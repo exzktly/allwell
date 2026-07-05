@@ -120,6 +120,19 @@ class ViewerContext:
         if callable(fn):
             fn(message)
 
+    def toast(self, message: str, *, kind: str = "info", msec: int = 3500) -> None:
+        """Show a transient notification toast (no-op if unavailable).
+
+        A genuine window-shell *notification service*, distinct from the status
+        bar (``set_status``): a self-dismissing popup announcing an action's
+        outcome (import/export success, a failure). It has no typed-state home —
+        it's a Qt overlay on the main window — so callers name it here instead of
+        reaching ``app._toast`` through the escape hatch. Kept in the frozen
+        accessor set."""
+        fn = getattr(self.app, "_toast", None)
+        if callable(fn):
+            fn(message, kind=kind, msec=msec)
+
     def save_figure_dialog(self, fig, default_name: str) -> None:
         """Open the app's Save-As dialog for *fig*, honouring the shared file-type
         filter and the active dataset directory."""

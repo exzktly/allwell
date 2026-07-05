@@ -20,6 +20,10 @@ from well_viewer.viewer_context import ViewerContext
 # home yet — not a convenience wrapper for arbitrary god-object access.
 _ALLOWED = {
     "set_status",
+    # ``toast`` names the transient notification-popup service (import/export
+    # outcome banners), distinct from the status bar; a genuine window-shell
+    # service with no typed-state home, like ``set_status``.
+    "toast",
     "save_figure_dialog",
     "open_export_style_panel",
     # ``window`` exposes the WellViewerApp *qua QMainWindow* for the operations

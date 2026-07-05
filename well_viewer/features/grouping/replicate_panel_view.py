@@ -268,7 +268,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
 
     import_ib = _IconButton("plus", toolbar)
     import_ib.setToolTip("Import selections from a JSON file (merges into the current set).")
-    import_ib.clicked.connect(lambda _=False: import_selections_from_json(app))
+    import_ib.clicked.connect(lambda _=False: import_selections_from_json(app._ctx))
     tl.addWidget(import_ib)
 
     clear_ib = _IconButton("x", toolbar)

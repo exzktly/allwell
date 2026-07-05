@@ -419,15 +419,15 @@ def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
 
 
-def import_selections_from_json(app) -> None:
+def import_selections_from_json(ctx) -> None:
     """Import a selections JSON file (the same schema used by Save) and
-    merge it into ``app._app_state.selection.selections``. Existing names get a ``_v2``
+    merge it into ``ctx.state.selection.selections``. Existing names get a ``_v2``
     suffix on collision so nothing already loaded is overwritten."""
     import json
     from PySide6.QtWidgets import QFileDialog, QMessageBox
 
     path, _ = QFileDialog.getOpenFileName(
-        app, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
+        ctx.window, "Import selections from JSON", "", "JSON (*.json);;All files (*)",
     )
     if not path:
         return
@@ -435,7 +435,7 @@ def import_selections_from_json(app) -> None:
         with open(path) as fh:
             payload = json.load(fh)
     except Exception as exc:
-        QMessageBox.critical(app, "Import failed", f"Could not parse JSON:\n{exc}")
+        QMessageBox.critical(ctx.window, "Import failed", f"Could not parse JSON:\n{exc}")
         return
 
     # Accept either a v2 sample-definitions block (with a 'selections' key)
@@ -446,7 +446,7 @@ def import_selections_from_json(app) -> None:
     elif isinstance(payload, list):
         items = payload
     if not items:
-        QMessageBox.warning(app, "Import", "No selections found in that file.")
+        QMessageBox.warning(ctx.window, "Import", "No selections found in that file.")
         return
 
     added = 0
@@ -458,19 +458,18 @@ def import_selections_from_json(app) -> None:
         replicates = sel.get("replicates")
         source = sel.get("source") or "imported"
         try:
-            app._sel_add(name=name, wells=list(wells),
-                          replicates=replicates, source=source)
+            sel_add(ctx, name=name, wells=list(wells),
+                    replicates=replicates, source=source)
             added += 1
         except Exception:
             _logger = __import__("logging").getLogger("well_viewer.runtime_app")
             _logger.exception("Import selection failed for %r", name)
 
-    if hasattr(app, "_groups_centre_refresh"):
-        try:
-            app._groups_centre_refresh()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    app._toast(f"Imported {added} selection(s) from {path}.", kind="success")
+    try:
+        groups_centre_refresh(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    ctx.toast(f"Imported {added} selection(s) from {path}.", kind="success")
 
 
 
@@ -522,7 +521,7 @@ def labels_apply_affix(app, *, where: str) -> None:
 
     app._invalidate_stats_cache()
     label_grid_refresh(app._ctx)
-    _schedule_sample_def_autosave(app)
+    _schedule_sample_def_autosave(app._ctx)
     app._set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
     )
@@ -707,16 +706,16 @@ def refresh_sidebar_map_now(app) -> None:
 
 
 
-def sel_export_one(app, sid) -> None:
+def sel_export_one(ctx, sid) -> None:
     """Export a single saved selection (by id) to a standalone JSON file."""
-    s = app._sel_by_id(sid)
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     from PySide6.QtWidgets import QFileDialog
     import json as _json
     default_name = f"{s.get('name') or 'selection'}.json"
     path, _ = QFileDialog.getSaveFileName(
-        app, "Export selection", default_name, "JSON (*.json)"
+        ctx.window, "Export selection", default_name, "JSON (*.json)"
     )
     if not path:
         return
@@ -725,9 +724,9 @@ def sel_export_one(app, sid) -> None:
         block = to_block([s], current_id=s.get("id"))
         with open(path, "w", encoding="utf-8") as f:
             _json.dump(block, f, indent=2)
-        app._toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
+        ctx.toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
     except Exception as exc:
-        app._toast(f"Export failed: {exc}", kind="danger", msec=6000)
+        ctx.toast(f"Export failed: {exc}", kind="danger", msec=6000)
 
 
 
@@ -895,16 +894,16 @@ def rebuild_all(app) -> None:
             app._show_line_sidebar()
     # Sample definitions auto-persist (debounced), like notes / ratios /
     # view-state — the explicit Save button is now just "save now".
-    _schedule_sample_def_autosave(app)
+    _schedule_sample_def_autosave(app._ctx)
 
 
-def _schedule_sample_def_autosave(app) -> None:
+def _schedule_sample_def_autosave(ctx) -> None:
     """Queue a debounced write of the sample-definitions block.
 
     Safe to call from any edit path: the registry coalesces a burst into one
     write and ``autosave_to_pipeline_info`` no-ops silently without a data dir.
     """
-    p = getattr(app, "_persistence", None)
+    p = ctx.persistence
     if p is not None:
         p.schedule_save("sample_definitions")
 
@@ -927,18 +926,18 @@ def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
 
 
 
-def sel_set_hidden(app, sid, hidden, *, light=False) -> None:
-    s = app._sel_by_id(sid)
+def sel_set_hidden(ctx, sid, hidden, *, light=False) -> None:
+    s = sel_by_id(ctx, sid)
     if s is None:
         return
     if bool(s.get("hidden")) == bool(hidden):
         return
     s["hidden"] = bool(hidden)
     if light:
-        app._refresh_sidebar_map()
-        _schedule_sample_def_autosave(app)
+        ctx.refresh_sidebar_map()
+        _schedule_sample_def_autosave(ctx)
     else:
-        app._rebuild_all()
+        ctx.rebuild_all()
 
 
 
@@ -987,17 +986,26 @@ def invalidate_stats_cache(ctx) -> None:
 
 
 
-def rep_clear_all(app) -> None:
+def sel_clear_all(ctx) -> None:
+    """Drop every saved selection and clear the current-selection pointer."""
+    sel_state = ctx.state.selection
+    sel_state.selections = []
+    sel_state.current_selection_id = None
+    ctx.rebuild_all()
+
+
+def rep_clear_all(ctx) -> None:
     from PySide6.QtWidgets import QMessageBox
-    if not app._app_state.selection.selections:
+    sel_state = ctx.state.selection
+    if not sel_state.selections:
         return
     resp = QMessageBox.question(
-        app, "Clear all groups?",
-        f"Remove all {len(app._app_state.selection.selections)} group(s)?",
+        ctx.window, "Clear all groups?",
+        f"Remove all {len(sel_state.selections)} group(s)?",
         QMessageBox.Yes | QMessageBox.No,
     )
     if resp == QMessageBox.Yes:
-        app._sel_clear_all()
+        sel_clear_all(ctx)
 
 
 
@@ -1106,7 +1114,7 @@ def labels_clear_all(app) -> None:
         app._app_state.dataset.well_labels.clear()
         label_grid_refresh(app._ctx)
         app._invalidate_stats_cache()
-        _schedule_sample_def_autosave(app)
+        _schedule_sample_def_autosave(app._ctx)
 
 
 

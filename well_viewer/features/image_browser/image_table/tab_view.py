@@ -17,8 +17,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
+    QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.data.crop_tool import CropTool
@@ -329,6 +329,24 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.setSpacing(6)
 
     tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx)))
+
+    # Composite: append a merged bottom row (each cell additively sums the
+    # LUT-colored rows above it). A transient display toggle; re-renders in place
+    # when a table already exists, else just stores the flag for the next Generate.
+    comp_chk = reg.register("_image_table_composite_chk", QCheckBox("Composite", action_row))
+    comp_chk.setChecked(bool(getattr(ctx.state.image_table, "composite", False)))
+    comp_chk.setToolTip(
+        "Append a merged row: each cell additively sums the LUT-colored "
+        "channels above it in that column."
+    )
+
+    def _on_composite_toggled(checked: bool) -> None:
+        ctx.state.image_table.composite = bool(checked)
+        if getattr(ctx.state.image_table, "last_render", None):
+            image_table_generate(ctx)
+
+    comp_chk.toggled.connect(_on_composite_toggled)
+    tr.addWidget(comp_chk)
 
     # The per-display options (Tophat / Boundaries / Binary) are now per-row,
     # in the LUT boxes below the grid (each row independent). This menu keeps the

@@ -61,6 +61,9 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     _row_export_cmap,
     _row_tint,
     _tint_from_colormap,
+    cell_display_rgb,
+    composite_additive_rgb,
+    composite_column_rgb,
 )
 
 
@@ -1336,6 +1339,36 @@ def image_table_generate(ctx) -> None:
             cl.addWidget(img_label)
 
             grid.addWidget(cell_widget, r, c)
+
+    # Composite row: append one extra bottom row whose cells additively merge
+    # the LUT-colored RGB of every row above them in the same column. Derives
+    # entirely from the rows above (no selector cell, no lut[r] entry), so the
+    # grid's row-indexed lookups are unaffected.
+    if getattr(ctx.state.image_table, "composite", False) and cells:
+        comp_row = len(cells)
+        n_cols = max(len(row) for row in cells)
+        for c in range(n_cols):
+            comp = composite_column_rgb(ctx, cache, cells, crop_tool, c, rendered)
+
+            cell_widget = QWidget()
+            cl = QVBoxLayout(cell_widget)
+            cl.setContentsMargins(2, 2, 2, 2)
+            cl.setSpacing(2)
+            header = QLabel("Composite", cell_widget)
+            header.setAlignment(Qt.AlignCenter)
+            cl.addWidget(header)
+
+            img_label = QLabel(cell_widget)
+            img_label.setAlignment(Qt.AlignCenter)
+            img_label.setFixedSize(sz, sz)
+            pix = make_overlay_thumb(comp, sz, sz, 0.0, 255.0) if comp is not None else None
+            if pix is not None:
+                img_label.setPixmap(pix)
+            else:
+                img_label.setText("(no image)")
+            cl.addWidget(img_label)
+
+            grid.addWidget(cell_widget, comp_row, c)
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache

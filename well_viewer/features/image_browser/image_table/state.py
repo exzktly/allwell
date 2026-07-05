@@ -44,6 +44,12 @@ class ImageTableState:
     # the per-row LUT/Display boxes — see grid_view.build_lut_row), not global.
     zoom: float = 1.0
 
+    # composite: when True, image_table_generate appends one extra row at the
+    # bottom whose cells additively merge (LUT-colored RGB summed, clipped to
+    # white) every row above them in the same column. A transient display
+    # toggle driven by the Composite checkbox in the action strip.
+    composite: bool = False
+
     # export-dialog settings (pad/cell-gap/titles/dpi/transparent-bg)
     export_opts: dict = field(default_factory=dict)
 

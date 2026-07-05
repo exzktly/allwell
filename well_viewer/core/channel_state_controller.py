@@ -793,11 +793,12 @@ def on_plot_channel_selected(ctx, source=None) -> None:
 
 
 
-def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
+def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     """Replace the ratio list and rebuild the index + UI."""
-    app._app_state.channel.ratio_metrics = list(ratios)
-    app._rebuild_ratio_index()
-    panel = getattr(app, "_ratio_panel", None)
+    # The typed channel slice sets the catalogue + rebuilds the ratio index in
+    # lockstep (the two must never disagree).
+    ctx.state.channel.set_ratio_metrics(list(ratios))
+    panel = ctx.widgets.get_or_none("_ratio_panel")
     if panel is not None:
         try:
             panel.refresh_from_app()
@@ -805,10 +806,10 @@ def set_ratio_metrics(app, ratios: Iterable[RatioMetric]) -> None:
             swallowed()  # was: pass (silent except)
     # Cell Gating shows one row per fluor channel + one per ratio. Pull
     # the ratio rows into the table whenever the ratio set changes.
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+    if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         try:
             from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
-            cell_gating_load_cell_areas(app._ctx)
+            cell_gating_load_cell_areas(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab

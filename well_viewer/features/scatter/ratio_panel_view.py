@@ -238,5 +238,5 @@ class RatioMetricsPanel(QWidget):
 def build_ratios_inline_panel(app, parent: QWidget) -> RatioMetricsPanel:
     """Construct the inline ratio editor and return it for app-level wiring."""
     panel = RatioMetricsPanel(app, parent)
-    app._ratio_panel = panel
+    app._ratio_panel = app._ctx.widgets.register("_ratio_panel", panel)
     return panel

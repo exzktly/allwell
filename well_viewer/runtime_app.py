@@ -838,7 +838,7 @@ class WellViewerApp(QWidget):
 
     def _rebuild_ratio_index(self) -> None: return rebuild_ratio_index(self)
 
-    def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None: return set_ratio_metrics(self, ratios)
+    def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None: return set_ratio_metrics(self._ctx, ratios)
 
     # ── Active channel ───────────────────────────────────────────────────────
 

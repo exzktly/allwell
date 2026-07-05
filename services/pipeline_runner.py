@@ -41,7 +41,11 @@ from util.aw_safe import swallowed
 def classify_log_line(line: str) -> str:
     """Return the severity tag for a single pipeline stdout line."""
     ll = line.lower()
-    if "error" in ll or "traceback" in ll or "exception" in ll:
+    # "failed" catches the per-FOV-group "FAILED <fov> …" line and the run
+    # failure summaries — otherwise a failure whose message lacks the substring
+    # "error"/"exception" (e.g. "15334400 requested and 0 written") renders as
+    # plain INFO and scrolls past unnoticed.
+    if "error" in ll or "traceback" in ll or "exception" in ll or "failed" in ll:
         return "ERROR"
     if "warning" in ll or "warn" in ll or "skipping" in ll:
         return "WARNING"

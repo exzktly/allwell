@@ -68,6 +68,30 @@ def test_emit_num_flag_helper_contract():
     _emit_num_flag(args, {}, "r", "--r", int)          # absent → skip
     assert args == []
 
+
+def test_phase_token_emitted_for_any_method():
+    # A phase channel now drives background-correction passthrough for every
+    # method, so --phase_token is sent whenever set — not only for label-free.
+    args = build_pipeline_args(
+        _P, _IN, _OUT,
+        _opts(segmentation_method="stardist_seeded_watershed_cell",
+              cytoplasm_token="CY", phase_token="BF"),
+    )
+    assert _flag_value(args, "--phase_token") == "BF"
+
+
+def test_phase_token_still_emitted_for_labelfree():
+    args = build_pipeline_args(
+        _P, _IN, _OUT,
+        _opts(segmentation_method="cellpose_labelfree", phase_token="BF"),
+    )
+    assert _flag_value(args, "--phase_token") == "BF"
+
+
+def test_phase_token_absent_when_unset():
+    args = build_pipeline_args(_P, _IN, _OUT, _opts())
+    assert "--phase_token" not in args
+
     args = []
     _emit_num_flag(args, {"r": ""}, "r", "--r", int)   # blank → skip
     assert args == []

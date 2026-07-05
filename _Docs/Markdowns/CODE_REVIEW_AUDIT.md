@@ -54,6 +54,21 @@ ignoring them has already cost real debugging time this project:
 5. **Run in the background and wait for the completion notification** — do not
    poll the log every few seconds. Check it once when notified (or on a Stop
    prompt), not on a loop.
+6. **Before committing ANY `ctx` conversion, run the FULL fast lane**
+   (`-m "not slow"`), not a hand-picked subset. Two whole failure classes are
+   invisible to targeted runs and only the full lane catches them: the
+   **deferred-import budget** (`test_deferred_imports` — a new function-local
+   `from well_viewer.features…` import can push it over ceiling) and **stale
+   unit-test fakes** (tests that hand-build an app-shaped `SimpleNamespace` and
+   call a helper you just flipped to `ctx`). Both shipped red to the branch this
+   epic before the full lane caught them.
+7. **A ctx conversion whose internal helper has heavy app-shaped-fake unit
+   coverage is a poor unit of work.** Converting it means reshaping every fake
+   (churny, error-prone) for no ratchet movement. Prefer leaving such helpers
+   app-native and reaching them via the sanctioned bridge, or convert them as
+   their own focused PR with the fake-reshaping budgeted in — don't fold them
+   into an unrelated leaf pass. (Learned from the `_apply_*` view-state cluster,
+   reverted.)
 
 ## Progress
 

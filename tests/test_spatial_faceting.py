@@ -93,3 +93,37 @@ def test_summary_level_unaffected(loaded_app_shape):
     assert not st.last_error, st.last_error
     assert st.frames == []
     assert st.last_result.get("kind") == "summary_matrix"
+
+
+@pytest.mark.slow
+def test_colony_vs_intra_map_recolours_even_with_metric(loaded_app_shape):
+    """Toggling Colony ↔ Intra-colony must visibly change the spatial map.
+
+    Regression: the map used to colour by a picked metric at *every* level, so
+    the two levels rendered identically whenever a metric was selected. The
+    Intra-colony map now always expresses radial position (r/R), so the
+    colorbar label differs between the levels.
+    """
+    app = loaded_app_shape
+    from well_viewer.features.spatial import controller as spc
+
+    _open_spatial(app)
+    app._set_selected_wells({WELLS[0]})
+    st = app._app_state.feature_slice("spatial")
+    st.viz = sp_state.VIZ_SPATIAL_MAP
+    st.metric_col = "gfp_mean_intensity"  # a real per-cell column → metric set
+    fig = app._ctx.widgets.get_or_none("_sp_fig")
+
+    st.level = sp_state.LEVEL_COLONY
+    spc.sp_recompute(app._ctx)
+    assert st.frames and st.frames[0].get("metric") is not None
+    colony_labels = {a.get_ylabel() for a in fig.axes}
+    assert "gfp_mean_intensity" in colony_labels  # metric colours the map
+    assert "r / R" not in colony_labels
+
+    st.level = sp_state.LEVEL_INTRA
+    spc.sp_recompute(app._ctx)
+    intra_labels = {a.get_ylabel() for a in fig.axes}
+    assert "r / R" in intra_labels  # radial position colours the map
+    assert "gfp_mean_intensity" not in intra_labels
+    assert colony_labels != intra_labels

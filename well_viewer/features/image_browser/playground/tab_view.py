@@ -41,9 +41,11 @@ def _row(parent, label_text: str) -> QWidget:
 
 
 def build_playground_tab(ctx, parent: QWidget) -> None:
-    # ctx is a ViewerContext (carries .app); tolerate a bare app in headless
-    # tests. This getattr is not the guardrailed app-unwrap.
-    app = getattr(ctx, "app", ctx)
+    # The Playground is an un-migrated dev/debug builder that still stamps its
+    # widgets onto the app and drives an app-native on_change. It reaches that
+    # app instance through the ``window`` handle (the QMainWindow *is* the app)
+    # until it gets its own ctx migration; the generic app escape hatch is gone.
+    app = ctx.window
     if parent.layout() is None:
         QHBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
     on_change = partial(playground_on_change, app)

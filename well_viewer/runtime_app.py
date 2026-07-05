@@ -268,14 +268,15 @@ class WellViewerApp(QWidget):
         self._runtime = AppRuntime(self)
         # The dependency-injection context handed to tab builders and
         # controllers in place of ``self``. Bundles the typed state, the bus,
-        # the widget registry, the runtime namespaces (+ a transitional ``app``
-        # escape hatch).
+        # the widget registry, and the runtime namespaces. No ``app`` escape
+        # hatch (A8 T6): this instance is held privately as ``_window`` and is
+        # reachable only through ctx's frozen named accessors.
         self._ctx = ViewerContext(
-            app=self,
             state=self._app_state,
             bus=self._event_bus,
             widgets=self._widget_registry,
             runtime=self._runtime,
+            _window=self,
         )
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)

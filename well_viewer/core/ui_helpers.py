@@ -462,6 +462,44 @@ def make_popover_button(text: str, parent: QWidget):
     return btn, content, content_layout
 
 
+def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
+    """A compact toolbar button that drops a menu of *actions* on click.
+
+    Returns ``(button, menu)`` — add ``QAction``s (or use ``add_menu_action``)
+    to ``menu``. Unlike :func:`make_popover_button` (which hosts live widgets in
+    a panel), this is for click-and-close commands — Export CSV, Save figure,
+    etc. Used to collapse a cluster of action buttons into one entry so a
+    control row stays reachable when Split View narrows the pane.
+    """
+    from PySide6.QtWidgets import QToolButton, QMenu
+
+    btn = QToolButton(parent)
+    btn.setText(text)
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    btn.setProperty("variant", "secondary")
+    if tooltip:
+        btn.setToolTip(tooltip)
+    # The label already carries a ▾ caret; hide the native indicator so they
+    # don't render as overlapping double arrows (mirrors make_popover_button).
+    btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
+    menu = QMenu(btn)
+    btn.setMenu(menu)
+    return btn, menu
+
+
+def add_menu_action(menu, label: str, callback, *, tooltip: str = ""):
+    """Add a simple ``QAction`` to *menu* that calls *callback* on trigger."""
+    from PySide6.QtGui import QAction
+
+    action = QAction(label, menu)
+    if tooltip:
+        action.setToolTip(tooltip)
+    action.triggered.connect(lambda _=False: callback())
+    menu.addAction(action)
+    return action
+
+
 def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
     """Forward wheel events from a matplotlib canvas to ``scroll_area``.
 

@@ -108,7 +108,11 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", ctrl))
 
     def _on_log_changed(state: int) -> None:
-        ctx.state.distribution.log_x = bool(state)
+        # Single source of truth: the per-figure axis pref (``x_log``) — the same
+        # store the Properties-sidebar "X log" toggle and the authoritative
+        # export-style pass use. Mirror into the feature-state field so the
+        # existing view-state persistence keeps working.
+        _set_distribution_log(ctx, "x", bool(state))
         _on_changed(ctx)
     log_x_cb.stateChanged.connect(_on_log_changed)
     cl.addWidget(log_x_cb)
@@ -116,7 +120,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     log_y_cb = reg.register("_distribution_log_y_cb", QCheckBox("log y", ctrl))
 
     def _on_log_y_changed(state: int) -> None:
-        ctx.state.distribution.log_y = bool(state)
+        _set_distribution_log(ctx, "y", bool(state))
         _on_changed(ctx)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
     cl.addWidget(log_y_cb)
@@ -168,6 +172,23 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     ), 1)
 
     refresh_distribution_timepoints(ctx)
+
+
+def _set_distribution_log(ctx, axis: str, on: bool) -> None:
+    """Write the unified log flag for ``axis`` ("x"/"y") to the per-figure axis
+    pref (the single source of truth shared with the Properties sidebar) and
+    mirror it into the feature-state field for view-state persistence.
+
+    Uses the *core* ``plot_style.figure_prefs`` directly (not the distribution
+    controller) so this on-plot handler adds no function-local feature import —
+    the controller owns the same write for its own redraw path."""
+    from well_viewer.core.plot_style import figure_prefs
+    key = "x_log" if axis == "x" else "y_log"
+    state_attr = "log_x" if axis == "x" else "log_y"
+    setattr(ctx.state.distribution, state_attr, bool(on))
+    fig = ctx.widgets.get_or_none("_distribution_fig")
+    if fig is not None:
+        figure_prefs(ctx, fig)[key] = bool(on)
 
 
 def _on_changed(ctx) -> None:

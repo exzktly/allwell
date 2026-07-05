@@ -26,7 +26,10 @@ def _toolbar_separator(parent: QWidget) -> QFrame:
     sep.setFixedHeight(20)
     return sep
 
-from well_viewer.core.ui_helpers import btn_card, btn_danger, btn_secondary
+from well_viewer.core.ui_helpers import (
+    btn_card, btn_danger, btn_secondary, make_popover_button,
+)
+from widgets.flow_layout import FlowLayout
 from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
@@ -86,7 +89,10 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
 
     ctrl = QWidget(inner)
     ctrl.setObjectName("TabCtrl")  # data-gated: greyed out until a dataset loads
-    cl = QHBoxLayout(ctrl)
+    # FlowLayout so this dense control row wraps onto extra lines instead of
+    # clipping its right-most controls (zoom / stage selector) when Split View
+    # halves the pane width — the reported "options collapsed and not visible".
+    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
     cl.setContentsMargins(10, 6, 10, 6)
     cl.addWidget(reg.register("_review_image_well_lbl", QLabel("No well selected", ctrl)))
 
@@ -118,7 +124,6 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     cl.addWidget(tp_menu)
     rt.tp_var = tp_menu
     rt.tp_cb = tp_menu  # alias for review_image_controller
-    cl.addStretch(1)
 
     from PySide6.QtWidgets import QPushButton
     delete_btn = QPushButton("Delete Cell", ctrl)
@@ -207,7 +212,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
 
     lut_row = QWidget(inner)
     lut_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
-    lr = QHBoxLayout(lut_row)
+    lr = FlowLayout(lut_row, h_spacing=6, v_spacing=4)
     lr.setContentsMargins(8, 2, 8, 2)
     lr.addWidget(reg.register("_review_lut_chan_lbl", QLabel(
         f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_row,
@@ -230,7 +235,6 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # see the comment above). Edits the active channel's ThreshFracOn — the same
     # value the Cell Gating tab and the Plotting quick-edit own — and re-renders,
     # so the Binary (≥ ON threshold) overlay updates live without leaving the tab.
-    lr.addSpacing(12)
     lr.addWidget(QLabel("ON threshold:", lut_row))
     thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",
@@ -252,27 +256,38 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         lambda v: (set_thresh_frac_on(ctx, v), refresh_review_image_ctx(ctx))
     )
     lr.addWidget(thresh_stepper)
-    lr.addStretch(1)
     il.addWidget(lut_row)
 
     # ── Color customization + binary-mask toggle row ───────────────────
     from PySide6.QtWidgets import QPushButton as _QPushButton
     color_row = QWidget(inner)
     color_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
-    cr = QHBoxLayout(color_row)
+    # FlowLayout so the row wraps rather than clipping when the pane narrows.
+    cr = FlowLayout(color_row, h_spacing=6, v_spacing=4)
     cr.setContentsMargins(8, 2, 8, 2)
     swatches: dict = {}
     rt.color_swatches = swatches
 
+    # Per-element colour swatches + Reset collapse into a "Colors ▾" popover so the
+    # Outline / Binary toggles (the controls used most) stay inline and reachable.
+    colors_btn, colors_panel, colors_lay = make_popover_button("Colors ▾", color_row)
+    colors_btn.setToolTip("Boundary / Selected / Tint colours and reset")
+    cr.addWidget(colors_btn)
+
     def _add_swatch(label_text: str, key: str, tooltip: str) -> None:
-        cr.addWidget(QLabel(label_text, color_row))
-        sw = _QPushButton("", color_row)
+        row = QWidget(colors_panel)
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(6)
+        rl.addWidget(QLabel(label_text, row))
+        sw = _QPushButton("", row)
         sw.setFixedSize(28, 18)
         sw.setToolTip(tooltip)
         sw.clicked.connect(
             lambda _=False, k=key: pick_review_image_color(ctx, k)
         )
-        cr.addWidget(sw)
+        rl.addWidget(sw)
+        colors_lay.addWidget(row)
         swatches[key] = sw
         review_image_refresh_color_swatch(ctx, key)
 
@@ -284,10 +299,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                 "Tints the grayscale fluorescence image. White (default) "
                 "leaves it pure grayscale; pick a color to multiply each\n"
                 "channel by the chosen RGB.")
-    cr.addWidget(btn_secondary(color_row, "Reset colors",
-                               lambda: reset_review_image_colors(ctx)))
-
-    cr.addSpacing(12)
+    colors_lay.addWidget(btn_secondary(colors_panel, "Reset colors",
+                                       lambda: reset_review_image_colors(ctx)))
 
     outline_btn = _QPushButton("Outline: On", color_row)
     rt.outline_btn = outline_btn
@@ -311,7 +324,6 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     cr.addWidget(binary_btn)
     refresh_review_image_binary_btn(ctx)
 
-    cr.addStretch(1)
     il.addWidget(color_row)
 
     canvas = QScrollArea(inner)

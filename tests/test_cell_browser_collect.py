@@ -287,14 +287,43 @@ def test_scatter_gate_mode_empty_when_no_gates_drawn():
 
 
 def test_scatter_gate_mode_empty_timepoints_relax_to_all():
-    # Outside gate mode an empty timepoint include-list yields nothing; in gate
-    # mode it relaxes to "all" so the gated cells aren't hidden by the default.
+    # In gate mode with NO scatter timepoint selection, an empty timepoint
+    # include-list relaxes to "all" so the gated cells aren't hidden by the
+    # default (the fallback when the scatter subset is unavailable).
     app = _app(_df())
     app._app_state.cell_gating.scatter_gates = [_gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
     app._cell_browser_state = SimpleNamespace(
         label_spot_count=False, scatter_gate_mode=True)
     cells = collect_cells(app._ctx, [], timepoints=[])
     assert len(cells) == 4
+
+
+def test_scatter_gate_mode_honours_scatter_selected_timepoints():
+    # In gate mode the gallery mirrors the scatter cloud, which is drawn over the
+    # scatter's OWN selected timepoint subset. With the browser picker at its
+    # deselected default, only the scatter-selected timepoints load — NOT every
+    # timepoint (the Split-View cell-gating bug).
+    app = _app(_df())
+    app._app_state.cell_gating.scatter_gates = [
+        _gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    # Scatter shows only tp=0 (24 unchecked). tps in the frame are [0,0,24,24].
+    app._ctx.runtime.scatter.tp_selections = {"0.0": True, "24.0": False}
+    cells = collect_cells(app._ctx, [], timepoints=[])
+    assert sorted(c.nucleus_id for c in cells) == ["10", "11"]  # tp=0 only
+
+
+def test_scatter_gate_mode_explicit_browser_timepoints_still_win():
+    # An explicit Cell-Browser timepoint selection overrides the scatter subset.
+    app = _app(_df())
+    app._app_state.cell_gating.scatter_gates = [
+        _gate("gfp_mean_intensity", "area_px", 0.0, 9999.0, 0.0, 9999.0)]
+    app._cell_browser_state = SimpleNamespace(
+        label_spot_count=False, scatter_gate_mode=True)
+    app._ctx.runtime.scatter.tp_selections = {"0.0": True, "24.0": False}
+    cells = collect_cells(app._ctx, [], timepoints=[24.0])
+    assert sorted(c.nucleus_id for c in cells) == ["12", "13"]  # browser pick wins
 
 
 def test_scatter_gate_choices_filter_to_named_gates():

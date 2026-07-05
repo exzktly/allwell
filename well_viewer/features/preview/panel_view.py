@@ -9,25 +9,13 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+    QComboBox, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
     QToolTip, QVBoxLayout, QWidget,
 )
 
-
-def _toolbar_separator(parent: QWidget) -> QFrame:
-    """A thin vertical hairline that visually groups toolbar clusters.
-
-    Uses the shared ``vline`` QSS rule (theme.qss) so it tracks the border
-    token; no hardcoded colour.
-    """
-    sep = QFrame(parent)
-    sep.setProperty("vline", True)
-    sep.setFixedWidth(1)
-    sep.setFixedHeight(20)
-    return sep
-
 from well_viewer.core.ui_helpers import (
-    btn_card, btn_danger, btn_secondary, make_popover_button,
+    add_menu_action, btn_card, btn_secondary,
+    make_action_menu_button, make_popover_button,
 )
 from widgets.flow_layout import FlowLayout
 from well_viewer.features.crop.controller import (
@@ -160,21 +148,29 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     )
     cl.addWidget(crop_btn)
 
-    cl.addWidget(btn_secondary(
-        ctrl, "Clear crop", lambda: clear_crop_region(ctx)))
-    cl.addWidget(btn_danger(
-        ctrl, "Reset", lambda: reset_crop_and_overrides(ctx)))
+    # ── Edit ▾ menu — the one-shot crop / reset actions ─────────────────
+    edit_btn, edit_menu = make_action_menu_button(
+        "Edit ▾", ctrl, tooltip="Crop and reset actions")
+    add_menu_action(edit_menu, "Clear crop", lambda: clear_crop_region(ctx))
+    add_menu_action(edit_menu, "Reset — restore all cells & remove crop",
+                    lambda: reset_crop_and_overrides(ctx))
+    cl.addWidget(edit_btn)
 
-    # Separate the edit cluster (Delete / Crop / Clear / Reset) from the
-    # image-stage selector so they don't read as one undifferentiated row.
-    cl.addWidget(_toolbar_separator(ctrl))
+    # ── View ▾ popover — image stage · zoom · overlay toggles ───────────
+    from widgets.segmented_control import SegmentedControl as _SegmentedControl
+    view_btn, view_panel, view_lay = make_popover_button("View ▾", ctrl)
+    view_btn.setToolTip("Image stage, zoom, and overlay toggles")
 
     # Image-stage selector: Raw / Flat-field (recomputed) / Corrected (final).
     # Lets the user validate each correction stage in isolation. Defaults to
     # Corrected (the saved final image). Signal wired AFTER initial setup so
     # building the control doesn't fire the handler.
-    from widgets.segmented_control import SegmentedControl as _SegmentedControl
-    source_seg = _SegmentedControl(ctrl)
+    stage_row = QWidget(view_panel)
+    stage_lay = QHBoxLayout(stage_row)
+    stage_lay.setContentsMargins(0, 0, 0, 0)
+    stage_lay.setSpacing(6)
+    stage_lay.addWidget(QLabel("Stage:", stage_row))
+    source_seg = _SegmentedControl(stage_row)
     rt.source_seg = source_seg
     for _lbl, _data in (("Raw", "raw"), ("Flat-field", "flatfield"),
                         ("Corrected", "corrected")):
@@ -191,54 +187,91 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     source_seg.currentChanged.connect(
         lambda _i: set_review_image_source(ctx, source_seg.currentData())
     )
-    cl.addWidget(source_seg)
+    stage_lay.addWidget(source_seg)
+    view_lay.addWidget(stage_row)
 
-    # Separate the zoom cluster (Fit / − / +) from the stage selector.
-    cl.addWidget(_toolbar_separator(ctrl))
+    zoom_row = QWidget(view_panel)
+    zoom_lay = QHBoxLayout(zoom_row)
+    zoom_lay.setContentsMargins(0, 0, 0, 0)
+    zoom_lay.setSpacing(6)
+    zoom_lay.addWidget(QLabel("Zoom:", zoom_row))
+    zoom_lay.addWidget(btn_secondary(zoom_row, "Fit", lambda: review_image_zoom_fit(ctx)))
+    zoom_lay.addWidget(btn_card(zoom_row, "−", lambda: review_image_zoom_step(ctx, -1)))
+    zoom_lay.addWidget(btn_card(zoom_row, "+", lambda: review_image_zoom_step(ctx, +1)))
+    view_lay.addWidget(zoom_row)
 
-    cl.addWidget(btn_secondary(ctrl, "Fit", lambda: review_image_zoom_fit(ctx)))
-    cl.addWidget(btn_card(ctrl, "−", lambda: review_image_zoom_step(ctx, -1)))
-    cl.addWidget(btn_card(ctrl, "+", lambda: review_image_zoom_step(ctx, +1)))
+    from PySide6.QtWidgets import QPushButton as _QPushButton
+    outline_btn = _QPushButton("Outline: On", view_panel)
+    rt.outline_btn = outline_btn
+    outline_btn.setProperty("variant", "toggle")
+    outline_btn.setCheckable(True)
+    outline_btn.setChecked(bool(ctx.state.review_image.show_outline))
+    outline_btn.clicked.connect(
+        lambda _=False: toggle_review_image_outline(ctx)
+    )
+    view_lay.addWidget(outline_btn)
+    refresh_review_image_outline_btn(ctx)
+
+    binary_btn = _QPushButton("Binary: Off", view_panel)
+    rt.binary_btn = binary_btn
+    binary_btn.setProperty("variant", "toggle")
+    binary_btn.setCheckable(True)
+    binary_btn.setChecked(bool(ctx.state.review_image.binary_mask))
+    binary_btn.clicked.connect(
+        lambda _=False: toggle_review_image_binary_mask(ctx)
+    )
+    view_lay.addWidget(binary_btn)
+    refresh_review_image_binary_btn(ctx)
+    cl.addWidget(view_btn)
     il.addWidget(ctrl)
 
     # The QC debris-gate controls now live on the Sample Definitions → Cell
     # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
     # gates). This overlay still *renders* the QC verdict — excluded cells show
     # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
-    # here again, via the quick-edit Stepper added to the LUT row below.
+    # here again, via the quick-edit Stepper in the LUT ▾ popover on the row above.
     status = reg.register("_review_image_status", QLabel("", inner))
     status.setObjectName("Muted")
     il.addWidget(status)
 
-    lut_row = QWidget(inner)
-    lut_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
-    lr = FlowLayout(lut_row, h_spacing=6, v_spacing=4)
-    lr.setContentsMargins(8, 2, 8, 2)
-    lr.addWidget(reg.register("_review_lut_chan_lbl", QLabel(
-        f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_row,
-    )))
+    # ── LUT ▾ popover — display brightness + ON/OFF threshold ───────────
+    lut_btn, lut_panel, lut_lay = make_popover_button("LUT ▾", ctrl)
+    lut_btn.setToolTip(
+        "Display brightness (min/max) and the ON/OFF intensity threshold for "
+        "the active channel")
 
-    lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_row))
+    lut_range_row = QWidget(lut_panel)
+    lut_range_lay = QHBoxLayout(lut_range_row)
+    lut_range_lay.setContentsMargins(0, 0, 0, 0)
+    lut_range_lay.setSpacing(6)
+    lut_range_lay.addWidget(reg.register("_review_lut_chan_lbl", QLabel(
+        f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_range_row,
+    )))
+    lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_range_row))
     lmin_entry.setFixedWidth(80)
     lmin_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
-    lr.addWidget(lmin_entry)
-
-    lr.addWidget(QLabel("max:", lut_row))
-    lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_row))
+    lut_range_lay.addWidget(lmin_entry)
+    lut_range_lay.addWidget(QLabel("max:", lut_range_row))
+    lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_range_row))
     lmax_entry.setFixedWidth(80)
     lmax_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
-    lr.addWidget(lmax_entry)
+    lut_range_lay.addWidget(lmax_entry)
+    lut_range_lay.addWidget(btn_secondary(lut_range_row, "Auto LUT",
+                                          lambda: review_image_auto_lut(ctx)))
+    lut_lay.addWidget(lut_range_row)
 
-    lr.addWidget(btn_secondary(lut_row, "Auto LUT", lambda: review_image_auto_lut(ctx)))
-
-    # ON/OFF intensity threshold quick-edit (the editor this row used to host;
-    # see the comment above). Edits the active channel's ThreshFracOn — the same
-    # value the Cell Gating tab and the Plotting quick-edit own — and re-renders,
-    # so the Binary (≥ ON threshold) overlay updates live without leaving the tab.
-    lr.addWidget(QLabel("ON threshold:", lut_row))
+    # ON/OFF intensity threshold quick-edit. Edits the active channel's
+    # ThreshFracOn — the same value the Cell Gating tab and the Plotting
+    # quick-edit own — and re-renders, so the Binary (≥ ON threshold) overlay
+    # updates live without leaving the tab.
+    thr_row = QWidget(lut_panel)
+    thr_lay = QHBoxLayout(thr_row)
+    thr_lay.setContentsMargins(0, 0, 0, 0)
+    thr_lay.setSpacing(6)
+    thr_lay.addWidget(QLabel("ON threshold:", thr_row))
     thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",
-        Stepper(lut_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
+        Stepper(thr_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
     thresh_stepper.setFixedWidth(96)
     thresh_stepper.setFocusPolicy(Qt.ClickFocus)
     _rt_edit = getattr(thresh_stepper, "_edit", None)
@@ -249,30 +282,18 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         "(≥ ON threshold) overlay. Same value as the Cell Gating tab's "
         "ThreshFracOn and the plot tabs' Threshold quick-edit."
     )
-    # Edit the active channel's ThreshFracOn (single source of truth, shared
-    # with Cell Gating / the plot quick-edit) and re-render so the binary
-    # overlay updates live.
     thresh_stepper.valueChanged.connect(
         lambda v: (set_thresh_frac_on(ctx, v), refresh_review_image_ctx(ctx))
     )
-    lr.addWidget(thresh_stepper)
-    il.addWidget(lut_row)
+    thr_lay.addWidget(thresh_stepper)
+    lut_lay.addWidget(thr_row)
+    cl.addWidget(lut_btn)
 
-    # ── Color customization + binary-mask toggle row ───────────────────
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    color_row = QWidget(inner)
-    color_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
-    # FlowLayout so the row wraps rather than clipping when the pane narrows.
-    cr = FlowLayout(color_row, h_spacing=6, v_spacing=4)
-    cr.setContentsMargins(8, 2, 8, 2)
+    # ── Colors ▾ popover — per-element display colours + reset ──────────
+    colors_btn, colors_panel, colors_lay = make_popover_button("Colors ▾", ctrl)
+    colors_btn.setToolTip("Boundary / Selected / Tint colours and reset")
     swatches: dict = {}
     rt.color_swatches = swatches
-
-    # Per-element colour swatches + Reset collapse into a "Colors ▾" popover so the
-    # Outline / Binary toggles (the controls used most) stay inline and reachable.
-    colors_btn, colors_panel, colors_lay = make_popover_button("Colors ▾", color_row)
-    colors_btn.setToolTip("Boundary / Selected / Tint colours and reset")
-    cr.addWidget(colors_btn)
 
     def _add_swatch(label_text: str, key: str, tooltip: str) -> None:
         row = QWidget(colors_panel)
@@ -301,30 +322,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                 "channel by the chosen RGB.")
     colors_lay.addWidget(btn_secondary(colors_panel, "Reset colors",
                                        lambda: reset_review_image_colors(ctx)))
-
-    outline_btn = _QPushButton("Outline: On", color_row)
-    rt.outline_btn = outline_btn
-    outline_btn.setProperty("variant", "toggle")
-    outline_btn.setCheckable(True)
-    outline_btn.setChecked(bool(ctx.state.review_image.show_outline))
-    outline_btn.clicked.connect(
-        lambda _=False: toggle_review_image_outline(ctx)
-    )
-    cr.addWidget(outline_btn)
-    refresh_review_image_outline_btn(ctx)
-
-    binary_btn = _QPushButton("Binary: Off", color_row)
-    rt.binary_btn = binary_btn
-    binary_btn.setProperty("variant", "toggle")
-    binary_btn.setCheckable(True)
-    binary_btn.setChecked(bool(ctx.state.review_image.binary_mask))
-    binary_btn.clicked.connect(
-        lambda _=False: toggle_review_image_binary_mask(ctx)
-    )
-    cr.addWidget(binary_btn)
-    refresh_review_image_binary_btn(ctx)
-
-    il.addWidget(color_row)
+    cl.addWidget(colors_btn)
 
     canvas = QScrollArea(inner)
     rt.canvas = canvas

@@ -84,12 +84,21 @@ class SpatialState:
 
     # ── transient computed cache (never persisted) ───────────────────────────
     last_result: dict = field(default_factory=dict)
+    # Per-frame levels (Cell / Colony / Intra-colony) compute one payload per
+    # selected well and facet them across a grid of panels. ``frames`` holds
+    # those per-well payloads; ``frames_truncated`` counts wells dropped by the
+    # panel cap so the renderer can note them. ``last_result`` stays the home
+    # of the Summary-level matrix (a single figure, not faceted).
+    frames: list = field(default_factory=list)
+    frames_truncated: int = 0
     last_error: str = ""
     n_cells: int = 0
     active_well: str = ""
 
     def reset_result(self) -> None:
         self.last_result = {}
+        self.frames = []
+        self.frames_truncated = 0
         self.last_error = ""
         self.n_cells = 0
 

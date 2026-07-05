@@ -35,6 +35,75 @@ def _restore_cells(ctx, snap: List[List[Dict[str, str]]]) -> None:
                 _write_cell(cell, snap[r][c])
 
 
+def _snapshot_row_selectors(ctx) -> List[Dict[str, str]]:
+    """Capture each row's per-row Channel + Well 'apply to whole row' selections
+    so a rebuild can restore them by position (``build_image_table_grid``
+    recreates these combos at their first option, losing the user's choice)."""
+    it = ctx.runtime.image_table
+    chans = getattr(it, "row_chan_cbs", None) or []
+    wells = getattr(it, "row_well_cbs", None) or []
+    out: List[Dict[str, str]] = []
+    for i in range(max(len(chans), len(wells))):
+        out.append({
+            "channel": chans[i].currentText().strip()
+            if i < len(chans) and chans[i] is not None else "",
+            "well": wells[i].currentText().strip()
+            if i < len(wells) and wells[i] is not None else "",
+        })
+    return out
+
+
+def _restore_row_selectors(ctx, snap: List[Dict[str, str]]) -> None:
+    """Write per-row Channel + Well selections back into the rebuilt row combos.
+
+    Signals are blocked — the cells were already restored by ``_restore_cells``,
+    so this only re-syncs the row-shortcut widgets (and the LUT-row channel
+    labels that read them); it must not re-broadcast onto the cells.
+    """
+    it = ctx.runtime.image_table
+    chans = getattr(it, "row_chan_cbs", None) or []
+    wells = getattr(it, "row_well_cbs", None) or []
+    for i, vals in enumerate(snap):
+        for cbs, key in ((chans, "channel"), (wells, "well")):
+            text = vals.get(key, "")
+            if not text or i >= len(cbs) or cbs[i] is None:
+                continue
+            cb = cbs[i]
+            blocked = cb.blockSignals(True)
+            try:
+                if cb.findText(text) >= 0:
+                    cb.setCurrentText(text)
+            finally:
+                cb.blockSignals(blocked)
+
+
+def _drop_row_lut_state(ctx, r: int) -> None:
+    """Re-key the per-row LUT colour + levels/display state so removing grid row
+    *r* shifts the rows below it up by one.
+
+    ``build_lut_row`` preserves per-row LUT state (colour, min/max, source,
+    boundaries, binary, log) across a rebuild **keyed by row index**. On a row
+    removal the surviving rows below *r* shift up, so without this each of them
+    would inherit the assignment of whatever row moved into its slot (colours /
+    levels visibly scramble on delete). Dropping index *r* and shifting the rest
+    down realigns the preserved state with the new row positions.
+
+    Flat (non-grouped) layout only: there the LUT-editor rows map 1:1 to grid
+    rows. Grouped/tiled layouts share one LUT row per channel (keyed by channel
+    group, not grid row), so a grid-row removal doesn't disturb their
+    per-channel assignments — leave them untouched.
+    """
+    if int(getattr(ctx.state.image_table, "group_size", 0) or 0) > 0:
+        return
+    it = ctx.runtime.image_table
+    colors = getattr(it, "row_lut_color_cbs", None)
+    if isinstance(colors, list) and 0 <= r < len(colors):
+        del colors[r]
+    lut = getattr(it, "lut", None)
+    if isinstance(lut, dict):
+        it.lut = {(k if k < r else k - 1): v for k, v in lut.items() if k != r}
+
+
 def _set_cols(ctx, new_cols: int) -> None:
     """Update the cols state + spinner (signals blocked) ahead of a rebuild."""
     ctx.state.image_table.cols = new_cols
@@ -60,7 +129,13 @@ def _set_rows(ctx, new_rows: int) -> None:
 
 
 def image_table_remove_row(ctx, r: int) -> None:
-    """Remove row *r* from the grid (never the only row), preserving the rest."""
+    """Remove row *r* from the grid (never the only row), preserving the rest.
+
+    "The rest" includes every surviving row's per-cell selections, its per-row
+    Channel/Well shortcut, and its LUT colour + levels/display assignment — all
+    of which are keyed by row index and would otherwise scramble when the rows
+    below *r* shift up (see ``_drop_row_lut_state`` / ``_restore_row_selectors``).
+    """
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
         ctx.set_status("Image Table: no rows to remove.")
@@ -73,10 +148,14 @@ def image_table_remove_row(ctx, r: int) -> None:
         return
 
     new_snap = [row for idx, row in enumerate(_snapshot_cells(ctx)) if idx != r]
+    row_selectors = [s for idx, s in enumerate(_snapshot_row_selectors(ctx))
+                     if idx != r]
+    _drop_row_lut_state(ctx, r)  # before the rebuild's index-keyed LUT restore
     _set_rows(ctx, len(new_snap))
     image_table_rebuild_grid(ctx)
     _restore_cells(ctx, new_snap)
-    image_table_rebuild_lut_row(ctx)
+    _restore_row_selectors(ctx, row_selectors)
+    image_table_rebuild_lut_row(ctx)  # relabel now the restored channels are set
     ctx.set_status(f"Image Table: removed row {r + 1}. Press Generate to render.")
 
 

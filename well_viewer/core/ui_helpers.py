@@ -782,8 +782,8 @@ def make_fluor_thumb(arr, sz_w: int, sz_h: int,
     norm = (_np.clip(arr, alo, ahi) - alo) / (ahi - alo)
     if cmap:
         try:
-            from matplotlib import colormaps as _mpl_cmaps
-            mpl_cmap = _mpl_cmaps[cmap]
+            from widgets.lut_cmaps import lut_cmap
+            mpl_cmap = lut_cmap(cmap)
         except (KeyError, Exception):
             mpl_cmap = None
         if mpl_cmap is not None:
@@ -835,8 +835,8 @@ def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
     norm = _np.clip((a - alo) / (ahi - alo), 0.0, 1.0)
     if cmap_name:
         try:
-            from matplotlib import colormaps as _mpl_cmaps
-            return (_mpl_cmaps[cmap_name](norm)[..., :3] * 255).astype(_np.uint8).copy()
+            from widgets.lut_cmaps import lut_cmap
+            return (lut_cmap(cmap_name)(norm)[..., :3] * 255).astype(_np.uint8).copy()
         except Exception:
             swallowed()  # was: pass (silent except)
     gray = (norm * 255).astype(_np.uint8)

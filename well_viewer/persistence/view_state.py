@@ -294,9 +294,11 @@ def _snapshot_image_table(ctx) -> dict:
                              len(cells[0]) if cells else 0)),
         # Grouped/tiled layout: columns-per-band + row-axis-values-per-band. Both
         # are needed to rebuild the banded grid's LUT row→channel sharing map on
-        # restore (see image_table_rebuild_grid). 0 = not grouped.
-        "group_size": int(getattr(ctx.state.image_table, "group_size", 0) or 0),
-        "group_row_span": int(getattr(ctx.state.image_table, "group_row_span", 0) or 0),
+        # restore (see image_table_rebuild_grid). 0 = not grouped. The dataclass
+        # fields default to 0, so no ``or 0`` guard is needed (keeps this snapshot
+        # function's cyclomatic complexity within the ratchet).
+        "group_size": int(getattr(ctx.state.image_table, "group_size", 0)),
+        "group_row_span": int(getattr(ctx.state.image_table, "group_row_span", 0)),
     }
     grid: list[list[dict[str, str]]] = []
     for row in cells:

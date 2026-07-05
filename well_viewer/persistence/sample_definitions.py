@@ -223,10 +223,10 @@ def load_from_pipeline_info(ctx) -> bool:
     return True
 
 
-def clear_all(app) -> None:
+def clear_all(ctx) -> None:
     """Clear every definition driven from the Sample Definitions tab."""
     confirm = QMessageBox.question(
-        app, "Clear sample definitions",
+        ctx.window, "Clear sample definitions",
         "Discard all well labels, replicate sets, bar groups, ratio "
         "metrics, and cell-gating thresholds defined on this tab?\n\n"
         "Saved JSON files are not touched until you click Save.",
@@ -236,20 +236,21 @@ def clear_all(app) -> None:
     if confirm != QMessageBox.Yes:
         return
 
-    app._app_state.dataset.well_labels.clear()
-    if hasattr(app, "_label_panel_refresh"):
+    sel_state = ctx.state.selection
+    ctx.state.dataset.well_labels.clear()
+    if hasattr(ctx.window, "_label_panel_refresh"):
         try:
             # Function-local feature import: this Clear-All *command* drives a UI
             # refresh, but the persistence module stays data-only at module scope
             # (see test_layering) — same escape hatch the cell-gating reset below
             # already uses.
             from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-            label_grid_refresh(app._ctx)
+            label_grid_refresh(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    app._app_state.selection.notes_text = ""
-    notes_edit = getattr(app, "_notes_edit", None)
+    sel_state.notes_text = ""
+    notes_edit = ctx.widgets.get_or_none("_notes_edit")
     if notes_edit is not None:
         blocked = notes_edit.blockSignals(True)
         try:
@@ -257,29 +258,34 @@ def clear_all(app) -> None:
         finally:
             notes_edit.blockSignals(blocked)
 
-    app._app_state.selection.selections = []
-    app._app_state.selection.current_selection_id = None
-    app._app_state.selection.plot_groups = []
+    sel_state.selections = []
+    sel_state.current_selection_id = None
+    sel_state.plot_groups = []
     try:
-        app._persistence.save("plot_groups")
+        ctx.persistence.save("plot_groups")
     except Exception:
         _logger.exception("Plot Groups save after Clear failed")
 
-    app._set_ratio_metrics([])
+    # set_ratio_metrics is core (persistence->core is allowed); function-local to
+    # keep this module's import surface minimal, matching the feature imports below.
+    from well_viewer.core.channel_state_controller import set_ratio_metrics
+    set_ratio_metrics(ctx, [])
 
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
+    fluor_edits = ctx.widgets.get_or_none("_cell_gating_fluor_gate_edits")
+    if fluor_edits is not None:
         try:
             from well_viewer.features.grouping.cell_gating_tab_view import (
                 cell_gating_on_gating_change,
                 cell_gating_on_threshold_frac_on_change,
             )
             # cell-area gating retired (now QC-owned); reset only fluor + frac.
-            for edit in app._cell_gating_fluor_gate_edits.values():
+            thresh_edits = ctx.widgets.get_or_none("_cell_gating_thresh_frac_edits") or {}
+            for edit in fluor_edits.values():
                 edit.setText("0.0")
-            for edit in app._cell_gating_thresh_frac_edits.values():
+            for edit in thresh_edits.values():
                 edit.setText("50.0")
-            cell_gating_on_gating_change(app._ctx)
-            cell_gating_on_threshold_frac_on_change(app._ctx)
+            cell_gating_on_gating_change(ctx)
+            cell_gating_on_threshold_frac_on_change(ctx)
         except Exception:
             _logger.exception("Cell Gating reset during Clear failed")
 

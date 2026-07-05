@@ -689,7 +689,7 @@ class WellViewerApp(QWidget):
 
     def _clear_sample_definitions_all(self) -> None:
         from well_viewer.persistence import sample_definitions as _sd
-        _sd.clear_all(self)
+        _sd.clear_all(self._ctx)
 
 
     def _save_gating_to_pipeline_info(self) -> None:

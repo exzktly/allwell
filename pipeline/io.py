@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 import zipfile
 from pathlib import Path
 
@@ -69,13 +70,32 @@ def _fsync_path(path: Path) -> None:
             pass
 
 
+# Retry budget for the image write. On network / NAS output volumes a single
+# large ``ndarray.tofile`` (tifffile writes the pixel buffer that way) can come
+# back short — the classic ``OSError: <N> requested and 0 written`` — when the
+# mount stalls mid-write. It is usually transient: a brief pause and a fresh
+# attempt succeed. A genuinely full disk still surfaces the original error once
+# the budget is exhausted, so the FOV is still marked failed rather than
+# silently producing a truncated image. ``_RETRY_BASE_DELAY_S`` is patched to 0
+# in tests. Mirrors the GUI-side shield in ``well_viewer/persistence/_io.py``.
+_WRITE_MAX_ATTEMPTS = 4
+_RETRY_BASE_DELAY_S = 0.5
+
+
 def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
-    """Atomic image write: tmp file → fsync → rename.
+    """Atomic image write: tmp file → fsync → rename, with retry on OSError.
 
     Routes ``.tif/.tiff`` through tifffile and ``.png`` through imageio v3.
     Other extensions fall back to tifffile. Cleans up the temp file on
     failure so the well's output directory never carries partial bytes
     that a later zip-up step would pack into a corrupt archive.
+
+    A transient short/zero write (``OSError: <N> requested and 0 written``,
+    seen on NAS / network output volumes) is retried up to
+    ``_WRITE_MAX_ATTEMPTS`` times with exponential backoff; the partial tmp is
+    unlinked between attempts. If every attempt fails the last ``OSError`` is
+    re-raised so the caller still treats the FOV as failed. Non-``OSError``
+    exceptions (e.g. ``KeyboardInterrupt``) are never retried.
 
     The tmp file is named ``__aw_tmp_<stem>.pid<N><ext>`` — a unique
     prefix the zip-up step's listers explicitly exclude. The trailing
@@ -91,20 +111,35 @@ def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
         f"__aw_tmp_{out_path.stem}.pid{os.getpid()}{out_path.suffix}"
     )
     suffix = out_path.suffix.lower()
-    try:
-        if suffix == ".png":
-            iio.imwrite(str(tmp), data)
-        else:
-            imwrite(str(tmp), data)
-        _fsync_path(tmp)
-        os.replace(str(tmp), str(out_path))
-    except BaseException:
+
+    def _cleanup_tmp() -> None:
         try:
             if tmp.exists():
                 tmp.unlink()
         except OSError:
             pass
-        raise
+
+    for attempt in range(_WRITE_MAX_ATTEMPTS):
+        try:
+            if suffix == ".png":
+                iio.imwrite(str(tmp), data)
+            else:
+                imwrite(str(tmp), data)
+            _fsync_path(tmp)
+            os.replace(str(tmp), str(out_path))
+            return
+        except OSError as exc:
+            _cleanup_tmp()
+            if attempt + 1 >= _WRITE_MAX_ATTEMPTS:
+                raise
+            log.warning(
+                "imwrite %s failed (%s); retry %d/%d after backoff",
+                out_path.name, exc, attempt + 1, _WRITE_MAX_ATTEMPTS - 1,
+            )
+            time.sleep(_RETRY_BASE_DELAY_S * (2 ** attempt))
+        except BaseException:
+            _cleanup_tmp()
+            raise
 
 
 def _safe_atomic_text_write(out_path: "Path | str") -> "_AtomicTextHandle":

@@ -1,6 +1,7 @@
 """Unit tests for pipeline.io.py (output writers extracted from the pipeline in P4)."""
 
 import csv
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -16,6 +17,73 @@ def test_safe_imwrite_tif_roundtrip(tmp_path):
     assert out.exists()
     np.testing.assert_array_equal(imread(str(out)), img)
     # No scratch temp file left behind.
+    assert not list(tmp_path.glob("__aw_tmp_*"))
+
+
+def test_safe_imwrite_retries_transient_oserror_then_succeeds(tmp_path, monkeypatch):
+    """A transient ``OSError: <N> requested and 0 written`` (short write on a NAS
+    output volume) must be absorbed by the retry loop, not fail the FOV."""
+    from tifffile import imread
+    img = np.arange(64, dtype=np.float32).reshape(8, 8)
+    out = tmp_path / "img.tif"
+
+    monkeypatch.setattr(mio, "_RETRY_BASE_DELAY_S", 0.0)
+    real_imwrite = mio.imwrite
+    attempts = {"n": 0}
+
+    def flaky_imwrite(path, data, *a, **k):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise OSError("15334400 requested and 0 written")
+        return real_imwrite(path, data, *a, **k)
+
+    with patch.object(mio, "imwrite", side_effect=flaky_imwrite):
+        mio._safe_imwrite(out, img)
+
+    assert attempts["n"] == 2                       # one failure, then success
+    np.testing.assert_array_equal(imread(str(out)), img)
+    assert not list(tmp_path.glob("__aw_tmp_*"))    # partial tmp cleaned up
+
+
+def test_safe_imwrite_exhausts_retries_and_reraises(tmp_path, monkeypatch):
+    """A persistent write failure (genuinely full disk) surfaces the final
+    ``OSError`` after the retry budget so the caller still fails the FOV, and no
+    partial tmp / target file is left behind."""
+    img = np.zeros((4, 4), dtype=np.float32)
+    out = tmp_path / "img.tif"
+
+    monkeypatch.setattr(mio, "_RETRY_BASE_DELAY_S", 0.0)
+    calls = {"n": 0}
+
+    def always_fails(path, data, *a, **k):
+        calls["n"] += 1
+        raise OSError("15334400 requested and 0 written")
+
+    with patch.object(mio, "imwrite", side_effect=always_fails):
+        with pytest.raises(OSError, match="0 written"):
+            mio._safe_imwrite(out, img)
+
+    assert calls["n"] == mio._WRITE_MAX_ATTEMPTS     # every attempt tried
+    assert not out.exists()
+    assert not list(tmp_path.glob("__aw_tmp_*"))
+
+
+def test_safe_imwrite_does_not_retry_keyboardinterrupt(tmp_path, monkeypatch):
+    """Non-OSError exceptions (e.g. Ctrl-C) are never retried — they propagate
+    immediately after tmp cleanup."""
+    img = np.zeros((4, 4), dtype=np.float32)
+    out = tmp_path / "img.tif"
+    calls = {"n": 0}
+
+    def interrupt(path, data, *a, **k):
+        calls["n"] += 1
+        raise KeyboardInterrupt
+
+    with patch.object(mio, "imwrite", side_effect=interrupt):
+        with pytest.raises(KeyboardInterrupt):
+            mio._safe_imwrite(out, img)
+
+    assert calls["n"] == 1                            # no retry
     assert not list(tmp_path.glob("__aw_tmp_*"))
 
 

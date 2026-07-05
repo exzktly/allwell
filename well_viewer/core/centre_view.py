@@ -452,7 +452,7 @@ def build_centre(app, parent: QWidget) -> None:
             sub_title = plotting_nb.currentName()
             if sub_title in pending:
                 _build_pending(sub_title)
-            on_tab_change(app, None)
+            on_tab_change(app._ctx, None)
             _refresh_channel_chip(sub_title)
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
@@ -660,7 +660,7 @@ def build_centre(app, parent: QWidget) -> None:
         title = app._notebook.currentName()
         if title in pending:
             _build_pending(title)
-        on_tab_change(app, None)
+        on_tab_change(app._ctx, None)
 
     app._notebook.currentChanged.connect(_on_tab_change)
 

@@ -141,121 +141,134 @@ _state_playground = _lazy_state("well_viewer.features.image_browser.playground.s
 # scaffolding (hide-all, post-dispatch drains) stays in ``on_tab_change``.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _activate_segmentation(app) -> None:
-    from well_viewer.features.image_browser.review_image.renderer import (
-        refresh_review_image, update_preview,
+def _activate_segmentation(ctx) -> None:
+    from well_viewer.features.preview.controller import (
+        sync_preview_well_for_image_tabs,
     )
-    app._sync_preview_well_for_image_tabs()
-    app._sidebar_preview_frame.setVisible(True)
-    app._refresh_preview_picker()
-    update_preview(app, app._app_state.preview.selected_well)
-    refresh_review_image(app)
+    from well_viewer.features.preview.preview_view import refresh_preview_picker
+    from well_viewer.features.image_browser.review_image.renderer import (
+        refresh_review_image_ctx, update_preview_ctx,
+    )
+    sync_preview_well_for_image_tabs(ctx)
+    ctx.widgets.get("_sidebar_preview_frame").setVisible(True)
+    refresh_preview_picker(ctx)
+    update_preview_ctx(ctx, ctx.state.preview.selected_well)
+    refresh_review_image_ctx(ctx)
 
 
-def _activate_image_table(app) -> None:
+def _activate_image_table(ctx) -> None:
     from well_viewer.features.image_browser.image_table.controller import (
         image_table_refresh_picker, image_table_repopulate_dropdowns,
     )
-    if hasattr(app, "_sidebar_image_table_frame"):
-        app._sidebar_image_table_frame.setVisible(True)
-    image_table_repopulate_dropdowns(app._ctx)
-    image_table_refresh_picker(app._ctx)
+    frame = ctx.widgets.get_or_none("_sidebar_image_table_frame")
+    if frame is not None:
+        frame.setVisible(True)
+    image_table_repopulate_dropdowns(ctx)
+    image_table_refresh_picker(ctx)
 
 
-def _activate_sample_definitions(app) -> None:
+def _activate_sample_definitions(ctx) -> None:
+    from well_viewer.core.selection_controller import groups_centre_refresh
     from well_viewer.features.grouping.cell_gating_tab_view import (
         cell_gating_sync_scatter_gates,
     )
-    app._sidebar_sample_frame.setVisible(True)
-    app._groups_centre_refresh()
+    ctx.widgets.get("_sidebar_sample_frame").setVisible(True)
+    groups_centre_refresh(ctx)
     # Cell Gating leads this tab; pick up any scatter gates drawn since the
     # last visit (refresh the summary + recompute Included if they changed).
-    cell_gating_sync_scatter_gates(app._ctx)
+    cell_gating_sync_scatter_gates(ctx)
 
 
-def _activate_statistics(app) -> None:
+def _activate_statistics(ctx) -> None:
     from well_viewer.features.stats.controller import (
         stats_sync_from_app, stats_update_tp_menu, stats_refresh_fov_indicator,
     )
-    app._sidebar_stats_frame.setVisible(True)
+    ctx.widgets.get("_sidebar_stats_frame").setVisible(True)
     # Auto-populate from rep-sets on first visit
-    if not app._app_state.stats.groups and hasattr(app, "_stats_grp_inner"):
-        stats_sync_from_app(app._ctx)
-    if hasattr(app, "_stats_tp_cb"):
-        stats_update_tp_menu(app._ctx)
+    if not ctx.state.stats.groups and ctx.widgets.has("_stats_grp_inner"):
+        stats_sync_from_app(ctx)
+    if ctx.widgets.has("_stats_tp_cb"):
+        stats_update_tp_menu(ctx)
     # Reflect the current FOV-replicate mode (may have been toggled on a plot tab).
-    stats_refresh_fov_indicator(app._ctx)
+    stats_refresh_fov_indicator(ctx)
 
 
-def _activate_multivariate(app) -> None:
+def _activate_multivariate(ctx) -> None:
     from well_viewer.features.multivariate.controller import mv_on_activate
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    mv_on_activate(app._ctx)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    mv_on_activate(ctx)
 
 
-def _activate_spatial(app) -> None:
+def _activate_spatial(ctx) -> None:
     from well_viewer.features.spatial.controller import sp_on_activate
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    sp_on_activate(app._ctx)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    sp_on_activate(ctx)
 
 
-def _activate_batch_export(app) -> None:
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    if hasattr(app, "_batch_export_set_mode"):
-        mode = getattr(app, "_batch_export_inline_state", {}).get("mode", "line")
-        app._batch_export_set_mode(mode)
+def _activate_batch_export(ctx) -> None:
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    state = ctx.runtime.batch_export.inline_state
+    if state:
+        from well_viewer.features.batch_export.tab_view import _show_batch_mode
+        _show_batch_mode(ctx, state.get("mode", "line"))
 
 
-def _activate_review_csv(app) -> None:
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    app._refresh_review_csv()
+def _activate_review_csv(ctx) -> None:
+    from well_viewer.features.image_browser.review_image.controller import (
+        refresh_review_csv,
+    )
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    refresh_review_csv(ctx)
 
 
-def _activate_smfish(app) -> None:
+def _activate_smfish(ctx) -> None:
+    from well_viewer.core.selection_controller import set_selected_wells
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-    app._sidebar_main_frame.setVisible(True)
-    if len(app._app_state.selection.selected_wells) > 1:
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    sel = ctx.state.selection
+    if len(sel.selected_wells) > 1:
         keep = (
-            app._app_state.selection.last_sel
-            if app._app_state.selection.last_sel in app._app_state.selection.selected_wells
-            else next(iter(app._app_state.selection.selected_wells))
+            sel.last_sel
+            if sel.last_sel in sel.selected_wells
+            else next(iter(sel.selected_wells))
         )
         # Route through the central mutator so _prev_sel is snapshotted
         # properly -- bypassing it leaves the next selection diff
         # mis-attributing cross-tab additions / removals.
-        app._set_selected_wells({keep}, commit=False)
-    app._refresh_sidebar_map()
-    smfish_sync_from_app(app._ctx)
+        set_selected_wells(ctx, {keep}, commit=False)
+    ctx.refresh_sidebar_map()
+    smfish_sync_from_app(ctx)
 
 
-def _activate_cell_gating(app) -> None:
+def _activate_cell_gating(ctx) -> None:
     from well_viewer.features.grouping.cell_gating_tab_view import (
         cell_gating_load_cell_areas, cell_gating_sync_scatter_gates,
     )
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        cell_gating_load_cell_areas(app._ctx)
-        cell_gating_sync_scatter_gates(app._ctx)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
+        cell_gating_load_cell_areas(ctx)
+        cell_gating_sync_scatter_gates(ctx)
 
 
-def _activate_cell_browser(app) -> None:
+def _activate_cell_browser(ctx) -> None:
     # Show the canonical well selector (plate) above the Cell Browser's own
     # filter sidebar — its gallery is scoped to the selected wells, so it
     # needs the same well picker every other tab has.
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    if hasattr(app, "_sidebar_cell_browser_frame"):
-        app._sidebar_cell_browser_frame.setVisible(True)
-    for _refresh in getattr(app, "_cell_browser_refreshers", ()):
-        _refresh(app._ctx)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
+    if frame is not None:
+        frame.setVisible(True)
+    for _refresh in (ctx.runtime.cell_browser.refreshers or ()):
+        _refresh(ctx)
 
 
-def _activate_playground(app) -> None:
+def _activate_playground(ctx) -> None:
     from well_viewer.core.safe import swallowed
     from well_viewer.features.image_browser.playground.controller import (
         playground_repopulate_dropdowns,
@@ -263,65 +276,68 @@ def _activate_playground(app) -> None:
     # Playground picks its own well/channel/tp/FOV via in-tab dropdowns; show
     # the canonical plate selector for parity, then refresh its selectors for
     # any dataset loaded since it last built.
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
     try:
-        playground_repopulate_dropdowns(app._ctx)
+        playground_repopulate_dropdowns(ctx)
     except Exception:
         swallowed()
 
 
-def _activate_saved_plots(app) -> None:
+def _activate_saved_plots(ctx) -> None:
     from well_viewer.core.safe import swallowed
     # Gallery of previously saved plots — no plate selection needed; just
     # repaint from the (per-dataset) store on each visit.
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
     try:
         from well_viewer.features.saved_plots.controller import (
             refresh_saved_plots_gallery,
         )
-        refresh_saved_plots_gallery(app._ctx)  # controller now takes ctx
+        refresh_saved_plots_gallery(ctx)  # controller now takes ctx
     except Exception:
         swallowed()
 
 
-def _activate_bar_plots(app) -> None:
+def _activate_bar_plots(ctx) -> None:
+    from well_viewer.features.barplot.controller import update_bar_tp_menu
     from well_viewer.features.barplot.renderer import redraw_bars
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    app._update_bar_tp_menu()
-    redraw_bars(app._ctx)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    update_bar_tp_menu(ctx)
+    redraw_bars(ctx)
 
 
-def _activate_scatter(app) -> None:
+def _activate_scatter(ctx) -> None:
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    update_scatter_menus(app._ctx)
-    scatter_redraw_active(app._ctx)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    update_scatter_menus(ctx)
+    scatter_redraw_active(ctx)
 
 
-def _activate_heatmap(app) -> None:
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    if hasattr(app, "_heatmap_sidebar_frame"):
+def _activate_heatmap(ctx) -> None:
+    from well_viewer.core.plot_orchestrator import redraw_app
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    if ctx.widgets.has("_heatmap_sidebar_frame"):
         try:
             from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
-            refresh_heatmap_layout_sidebar(app._ctx)
+            refresh_heatmap_layout_sidebar(ctx)
         except Exception:
             _logger.exception("Heatmap sidebar refresh failed")
-    app._redraw()
+    redraw_app(ctx)
 
 
-def _activate_default_plot(app) -> None:
+def _activate_default_plot(ctx) -> None:
     # Line Graphs / Distribution — unified picker shown, generic redraw.
-    app._sidebar_main_frame.setVisible(True)
-    app._refresh_sidebar_map()
-    app._redraw()
+    from well_viewer.core.plot_orchestrator import redraw_app
+    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+    ctx.refresh_sidebar_map()
+    redraw_app(ctx)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -102,7 +102,7 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
     split.setVisible(True)
     nb.setVisible(False)
     _install_split_focus_filter(app)
-    on_tab_change(app, None)
+    on_tab_change(app._ctx, None)
 
 
 def exit_split(app) -> None:
@@ -138,7 +138,7 @@ def exit_split(app) -> None:
                 nb.setCurrentByName(a)
         finally:
             nb.blockSignals(blocked)
-    on_tab_change(app, None)
+    on_tab_change(app._ctx, None)
 
 
 def focus_split(app, top: str) -> None:
@@ -148,7 +148,7 @@ def focus_split(app, top: str) -> None:
     if getattr(app, "_split_focused", None) == top:
         return
     app._split_focused = top
-    on_tab_change(app, None)
+    on_tab_change(app._ctx, None)
 
 
 # ── Focused-pane click watcher ───────────────────────────────────────────────

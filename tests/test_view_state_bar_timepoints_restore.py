@@ -42,8 +42,8 @@ def test_pending_bar_timepoints_survive_tab_activation(loaded_app):
     # Drive the real centre-tab dispatcher (what view_state._activate_tab triggers
     # via the notebook change on load). _last_tab_name differs so it's a real
     # transition into Bar Plots: populate menu -> draw -> restore pending -> redraw.
-    app._last_tab_name = "Line Graphs"
-    on_tab_change(app)
+    app._tab_last_tab_name = "Line Graphs"
+    on_tab_change(app._ctx)
 
     # The renderer's authoritative timepoint source must reflect the restored
     # multi-select (not the single default _update_bar_tp_menu seeds), and the

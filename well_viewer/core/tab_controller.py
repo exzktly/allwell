@@ -39,38 +39,42 @@ split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
 split_nav_intercept = None      # fn(app, key) -> bool (True = consume nav)
 
 
-def on_tab_change(app, _e=None) -> None:
+def on_tab_change(ctx, _e=None) -> None:
     """Show/hide the sidebar and refresh whichever tab is now active."""
-    if not hasattr(app, "_line_ax_mean"):
+    from well_viewer.core.plot_orchestrator import redraw_app
+    if not ctx.widgets.has("_line_ax_mean"):
         return
-    tab = app._current_centre_tab()
-    prev_tab = getattr(app, "_last_tab_name", None)
-    prev_selected = set(app._app_state.selection.selected_wells)
+    tab = current_centre_tab(ctx)
+    prev_tab = ctx.runtime.tab.last_tab_name
+    prev_selected = set(ctx.state.selection.selected_wells)
 
     # Dismiss any open figure configurator on tab change -- the user can
     # re-open it on the new tab via the plot card's sliders IconButton.
-    for sb in list((getattr(app, "_export_style_sidebars", {}) or {}).values()):
+    for sb in list((ctx.widgets.get_or_none("_export_style_sidebars") or {}).values()):
         try:
             sb._close_dock()
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    app._sidebar_main_frame.setVisible(False)
-    app._sidebar_preview_frame.setVisible(False)
-    if hasattr(app, "_sidebar_image_table_frame"):
-        app._sidebar_image_table_frame.setVisible(False)
-    app._sidebar_sample_frame.setVisible(False)
-    app._sidebar_stats_frame.setVisible(False)
-    if hasattr(app, "_sidebar_cell_browser_frame"):
-        app._sidebar_cell_browser_frame.setVisible(False)
+    ctx.widgets.get("_sidebar_main_frame").setVisible(False)
+    ctx.widgets.get("_sidebar_preview_frame").setVisible(False)
+    _it_frame = ctx.widgets.get_or_none("_sidebar_image_table_frame")
+    if _it_frame is not None:
+        _it_frame.setVisible(False)
+    ctx.widgets.get("_sidebar_sample_frame").setVisible(False)
+    ctx.widgets.get("_sidebar_stats_frame").setVisible(False)
+    _cb_frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
+    if _cb_frame is not None:
+        _cb_frame.setVisible(False)
     # Heat-map layout configurator lives inside the standard sidebar but is
     # only relevant on the Heat Map tab.
-    if hasattr(app, "_heatmap_sidebar_frame"):
-        app._heatmap_sidebar_frame.setVisible(tab == "Heat Map")
+    _hm_frame = ctx.widgets.get_or_none("_heatmap_sidebar_frame")
+    if _hm_frame is not None:
+        _hm_frame.setVisible(tab == "Heat Map")
     # The sidebar plate-map doubles as the heat-map drag source on the
     # Heat Map tab -- flip each WellButton into drag-source mode while
     # that tab is active.
-    app._sync_heatmap_well_drag_mode(tab == "Heat Map")
+    sync_heatmap_well_drag_mode(ctx, tab == "Heat Map")
 
     # Per-tab activation is dispatched through the feature registry: each
     # descriptor's ``on_activate`` hook owns its sidebar-visibility + refresh
@@ -78,38 +82,38 @@ def on_tab_change(app, _e=None) -> None:
     # tab with no descriptor / no hook falls back to the generic plot path
     # (unified picker + redraw) — the same behaviour the old ``else`` gave Line
     # Graphs and any unknown leaf.
-    desc = app._features.get(tab)
+    desc = ctx.features.get(tab)
     if desc is not None and desc.on_activate is not None:
-        desc.on_activate(app)
+        desc.on_activate(ctx)
     else:
-        app._sidebar_main_frame.setVisible(True)
-        app._refresh_sidebar_map()
-        app._redraw()
+        ctx.widgets.get("_sidebar_main_frame").setVisible(True)
+        ctx.refresh_sidebar_map()
+        redraw_app(ctx)
 
-    app._run_tab_switch_smoke_checks(prev_tab, tab, prev_selected)
-    app._last_tab_name = tab
+    run_tab_switch_smoke_checks(ctx, prev_tab, tab, prev_selected)
+    ctx.runtime.tab.last_tab_name = tab
 
     # Drain any restored view-state slated for this tab. Safe no-op when
     # nothing is pending; runs after the tab's own dispatch so its widgets
     # are populated and apply step can validate combo items.
-    if getattr(app, "_view_state_pending", None):
+    if ctx.runtime.view_state.pending:
         from well_viewer.persistence import view_state as _vs
-        if _vs.apply_pending_tab_state(app._ctx, tab):
+        if _vs.apply_pending_tab_state(ctx, tab):
             # The restore lands *after* this tab's initial draw above, so that
             # draw used pre-restore defaults — e.g. the Bar timepoint popup,
-            # which ``_update_bar_tp_menu`` had defaulted to a single checked
+            # which ``update_bar_tp_menu`` had defaulted to a single checked
             # timepoint, so the plot showed one timepoint even though the saved
             # selection (now applied) has several. Redraw the plot tabs so they
             # reflect the restored state. (Image Table deliberately does not
             # auto-regenerate, so it is intentionally excluded.)
             if tab == "Bar Plots":
                 from well_viewer.features.barplot.renderer import redraw_bars
-                redraw_bars(app._ctx)
+                redraw_bars(ctx)
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
-                scatter_redraw_active(app._ctx)
+                scatter_redraw_active(ctx)
             elif tab == "Distribution":
-                app._redraw()
+                redraw_app(ctx)
 
 
 def image_browser_subtab_app_bridge(
@@ -120,32 +124,27 @@ def image_browser_subtab_app_bridge(
 
     The Image Browser sub-tab controller (``features/image_browser/controller``)
     is ctx-native — it reads ``ctx.runtime`` / ``ctx.widgets`` and dispatches the
-    ctx-native sub-tab builders. Two leaves in the lifecycle still bottom into
-    un-migrated god-method clusters, so they can only be reached through the app
-    handle:
-
-    * **Segmentation build** — ``build_review_image_panel`` (a feature-layer
-      builder with ~30 app-bound method lambdas) and its channel-combo populate
-      ``update_channel_selector`` (the whole channel-state cluster).
-    * **Active-tab refresh** — ``on_tab_change`` (the sidebar-swap + per-leaf
-      feature-registry dispatch).
-
-    Converting any of these piecemeal would net-*add* god-object unwraps; routing
-    both through this single core bridge keeps exactly one such unwrap for the
-    whole sub-tab lifecycle, so the feature layer names no god-object. This is the
-    sanctioned ctx→app boundary until those clusters migrate centrally.
+    ctx-native sub-tab builders. ``on_tab_change`` and ``update_channel_selector``
+    are now ctx-native too, so the ONE remaining god-object reach is the
+    Segmentation build: ``build_review_image_panel`` is a feature-layer builder
+    whose ~20 signal lambdas still bind app-native review-image callbacks (crop /
+    interaction / LUT / zoom / colour). Until that whole callback web migrates to
+    ctx, the builder needs the raw app handle — the last such reach in the tree.
+    Routing it through this single core bridge keeps that final unwrap out of the
+    feature layer.
     """
-    app = ctx.app
     if segmentation_frame is not None:
         from well_viewer.core.channel_state_controller import update_channel_selector
-        _build_review_image_panel(app, segmentation_frame)
+        # Last app reach: the review-image builder's callback web is still
+        # app-native (see the docstring). Cleared when that web migrates to ctx.
+        _build_review_image_panel(ctx.app, segmentation_frame)
         # The review-image channel combo is born empty (a "GFP" placeholder);
         # when the panel builds *after* a dataset is already loaded (it builds
         # lazily now), nothing has populated it yet, so fill it from the current
         # channel state. Harmless before any load.
-        update_channel_selector(app._ctx)
+        update_channel_selector(ctx)
     if refresh_active_tab:
-        on_tab_change(app, None)
+        on_tab_change(ctx, None)
 
 
 def build_sample_definitions_app_bridge(ctx, frame) -> None:

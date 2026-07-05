@@ -113,7 +113,12 @@ def _split_app(*, install=True):
     # flags via ctx.runtime.split. Give the double a matching ctx.
     from types import SimpleNamespace
     from well_viewer.core.app_runtime import AppRuntime
-    app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app))
+    from well_viewer.core.widget_registry import WidgetRegistry
+    # ``on_tab_change`` (called by enter/exit) early-returns unless
+    # ``ctx.widgets.has("_line_ax_mean")`` — an empty registry keeps the stub
+    # headless while satisfying the ctx-native probe.
+    app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app),
+                               widgets=WidgetRegistry(app))
     if install:
         sv.install_split_view(app)
     return app, st, widgets

@@ -596,22 +596,27 @@ The `wire_save_to_gallery` → `save_plot_from_card` → `get_store` / `capture_
 (Batch F5 tail). The dedicated `SavedPlotsService` object is a future refactor,
 not required to reach 0.
 
-### T6 — Retire `ctx.app` · `[ ]` THE CAPSTONE
+### T6 — Retire `ctx.app` · `[x]` THE CAPSTONE — DONE
 Once F1–F5 land the count at the ~13 **FLOOR**, delete the `app` field from
 `ViewerContext` and dissolve the floor in one coordinated change:
 
-1. **Persistence unwraps (8).** Replace each `app = ctx.app` in `persistence/`
+1. **Persistence unwraps (8).** `[x]` Replace each `app = ctx.app` in `persistence/`
    with direct `ctx.persistence` / typed-state access, or pass the concrete
    `data_dir` + slice the caller already holds. These modules never needed the
    whole app — only `app._app_state.dataset` + the persistence doc, both on `ctx`.
-2. **`AppRuntime` stamp (3).** `_FeatureRuntime` holds `app` only to `setattr`
-   the legacy `app._<prefix><name>` mirror. When every reader has migrated onto
-   `ctx.runtime.<feature>.<name>` (a mechanical sweep the runtime holders already
-   enable), the mirror write is dropped and the holder stores its own dict — no
-   `app` reference.
-3. **Shared-helper touches (2).** `ui_helpers` / `plot_card_actions` — inline the
+2. **`AppRuntime` stamp (3).** `[x]` `_FeatureRuntime` held `app` only to `setattr`
+   the legacy `app._<prefix><name>` mirror. Every reader has migrated onto
+   `ctx.runtime.<feature>.<name>` (production audit: zero non-comment reads of a
+   runtime key off the app remain), so the mirror write is dropped and the holder
+   stores its own dict — no `app` reference. The real app injects one standalone
+   store shared with `WidgetRegistry` so the widget cross-reads still resolve;
+   legacy/test call sites fall back to a `_AppAttrStore` getattr/setattr view.
+   Two production read-path inconsistencies the split store exposed (review-image
+   `tp_cb`, image-browser `subtabs`, and the SEM/FOV sidebar sync observers) were
+   unified onto `ctx.runtime`. (Commit `2897a8f`.)
+3. **Shared-helper touches (2).** `[x]` `ui_helpers` / `plot_card_actions` — inline the
    one window-service call each through a named `ViewerContext` accessor.
-4. **Delete `ViewerContext.app`**, flip the ratchet from `<= N` to `== 0` (hard
+4. **Delete `ViewerContext.app`**, `[x]` flip the ratchet from `<= N` to `== 0` (hard
    ban), and remove the strangler docstring. The frozen named-accessor set is the
    *entire* remaining, intentional surface between features and the window shell.
 

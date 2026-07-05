@@ -47,6 +47,14 @@ def render_spatial(ctx) -> None:
         _logger.exception("Spatial render failed")
         _draw_message(fig, f"Render failed: {exc}")
     canvas = ctx.widgets.get_or_none("_sp_canvas")
+    # Re-apply the Export-Style / Properties sidebar prefs (title, font sizes,
+    # grid, legend, …) so toggling them in the panel survives a recompute.
+    try:
+        from well_viewer.core.plot_style import apply_export_style_to_current
+        apply_export_style_to_current(ctx, fig, canvas)
+    except Exception:  # pragma: no cover - defensive
+        from well_viewer.core.safe import swallowed
+        swallowed()
     if canvas is not None:
         canvas.draw_idle()
 
@@ -188,31 +196,35 @@ def _render_spatial_map(ax, payload, st) -> None:
     )
     labels = payload.get("colony_labels")
 
-    # A picked metric wins the colouring at any level — the user's selection
-    # is what they want to see, so Cell / Colony / Intra all obey it. The
-    # colony-ID / r/R colouring is the fallback for "no metric picked".
-    if has_metric:
+    # The spatial map expresses each level's *defining* quantity, so toggling
+    # the level visibly re-colours the same points:
+    #   • Intra-colony → normalised radial position r/R (centre → edge), always
+    #     — even with a metric picked. The metric is analysed against r/R via
+    #     the Radial-profile / Boundary-vs-interior vizs, not this map.
+    #   • Cell / Colony → the picked metric when one is set (the user's signal
+    #     in the well plane), else colony id (Colony) or a flat colour (Cell).
+    if level == sp_state.LEVEL_INTRA:
+        colours = payload.get("intra_colour")
+        if colours is None or colours.shape[0] != pts.shape[0]:
+            _scatter_by_colony(ax, pts, labels)  # colonies not detected yet
+        else:
+            sc = ax.scatter(pts[:, 0], pts[:, 1], c=colours, s=8,
+                            cmap="viridis", edgecolors="none")
+            cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
+            cbar.set_label(payload.get("intra_colour_label", "r / R"),
+                           color=_tokens(ax)[2], fontsize=8)
+        if st.show_hulls:
+            _overlay_hulls(ax, pts, labels)
+    elif has_metric:
         sc = ax.scatter(pts[:, 0], pts[:, 1], c=metric, s=8,
                         cmap="viridis", edgecolors="none")
         cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
         cbar.set_label(payload.get("metric_col", ""), color=_tokens(ax)[2],
                        fontsize=8)
-        if st.show_hulls and level in (sp_state.LEVEL_COLONY, sp_state.LEVEL_INTRA):
+        if st.show_hulls and level == sp_state.LEVEL_COLONY:
             _overlay_hulls(ax, pts, labels)
     elif level == sp_state.LEVEL_COLONY:
         _scatter_by_colony(ax, pts, labels)
-        if st.show_hulls:
-            _overlay_hulls(ax, pts, labels)
-    elif level == sp_state.LEVEL_INTRA:
-        colours = payload.get("intra_colour")
-        if colours is None or colours.shape[0] != pts.shape[0]:
-            _scatter_by_colony(ax, pts, labels)
-        else:
-            sc = ax.scatter(pts[:, 0], pts[:, 1], c=colours, s=8,
-                            cmap="viridis", edgecolors="none")
-            cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
-            cbar.set_label(payload.get("intra_colour_label", "r/R"),
-                           color=_tokens(ax)[2], fontsize=8)
         if st.show_hulls:
             _overlay_hulls(ax, pts, labels)
     else:

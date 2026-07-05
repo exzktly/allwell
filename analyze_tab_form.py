@@ -658,7 +658,10 @@ class AnalyzeTabFormMixin:
         # exhaust memory). The value is the MAX pixels per tile SIDE (not the
         # number of tiles): StarDist splits the frame into as many tiles as
         # needed so no block exceeds it. 0 = off (default).
-        tile_row = self._row(sec, "Max tile size (px/side, 0=off)")
+        # Label kept short so it fits the 150 px label column — a longer string
+        # clips mid-word and leaves a stray "=" hanging at the edge. The px/side
+        # meaning is spelled out in the info-icon tooltip below.
+        tile_row = self._row(sec, "Max tile size (0=off)")
         self._stardist_tile_px_edit = self._entry(tile_row, "0", width=56)
         tile_row.layout().addWidget(self._info_icon(
             tile_row,

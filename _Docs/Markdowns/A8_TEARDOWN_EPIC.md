@@ -10,14 +10,19 @@
 > `ViewerContext` — is the **focused campaign** in [§ Endgame](#endgame--the-51-file-by-file-focused-campaign)
 > below.
 >
-> **Status:** `[~]` IN PROGRESS — **1** `ctx.app` ref remains (ratchet
-> `CTX_APP_BUDGET = 1`, `tests/test_ctx_app_burndown.py`), 99.9% overall. The
-> sole remaining ref is `core/tab_controller.py:138` — the review-image
-> segmentation bridge (`build_review_image_panel` ~30 app-lambdas + `on_tab_change`
-> + its 18 `on_activate` hooks). Every other floor ref fell to a genuine
-> god-method decomposition (D-series + the sample-def D6 leaf sequence that cleared
-> `tab_controller:164`). Once :138's tree is ctx-native the ratchet flips to 0 and
-> **T6** deletes `ViewerContext.app`.
+> **Status:** `[x]` **ctx.app = 0** — the burn-down is COMPLETE (894 → 0,
+> ratchet `CTX_APP_BUDGET = 0`, `tests/test_ctx_app_burndown.py`). The endgame
+> landed in three commits on 2026-07-05: **(A)** the `view_state._apply_*`
+> pending-restore cluster → ctx; **(B)** `on_tab_change` + the 18 feature-registry
+> `on_activate` hooks → ctx; **(C)** the entire review-image interaction web
+> (crop / mouse-interaction / LUT / colour / zoom / cell-delete / CSV-nav —
+> ~40 functions across `review_image.{controller,renderer,collect,box_select}`
+> + `crop.controller`) → ctx, letting `build_review_image_panel(ctx, …)` clear
+> the final reach in `image_browser_subtab_app_bridge`. NO code names `ctx.app`.
+> The `app` field survives ONLY as the backing store for the frozen ctx service
+> accessors (`ctx.window` / `ctx.persistence` / `ctx.rebuild_all` / …) — deleting
+> it outright is the remaining **T6** work (dissolve those accessors), tracked
+> separately; the ratchet is now a regression guard, not a burn-down.
 > **Branch:** `claude/code-review-audit-framework-se53zd` (PR #597).
 
 ---
@@ -210,7 +215,7 @@ residual.
 | R2 | `features/heatmap/tab_view.py` `refresh_heatmap_timepoints`, `_on_tp_changed` | ~~`_redraw(ctx.app)`~~ → `redraw_heatmap(ctx)` | **DONE** (task R2). The heatmap render tree is ctx-native — `redraw_heatmap(ctx)` (`features/heatmap/controller.py:390`) reads the array/index off typed `ctx.state` + `ctx.widgets`, so the timepoint handlers dropped their `_redraw(ctx.app)` residual. | `[x]` |
 | R3 | `features/distribution/tab_view.py` `_on_changed` | ~~`redraw_distribution(ctx.app)`~~ → `redraw_distribution(ctx)` | **DONE** (task R3). `redraw_distribution(ctx)` (`features/distribution/controller.py:210`) + the shared plot-render helpers (`iter_plot_groups`/`_setup_axes`/plot-style/`_display_label_for`) all take `ctx`, so `_on_changed`'s render handoff is ctx-native. | `[x]` |
 | R4 | `features/qc/controller.py` `get_qc_params` | ~~`app._qc_params`~~ → `app._app_state.qc.params` | **DONE.** `_qc_params` moved off the god-object into a typed core slice `QcState` (`core/qc_state.py`, `AppState.qc`); `get_qc_params` / `set_qc_params` / persistence all read/write `app._app_state.qc.params`. The accessor now reads pure typed state, so its ctx signature-flip (`get_qc_params(ctx)` → `ctx.state.qc.params`) is a 3-line, zero-residual change that lands with R1. | `[x]` |
-| R5 | `core/split_view.py` (≈4 write sites) | `app._split_active = …` (bare writes) | **Low priority / cosmetic.** Reads are modernized via `ctx.runtime.split` (R-home done). The direct writes are bare `app._split_active` (uncounted by the ratchet), harmless; move them onto `ctx.runtime.split.active` when `split_view` functions take `ctx`. | `[ ]` |
+| R5 | `core/split_view.py` (4 write sites) | ~~`app._split_active = …` (bare writes)~~ → `app._ctx.runtime.split.active = …` | **DONE** (2026-07-05). The four `enter_split` / `exit_split` / `focus_split` write sites (lines 73/93/123/372) now write through `ctx.runtime.split.active` — the flag's single home — symmetric with the ctx-based plot handlers that read it. `test_split_view.py` green. | `[x]` |
 
 > When you clear a blocker, delete the residual touch, drop the ratchet, and tick
 > the row(s). R4 → unblocks R1. R2/R3 are the render-tree passes (one feature

@@ -75,8 +75,9 @@ class AppRuntime:
         object.__setattr__(self, "saved_plots", _FeatureRuntime(app, "_saved_plots_"))
         # App-global split-view mode flag (transient session state, never
         # persisted): ``ctx.runtime.split.active`` <-> ``app._split_active``.
-        # split_view.py still writes ``app._split_active`` directly; ctx-based
-        # plot handlers read the flag here instead of naming the god-object.
+        # Both sides go through this namespace now (A8 residual R5) — split_view
+        # writes ``…runtime.split.active`` and ctx-based plot handlers read it —
+        # so the flag's single home is the runtime, not a bare god-object attr.
         object.__setattr__(self, "split", _FeatureRuntime(app, "_split_"))
         # App-global per-FOV toggle button bank + observers (shared by the plot
         # tabs and batch-export panels): ``ctx.runtime.fov.btns`` <-> the

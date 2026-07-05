@@ -70,7 +70,7 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
                 _logger.exception("Split: deferred build for %r failed", t)
     # Set state first so any notebook signal fired mid-detach resolves to the
     # focused pane rather than a stale leaf.
-    app._split_active = True
+    app._ctx.runtime.split.active = True
     app._split_tab_a = tab_a
     app._split_tab_b = tab_b
     app._split_focused = tab_a
@@ -90,7 +90,7 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
                 nb.reattachPage(tab_b, wb)
         finally:
             nb.blockSignals(blocked)
-        app._split_active = False
+        app._ctx.runtime.split.active = False
         app._split_tab_a = app._split_tab_b = app._split_focused = None
         return
     app._split_pane_widgets = {tab_a: wa, tab_b: wb}
@@ -120,7 +120,7 @@ def exit_split(app) -> None:
     for w in (wa, wb):
         if w is not None:
             w.setParent(None)
-    app._split_active = False
+    app._ctx.runtime.split.active = False
     app._split_tab_a = app._split_tab_b = app._split_focused = None
     app._split_pane_widgets = {}
     _remove_split_focus_filter(app)
@@ -369,7 +369,7 @@ def install_split_view(app) -> None:
     if layout is not None:
         layout.addWidget(split, 1)
     app._split_pane = split
-    app._split_active = False
+    app._ctx.runtime.split.active = False
     app._split_tab_a = app._split_tab_b = app._split_focused = None
     app._split_pane_widgets = {}
 

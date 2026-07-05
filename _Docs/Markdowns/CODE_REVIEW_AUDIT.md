@@ -143,7 +143,7 @@ Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend
 | A5 | characterization tests for CC-69 `redraw_line_plots` + CC-52 `run_stats` | H | `[x]` DONE | `test_stats_report_formatting.py` |
 | A6 | ~~delete cosmetic `WidgetRegistry`~~ (stale — verified live) | H | `[-]` DROPPED | #597 |
 | A7 | split `scatter/callbacks.py` (handlers vs single-cell viewer) | M | `[x]` DONE | `test_scatter_cell_viewer_dock.py` |
-| A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[x]` DONE | `test_ctx_app_burndown.py` |
+| A8 | `ctx.app` / god-object burn-down: lint + migrate hot clusters | M | `[x]` DONE — **ctx.app = 0** (894→0; `CTX_APP_BUDGET=0`) | `test_ctx_app_burndown.py` |
 | A9 | delete dead frameless modules (`_window_chrome`, `window_resize_grips`) | M | `[x]` DONE | #597 |
 | A10 | parametrize the `process_well_*` task/driver pairs | M | `[x]` DONE | `test_well_worker_pool.py` |
 | A11 | consolidate 3 rsync transport/retry impls | M | `[x]` DONE | `test_stream_rsync_retry.py` |

@@ -131,6 +131,35 @@ def test_partial_fov_failures_count_wells_not_fov_names(tmp_path, monkeypatch):
     assert failed.count("A1") == 1
 
 
+def test_parent_counts_nuclei_without_retaining_records(tmp_path, monkeypatch, caplog):
+    """Memory-leak regression: the driver must NOT accumulate every well's
+    per-cell records in the parent (that held the whole plate's cell dicts in
+    the long-lived parent just to len() them — the tens-of-GB leak). It keeps a
+    running integer instead; the summary line reports the correct total nuclei
+    across wells, proving the records themselves are never needed in the parent."""
+    import logging
+    _patch(monkeypatch)
+
+    def submit_task(executor, well, path):
+        # Distinct record counts per well: 2 + 3 = 5 total.
+        n = {"A1": 2, "A2": 3}[well]
+        return _FakeFuture(([{"nuc": i} for i in range(n)], []))
+
+    with caplog.at_level(logging.INFO, logger="process_microscopy"):
+        pm._run_well_worker_pool(
+            items=[("A1", Path("a1")), ("A2", Path("a2"))],
+            output_dir=tmp_path, workers=2, force=False, incremental=False,
+            force_cpu=False, threads_per_worker=0, shared_kwargs_template={},
+            mode_label="Test",
+            stale_sweep=lambda out: None,
+            output_exists=lambda well: False,
+            submit_task=submit_task,
+        )
+
+    summary = next(m for m in caplog.messages if "nuclei :" in m)
+    assert "nuclei : 5" in summary
+
+
 def test_all_complete_returns_empty_failed_list(tmp_path, monkeypatch):
     # The early "all complete" path returns [] (no failures) so main() exits 0.
     _patch(monkeypatch)

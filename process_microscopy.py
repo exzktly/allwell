@@ -3577,7 +3577,15 @@ def _run_well_worker_pool(
                  len(to_process))
     log.info("%s mode: %d well(s) to process, %d worker(s).", mode_label, len(to_process), workers)
 
-    all_records: list[dict] = []
+    # Running count of per-cell records across all wells — NOT the records
+    # themselves. Each well already writes its own per-well CSV inside its worker,
+    # so the parent never needs the records; it only reports a total in the
+    # summary line below. Accumulating the full list here (the old behaviour) held
+    # every cell dict of the entire plate in the long-lived parent process just to
+    # call len() on it — tens of millions of ~KB dicts on a large plate, i.e. the
+    # tens-of-GB "the run eats all my RAM" leak. A single integer fixes it, and
+    # each well's returned records are freed as soon as the loop reassigns them.
+    total_nuclei = 0
     # Two DISTINCT failure classes, kept apart so the summary isn't misleading:
     #   * wells_failed_entirely — the worker raised, so the well produced NO
     #     output at all (no CSV, no out.zip); it is absent from the plate map.
@@ -3609,7 +3617,7 @@ def _run_well_worker_pool(
             well_label = future_to_well[future]
             try:
                 records, failed = future.result()
-                all_records.extend(records)
+                total_nuclei += len(records)
                 if failed:
                     partial_wells[well_label] = list(failed)
             except Exception as exc:           # noqa: BLE001
@@ -3630,7 +3638,7 @@ def _run_well_worker_pool(
         "Total wells : %d  |  processed : %d  |  skipped : %d  |  nuclei : %d  |  "
         "wells failed (no output) : %d  |  wells partial : %d  |  "
         "FOV-groups failed : %d",
-        len(items), len(to_process), n_skipped, len(all_records),
+        len(items), len(to_process), n_skipped, total_nuclei,
         len(wells_failed_entirely), len(partial_wells), n_partial_fovs,
     )
     if wells_failed_entirely:

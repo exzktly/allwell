@@ -379,11 +379,14 @@ What lives on `WellViewerApp`:
   objects (`channel`, `selection`, `dataset`, `plot`, `stats`, `review_image`,
   `preview`). Single source of truth for runtime state; call sites read
   `self._app_state.<domain>.<field>` directly, no `@property` shims.
-- **`self._event_bus` / `self._widget_registry` / `self._ctx`** — the
-  `EventBus`, the widget-handle store (which now `setattr`s onto `app` on
-  `register`, so `app._<widget>` reads resolve via plain attribute
-  lookup), and the `ViewerContext` that bundles them for injection. All three
-  are load-bearing (see §5.9).
+- **`self._event_bus` / `self._attr_store` / `self._widget_registry` /
+  `self._runtime` / `self._ctx`** — the `EventBus`; a shared `name → object`
+  attribute-store dict; the widget-handle store (`WidgetRegistry`, which
+  `setattr`s onto `app` on `register` *and* writes the shared store, so both
+  `app._<widget>` and `ctx.runtime` reads resolve); the per-feature runtime
+  namespaces (`AppRuntime`, backed by that same shared store, no `app` ref); and
+  the `ViewerContext` that bundles state / bus / widgets / runtime for injection.
+  All are load-bearing (see §5.9).
 - **`__init__`** (~140 lines) — wires the bus, the persistence registry,
   the widget registry, the viewer context, the redraw / selection
   coordinators, then calls `views.app_shell_view.build_ui(self)`.
@@ -462,9 +465,10 @@ the stack and put back in its original slot — the reparenting primitive behind
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 
 Each module exposes a single `build_<name>_tab(ctx, parent)` function —
-`ctx` is a `ViewerContext`. Each builder references `ctx.app` / `ctx.state` /
-`ctx.widgets` directly rather than unwrapping into a local `app` (the guardrail
-`TAB_CTX_APP_UNWRAP_BUDGET = 0` enforces this). The function:
+`ctx` is a `ViewerContext`. Each builder references `ctx.state` / `ctx.widgets` /
+`ctx.runtime` (and the frozen window-service accessors like `ctx.window`)
+directly — there is no `ctx.app` (the `CTX_APP_BUDGET = 0` ratchet hard-bans it).
+The function:
 
 1. Creates a `make_plot_with_right_dock(parent)` host (returns
    `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
@@ -640,7 +644,7 @@ Shared domain helpers (under `well_viewer/domain/`):
 | Module | Role |
 |--------|------|
 | `domain/fold_change.py` | Fold-change normalization helpers (vs control well/rep-set, vs each member's first timepoint). Consumed by line / bar plot, batch export, and `features/export/service.py`. |
-| `domain/stats_compute.py` | `well_aggregate_stats`, `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. `aggregate_well` / `aggregate_group` delegate to `app._aggregate_well` / `app._aggregate_group` when those methods exist, which is the hook the pure-logic test `MockApp` uses to short-circuit aggregation; the production `WellViewerApp` does not define them, so the DataFrame path is taken at runtime. |
+| `domain/stats_compute.py` | `well_aggregate_stats`, `compute_rep_stats`, `aggregate_well`, `aggregate_group` — the pure-math layer the bar / line / scatter controllers share. `aggregate_well` / `aggregate_group` resolve an optional delegate through `ctx.runtime.aggregate.well` / `.group`, which is the hook the pure-logic test `MockApp` uses to short-circuit aggregation (its `_aggregate_well` / `_aggregate_group` methods surface through the runtime's back-compat view); the production `WellViewerApp` provides no such delegate, so the value is `None` and the DataFrame path is taken at runtime. |
 | `domain/batch_models.py`, `domain/ratio_models.py`, `domain/selections_model.py` | Plain dataclass models. |
 
 Data-layer helpers (under `well_viewer/data/`):
@@ -773,8 +777,10 @@ a re-render.
 
 ### 5.9 Typed state, the event bus, and the DI context
 
-Four pieces let controllers and tabs depend on typed seams instead of the loose
-`WellViewerApp` namespace. The state modules — cross-cutting ones under
+Five pieces let controllers and tabs depend on typed seams instead of the loose
+`WellViewerApp` namespace: the typed **state** objects, the **event bus**, the
+**widget registry**, the per-feature **runtime** namespaces, and the
+**`ViewerContext`** that bundles them. The state modules — cross-cutting ones under
 `well_viewer/core/` and per-feature ones under
 `well_viewer/features/<feature>/state.py` — are **import-safe**: they
 import only stdlib, numpy/pandas, the Qt-free domain models
@@ -831,19 +837,44 @@ pin these invariants.
 widget handles (figures, canvases, axes). `register("_line_fig", fig)`
 stashes the handle by name *and* `setattr`s it onto the bound app, so
 `app._line_fig` readers resolve via plain attribute lookup — no `__getattr__`
-forwarder is needed, and the registry stays the canonical store.
+forwarder is needed, and the registry stays the canonical store. Its backing
+dict is **shared with `AppRuntime`** (below), so a handle registered as
+`_<feature>_<name>` is also reachable through `ctx.runtime.<feature>.<name>`.
 
-**`ViewerContext` (`viewer_context.py`).** A frozen dataclass bundling
-`state` / `bus` / `widgets` plus a residual `app` field for the remaining
-proxy methods on `WellViewerApp`. `WellViewerApp.__init__` builds `self._ctx`
-and passes it to every tab builder. Builders read `ctx.app.<field>` directly
-where they need the app, or `ctx.state.<domain>.<field>` / `ctx.bus` for the
-typed seams — no `app = ctx.app` unwrap (the `TAB_CTX_APP_UNWRAP_BUDGET`
-guardrail is zero).
+**`AppRuntime` (`core/app_runtime.py`).** Per-feature namespaces for *live,
+non-persisted* session objects that aren't typed state — worker bridges, decoded
+image arrays, popup figures/canvases, transient toggle banks (SEM/FOV), and live
+callback handles. `ctx.runtime.<feature>.<name>` reads/writes a plain
+`name → object` **attribute-store** dict (keyed `_<feature>_<name>`) and holds
+**no reference to the god-object** (A8 T6): the real app injects one store
+*shared with `WidgetRegistry`* so the widget and runtime views resolve one
+another's entries. These objects are never serialized — `persistence/` must not
+import `app_runtime` (`tests/test_app_runtime.py`). (Legacy / pure-logic test
+call sites that construct `AppRuntime(app)` get a back-compat `_AppAttrStore`
+getattr/setattr view over that app instead of a standalone dict.)
 
-`tests/test_guardrails.py` holds `runtime_app.py` to ratcheting line-count and
-`self._*` attribute-count ceilings (it can only ratchet down), plus the
-state-package import boundary above.
+**`ViewerContext` (`viewer_context.py`).** A frozen dataclass — the single typed
+handle tab builders and controllers receive **instead of** the `WellViewerApp`
+god-object. It bundles `state` (typed `AppState`), `bus` (`EventBus`), `widgets`
+(`WidgetRegistry`), and `runtime` (`AppRuntime`). **There is no `app` field**
+(A8 teardown, T6): the god-object instance is held *privately* as `_window` and
+reachable only through a small, closed set of **frozen named service accessors** —
+`ctx.window` (the god-object *qua* `QMainWindow`, for dialog parenting /
+`isinstance` guards / `findChildren` walks), plus `ctx.persistence`,
+`ctx.features`, `ctx.rebuild_all`, `ctx.refresh_sidebar_map`, `ctx.set_status`,
+`ctx.toast`, `ctx.save_figure_dialog`, `ctx.open_export_style_panel`. That
+enumerable accessor set is the *entire* intentional surface between features and
+the window shell — never a generic `ctx.app` escape hatch and never a
+`__getattr__` passthrough. `WellViewerApp.__init__` builds `self._ctx` and passes
+it to every tab builder and controller; feature code reads
+`ctx.state.<domain>.<field>` / `ctx.bus` / `ctx.widgets` / `ctx.runtime` and the
+frozen accessors, nothing else.
+
+`tests/test_ctx_app_burndown.py` hard-bans any `ctx.app` (`CTX_APP_BUDGET = 0`);
+`tests/test_ctx_service_accessors.py` freezes the accessor set (adding one is a
+reviewed act); `tests/test_guardrails.py` holds `runtime_app.py` to ratcheting
+line-count and `self._*` attribute-count ceilings (it can only ratchet down),
+plus the state-package import boundary above.
 
 ### 5.10 Split View (optional, one-line removable)
 
@@ -2008,6 +2039,9 @@ The map (each rule links to the test that holds it):
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
 | No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
 | `runtime_app` line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |
+| No `ctx.app` — features reach the window shell only through the frozen `ViewerContext` accessors (§5.9) | `tests/test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
+| The `ViewerContext` window-service accessor set is closed (adding one is a reviewed act, §5.9) | `tests/test_ctx_service_accessors.py` |
+| `AppRuntime` is live-object-only — `persistence/` never imports `app_runtime` (§5.9) | `tests/test_app_runtime.py` |
 | `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |
 

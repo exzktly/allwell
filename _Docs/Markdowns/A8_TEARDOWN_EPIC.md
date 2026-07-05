@@ -19,10 +19,17 @@
 > ~40 functions across `review_image.{controller,renderer,collect,box_select}`
 > + `crop.controller`) → ctx, letting `build_review_image_panel(ctx, …)` clear
 > the final reach in `image_browser_subtab_app_bridge`. NO code names `ctx.app`.
-> The `app` field survives ONLY as the backing store for the frozen ctx service
-> accessors (`ctx.window` / `ctx.persistence` / `ctx.rebuild_all` / …) — deleting
-> it outright is the remaining **T6** work (dissolve those accessors), tracked
-> separately; the ratchet is now a regression guard, not a burn-down.
+>
+> **T6 is now DONE (2026-07-05).** The transitional `app` field was **deleted**
+> from `ViewerContext`: the god-object instance is held privately as `_window`
+> and reachable only through the frozen named service accessors (`ctx.window` /
+> `ctx.persistence` / `ctx.rebuild_all` / …). The `AppRuntime` app-stamp was also
+> dissolved — `_FeatureRuntime` is now backed by a plain attribute-store dict
+> (shared with `WidgetRegistry` so widget cross-reads resolve), holds **no `app`
+> reference**, and every runtime-key reader was migrated onto `ctx.runtime`
+> (commits `2897a8f` / `6dd2190`). The ratchet is pinned at 0 as a regression
+> guard. The **entire** remaining, intentional surface between features and the
+> window shell is the enumerable frozen-accessor set in `viewer_context.py`.
 > **Branch:** `claude/code-review-audit-framework-se53zd` (PR #597).
 
 ---
@@ -127,7 +134,7 @@ not T2.
   *string* search of `persistence/` (catches `getattr(app, "name")`), not just
   `app.name`, before moving it.
 
-### T3 — Thread `ctx` through the controller layer · `[ ]` (the remaining core)
+### T3 — Thread `ctx` through the controller layer · `[x]` DONE (the core)
 **Mechanism (validated):** the app-level callers already hold `app`, and
 `app._ctx` exists, so an orchestration function can be flipped to take `ctx`
 while its app-machinery callers pass `app._ctx` (which does **not** match the
@@ -580,7 +587,7 @@ behaviour extraction, each interactive-smoke-tested before merge.
 
 ---
 
-### T4 — Extract cross-cutting services · `[~]`
+### T4 — Extract cross-cutting services · `[x]` DONE (folded into D1)
 Category (c). `_invalidate_stats_cache` operates on the already-typed
 `stats_cache` slice → replace the ~20 scattered calls with a
 `bus.plot_options_changed`/dedicated invalidation event, or a small `StatsCache`
@@ -633,12 +640,16 @@ field. Everything must be green on the fast lane; the closeEvent/teardown tests
 |----|------------|-----------|------|--------|--------|
 | T1 | Wire the EventBus | — | Med | `[x]` | in place (state→redraw paths); per-control redraws are T3, not bus |
 | T2 | Feature runtime holders | — | Low | `[x]` | 293 → 249 (all pure-runtime writes; persisted fields excluded) |
-| T3 | Thread ctx through controllers | T2 | High | `[~]` | 249 → 10 (R1–R7 + F1/F2/F4 + E1–E6 + D-series + A14 + tab/fold-change done; 10 remain) |
-| T4 | Extract cross-cutting services | T1 | Med | `[~]` | folded into D1 (channel/axis → `channel_changed`) |
-| T5 | Saved-plots service | — | Med | `[~]` | capture/persistence ctx-native (`226d0af`); `_rebuild_all` → D7 |
-| T6 | Retire `ctx.app` | D1–D10 | High | `[ ]` | 26 floor → 0 (decompose god-methods, then delete field) |
+| T3 | Thread ctx through controllers | T2 | High | `[x]` | 249 → 0 (R1–R7 + F1/F2/F4 + E1–E6 + D-series + A14 + tab/fold-change — count reached 0) |
+| T4 | Extract cross-cutting services | T1 | Med | `[x]` | folded into D1 (channel/axis → `channel_changed`) |
+| T5 | Saved-plots service | — | Med | `[x]` | capture/persistence ctx-native (`226d0af`); `_rebuild_all` → D7 |
+| T6 | Retire `ctx.app` | D1–D10 | High | `[x]` | 26 floor → 0; `ViewerContext.app` deleted + AppRuntime stamp dissolved (`2897a8f`) |
 
-**Campaign status (51 → 26 = 97% overall).** The parallel sweep (F1/F2/F4) plus
+**Campaign status: COMPLETE (51 → 0 = 100%).** The floor described below was
+fully cleared — the D-series god-method decompositions took 26 → 0 and T6 then
+deleted the `ViewerContext.app` field and dissolved the `AppRuntime` stamp. The
+narrative below is retained as the historical record of the enabler campaign that
+reached the 26 floor. The parallel sweep (F1/F2/F4) plus
 the enabler passes **E1–E6** (register orphan widgets, ctx-native
 `ScatterCellViewer`, relocate shared toggles, migrate the review-image /
 heatmap-plate-sel / image-browser / stats-editor service chains, `_doc` → typed
@@ -658,8 +669,9 @@ floor register + the D-series roadmap in
   cross-feature function-local imports for deletability), `test_app_runtime.py`
   (stamp write-through + `persistence/` never imports `app_runtime`),
   `test_monolith_budgets.py` (per-file line ceilings).
-- **At T6:** delete `ViewerContext.app`, flip the ratchet from `<= N` to `== 0`
-  (hard ban), and the count is pinned at 0.
+- **T6 (done):** `ViewerContext.app` deleted, ratchet flipped `<= N` → `== 0`
+  (hard ban); count pinned at 0. The `AppRuntime` app-stamp was dissolved in a
+  follow-up (`2897a8f`) — the holder now owns a standalone store, no `app` ref.
 
 ## Risks & mitigations
 

@@ -53,21 +53,23 @@ def _set_combo(app, attr: str, options, current):
             cb.blockSignals(blocked)
 
 
-def playground_repopulate_dropdowns(app) -> None:
+def playground_repopulate_dropdowns(ctx) -> None:
     """Refresh the frame selectors from the loaded dataset (idempotent)."""
-    st = _st(app)
-    wells = _well_options(app._ctx)
-    channels = [c for c in _channel_options(app._ctx) if _is_real_channel(c)]
-    tps = _timepoint_options(app._ctx)
-    fovs = _fov_options(app._ctx)
+    st = ctx.state.playground
+    wells = _well_options(ctx)
+    channels = [c for c in _channel_options(ctx) if _is_real_channel(c)]
+    tps = _timepoint_options(ctx)
+    fovs = _fov_options(ctx)
     st.well = st.well or (wells[0] if wells else None)
     st.channel = st.channel or (channels[0] if channels else None)
     st.timepoint = st.timepoint or (tps[0] if tps else None)
     st.fov = st.fov or (fovs[0] if fovs else None)
-    _set_combo(app, "_playground_well_cb", wells, st.well)
-    _set_combo(app, "_playground_chan_cb", channels, st.channel)
-    _set_combo(app, "_playground_tp_cb", tps, st.timepoint)
-    _set_combo(app, "_playground_fov_cb", fovs, st.fov)
+    # The playground combos are not registered; reach them (widgets) via the
+    # blessed ctx.window accessor. _set_combo stays app/window-first (widget I/O).
+    _set_combo(ctx.window, "_playground_well_cb", wells, st.well)
+    _set_combo(ctx.window, "_playground_chan_cb", channels, st.channel)
+    _set_combo(ctx.window, "_playground_tp_cb", tps, st.timepoint)
+    _set_combo(ctx.window, "_playground_fov_cb", fovs, st.fov)
 
 
 # ── widget → state ───────────────────────────────────────────────────────────

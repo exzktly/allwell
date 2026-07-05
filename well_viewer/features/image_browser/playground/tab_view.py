@@ -319,5 +319,5 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     ff_cb.currentIndexChanged.connect(_sync_method_rows)
     _sync_method_rows()
 
-    playground_repopulate_dropdowns(app)
+    playground_repopulate_dropdowns(app._ctx)
     on_change()

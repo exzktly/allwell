@@ -10,11 +10,14 @@
 > `ViewerContext` — is the **focused campaign** in [§ Endgame](#endgame--the-51-file-by-file-focused-campaign)
 > below.
 >
-> **Status:** `[~]` IN PROGRESS — **51** `ctx.app` refs remain (ratchet
-> `CTX_APP_BUDGET = 51`, `tests/test_ctx_app_burndown.py`). ~13 are the
-> structural **floor** (the runtime stamp + sanctioned persistence unwraps +
-> two shared-helper touches) that only T6 dissolves; the other ~38 are the
-> convertible controller/feature/registry residue this campaign burns down.
+> **Status:** `[~]` IN PROGRESS — **1** `ctx.app` ref remains (ratchet
+> `CTX_APP_BUDGET = 1`, `tests/test_ctx_app_burndown.py`), 99.9% overall. The
+> sole remaining ref is `core/tab_controller.py:138` — the review-image
+> segmentation bridge (`build_review_image_panel` ~30 app-lambdas + `on_tab_change`
+> + its 18 `on_activate` hooks). Every other floor ref fell to a genuine
+> god-method decomposition (D-series + the sample-def D6 leaf sequence that cleared
+> `tab_controller:164`). Once :138's tree is ctx-native the ratchet flips to 0 and
+> **T6** deletes `ViewerContext.app`.
 > **Branch:** `claude/code-review-audit-framework-se53zd` (PR #597).
 
 ---
@@ -666,7 +669,39 @@ floor register + the D-series roadmap in
 
 ---
 
-**Last updated:** 2026-07-04 (latest) — the god-method decomposition (D-series)
+**Last updated:** 2026-07-05 (latest) — **14 → 1 (99.9% overall)**, all pushed
+and green. Two floor refs fell to genuine, verified god-service decompositions:
+
+- **`tab_controller:164` (D6 / sample-def builder tree) — CLEARED.** Landed only
+  after the whole sample-def dependency set was made ctx-native across a leaf-first
+  sequence (per the epic's "convert a shared leaf across all its callers" rule):
+  the selection-mutator family (`sel_by_id`/`sel_set_composition`/`sel_add`/…/
+  `sel_clear_all`), `rep_clear_all`/`rep_add`/`rep_quick_pairs(_from_dropdowns)`,
+  the GROUPS-list wiring (`wire_selections_list` + `_grp_on_*`),
+  `import_selections_from_json`, `notes_schedule_save`, `set_ratio_metrics`,
+  `clear_all`, the labels subsystem (`labels_apply_affix`/`labels_clear_all`), and
+  all three sub-builders (`build_label_grid`/`build_ratios_inline_panel`/
+  `build_pipeline_info_subtab`). Then the three centre builders
+  (`build_sample_definitions_centre`/`build_replicate_groups_centre`/
+  `build_replicate_panel`) took ctx and the bridge dropped its unwrap. A new frozen
+  `ctx.toast` accessor homes the import/export notification; the pipeline-info
+  refresh closure moved to `ctx.runtime.grouping`. Verified in the **slow
+  (`loaded_app`) pass** — the two D6 bridge tests + 7 `loaded_app` selection-refresh
+  tests — which is what caught a missed `app._ctx` sub-builder call before it
+  shipped (exactly the regression-box lesson). One gamed intermediate commit
+  (`a4b3a07`, a `ctx.window`-relabel that decoupled nothing) was **reverted** on
+  audit before the genuine version landed.
+- **The single remaining ref — `tab_controller:138`** — is mapped: its callees
+  `update_preview`/`refresh_review_image` already have ctx forms; `redraw_app`/
+  `update_bar_tp_menu`/`refresh_review_csv`/`sync_heatmap_well_drag_mode`/
+  `run_tab_switch_smoke_checks`/`current_centre_tab`/`set_selected_wells`/
+  `_show_batch_mode` are already ctx. The genuinely-remaining leaves are
+  `apply_pending_tab_state` (+ its `_apply_*` cluster) and
+  `playground_repopulate_dropdowns` (done); then the atomic `on_tab_change(ctx)` +
+  18 `on_activate` hooks + 6 callers commit; then `build_review_image_panel(ctx)`;
+  then the bridge → ratchet 1→0 → **T6**.
+
+**Prior (2026-07-04):** the god-method decomposition (D-series)
 **ran to the irreducible floor: 51 → 14 (98.4% overall)**, all pushed and green.
 Landed net-negative: **D1** channel/metric, **D4** review-image draw web, **D5**
 image-browser sub-tabs, **D6** sample-def/review-csv builders, **D-core** redraw

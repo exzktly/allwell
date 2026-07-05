@@ -266,7 +266,7 @@ def _activate_playground(app) -> None:
     app._sidebar_main_frame.setVisible(True)
     app._refresh_sidebar_map()
     try:
-        playground_repopulate_dropdowns(app)
+        playground_repopulate_dropdowns(app._ctx)
     except Exception:
         swallowed()
 

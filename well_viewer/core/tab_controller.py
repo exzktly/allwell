@@ -124,20 +124,15 @@ def image_browser_subtab_app_bridge(
 
     The Image Browser sub-tab controller (``features/image_browser/controller``)
     is ctx-native — it reads ``ctx.runtime`` / ``ctx.widgets`` and dispatches the
-    ctx-native sub-tab builders. ``on_tab_change`` and ``update_channel_selector``
-    are now ctx-native too, so the ONE remaining god-object reach is the
-    Segmentation build: ``build_review_image_panel`` is a feature-layer builder
-    whose ~20 signal lambdas still bind app-native review-image callbacks (crop /
-    interaction / LUT / zoom / colour). Until that whole callback web migrates to
-    ctx, the builder needs the raw app handle — the last such reach in the tree.
-    Routing it through this single core bridge keeps that final unwrap out of the
-    feature layer.
+    ctx-native sub-tab builders. ``on_tab_change``, ``update_channel_selector``,
+    and the whole ``build_review_image_panel`` callback web (crop / interaction /
+    LUT / zoom / colour) are all ctx-native now, so this bridge names no
+    god-object — it is a thin lifecycle seam kept for the Image Browser sub-tab
+    controller to call.
     """
     if segmentation_frame is not None:
         from well_viewer.core.channel_state_controller import update_channel_selector
-        # Last app reach: the review-image builder's callback web is still
-        # app-native (see the docstring). Cleared when that web migrates to ctx.
-        _build_review_image_panel(ctx.app, segmentation_frame)
+        _build_review_image_panel(ctx, segmentation_frame)
         # The review-image channel combo is born empty (a "GFP" placeholder);
         # when the panel builds *after* a dataset is already loaded (it builds
         # lazily now), nothing has populated it yet, so fill it from the current

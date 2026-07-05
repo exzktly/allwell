@@ -190,7 +190,7 @@ from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
 from well_viewer.features.preview.controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
 review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows = _lazy_names("well_viewer.features.image_browser.review_image.controller", "review_row_keys", "review_norm_fov", "review_collect_timepoints", "refresh_review_csv", "refresh_review_csv_rows", "review_effective_included", "review_load_rows")
-set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache")
+set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache, review_image_get_color = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache", "review_image_get_color")
 open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
 col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display, on_scatter_axis_change, on_scatter_agg_axis_change = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display", "on_scatter_axis_change", "on_scatter_agg_axis_change")
 from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_index_of, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, sel_clear_all, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
@@ -930,9 +930,9 @@ class WellViewerApp(QWidget):
     def _review_collect_timepoints(self, fov: str) -> list: return review_collect_timepoints(self._ctx, fov)
 
 
-    def _set_review_image_source(self, mode: str) -> None: return set_review_image_source(self, mode)
+    def _set_review_image_source(self, mode: str) -> None: return set_review_image_source(self._ctx, mode)
 
-    def _refresh_review_image_source_btn(self) -> None: return refresh_review_image_source_btn(self)
+    def _refresh_review_image_source_btn(self) -> None: return refresh_review_image_source_btn(self._ctx)
 
     # ── Review Image color customization ──────────────────────────────────
 
@@ -943,27 +943,26 @@ class WellViewerApp(QWidget):
     }
 
     def _review_image_get_color(self, which: str) -> Tuple[int, int, int]:
-        attr = f"_review_image_{which}_color"
-        return tuple(getattr(self, attr, self._REVIEW_IMAGE_COLOR_DEFAULTS[which]))  # type: ignore[return-value]
+        return review_image_get_color(self._ctx, which)
 
     def _review_image_set_color(self, which: str, rgb: Tuple[int, int, int]) -> None:
-        return review_image_set_color(self, which, rgb)
+        return review_image_set_color(self._ctx, which, rgb)
 
     def _review_image_refresh_color_swatch(self, which: str) -> None:
-        return review_image_refresh_color_swatch(self, which)
+        return review_image_refresh_color_swatch(self._ctx, which)
 
 
-    def _reset_review_image_colors(self) -> None: return reset_review_image_colors(self)
+    def _reset_review_image_colors(self) -> None: return reset_review_image_colors(self._ctx)
 
     # ── Binary mask toggle ────────────────────────────────────────────────
 
-    def _toggle_review_image_binary_mask(self) -> None: return toggle_review_image_binary_mask(self)
+    def _toggle_review_image_binary_mask(self) -> None: return toggle_review_image_binary_mask(self._ctx)
 
-    def _refresh_review_image_binary_btn(self) -> None: return refresh_review_image_binary_btn(self)
+    def _refresh_review_image_binary_btn(self) -> None: return refresh_review_image_binary_btn(self._ctx)
 
-    def _toggle_review_image_outline(self) -> None: return toggle_review_image_outline(self)
+    def _toggle_review_image_outline(self) -> None: return toggle_review_image_outline(self._ctx)
 
-    def _refresh_review_image_outline_btn(self) -> None: return refresh_review_image_outline_btn(self)
+    def _refresh_review_image_outline_btn(self) -> None: return refresh_review_image_outline_btn(self._ctx)
 
 
 
@@ -976,11 +975,11 @@ class WellViewerApp(QWidget):
 
     def _review_image_resolve_lut(self, arr) -> Tuple[float, float]: return review_image_resolve_lut(self._ctx, arr)
 
-    def _review_image_auto_lut(self) -> None: return review_image_auto_lut(self)
+    def _review_image_auto_lut(self) -> None: return review_image_auto_lut(self._ctx)
 
-    def _review_image_commit_lut(self) -> None: return review_image_commit_lut(self)
+    def _review_image_commit_lut(self) -> None: return review_image_commit_lut(self._ctx)
 
-    def _review_image_zoom_step(self, direction: int) -> None: return review_image_zoom_step(self, direction)
+    def _review_image_zoom_step(self, direction: int) -> None: return review_image_zoom_step(self._ctx, direction)
 
     def _review_image_zoom_fit(self) -> None:
         self._app_state.review_image.zoom = 1.0
@@ -994,14 +993,14 @@ class WellViewerApp(QWidget):
 
 
 
-    def _on_review_image_click(self, event: Any) -> None: _on_review_image_click_controller(self, event, _logger)
+    def _on_review_image_click(self, event: Any) -> None: _on_review_image_click_controller(self._ctx, event, _logger)
 
     def _apply_review_image_cursor(self) -> None: return apply_review_image_cursor(self._ctx)
 
     def _select_review_csv_row_for_cell(self, fov: str, tp: str, nucleus_id: str) -> None:
-        _select_review_csv_row_for_cell_controller(self, fov, tp, nucleus_id, _logger)
+        _select_review_csv_row_for_cell_controller(self._ctx, fov, tp, nucleus_id, _logger)
 
-    def _set_review_image_include_mode(self, enabled: bool) -> None: return set_review_image_include_mode(self, enabled)
+    def _set_review_image_include_mode(self, enabled: bool) -> None: return set_review_image_include_mode(self._ctx, enabled)
 
     def _toggle_selected_review_cell(self) -> None:
         self._set_review_image_include_mode(not self._app_state.review_image.include_edit_mode)
@@ -1125,7 +1124,7 @@ class WellViewerApp(QWidget):
 
     def _invalidate_stats_cache(self) -> None: return invalidate_stats_cache(self._ctx)
 
-    def _invalidate_review_image_frame_cache(self) -> None: return invalidate_review_image_frame_cache(self)
+    def _invalidate_review_image_frame_cache(self) -> None: return invalidate_review_image_frame_cache(self._ctx)
 
 
     def _collect_bar_items(self, target_t: float, *, fc_state = None, miss_sink = None) -> tuple:

@@ -186,7 +186,7 @@ class GatingWorker(QThread):
             # so per-cell curation in the Segmentation tab is not clobbered by
             # threshold-based recomputes.
             try:
-                apply_review_overrides_to_cache(self._ctx.app, )
+                apply_review_overrides_to_cache(self._ctx)
             except Exception:
                 swallowed()  # was: pass (silent except)
             # CRITICAL: Only invalidate stats cache, NOT _refresh_review_csv_rows.

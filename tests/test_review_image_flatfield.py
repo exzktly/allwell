@@ -44,17 +44,17 @@ def test_set_source_updates_state_syncs_control_and_clears_lut(loaded_app):
     chan = str(app._app_state.channel.active_image_channel or "").lower()
     app._app_state.image_view.lut_by_channel[chan] = (10.0, 200.0)
 
-    set_review_image_source(app, "flatfield")
+    set_review_image_source(app._ctx, "flatfield")
     assert app._app_state.review_image.image_source == "flatfield"
     assert app._review_image_source_seg.currentData() == "flatfield"
     # Switching stages drops the active channel's cached LUT (ranges differ).
     assert chan not in app._app_state.image_view.lut_by_channel
 
-    set_review_image_source(app, "corrected")
+    set_review_image_source(app._ctx, "corrected")
     assert app._app_state.review_image.image_source == "corrected"
     assert app._review_image_source_seg.currentData() == "corrected"
 
-    set_review_image_source(app, "bogus")  # invalid → ignored
+    set_review_image_source(app._ctx, "bogus")  # invalid → ignored
     assert app._app_state.review_image.image_source == "corrected"
 
 

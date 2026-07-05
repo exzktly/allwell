@@ -381,7 +381,7 @@ def review_build_threshold_map(
     return above_by_nid
 
 
-def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
+def apply_review_overrides_to_cache(ctx, label: Optional[str] = None) -> None:
     """Project overrides onto cached row['Included'] so non-Review tabs see them.
 
     The override dict is the source of truth; this projects values onto the
@@ -389,24 +389,26 @@ def apply_review_overrides_to_cache(app, label: Optional[str] = None) -> None:
     respects user toggles. Called after gating recomputes (which rewrite
     row['Included'] from thresholds), after patch-file load, and on toggle.
     """
-    if not app._review_included_overrides:
+    from well_viewer.data.data_loading import get_rows
+    overrides = ctx.runtime.review.included_overrides
+    if not overrides:
         return
     by_label: Dict[str, Dict[Tuple[str, str, str], str]] = {}
-    for (lbl, fov, tp, nid), val in app._review_included_overrides.items():
+    for (lbl, fov, tp, nid), val in overrides.items():
         if label is not None and lbl != label:
             continue
         by_label.setdefault(lbl, {})[(fov, tp, nid)] = val
     for lbl, lookup in by_label.items():
-        if lbl not in app._app_state.dataset.well_paths:
+        if lbl not in ctx.state.dataset.well_paths:
             continue
         try:
-            df = app._get_rows(lbl)
+            df = get_rows(ctx, lbl)
         except Exception:
             swallowed()  # silent except
             continue
         if df is None or df.empty:
             continue
-        keys = review_row_keys_series(app._ctx, df)
+        keys = review_row_keys_series(ctx, df)
         if keys is None:
             continue
         override_map = pd.Series(lookup)

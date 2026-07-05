@@ -285,7 +285,7 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.features.image_browser.review_image.controller import (
             apply_review_overrides_to_cache,
         )
-        apply_review_overrides_to_cache(app)
+        apply_review_overrides_to_cache(app._ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)

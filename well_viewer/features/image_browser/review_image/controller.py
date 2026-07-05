@@ -8,10 +8,12 @@ import logging
 
 from PySide6.QtWidgets import QTableWidgetItem
 
-from well_viewer.features.image_browser.review_image.renderer import refresh_review_image
 from well_viewer.features.image_browser.review_image.renderer import refresh_review_image_ctx
 from well_viewer.features.image_browser.review_image.renderer import render_review_image_display
 from well_viewer.features.image_browser.review_image.renderer import update_preview_ctx
+from well_viewer.features.image_browser.review_image.renderer import (
+    review_image_get_color, review_image_set_color,
+)
 from well_viewer.features.image_browser.review_image.box_select import (
     box_select_begin, box_select_finish, box_select_update,
 )
@@ -67,7 +69,6 @@ def _guard_event(fn):
     return _wrapped
 
 
-
 def _select_tab_by_text(notebook, text: str) -> None:
     """Select a centre-stack page by its name (NamedPageStack v2 API)."""
     if notebook is None:
@@ -100,12 +101,12 @@ def _table_row_dict(table, row_idx: int, col_names: list[str] | None = None) -> 
 
 
 @_guard_event
-def on_review_image_click(app, event, logger) -> None:
-    mask_arr = getattr(app._review_image_label, "_mask_arr", None)
+def on_review_image_click(ctx, event, logger) -> None:
+    label = ctx.runtime.review_image.label
+    mask_arr = getattr(label, "_mask_arr", None)
     if mask_arr is None:
         return
-    scale = float(getattr(app, "_review_image_scale", 1.0) or 1.0)
-    label = app._review_image_label
+    scale = float(ctx.runtime.review_image.scale or 1.0)
     off_x, off_y = 0, 0
     pm = label.pixmap()
     if pm is not None and not pm.isNull():
@@ -118,21 +119,21 @@ def on_review_image_click(app, event, logger) -> None:
     nid = int(mask_arr[y, x])
     if nid <= 0:
         return
-    fov_menu = getattr(app, "_review_image_fov_menu", None) or getattr(app, "_preview_fov_cb", None)
+    fov_menu = ctx.runtime.review_image.fov_menu or ctx.widgets.get_or_none("_preview_fov_cb")
     fov = fov_menu.currentText().strip() if fov_menu is not None else ""
-    tp_cb = getattr(app, "_review_image_tp_cb", None)
+    tp_cb = ctx.runtime.review_image.tp_cb
     tp = tp_cb.currentText().strip() if tp_cb is not None else ""
-    if app._app_state.review_image.include_edit_mode:
-        set_review_cell_included(app,fov, tp, str(nid), "0")
-        app._set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
+    if ctx.state.review_image.include_edit_mode:
+        set_review_cell_included(ctx, fov, tp, str(nid), "0")
+        ctx.set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
         return
-    app._app_state.review_image.selected_nucleus = nid
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
-    app._select_review_csv_row_for_cell(fov, tp, str(nid))
+    ctx.state.review_image.selected_nucleus = nid
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
+    select_review_csv_row_for_cell(ctx, fov, tp, str(nid), logger)
 
 
-def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logger) -> None:
+def select_review_csv_row_for_cell(ctx, fov: str, tp: str, nucleus_id: str, logger) -> None:
     """Navigate the Review CSV tab to the row for the given cell.
 
     Wrapped end-to-end: any failure is logged + surfaced on the status line
@@ -141,45 +142,42 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
     nucleus columns instead of materialising a dict per row, so a fallback
     "show all rows" table doesn't make this O(rows × columns).
     """
+    from well_viewer.core.selection_controller import set_selected_wells
     try:
-        fov_n, tp_n, nucleus_n = app._review_row_keys({"fov": fov, "tp": tp, "nucleus_id": nucleus_id})
-        app._review_csv_lookup_context = {
-            "well": str(app._app_state.preview.selected_well or ""),
+        fov_n, tp_n, nucleus_n = review_row_keys(ctx, {"fov": fov, "tp": tp, "nucleus_id": nucleus_id})
+        lookup = {
+            "well": str(ctx.state.preview.selected_well or ""),
             "fov": str(fov_n),
             "tp": str(tp_n),
             "nucleus_id": str(nucleus_n),
         }
-        app._set_status(
+        ctx.runtime.review.csv_lookup_context = lookup
+        ctx.set_status(
             "Review CSV lookup request: "
-            f"well={app._review_csv_lookup_context['well']}  "
-            f"fov={app._review_csv_lookup_context['fov']}  "
-            f"tp={app._review_csv_lookup_context['tp']}  "
-            f"nucleus_id={app._review_csv_lookup_context['nucleus_id']}"
+            f"well={lookup['well']}  "
+            f"fov={lookup['fov']}  "
+            f"tp={lookup['tp']}  "
+            f"nucleus_id={lookup['nucleus_id']}"
         )
         logger.info(
             "Review-image click -> Review CSV lookup: well=%s fov=%s tp=%s nucleus_id=%s",
-            app._app_state.preview.selected_well, fov, tp, nucleus_id,
+            ctx.state.preview.selected_well, fov, tp, nucleus_id,
         )
         # Ensure the previewed well is in the sidebar selection so the tab-switch
         # refresh loads its CSV rows — Review Image's preview well is independent
         # of _selected_wells, and _refresh_review_csv reads only _selected_wells.
-        preview_well = app._app_state.preview.selected_well
+        preview_well = ctx.state.preview.selected_well
         if (
             preview_well
-            and preview_well in app._app_state.dataset.well_paths
-            and preview_well not in app._app_state.selection.selected_wells
+            and preview_well in ctx.state.dataset.well_paths
+            and preview_well not in ctx.state.selection.selected_wells
         ):
             # Go through the single mutation helper so _prev_sel is
             # snapshotted properly. commit=False because we're about to
             # switch tabs anyway — the tab-change handler will trigger
             # the redraw.
-            if hasattr(app, "_set_selected_wells"):
-                new_sel = set(app._app_state.selection.selected_wells) | {preview_well}
-                app._set_selected_wells(new_sel, commit=False)
-            else:
-                app._app_state.selection.selected_wells.add(preview_well)
-                if hasattr(app, "_refresh_sidebar_map"):
-                    app._refresh_sidebar_map()
+            new_sel = set(ctx.state.selection.selected_wells) | {preview_well}
+            set_selected_wells(ctx, new_sel, commit=False)
         # If the Review CSV tab is already built, pre-point its FOV/TP combos
         # at the target *before* switching tabs. The tab-switch fires
         # _refresh_review_csv, which would otherwise rebuild the table for
@@ -187,8 +185,10 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         # rows survive the filter, fall back to inserting *every* loaded row —
         # tens of thousands of QTableWidgetItems — which is what made this
         # look hung).
-        if hasattr(app, "_review_fov_cb") and hasattr(app, "_review_tp_cb"):
-            for combo, value in ((app._review_fov_cb, fov_n), (app._review_tp_cb, tp_n)):
+        review_fov_cb = ctx.widgets.get_or_none("_review_fov_cb")
+        review_tp_cb = ctx.widgets.get_or_none("_review_tp_cb")
+        if review_fov_cb is not None and review_tp_cb is not None:
+            for combo, value in ((review_fov_cb, fov_n), (review_tp_cb, tp_n)):
                 combo.blockSignals(True)
                 try:
                     combo.setCurrentText(value)
@@ -196,21 +196,25 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
                     combo.blockSignals(False)
         # Switch to the Review CSV tab — this lazily builds the tab (and its
         # combo boxes / table) if the user hasn't visited it yet.
-        if hasattr(app, "_notebook"):
-            _select_tab_by_text(app._notebook, "Review CSV")
-        if not hasattr(app, "_review_csv_table") or not hasattr(app, "_review_fov_cb"):
-            app._set_status("Review CSV tab is not available yet.")
+        notebook = getattr(ctx.window, "_notebook", None)
+        if notebook is not None:
+            _select_tab_by_text(notebook, "Review CSV")
+        review_csv_table = ctx.widgets.get_or_none("_review_csv_table")
+        review_fov_cb = ctx.widgets.get_or_none("_review_fov_cb")
+        review_tp_cb = ctx.widgets.get_or_none("_review_tp_cb")
+        if review_csv_table is None or review_fov_cb is None:
+            ctx.set_status("Review CSV tab is not available yet.")
             return
         # Block the per-combo currentIndexChanged signals so we rebuild the
         # table once here instead of once per setCurrentText.
-        app._review_fov_cb.blockSignals(True)
-        app._review_tp_cb.blockSignals(True)
+        review_fov_cb.blockSignals(True)
+        review_tp_cb.blockSignals(True)
         try:
-            app._review_fov_cb.setCurrentText(fov_n)
-            app._review_tp_cb.setCurrentText(tp_n)
+            review_fov_cb.setCurrentText(fov_n)
+            review_tp_cb.setCurrentText(tp_n)
         finally:
-            app._review_fov_cb.blockSignals(False)
-            app._review_tp_cb.blockSignals(False)
+            review_fov_cb.blockSignals(False)
+            review_tp_cb.blockSignals(False)
 
         # Rebuild the table only when the visible row set actually changes
         # (different well selection / FOV / timepoint). ``refresh_review_csv_rows``
@@ -218,17 +222,17 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
         # row} index onto the app; repeated clicks within the same FOV+timepoint
         # reuse them, so navigation is an O(1) index lookup + selectRow instead of
         # rebuilding the whole QTableWidget and linearly rescanning it every click.
-        sel_wells = tuple(sorted(app._app_state.selection.selected_wells, key=app._parse_rc))
+        sel_wells = tuple(sorted(ctx.state.selection.selected_wells, key=parse_rc))
         want_sig = (sel_wells, fov_n, tp_n)
-        if (getattr(app, "_review_csv_render_sig", None) != want_sig
-                or not getattr(app, "_review_csv_row_index", None)):
-            app._refresh_review_csv_rows()
+        if (ctx.runtime.review.csv_render_sig != want_sig
+                or not ctx.runtime.review.csv_row_index):
+            refresh_review_csv_rows(ctx)
 
-        table = app._review_csv_table
+        table = ctx.widgets.get_or_none("_review_csv_table")
         # Match the clicked well first (the index spans all selected wells); fall
         # back to the well-agnostic key for older single-well behaviour.
-        index = getattr(app, "_review_csv_row_index", None) or {}
-        well_n = str(app._app_state.preview.selected_well or "").strip().upper()
+        index = ctx.runtime.review.csv_row_index or {}
+        well_n = str(ctx.state.preview.selected_well or "").strip().upper()
         row_idx = index.get((well_n, fov_n, tp_n, nucleus_n))
         if row_idx is None:
             row_idx = index.get((fov_n, tp_n, nucleus_n))
@@ -237,19 +241,19 @@ def select_review_csv_row_for_cell(app, fov: str, tp: str, nucleus_id: str, logg
             item = table.item(row_idx, 0)
             if item:
                 table.scrollToItem(item)
-            app._set_status(f"Matched Review CSV row for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}.")
+            ctx.set_status(f"Matched Review CSV row for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}.")
             return
         logger.warning(
             "Review CSV exact row match not found. target=(%s,%s,%s) rows=%d",
             fov_n, tp_n, nucleus_n, table.rowCount(),
         )
-        app._set_status(
+        ctx.set_status(
             f"No exact Review CSV row match for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}; showing fallback rows."
         )
     except Exception:  # noqa: BLE001
         logger.exception("Review-image -> Review CSV navigation failed")
         try:
-            app._set_status("Could not navigate to the Review CSV row (see log for details).")
+            ctx.set_status("Could not navigate to the Review CSV row (see log for details).")
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -337,14 +341,14 @@ def _on_review_csv_row_double_click_impl(ctx, item) -> None:
 
 
 @_guard_event
-def on_review_image_press(app, event) -> None:
+def on_review_image_press(ctx, event) -> None:
     # In include-edit (delete) or crop-edit mode, LMB drag draws a rubber-band
     # rectangle instead of panning. The anchor is recorded in label-local
     # pixels (invariant to window position / scrollbar state) by the shared
     # box-select helper; only the release action differs between the modes.
-    ri = app._app_state.review_image
+    ri = ctx.state.review_image
     if ri.include_edit_mode or ri.crop_edit_mode:
-        box_select_begin(app, event)
+        box_select_begin(ctx, event)
         return
     ri.dragging = True
     ri.drag_moved = False
@@ -352,39 +356,40 @@ def on_review_image_press(app, event) -> None:
     ri.drag_last_xy = (int(gp.x()), int(gp.y()))
 
 
-def on_review_image_drag(app, event) -> None:
+def on_review_image_drag(ctx, event) -> None:
     # Rubber-band update path: stay anchored in label-local pixels.
-    if app._app_state.review_image.box_active:
-        box_select_update(app, event)
+    ri = ctx.state.review_image
+    if ri.box_active:
+        box_select_update(ctx, event)
         return
-    if not app._app_state.review_image.dragging:
+    if not ri.dragging:
         return
     gp = event.globalPosition().toPoint()
     gx, gy = int(gp.x()), int(gp.y())
-    lx, ly = app._app_state.review_image.drag_last_xy
+    lx, ly = ri.drag_last_xy
     dx = gx - lx
     dy = gy - ly
     if dx or dy:
-        app._app_state.review_image.drag_moved = True
-    app._app_state.review_image.pan_x = float(app._app_state.review_image.pan_x + dx)
-    app._app_state.review_image.pan_y = float(app._app_state.review_image.pan_y + dy)
-    app._app_state.review_image.drag_last_xy = (gx, gy)
+        ri.drag_moved = True
+    ri.pan_x = float(ri.pan_x + dx)
+    ri.pan_y = float(ri.pan_y + dy)
+    ri.drag_last_xy = (gx, gy)
     # Pan reuses the existing pixmap; only the scrollbars need to move.
-    app._render_review_image_display(pan_only=True)
+    render_review_image_display(ctx, pan_only=True)
 
 
 @_guard_event
-def on_review_image_release(app, event) -> None:
+def on_review_image_release(ctx, event) -> None:
     # Rubber-band finalize path, shared by delete and crop modes. A drag too
     # short to be a box returns None: in delete mode that quick tap toggles one
     # cell (the existing click handler); in crop mode it is a no-op.
-    ri = app._app_state.review_image
+    ri = ctx.state.review_image
     if ri.box_active:
         crop_mode = ri.crop_edit_mode
-        rect = box_select_finish(app, event)
+        rect = box_select_finish(ctx, event)
         if rect is None:
             if not crop_mode:
-                app._on_review_image_click(event)
+                on_review_image_click(ctx, event, _logger)
             return
         mx0, my0, mx1, my1 = rect
         if crop_mode:
@@ -395,32 +400,32 @@ def on_review_image_release(app, event) -> None:
             from well_viewer.features.crop.controller import (
                 set_crop_edit_mode, set_crop_region,
             )
-            set_crop_region(app, (my0, mx0, my1, mx1))
+            set_crop_region(ctx, (my0, mx0, my1, mx1))
             # The crop is a one-shot draw — leave crop mode (and un-check the
             # Crop Region button) once the region is committed.
-            set_crop_edit_mode(app, False)
+            set_crop_edit_mode(ctx, False)
         else:
-            apply_box_delete(app, mx0, my0, mx1, my1)
+            apply_box_delete(ctx, mx0, my0, mx1, my1)
         return
-    was_dragging = app._app_state.review_image.dragging
-    moved = app._app_state.review_image.drag_moved
-    app._app_state.review_image.dragging = False
-    app._app_state.review_image.drag_moved = False
+    was_dragging = ri.dragging
+    moved = ri.drag_moved
+    ri.dragging = False
+    ri.drag_moved = False
     if was_dragging and not moved:
-        app._on_review_image_click(event)
+        on_review_image_click(ctx, event, _logger)
 
 
 @_guard_event
-def on_review_image_move(app, event) -> None:
+def on_review_image_move(ctx, event) -> None:
     """Unified mouseMove handler: drag when LMB held, otherwise hover."""
     from PySide6.QtCore import Qt
     if event.buttons() & Qt.LeftButton:
-        on_review_image_drag(app, event)
+        on_review_image_drag(ctx, event)
     else:
-        on_review_image_hover(app, event)
+        on_review_image_hover(ctx, event)
 
 
-def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
+def _show_image_pixel_tooltip(ctx, event, channel_label: str, label) -> None:
     """Show an x/y/value tooltip for a QLabel carrying ``_raw_arr`` / ``_sz_w`` /
     ``_sz_h`` (and optionally ``_crop`` / ``_mask_arr``).
 
@@ -437,13 +442,13 @@ def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
     # active view mode (raw / flat-field / corrected).
     arr = getattr(lbl, "_raw_arr", None)
     if arr is None:
-        arr = getattr(app._app_state.review_image, "last_fluor_arr", None)
-    if arr is None or not app._NP_AVAILABLE:
+        arr = getattr(ctx.state.review_image, "last_fluor_arr", None)
+    if arr is None or _np is None:
         QToolTip.hideText()
         return
     sz_w = getattr(lbl, "_sz_w", lbl.width() if lbl else 1)
     sz_h = getattr(lbl, "_sz_h", lbl.height() if lbl else 1)
-    arr = app._np.asarray(arr, dtype=app._np.float32)
+    arr = _np.asarray(arr, dtype=_np.float32)
     full_h, full_w = arr.shape[:2]
     crop = getattr(lbl, "_crop", None)
     if crop is not None:
@@ -475,7 +480,7 @@ def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
     mask_arr = getattr(lbl, "_mask_arr", None)
     if mask_arr is not None:
         try:
-            nid = int(app._np.asarray(mask_arr)[int(img_y), int(img_x)])
+            nid = int(_np.asarray(mask_arr)[int(img_y), int(img_x)])
             if nid > 0:
                 extra = f"  cell:{nid}"
         except Exception:
@@ -484,25 +489,26 @@ def _show_image_pixel_tooltip(app, event, channel_label: str, label) -> None:
     QToolTip.showText(global_pos, f"x={int(img_x)}  y={int(img_y)}  {channel_label}:{val:.1f}{extra}")
 
 
-def on_review_image_hover(app, event) -> None:
-    if not hasattr(app, "_review_image_label"):
+def on_review_image_hover(ctx, event) -> None:
+    label = ctx.runtime.review_image.label
+    if label is None:
         return
-    pm = app._review_image_label.pixmap()
+    pm = label.pixmap()
     if pm is not None and not pm.isNull():
-        app._review_image_label._sz_w = int(pm.width())
-        app._review_image_label._sz_h = int(pm.height())
+        label._sz_w = int(pm.width())
+        label._sz_h = int(pm.height())
     else:
-        app._review_image_label._sz_w = int(app._review_image_label.width())
-        app._review_image_label._sz_h = int(app._review_image_label.height())
+        label._sz_w = int(label.width())
+        label._sz_h = int(label.height())
     _show_image_pixel_tooltip(
-        app,
+        ctx,
         event,
-        str(app._app_state.channel.active_image_channel or "").upper(),
-        label=app._review_image_label,
+        str(ctx.state.channel.active_image_channel or "").upper(),
+        label=label,
     )
 
 
-def on_review_image_channel_selected(app, _e=None) -> None:
+def on_review_image_channel_selected(ctx, _e=None) -> None:
     """Channel-switch handler that preserves Review Image zoom/pan view."""
     import logging
     from well_viewer.core import debug_flags as _debug_flags
@@ -510,49 +516,37 @@ def on_review_image_channel_selected(app, _e=None) -> None:
     if _debug_flags.review_image_channel_switch_debug_enabled():
         logger.debug("[RI-CHSW step 1] Review Image channel ComboboxSelected event received")
     selected_ui_value = ""
-    if getattr(app, "_review_image_chan_cb", None) is not None:
-        selected_ui_value = str(app._review_image_chan_cb.currentText() or "").strip()
-    if not selected_ui_value and hasattr(app, "_review_image_chan_var"):
-        selected_ui_value = app._review_image_chan_var.currentText()
+    chan_cb = ctx.runtime.review_image.chan_cb
+    if chan_cb is not None:
+        selected_ui_value = str(chan_cb.currentText() or "").strip()
+    chan_var = ctx.runtime.review_image.chan_var
+    if not selected_ui_value and chan_var is not None:
+        selected_ui_value = chan_var.currentText()
     if _debug_flags.review_image_channel_switch_debug_enabled():
         logger.debug(
             "[RI-CHSW step 2] review_image_channel_selected ui_value=%r active_before=%r",
             selected_ui_value,
-            app._app_state.channel.active_image_channel,
+            ctx.state.channel.active_image_channel,
         )
-    set_active_image_channel(app._ctx, selected_ui_value.lower(), preserve_review_view=True)
-
-
-
-
-
+    set_active_image_channel(ctx, selected_ui_value.lower(), preserve_review_view=True)
 
 
 # ── Flat-field validation view (recompute the selected flat-field) ────────────
 
 
-
-
-
-
-
-
-
-
-
-def pick_review_image_color(app, which: str) -> None:
+def pick_review_image_color(ctx, which: str) -> None:
     """Open a v2 ColorSwatchRow popover anchored at the swatch button."""
     from PySide6.QtGui import QColor
 
     from widgets.color_swatch_row import ColorSwatchRow
     from widgets.popover import Popover
 
-    anchor = (getattr(app, "_review_image_color_swatches", {}) or {}).get(which)
+    anchor = (ctx.runtime.review_image.color_swatches or {}).get(which)
     if anchor is None:
         return
 
-    r, g, b = app._review_image_get_color(which)
-    recents = list(getattr(app, "_review_image_color_recents", []) or [])
+    r, g, b = review_image_get_color(ctx, which)
+    recents = list(ctx.runtime.review_image.color_recents or [])
 
     pop = Popover(anchor)
     row = ColorSwatchRow(allow_custom=True, recents=recents)
@@ -561,66 +555,56 @@ def pick_review_image_color(app, which: str) -> None:
     def _apply(c: QColor, _which=which, _pop=pop, _row=row) -> None:
         if not c.isValid():
             return
-        app._review_image_set_color(_which, (c.red(), c.green(), c.blue()))
-        rec = [c] + [QColor(x) for x in (getattr(app, "_review_image_color_recents", []) or [])
+        review_image_set_color(ctx, _which, (c.red(), c.green(), c.blue()))
+        rec = [c] + [QColor(x) for x in (ctx.runtime.review_image.color_recents or [])
                      if QColor(x).rgb() != c.rgb()]
-        app._review_image_color_recents = rec[:8]
+        ctx.runtime.review_image.color_recents = rec[:8]
 
     row.colorPicked.connect(_apply)
     pop.setContentWidget(row)
     pop.popup(anchor, side="bottom", align="start")
 
 
-
-
-
-
-
-
-
-
-
-def set_review_cell_included(app, fov: str, tp: str, nid: str, included: str) -> None:
-    if app._app_state.preview.selected_well is None:
+def set_review_cell_included(ctx, fov: str, tp: str, nid: str, included: str) -> None:
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    if ctx.state.preview.selected_well is None:
         return
-    fov_n, tp_n, nid_n = app._review_row_keys({"fov": fov, "tp": tp, "nucleus_id": nid})
+    fov_n, tp_n, nid_n = review_row_keys(ctx, {"fov": fov, "tp": tp, "nucleus_id": nid})
     if not (fov_n and tp_n and nid_n):
         return
-    key = (app._app_state.preview.selected_well, fov_n, tp_n, nid_n)
-    app._review_included_overrides[key] = str(included).strip() or "1"
+    key = (ctx.state.preview.selected_well, fov_n, tp_n, nid_n)
+    ctx.runtime.review.included_overrides[key] = str(included).strip() or "1"
     # Project the override onto the cached row immediately so other tabs
     # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
     # the next gating recompute, then invalidate the stats cache.
-    apply_review_overrides_to_cache(app,app._app_state.preview.selected_well)
-    if hasattr(app, "_invalidate_stats_cache"):
-        try:
-            app._invalidate_stats_cache()
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    apply_review_overrides_to_cache(ctx, ctx.state.preview.selected_well)
+    try:
+        invalidate_stats_cache(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
     # Persist to disk (debounced) so curation survives between sessions.
-    app._persistence.schedule_save("cell_overrides")
+    ctx.persistence.schedule_save("cell_overrides")
     # Bump the override version so the include-map cache is bypassed
     # on the next refresh; the frame cache (decoded image + boundary)
     # remains valid because the underlying mask label image is unchanged.
-    app._app_state.review_image.override_version += 1
-    prev_zoom = float(app._app_state.review_image.zoom)
-    prev_pan_x = float(app._app_state.review_image.pan_x)
-    prev_pan_y = float(app._app_state.review_image.pan_y)
+    ctx.state.review_image.override_version += 1
+    prev_zoom = float(ctx.state.review_image.zoom)
+    prev_pan_x = float(ctx.state.review_image.pan_x)
+    prev_pan_y = float(ctx.state.review_image.pan_y)
     # Skip a full Review CSV table rebuild here — the user is on the
     # Review Image tab and rebuilding tens of thousands of QTableWidgetItems
     # per click was the dominant memory leak. The table reads the effective
     # Included via override on the next refresh (combobox change / Refresh
     # button / well-selection change), so the value is never lost.
-    refresh_review_image(app)
-    app._app_state.review_image.zoom = prev_zoom
-    app._app_state.review_image.pan_x = prev_pan_x
-    app._app_state.review_image.pan_y = prev_pan_y
-    app._render_review_image_display()
-
+    refresh_review_image_ctx(ctx)
+    ctx.state.review_image.zoom = prev_zoom
+    ctx.state.review_image.pan_x = prev_pan_x
+    ctx.state.review_image.pan_y = prev_pan_y
+    render_review_image_display(ctx)
 
 
 def set_review_cells_included_batch(
-    app, items: List[Tuple[str, str, str, str]]
+    ctx, items: List[Tuple[str, str, str, str]]
 ) -> None:
     """Apply many (fov, tp, nid, included) overrides with a single redraw.
 
@@ -628,42 +612,41 @@ def set_review_cells_included_batch(
     cache-projection, stats invalidation, save-schedule, and image
     refresh — otherwise a 100-cell box delete would redraw 100 times.
     """
-    if app._app_state.preview.selected_well is None or not items:
+    from well_viewer.core.selection_controller import invalidate_stats_cache
+    if ctx.state.preview.selected_well is None or not items:
         return
-    well = app._app_state.preview.selected_well
+    well = ctx.state.preview.selected_well
     any_changed = False
     for fov, tp, nid, included in items:
-        fov_n, tp_n, nid_n = app._review_row_keys(
-            {"fov": fov, "tp": tp, "nucleus_id": nid}
+        fov_n, tp_n, nid_n = review_row_keys(
+            ctx, {"fov": fov, "tp": tp, "nucleus_id": nid}
         )
         if not (fov_n and tp_n and nid_n):
             continue
-        app._review_included_overrides[(well, fov_n, tp_n, nid_n)] = (
+        ctx.runtime.review.included_overrides[(well, fov_n, tp_n, nid_n)] = (
             str(included).strip() or "1"
         )
         any_changed = True
     if not any_changed:
         return
-    apply_review_overrides_to_cache(app,well)
-    if hasattr(app, "_invalidate_stats_cache"):
-        try:
-            app._invalidate_stats_cache()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    app._persistence.schedule_save("cell_overrides")
-    app._app_state.review_image.override_version += 1
-    prev_zoom = float(app._app_state.review_image.zoom)
-    prev_pan_x = float(app._app_state.review_image.pan_x)
-    prev_pan_y = float(app._app_state.review_image.pan_y)
-    refresh_review_image(app)
-    app._app_state.review_image.zoom = prev_zoom
-    app._app_state.review_image.pan_x = prev_pan_x
-    app._app_state.review_image.pan_y = prev_pan_y
-    app._render_review_image_display()
+    apply_review_overrides_to_cache(ctx, well)
+    try:
+        invalidate_stats_cache(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
+    ctx.persistence.schedule_save("cell_overrides")
+    ctx.state.review_image.override_version += 1
+    prev_zoom = float(ctx.state.review_image.zoom)
+    prev_pan_x = float(ctx.state.review_image.pan_x)
+    prev_pan_y = float(ctx.state.review_image.pan_y)
+    refresh_review_image_ctx(ctx)
+    ctx.state.review_image.zoom = prev_zoom
+    ctx.state.review_image.pan_x = prev_pan_x
+    ctx.state.review_image.pan_y = prev_pan_y
+    render_review_image_display(ctx)
 
 
-
-def apply_box_delete(app, x0: int, y0: int, x1: int, y1: int) -> None:
+def apply_box_delete(ctx, x0: int, y0: int, x1: int, y1: int) -> None:
     """Mark every cell with any pixel in mask[y0:y1, x0:x1] as Included=0.
 
     Coordinates are in mask-array pixel space (already converted from
@@ -671,9 +654,9 @@ def apply_box_delete(app, x0: int, y0: int, x1: int, y1: int) -> None:
     _review_image_scale, so window position, scroll, and zoom are
     already accounted for).
     """
-    label = getattr(app, "_review_image_label", None)
+    label = ctx.runtime.review_image.label
     mask = getattr(label, "_mask_arr", None) if label is not None else None
-    if mask is None or app._app_state.preview.selected_well is None:
+    if mask is None or ctx.state.preview.selected_well is None:
         return
     h, w = int(mask.shape[0]), int(mask.shape[1])
     xa, xb = sorted((max(0, min(w, int(x0))), max(0, min(w, int(x1)))))
@@ -683,21 +666,20 @@ def apply_box_delete(app, x0: int, y0: int, x1: int, y1: int) -> None:
     sub = mask[ya:yb, xa:xb]
     nids = [int(n) for n in _np.unique(sub) if int(n) > 0]
     if not nids:
-        app._set_status("Box selection: no cells inside rectangle.")
+        ctx.set_status("Box selection: no cells inside rectangle.")
         return
-    fov_cb = getattr(app, "_review_image_fov_menu", None) or getattr(app, "_preview_fov_cb", None)
+    fov_cb = ctx.runtime.review_image.fov_menu or ctx.widgets.get_or_none("_preview_fov_cb")
     if fov_cb is None:
         return
     fov = fov_cb.currentText().strip()
-    tp_cb = getattr(app, "_review_image_tp_cb", None)
+    tp_cb = ctx.runtime.review_image.tp_cb
     tp = tp_cb.currentText().strip() if tp_cb is not None else ""
-    set_review_cells_included_batch(app,
+    set_review_cells_included_batch(ctx,
         [(fov, tp, str(nid), "0") for nid in nids]
     )
-    app._set_status(
+    ctx.set_status(
         f"Box delete: marked {len(nids)} cell(s) Included=0."
     )
-
 
 
 def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
@@ -750,10 +732,6 @@ def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
     ri.pan_x = (nw / 2.0) - (cx * scale)
     ri.pan_y = (nh / 2.0) - (cy * scale)
     render_review_image_display(ctx)
-
-
-
-
 
 
 def refresh_review_csv(ctx) -> None:
@@ -855,7 +833,6 @@ def _refresh_review_csv_impl(ctx) -> None:
     if tps and tp_cb.currentText() not in tps:
         tp_cb.setCurrentText(tps[0])
     refresh_review_csv_rows(ctx, rows)
-
 
 
 def refresh_review_csv_rows(ctx, rows: Optional[List[dict]] = None) -> None:
@@ -1004,19 +981,4 @@ def _refresh_review_csv_rows_impl(ctx, rows: Optional[List[dict]] = None) -> Non
         )
     else:
         msg_lbl.setText(f"Showing {len(filtered):,} row(s).")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

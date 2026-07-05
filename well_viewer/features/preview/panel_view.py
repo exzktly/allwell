@@ -44,16 +44,35 @@ on_review_image_move = _lazy(_RI_CTRL, "on_review_image_move")
 on_review_image_press = _lazy(_RI_CTRL, "on_review_image_press")
 on_review_image_release = _lazy(_RI_CTRL, "on_review_image_release")
 pick_review_image_color = _lazy(_RI_CTRL, "pick_review_image_color")
-refresh_review_image = _lazy(_RI_RENDER, "refresh_review_image")
+refresh_review_image_ctx = _lazy(_RI_RENDER, "refresh_review_image_ctx")
 render_review_image_display = _lazy(_RI_RENDER, "render_review_image_display")
+# ctx-native review-image callbacks the builder wires to Qt signals (A8 teardown:
+# the whole callback web is ctx now, so the builder names no god-object).
+apply_review_image_cursor = _lazy(_RI_RENDER, "apply_review_image_cursor")
+review_image_auto_lut = _lazy(_RI_RENDER, "review_image_auto_lut")
+review_image_commit_lut = _lazy(_RI_RENDER, "review_image_commit_lut")
+review_image_refresh_color_swatch = _lazy(_RI_RENDER, "review_image_refresh_color_swatch")
+review_image_zoom_fit = _lazy(_RI_RENDER, "review_image_zoom_fit")
+review_image_zoom_step = _lazy(_RI_RENDER, "review_image_zoom_step")
+reset_review_image_colors = _lazy(_RI_RENDER, "reset_review_image_colors")
+set_review_image_source = _lazy(_RI_RENDER, "set_review_image_source")
+toggle_review_image_binary_mask = _lazy(_RI_RENDER, "toggle_review_image_binary_mask")
+refresh_review_image_binary_btn = _lazy(_RI_RENDER, "refresh_review_image_binary_btn")
+toggle_review_image_outline = _lazy(_RI_RENDER, "toggle_review_image_outline")
+refresh_review_image_outline_btn = _lazy(_RI_RENDER, "refresh_review_image_outline_btn")
+toggle_selected_review_cell = _lazy(_RI_RENDER, "toggle_selected_review_cell")
+set_thresh_frac_on = _lazy("well_viewer.core.channel_state_controller", "set_thresh_frac_on")
 
 
-def build_review_image_panel(self, parent: QWidget) -> None:
-    # Register the widgets the ctx-native render pipeline reads back
-    # (``update_preview_ctx`` resolves them via ``ctx.widgets``). ``register``
-    # still stamps ``self._<name>`` so the app-native readers (refresh / draw)
-    # are unaffected.
-    reg = self._ctx.widgets
+def build_review_image_panel(ctx, parent: QWidget) -> None:
+    # A8 teardown: fully ctx-native builder. Widgets that the render pipeline
+    # reads back go through ``ctx.widgets`` (which stamps ``app._<name>`` so
+    # app-native readers are unaffected); the live scratch handles the callbacks
+    # need (buttons, canvas, label, swatch dict) go through
+    # ``ctx.runtime.review_image`` (1:1 with the legacy ``app._review_image_*``
+    # stamps). No god-object is named here.
+    reg = ctx.widgets
+    rt = ctx.runtime.review_image
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -69,79 +88,77 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     ctrl.setObjectName("TabCtrl")  # data-gated: greyed out until a dataset loads
     cl = QHBoxLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
-    self._review_image_well_lbl = reg.register(
-        "_review_image_well_lbl", QLabel("No well selected", ctrl))
-    cl.addWidget(self._review_image_well_lbl)
+    cl.addWidget(reg.register("_review_image_well_lbl", QLabel("No well selected", ctrl)))
 
     cl.addWidget(QLabel("Channel:", ctrl))
-    self._review_image_chan_cb = reg.register("_review_image_chan_cb", QComboBox(ctrl))
-    self._review_image_chan_cb.addItems(["GFP"])
-    self._review_image_chan_cb.currentIndexChanged.connect(
-        lambda _i: on_review_image_channel_selected(self, None)
+    chan_cb = reg.register("_review_image_chan_cb", QComboBox(ctrl))
+    chan_cb.addItems(["GFP"])
+    chan_cb.currentIndexChanged.connect(
+        lambda _i: on_review_image_channel_selected(ctx, None)
     )
-    cl.addWidget(self._review_image_chan_cb)
+    cl.addWidget(chan_cb)
     # ``_review_image_chan_var`` is a legacy alias of the same combo; register it
     # under both names so ctx.widgets resolves either.
-    self._review_image_chan_var = reg.register("_review_image_chan_var", self._review_image_chan_cb)
+    reg.register("_review_image_chan_var", chan_cb)
 
     cl.addWidget(QLabel("FOV:", ctrl))
-    self._review_image_fov_menu = reg.register(
-        "_review_image_fov_menu", QComboBox(ctrl))
-    self._review_image_fov_menu.addItems(["—"])
-    self._review_image_fov_menu.currentIndexChanged.connect(
-        lambda _i: refresh_review_image(self)
+    fov_menu = reg.register("_review_image_fov_menu", QComboBox(ctrl))
+    fov_menu.addItems(["—"])
+    fov_menu.currentIndexChanged.connect(
+        lambda _i: refresh_review_image_ctx(ctx)
     )
-    cl.addWidget(self._review_image_fov_menu)
+    cl.addWidget(fov_menu)
 
     cl.addWidget(QLabel("Timepoint:", ctrl))
-    self._review_image_tp_menu = reg.register(
-        "_review_image_tp_menu", QComboBox(ctrl))
-    self._review_image_tp_menu.addItems(["—"])
-    self._review_image_tp_menu.currentIndexChanged.connect(
-        lambda _i: refresh_review_image(self)
+    tp_menu = reg.register("_review_image_tp_menu", QComboBox(ctrl))
+    tp_menu.addItems(["—"])
+    tp_menu.currentIndexChanged.connect(
+        lambda _i: refresh_review_image_ctx(ctx)
     )
-    cl.addWidget(self._review_image_tp_menu)
-    self._review_image_tp_var = self._review_image_tp_menu
-    self._review_image_tp_cb = self._review_image_tp_menu  # alias for review_image_controller
+    cl.addWidget(tp_menu)
+    rt.tp_var = tp_menu
+    rt.tp_cb = tp_menu  # alias for review_image_controller
     cl.addStretch(1)
 
     from PySide6.QtWidgets import QPushButton
-    self._review_image_delete_btn = QPushButton("Delete Cell", ctrl)
-    self._review_image_delete_btn.setProperty("variant", "toggle")
-    self._review_image_delete_btn.setCheckable(True)
-    self._review_image_delete_btn.setChecked(False)
-    self._review_image_delete_btn.setToolTip(
+    delete_btn = QPushButton("Delete Cell", ctrl)
+    rt.delete_btn = delete_btn
+    delete_btn.setProperty("variant", "toggle")
+    delete_btn.setCheckable(True)
+    delete_btn.setChecked(False)
+    delete_btn.setToolTip(
         "Enter drag-delete mode.\n"
         "• Click a cell to mark it Included=0.\n"
         "• Drag a rectangle to bulk-delete all cells inside."
     )
-    self._review_image_delete_btn.clicked.connect(
-        lambda _=False: self._toggle_selected_review_cell()
+    delete_btn.clicked.connect(
+        lambda _=False: toggle_selected_review_cell(ctx)
     )
-    cl.addWidget(self._review_image_delete_btn)
+    cl.addWidget(delete_btn)
 
     # Crop region: drag a rectangle to keep only cells whose centroid is inside;
     # applies to every FOV/timepoint/channel/well. Clear crop removes just the
     # box; Reset restores every cell (incl. manual deletes) and removes the crop.
-    self._review_image_crop_btn = QPushButton("Crop Region", ctrl)
-    self._review_image_crop_btn.setProperty("variant", "toggle")
-    self._review_image_crop_btn.setCheckable(True)
-    self._review_image_crop_btn.setChecked(False)
-    self._review_image_crop_btn.setToolTip(
+    crop_btn = QPushButton("Crop Region", ctrl)
+    rt.crop_btn = crop_btn
+    crop_btn.setProperty("variant", "toggle")
+    crop_btn.setCheckable(True)
+    crop_btn.setChecked(False)
+    crop_btn.setToolTip(
         "Enter crop mode, then drag a rectangle.\n"
         "• Cells whose centroid is inside are kept; cells outside are excluded.\n"
         "• Applies to all FOVs / timepoints / channels / wells.\n"
         "Note: the box is drawn in the current FOV's pixel space and applied to all."
     )
-    self._review_image_crop_btn.clicked.connect(
-        lambda _=False: toggle_crop_edit_mode(self)
+    crop_btn.clicked.connect(
+        lambda _=False: toggle_crop_edit_mode(ctx)
     )
-    cl.addWidget(self._review_image_crop_btn)
+    cl.addWidget(crop_btn)
 
     cl.addWidget(btn_secondary(
-        ctrl, "Clear crop", lambda: clear_crop_region(self)))
+        ctrl, "Clear crop", lambda: clear_crop_region(ctx)))
     cl.addWidget(btn_danger(
-        ctrl, "Reset", lambda: reset_crop_and_overrides(self)))
+        ctrl, "Reset", lambda: reset_crop_and_overrides(ctx)))
 
     # Separate the edit cluster (Delete / Crop / Clear / Reset) from the
     # image-stage selector so they don't read as one undifferentiated row.
@@ -152,13 +169,13 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # Corrected (the saved final image). Signal wired AFTER initial setup so
     # building the control doesn't fire the handler.
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
-    self._review_image_source_seg = _SegmentedControl(ctrl)
+    source_seg = _SegmentedControl(ctrl)
+    rt.source_seg = source_seg
     for _lbl, _data in (("Raw", "raw"), ("Flat-field", "flatfield"),
                         ("Corrected", "corrected")):
-        self._review_image_source_seg.addSegment(_lbl, data=_data)
-    self._review_image_source_seg.setCurrentByData(
-        self._app_state.review_image.image_source)
-    self._review_image_source_seg.setToolTip(
+        source_seg.addSegment(_lbl, data=_data)
+    source_seg.setCurrentByData(ctx.state.review_image.image_source)
+    source_seg.setToolTip(
         "Image stage shown:\n"
         "• Raw — unprocessed fluorescence.\n"
         "• Flat-field — raw with only the selected flat-field applied "
@@ -166,18 +183,17 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         "is approximated from the current well.\n"
         "• Corrected — the saved final image (flat-field + background)."
     )
-    self._review_image_source_seg.currentChanged.connect(
-        lambda _i: self._set_review_image_source(
-            self._review_image_source_seg.currentData())
+    source_seg.currentChanged.connect(
+        lambda _i: set_review_image_source(ctx, source_seg.currentData())
     )
-    cl.addWidget(self._review_image_source_seg)
+    cl.addWidget(source_seg)
 
     # Separate the zoom cluster (Fit / − / +) from the stage selector.
     cl.addWidget(_toolbar_separator(ctrl))
 
-    cl.addWidget(btn_secondary(ctrl, "Fit", self._review_image_zoom_fit))
-    cl.addWidget(btn_card(ctrl, "−", lambda: self._review_image_zoom_step(-1)))
-    cl.addWidget(btn_card(ctrl, "+", lambda: self._review_image_zoom_step(+1)))
+    cl.addWidget(btn_secondary(ctrl, "Fit", lambda: review_image_zoom_fit(ctx)))
+    cl.addWidget(btn_card(ctrl, "−", lambda: review_image_zoom_step(ctx, -1)))
+    cl.addWidget(btn_card(ctrl, "+", lambda: review_image_zoom_step(ctx, +1)))
     il.addWidget(ctrl)
 
     # The QC debris-gate controls now live on the Sample Definitions → Cell
@@ -185,32 +201,30 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # gates). This overlay still *renders* the QC verdict — excluded cells show
     # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
     # here again, via the quick-edit Stepper added to the LUT row below.
-    self._review_image_status = reg.register(
-        "_review_image_status", QLabel("", inner))
-    self._review_image_status.setObjectName("Muted")
-    il.addWidget(self._review_image_status)
+    status = reg.register("_review_image_status", QLabel("", inner))
+    status.setObjectName("Muted")
+    il.addWidget(status)
 
     lut_row = QWidget(inner)
     lut_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
     lr = QHBoxLayout(lut_row)
     lr.setContentsMargins(8, 2, 8, 2)
-    self._review_lut_chan_lbl = reg.register("_review_lut_chan_lbl", QLabel(
-        f"{self._app_state.channel.active_image_channel.upper()} LUT min:", lut_row,
-    ))
-    lr.addWidget(self._review_lut_chan_lbl)
+    lr.addWidget(reg.register("_review_lut_chan_lbl", QLabel(
+        f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_row,
+    )))
 
-    self._review_lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_row))
-    self._review_lmin_entry.setFixedWidth(80)
-    self._review_lmin_entry.editingFinished.connect(self._review_image_commit_lut)
-    lr.addWidget(self._review_lmin_entry)
+    lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_row))
+    lmin_entry.setFixedWidth(80)
+    lmin_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
+    lr.addWidget(lmin_entry)
 
     lr.addWidget(QLabel("max:", lut_row))
-    self._review_lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_row))
-    self._review_lmax_entry.setFixedWidth(80)
-    self._review_lmax_entry.editingFinished.connect(self._review_image_commit_lut)
-    lr.addWidget(self._review_lmax_entry)
+    lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_row))
+    lmax_entry.setFixedWidth(80)
+    lmax_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
+    lr.addWidget(lmax_entry)
 
-    lr.addWidget(btn_secondary(lut_row, "Auto LUT", self._review_image_auto_lut))
+    lr.addWidget(btn_secondary(lut_row, "Auto LUT", lambda: review_image_auto_lut(ctx)))
 
     # ON/OFF intensity threshold quick-edit (the editor this row used to host;
     # see the comment above). Edits the active channel's ThreshFracOn — the same
@@ -218,15 +232,15 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # so the Binary (≥ ON threshold) overlay updates live without leaving the tab.
     lr.addSpacing(12)
     lr.addWidget(QLabel("ON threshold:", lut_row))
-    self._review_thresh_frac_stepper = reg.register(
+    thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",
         Stepper(lut_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
-    self._review_thresh_frac_stepper.setFixedWidth(96)
-    self._review_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
-    _rt_edit = getattr(self._review_thresh_frac_stepper, "_edit", None)
+    thresh_stepper.setFixedWidth(96)
+    thresh_stepper.setFocusPolicy(Qt.ClickFocus)
+    _rt_edit = getattr(thresh_stepper, "_edit", None)
     if _rt_edit is not None:
         _rt_edit.setFocusPolicy(Qt.ClickFocus)
-    self._review_thresh_frac_stepper.setToolTip(
+    thresh_stepper.setToolTip(
         "ON/OFF intensity threshold for the active channel — drives the Binary "
         "(≥ ON threshold) overlay. Same value as the Cell Gating tab's "
         "ThreshFracOn and the plot tabs' Threshold quick-edit."
@@ -234,10 +248,10 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # Edit the active channel's ThreshFracOn (single source of truth, shared
     # with Cell Gating / the plot quick-edit) and re-render so the binary
     # overlay updates live.
-    self._review_thresh_frac_stepper.valueChanged.connect(
-        lambda v: (self._set_thresh_frac_on(v), refresh_review_image(self))
+    thresh_stepper.valueChanged.connect(
+        lambda v: (set_thresh_frac_on(ctx, v), refresh_review_image_ctx(ctx))
     )
-    lr.addWidget(self._review_thresh_frac_stepper)
+    lr.addWidget(thresh_stepper)
     lr.addStretch(1)
     il.addWidget(lut_row)
 
@@ -247,7 +261,8 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     color_row.setObjectName("TabCtrl")  # data-gated with the rest of the controls
     cr = QHBoxLayout(color_row)
     cr.setContentsMargins(8, 2, 8, 2)
-    self._review_image_color_swatches = {}
+    swatches: dict = {}
+    rt.color_swatches = swatches
 
     def _add_swatch(label_text: str, key: str, tooltip: str) -> None:
         cr.addWidget(QLabel(label_text, color_row))
@@ -255,11 +270,11 @@ def build_review_image_panel(self, parent: QWidget) -> None:
         sw.setFixedSize(28, 18)
         sw.setToolTip(tooltip)
         sw.clicked.connect(
-            lambda _=False, k=key: pick_review_image_color(self, k)
+            lambda _=False, k=key: pick_review_image_color(ctx, k)
         )
         cr.addWidget(sw)
-        self._review_image_color_swatches[key] = sw
-        self._review_image_refresh_color_swatch(key)
+        swatches[key] = sw
+        review_image_refresh_color_swatch(ctx, key)
 
     _add_swatch("Boundary:", "boundary",
                 "Color used for included cell boundaries.")
@@ -270,48 +285,48 @@ def build_review_image_panel(self, parent: QWidget) -> None:
                 "leaves it pure grayscale; pick a color to multiply each\n"
                 "channel by the chosen RGB.")
     cr.addWidget(btn_secondary(color_row, "Reset colors",
-                               self._reset_review_image_colors))
+                               lambda: reset_review_image_colors(ctx)))
 
     cr.addSpacing(12)
 
-    self._review_image_outline_btn = _QPushButton("Outline: On", color_row)
-    self._review_image_outline_btn.setProperty("variant", "toggle")
-    self._review_image_outline_btn.setCheckable(True)
-    self._review_image_outline_btn.setChecked(
-        bool(self._app_state.review_image.show_outline)
+    outline_btn = _QPushButton("Outline: On", color_row)
+    rt.outline_btn = outline_btn
+    outline_btn.setProperty("variant", "toggle")
+    outline_btn.setCheckable(True)
+    outline_btn.setChecked(bool(ctx.state.review_image.show_outline))
+    outline_btn.clicked.connect(
+        lambda _=False: toggle_review_image_outline(ctx)
     )
-    self._review_image_outline_btn.clicked.connect(
-        lambda _=False: self._toggle_review_image_outline()
-    )
-    cr.addWidget(self._review_image_outline_btn)
-    self._refresh_review_image_outline_btn()
+    cr.addWidget(outline_btn)
+    refresh_review_image_outline_btn(ctx)
 
-    self._review_image_binary_btn = _QPushButton("Binary: Off", color_row)
-    self._review_image_binary_btn.setProperty("variant", "toggle")
-    self._review_image_binary_btn.setCheckable(True)
-    self._review_image_binary_btn.setChecked(
-        bool(self._app_state.review_image.binary_mask)
+    binary_btn = _QPushButton("Binary: Off", color_row)
+    rt.binary_btn = binary_btn
+    binary_btn.setProperty("variant", "toggle")
+    binary_btn.setCheckable(True)
+    binary_btn.setChecked(bool(ctx.state.review_image.binary_mask))
+    binary_btn.clicked.connect(
+        lambda _=False: toggle_review_image_binary_mask(ctx)
     )
-    self._review_image_binary_btn.clicked.connect(
-        lambda _=False: self._toggle_review_image_binary_mask()
-    )
-    cr.addWidget(self._review_image_binary_btn)
-    self._refresh_review_image_binary_btn()
+    cr.addWidget(binary_btn)
+    refresh_review_image_binary_btn(ctx)
 
     cr.addStretch(1)
     il.addWidget(color_row)
 
-    self._review_image_canvas = QScrollArea(inner)
-    self._review_image_canvas.setWidgetResizable(False)
-    self._review_image_canvas.setAlignment(Qt.AlignCenter)
-    self._review_image_canvas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    self._review_image_canvas.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    canvas = QScrollArea(inner)
+    rt.canvas = canvas
+    canvas.setWidgetResizable(False)
+    canvas.setAlignment(Qt.AlignCenter)
+    canvas.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    canvas.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
-    self._review_image_label = QLabel(self._review_image_canvas)
-    self._review_image_label.setAlignment(Qt.AlignCenter)
-    self._review_image_label.setMouseTracking(True)
-    self._review_image_canvas.setWidget(self._review_image_label)
-    il.addWidget(self._review_image_canvas, 1)
+    label = QLabel(canvas)
+    rt.label = label
+    label.setAlignment(Qt.AlignCenter)
+    label.setMouseTracking(True)
+    canvas.setWidget(label)
+    il.addWidget(canvas, 1)
 
     # Re-fit the image whenever the scroll area is (re)sized. The lazy first
     # build draws before Qt has laid out the canvas, so the initial
@@ -320,36 +335,36 @@ def build_review_image_panel(self, parent: QWidget) -> None:
     # re-fits it (and keeps it fitted on window/splitter resizes). Mirrors the
     # Image Table / Playground canvases. No recursion: the render resizes the
     # inner label, not this scroll area.
-    _orig_canvas_resize = self._review_image_canvas.resizeEvent
+    _orig_canvas_resize = canvas.resizeEvent
 
     def _on_review_image_canvas_resize(ev) -> None:
         _orig_canvas_resize(ev)
-        render_review_image_display(self._ctx)
+        render_review_image_display(ctx)
 
-    self._review_image_canvas.resizeEvent = _on_review_image_canvas_resize
+    canvas.resizeEvent = _on_review_image_canvas_resize
 
     # Install wheel + mouse hooks for zoom / drag
     def _wheel(event):
         delta = event.angleDelta().y()
         if delta > 0:
-            self._review_image_zoom_step(+1)
+            review_image_zoom_step(ctx, +1)
         elif delta < 0:
-            self._review_image_zoom_step(-1)
-    self._review_image_label.wheelEvent = _wheel
-    self._review_image_label.mousePressEvent = partial(on_review_image_press, self)
-    self._review_image_label.mouseMoveEvent = partial(on_review_image_move, self)
-    self._review_image_label.mouseReleaseEvent = partial(on_review_image_release, self)
+            review_image_zoom_step(ctx, -1)
+    label.wheelEvent = _wheel
+    label.mousePressEvent = partial(on_review_image_press, ctx)
+    label.mouseMoveEvent = partial(on_review_image_move, ctx)
+    label.mouseReleaseEvent = partial(on_review_image_release, ctx)
 
     def _leave(_ev):
         try:
             QToolTip.hideText()
         except Exception:
             swallowed()  # was: pass (silent except)
-    self._review_image_label.leaveEvent = _leave
+    label.leaveEvent = _leave
 
     # Default cursor reflects the initial Include-edit-mode state
     # (ForbiddenCursor when remove-cell mode is active).
-    self._apply_review_image_cursor()
+    apply_review_image_cursor(ctx)
 
 # ``refresh_fov_btn_state`` moved to ``well_viewer.core.plot_toggles`` (A8
 # enabler E3) alongside the SEM/FOV toggles it pairs with, so any feature can

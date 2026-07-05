@@ -821,7 +821,19 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              Qt-nav stamp (_sample_definitions_subtabs) via ctx.window. The new
 #              ctx.toast accessor homes the import/export notification. Only
 #              tab_controller:138 (the review-image bridge) remains.
-CTX_APP_BUDGET = 1
+# 2026-07-05: ZERO. The endgame landed in three commits: (A) the view_state
+#              _apply_* pending-restore cluster → ctx; (B) on_tab_change + the 18
+#              feature-registry on_activate hooks → ctx; (C) the entire
+#              review-image interaction web (crop / interaction / LUT / colour /
+#              zoom — ~40 functions across review_image.controller/renderer/
+#              collect/box_select + crop.controller) → ctx, letting
+#              build_review_image_panel take ctx and clearing the last reach in
+#              image_browser_subtab_app_bridge. The ``app`` field survives only
+#              as the backing store for the frozen ctx service accessors
+#              (ctx.window / ctx.persistence / ctx.rebuild_all / …); NO code
+#              names ``ctx.app`` any more. Budget floored at 0 — the ratchet is
+#              now a regression guard, not a burn-down.
+CTX_APP_BUDGET = 0
 
 
 def _count_ctx_app() -> tuple[int, dict[str, int]]:

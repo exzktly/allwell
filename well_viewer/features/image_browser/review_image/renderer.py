@@ -710,14 +710,50 @@ def review_image_resolve_lut(ctx, arr) -> Tuple[float, float]:
 
 
 
-def refresh_review_image_source_btn(app) -> None:
+# Default swatch colours for the Review Image overlays (boundary / selected /
+# tint). Was ``WellViewerApp._REVIEW_IMAGE_COLOR_DEFAULTS`` — moved here so the
+# ctx-native colour helpers own it without naming the god-object.
+_REVIEW_IMAGE_COLOR_DEFAULTS = {
+    "boundary": (255, 64, 64),
+    "selected": (255, 230, 64),
+    "tint": (255, 255, 255),
+}
+
+
+def review_image_get_color(ctx, which: str) -> Tuple[int, int, int]:
+    """The current RGB for a Review Image overlay slot (boundary/selected/tint).
+
+    Stored as ``ctx.runtime.review_image.<which>_color`` scratch; falls back to
+    the module default when unset."""
+    return tuple(
+        getattr(ctx.runtime.review_image, f"{which}_color", None)
+        or _REVIEW_IMAGE_COLOR_DEFAULTS[which]
+    )
+
+
+def review_image_zoom_fit(ctx) -> None:
+    """Reset the Review Image canvas to 1× / no pan and re-render."""
+    ctx.state.review_image.zoom = 1.0
+    ctx.state.review_image.pan_x = 0.0
+    ctx.state.review_image.pan_y = 0.0
+    render_review_image_display(ctx)
+
+
+def toggle_selected_review_cell(ctx) -> None:
+    """Flip include-edit (delete) mode — the Delete Cell toolbar toggle."""
+    set_review_image_include_mode(
+        ctx, not ctx.state.review_image.include_edit_mode
+    )
+
+
+def refresh_review_image_source_btn(ctx) -> None:
     """Sync the Raw / Flat-field / Corrected segmented control with state."""
-    seg = getattr(app, "_review_image_source_seg", None)
+    seg = ctx.runtime.review_image.source_seg
     if seg is None:
         return
     blocked = seg.blockSignals(True)
     try:
-        seg.setCurrentByData(app._app_state.review_image.image_source)
+        seg.setCurrentByData(ctx.state.review_image.image_source)
     finally:
         seg.blockSignals(blocked)
 
@@ -751,11 +787,11 @@ def apply_review_image_cursor(ctx) -> None:
 
 
 
-def refresh_review_image_binary_btn(app) -> None:
-    btn = getattr(app, "_review_image_binary_btn", None)
+def refresh_review_image_binary_btn(ctx) -> None:
+    btn = ctx.runtime.review_image.binary_btn
     if btn is None:
         return
-    on = bool(app._app_state.review_image.binary_mask)
+    on = bool(ctx.state.review_image.binary_mask)
     btn.setChecked(on)
     btn.setText("Binary: On" if on else "Binary: Off")
     btn.setToolTip(
@@ -769,8 +805,8 @@ def refresh_review_image_binary_btn(app) -> None:
 
 
 
-def review_image_auto_lut(app) -> None:
-    arr = app._app_state.review_image.last_fluor_arr
+def review_image_auto_lut(ctx) -> None:
+    arr = ctx.state.review_image.last_fluor_arr
     if arr is None or not _NP_AVAILABLE:
         return
     arr_np = _np.asarray(arr, dtype=_np.float32)
@@ -778,21 +814,23 @@ def review_image_auto_lut(app) -> None:
     hi = float(arr_np.max())
     if hi <= lo:
         hi = lo + 1.0
-    app._app_state.image_view.lut_by_channel[str(app._app_state.channel.active_image_channel or "").lower()] = (lo, hi)
-    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
-        app._review_lmin_entry.setText(f"{lo:.0f}")
-        app._review_lmax_entry.setText(f"{hi:.0f}")
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    ctx.state.image_view.lut_by_channel[str(ctx.state.channel.active_image_channel or "").lower()] = (lo, hi)
+    lmin = ctx.runtime.review.lmin_entry
+    lmax = ctx.runtime.review.lmax_entry
+    if lmin is not None and lmax is not None:
+        lmin.setText(f"{lo:.0f}")
+        lmax.setText(f"{hi:.0f}")
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def review_image_refresh_color_swatch(app, which: str) -> None:
-    swatches = getattr(app, "_review_image_color_swatches", {}) or {}
+def review_image_refresh_color_swatch(ctx, which: str) -> None:
+    swatches = ctx.runtime.review_image.color_swatches or {}
     btn = swatches.get(which)
     if btn is None:
         return
-    r, g, b = app._review_image_get_color(which)
+    r, g, b = review_image_get_color(ctx, which)
     # Explicit border-radius on every side so the bottom corners stay
     # rounded — the global QSS rule was being clipped by the swatch's
     # tight fixed size, leaving square lower corners.
@@ -804,7 +842,7 @@ def review_image_refresh_color_swatch(app, which: str) -> None:
 
 
 
-def set_review_image_source(app, mode: str) -> None:
+def set_review_image_source(ctx, mode: str) -> None:
     """Set which image stage the Review Image canvas shows.
 
     ``mode`` is one of ``"raw"`` (unprocessed fluorescence), ``"flatfield"``
@@ -815,59 +853,61 @@ def set_review_image_source(app, mode: str) -> None:
     """
     if mode not in ("raw", "flatfield", "corrected"):
         return
-    app._app_state.review_image.image_source = mode
+    ctx.state.review_image.image_source = mode
     # LUT ranges differ between stages, so drop the active channel's cached LUT
     # so the new stage gets a fresh auto-fit instead of a stale clip.
-    chan = str(app._app_state.channel.active_image_channel or "").lower()
-    app._app_state.image_view.lut_by_channel.pop(chan, None)
-    app._refresh_review_image_source_btn()
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    chan = str(ctx.state.channel.active_image_channel or "").lower()
+    ctx.state.image_view.lut_by_channel.pop(chan, None)
+    refresh_review_image_source_btn(ctx)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def set_review_image_include_mode(app, enabled: bool) -> None:
+def set_review_image_include_mode(ctx, enabled: bool) -> None:
     enabled = bool(enabled)
-    app._app_state.review_image.include_edit_mode = enabled
-    if enabled and app._app_state.review_image.crop_edit_mode:
+    ctx.state.review_image.include_edit_mode = enabled
+    if enabled and ctx.state.review_image.crop_edit_mode:
         # Mutually exclusive with crop-draw mode so an armed rubber band is
         # unambiguous on release. Clear it directly (avoids importing the crop
         # controller, which imports this module).
-        app._app_state.review_image.crop_edit_mode = False
-        crop_btn = getattr(app, "_review_image_crop_btn", None)
+        ctx.state.review_image.crop_edit_mode = False
+        crop_btn = ctx.runtime.review_image.crop_btn
         if crop_btn is not None:
             crop_btn.setChecked(False)
-    app._apply_review_image_cursor()
-    btn = getattr(app, "_review_image_delete_btn", None)
+    apply_review_image_cursor(ctx)
+    btn = ctx.runtime.review_image.delete_btn
     if btn is not None:
         btn.setChecked(enabled)
     if enabled:
-        app._set_status(
+        ctx.set_status(
             "Delete mode ON — click a cell to exclude it, or drag a rectangle to bulk-exclude."
         )
     else:
-        app._set_status("Delete mode OFF.")
+        ctx.set_status("Delete mode OFF.")
 
 
 
-def review_image_commit_lut(app) -> None:
-    arr = app._app_state.review_image.last_fluor_arr
+def review_image_commit_lut(ctx) -> None:
+    arr = ctx.state.review_image.last_fluor_arr
     if arr is None:
         return
-    lo, hi = app._review_image_resolve_lut(_np.asarray(arr, dtype=_np.float32))
-    if hasattr(app, "_review_lmin_entry") and hasattr(app, "_review_lmax_entry"):
-        app._review_lmin_entry.setText(f"{lo:.0f}")
-        app._review_lmax_entry.setText(f"{hi:.0f}")
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    lo, hi = review_image_resolve_lut(ctx, _np.asarray(arr, dtype=_np.float32))
+    lmin = ctx.runtime.review.lmin_entry
+    lmax = ctx.runtime.review.lmax_entry
+    if lmin is not None and lmax is not None:
+        lmin.setText(f"{lo:.0f}")
+        lmax.setText(f"{hi:.0f}")
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def refresh_review_image_outline_btn(app) -> None:
-    btn = getattr(app, "_review_image_outline_btn", None)
+def refresh_review_image_outline_btn(ctx) -> None:
+    btn = ctx.runtime.review_image.outline_btn
     if btn is None:
         return
-    on = bool(app._app_state.review_image.show_outline)
+    on = bool(ctx.state.review_image.show_outline)
     btn.setChecked(on)
     btn.setText("Outline: On" if on else "Outline: Off")
     btn.style().unpolish(btn)
@@ -875,65 +915,64 @@ def refresh_review_image_outline_btn(app) -> None:
 
 
 
-def invalidate_review_image_frame_cache(app) -> None:
+def invalidate_review_image_frame_cache(ctx) -> None:
     """Drop the decoded fluor / mask / boundary cache.
 
     Call on data load (well paths change) and on dataset re-scan so the
     next refresh re-decodes from disk.
     """
-    app._app_state.review_image.frame_cache = None
-    app._app_state.review_image.include_cache.clear()
-    app._app_state.review_image.override_version += 1
+    ctx.state.review_image.frame_cache = None
+    ctx.state.review_image.include_cache.clear()
+    ctx.state.review_image.override_version += 1
 
 
 
-def toggle_review_image_binary_mask(app) -> None:
+def toggle_review_image_binary_mask(ctx) -> None:
     """Flip the binary-mask overlay on/off and refresh the canvas."""
-    app._app_state.review_image.binary_mask = not bool(
-        app._app_state.review_image.binary_mask
+    ctx.state.review_image.binary_mask = not bool(
+        ctx.state.review_image.binary_mask
     )
-    app._refresh_review_image_binary_btn()
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    refresh_review_image_binary_btn(ctx)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def toggle_review_image_outline(app) -> None:
+def toggle_review_image_outline(ctx) -> None:
     """Flip the cell-outline overlay on/off and refresh the canvas."""
-    app._app_state.review_image.show_outline = not bool(
-        app._app_state.review_image.show_outline
+    ctx.state.review_image.show_outline = not bool(
+        ctx.state.review_image.show_outline
     )
-    app._refresh_review_image_outline_btn()
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    refresh_review_image_outline_btn(ctx)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def review_image_set_color(app, which: str, rgb: Tuple[int, int, int]) -> None:
-    attr = f"_review_image_{which}_color"
+def review_image_set_color(ctx, which: str, rgb: Tuple[int, int, int]) -> None:
     rgb_clamped = tuple(max(0, min(255, int(c))) for c in rgb)
-    setattr(app, attr, rgb_clamped)
-    app._review_image_refresh_color_swatch(which)
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    setattr(ctx.runtime.review_image, f"{which}_color", rgb_clamped)
+    review_image_refresh_color_swatch(ctx, which)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def reset_review_image_colors(app) -> None:
+def reset_review_image_colors(ctx) -> None:
     """Restore the default colors for boundary / selection / tint."""
-    for which, default in app._REVIEW_IMAGE_COLOR_DEFAULTS.items():
-        setattr(app, f"_review_image_{which}_color", tuple(default))
-        app._review_image_refresh_color_swatch(which)
-    app._app_state.review_image.preserve_view_on_refresh = True
-    refresh_review_image(app)
+    for which, default in _REVIEW_IMAGE_COLOR_DEFAULTS.items():
+        setattr(ctx.runtime.review_image, f"{which}_color", tuple(default))
+        review_image_refresh_color_swatch(ctx, which)
+    ctx.state.review_image.preserve_view_on_refresh = True
+    refresh_review_image_ctx(ctx)
 
 
 
-def review_image_zoom_step(app, direction: int) -> None:
+def review_image_zoom_step(ctx, direction: int) -> None:
     steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-    cur = app._app_state.review_image.zoom
+    cur = ctx.state.review_image.zoom
     idx = min(range(len(steps)), key=lambda i: abs(steps[i] - cur))
     idx = max(0, min(len(steps) - 1, idx + direction))
-    app._app_state.review_image.zoom = steps[idx]
-    app._render_review_image_display()
+    ctx.state.review_image.zoom = steps[idx]
+    render_review_image_display(ctx)
 

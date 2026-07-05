@@ -33,6 +33,28 @@ CI runs `ruff check .` + a fast-lane pytest job; run the rest locally.
 - **Single file / subset:** `python -m pytest tests/test_fold_change.py` · `... ::test_name` · `-k "expr"`.
 - **Per-area suites** are named in each item's `Verify` field.
 
+### Running slow (`loaded_app`/`viewer_app`) tests — mandatory rules
+
+These fixtures build the whole Qt app; a run can take minutes and can *hang* on a
+modal dialog or a Qt/C deadlock. Follow these every time — they exist because
+ignoring them has already cost real debugging time this project:
+
+1. **Never `| tail` a run you might need to diagnose.** Redirect the *full*
+   output to a file (`… > run.log 2>&1`) and `Read`/`grep` it. A bare pipe to
+   `tail` throws away the traceback you'll need; a log file keeps partial
+   progress recoverable after a timeout/kill.
+2. **One heavy `loaded_app` run at a time.** `pgrep -f pytest` first; never launch
+   a second while one is live. Concurrent runs starve each other's CPU and look
+   exactly like a hang.
+3. **Always `--timeout-method=thread`** for anything that can block in Qt/C, so a
+   hung main thread dumps its traceback instead of dying silently. (`signal` is
+   fine only for the pure fast lane.)
+4. **Isolate to the single failing node with `-x` / `::test_name`** once you know
+   where it fails — don't re-run the whole file to watch one test.
+5. **Run in the background and wait for the completion notification** — do not
+   poll the log every few seconds. Check it once when notified (or on a Stop
+   prompt), not on a loop.
+
 ## Progress
 
 Severity: **C**ritical / **H**igh / **M**edium / **L**ow. Status uses the legend above. One row per tracked finding; grouped by workstream.

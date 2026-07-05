@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme as theme_v2
+from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
 from well_viewer.core.safe import swallowed
@@ -123,7 +124,7 @@ class AllWellApp(QMainWindow):
         hl.addWidget(title)
 
         # Phase 10 (B2): version pill next to wordmark.
-        self._version_pill = QLabel("v8.5.1")
+        self._version_pill = QLabel(f"v{_APP_VERSION}")
         self._version_pill.setObjectName("VersionPill")
         self._version_pill.setStyleSheet(
             f"color: {theme_v2.Colors.text_faint}; "

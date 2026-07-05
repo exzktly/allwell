@@ -217,6 +217,43 @@ def _dump_well_failure_trace(output_dir: Path, well_label: str, exc: BaseExcepti
         return None
 
 
+def _dump_fov_failure_trace(
+    output_dir: Path, well_label: str, fov_stem: str, exc: BaseException,
+) -> "Path | None":
+    """Persist a worker-side exception trace for a single FOV-group.
+
+    The per-well analogue (:func:`_dump_well_failure_trace`) only fires when a
+    *whole* well fails. An individual FOV-group failure is caught inside the
+    worker (the well keeps going and writes a partial CSV/zip), logged with
+    ``exc_info=True`` — but never persisted. If the live log stream is muted or
+    the line scrolls past, the cause is lost and the well silently drops a
+    timepoint. Writing the full ``traceback.format_exc()`` to
+    ``<output_dir>/errors/<well>_<fov>_pid<N>.txt`` guarantees a durable,
+    readable trace for exactly the "why did this timepoint fail?" case.
+
+    *output_dir* must be the persistent dataset output dir (NOT the per-well
+    ``tmp_images`` staging dir, which is deleted on cleanup).
+
+    Returns the trace-file path on success, or None if it could not be written.
+    """
+    import traceback as _tb
+    try:
+        err_dir = output_dir / "errors"
+        err_dir.mkdir(parents=True, exist_ok=True)
+        safe_fov = _safe_well(str(fov_stem))
+        err_path = err_dir / f"{_safe_well(well_label)}_{safe_fov}_pid{os.getpid()}.txt"
+        with err_path.open("w") as fh:
+            fh.write(f"Well:      {well_label}\n")
+            fh.write(f"FOV-group: {fov_stem}\n")
+            fh.write(f"PID:       {os.getpid()}\n")
+            fh.write(f"Exception type: {type(exc).__name__}\n")
+            fh.write("\n")
+            fh.write(_tb.format_exc())
+        return err_path
+    except Exception:                # noqa: BLE001
+        return None
+
+
 def _ensure_stardist_runtime_deps() -> None:
     """
     Fail fast with a clear message when StarDist runtime deps are missing.
@@ -1708,7 +1745,7 @@ def _correct_image_group(
     tophat_nir, tophat_radius_nir, tophat_fluor, tophat_radius_fluor,
     fft_small_nir, fft_small_fluor, flatfield_mode, flatfield_models,
     background_method, background_models, smfish_tokens, mesh_ratio, mesh_sigma,
-    schema, sep,
+    schema, sep, phase_token="",
 ):
     """Flat-field + per-channel background correction (+ smFISH LoG).
 
@@ -1717,7 +1754,18 @@ def _correct_image_group(
     the (flat-fielded) raws are what segmentation (watershed/cellpose) and the
     overlay image consume downstream, so the orchestrator must use these, not the
     originals.
+
+    *phase_token* designates the phase/brightfield channel: that channel skips
+    BOTH flat-field and background subtraction, so its ``nir_corr`` /
+    ``fluor_tophat`` entry is the untouched original — which the writer then
+    saves under the usual ``_tophat`` suffix. Background-correcting a
+    phase-contrast image is meaningless (and, in label-free mode, feeds Cellpose
+    a raw brightfield image, which is what its model expects).
     """
+    _ph = str(phase_token or "").strip().lower()
+
+    def _is_phase(token: str) -> bool:
+        return bool(_ph) and str(token or "").strip().lower() == _ph
     # ── Flat-field (illumination) + background correction ────────────────────
     # Normal order is flat-field (divide) → background (subtract). The one
     # exception is the proper *combined* empty-well model: when both flat-field
@@ -1748,9 +1796,13 @@ def _correct_image_group(
     # Flat-field up front for every channel, unless folded into the combined step.
     if flatfield_mode and flatfield_mode != "none" and not combined_ew:
         _t = time.perf_counter()
-        nir_raw = apply_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
-        fluor_raws = [apply_flatfield(f, _flatfield_for(tok, f))
-                      for f, tok in zip(fluor_raws, fluor_tokens)]
+        # Skip flat-field on the phase channel so its raw is left untouched.
+        if not _is_phase(nuclear_token):
+            nir_raw = apply_flatfield(nir_raw, _flatfield_for(nuclear_token, nir_raw))
+        fluor_raws = [
+            f if _is_phase(tok) else apply_flatfield(f, _flatfield_for(tok, f))
+            for f, tok in zip(fluor_raws, fluor_tokens)
+        ]
         log.info("  flatfield:   %.1f s  (mode=%s)", time.perf_counter() - _t, flatfield_mode)
 
     # Background subtraction per channel (gated by the top-hat toggle). In
@@ -1774,17 +1826,29 @@ def _correct_image_group(
             ff_field=_flatfield_for(token, img) if combined_ew else None)
 
     _t = time.perf_counter()
-    nir_corr = _correct(nir_raw, nuclear_token, tophat_radius_nir, tophat_nir,
-                        fft_small_nir)
-    log.info("  bg_nir:      %.1f s  (method=%s%s, radius %d, enabled=%s)",
-             time.perf_counter() - _t, background_method,
-             " +combined-empty_well" if combined_ew else "",
-             tophat_radius_nir, tophat_nir)
+    if _is_phase(nuclear_token):
+        # Phase channel: no correction — the raw is the output (resaved as-is).
+        nir_corr = nir_raw
+        log.info("  bg_nir:      skipped (phase channel %r — resaving original)",
+                 nuclear_token)
+    else:
+        nir_corr = _correct(nir_raw, nuclear_token, tophat_radius_nir, tophat_nir,
+                            fft_small_nir)
+        log.info("  bg_nir:      %.1f s  (method=%s%s, radius %d, enabled=%s)",
+                 time.perf_counter() - _t, background_method,
+                 " +combined-empty_well" if combined_ew else "",
+                 tophat_radius_nir, tophat_nir)
 
     fluor_tophat: list[np.ndarray] = []
     for i, (fraw, do_th, radius) in enumerate(
             zip(fluor_raws, tophat_fluor, tophat_radius_fluor)):
         _t = time.perf_counter()
+        if _is_phase(fluor_tokens[i]):
+            # Phase channel: no correction — pass the raw through unchanged.
+            fluor_tophat.append(fraw)
+            log.info("  bg_%s:  skipped (phase channel — resaving original)",
+                     fluor_tokens[i].lower())
+            continue
         fc = _correct(fraw, fluor_tokens[i], radius, do_th, fft_small_fluor[i])
         fluor_tophat.append(fc)
         log.info("  bg_%s:  %.1f s  (method=%s, radius %d, enabled=%s)",
@@ -2070,6 +2134,7 @@ def process_image_group(
     cellpose_flow_threshold: float = 0.4,
     cellpose_cellprob_threshold: float = 0.0,
     cellpose_nuclei_channel: str = "",
+    phase_token: str = "",
 ) -> list[dict]:
     """
     Process one nuclear image together with an arbitrary number of fluorescent
@@ -2080,6 +2145,9 @@ def process_image_group(
     *fluor_tokens*       : channel token strings (e.g. ["GFP", "mCherry"]).
     *tophat_fluor*       : per-channel top-hat enable flags.
     *tophat_radius_fluor*: per-channel top-hat radii.
+    *phase_token*        : if set, the channel with this token (nuclear or one
+                           of the fluor channels) skips ALL background correction
+                           and is resaved from the original image.
 
     Output CSV columns for each fluor channel are prefixed with the lower-cased
     token, e.g. "gfp_total_intensity", "mcherry_mean_intensity".
@@ -2095,6 +2163,7 @@ def process_image_group(
         flatfield_models=flatfield_models, background_method=background_method,
         background_models=background_models, smfish_tokens=smfish_tokens,
         mesh_ratio=mesh_ratio, mesh_sigma=mesh_sigma, schema=schema, sep=sep,
+        phase_token=phase_token,
     )
 
     labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask = (
@@ -2874,6 +2943,7 @@ def _process_groups_in_worker(
     shared_kwargs: dict,
     well_label: str,
     fov_threads: int = 1,
+    errors_dir: "Path | None" = None,
 ) -> "tuple[list[dict], list[str]]":
     """
     Process all image groups for one well within a single worker process.
@@ -2883,6 +2953,11 @@ def _process_groups_in_worker(
 
     *fov_threads* controls concurrent FOV processing via ThreadPoolExecutor.
     fov_threads=1 (default) is safe for any backend; >1 benefits multi-core CPU.
+
+    *errors_dir* is the persistent dataset output dir (NOT the ``tmp_images``
+    staging dir); a per-FOV-group failure trace is written under
+    ``<errors_dir>/errors/`` so "why did this timepoint fail?" has a durable
+    answer even when the live log is muted. When None, no trace file is written.
 
     Returns (records, failed_names).
 
@@ -2901,6 +2976,22 @@ def _process_groups_in_worker(
 
     all_records: list[dict] = []
     failed:      list[str]  = []
+
+    def _record_fov_failure(nuclear_path: Path, exc: BaseException) -> None:
+        """Persist a per-FOV traceback + log it as an error the GUI surfaces."""
+        trace_path = None
+        if errors_dir is not None:
+            trace_path = _dump_fov_failure_trace(
+                errors_dir, well_label, _fov_stem(nuclear_path), exc)
+        # Include the exception TYPE so the one-liner is self-explanatory and
+        # classify_log_line tags it ERROR (and point at the persisted trace).
+        log.error(
+            "FAILED %s (%s: %s); FOV trace -> %s",
+            nuclear_path.name, type(exc).__name__, exc,
+            trace_path if trace_path is not None else "<unwritable>",
+            exc_info=True,
+        )
+        failed.append(nuclear_path.name)
     # Per-well FOV-group progress, tagged with the well so the GUI can attribute
     # it correctly even when several wells process in parallel. One "image group"
     # = one FOV × timepoint.
@@ -2948,8 +3039,7 @@ def _process_groups_in_worker(
             try:
                 all_records.extend(_process_or_resume(nuclear_path, fluor_paths))
             except Exception as exc:           # noqa: BLE001
-                log.error("FAILED %s: %s", nuclear_path.name, exc, exc_info=True)
-                failed.append(nuclear_path.name)
+                _record_fov_failure(nuclear_path, exc)
             _fov_done += 1
             log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
     else:
@@ -2963,8 +3053,7 @@ def _process_groups_in_worker(
                 try:
                     all_records.extend(fut.result())
                 except Exception as exc:       # noqa: BLE001
-                    log.error("FAILED %s: %s", nuclear_path.name, exc, exc_info=True)
-                    failed.append(nuclear_path.name)
+                    _record_fov_failure(nuclear_path, exc)
                 _fov_done += 1
                 log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
 
@@ -2976,12 +3065,16 @@ def _process_groups_in_worker(
         # A plain re-run SKIPS this well (its CSV/zip exist); use --incremental to
         # reprocess only the missing FOV-groups (they are absent from the CSV
         # done-set) or --force to redo the whole well.
+        _err_hint = (
+            f" Per-FOV tracebacks in {errors_dir / 'errors'}."
+            if errors_dir is not None else ""
+        )
         log.warning(
             "Well %s — PARTIAL: %d of %d FOV-group(s) FAILED (%s). The per-well "
             "CSV / out.zip cover only the %d successful FOV-group(s). Re-run with "
-            "--incremental to recover the missing ones.",
+            "--incremental to recover the missing ones.%s",
             well_label, len(failed), _fov_total, ", ".join(failed),
-            _fov_total - len(failed),
+            _fov_total - len(failed), _err_hint,
         )
 
     return all_records, failed
@@ -3109,7 +3202,8 @@ def process_well_zip_task(
             )
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed = _process_groups_in_worker(groups, kwargs, well_label)
+            records, failed = _process_groups_in_worker(
+                groups, kwargs, well_label, errors_dir=output_dir)
 
             if incremental:
                 if records:
@@ -3254,7 +3348,8 @@ def process_well_folder_task(
                 # else: no prior CSV or outputs → new well → process all (full).
 
             kwargs = {**shared_kwargs_template, "output_dir": tmp_images}
-            records, failed = _process_groups_in_worker(groups, kwargs, well_label)
+            records, failed = _process_groups_in_worker(
+                groups, kwargs, well_label, errors_dir=output_dir)
 
             if incremental:
                 # Merge new rows / images into the existing well outputs.
@@ -4363,6 +4458,11 @@ def main() -> None:
         output_dir=output_dir,
         nuclear_token=args.nuclear_token,
         fluor_tokens=fluor_tokens_for_quant,
+        # The phase/brightfield channel (if any) skips background correction and
+        # is resaved from the original. For label-free, nuclear_token was already
+        # remapped onto this token above, so the same value flags the nuclear
+        # slot; for other methods it flags one of the fluor channels.
+        phase_token=phase_token.lower(),
         tophat_nir=not args.no_tophat_nir,
         tophat_radius_nir=args.tophat_radius_nir,
         tophat_fluor=tophat_fluor,

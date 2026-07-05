@@ -85,12 +85,14 @@ def build_pipeline_args(
     cytoplasm_token = (opts.get("cytoplasm_token") or "").strip()
     if segmentation_method == "stardist_seeded_watershed_cell" and cytoplasm_token:
         args += ["--cytoplasm_token", cytoplasm_token]
-    # The label-free preset segments the designated phase channel; main() applies
-    # the cyto3 brightfield preset, so the GUI sends only the phase token here.
-    if segmentation_method == "cellpose_labelfree":
-        phase_token = (opts.get("phase_token") or "").strip()
-        if phase_token:
-            args += ["--phase_token", phase_token]
+    # The phase token has two uses, so it is sent for ANY method when set:
+    #   * cellpose_labelfree — main() remaps it onto the nuclear slot (cyto3
+    #     brightfield preset) as the segmentation input;
+    #   * every method — the phase channel skips background correction and is
+    #     resaved from the original (see _correct_image_group phase passthrough).
+    phase_token = (opts.get("phase_token") or "").strip()
+    if phase_token:
+        args += ["--phase_token", phase_token]
     # General Cellpose: expose model + diameter + thresholds + optional nucleus
     # channel (works on a fluorescent or brightfield channel; no phase remap).
     if segmentation_method == "cellpose":

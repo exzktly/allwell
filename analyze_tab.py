@@ -378,6 +378,11 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
 
         smfish_cb = _pin_checkbox("smFISH")
         phase_cb = _pin_checkbox("Phase")
+        phase_cb.setToolTip(
+            "Mark this channel as phase/brightfield: it skips all background "
+            "correction and is resaved from the original image. With the "
+            "Label-free method it is also the Cellpose segmentation input."
+        )
         rl.addStretch(1)
 
         self._fluor_rows.append((edit, smfish_cb, phase_cb, remove_btn))

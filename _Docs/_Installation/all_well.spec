@@ -37,12 +37,22 @@ def pkg_dir(name: str) -> Path:
 _here = Path(SPECPATH)               # _Docs/_Installation/ — directory of this .spec  # noqa: F821
 _parent = _here.parent.parent        # repository root (two levels up)
 
+# Single source of truth for the app version (repo-root version.py). Loaded by
+# exec so the .spec doesn't depend on the repo root being importable at build
+# time. Bump version.py on a release; the bundle version tracks it automatically.
+_ver_ns: dict = {}
+exec((_parent / "version.py").read_text(), _ver_ns)
+APP_VERSION = _ver_ns["__version__"]
+
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
     (str(_parent / "analyze_tab.py"),           "."),
     (str(_parent / "process_microscopy.py"),    "."),
     (str(_parent / "WellPlateZipper.py"),       "."),
     (str(_parent / "theme.py"),                 "."),
+    # allwell.py is exec'd (not statically imported), so its `from version
+    # import __version__` isn't followed by PyInstaller — bundle version.py too.
+    (str(_parent / "version.py"),               "."),
 ]
 
 # Bundle every first-party package so module imports resolve at runtime
@@ -571,13 +581,13 @@ app = BUNDLE(   # noqa: F821
     name="AllWell.app",
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
-    version="7.4.16",
+    version=APP_VERSION,
     info_plist={
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription":
             "AllWell needs access to open microscopy data files.",
-        "CFBundleShortVersionString": "7.4.16",
-        "CFBundleVersion": "7.4.16",
+        "CFBundleShortVersionString": APP_VERSION,
+        "CFBundleVersion": APP_VERSION,
         "CFBundleName": "AllWell",
         "CFBundleDisplayName": "All Well",
         "CFBundleExecutable": "AllWell",

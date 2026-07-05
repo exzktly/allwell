@@ -660,14 +660,16 @@ class AnalyzeTabFormMixin:
         # needed so no block exceeds it. 0 = off (default).
         tile_row = self._row(sec, "Max tile size (px/side, 0=off)")
         self._stardist_tile_px_edit = self._entry(tile_row, "0", width=56)
-        tile_hint = QLabel(
-            "(Max pixels per tile side — NOT the tile count. 0 = whole frame at "
-            "once; 2048 → a 4096-px frame is split into a 2×2 grid. Smaller = "
-            "less RAM per worker, slightly slower.)",
-            tile_row)
-        tile_hint.setObjectName("Muted")
-        tile_hint.setWordWrap(True)
-        tile_row.layout().addWidget(tile_hint, 1)
+        tile_row.layout().addWidget(self._info_icon(
+            tile_row,
+            "Max pixels per tile SIDE for StarDist prediction — NOT the number "
+            "of tiles. StarDist splits the frame into as many tiles as needed so "
+            "no block exceeds this size, then stitches the result. 0 = off "
+            "(predict the whole frame at once). On large frames (~4K) an untiled "
+            "predict can use several GB per worker, so a few parallel workers "
+            "exhaust RAM; e.g. 2048 splits a 4096-px frame into a 2×2 grid, 1024 "
+            "into 4×4. Smaller = less RAM per worker, slightly slower."))
+        tile_row.layout().addStretch(1)
 
         self._cpu_only_cb = QCheckBox("CPU only (disable GPU)", sec)
         sec.layout().addWidget(self._cpu_only_cb)

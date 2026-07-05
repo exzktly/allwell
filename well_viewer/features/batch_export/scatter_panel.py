@@ -419,12 +419,26 @@ class ScatterBatchExportPanel(BatchExportPanel):
         try:
             used_names: set = set()
             used_ids: set = set()
-            sel.selections = [
+            selections = [
                 make_selection(name=m.name, wells=list(m.wells), source="rep_set",
                                used_names=used_names, used_ids=used_ids,
                                fallback_color_idx=i)
                 for i, m in enumerate(grp.members)
             ]
+            # Represent each solo well as its own single-well selection too.
+            # ``collect_scatter_data`` (shared with the on-tab plot) uses
+            # replicate-sets *or* the raw ``selected_wells`` — never both — so a
+            # group that mixes replicate sets with single wells would otherwise
+            # silently drop the single wells from the export. Making them
+            # single-member selections keeps them in the rep-set branch, matching
+            # this scope's documented intent (members + solo wells).
+            for j, w in enumerate(grp.solo_wells):
+                selections.append(
+                    make_selection(name=w, wells=[w], source="well",
+                                   used_names=used_names, used_ids=used_ids,
+                                   fallback_color_idx=len(grp.members) + j)
+                )
+            sel.selections = selections
             sel.current_selection_id = None
             sel.selected_wells = set(grp.solo_wells)
             yield

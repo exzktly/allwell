@@ -181,6 +181,12 @@ def build_pipeline_args(
             args += ["--workers", str(workers)]
     except (TypeError, ValueError):
         pass
+    try:
+        tile_px = int(opts.get("stardist_tile_px", 0) or 0)
+        if tile_px > 0:                      # 0 = off (default) → no flag
+            args += ["--stardist_tile_px", str(tile_px)]
+    except (TypeError, ValueError):
+        pass
 
     return args
 

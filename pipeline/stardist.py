@@ -51,14 +51,23 @@ _STARDIST_INPUT_CLIP = (0.0, 1.0)
 # (H×W×n_rays) distance array in one shot — several GB per worker — so a handful
 # of parallel workers exhaust host RAM (the "each worker eats ~8GB" symptom on
 # large microscopy frames). StarDist can process the frame in overlapping tiles
-# and stitch the result, which caps the peak at roughly one tile's worth. We tile
-# whenever a side exceeds ``_STARDIST_TILE_PX`` (so small frames stay untiled and
-# fast). Env-tunable: ``ALLWELL_STARDIST_TILE_PX`` (smaller = less RAM, a bit
-# slower; ``0`` disables tiling entirely).
-try:
-    _STARDIST_TILE_PX = int(os.environ.get("ALLWELL_STARDIST_TILE_PX", "2048"))
-except (TypeError, ValueError):
-    _STARDIST_TILE_PX = 2048
+# and stitch the result, which caps the peak at roughly one tile's worth.
+#
+# OFF by default (``0`` → no tiling, StarDist's native behaviour). The per-run
+# value is set by ``process_microscopy._worker_init`` from the ``--stardist_tile_px``
+# CLI arg (exposed in the Analyze GUI) via :func:`set_tile_px`. When set to N > 0,
+# a frame is tiled so no block exceeds N px per side; smaller N = less RAM, a bit
+# slower.
+_STARDIST_TILE_PX = 0
+
+
+def set_tile_px(tile_px: "int | None") -> None:
+    """Install the per-worker StarDist tiling threshold (px per side; 0 = off)."""
+    global _STARDIST_TILE_PX
+    try:
+        _STARDIST_TILE_PX = max(0, int(tile_px or 0))
+    except (TypeError, ValueError):
+        _STARDIST_TILE_PX = 0
 
 
 def _stardist_n_tiles(img: np.ndarray) -> "tuple[int, int] | None":

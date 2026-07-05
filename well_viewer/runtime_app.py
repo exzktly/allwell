@@ -337,8 +337,6 @@ class WellViewerApp(QWidget):
         # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
         # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
         # remain as @property shims further down.
-        self._rep_quick_pair_dir   = "row"
-        self._rep_quick_iter_order = "row"
         self._entry_edit = None
         self._cdf_xmin_edit = None
         self._cdf_xmax_edit = None
@@ -646,17 +644,17 @@ class WellViewerApp(QWidget):
     # ── Quick-group helpers (delegates to grouping_controller) ────────────────
 
     def _rep_quick_row_pairs(self) -> None:
-        self._rep_quick_pair_dir = "row"
-        self._rep_quick_iter_order = "row"
-        rep_quick_pairs(self)
+        self._ctx.runtime.grouping.pair_dir = "row"
+        self._ctx.runtime.grouping.iter_order = "row"
+        rep_quick_pairs(self._ctx)
 
     def _rep_quick_col_pairs(self) -> None:
-        self._rep_quick_pair_dir = "col"
-        self._rep_quick_iter_order = "col"
-        rep_quick_pairs(self)
+        self._ctx.runtime.grouping.pair_dir = "col"
+        self._ctx.runtime.grouping.iter_order = "col"
+        rep_quick_pairs(self._ctx)
 
 
-    def _rep_quick_pairs_from_dropdowns(self) -> None: return rep_quick_pairs_from_dropdowns(self)
+    def _rep_quick_pairs_from_dropdowns(self) -> None: return rep_quick_pairs_from_dropdowns(self._ctx)
 
     # ── Bar group persistence (delegates to well_viewer.persistence.bar_groups)
 

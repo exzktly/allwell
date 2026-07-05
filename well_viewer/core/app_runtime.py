@@ -157,5 +157,8 @@ class AppRuntime:
         # Sample-Definitions GROUPS-list transient scratch (prefix ``_grp_``): the
         # pending inline-rename row index (``ctx.runtime.grouping.inline_edit_idx``
         # <-> ``app._grp_inline_edit_idx``) the rename action sets and the panel
-        # refresh consumes. Session-only, never persisted.
+        # refresh consumes, and the Quick-Replicates dropdown state
+        # (``ctx.runtime.grouping.pair_dir`` / ``.iter_order`` <-> ``app._grp_pair_dir``
+        # / ``app._grp_iter_order``) the row/col-pair shims + the from-dropdowns
+        # reader thread through. Session-only, never persisted.
         object.__setattr__(self, "grouping", _FeatureRuntime(app, "_grp_"))

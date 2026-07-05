@@ -37,23 +37,25 @@ def make_replicate_pairs(toks):
     return sets
 
 
-def rep_quick_pairs(app) -> None:
+def rep_quick_pairs(ctx) -> None:
     """Generate quick replicate pairs using current dropdown selections."""
-    pair_dir = app._rep_quick_pair_dir
-    iter_order = app._rep_quick_iter_order
+    pair_dir = ctx.runtime.grouping.pair_dir or "row"
+    iter_order = ctx.runtime.grouping.iter_order or "row"
+    well_paths = ctx.state.dataset.well_paths
+    sel_state = ctx.state.selection
     new_sets = []
 
     if pair_dir == "row":
         if iter_order == "row":
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
-                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
+                          if f"{row_ltr}{col}" in well_paths]
                 new_sets.extend(make_replicate_pairs(loaded))
         else:
             by_col = {}
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
-                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
+                          if f"{row_ltr}{col}" in well_paths]
                 row_sets = make_replicate_pairs(loaded)
                 for s in row_sets:
                     if s.wells:
@@ -68,13 +70,13 @@ def rep_quick_pairs(app) -> None:
         if iter_order == "col":
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
-                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
+                          if f"{row_ltr}{col}" in well_paths]
                 new_sets.extend(make_replicate_pairs(loaded))
         else:
             by_row = {}
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
-                          if f"{row_ltr}{col}" in app._app_state.dataset.well_paths]
+                          if f"{row_ltr}{col}" in well_paths]
                 col_sets = make_replicate_pairs(loaded)
                 for s in col_sets:
                     if s.wells:
@@ -88,10 +90,10 @@ def rep_quick_pairs(app) -> None:
 
     if not new_sets:
         return
-    if app._app_state.selection.selections:
+    if sel_state.selections:
         resp = QMessageBox.question(
-            app, "Replace groups?",
-            f"This will replace the current {len(app._app_state.selection.selections)} group(s). Continue?",
+            ctx.window, "Replace groups?",
+            f"This will replace the current {len(sel_state.selections)} group(s). Continue?",
             QMessageBox.Yes | QMessageBox.No,
         )
         if resp != QMessageBox.Yes:
@@ -104,9 +106,9 @@ def rep_quick_pairs(app) -> None:
                            source="rep_set", used_names=used_names, used_ids=used_ids,
                            fallback_color_idx=i)
             for i, s in enumerate(new_sets)]
-    app._app_state.selection.selections = sels
-    app._app_state.selection.current_selection_id = sels[0]["id"] if sels else None
-    app._rebuild_all()
+    sel_state.selections = sels
+    sel_state.current_selection_id = sels[0]["id"] if sels else None
+    ctx.rebuild_all()
 
 
 def rep_add(ctx) -> None:
@@ -201,16 +203,17 @@ def rank_color_rset(ctx, rset) -> str:
 
 
 
-def rep_quick_pairs_from_dropdowns(app) -> None:
-    """Read dropdown values and update state, then call _rep_quick_pairs()."""
+def rep_quick_pairs_from_dropdowns(ctx) -> None:
+    """Read dropdown values and update state, then call rep_quick_pairs()."""
+    grp = ctx.runtime.grouping
+    pair_cb = ctx.widgets.get_or_none("_rep_quick_pair_dir_var")
+    iter_cb = ctx.widgets.get_or_none("_rep_quick_iter_order_var")
+    if pair_cb is None or iter_cb is None:
+        return
     # Map dropdown display values to internal values
-    pair_dir_display = app._rep_quick_pair_dir_var.currentText()
-    app._rep_quick_pair_dir = "row" if "Rows" in pair_dir_display else "col"
-
-    iter_order_display = app._rep_quick_iter_order_var.currentText()
-    app._rep_quick_iter_order = "row" if "Across" in iter_order_display else "col"
-
-    rep_quick_pairs(app)
+    grp.pair_dir = "row" if "Rows" in pair_cb.currentText() else "col"
+    grp.iter_order = "row" if "Across" in iter_cb.currentText() else "col"
+    rep_quick_pairs(ctx)
 
 
 

@@ -153,7 +153,8 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     app._rep_quick_pair_dir_cb.addItems(["Rows (A01+A02)", "Columns (A01+B01)"])
     app._rep_quick_pair_dir_cb.setCurrentText("Rows (A01+A02)")
     hdr2r_l.addWidget(app._rep_quick_pair_dir_cb)
-    app._rep_quick_pair_dir_var = app._rep_quick_pair_dir_cb
+    app._rep_quick_pair_dir_var = app._ctx.widgets.register(
+        "_rep_quick_pair_dir_var", app._rep_quick_pair_dir_cb)
 
     order_lbl = QLabel("Order:", hdr2r)
     hdr2r_l.addWidget(order_lbl)
@@ -161,7 +162,8 @@ def build_replicate_groups_centre(app, parent: QWidget) -> None:
     app._rep_quick_iter_order_cb.addItems(["Across rows", "Down columns"])
     app._rep_quick_iter_order_cb.setCurrentText("Across rows")
     hdr2r_l.addWidget(app._rep_quick_iter_order_cb)
-    app._rep_quick_iter_order_var = app._rep_quick_iter_order_cb
+    app._rep_quick_iter_order_var = app._ctx.widgets.register(
+        "_rep_quick_iter_order_var", app._rep_quick_iter_order_cb)
     hdr2r_l.addStretch(1)
     hdr2r_l.addWidget(btn_primary(hdr2r, "Apply Quick Replicates",
                                   app._rep_quick_pairs_from_dropdowns))

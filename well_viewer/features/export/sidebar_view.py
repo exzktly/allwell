@@ -274,7 +274,7 @@ class ExportStyleSidebar(QWidget):
                 # Restore the button once the one-shot draw completes.
                 if not on:
                     _b.setText("Draw gate")
-            self._app._scatter_gate_draw_sync = _sync_draw_toggle
+            self._app._ctx.runtime.scatter.gate_draw_sync = _sync_draw_toggle
             clear_btn = QPushButton("Clear gates")
             clear_btn.clicked.connect(lambda _=False: self._on_clear_gates())
             add_full(s_gates, clear_btn)
@@ -290,7 +290,7 @@ class ExportStyleSidebar(QWidget):
             self._rebuild_gate_list()
             # Keep the gate-count label + name list live when a gate is drawn on
             # the plot (gating.py calls this after appending/clearing a gate).
-            self._app._scatter_gate_count_cb = self._refresh_gate_count
+            self._app._ctx.runtime.scatter.gate_count_cb = self._refresh_gate_count
 
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
@@ -432,9 +432,9 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()  # was: pass (silent except)
 
-            if not hasattr(self._app, "_sem_observers"):
-                self._app._sem_observers = []
-            self._app._sem_observers.append(_sync_err_from_app)
+            if not self._app._ctx.runtime.sem.observers:
+                self._app._ctx.runtime.sem.observers = []
+            self._app._ctx.runtime.sem.observers.append(_sync_err_from_app)
 
         # Across: Replicates vs FOV (single-well-mode FOV-spread toggle).
         _across_init = "fov" if bool(getattr(self._app, "_use_fov_spread_active", lambda: False)()) else "rep"
@@ -473,9 +473,9 @@ class ExportStyleSidebar(QWidget):
                 except Exception:
                     swallowed()  # was: pass (silent except)
 
-            if not hasattr(self._app, "_fov_observers"):
-                self._app._fov_observers = []
-            self._app._fov_observers.append(_sync_across_from_app)
+            if not self._app._ctx.runtime.fov.observers:
+                self._app._ctx.runtime.fov.observers = []
+            self._app._ctx.runtime.fov.observers.append(_sync_across_from_app)
 
         # Show: Mean (bars only) / Mean+spread (bars + error bars) / All points
         # (overlay per-cell dots via the beeswarm path). Drives

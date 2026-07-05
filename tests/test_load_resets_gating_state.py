@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import types
 
+from well_viewer.core.app_runtime import AppRuntime
 from well_viewer.core.cell_gating_state import CellGatingState
 from well_viewer.core.load_controller import _reset_gating_state
 
@@ -15,6 +16,8 @@ def test_reset_clears_all_leaky_gating_attrs():
     # Epic-cellgating: the scatter-gate geometry + use-flags + per-layer gate
     # selections are typed state on ``ctx.state.cell_gating`` (joining the R6
     # gate values), so the swap-reset clears the slice, not loose app attrs.
+    # The per-cell include-override map is runtime scratch, reset through
+    # ``ctx.runtime.review.included_overrides``.
     cg = CellGatingState(
         scatter_gates=[{"name": "G1", "x0": 0}],
         use_scatter_gates=True,
@@ -22,8 +25,10 @@ def test_reset_clears_all_leaky_gating_attrs():
         gating_choices={"G1"},
         thresh_choices={"G1"},
     )
+    rt = AppRuntime()
+    rt.review.included_overrides = {"A01/0/1/5": False}
     app = types.SimpleNamespace(
-        _review_included_overrides={"A01/0/1/5": False},
+        _ctx=types.SimpleNamespace(runtime=rt),
         _app_state=types.SimpleNamespace(
             cell_gating=cg,
             heatmap=types.SimpleNamespace(active_layout_name="old-layout"),
@@ -33,7 +38,7 @@ def test_reset_clears_all_leaky_gating_attrs():
     _reset_gating_state(app)
 
     assert cg.scatter_gates == []
-    assert app._review_included_overrides == {}
+    assert rt.review.included_overrides == {}
     assert cg.use_scatter_gates is False
     assert cg.use_scatter_thresh is False
     assert cg.gating_choices is None

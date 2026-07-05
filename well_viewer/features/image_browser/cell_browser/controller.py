@@ -325,7 +325,7 @@ def on_cell_clicked(ctx, desc) -> None:
         refresh_review_image_ctx(ctx)
         # The TP menu now holds the target FOV's timepoints; setting it fires
         # currentIndexChanged → refresh, rendering the correct frame.
-        tp_cb = getattr(ctx.window, "_review_image_tp_cb", None)
+        tp_cb = ctx.runtime.review_image.tp_cb
         if tp_cb is not None and tp_norm:
             tp_cb.setCurrentText(tp_norm)
         # Centre + zoom on the highlighted cell so it's actually visible.

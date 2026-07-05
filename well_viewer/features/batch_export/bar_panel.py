@@ -205,7 +205,7 @@ class BarBatchExportPanel(BatchExportPanel):
         # the dropdown's display label — translate ratio labels first so
         # the bar plot draws against the user-configured ThreshFracOn
         # instead of the 50.0 default.
-        threshold = _get_thresh_frac_on(self._ctx, 
+        threshold = _get_thresh_frac_on(self._ctx,
             self._resolved_channel_key(_ch_selected)
         )
         use_sem = self._ctx.state.plot.use_sem

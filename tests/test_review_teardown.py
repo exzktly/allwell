@@ -8,12 +8,15 @@ from __future__ import annotations
 import threading
 import types
 
+from well_viewer.core.app_runtime import AppRuntime
 from well_viewer.runtime_app import teardown_review_pane
 
 
 def test_teardown_sets_smfish_cancel_event():
     ev = threading.Event()
-    app = types.SimpleNamespace(_smfish_cancel_event=ev, _split_focus_filter=None)
+    rt = AppRuntime()
+    rt.smfish.cancel_event = ev
+    app = types.SimpleNamespace(_ctx=types.SimpleNamespace(runtime=rt))
     teardown_review_pane(app)
     assert ev.is_set()
 

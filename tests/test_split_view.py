@@ -5,7 +5,7 @@ Pins the load-bearing invariants:
    back to the original add order (the reparenting primitive).
 2. ``install_split_view`` registers the provider hooks + entry-UI widgets, and
    ``enter_split`` / ``exit_split`` reparent two top-level pages into
-   ``app._split_pane`` and back. While split, ``visible_centre_tabs`` reports
+   ``app._ctx.runtime.split.pane`` and back. While split, ``visible_centre_tabs`` reports
    both panes and ``current_centre_tab`` the focused one.
 3. **Removability:** without ``install_split_view`` the provider hooks stay
    ``None`` and the resolvers collapse to single-tab — the app behaves exactly
@@ -132,7 +132,7 @@ def test_not_installed_is_single_tab():
     app, _, _ = _split_app(install=False)
     assert tc.split_visible_provider is None
     assert tc.split_focus_provider is None
-    assert getattr(app, "_split_toggle_btn", None) is None
+    assert app._ctx.runtime.split.toggle_btn is None
     assert tc.visible_centre_tabs(app._ctx) == {tc.current_centre_tab(app._ctx)}
     assert len(tc.visible_centre_tabs(app._ctx)) == 1
 
@@ -144,8 +144,8 @@ def test_install_registers_hooks_and_widgets():
     assert tc.split_visible_provider is not None
     assert tc.split_focus_provider is not None
     assert tc.split_nav_intercept is not None
-    assert getattr(app, "_split_toggle_btn", None) is not None
-    assert getattr(app, "_split_pane", None) is not None
+    assert app._ctx.runtime.split.toggle_btn is not None
+    assert app._ctx.runtime.split.pane is not None
 
 
 def test_enter_split_reparents_and_reports_both_panes():
@@ -155,8 +155,8 @@ def test_enter_split_reparents_and_reports_both_panes():
     app, st, _ = _split_app()
     sv.enter_split(app, "Plotting", "Saved Plots")
 
-    assert app._split_active is True
-    assert app._split_pane.count() == 2
+    assert app._ctx.runtime.split.active is True
+    assert app._ctx.runtime.split.pane.count() == 2
     assert st.pageNames() == ["Statistics"]          # the two panes detached
     assert tc.visible_centre_tabs(app._ctx) == {"Plotting", "Saved Plots"}
     assert tc.is_tab_visible(app._ctx, "Saved Plots")
@@ -170,8 +170,8 @@ def test_exit_split_restores_notebook_order():
     sv.enter_split(app, "Plotting", "Saved Plots")
     sv.exit_split(app)
 
-    assert app._split_active is False
-    assert app._split_pane.count() == 0
+    assert app._ctx.runtime.split.active is False
+    assert app._ctx.runtime.split.pane.count() == 0
     assert st.pageNames() == ["Plotting", "Statistics", "Saved Plots"]
     assert st.setCurrentByName("Plotting") is True
 
@@ -181,7 +181,7 @@ def test_enter_split_same_tab_is_noop():
 
     app, st, _ = _split_app()
     sv.enter_split(app, "Plotting", "Plotting")
-    assert app._split_active is False
+    assert app._ctx.runtime.split.active is False
     assert st.pageNames() == ["Plotting", "Statistics", "Saved Plots"]
 
 
@@ -193,7 +193,7 @@ def test_focus_split_switches_focused_pane():
     sv.enter_split(app, "Plotting", "Saved Plots")
     assert tc.current_centre_tab(app._ctx) == "Plotting"
     sv.focus_split(app, "Saved Plots")
-    assert app._split_focused == "Saved Plots"
+    assert app._ctx.runtime.split.focused == "Saved Plots"
     assert tc.current_centre_tab(app._ctx) == "Saved Plots"
 
 
@@ -214,16 +214,16 @@ def test_real_app_enter_exit_split(loaded_app):
     app._notebook.setCurrentByName("Plotting")
     sv.enter_split(app, "Plotting", "Statistics")
 
-    assert app._split_active is True
-    assert app._split_pane.count() == 2
+    assert app._ctx.runtime.split.active is True
+    assert app._ctx.runtime.split.pane.count() == 2
     visible = tc.visible_centre_tabs(app._ctx)
     assert "Statistics" in visible
     assert visible & _PLOT_LEAVES               # Plotting resolved to a plot leaf
     assert app._current_centre_tab() in _PLOT_LEAVES  # pane A focused
 
     sv.exit_split(app)
-    assert app._split_active is False
-    assert app._split_pane.count() == 0
+    assert app._ctx.runtime.split.active is False
+    assert app._ctx.runtime.split.pane.count() == 0
     assert "Plotting" in app._notebook.pageNames()
     assert "Statistics" in app._notebook.pageNames()
 
@@ -237,12 +237,12 @@ def test_dataset_reload_exits_split(loaded_app, mini_dataset):
     app = loaded_app
     app._notebook.setCurrentByName("Plotting")
     sv.enter_split(app, "Plotting", "Image Browser")
-    assert app._split_active is True
+    assert app._ctx.runtime.split.active is True
 
     app._load_path(mini_dataset)  # reopen the same dataset
 
-    assert app._split_active is False
-    assert app._split_pane.count() == 0
+    assert app._ctx.runtime.split.active is False
+    assert app._ctx.runtime.split.pane.count() == 0
     # Notebook restored intact — no detached/dangling pages.
     assert "Plotting" in app._notebook.pageNames()
     assert "Image Browser" in app._notebook.pageNames()

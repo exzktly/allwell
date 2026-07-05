@@ -35,14 +35,14 @@ def test_pending_bar_timepoints_survive_tab_activation(loaded_app):
     # dataset before it activates the saved tab.
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Bar Plots")
-    app._view_state_pending = {
+    app._ctx.runtime.view_state.pending = {
         "Bar Plots": {"timepoint_selections": {s: True for s in tp_strs}},
     }
 
     # Drive the real centre-tab dispatcher (what view_state._activate_tab triggers
     # via the notebook change on load). _last_tab_name differs so it's a real
     # transition into Bar Plots: populate menu -> draw -> restore pending -> redraw.
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     on_tab_change(app._ctx)
 
     # The renderer's authoritative timepoint source must reflect the restored
@@ -50,4 +50,4 @@ def test_pending_bar_timepoints_survive_tab_activation(loaded_app):
     # pending entry must have been consumed.
     resolved = {s for _f, s in resolve_bar_timepoints(app._ctx)}
     assert resolved == set(tp_strs), (resolved, tp_strs)
-    assert not (app._view_state_pending or {}).get("Bar Plots")
+    assert not (app._ctx.runtime.view_state.pending or {}).get("Bar Plots")

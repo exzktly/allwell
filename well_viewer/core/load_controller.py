@@ -139,7 +139,7 @@ def _reset_gating_state(app) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
-    app._review_included_overrides = {}
+    app._ctx.runtime.review.included_overrides = {}
     app._app_state.heatmap.active_layout_name = None
 
 
@@ -180,7 +180,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # the normal single-notebook layout — the detached split panes break it.
     # Guarded so the feature stays one-line removable (``_split_active`` is never
     # set when split_view isn't installed).
-    if getattr(app, "_split_active", False):
+    if app._ctx.runtime.split.active:
         from well_viewer.core.split_view import (
             exit_split, sync_split_toggle_button,
         )
@@ -234,7 +234,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # Signal any in-flight smFISH "Apply to All" worker to abort so
     # it doesn't overwrite the *new* dataset's CSVs with counts
     # computed against the previous dataset.
-    smfish_cancel = getattr(app, "_smfish_cancel_event", None)
+    smfish_cancel = app._ctx.runtime.smfish.cancel_event
     if smfish_cancel is not None:
         try:
             smfish_cancel.set()

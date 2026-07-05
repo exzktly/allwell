@@ -611,7 +611,7 @@ def _activate_tab(ctx, name: str) -> None:
                 sub.setCurrentByName(name)
         elif name in _IMAGE_BROWSER_SUBTABS:
             outer.setCurrentByName("Image Browser")
-            sub = getattr(ctx.window, "_image_browser_subtabs", None)
+            sub = ctx.runtime.image_browser.subtabs
             if sub is not None:
                 for i in range(sub.count()):
                     if sub.tabText(i) == name:
@@ -1165,7 +1165,7 @@ def reset(app) -> None:
     _reset_distribution(app)
     _reset_scatter(app)
     # Drop any pending state stashed from a previous restore.
-    app._view_state_pending = None
+    app._ctx.runtime.view_state.pending = None
     # Drop the view_state section so a fresh open doesn't repopulate.
     if app._app_state.dataset.data_dir:
         try:

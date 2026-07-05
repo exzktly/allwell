@@ -22,15 +22,15 @@ def test_cell_browser_tab_builds_and_registers(loaded_app):
 
     # Centre widgets wired.
     assert getattr(app, "_cell_browser_grid", None) is not None
-    assert getattr(app, "_cell_browser_loader", None) is not None
-    assert getattr(app, "_cell_browser_state", None) is not None
+    assert app._ctx.runtime.cell_browser.loader is not None
+    assert app._ctx.runtime.cell_browser.state is not None
 
     # Sidebar frame is shown on this tab and its builder ran.
     assert app._sidebar_cell_browser_frame.isVisibleTo(app._sidebar_cell_browser_frame.parent())
-    assert hasattr(app, "_cell_browser_criteria_rows")
+    assert app._ctx.runtime.cell_browser.criteria_rows is not None
 
     # Channel chips populated from the dataset's fluor channels.
-    chips = getattr(app, "_cell_browser_channel_chips", {})
+    chips = (app._ctx.runtime.cell_browser.channel_chips or {})
     assert set(chips) == set(app._app_state.channel.fluor_channels or [])
 
 
@@ -43,7 +43,7 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
 
     from well_viewer.features.image_browser.cell_browser.tab_view import cell_browser_refresh
 
-    built = set(getattr(app, "_cell_browser_channel_chips", {}))
+    built = set((app._ctx.runtime.cell_browser.channel_chips or {}))
     assert built, "expected the bar to build from the dataset's channels"
 
     # Force the next resolve to come back empty (fluor list AND data both empty).
@@ -56,7 +56,7 @@ def test_cell_browser_bar_survives_empty_refresh(loaded_app):
         app._get_rows = real_get_rows
 
     # The bar must still be intact — not blanked.
-    assert set(getattr(app, "_cell_browser_channel_chips", {})) == built
+    assert set((app._ctx.runtime.cell_browser.channel_chips or {})) == built
 
 
 def test_cell_browser_section_icon_registered(viewer_app):
@@ -115,7 +115,7 @@ def test_cell_browser_click_sets_normalized_timepoint(loaded_app):
 
     fov_rec, tp_rec = _Rec(), _Rec()
     app._preview_fov_cb = fov_rec
-    app._review_image_tp_cb = tp_rec
+    app._ctx.runtime.review_image.tp_cb = tp_rec
 
     ctl.on_cell_clicked(app._ctx, cell)
 
@@ -135,7 +135,7 @@ def test_cell_browser_apply_filters_no_criteria(loaded_app):
     # No criteria + all timepoints/FOVs selected → every cell in the selected
     # wells qualifies. apply_filters must populate the state without raising.
     ctl.apply_filters(app._ctx)
-    st = app._cell_browser_state
+    st = app._ctx.runtime.cell_browser.state
     assert isinstance(st.cells, list)
     # loaded advances by at most one page; never exceeds the total.
     assert 0 <= st.loaded <= len(st.cells)

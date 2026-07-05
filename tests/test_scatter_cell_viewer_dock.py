@@ -34,7 +34,7 @@ def test_cell_viewer_slides_into_scatter_dock(loaded_app):
     assert dock is not None
 
     app._open_scatter_cell_viewer("A01", "", "1", 0)
-    viewer = app._scatter_cell_viewer
+    viewer = app._ctx.runtime.scatter.cell_viewer
     assert viewer is not None
     # The viewer lives inside the shared dock and is the visible panel.
     assert viewer.parentWidget() is dock
@@ -49,7 +49,7 @@ def test_cell_viewer_and_properties_are_mutually_exclusive(loaded_app):
 
     # Open the cell viewer first.
     app._open_scatter_cell_viewer("A01", "", "1", 0)
-    viewer = app._scatter_cell_viewer
+    viewer = app._ctx.runtime.scatter.cell_viewer
     assert not viewer.isHidden()
 
     # Opening the Properties / Export-Style sidebar hides the cell viewer

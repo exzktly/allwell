@@ -105,11 +105,11 @@ def test_gate_stays_live_as_wells_are_added_and_removed(loaded_app):
     wells = list(app._app_state.dataset.well_paths.keys())
     assert len(wells) >= 3
     _enter_split(app)
-    app._cell_browser_state.scatter_gate_mode = True
+    app._ctx.runtime.cell_browser.state.scatter_gate_mode = True
     app._app_state.cell_gating.scatter_gates = [
         {"x_col": "gfp_mean_intensity", "y_col": "gfp_mean_intensity",
          "x0": -1e12, "x1": 1e12, "y0": -1e12, "y1": 1e12, "name": "G1"}]
-    app._cell_browser_gate_choices = None
+    app._ctx.runtime.cell_browser.gate_choices = None
 
     def scope():
         return sorted({c.well for c in collect_cells(app._ctx, [], live_sync=True)})

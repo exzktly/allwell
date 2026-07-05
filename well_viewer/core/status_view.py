@@ -151,9 +151,9 @@ def build_bottom(app) -> None:
 
     # Keep the band chip in lock-step with every SEM/SD toggle (from any
     # toolbar), and seed both chips for the current state.
-    if not getattr(app, "_sem_observers", None):
-        app._sem_observers = []
-    app._sem_observers.append(lambda _is_sem: refresh_status_chips(app._ctx))
+    if not app._ctx.runtime.sem.observers:
+        app._ctx.runtime.sem.observers = []
+    app._ctx.runtime.sem.observers.append(lambda _is_sem: refresh_status_chips(app._ctx))
     refresh_status_chips(app._ctx)
 
 

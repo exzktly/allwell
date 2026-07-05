@@ -333,7 +333,7 @@ def _on_review_csv_row_double_click_impl(ctx, item) -> None:
     # triggers refresh_review_image via currentIndexChanged, which renders
     # the correct frame with the highlight already in place.
     if tp:
-        tp_cb = getattr(ctx.window, "_review_image_tp_cb", None)
+        tp_cb = ctx.runtime.review_image.tp_cb
         if tp_cb is not None:
             tp_cb.setCurrentText(tp)
 

@@ -337,10 +337,10 @@ def image_table_app(loaded_app):
     app = loaded_app
     # Image Browser is a lazy-only centre tab (built on first user click, not by
     # the background drain), so force its parent build, then the sub-tab.
-    build_pending = getattr(app, "_centre_build_pending", None)
+    build_pending = app._ctx.runtime.centre.build_pending
     if build_pending is not None:
         build_pending("Image Browser")
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = app._ctx.runtime.image_browser.subtabs
     assert sub is not None, "Image Browser parent tab was not built"
     idx = next((i for i in range(sub.count())
                 if sub.tabText(i) == "Image Table"), None)

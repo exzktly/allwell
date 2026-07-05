@@ -15,7 +15,7 @@ def _build_image_table(app):
     """Drive the lazy Image Browser → Image Table build like a real user, so
     ``_image_table_selector_grid`` and friends exist."""
     app._notebook.setCurrentByName("Image Browser")
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = app._ctx.runtime.image_browser.subtabs
     assert sub is not None, "Image Browser container should build on navigation"
     for i in range(sub.count()):
         if sub.tabText(i) == "Image Table":
@@ -27,7 +27,7 @@ def _build_image_table(app):
 
 
 def _dims(app):
-    cells = app._image_table_cells
+    cells = app._ctx.runtime.image_table.cells
     return len(cells), (len(cells[0]) if cells else 0)
 
 
@@ -83,5 +83,5 @@ def test_add_varied_col_appends_and_clones(loaded_app):
     rows1, cols1 = _dims(app)
     assert (rows1, cols1) == (rows0, cols0 + 1)
     # New last column has the chosen channel in every row.
-    for row in app._image_table_cells:
+    for row in app._ctx.runtime.image_table.cells:
         assert row[-1]["chan_cb"].currentText() == chans[0]

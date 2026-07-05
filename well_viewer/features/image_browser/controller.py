@@ -38,7 +38,7 @@ _logger = logging.getLogger("well_viewer")
 
 def image_browser_current_subtab(app) -> str:
     """Leaf name of the active Image Browser sub-tab ("" when none/unbuilt)."""
-    sub = getattr(app, "_image_browser_subtabs", None)
+    sub = app._ctx.runtime.image_browser.subtabs
     if sub is None or sub.count() == 0:
         return ""
     try:

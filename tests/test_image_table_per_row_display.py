@@ -20,8 +20,8 @@ def test_lut_table_is_per_row_not_per_channel(image_table_app):
     # rows = wells, cols = timepoints -> each row is the same single channel,
     # so a per-channel table would collapse to one box; per-row keeps one each.
     C.image_table_apply_preset(app._ctx, "well", "timepoint")
-    cells = app._image_table_cells
-    luts = app._image_table_lut
+    cells = app._ctx.runtime.image_table.cells
+    luts = app._ctx.runtime.image_table.lut
     assert set(luts) == set(range(len(cells))), "one LUT/Display box per grid row"
 
     # Per-row min/max are independent.
@@ -36,7 +36,7 @@ def test_generate_runs_with_per_row_display(image_table_app):
     app = image_table_app
     C.image_table_repopulate_dropdowns(app._ctx)
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    luts = app._image_table_lut
+    luts = app._ctx.runtime.image_table.lut
     assert luts
     # Switch row 0 to the Corrected (top-hat) source only, then render — must
     # not raise and must read row 0's option (True) independently of the others.
@@ -55,7 +55,7 @@ def test_per_row_controls_do_not_auto_generate(image_table_app, monkeypatch):
     app = image_table_app
     ic.image_table_repopulate_dropdowns(app._ctx)
     ic.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    luts = app._image_table_lut
+    luts = app._ctx.runtime.image_table.lut
     assert luts
 
     calls = []
@@ -68,7 +68,7 @@ def test_per_row_controls_do_not_auto_generate(image_table_app, monkeypatch):
         if luts[r]["binary"].itemData(i) == "mask":
             luts[r]["binary"].setCurrentIndex(i)
             break
-    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", [])
+    color_cbs = (app._ctx.runtime.image_table.row_lut_color_cbs or [])
     if color_cbs:
         try:
             color_cbs[r].setLut("viridis", reversed=False)

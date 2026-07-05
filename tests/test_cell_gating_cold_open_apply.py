@@ -30,8 +30,8 @@ def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
 
     app1._cell_gating_fluor_gate_edits[ch].setText("130")
     cg.cell_gating_on_gating_change(app1._ctx)
-    if app1._cell_gating_worker:
-        app1._cell_gating_worker.wait()
+    if app1._ctx.runtime.cell_gating.worker:
+        app1._ctx.runtime.cell_gating.worker.wait()
     gated = int(df_included_mask(app1._get_rows(well)).sum())
     assert gated < base, "gate should filter in the first session"
 
@@ -39,7 +39,7 @@ def test_fluor_gate_applies_on_cold_open(qtbot, mini_dataset):
     # without the user re-toggling.
     app2 = WellViewerApp()
     app2._load_path(mini_dataset)
-    if getattr(app2, "_cell_gating_worker", None):
-        app2._cell_gating_worker.wait()
+    if app2._ctx.runtime.cell_gating.worker:
+        app2._ctx.runtime.cell_gating.worker.wait()
     assert float(app2._cell_gating_fluor_gate_edits[ch].text()) == 130.0
     assert int(df_included_mask(app2._get_rows(well)).sum()) == gated

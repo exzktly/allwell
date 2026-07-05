@@ -46,7 +46,7 @@ from PySide6.QtCore import (
     QTimer, Signal,
 )
 from PySide6.QtWidgets import (
-    QApplication, QFileDialog, QMainWindow, QRubberBand, QWidget,
+    QApplication, QFileDialog, QMainWindow, QWidget,
 )
 
 import pandas as pd
@@ -213,7 +213,9 @@ def teardown_review_pane(app) -> None:
     """
     if app is None:
         return
-    ev = getattr(app, "_smfish_cancel_event", None)
+    ctx = getattr(app, "_ctx", None)
+    runtime = getattr(ctx, "runtime", None) if ctx is not None else None
+    ev = runtime.smfish.cancel_event if runtime is not None else None
     if ev is not None:
         try:
             ev.set()
@@ -221,7 +223,7 @@ def teardown_review_pane(app) -> None:
             _logger.debug("teardown: smFISH cancel event set failed", exc_info=True)
     # Supersede any in-flight Cell Browser loader (audit E22) so its daemon
     # thread stops reading the zipfile cache once the pane is going away.
-    loader = getattr(app, "_cell_browser_loader", None)
+    loader = runtime.cell_browser.loader if runtime is not None else None
     if loader is not None:
         try:
             loader.cancel()
@@ -257,15 +259,20 @@ class WellViewerApp(QWidget):
         self._app_state = AppState()
         attach_feature_state(self._app_state, self._features)
         self._event_bus = EventBus()
+        # One ``name -> object`` attribute store shared by the widget registry
+        # and the runtime namespaces (A8 T6): a handle registered as
+        # ``_<feature>_<name>`` stays reachable through both ``ctx.widgets`` and
+        # ``ctx.runtime.<feature>.<name>``, exactly as when both stamped one
+        # ``self.__dict__``. Plain session storage, not a god-object handle.
+        self._attr_store: dict = {}
         # Name-keyed store for Qt widget handles. Tab builders register their
-        # figures / canvases / axes here; ``__getattr__`` (below) forwards
-        # legacy ``app._<widget>`` reads to it so reader call sites are
-        # untouched while writers migrate tab by tab.
-        self._widget_registry = WidgetRegistry(self)
+        # figures / canvases / axes here; ``register`` also stamps the handle
+        # onto ``self`` so the residual direct ``app._<widget>`` readers resolve.
+        self._widget_registry = WidgetRegistry(self, store=self._attr_store)
         # Per-feature live-object namespaces (workers, decoded arrays, popup
-        # figures) — A8 teardown T2. Stamps app._<feature>_<name> so legacy
-        # readers resolve while builders write through ctx.runtime.
-        self._runtime = AppRuntime(self)
+        # figures) — A8 teardown T2/T6. Builders write through ctx.runtime; the
+        # holder owns only the shared store above (no app reference).
+        self._runtime = AppRuntime(store=self._attr_store)
         # The dependency-injection context handed to tab builders and
         # controllers in place of ``self``. Bundles the typed state, the bus,
         # the widget registry, and the runtime namespaces. No ``app`` escape
@@ -278,6 +285,16 @@ class WellViewerApp(QWidget):
             runtime=self._runtime,
             _window=self,
         )
+        # A8 T6: the runtime store no longer forwards to the app via ``getattr``,
+        # so the residual god-object callbacks that other layers still invoke
+        # through the runtime namespace are wired here as explicit live handles
+        # (the namespace's documented purpose). These four are the last method
+        # reach-throughs pending the god-method decomposition roadmap: the stats
+        # results-panel Run / Property actions and the barplot key/label helpers.
+        self._runtime.stats.run = self._stats_run
+        self._runtime.stats.property_change = self._stats_property_change
+        self._runtime.barplot.current_keys = self._bar_current_keys
+        self._runtime.barplot.well_display_label = self._bar_well_display_label
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)
         # Phase 4 teardown: one debounce path + save/load dispatch for the
@@ -298,12 +315,12 @@ class WellViewerApp(QWidget):
         # Heatmap layouts: arbitrary R×C grids decoupled from the physical
         # 8×12 plate. When empty, the heatmap controller synthesizes a plate
         # layout on the fly.
-        self._heatmap_layouts: List = []
+        self._runtime.heatmap.layouts = []
 
         # Per-tab view-state values waiting to apply on first tab visit
         # (populated by view_state.load_from_data_dir, drained by
         # _on_tab_change → view_state.apply_pending_tab_state).
-        self._view_state_pending: Optional[dict] = None
+        self._runtime.view_state.pending = None
 
         # Plot controls — widgets are assigned in _build_ui; keep placeholders
         # until then so callers can inspect default state. Plot options
@@ -312,15 +329,15 @@ class WellViewerApp(QWidget):
         # The button/observer lists below stay here: they are widget handles,
         # not state. attach_plot_toolbar() registers each SEM button in
         # _sem_btns, so these must exist BEFORE any plot tab is built.
-        self._sem_btns: List = []
-        self._sem_btn = None
+        self._runtime.sem.btns = []
+        self._runtime.sem.btn = None
         # Observers notified after _toggle_sem flips the state — for v2 widgets
         # (e.g. the Statistics SegmentedControl in ExportStyleSidebar) that don't
         # share the QPushButton API _sem_btns assumes.
-        self._sem_observers: List = []   # callables (use_sem: bool) -> None
-        self._fov_btns: List = []
-        self._fov_btn = None
-        self._fov_observers: List = []   # callables (use_fov: bool) -> None
+        self._runtime.sem.observers = []   # callables (use_sem: bool) -> None
+        self._runtime.fov.btns = []
+        self._runtime.fov.btn = None
+        self._runtime.fov.observers = []   # callables (use_fov: bool) -> None
         # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
         self._plot_chan_cb = None
         self._review_image_chan_cb = None
@@ -328,10 +345,10 @@ class WellViewerApp(QWidget):
         self._bar_swarm_cb = None
         self._bar_violin_cb = None
         self._violin_bw_edit = None
-        self._bar_ylim_mean_lo_edit = None
-        self._bar_ylim_mean_hi_edit = None
-        self._bar_ylim_frac_lo_edit = None
-        self._bar_ylim_frac_hi_edit = None
+        self._runtime.barplot.ylim_mean_lo_edit = None
+        self._runtime.barplot.ylim_mean_hi_edit = None
+        self._runtime.barplot.ylim_frac_lo_edit = None
+        self._runtime.barplot.ylim_frac_hi_edit = None
         # Draw order and fold-change normalization state live in
         # ``self._app_state.plot`` (well_viewer/state/plot.py) — see the shims.
         # Plate selection and the unified saved-selections ("v2") model now
@@ -352,20 +369,20 @@ class WellViewerApp(QWidget):
         # (well_viewer/state/review_image.py); see the @property shims below.
         # Widget handles and the lazily-built montage arrays stay here.
         self._preview_fov_cb = None
-        self._review_image_tp_cb = None
+        self._runtime.review_image.tp_cb = None
         # Rubber-band rectangle for box-delete in include-edit mode; the
         # QRubberBand is parented to _review_image_label so it scrolls with
         # the image. Coordinates convert to mask-array space at release time.
-        self._review_image_rubber_band: Optional[QRubberBand] = None
-        self._review_included_overrides: Dict[Tuple[str, str, str, str], str] = {}
-        self._review_csv_lookup_context: Dict[str, str] = {}
+        self._runtime.review_image.rubber_band = None
+        self._runtime.review.included_overrides = {}
+        self._runtime.review.csv_lookup_context = {}
         # Notes sub-tab text buffer now lives in the typed selection slice
         # (self._app_state.selection.notes_text). Data-dir autosave debouncing
         # lives in the PersistenceRegistry (self._persistence, built below).
-        self._review_image_source_seg = None
-        self._review_image_color_swatches: Dict[str, object] = {}
-        self._review_image_binary_btn = None
-        self._review_image_outline_btn = None
+        self._runtime.review_image.source_seg = None
+        self._runtime.review_image.color_swatches = {}
+        self._runtime.review_image.binary_btn = None
+        self._runtime.review_image.outline_btn = None
 
         from well_viewer.core.app_shell_view import build_ui
         build_ui(self)

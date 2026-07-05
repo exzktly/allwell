@@ -32,7 +32,7 @@ def test_build_does_not_render(image_table_app):
     # rows=channels, cols=timepoints
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
     # Selector grid was built…
-    assert app._image_table_cells, "Build should assemble the selector grid"
+    assert app._ctx.runtime.image_table.cells, "Build should assemble the selector grid"
     # …but no images were rendered (Build must not auto-generate).
     assert not app._app_state.image_table.last_render
 
@@ -45,7 +45,7 @@ def test_display_options_are_per_row(image_table_app):
     app = image_table_app
     C.image_table_repopulate_dropdowns(app._ctx)
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    luts = app._image_table_lut or {}
+    luts = app._ctx.runtime.image_table.lut or {}
     assert luts, "per-row LUT/Display boxes should exist after a build"
     # Each row has its own source/boundaries/binary widgets.
     for r, entry in luts.items():
@@ -69,15 +69,15 @@ def _row_values(app, dim):
     key = {"channel": "chan_cb", "timepoint": "tp_cb",
            "fov": "fov_cb", "well": "well_cb"}[dim]
     return [[cell[key].currentText().strip() for cell in row]
-            for row in app._image_table_cells]
+            for row in app._ctx.runtime.image_table.cells]
 
 
 def test_add_row_uniform_clones_and_varies_channel(image_table_app):
     app = image_table_app
     C.image_table_repopulate_dropdowns(app._ctx)
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    n0 = len(app._image_table_cells)
-    cols0 = len(app._image_table_cells[0])
+    n0 = len(app._ctx.runtime.image_table.cells)
+    cols0 = len(app._ctx.runtime.image_table.cells[0])
     tps_before = _row_values(app, "timepoint")
 
     # Add a row cloned from row 1, uniformly set to a chosen channel.
@@ -86,8 +86,8 @@ def test_add_row_uniform_clones_and_varies_channel(image_table_app):
     C.image_table_add_varied_row(
         app._ctx, src_idx=0, dim="channel", mode="uniform", value=target)
 
-    assert len(app._image_table_cells) == n0 + 1
-    new_row = app._image_table_cells[-1]
+    assert len(app._ctx.runtime.image_table.cells) == n0 + 1
+    new_row = app._ctx.runtime.image_table.cells[-1]
     # whole new row carries the chosen channel…
     assert all(cell["chan_cb"].currentText().strip() == target for cell in new_row)
     # …but the other dimension (timepoints) is copied from the source row.
@@ -128,7 +128,7 @@ def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
     app = image_table_app
     C.image_table_repopulate_dropdowns(app._ctx)
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    cells = app._image_table_cells
+    cells = app._ctx.runtime.image_table.cells
     assert cells
     # Synthesize a rendered array per cell (real image discovery is dataset-
     # specific); the autofill must pool these into the LUT boxes as numbers.
@@ -138,7 +138,7 @@ def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
             rendered[(r, c)] = (np.arange(16, dtype=np.float32).reshape(4, 4) + r)
     C._refresh_lut_fields_from_render(app._ctx, rendered)
 
-    luts = app._image_table_lut or {}
+    luts = app._ctx.runtime.image_table.lut or {}
     filled = []
     for chan, entry in luts.items():
         txt = entry["min"].text().strip()

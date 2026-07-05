@@ -57,9 +57,9 @@ EXPORT_PROFILES = {
 
 
 def _ensure_custom_export_profiles(app) -> dict:
-    if not hasattr(app, "_export_style_custom_profiles"):
-        app._export_style_custom_profiles = {}
-    return app._export_style_custom_profiles
+    if app._ctx.runtime.export.custom_profiles is None:
+        app._ctx.runtime.export.custom_profiles = {}
+    return app._ctx.runtime.export.custom_profiles
 
 
 def _get_all_profile_names(app) -> list[str]:

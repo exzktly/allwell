@@ -24,15 +24,15 @@ SECTION = "export_groups"
 
 def save_to_data_dir(app) -> None:
     """Persist the batch-export groups to the consolidated persistence document."""
-    doc = getattr(app, "_batch_export_export_groups_doc", None) or None
+    doc = app._ctx.runtime.batch_export.export_groups_doc or None
     _doc.set_section(app._ctx, SECTION, doc)
 
 
 def load_from_data_dir(app) -> None:
     """Load persisted batch-export groups and refresh any open Batch Export panels."""
     raw = _doc.get_section(app._ctx, SECTION)
-    app._batch_export_export_groups_doc = raw if isinstance(raw, dict) else {}
-    state = getattr(app, "_batch_export_inline_state", None)
+    app._ctx.runtime.batch_export.export_groups_doc = raw if isinstance(raw, dict) else {}
+    state = app._ctx.runtime.batch_export.inline_state
     if not state:
         return
     for panel in (state.get("panels") or {}).values():

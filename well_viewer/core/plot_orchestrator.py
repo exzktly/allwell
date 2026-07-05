@@ -160,7 +160,7 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
     stat_y = app._scatter_agg_stat_y_cb.currentText()
 
     selected_timepoints: list[float] = []
-    tp_checks = getattr(app, "_scatter_agg_tp_checks", None)
+    tp_checks = app._ctx.runtime.scatter.agg_tp_checks
     if tp_checks:
         for tp_str, widget in tp_checks.items():
             try:

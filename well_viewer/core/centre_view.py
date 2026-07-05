@@ -162,7 +162,7 @@ def build_centre(app, parent: QWidget) -> None:
         except Exception:
             _logger.exception("Deferred build for %r failed", title)
 
-    app._centre_build_pending = _build_pending
+    app._ctx.runtime.centre.build_pending = _build_pending
 
     # Tabs whose construction we never want to run from the background
     # drain — they only build on first user access (tab click). The tabs
@@ -695,7 +695,7 @@ def drain_pending_centre_builders(app) -> None:
     on first access.
     """
     pending = getattr(app, "_centre_pending_builders", None)
-    build = getattr(app, "_centre_build_pending", None)
+    build = app._ctx.runtime.centre.build_pending
     if not pending or build is None:
         return
     lazy_only = getattr(app, "_centre_lazy_only_titles", frozenset())

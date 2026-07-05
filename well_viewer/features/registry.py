@@ -395,7 +395,7 @@ def _sel_cell_browser(app) -> None:
     # live in Split View — the user expects the Scatter and Cell Browser to track
     # each other. Outside split the gallery stays Generate-gated (deferred) so a
     # selection change doesn't trigger a heavy re-composite unprompted.
-    if not getattr(app, "_split_active", False):
+    if not app._ctx.runtime.split.active:
         return
     from well_viewer.features.image_browser.cell_browser.controller import (
         apply_filters,

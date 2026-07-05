@@ -41,7 +41,7 @@ def _collect_settings(app) -> dict:
 def save_to_data_dir(app) -> None:
     if not app._app_state.dataset.data_dir:
         return
-    layouts = list(getattr(app, "_heatmap_layouts", []) or [])
+    layouts = list(app._ctx.runtime.heatmap.layouts or [])
     payload = {
         "layouts": [lay.to_dict() for lay in layouts],
         "settings": _collect_settings(app),
@@ -56,7 +56,7 @@ def load_from_data_dir(app) -> None:
     if not isinstance(data, dict):
         return
     from well_viewer.features.heatmap.models import layouts_from_dict
-    app._heatmap_layouts = layouts_from_dict(data.get("layouts", []) or [])
+    app._ctx.runtime.heatmap.layouts = layouts_from_dict(data.get("layouts", []) or [])
     settings = data.get("settings", {}) or {}
     hm = app._app_state.feature_slice("heatmap")
     if isinstance(settings, dict) and hm is not None:

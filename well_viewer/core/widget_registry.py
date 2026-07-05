@@ -11,6 +11,13 @@ calls ``registry.register("_line_fig", fig)`` instead of ``app._line_fig = fig``
 legacy ``app._<widget>`` readers resolve via ordinary attribute lookup — no
 ``__getattr__`` forwarder required.
 
+The backing ``name -> widget`` dict can be **shared with ``AppRuntime``** (pass
+``store=``): the real app wires one attribute-store dict into both so a handle
+registered here as ``_<feature>_<name>`` is also reachable through
+``ctx.runtime.<feature>.<name>`` (and vice-versa), preserving the cross-reads
+that used to resolve because both stamped one ``app.__dict__``. See
+``core/app_runtime.py``.
+
 Deliberately Qt-free — it only holds references.
 """
 
@@ -27,8 +34,11 @@ class WidgetRegistry:
     lookup on the bound app.
     """
 
-    def __init__(self, app: Any = None) -> None:
-        self._widgets: dict[str, Any] = {}
+    def __init__(self, app: Any = None, store: dict | None = None) -> None:
+        # Backing store; may be shared with AppRuntime (pass ``store=``) so the
+        # two namespaces resolve one another's entries. Keys are the legacy
+        # underscored widget names (``"_line_fig"``).
+        self._widgets: dict[str, Any] = store if store is not None else {}
         self._app = app
 
     def register(self, name: str, widget: Any) -> Any:

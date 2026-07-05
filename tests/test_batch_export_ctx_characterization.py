@@ -35,7 +35,7 @@ _EXPECTED_CLASS = {
 
 def _panel_for(app, mode):
     send_plot_to_batch_export(app, mode)
-    state = app._batch_export_inline_state
+    state = app._ctx.runtime.batch_export.inline_state
     assert state["mode"] == mode
     return state["panels"][mode]
 

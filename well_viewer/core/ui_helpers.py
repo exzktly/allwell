@@ -424,7 +424,7 @@ def send_plot_to_batch_export(app, mode: str) -> None:
     nb = getattr(app, "_notebook", None)
     if nb is not None:
         nb.setCurrentByName("Batch Export")
-    setter = getattr(app, "_batch_export_set_mode", None)
+    setter = app._ctx.runtime.batch_export.set_mode
     if callable(setter):
         setter(mode)
     label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",

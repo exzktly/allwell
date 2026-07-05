@@ -66,13 +66,13 @@ def test_reset_restores_manual_deletes_and_clears_crop(loaded_app_shape, monkeyp
     df = app._get_rows(well)
     df["Included"] = 1
     df.loc[df.index[0], "Included"] = 0
-    app._review_included_overrides[(well, "1", "0h", "1")] = "0"
+    app._ctx.runtime.review.included_overrides[(well, "1", "0h", "1")] = "0"
     set_crop_region(app._ctx, _REGION)
     assert int(df_included_mask(app._get_rows(well)).sum()) < incl_full
 
     reset_crop_and_overrides(app._ctx)
 
     assert get_crop_region(app._ctx) is None
-    assert not app._review_included_overrides
+    assert not app._ctx.runtime.review.included_overrides
     # Cache was invalidated → frames reload original (all-Included) rows → full set.
     assert int(df_included_mask(app._get_rows(well)).sum()) == incl_full

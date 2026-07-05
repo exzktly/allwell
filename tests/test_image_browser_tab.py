@@ -18,7 +18,7 @@ _SUBTABS = ("Segmentation", "Image Table", "Cell Browser", "Playground")
 
 def _build_image_browser_parent(app):
     """Force the lazy Image Browser container to build (Segmentation eager)."""
-    build_pending = getattr(app, "_centre_build_pending", None)
+    build_pending = app._ctx.runtime.centre.build_pending
     if build_pending is not None:
         build_pending("Image Browser")
     sub = app._ctx.runtime.image_browser.subtabs
@@ -48,7 +48,7 @@ def test_subtab_chain_is_ctx_native_and_builds_each_body(viewer_app):
     # Eager Segmentation build (mirrors tab_view's initial build) went through the
     # ctx-native path and produced the review-image canvas + channel combo.
     assert ctx.runtime.image_browser.built.get("Segmentation") is True
-    assert hasattr(app, "_review_image_label")
+    assert app._ctx.runtime.review_image.label is not None
     assert hasattr(app, "_review_image_chan_cb")
 
     # Navigate the rail to Image Browser so its active sub-tab is the effective
@@ -104,5 +104,5 @@ def test_playground_is_flat_sibling_not_nested_in_segmentation(viewer_app):
     assert not hasattr(app, "_segmentation_subtabs")
     assert not hasattr(app, "_playground_subtab_frame")
     # Playground is one of the Image Browser sub-tabs.
-    sub = app._image_browser_subtabs
+    sub = app._ctx.runtime.image_browser.subtabs
     assert "Playground" in [sub.tabText(i) for i in range(sub.count())]

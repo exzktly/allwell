@@ -61,7 +61,7 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
     if app._ctx.runtime.split.active:
         exit_split(app)
     # Force-build deferred bodies before detaching so panes are never blank.
-    build = getattr(app, "_centre_build_pending", None)
+    build = app._ctx.runtime.centre.build_pending
     if callable(build):
         for t in (tab_a, tab_b):
             try:
@@ -220,7 +220,7 @@ class _SplitFocusWatcher(QObject):
 
 
 def _install_split_focus_filter(app) -> None:
-    watcher = getattr(app, "_split_focus_filter", None)
+    watcher = app._ctx.runtime.split.focus_filter
     if watcher is None:
         watcher = _SplitFocusWatcher(app)
         app._ctx.runtime.split.focus_filter = watcher
@@ -234,7 +234,7 @@ def _install_split_focus_filter(app) -> None:
 
 
 def _remove_split_focus_filter(app) -> None:
-    watcher = getattr(app, "_split_focus_filter", None)
+    watcher = app._ctx.runtime.split.focus_filter
     if watcher is None:
         return
     qapp = QApplication.instance()
@@ -250,7 +250,7 @@ def _remove_split_focus_filter(app) -> None:
 
 def sync_split_toggle_button(app, checked: bool) -> None:
     """Reflect *checked* on the top-bar split toggle without re-firing it."""
-    btn = getattr(app, "_split_toggle_btn", None)
+    btn = app._ctx.runtime.split.toggle_btn
     if btn is None:
         return
     blocked = btn.blockSignals(True)

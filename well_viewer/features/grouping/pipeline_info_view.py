@@ -21,11 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 
-def _raw_pipeline_info(app) -> dict:
+def _raw_pipeline_info(ctx) -> dict:
     """Best-effort read of the full pipeline_info.json from the loaded folder,
     falling back to the curated dict the loader already parsed."""
-    ds = getattr(app, "_app_state", None)
-    ds = getattr(ds, "dataset", None) if ds is not None else None
+    ds = getattr(ctx.state, "dataset", None)
     data_dir = getattr(ds, "data_dir", None) if ds is not None else None
     if data_dir is not None:
         for cand in (Path(data_dir) / "pipeline_info.json",
@@ -51,7 +50,7 @@ def _fmt(value) -> str:
     return s if s not in ("", "None") else "—"
 
 
-def build_pipeline_info_subtab(app, parent: QWidget) -> None:
+def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     layout = parent.layout() or QVBoxLayout(parent)
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(6)
@@ -91,11 +90,11 @@ def build_pipeline_info_subtab(app, parent: QWidget) -> None:
     tree.header().setStretchLastSection(True)
     layout.addWidget(tree, 1)
 
-    app._pipeline_info_tree = tree
+    ctx.widgets.register("_pipeline_info_tree", tree)
 
     def _refresh() -> None:
         tree.clear()
-        info = _raw_pipeline_info(app)
+        info = _raw_pipeline_info(ctx)
         if not info:
             QTreeWidgetItem(tree, ["(no dataset loaded)",
                                    "open a results folder to see its run parameters"])
@@ -182,5 +181,8 @@ def build_pipeline_info_subtab(app, parent: QWidget) -> None:
         tree.resizeColumnToContents(0)
 
     reload_ib.clicked.connect(lambda _=False: _refresh())
-    app._pipeline_info_refresh = _refresh
+    # Live-callback stamp (AppRuntime's sanctioned case): the sample-def tab-switch
+    # invokes this to re-read pipeline_info.json when the Pipeline Info sub-tab is
+    # entered. Reached via ctx.runtime.grouping.pipeline_info_refresh.
+    ctx.runtime.grouping.pipeline_info_refresh = _refresh
     _refresh()

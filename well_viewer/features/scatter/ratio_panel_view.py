@@ -235,8 +235,8 @@ class RatioMetricsPanel(QWidget):
         self._app._persistence.schedule_save("ratios")
 
 
-def build_ratios_inline_panel(app, parent: QWidget) -> RatioMetricsPanel:
+def build_ratios_inline_panel(ctx, parent: QWidget) -> RatioMetricsPanel:
     """Construct the inline ratio editor and return it for app-level wiring."""
-    panel = RatioMetricsPanel(app, parent)
-    app._ratio_panel = app._ctx.widgets.register("_ratio_panel", panel)
+    panel = RatioMetricsPanel(ctx.window, parent)
+    ctx.widgets.register("_ratio_panel", panel)
     return panel

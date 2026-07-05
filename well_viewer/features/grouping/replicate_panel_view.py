@@ -326,7 +326,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     ratio_tab = _QWidget(sub_tabs)
     rl = _QVBoxLayout(ratio_tab)
     rl.setContentsMargins(0, 0, 0, 0)
-    rl.addWidget(build_ratios_inline_panel(app, ratio_tab))
+    rl.addWidget(build_ratios_inline_panel(app._ctx, ratio_tab))
     rl.addStretch(1)
     sub_tabs.addTab(ratio_tab, "Ratios")
 
@@ -337,7 +337,7 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
     )
     pinfo_tab = _QWidget(sub_tabs)
     _QVBoxLayout(pinfo_tab).setContentsMargins(0, 0, 0, 0)
-    build_pipeline_info_subtab(app, pinfo_tab)
+    build_pipeline_info_subtab(app._ctx, pinfo_tab)
     sub_tabs.addTab(pinfo_tab, "Pipeline Info")
 
     # Sub-tab 5: Notes — freeform per-project text, persisted via
@@ -361,8 +361,10 @@ def build_sample_definitions_centre(app, parent: QWidget) -> None:
         if name == "Cell Gating":
             build_cell_gating_subtab(app._ctx)
             cell_gating_sync_scatter_gates(app._ctx)
-        if name == "Pipeline Info" and hasattr(app, "_pipeline_info_refresh"):
-            app._pipeline_info_refresh()      # re-read in case the dataset changed
+        if name == "Pipeline Info":
+            cb = app._ctx.runtime.grouping.pipeline_info_refresh
+            if callable(cb):
+                cb()      # re-read in case the dataset changed
         # Entering the Groups sub-tab deselects any previously-active
         # group so a click on the sidebar plate has no consequence
         # until the user explicitly picks one. The active-group banner

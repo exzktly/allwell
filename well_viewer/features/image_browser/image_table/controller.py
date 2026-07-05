@@ -15,7 +15,7 @@ and drive the Image Table tab:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -61,6 +61,16 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     _row_export_cmap,
     _row_tint,
     _tint_from_colormap,
+    cell_display_rgb,
+    composite_additive_rgb,
+    composite_column_rgb,
+)
+# LUT min/max pooling (Fit + post-render refresh) lives in ``lut_ops``; re-exported
+# so ``image_table_rebuild_lut_row`` (on_auto_lut) and ``image_table_generate``
+# call sites are unchanged.
+from well_viewer.features.image_browser.image_table.lut_ops import (  # noqa: E402,F401
+    _refresh_lut_fields_from_render,
+    image_table_auto_lut,
 )
 
 
@@ -193,11 +203,18 @@ def image_table_repopulate_dropdowns(ctx) -> None:
 
 
 def image_table_apply_dimensions(ctx) -> None:
-    """Read rows / cols spinners and rebuild the selector grid."""
+    """Read rows / cols spinners and rebuild the selector grid.
+
+    A manual grid resize exits grouped/tiled mode: the banded LUT-sharing map is
+    derived from the Build step's group sizing, so hand-editing rows/cols clears
+    it (one LUT row per grid row again) to keep the mapping consistent.
+    """
     rows = int(ctx.runtime.image_table.rows_spin.value())
     cols = int(ctx.runtime.image_table.cols_spin.value())
     ctx.state.image_table.rows = rows
     ctx.state.image_table.cols = cols
+    ctx.state.image_table.group_size = 0
+    ctx.state.image_table.group_row_span = 0
     image_table_rebuild_grid(ctx)
 
 
@@ -237,6 +254,16 @@ def image_table_rebuild_grid(ctx) -> None:
     ctx.runtime.image_table.cells = cells
     ctx.runtime.image_table.row_chan_cbs = row_chan_cbs
     ctx.runtime.image_table.row_well_cbs = row_well_cbs
+
+    # Grid-row → LUT-group map. In a grouped/tiled layout the row axis repeats
+    # every ``group_row_span`` grid rows (band by band), so all band-rows of the
+    # same channel share one LUT/Display row (shared-per-channel LUT). Non-grouped
+    # → identity, one LUT row per grid row. build_lut_row reads this to decide how
+    # many editor rows to build, so it must be set BEFORE rebuild_lut_row below.
+    span = int(getattr(ctx.state.image_table, "group_row_span", 0) or 0)
+    ctx.runtime.image_table.lut_row_map = (
+        [r % span for r in range(rows)] if span > 0 else list(range(rows))
+    )
     # The per-row colormap selectors live in the per-row table now and are
     # (re)created + stored on ctx by image_table_rebuild_lut_row -> build_lut_row.
 
@@ -417,7 +444,8 @@ def image_table_distribute_timepoints(ctx) -> None:
 
 _AXIS_LABEL = {"channel": "Channels", "well": "Wells",
                "timepoint": "Timepoints", "fov": "FOVs"}
-_AXIS_MAX = 12  # grid is capped at 12×12; longer axes are truncated
+_AXIS_MAX = 12  # non-grouped grid is capped at 12×12; longer axes are truncated
+_ROW_MAX = 60   # grouped/tiled grids may stack many bands — cap total rows here
 
 
 
@@ -472,11 +500,35 @@ def image_table_build_layout(ctx) -> None:
                         f"(select some in the sidebar).")
         return
 
-    row_vals = row_vals[:_AXIS_MAX]
-    col_vals = col_vals[:_AXIS_MAX]
-    rows, cols = len(row_vals), len(col_vals)
+    # Grouped/tiled layout: wrap the COLUMNS axis into vertically-stacked bands
+    # of ``G`` columns, repeating the ROWS axis per band. 0 / ≥col-count = off.
+    group = int(getattr(ctx.state.image_table, "group_size", 0) or 0)
+    n_row_vals = len(row_vals[:_AXIS_MAX])
+    grouped = 0 < group < len(col_vals)
+    clamped_bands = 0
+    if grouped:
+        # Cap band width at the column max and total rows at the row max; drop
+        # whole overflow bands (reporting the truncation) rather than silently.
+        G = min(group, _AXIS_MAX)
+        row_vals = row_vals[:_AXIS_MAX]
+        n_row_vals = len(row_vals)
+        n_bands_wanted = (len(col_vals) + G - 1) // G
+        max_bands = max(1, _ROW_MAX // max(1, n_row_vals))
+        n_bands = min(n_bands_wanted, max_bands)
+        clamped_bands = n_bands_wanted - n_bands
+        cols = G
+        rows = n_row_vals * n_bands
+        ctx.state.image_table.group_size = G
+        ctx.state.image_table.group_row_span = n_row_vals
+    else:
+        row_vals = row_vals[:_AXIS_MAX]
+        col_vals = col_vals[:_AXIS_MAX]
+        rows, cols = len(row_vals), len(col_vals)
+        ctx.state.image_table.group_size = 0
+        ctx.state.image_table.group_row_span = 0
 
     # Size the grid (sync the spinners) and rebuild the empty selector cells.
+    # group state is set above so rebuild_grid builds the LUT row→group map.
     ctx.state.image_table.rows = rows
     ctx.state.image_table.cols = cols
     for attr, val in (("rows_spin", rows), ("cols_spin", cols)):
@@ -501,21 +553,36 @@ def image_table_build_layout(ctx) -> None:
         finally:
             cb.blockSignals(False)
 
+    tiled = {"n_row_vals": n_row_vals, "group_size": cols} if grouped else {}
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
-            vals = _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c)
+            vals = _layout_cell_values(row_axis, col_axis, row_vals, col_vals,
+                                       fixed, r, c, **tiled)
             for dim, ckey in key_of.items():
                 _set(cell.get(ckey), vals[dim])
 
     if row_axis == "channel":
-        _apply_row_channel_styling(ctx, row_vals)
+        # Repeat the channel per band so every grid row's selector-col-0 combo
+        # shows its band channel.
+        grid_channels = (
+            [row_vals[r % n_row_vals] for r in range(rows)] if grouped else row_vals
+        )
+        _apply_row_channel_styling(ctx, grid_channels)
 
     image_table_rebuild_lut_row(ctx)
-    ctx.set_status(
+    status = (
         f"Image Table: built {rows}×{cols} selector grid — rows = {_AXIS_LABEL[row_axis]}, "
-        f"cols = {_AXIS_LABEL[col_axis]}. Press Generate to render."
+        f"cols = {_AXIS_LABEL[col_axis]}"
     )
+    if grouped:
+        status += f", grouped {cols}/band"
+    status += ". Press Generate to render."
+    if clamped_bands:
+        status += (
+            f" (Clamped {clamped_bands} band(s) that exceed the {_ROW_MAX}-row grid limit.)"
+        )
+    ctx.set_status(status)
 
 
 def image_table_apply_preset(ctx, row_axis: str, col_axis: str) -> None:
@@ -1110,51 +1177,6 @@ def _install_cell_events(
 
 
 
-def _refresh_lut_fields_from_render(ctx, rendered) -> None:
-    """Pool the actual min/max per ROW from the just-rendered arrays and write
-    the numbers into that row's LUT box, except rows the user has overridden.
-
-    Each row's entry carries an ``auto`` flag (True until the user edits its
-    min/max); only auto rows get refreshed, so manual overrides stick.
-    """
-    luts = getattr(ctx.runtime.image_table, "lut", None) or {}
-    cells = getattr(ctx.runtime.image_table, "cells", None) or []
-    if not luts or not cells:
-        return
-    try:
-        import numpy as _np
-    except Exception:
-        return
-
-    for r, row in enumerate(cells):
-        entry = luts.get(r)
-        if not isinstance(entry, dict) or not entry.get("auto", True):
-            continue  # missing or user-edited — leave alone
-        lo: Optional[float] = None
-        hi: Optional[float] = None
-        for c, _cell in enumerate(row):
-            arr = rendered.get((r, c))
-            if arr is None or getattr(arr, "ndim", 2) >= 3:
-                continue  # skip empty cells and pre-rendered RGB overlays
-            a = _np.asarray(arr, dtype=_np.float32)
-            mn, mx = float(a.min()), float(a.max())
-            lo = mn if lo is None else min(lo, mn)
-            hi = mx if hi is None else max(hi, mx)
-        if lo is None or hi is None:
-            continue
-        if hi <= lo:
-            hi = lo + 1.0
-        for key, val in (("min", lo), ("max", hi)):
-            le = entry.get(key)
-            if le is None:
-                continue
-            blocked = le.blockSignals(True)
-            try:
-                le.setText(f"{val:.4g}")
-            finally:
-                le.blockSignals(blocked)
-
-
 # ── Generate (render image table below the selector) ─────────────────────────
 
 
@@ -1209,6 +1231,42 @@ def _prefetch_cell_arrays(ctx, cells, cache) -> None:
         import logging as _logging
         _logging.getLogger("well_viewer.image_table").debug(
             "image_table: parallel prefetch failed", exc_info=True)
+
+
+def _append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered) -> None:
+    """Append one extra bottom grid row whose cells additively merge the
+    LUT-colored RGB of every row above them in the same column.
+
+    Derives entirely from the rows above (no selector cell, no ``lut[r]`` entry),
+    so the grid's row-indexed lookups are unaffected. Extracted from
+    ``image_table_generate`` to keep that function's complexity in budget.
+    """
+    from well_viewer.core.ui_helpers import make_overlay_thumb
+
+    comp_row = len(cells)
+    n_cols = max(len(row) for row in cells)
+    for c in range(n_cols):
+        comp = composite_column_rgb(ctx, cache, cells, crop_tool, c, rendered)
+
+        cell_widget = QWidget()
+        cl = QVBoxLayout(cell_widget)
+        cl.setContentsMargins(2, 2, 2, 2)
+        cl.setSpacing(2)
+        header = QLabel("Composite", cell_widget)
+        header.setAlignment(Qt.AlignCenter)
+        cl.addWidget(header)
+
+        img_label = QLabel(cell_widget)
+        img_label.setAlignment(Qt.AlignCenter)
+        img_label.setFixedSize(sz, sz)
+        pix = make_overlay_thumb(comp, sz, sz, 0.0, 255.0) if comp is not None else None
+        if pix is not None:
+            img_label.setPixmap(pix)
+        else:
+            img_label.setText("(no image)")
+        cl.addWidget(img_label)
+
+        grid.addWidget(cell_widget, comp_row, c)
 
 
 def image_table_generate(ctx) -> None:
@@ -1337,6 +1395,11 @@ def image_table_generate(ctx) -> None:
 
             grid.addWidget(cell_widget, r, c)
 
+    # Composite row: append one extra bottom row whose cells additively merge
+    # the LUT-colored RGB of every row above them in the same column.
+    if getattr(ctx.state.image_table, "composite", False) and cells:
+        _append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered)
+
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache
     # Fill the per-channel LUT min/max boxes with the actual pooled numbers so
@@ -1373,79 +1436,6 @@ def image_table_generate(ctx) -> None:
                 break
         except Exception:
             swallowed()  # was: pass (silent except)
-
-
-def image_table_auto_lut(ctx, row_idx: int) -> None:
-    """Pool min/max across grid row *row_idx*'s loaded cells; write + redraw.
-
-    Per-row Fit: pools the image range of the cells in this row (whatever
-    channel each shows — normally the one row channel), honouring the row's
-    own top-hat toggle, and writes the result into the row's LUT box.
-    """
-    cells = getattr(ctx.runtime.image_table, "cells", None) or []
-    if not (0 <= row_idx < len(cells)):
-        return
-    rendered = getattr(ctx.state.image_table, "last_render", None) or {}
-    cache = getattr(ctx.state.image_table, "image_cache", None)
-    if cache is None:
-        cache = {}
-        ctx.state.image_table.image_cache = cache
-    use_tophat, _show_b, _bm = _row_display_opts(ctx, row_idx)
-
-    try:
-        import numpy as _np
-    except Exception:
-        ctx.set_status("Image Table: numpy unavailable; cannot compute auto LUT.")
-        return
-
-    pooled_min: Optional[float] = None
-    pooled_max: Optional[float] = None
-    r = row_idx
-    for c, cell in enumerate(cells[r]):
-        chan = cell["chan_cb"].currentText().strip()
-        if not chan:
-            continue
-        arr = rendered.get((r, c))
-        if arr is None:
-            # Lazy-load if Generate hasn't been clicked yet.
-            well = cell["well_cb"].currentText().strip()
-            tp = cell["tp_cb"].currentText().strip()
-            fov = cell["fov_cb"].currentText().strip()
-            if well and tp and fov:
-                arr = _load_array(ctx, cache, well, chan.upper(), tp, fov, use_tophat=use_tophat)
-        if arr is None:
-            continue
-        a = _np.asarray(arr, dtype=_np.float32)
-        mn = float(a.min())
-        mx = float(a.max())
-        pooled_min = mn if pooled_min is None else min(pooled_min, mn)
-        pooled_max = mx if pooled_max is None else max(pooled_max, mx)
-
-    if pooled_min is None or pooled_max is None:
-        ctx.set_status(
-            f"Image Table: no loaded images for row {row_idx + 1}; cannot auto-LUT."
-        )
-        return
-    if pooled_max <= pooled_min:
-        pooled_max = pooled_min + 1.0
-
-    luts = getattr(ctx.runtime.image_table, "lut", None) or {}
-    entry = luts.get(row_idx)
-    if entry is None:
-        return
-    # "Fit" re-enables auto-tracking so the boxes follow the data again.
-    entry["auto"] = True
-    for key, val in (("min", pooled_min), ("max", pooled_max)):
-        le = entry.get(key)
-        if le is None:
-            continue
-        blocked = le.blockSignals(True)
-        try:
-            le.setText(f"{val:.4g}")
-        finally:
-            le.blockSignals(blocked)
-    # No auto-render: Fit only fills the min/max numbers; the explicit Generate
-    # button applies them (matches the rest of the per-row table).
 
 
 # ── Export (transparent background, labels above each image) ─────────────────

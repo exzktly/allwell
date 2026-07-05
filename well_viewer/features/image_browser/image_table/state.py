@@ -40,9 +40,25 @@ class ImageTableState:
     row_axis: str = "channel"
     col_axis: str = "timepoint"
 
+    # grouped / tiled layout. ``group_size`` wraps the COLUMNS axis into
+    # vertically-stacked bands of this many columns; the ROWS axis repeats per
+    # band. 0 = off (one band → today's flat layout). ``group_row_span`` records
+    # how many row-axis values (e.g. channels) each band spans, so the LUT
+    # row→group mapping (shared-per-channel LUT across bands) can be rebuilt and
+    # survives view-state restore. Set by image_table_build_layout; 0 when not
+    # grouped.
+    group_size: int = 0
+    group_row_span: int = 0
+
     # display options. Top-hat / boundaries / binary are now per ROW (stored on
     # the per-row LUT/Display boxes — see grid_view.build_lut_row), not global.
     zoom: float = 1.0
+
+    # composite: when True, image_table_generate appends one extra row at the
+    # bottom whose cells additively merge (LUT-colored RGB summed, clipped to
+    # white) every row above them in the same column. A transient display
+    # toggle driven by the Composite checkbox in the action strip.
+    composite: bool = False
 
     # export-dialog settings (pad/cell-gap/titles/dpi/transparent-bg)
     export_opts: dict = field(default_factory=dict)

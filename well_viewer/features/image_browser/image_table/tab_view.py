@@ -17,8 +17,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
+    QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.data.crop_tool import CropTool
@@ -240,11 +240,34 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     orow.addStretch(1)
 
+    # Group size: wrap the Columns axis into vertically-stacked bands (0 = off).
+    orow.addWidget(QLabel("Group:", opts_row))
+    group_spin = QSpinBox(opts_row)
+    group_spin.setRange(0, 12)
+    group_spin.setValue(int(getattr(ctx.state.image_table, "group_size", 0) or 0))
+    group_spin.setSpecialValueText("Off")  # shown when value == 0
+    group_spin.setFixedWidth(70)
+    group_spin.setToolTip(
+        "Wrap the Columns axis into vertically-stacked bands of this many "
+        "columns; the Rows axis (e.g. channels) repeats per band. 0 = off "
+        "(one band). Applies on Build."
+    )
+
+    def _on_group_changed(v: int) -> None:
+        ctx.state.image_table.group_size = int(v)
+        image_table_build_layout(ctx)
+
+    group_spin.valueChanged.connect(_on_group_changed)
+    orow.addWidget(group_spin)
+    reg.register("_image_table_group_spin", group_spin)
+
     orow.addWidget(QLabel("Grid:", opts_row))
     rows_spin = QSpinBox(opts_row)
-    rows_spin.setRange(1, 12)
+    # Grouped/tiled layouts stack many bands, so rows can exceed 12 (matches
+    # controller._ROW_MAX). Columns stay ≤ 12 (a band is at most 12 wide).
+    rows_spin.setRange(1, 60)
     rows_spin.setValue(int(ctx.state.image_table.rows))
-    # Wide enough that a two-digit value (up to 12) clears the up/down arrows
+    # Wide enough that a two-digit value clears the up/down arrows
     # instead of being clipped against them.
     rows_spin.setFixedWidth(70)
     rows_spin.setToolTip("Grid rows (Build sets this automatically).")
@@ -331,6 +354,24 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.setContentsMargins(0, 0, 0, 0)
 
     tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx)))
+
+    # Composite: append a merged bottom row (each cell additively sums the
+    # LUT-colored rows above it). A transient display toggle; re-renders in place
+    # when a table already exists, else just stores the flag for the next Generate.
+    comp_chk = reg.register("_image_table_composite_chk", QCheckBox("Composite", action_row))
+    comp_chk.setChecked(bool(getattr(ctx.state.image_table, "composite", False)))
+    comp_chk.setToolTip(
+        "Append a merged row: each cell additively sums the LUT-colored "
+        "channels above it in that column."
+    )
+
+    def _on_composite_toggled(checked: bool) -> None:
+        ctx.state.image_table.composite = bool(checked)
+        if getattr(ctx.state.image_table, "last_render", None):
+            image_table_generate(ctx)
+
+    comp_chk.toggled.connect(_on_composite_toggled)
+    tr.addWidget(comp_chk)
 
     # The per-display options (Tophat / Boundaries / Binary) are now per-row,
     # in the LUT boxes below the grid (each row independent). This menu keeps the

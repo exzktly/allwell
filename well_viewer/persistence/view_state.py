@@ -292,6 +292,13 @@ def _snapshot_image_table(ctx) -> dict:
         "rows": int(getattr(ctx.state.image_table, "rows", len(cells))),
         "cols": int(getattr(ctx.state.image_table, "cols",
                              len(cells[0]) if cells else 0)),
+        # Grouped/tiled layout: columns-per-band + row-axis-values-per-band. Both
+        # are needed to rebuild the banded grid's LUT row→channel sharing map on
+        # restore (see image_table_rebuild_grid). 0 = not grouped. The dataclass
+        # fields default to 0, so no ``or 0`` guard is needed (keeps this snapshot
+        # function's cyclomatic complexity within the ratchet).
+        "group_size": int(getattr(ctx.state.image_table, "group_size", 0)),
+        "group_row_span": int(getattr(ctx.state.image_table, "group_row_span", 0)),
     }
     grid: list[list[dict[str, str]]] = []
     for row in cells:
@@ -848,13 +855,13 @@ def _apply_image_table(ctx, state: dict) -> None:
     # both helpers are used below.
     try:
         from well_viewer.features.image_browser.image_table.controller import (
-            image_table_apply_dimensions,
+            image_table_rebuild_grid,
             image_table_rebuild_lut_row,
             image_table_set_zoom,
         )
     except Exception:  # pragma: no cover - import failure leaves these no-ops
-        image_table_apply_dimensions = image_table_set_zoom = None
-        image_table_rebuild_lut_row = None
+        image_table_set_zoom = None
+        image_table_rebuild_lut_row = image_table_rebuild_grid = None
 
     # Grid axes first (before the dimension rebuild), so the per-row channel/well
     # combos + labels are laid out on the same axes the plot was saved with. The
@@ -881,18 +888,43 @@ def _apply_image_table(ctx, state: dict) -> None:
         except Exception:
             swallowed()
 
-    # Dimensions — set the spinners first; the apply_dimensions hook
-    # rebuilds the selector grid + cells list against the new size.
+    # Grouped/tiled layout state — restore BEFORE the grid rebuild so the LUT
+    # row→group map is rebuilt correctly (image_table_rebuild_grid reads
+    # group_row_span). Sync the Group spinner so the UI matches.
+    grp = state.get("group_size")
+    span = state.get("group_row_span")
+    if isinstance(grp, int):
+        ctx.state.image_table.group_size = int(grp)
+        gspin = getattr(ctx.runtime.image_table, "group_spin", None)
+        if gspin is not None:
+            try:
+                blocked = gspin.blockSignals(True)
+                try:
+                    gspin.setValue(int(grp))
+                finally:
+                    gspin.blockSignals(blocked)
+            except Exception:
+                swallowed()
+    if isinstance(span, int):
+        ctx.state.image_table.group_row_span = int(span)
+
+    # Dimensions — set the spinners first; rebuild the selector grid + cells
+    # list against the new size. Use rebuild_grid directly (not apply_dimensions,
+    # which resets grouping) so a restored banded layout keeps its LUT sharing.
     rows = state.get("rows")
     cols = state.get("cols")
     if isinstance(rows, int) or isinstance(cols, int):
         rows_spin = ctx.runtime.image_table.rows_spin
         cols_spin = ctx.runtime.image_table.cols_spin
-        # Block the per-spinner valueChanged → apply_dimensions firing twice;
-        # call apply_dimensions once after both values are set.
         changed = False
-        for spin, val in ((rows_spin, rows), (cols_spin, cols)):
-            if spin is None or not isinstance(val, int):
+        for spin, val, fld in ((rows_spin, rows, "rows"), (cols_spin, cols, "cols")):
+            if not isinstance(val, int):
+                continue
+            try:
+                setattr(ctx.state.image_table, fld, int(val))
+            except Exception:
+                swallowed()
+            if spin is None:
                 continue
             try:
                 if int(spin.value()) != int(val):
@@ -904,11 +936,13 @@ def _apply_image_table(ctx, state: dict) -> None:
                     changed = True
             except Exception:
                 swallowed()  # was: pass (silent except)
-        if changed and image_table_apply_dimensions is not None:
+        # Rebuild if the dimensions changed, or if a grouped layout was restored
+        # (so the LUT row→group map is (re)built even when rows/cols already match).
+        if (changed or (isinstance(grp, int) and grp > 0)) and image_table_rebuild_grid is not None:
             try:
-                image_table_apply_dimensions(ctx)
+                image_table_rebuild_grid(ctx)
             except Exception:
-                _logger.debug("image_table: apply_dimensions failed", exc_info=True)
+                _logger.debug("image_table: rebuild_grid failed", exc_info=True)
 
     cells = state.get("cells") or []
     live = ctx.runtime.image_table.cells or []

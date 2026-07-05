@@ -17,15 +17,10 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: F401
 from well_viewer.core.safe import swallowed
 
 from well_viewer.features.image_browser.image_table.image_compose import (
-    _compose_image_table_rgb,
-    _export_binary_mask,
-    _is_nuc_seg,
     _load_array,
-    _load_mask_array,
-    _parse_lut,
     _row_display_opts,
-    _row_cmap_name,
-    _row_log_scale,
+    cell_display_rgb,
+    composite_column_rgb,
 )
 
 
@@ -190,6 +185,11 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
 
     rows = int(getattr(ctx.state.image_table, "rows", len(cells)) or len(cells))
     cols = int(getattr(ctx.state.image_table, "cols", len(cells[0])) or len(cells[0]))
+    # Composite adds one extra row at the bottom (additive merge of the rows
+    # above, per column). Reserve a subplot row for it up front.
+    composite = bool(getattr(ctx.state.image_table, "composite", False)) and bool(cells)
+    if composite:
+        rows += 1
 
     cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
     rendered = getattr(ctx.state.image_table, "last_render", None) or {}
@@ -243,7 +243,7 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     fig.patch.set_alpha(0.0 if transparent_bg else 1.0)
 
     for r, row in enumerate(cells):
-        use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
+        use_tophat = _row_display_opts(ctx, r)[0]
         for c, cell in enumerate(row):
             ax = fig.add_subplot(rows, cols, r * cols + c + 1)
             ax.set_facecolor("none" if transparent_bg else "white")
@@ -255,36 +255,13 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
             arr = rendered.get((r, c))
             if arr is None and well and chan and tp:
                 arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
-            if arr is not None and crop_tool is not None:
-                arr = crop_tool.apply_to_array(arr)
 
             if arr is not None:
-                lo, hi = _parse_lut(ctx, r)
-                # Render exactly the same RGB the live thumbnail shows:
-                # full mpl colormap (not the black→tint approximation
-                # this path used before) + show_binary / show_boundaries
-                # toggles + crop. The shared helper is the single source
-                # of truth — anything that changes the live look auto-
-                # propagates to the export.
-                mask_arr = None
-                if show_boundaries and not _is_nuc_seg(chan):
-                    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
-                    if mask_arr is not None and crop_tool is not None:
-                        mask_arr = crop_tool.apply_to_array(mask_arr)
-                binary_mask = None
-                if binary_mode in ("mask", "threshold") and not _is_nuc_seg(chan):
-                    binary_mask = _export_binary_mask(
-                        ctx, cache, well, chan, tp, fov, binary_mode, crop_tool,
-                    )
-                rgb = _compose_image_table_rgb(
-                    arr, mask_arr,
-                    lo=lo, hi=hi,
-                    cmap_name=_row_cmap_name(ctx, r),
-                    is_overlay=_is_nuc_seg(chan),
-                    binary_mask=binary_mask,
-                    show_boundaries=show_boundaries,
-                    log_scale=_row_log_scale(ctx, r),
-                )
+                # Render exactly the same RGB the live thumbnail shows —
+                # full mpl colormap + show_binary / show_boundaries toggles +
+                # crop — via the shared single-source helper, so anything that
+                # changes the live look auto-propagates to the export.
+                rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
                 if rgb is not None:
                     if cell_max_px:
                         rgb = _max_pool_rgb(rgb, cell_max_px)
@@ -310,6 +287,30 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
                 else:
                     title = "(unset)"
                 ax.set_title(title, fontsize=title_fontsize)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+
+    if composite:
+        comp_row = len(cells)
+        for c in range(cols):
+            ax = fig.add_subplot(rows, cols, comp_row * cols + c + 1)
+            ax.set_facecolor("none" if transparent_bg else "white")
+            comp = composite_column_rgb(ctx, cache, cells, crop_tool, c, rendered)
+            if comp is not None:
+                if cell_max_px:
+                    comp = _max_pool_rgb(comp, cell_max_px)
+                    ax.imshow(comp, aspect="equal", interpolation="nearest")
+                else:
+                    ax.imshow(comp, aspect="equal")
+            else:
+                ax.text(
+                    0.5, 0.5, "(no image)",
+                    ha="center", va="center", transform=ax.transAxes, fontsize=7,
+                )
+            if show_titles:
+                ax.set_title("Composite", fontsize=title_fontsize)
             ax.set_xticks([])
             ax.set_yticks([])
             for spine in ax.spines.values():

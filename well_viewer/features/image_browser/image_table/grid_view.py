@@ -246,6 +246,20 @@ def build_lut_row(
     row_chan_cbs = getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []
     default_cmap = (lut_color_names[0] if lut_color_names else "Greys") or "Greys"
 
+    # LUT-group map (grid row → LUT index). Grouped/tiled layouts collapse the
+    # editor table to one row per row-axis value (channel), shared across bands;
+    # non-grouped → identity. ``n_lut`` editor rows, each labelled by the channel
+    # of its first mapped grid row.
+    lut_map = getattr(ctx.runtime.image_table, "lut_row_map", None) or list(range(len(cells)))
+    n_lut = (max(lut_map) + 1) if lut_map else 0
+    grouped = n_lut < len(cells)
+
+    def _rep_grid_row(li: int) -> int:
+        try:
+            return lut_map.index(li)
+        except ValueError:
+            return li
+
     def _row_channel(r: int) -> str:
         if 0 <= r < len(row_chan_cbs):
             t = (row_chan_cbs[r].currentText() or "").strip()
@@ -281,12 +295,18 @@ def build_lut_row(
         wl.addStretch(1)
         return wrap, cb
 
-    for r in range(len(cells)):
+    for r in range(n_lut):
         grow = r + 1  # grid row 0 is the header
-        chan = _row_channel(r)
+        chan = _row_channel(_rep_grid_row(r))
         p = prev.get(r, {})
 
-        name_lbl = QLabel(f"Row {r + 1}" + (f" · {chan.upper()}" if chan else ""), container)
+        # Grouped: label by channel (one shared LUT row per channel). Otherwise
+        # keep the per-grid-row "Row N · CHAN" label.
+        if grouped:
+            label_text = chan.upper() if chan else f"Group {r + 1}"
+        else:
+            label_text = f"Row {r + 1}" + (f" · {chan.upper()}" if chan else "")
+        name_lbl = QLabel(label_text, container)
         layout.addWidget(name_lbl, grow, 0)
 
         # Color (per-row colormap) — moved here from the master grid. Passive:

@@ -104,6 +104,22 @@ def _numeric_token(value: object) -> Optional[float]:
     except ValueError:
         return None
 
+def _lut_index(ctx, r: int) -> int:
+    """Map a grid ROW index to its LUT-table index.
+
+    Normally identity (one LUT/Display row per grid row). In a grouped / tiled
+    layout the LUT table collapses to one row per row-axis value (e.g. per
+    channel), and every band-row showing that value resolves to the SAME LUT
+    entry — this is the "shared per channel" LUT. The map is built alongside the
+    grid (``image_table_rebuild_grid``) as ``ctx.runtime.image_table.lut_row_map``;
+    absent/short → identity, so the non-grouped path is unchanged.
+    """
+    m = getattr(ctx.runtime.image_table, "lut_row_map", None)
+    if m and 0 <= r < len(m):
+        return int(m[r])
+    return r
+
+
 def _row_cmap_name(ctx, r: int) -> Optional[str]:
     """Return the mpl colormap name for row *r*, or None when the row is
     set to ``Greys`` (untinted grayscale fast path).
@@ -114,6 +130,7 @@ def _row_cmap_name(ctx, r: int) -> Optional[str]:
     the cmap's high-end colour, low intensity gets the low end.
     """
     cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
+    r = _lut_index(ctx, r)
     if not (0 <= r < len(cbs)):
         return None
     cb = cbs[r]
@@ -133,6 +150,7 @@ def _row_tint(ctx, r: int) -> Optional[Tuple[float, float, float]]:
     figure path, which constructs a black→tint LinearSegmentedColormap.
     """
     cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
+    r = _lut_index(ctx, r)
     if not (0 <= r < len(cbs)):
         return None
     cb = cbs[r]
@@ -319,7 +337,7 @@ def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
     (S4) when one exists, otherwise auto-fits.
     """
     luts = getattr(ctx.runtime.image_table, "lut", None) or {}
-    entry = luts.get(row_idx)
+    entry = luts.get(_lut_index(ctx, row_idx))
     lo = hi = None
     if entry:
         from well_viewer.core.ui_helpers import parse_float_edit
@@ -327,6 +345,8 @@ def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
         hi = parse_float_edit(entry["max"], allow_auto=True)
 
     # Row in auto mode (no manual override) → inherit the shared default.
+    # ``_shared_channel_lut`` reads the grid cell's own channel (raw row index),
+    # which is correct per band even under a grouped layout.
     if lo is None and hi is None:
         shared = _shared_channel_lut(ctx, row_idx)
         if shared is not None:
@@ -340,7 +360,7 @@ def _row_display_opts(ctx, row_idx: int) -> Tuple[bool, bool, str]:
     Read from the row's LUT/Display box widgets (``grid_view.build_lut_row``);
     defaults to all-off when the row has no box yet.
     """
-    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(row_idx) or {}
+    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(_lut_index(ctx, row_idx)) or {}
     source_w = entry.get("source")
     bound_w = entry.get("boundaries")
     bin_w = entry.get("binary")
@@ -358,7 +378,7 @@ def _row_log_scale(ctx, row_idx: int) -> bool:
     Separate from :func:`_row_display_opts` so that helper's 3-tuple unpack call
     sites stay unchanged. Reads the row's ``"log"`` checkbox (``build_lut_row``).
     """
-    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(row_idx) or {}
+    entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(_lut_index(ctx, row_idx)) or {}
     log_w = entry.get("log")
     try:
         return bool(log_w.isChecked()) if log_w is not None else False
@@ -708,3 +728,112 @@ def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
     cm = crop_tool.apply_to_array(b) if crop_tool else b
     rgb = _np.stack([cm, cm, cm], axis=-1)
     return make_overlay_thumb(rgb, sz, sz, None, None)
+
+
+# ── Composite row: additive merge of the LUT-colored rows above ─────────────
+
+
+def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
+    """Return the uint8 (H, W, 3) RGB shown for grid cell ``cell`` in row *r*.
+
+    Single source of truth for "what pixels does this cell display": applies the
+    shared crop, resolves the row's LUT window / colormap / display toggles, and
+    delegates to :func:`_compose_image_table_rgb`. Callers pass the already-loaded
+    ``arr`` (the live path reuses ``last_render``; the export path lazy-loads it)
+    so this helper stays free of the ratio-load / controller coupling. Returns
+    ``None`` when ``arr`` is ``None`` or can't be composed.
+
+    Mirrors the per-cell block in ``export._build_export_figure`` — extracted so
+    the live thumbnail, the export figure, and the composite row all agree.
+    """
+    if arr is None:
+        return None
+    chan = cell["chan_cb"].currentText().strip()
+    well = cell["well_cb"].currentText().strip()
+    tp = cell["tp_cb"].currentText().strip()
+    fov = cell["fov_cb"].currentText().strip()
+
+    _use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
+    cropped = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
+    lo, hi = _parse_lut(ctx, r)
+
+    mask_arr = None
+    if show_boundaries and not _is_nuc_seg(chan):
+        mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
+        if mask_arr is not None and crop_tool is not None:
+            mask_arr = crop_tool.apply_to_array(mask_arr)
+    binary_mask = None
+    if binary_mode in ("mask", "threshold") and not _is_nuc_seg(chan):
+        binary_mask = _export_binary_mask(
+            ctx, cache, well, chan, tp, fov, binary_mode, crop_tool,
+        )
+    return _compose_image_table_rgb(
+        cropped, mask_arr,
+        lo=lo, hi=hi,
+        cmap_name=_row_cmap_name(ctx, r),
+        is_overlay=_is_nuc_seg(chan),
+        binary_mask=binary_mask,
+        show_boundaries=show_boundaries,
+        log_scale=_row_log_scale(ctx, r),
+    )
+
+
+def composite_additive_rgb(rgbs):
+    """Additively merge a list of uint8 RGB arrays, clipped to white.
+
+    Sums every array that matches the reference (first non-None) shape, skipping
+    (and logging) mismatched shapes — grid rows may target different wells / FOVs
+    / crops. Returns a uint8 (H, W, 3) array, or ``None`` when nothing usable was
+    supplied. This is the standard fluorescence "merge": overlapping LUT-colored
+    signals brighten toward white.
+    """
+    import numpy as _np
+
+    usable = [rgb for rgb in rgbs if rgb is not None]
+    if not usable:
+        return None
+    ref_shape = _np.asarray(usable[0]).shape
+    acc = _np.zeros(ref_shape, dtype=_np.float32)
+    used = 0
+    for rgb in usable:
+        a = _np.asarray(rgb)
+        if a.shape != ref_shape:
+            logger.debug(
+                "image_table composite: skipping tile shape %r != reference %r",
+                a.shape, ref_shape,
+            )
+            continue
+        acc += a.astype(_np.float32)
+        used += 1
+    if used == 0:
+        return None
+    return _np.clip(acc, 0.0, 255.0).astype(_np.uint8)
+
+
+def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
+    """Build the additive composite RGB for grid column *c*.
+
+    Gathers each grid row's displayed RGB (via :func:`cell_display_rgb`) for
+    column *c* and merges them with :func:`composite_additive_rgb`. Reuses the
+    per-generate ``rendered`` arrays when present, else lazy-loads (mirroring the
+    export path). Returns a uint8 (H, W, 3) array, or ``None``.
+    """
+    rendered = rendered or {}
+    rgbs = []
+    for r, row in enumerate(cells):
+        if c >= len(row):
+            continue
+        cell = row[c]
+        arr = rendered.get((r, c))
+        if arr is None:
+            well = cell["well_cb"].currentText().strip()
+            chan = cell["chan_cb"].currentText().strip()
+            tp = cell["tp_cb"].currentText().strip()
+            fov = cell["fov_cb"].currentText().strip()
+            if well and chan and tp:
+                use_tophat = _row_display_opts(ctx, r)[0]
+                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+        rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
+        if rgb is not None:
+            rgbs.append(rgb)
+    return composite_additive_rgb(rgbs)

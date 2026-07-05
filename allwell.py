@@ -989,7 +989,6 @@ class AllWellApp(QMainWindow):
         manager (Finder on macOS, Explorer on Windows, the default file
         manager via ``xdg-open`` on Linux). Falls back to the standard
         Open-directory dialog when no dataset is loaded yet."""
-        review = getattr(self, "_review", None)
         # The previously-loaded directory lives on
         # ``review._app_state.dataset.data_dir`` (set by
         # ``well_viewer/core/load_controller.py``). Earlier code consulted a

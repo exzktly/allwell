@@ -73,46 +73,29 @@ def _fsync_path(path: Path) -> None:
 
 # Retry budget for the image write. ``tifffile`` writes the pixel buffer with
 # ``ndarray.tofile``, which raises the cryptic ``OSError: <N> requested and 0
-# written`` whenever the underlying ``fwrite`` comes back short. On a LOCAL disk
-# the overwhelming cause is the volume (or a user/quota) being **full** — numpy
-# does not fold the ``ENOSPC`` "No space left on device" text into that message,
-# so the disk-full nature is hidden. A near-full disk cannot be fixed by
-# retrying, so we detect it up front and raise a clear, actionable error instead
-# of grinding through the backoff. Only genuinely transient short writes (a
-# stalled network mount, an interrupted syscall) fall through to the retry loop.
-# ``_RETRY_BASE_DELAY_S`` is patched to 0 in tests. Mirrors the GUI-side shield
-# in ``well_viewer/persistence/_io.py``.
-_WRITE_MAX_ATTEMPTS = 4
+# written`` whenever the underlying ``fwrite`` comes back short. The error is at
+# the *write* stage (the file already opened), so with free disk space available
+# it is not "disk full" — the usual culprits on a local volume are a transient
+# filesystem/I-O hiccup, a backup / anti-virus / indexing process momentarily
+# holding the freshly-created file, or (macOS APFS) space that ``df`` reports
+# free but that isn't yet writable. All of those clear on their own, so the right
+# response is to back off and retry; only when the volume is genuinely out of
+# room (free space below the image size) is retrying futile and we say so
+# outright. If the retries are exhausted the caller still sees a failure — with
+# an honest, actionable diagnostic rather than the raw numpy message — so the FOV
+# is marked failed instead of emitting a truncated image. ``_RETRY_BASE_DELAY_S``
+# is patched to 0 in tests. Mirrors the GUI-side shield in
+# ``well_viewer/persistence/_io.py``.
+_WRITE_MAX_ATTEMPTS = 5
 _RETRY_BASE_DELAY_S = 0.5
-# Headroom (bytes) required beyond the array itself before we treat a write
-# failure as "transient" rather than "disk full" — covers tmp + final copy
-# living side by side around the atomic rename, plus filesystem overhead.
-_DISK_FULL_MARGIN = 16 * 1024 * 1024  # 16 MiB
 
 
-def _disk_full_message(out_path: Path, data: "np.ndarray") -> "str | None":
-    """A clear disk-full diagnostic if *out_path*'s volume can't hold *data*.
-
-    ``None`` when there is plenty of free space (so the failure is something
-    else — a transient blip worth retrying). numpy's short-write ``OSError``
-    carries no ``errno``, so we can't switch on ``ENOSPC``; instead we ask the
-    filesystem how much room is left and compare it against the bytes we are
-    trying to write plus a margin for the tmp + renamed copy.
-    """
+def _free_bytes(path: Path) -> "int | None":
+    """Free bytes on *path*'s volume, or ``None`` if it can't be determined."""
     try:
-        free = shutil.disk_usage(out_path.parent).free
+        return shutil.disk_usage(path.parent).free
     except OSError:
-        return None  # can't tell — let the retry loop handle it
-    need = int(getattr(data, "nbytes", 0) or 0)
-    if free >= need + _DISK_FULL_MARGIN:
         return None
-    return (
-        f"No space left on device while writing {out_path.name}: "
-        f"{free:,} byte(s) free on {out_path.parent}, need ~{need:,} for this "
-        f"image. Free up disk space (or point --scratch / ALLWELL_SCRATCH_DIR "
-        f"at a roomier volume) and re-run with --incremental to resume the "
-        f"unfinished FOV-groups."
-    )
 
 
 def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
@@ -123,15 +106,17 @@ def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
     failure so the well's output directory never carries partial bytes
     that a later zip-up step would pack into a corrupt archive.
 
-    Write failures are triaged: a short/zero write on a (near-)full volume
-    (the cryptic ``OSError: <N> requested and 0 written`` numpy raises) is
-    re-raised immediately with a clear "No space left on device" message —
-    retrying a full disk is pointless. Any other ``OSError`` is treated as a
-    transient blip and retried up to ``_WRITE_MAX_ATTEMPTS`` times with
-    exponential backoff (the partial tmp is unlinked between attempts); the
-    final failure still propagates so the caller marks the FOV failed rather
-    than emitting a truncated image. Non-``OSError`` exceptions (e.g.
-    ``KeyboardInterrupt``) are never retried.
+    An ``OSError`` from the codec (notably numpy's cryptic ``<N> requested and 0
+    written`` short-write) is retried up to ``_WRITE_MAX_ATTEMPTS`` times with
+    exponential backoff — such failures are usually transient (filesystem/I-O
+    blip, backup/AV holding the file, macOS APFS purgeable space) and clear on
+    a retry; the partial tmp is unlinked between attempts. Two exits skip the
+    remaining retries: a genuinely full volume (free space below the image
+    size), which cannot be fixed by retrying, is reported immediately; and once
+    the budget is exhausted the final failure propagates as an enriched
+    ``OSError`` (original message + free space + likely causes + how to resume)
+    so the caller marks the FOV failed rather than emitting a truncated image.
+    Non-``OSError`` exceptions (e.g. ``KeyboardInterrupt``) are never retried.
 
     The tmp file is named ``__aw_tmp_<stem>.pid<N><ext>`` — a unique
     prefix the zip-up step's listers explicitly exclude. The trailing
@@ -147,6 +132,7 @@ def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
         f"__aw_tmp_{out_path.stem}.pid{os.getpid()}{out_path.suffix}"
     )
     suffix = out_path.suffix.lower()
+    need = int(getattr(data, "nbytes", 0) or 0)
 
     def _cleanup_tmp() -> None:
         try:
@@ -166,12 +152,29 @@ def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
             return
         except OSError as exc:
             _cleanup_tmp()
-            # Disk full → retrying can't help; surface the real reason now.
-            disk_msg = _disk_full_message(out_path, data)
-            if disk_msg is not None:
-                raise OSError(disk_msg) from exc
+            free = _free_bytes(out_path)
+            # Genuinely out of room → retrying cannot help; say so plainly.
+            if free is not None and free < need:
+                raise OSError(
+                    f"No space left on device while writing {out_path.name}: "
+                    f"{free:,} byte(s) free on {out_path.parent}, need "
+                    f"{need:,} for this image. Free up space (or point "
+                    f"ALLWELL_SCRATCH_DIR at a roomier volume) and re-run with "
+                    f"--incremental to resume."
+                ) from exc
             if attempt + 1 >= _WRITE_MAX_ATTEMPTS:
-                raise
+                free_str = (f"{free:,} byte(s) free" if free is not None
+                            else "free space unknown")
+                raise OSError(
+                    f"Failed to write {out_path.name} after "
+                    f"{_WRITE_MAX_ATTEMPTS} attempts ({exc}); {free_str} on "
+                    f"{out_path.parent}. A zero-byte write with space available "
+                    f"usually means a transient filesystem/I-O error, a backup / "
+                    f"anti-virus / indexing process holding the file, or (macOS "
+                    f"APFS) space df reports free but that is not yet writable. "
+                    f"Re-run with --incremental to resume the unfinished "
+                    f"FOV-groups."
+                ) from exc
             log.warning(
                 "imwrite %s failed (%s); retry %d/%d after backoff",
                 out_path.name, exc, attempt + 1, _WRITE_MAX_ATTEMPTS - 1,

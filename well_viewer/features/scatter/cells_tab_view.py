@@ -102,6 +102,9 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     tp_cb.hide()
     reg.register("_scatter_tp_var", tp_cb)
     ctx.runtime.scatter.tp_selections = {}
+    # Stash the per-cell tp-selection summary refresher so view_state restore can
+    # repaint the "(X selected)" label without importing this feature module.
+    ctx.runtime.scatter.tp_display_refresh = update_scatter_tp_selection_display
 
     # Secondary display options (Layout + Colour-by-time) collapse into a
     # "Display ▾" popover so the per-cell scatter control row stays readable —

@@ -94,7 +94,7 @@ def on_tab_change(app, _e=None) -> None:
     # are populated and apply step can validate combo items.
     if getattr(app, "_view_state_pending", None):
         from well_viewer.persistence import view_state as _vs
-        if _vs.apply_pending_tab_state(app, tab):
+        if _vs.apply_pending_tab_state(app._ctx, tab):
             # The restore lands *after* this tab's initial draw above, so that
             # draw used pre-restore defaults — e.g. the Bar timepoint popup,
             # which ``_update_bar_tp_menu`` had defaulted to a single checked

@@ -623,7 +623,7 @@ def _activate_tab(ctx, name: str) -> None:
         _logger.debug("view_state: tab activation failed for %r", name, exc_info=True)
 
 
-def apply_pending_tab_state(app, tab_name: str) -> bool:
+def apply_pending_tab_state(ctx, tab_name: str) -> bool:
     """Pop *tab_name*'s pending state (if any) into live widgets.
 
     Called from ``_on_tab_change`` so a tab that built lazily still receives
@@ -634,7 +634,7 @@ def apply_pending_tab_state(app, tab_name: str) -> bool:
     some restored state (the Bar timepoint multi-select, swarm/violin, scatter
     axes) changes what should be plotted.
     """
-    pending = getattr(app, "_view_state_pending", None)
+    pending = ctx.runtime.view_state.pending
     if not pending:
         return False
     state = pending.pop(tab_name, None)
@@ -642,20 +642,20 @@ def apply_pending_tab_state(app, tab_name: str) -> bool:
         return False
     try:
         if tab_name == "Bar Plots":
-            _apply_bar(app, state)
+            _apply_bar(ctx, state)
         elif tab_name == "Distribution":
-            _apply_distribution(app, state)
+            _apply_distribution(ctx, state)
         elif tab_name == "Scatter Plot":
-            _apply_scatter(app, state)
+            _apply_scatter(ctx, state)
         elif tab_name == "Image Table":
-            _apply_image_table(app, state)
+            _apply_image_table(ctx, state)
     except Exception:
         _logger.debug("view_state: apply_pending_tab_state(%r) failed", tab_name, exc_info=True)
     return True
 
 
-def _set_combo_if_valid(app, attr: str, value: str) -> None:
-    w = getattr(app, attr, None)
+def _set_combo_if_valid(ctx, attr: str, value: str) -> None:
+    w = ctx.widgets.get_or_none(attr)
     if w is None:
         return
     try:
@@ -677,9 +677,9 @@ def _set_combo_if_valid(app, attr: str, value: str) -> None:
         swallowed()  # was: pass (silent except)
 
 
-def _apply_bar(app, state: dict) -> None:
+def _apply_bar(ctx, state: dict) -> None:
     if "timepoint" in state:
-        _set_combo_if_valid(app, "_bar_tp_cb", str(state["timepoint"]))
+        _set_combo_if_valid(ctx, "_bar_tp_cb", str(state["timepoint"]))
     if "timepoint_selections" in state and isinstance(state["timepoint_selections"], dict):
         try:
             # Intersect with the dataset's current timepoint keys so a saved
@@ -687,14 +687,14 @@ def _apply_bar(app, state: dict) -> None:
             # orphan keys that the popup ignores. ``update_bar_tp_menu`` keys
             # via ``f"{t:.4g}"``; we keep whatever is in the saved file as the
             # authoritative selection unless the key is no longer present.
-            current = dict(app._app_state.bar.tp_selections or {})
+            current = dict(ctx.state.bar.tp_selections or {})
             saved = {str(k): bool(v) for k, v in state["timepoint_selections"].items()}
             merged = {k: (saved[k] if k in saved else False) for k in current}
             # When the saved set covers every current timepoint (common when
             # nothing's changed between runs), use it verbatim.
             if set(saved.keys()) >= set(current.keys()):
                 merged = {k: saved.get(k, False) for k in current}
-            app._app_state.bar.tp_selections = merged or saved
+            ctx.state.bar.tp_selections = merged or saved
         except Exception:
             swallowed()  # was: pass (silent except)
         # Sync the hidden back-compat combo + the "(X selected)" label so every
@@ -705,14 +705,14 @@ def _apply_bar(app, state: dict) -> None:
         # module doesn't add a new deferred ``from well_viewer.features ...``
         # import — the cycle-budget guard in test_deferred_imports caps those.
         try:
-            sels = app._app_state.bar.tp_selections or {}
-            hidden = getattr(app, "_bar_tp_cb", None)
+            sels = ctx.state.bar.tp_selections or {}
+            hidden = ctx.widgets.get_or_none("_bar_tp_cb")
             if hidden is not None and sels:
                 for tp_str in sorted(sels.keys(), key=lambda s: float(s)):
                     if sels[tp_str]:
                         hidden.setCurrentText(tp_str)
                         break
-            lbl = getattr(app, "_bar_tp_label", None)
+            lbl = ctx.widgets.get_or_none("_bar_tp_label")
             if lbl is not None:
                 total = len(sels)
                 count = sum(1 for v in sels.values() if v)
@@ -722,19 +722,19 @@ def _apply_bar(app, state: dict) -> None:
                     lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
         except Exception:
             _logger.debug("view_state: bar tp post-restore sync failed", exc_info=True)
-    _bar = app._app_state.feature_slice("bar")
+    _bar = ctx.state.feature_slice("bar")
     if _bar is not None:
         if "swarm" in state:
             _bar.swarm = bool(state["swarm"])
         if "violin" in state:
             _bar.violin = bool(state["violin"])
-    slider = getattr(app, "_violin_slider", None)
+    slider = ctx.widgets.get_or_none("_violin_slider")
     if slider is not None and "violin_smooth" in state:
         try:
             slider.setValue(int(state["violin_smooth"]))
         except Exception:
             swallowed()  # was: pass (silent except)
-    plot = getattr(app._app_state, "plot", None) if hasattr(app, "_app_state") else None
+    plot = getattr(ctx.state, "plot", None)
     if plot is not None:
         if "group_mode" in state and str(state["group_mode"]) in ("well", "timepoint"):
             plot.bar_group_mode = str(state["group_mode"])
@@ -748,20 +748,20 @@ def _apply_bar(app, state: dict) -> None:
             plot.bar_order = [str(k) for k in state["bar_order"]]
 
 
-def _apply_distribution(app, state: dict) -> None:
+def _apply_distribution(ctx, state: dict) -> None:
     if "timepoint" in state:
-        _set_combo_if_valid(app, "_distribution_tp_cb", str(state["timepoint"]))
+        _set_combo_if_valid(ctx, "_distribution_tp_cb", str(state["timepoint"]))
     if "mode" in state:
-        _set_combo_if_valid(app, "_distribution_mode_cb", str(state["mode"]))
+        _set_combo_if_valid(ctx, "_distribution_mode_cb", str(state["mode"]))
     if "layout" in state:
-        _set_combo_if_valid(app, "_distribution_layout_cb", str(state["layout"]))
-    _dist = app._app_state.feature_slice("distribution")
+        _set_combo_if_valid(ctx, "_distribution_layout_cb", str(state["layout"]))
+    _dist = ctx.state.feature_slice("distribution")
     if "bins" in state:
         try:
             bins = int(state["bins"])
         except (TypeError, ValueError):
             return
-        spin = getattr(app, "_distribution_bins_spin", None)
+        spin = ctx.widgets.get_or_none("_distribution_bins_spin")
         if spin is not None:
             try:
                 spin.setValue(bins)
@@ -772,7 +772,7 @@ def _apply_distribution(app, state: dict) -> None:
     if "log_x" in state:
         if _dist is not None:
             _dist.log_x = bool(state["log_x"])
-        cb = getattr(app, "_distribution_log_x_cb", None)
+        cb = ctx.widgets.get_or_none("_distribution_log_x_cb")
         if cb is not None:
             try:
                 cb.setChecked(bool(state["log_x"]))
@@ -781,7 +781,7 @@ def _apply_distribution(app, state: dict) -> None:
     if "log_y" in state:
         if _dist is not None:
             _dist.log_y = bool(state["log_y"])
-        cb = getattr(app, "_distribution_log_y_cb", None)
+        cb = ctx.widgets.get_or_none("_distribution_log_y_cb")
         if cb is not None:
             try:
                 cb.setChecked(bool(state["log_y"]))
@@ -789,7 +789,7 @@ def _apply_distribution(app, state: dict) -> None:
                 swallowed()  # was: pass (silent except)
 
 
-def _apply_scatter(app, state: dict) -> None:
+def _apply_scatter(ctx, state: dict) -> None:
     for key, attr in (
         ("ch_x", "_scatter_ch_x_cb"),
         ("metric_x", "_scatter_metric_x_cb"),
@@ -802,32 +802,33 @@ def _apply_scatter(app, state: dict) -> None:
         ("agg_metric_y", "_scatter_agg_metric_y_cb"),
     ):
         if key in state:
-            _set_combo_if_valid(app, attr, str(state[key]))
+            _set_combo_if_valid(ctx, attr, str(state[key]))
     # Restore the per-timepoint multi-select filters, intersected with the
     # timepoints the current dataset actually has (a saved tp may be gone).
-    for skey, attr in (
-        ("tp_selections", "_scatter_tp_selections"),
-        ("agg_tp_selections", "_scatter_agg_tp_selections"),
+    for skey, live in (
+        ("tp_selections", ctx.runtime.scatter.tp_selections),
+        ("agg_tp_selections", ctx.runtime.scatter.agg_tp_selections),
     ):
         saved = state.get(skey)
-        live = getattr(app, attr, None)
         if isinstance(saved, dict) and isinstance(live, dict):
             for tp_str in live:
                 if tp_str in saved:
                     live[tp_str] = bool(saved[tp_str])
     # Refresh the timepoint-selector summary labels so the restored filter is
     # reflected in the UI, then re-apply the active sub-tab last (it repopulates
-    # the axis combos but preserves the values we just set, and redraws).
-    for fn_name in ("_update_scatter_tp_selection_display",
-                    "_update_tp_selection_display"):
-        fn = getattr(app, fn_name, None)
-        if callable(fn):
+    # the axis combos but preserves the values we just set, and redraws). The two
+    # display refreshers are ctx-native functions the scatter cells/agg builders
+    # stash on ``ctx.runtime.scatter`` (like ``set_mode``/``gate_redraw_cb``), so
+    # persistence reaches them without importing the feature module.
+    for ref in (ctx.runtime.scatter.tp_display_refresh,
+                ctx.runtime.scatter.agg_tp_display_refresh):
+        if callable(ref):
             try:
-                fn()
+                ref(ctx)
             except Exception:
                 swallowed()
     mode = state.get("mode")
-    set_mode = getattr(app, "_scatter_set_mode", None)
+    set_mode = ctx.runtime.scatter.set_mode
     if mode and callable(set_mode):
         try:
             set_mode(str(mode))
@@ -835,7 +836,7 @@ def _apply_scatter(app, state: dict) -> None:
             swallowed()
 
 
-def _apply_image_table(app, state: dict) -> None:
+def _apply_image_table(ctx, state: dict) -> None:
     """Restore the Image Table grid (dimensions, per-cell combos, toggles,
     per-channel LUTs) and re-render via image_table_generate.
 
@@ -862,7 +863,7 @@ def _apply_image_table(app, state: dict) -> None:
         axis = state.get(key)
         if not isinstance(axis, str) or not axis:
             continue
-        cb = getattr(app, f"_image_table_{which}_axis_cb", None)
+        cb = getattr(ctx.runtime.image_table, f"{which}_axis_cb", None)
         if cb is not None:
             try:
                 idx = cb.findData(axis)
@@ -875,8 +876,8 @@ def _apply_image_table(app, state: dict) -> None:
             except Exception:
                 swallowed()
         try:
-            setattr(app._app_state.image_table, f"{which}_axis", axis)
-            setattr(app, f"_image_table_{which}_axis", axis)
+            setattr(ctx.state.image_table, f"{which}_axis", axis)
+            setattr(ctx.runtime.image_table, f"{which}_axis", axis)
         except Exception:
             swallowed()
 
@@ -885,8 +886,8 @@ def _apply_image_table(app, state: dict) -> None:
     rows = state.get("rows")
     cols = state.get("cols")
     if isinstance(rows, int) or isinstance(cols, int):
-        rows_spin = getattr(app, "_image_table_rows_spin", None)
-        cols_spin = getattr(app, "_image_table_cols_spin", None)
+        rows_spin = ctx.runtime.image_table.rows_spin
+        cols_spin = ctx.runtime.image_table.cols_spin
         # Block the per-spinner valueChanged → apply_dimensions firing twice;
         # call apply_dimensions once after both values are set.
         changed = False
@@ -905,12 +906,12 @@ def _apply_image_table(app, state: dict) -> None:
                 swallowed()  # was: pass (silent except)
         if changed and image_table_apply_dimensions is not None:
             try:
-                image_table_apply_dimensions(app._ctx)
+                image_table_apply_dimensions(ctx)
             except Exception:
                 _logger.debug("image_table: apply_dimensions failed", exc_info=True)
 
     cells = state.get("cells") or []
-    live = getattr(app, "_image_table_cells", None) or []
+    live = ctx.runtime.image_table.cells or []
     if isinstance(cells, list) and live:
         for r, row_state in enumerate(cells):
             if r >= len(live) or not isinstance(row_state, list):
@@ -946,12 +947,11 @@ def _apply_image_table(app, state: dict) -> None:
 
     # Per-row channel / well convenience combos — set to match (the per-cell
     # values are already restored above and stay authoritative).
-    for key, attr in (
-        ("row_chans", "_image_table_row_chan_cbs"),
-        ("row_wells", "_image_table_row_well_cbs"),
+    for key, cbs in (
+        ("row_chans", ctx.runtime.image_table.row_chan_cbs),
+        ("row_wells", ctx.runtime.image_table.row_well_cbs),
     ):
         texts = state.get(key)
-        cbs = getattr(app, attr, None)
         if not isinstance(texts, list) or not cbs:
             continue
         for cb, text in zip(cbs, texts):
@@ -973,7 +973,7 @@ def _apply_image_table(app, state: dict) -> None:
         ("global_fov",  "_image_table_global_fov_cb"),
     ):
         if key in state and isinstance(state[key], str):
-            _set_combo_if_valid(app, attr, state[key])
+            _set_combo_if_valid(ctx, attr, state[key])
 
     # Rebuild the per-row levels & display table now that the channel combos are
     # restored. The per-row labels ("Row N · CHAN") + colour selectors are
@@ -984,7 +984,7 @@ def _apply_image_table(app, state: dict) -> None:
     # restored channels before the row_luts values are re-applied below.
     if image_table_rebuild_lut_row is not None:
         try:
-            image_table_rebuild_lut_row(app._ctx)
+            image_table_rebuild_lut_row(ctx)
         except Exception:
             _logger.debug("image_table: per-row LUT table rebuild failed", exc_info=True)
 
@@ -992,8 +992,8 @@ def _apply_image_table(app, state: dict) -> None:
     # (top-hat / boundaries / binary) is per-row now, so it round-trips here
     # alongside min/max rather than as separate global toggles.
     row_luts = state.get("row_luts") or {}
-    live_luts = getattr(app, "_image_table_lut", None) or {}
-    color_cbs = getattr(app, "_image_table_row_lut_color_cbs", None) or []
+    live_luts = ctx.runtime.image_table.lut or {}
+    color_cbs = ctx.runtime.image_table.row_lut_color_cbs or []
     if isinstance(row_luts, dict) and isinstance(live_luts, dict):
         for r_key, slot in row_luts.items():
             try:
@@ -1069,7 +1069,7 @@ def _apply_image_table(app, state: dict) -> None:
     # notify=False so the CropTool's on_change (image_table_generate) does NOT
     # fire here — restore must not composite the grid off disk during dataset
     # load; the restored crop applies on the next user-triggered Generate.
-    ct = getattr(app, "_image_table_crop_tool", None)
+    ct = ctx.runtime.image_table.crop_tool
     if ct is not None and "crop" in state:
         try:
             crop = state.get("crop")
@@ -1085,7 +1085,7 @@ def _apply_image_table(app, state: dict) -> None:
     # Zoom (display-only) via its feature setter (imported once at the top).
     if isinstance(state.get("zoom"), (int, float)) and image_table_set_zoom is not None:
         try:
-            image_table_set_zoom(app._ctx, float(state["zoom"]))
+            image_table_set_zoom(ctx, float(state["zoom"]))
         except Exception:
             _logger.debug("image_table: zoom restore failed", exc_info=True)
 

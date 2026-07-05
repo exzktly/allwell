@@ -14,6 +14,20 @@ from well_viewer.features.image_browser.image_table import controller as C  # no
 pytestmark = pytest.mark.qt
 
 
+class _RuntimeNS:
+    """Mimics ``AppRuntime._FeatureRuntime``: attributes set at construction
+    resolve; any *unset* attribute returns ``None`` (never ``AttributeError``),
+    exactly like the real prefix-backed runtime the ctx-native
+    ``_apply_image_table`` reads. Lets the fakes below omit the widget handles a
+    given restore payload never touches."""
+
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __getattr__(self, _name):  # only reached for names not in __dict__
+        return None
+
+
 # ── Fast-lane coverage (no full WellViewerApp → not auto-marked ``slow``) ─────
 # These exercise the snapshot/apply helpers against hand-built widgets so the
 # round-trip — and the "restore must not generate images on load" contract — run
@@ -29,14 +43,17 @@ def test_apply_image_table_crop_restore_does_not_generate():
 
     calls = []
     ct = CropTool(on_change=lambda: calls.append(1))
-    app = SimpleNamespace(
-        _image_table_crop_tool=ct,
-        _image_table_cells=[],
-        _image_table_lut={},
-        _image_table_row_lut_color_cbs=[],
-        _app_state=SimpleNamespace(image_table=ImageTableState()),
+    # ctx-shaped fake: the ctx-native ``_apply_image_table`` reads the live grid
+    # objects off ``ctx.runtime.image_table`` (None for the handles this payload
+    # never touches) and the typed slice off ``ctx.state``.
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(image_table=ImageTableState()),
+        runtime=SimpleNamespace(image_table=_RuntimeNS(
+            crop_tool=ct, cells=[], lut={}, row_lut_color_cbs=[],
+            row_chan_cbs=None, row_well_cbs=None)),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
     )
-    vs._apply_image_table(app, {"crop": [3, 5, 40, 60], "crop_mode": False})
+    vs._apply_image_table(ctx, {"crop": [3, 5, 40, 60], "crop_mode": False})
     assert tuple(ct.crop) == (3, 5, 40, 60)
     assert calls == [], "restore must not trigger image_table_generate on load"
 
@@ -80,18 +97,13 @@ def test_channel_and_source_round_trip_minimal_widgets(qapp):
     color_cbs = [LutSelector()]
     crop = CropTool(on_change=lambda: None)
     it_state = SimpleNamespace(image_table=ImageTableState(rows=1, cols=1))
-    # The fake doubles as its own ctx: ``_image_table_*`` / ``_app_state`` feed the
-    # app-based ``_apply_image_table``; ``state`` / ``runtime.image_table`` /
-    # ``widgets`` (+ a ``_ctx`` self-ref) feed the ctx-based
-    # ``_snapshot_image_table``. The same live objects back both faces.
+    # ctx-shaped fake: ``state`` / ``runtime.image_table`` (None for unset grid
+    # widgets) / ``widgets`` (+ a ``_ctx`` self-ref) back both the ctx-native
+    # ``_snapshot_image_table`` and ``_apply_image_table`` off the same live
+    # objects.
     app = SimpleNamespace(
-        _image_table_cells=cells,
-        _image_table_lut=lut,
-        _image_table_row_lut_color_cbs=color_cbs,
-        _image_table_crop_tool=crop,
-        _app_state=it_state,
         state=it_state,
-        runtime=SimpleNamespace(image_table=SimpleNamespace(
+        runtime=SimpleNamespace(image_table=_RuntimeNS(
             cells=cells, lut=lut, row_lut_color_cbs=color_cbs, crop_tool=crop,
             row_chan_cbs=None, row_well_cbs=None)),
         widgets=SimpleNamespace(get_or_none=lambda _n: None),
@@ -108,7 +120,7 @@ def test_channel_and_source_round_trip_minimal_widgets(qapp):
     # Wipe, then restore through the apply helper.
     cell["chan_cb"].setCurrentText("GFP")
     lut0["source"].setCurrentIndex(0)
-    vs._apply_image_table(app, snap)
+    vs._apply_image_table(app._ctx, snap)
 
     assert cell["chan_cb"].currentText() == "mCherry"
     assert lut0["source"].currentData() == "corrected"
@@ -155,7 +167,7 @@ def test_image_table_display_state_round_trips(loaded_app):
     row0["min"].setText("")
     row0["max"].setText("")
 
-    vs._apply_image_table(app, snap)
+    vs._apply_image_table(app._ctx, snap)
 
     # Dimensions are unchanged, so the live widgets are not rebuilt.
     live0 = app._image_table_lut[0]
@@ -206,7 +218,7 @@ def test_channel_and_source_restore_through_full_view_state_path(loaded_app):
     vs.restore(app._ctx, snap)
     # restore stashes pending + tries to activate the tab; apply explicitly so
     # the assertion doesn't depend on notebook/subtab navigation in the harness.
-    vs.apply_pending_tab_state(app, "Image Table")
+    vs.apply_pending_tab_state(app._ctx, "Image Table")
 
     assert app._image_table_cells[0][0]["chan_cb"].currentText() == want_chan
     assert app._image_table_lut[0]["source"].currentData() == "corrected"

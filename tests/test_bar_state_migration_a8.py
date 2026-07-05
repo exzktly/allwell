@@ -44,6 +44,6 @@ def test_persistence_round_trip_through_slice(viewer_app):
 
     # Flip the live slice, then apply the saved bar state — the slice must follow.
     app._app_state.bar.swarm = False
-    vs._apply_bar(app, bar_snap)
+    vs._apply_bar(app._ctx, bar_snap)
     assert app._app_state.bar.swarm is True
     assert app._app_state.bar.violin is False

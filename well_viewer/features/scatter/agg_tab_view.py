@@ -99,6 +99,9 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     agg_tp_label.setObjectName("Muted")
     cl.addWidget(agg_tp_label)
     ctx.runtime.scatter.agg_tp_selections = {}
+    # Stash the aggregate tp-selection summary refresher so view_state restore can
+    # repaint the "(X selected)" label without importing this feature module.
+    ctx.runtime.scatter.agg_tp_display_refresh = update_tp_selection_display
 
     # Error band (SEM/SD) for the aggregate's mean±spread points collapses into
     # a "Display ▾" popover (matches line/bar), instead of a card-controls row.

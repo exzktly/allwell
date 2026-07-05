@@ -10,10 +10,11 @@ from well_viewer.persistence import view_state as vs
 
 
 def _fake_app_with_distribution(**overrides):
-    """A fake that doubles as its own ctx: ``_app_state`` feeds the app-based
-    ``_apply_distribution``, while ``state`` / ``widgets`` (+ a ``_ctx`` self-ref)
-    feed the ctx-based ``_snapshot_distribution``. The distribution combos aren't
-    built, so ``widgets.get_or_none`` returns ``None`` (snapshot skips them)."""
+    """A ctx-shaped fake that doubles as its own ctx: ``state`` (typed slice +
+    ``feature_slice``) and ``widgets`` (+ a ``_ctx`` self-ref) back both the
+    ctx-native ``_snapshot_distribution`` and ``_apply_distribution``. The
+    distribution combos aren't built, so ``widgets.get_or_none`` returns ``None``
+    (both helpers skip them)."""
     slice_ = DistributionState(**overrides)
     state = SimpleNamespace(distribution=slice_,
                             feature_slice=lambda name: slice_ if name == "distribution" else None)
@@ -29,8 +30,8 @@ def test_distribution_log_y_snapshot_and_restore():
     assert snap["log_y"] is True
 
     restored = _fake_app_with_distribution()
-    vs._apply_distribution(restored, snap)
-    assert restored._app_state.distribution.log_y is True
+    vs._apply_distribution(restored._ctx, snap)
+    assert restored.state.distribution.log_y is True
 
 
 def test_render_overlay_sets_log_y_scale():

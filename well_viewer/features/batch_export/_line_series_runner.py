@@ -79,7 +79,7 @@ def collect_line_series_for_group(
     def _cdf_for(wells: List[str]) -> List[float]:
         if not include_cdf:
             return []
-        from well_viewer.data.data_loading import all_fluor_values as _all_fluor_values
+        from well_viewer.data.data_loading import _all_fluor_values
         vals: List[float] = []
         for lbl in wells:
             df = _get_rows(ctx, lbl)

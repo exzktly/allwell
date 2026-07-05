@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal, QRectF
+from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QEvent, QObject
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -209,6 +209,9 @@ class AllWellApp(QMainWindow):
         self._help_btn.clicked.connect(self._toggle_help_drawer)
         hl.addWidget(self._help_btn)
         self._help_drawer = None  # built lazily on first open
+        self._help_scroll = None
+        self._help_content = None
+        self._help_manual_view = None  # None in trimmed builds without the manual
 
         rl.addWidget(header)
 
@@ -651,16 +654,168 @@ class AllWellApp(QMainWindow):
                     _dw.setMinimumHeight(int(_dw.document().size().height()) + 16)
 
                 manual_view.document().contentsChanged.connect(_resize_manual)
-                cl.addWidget(manual_view)
 
-            cl.addStretch(1)
+                # The manual's minimum height is derived from the document
+                # height at the *current* text width. On the very first build
+                # the drawer isn't shown yet, so the viewport width is a
+                # placeholder and the estimate is wrong — usually far too tall,
+                # which is what left a big band of blank space under the text.
+                # Recompute whenever the manual is actually resized (i.e. once
+                # the drawer opens and every time the window changes width) so
+                # its height tracks the real wrapped text with no trailing gap.
+                class _ManualResizeFilter(QObject):
+                    def eventFilter(self, obj, ev):  # noqa: N802
+                        if ev.type() == QEvent.Resize:
+                            _resize_manual()
+                        return False
+
+                self._help_manual_resize_filter = _ManualResizeFilter(manual_view)
+                manual_view.installEventFilter(self._help_manual_resize_filter)
+                cl.addWidget(manual_view)
+                self._help_manual_view = manual_view
+
             scroll.setWidget(content)
             drawer.setContentWidget(scroll)
             self._help_drawer = drawer
+            self._help_scroll = scroll
+            self._help_content = content
         if self._help_drawer.isVisible():
             self._help_drawer.close()
         else:
             self._help_drawer.open()
+            # Once the drawer is laid out, jump to the help section that
+            # matches the page the user is currently looking at. Deferred by a
+            # short beat so the manual's resize-driven height recompute and the
+            # scroll area's layout (which fixes the scrollbar range) have both
+            # flushed before we compute where to scroll.
+            QTimer.singleShot(60, self._scroll_help_to_current_section)
+
+    # Map the app's current leaf page → the reference-manual heading that
+    # documents it. Keys are the leaf-tab names returned by
+    # ``well_viewer.core.tab_controller.current_centre_tab`` (plus the special
+    # "Analyze" pane). Values are exact heading texts in
+    # ``README_WellViewer.md``. Pages without a dedicated heading point at the
+    # "The Review tabs" overview, which describes every centre tab in one table.
+    _HELP_SECTION_BY_PAGE = {
+        "Analyze": "Analyze mode — running the pipeline",
+        "Multivariate": "Multivariate analysis",
+        "Spatial": "Spatial analysis",
+        "Spatial Map": "Spatial analysis",
+        "Batch Export": "Batch export",
+        "Bar Plots": "The Review tabs",
+        "Line Graphs": "The Review tabs",
+        "Scatter Plot": "The Review tabs",
+        "Distribution": "The Review tabs",
+        "Heat Map": "The Review tabs",
+        "Statistics": "The Review tabs",
+        "Image Table": "The Review tabs",
+        "Segmentation": "The Review tabs",
+        "Review Image": "The Review tabs",
+        "Playground": "The Review tabs",
+        "smFISH": "The Review tabs",
+        "Review CSV": "The Review tabs",
+        "Cell Gating": "The Review tabs",
+        "Sample Definitions": "The Review tabs",
+    }
+
+    def _help_section_for_current_page(self) -> str:
+        """Heading text in the reference manual that best matches the page the
+        user is currently viewing, or ``""`` when it can't be determined."""
+        review = getattr(self, "_review", None)
+        if review is None:
+            return ""
+        # Analyze pane wins — its leaf tab isn't a WellViewer centre tab.
+        stack = getattr(review, "_central_pane_stack", None)
+        if stack is not None and stack.currentIndex() == 1:
+            return self._HELP_SECTION_BY_PAGE.get("Analyze", "")
+        ctx = getattr(review, "_ctx", None)
+        if ctx is None:
+            return ""
+        try:
+            from well_viewer.core.tab_controller import current_centre_tab
+            leaf = current_centre_tab(ctx) or ""
+        except Exception:
+            return ""
+        if leaf in self._HELP_SECTION_BY_PAGE:
+            return self._HELP_SECTION_BY_PAGE[leaf]
+        # Fall back to a loose match so renamed/prefixed leaves ("Spatial Map",
+        # "Bar Plots (split)") still resolve to a section.
+        for key, section in self._HELP_SECTION_BY_PAGE.items():
+            if key.lower() in leaf.lower():
+                return section
+        return "The Review tabs"
+
+    def _scroll_help_to_current_section(self) -> None:
+        """Scroll the open help drawer so the heading for the current page sits
+        at the top of the manual. No-op if the drawer/manual isn't built, the
+        page can't be resolved, or the heading isn't found."""
+        mv = getattr(self, "_help_manual_view", None)
+        scroll = getattr(self, "_help_scroll", None)
+        content = getattr(self, "_help_content", None)
+        if mv is None or scroll is None or content is None:
+            return
+        target = self._help_section_for_current_page()
+        if not target:
+            return
+        # Find the actual heading block (headingLevel > 0) — matching on block
+        # text alone would also hit the table-of-contents links and inline
+        # cross-references that repeat the same words earlier in the document.
+        doc = mv.document()
+        block = doc.begin()
+        heading_block = None
+        while block.isValid():
+            if block.blockFormat().headingLevel() > 0 \
+                    and block.text().strip() == target:
+                heading_block = block
+                break
+            block = block.next()
+        if heading_block is None:
+            return
+        from PySide6.QtGui import QTextCursor
+        cursor = QTextCursor(heading_block)
+        # cursorRect is in the browser's viewport space; its own scrollbar is
+        # off and it is expanded to full document height, so the top of that
+        # rect equals the heading's y-offset from the document top.
+        y_in_manual = mv.cursorRect(cursor).top()
+        y_offset = mv.mapTo(content, mv.rect().topLeft()).y()
+        target_y = int(y_offset + y_in_manual) - theme_v2.Spacing.md
+        bar = scroll.verticalScrollBar()
+        bar.setValue(max(0, min(target_y, bar.maximum())))
+
+    def _current_data_dir(self):
+        """Return the directory of the dataset currently loaded in the
+        embedded WellViewer, or ``None`` when nothing is loaded.
+
+        The canonical source is ``review._app_state.dataset.data_dir``
+        (set by ``well_viewer/core/load_controller.py``). An older ``_data_dir``
+        attribute was never actually assigned, so callers that consulted it
+        always behaved as if no dataset were loaded."""
+        review = getattr(self, "_review", None)
+        if review is None:
+            return None
+        state = getattr(review, "_app_state", None)
+        dataset = getattr(state, "dataset", None) if state is not None else None
+        cur = getattr(dataset, "data_dir", None) if dataset is not None else None
+        # Fall back to the legacy attribute in case a future refactor restores
+        # it, so this helper never regresses below the old behaviour.
+        if not cur:
+            cur = getattr(review, "_data_dir", None)
+        return cur
+
+    def _current_dataset_root(self):
+        """The path to feed back to ``_load_path`` to reopen the current
+        dataset. For an ``in/`` + ``out/`` layout the loaded ``data_dir`` is the
+        ``out/`` folder, but ``_load_path`` wants the *root* (the folder holding
+        both), so it can re-detect the layout and re-bind the raw ``in/`` images.
+        Mirrors the reconstruction in ``_on_analyze_pipeline_complete``. Returns
+        ``None`` when nothing is loaded."""
+        cur = self._current_data_dir()
+        if not cur:
+            return None
+        cur = Path(cur)
+        if cur.name.lower() == "out" and (cur.parent / "in").is_dir():
+            return cur.parent
+        return cur
 
     # ── Phase 10 / 11 handlers ───────────────────────────────────────────
     def _on_titlebar_mode_seg(self, idx: int) -> None:
@@ -693,7 +848,7 @@ class AllWellApp(QMainWindow):
         review = self._review
         if review is None or not hasattr(review, "_load_path"):
             return
-        cur = getattr(review, "_data_dir", None)
+        cur = self._current_dataset_root()
         if cur:
             try:
                 review._load_path(Path(cur))
@@ -726,7 +881,7 @@ class AllWellApp(QMainWindow):
         review = self._review
         if review is None:
             return
-        cur = getattr(review, "_data_dir", None)
+        cur = self._current_data_dir()
         if not cur:
             QMessageBox.information(
                 self, "No dataset", "Load a dataset before resetting saved state.")
@@ -750,8 +905,9 @@ class AllWellApp(QMainWindow):
         except Exception:
             swallowed()  # was: pass (silent except)
         try:
+            root = self._current_dataset_root() or cur
             if hasattr(review, "_load_path"):
-                review._load_path(Path(cur))
+                review._load_path(Path(root))
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -834,11 +990,12 @@ class AllWellApp(QMainWindow):
         manager via ``xdg-open`` on Linux). Falls back to the standard
         Open-directory dialog when no dataset is loaded yet."""
         review = getattr(self, "_review", None)
-        # The previously-loaded directory is on ``app._data_dir``
-        # (``well_viewer/load_controller.py`` sets it). The earlier code
-        # consulted a never-set ``_loaded_path`` attribute and therefore
+        # The previously-loaded directory lives on
+        # ``review._app_state.dataset.data_dir`` (set by
+        # ``well_viewer/core/load_controller.py``). Earlier code consulted a
+        # never-set ``_data_dir``/``_loaded_path`` attribute and therefore
         # always fell into the "open a dataset" dialog branch.
-        cur = getattr(review, "_data_dir", None) if review is not None else None
+        cur = self._current_data_dir()
         if cur is None or not Path(cur).exists():
             # Nothing loaded — fall through to the "load a dataset" path so
             # the button still does something useful on a cold start.

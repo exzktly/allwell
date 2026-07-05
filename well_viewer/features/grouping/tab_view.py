@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from well_viewer.core.safe import swallowed
+from well_viewer.features.grouping.controller import rep_add
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -46,7 +47,6 @@ def wire_selections_list(ctx, lst) -> None:
         sel_select, sel_rename, sel_set_hidden, sel_delete, sel_duplicate,
         sel_set_color, sel_export_one, sel_reorder,
     )
-    from well_viewer.features.grouping.controller import rep_add
     lst.entryActivated.connect(lambda sid: sel_select(ctx, sid))
     lst.entryRenamed.connect(lambda sid, name: sel_rename(ctx, sid, name))
     lst.entryVisibilityToggled.connect(lambda sid, hidden: sel_set_hidden(ctx, sid, hidden))

@@ -18,8 +18,24 @@ def qapp():
 
 
 def _stub_app(data_dir):
+    """ctx-shaped fake: build_pipeline_info_subtab is ctx-native — it reads
+    ``ctx.state.dataset``, registers the tree via ``ctx.widgets`` (mirrored onto
+    the fake as ``._pipeline_info_tree`` like the real registry stamps the app),
+    and stamps the refresh closure on ``ctx.runtime.grouping``."""
     ds = types.SimpleNamespace(data_dir=data_dir, pipeline_info={})
-    return types.SimpleNamespace(_app_state=types.SimpleNamespace(dataset=ds))
+    ctx = types.SimpleNamespace()
+    ctx.state = types.SimpleNamespace(dataset=ds)
+    _reg: dict = {}
+
+    def _register(name, widget):
+        _reg[name] = widget
+        setattr(ctx, name, widget)   # mirror, like WidgetRegistry stamps app.<name>
+        return widget
+
+    ctx.widgets = types.SimpleNamespace(
+        register=_register, get_or_none=lambda n: _reg.get(n))
+    ctx.runtime = types.SimpleNamespace(grouping=types.SimpleNamespace())
+    return ctx
 
 
 def _rows(tree):
@@ -54,7 +70,7 @@ def test_pipeline_info_shows_background_method(qapp, tmp_path):
     assert ("Fluorescent", "gfp, mcherry") in rows
     assert ("Method", "stardist_nuclei") in rows
     # the same call wired a refresh hook the sub-tab switch uses
-    assert callable(app._pipeline_info_refresh)
+    assert callable(app.runtime.grouping.pipeline_info_refresh)
 
 
 def test_pipeline_info_reports_top_hat_run(qapp, tmp_path):

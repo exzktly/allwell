@@ -24,6 +24,9 @@ from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.selection_controller import update_active_group_label
 from well_viewer.core.selection_controller import groups_centre_refresh
+from well_viewer.features.grouping.controller import (
+    rep_add, rep_refresh_map, rep_quick_pairs_from_dropdowns,
+)
 from well_viewer.core.safe import swallowed
 
 
@@ -87,7 +90,6 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
 
     def _commit_plate_to_current(*_a) -> None:
         from well_viewer.core.selection_controller import sel_by_id, sel_set_composition
-        from well_viewer.features.grouping.controller import rep_refresh_map
         from well_viewer.domain.viewer_state import parse_rc
         # Well-membership edits should only land while the user is on the
         # GROUPS sub-tab of Sample Definitions. When the user is on Cell
@@ -133,9 +135,6 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
       - 1-line usage hint
     """
     from well_viewer.core.selection_controller import rep_clear_all
-    from well_viewer.features.grouping.controller import (
-        rep_add, rep_quick_pairs_from_dropdowns,
-    )
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)

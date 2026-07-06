@@ -16,6 +16,14 @@ import os
 from pathlib import Path
 import importlib.util
 
+# Raise the interpreter recursion limit for the build. PyInstaller walks the
+# module-dependency graph recursively during Analysis; on a tree this large and
+# densely cross-linked (TensorFlow, torch, scipy, …) it overflows Python's
+# default limit of 1000 with "maximum recursion depth exceeded". Bumping it here
+# only affects the build process, not the frozen app. This is PyInstaller's
+# documented fix for the error.
+sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
+
 
 # ---------------------------------------------------------------------------
 # Helper: locate a package's data directory

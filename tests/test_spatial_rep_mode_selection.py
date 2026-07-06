@@ -60,8 +60,8 @@ def test_no_groups_uses_selected_wells():
 
 
 def test_spatial_and_multivariate_in_rep_mirror_set():
-    from well_viewer.runtime_app import WellViewerApp
-    assert "Spatial" in WellViewerApp._REP_MIRROR_TABS
-    assert "Multivariate" in WellViewerApp._REP_MIRROR_TABS
+    from well_viewer.core.selection_controller import _REP_MIRROR_TABS
+    assert "Spatial" in _REP_MIRROR_TABS
+    assert "Multivariate" in _REP_MIRROR_TABS
     # plotting tabs stay in the mirror set too
-    assert "Bar Plots" in WellViewerApp._REP_MIRROR_TABS
+    assert "Bar Plots" in _REP_MIRROR_TABS

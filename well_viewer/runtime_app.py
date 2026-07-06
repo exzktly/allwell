@@ -834,13 +834,6 @@ class WellViewerApp(QWidget):
         "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
     })
 
-    # Per-well analysis tabs that consume the replicate-mode *active set* (visible
-    # groups + solo wells) just like the plotting tabs — so in rep-mode the plate
-    # highlights their active wells and a well click toggles that group. Spatial /
-    # Multivariate read ``rep_sets_active`` (not ``selected_wells``), which is
-    # empty in passive rep-mode; without this they fall back to first/all wells.
-    _REP_MIRROR_TABS = _PLOTTING_TABS | frozenset({"Spatial", "Multivariate"})
-
 
 
 

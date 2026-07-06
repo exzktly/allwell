@@ -215,6 +215,13 @@ PLOTTING_TABS = frozenset({
     "Line Graphs", "Bar Plots", "Scatter Plot", "Distribution", "Heat Map",
 })
 
+# Per-well tabs that consume the replicate-mode *active set* (visible groups +
+# solo wells) like the plotting tabs — so in rep-mode the plate highlights their
+# active wells and a well click toggles that group. Spatial / Multivariate read
+# ``rep_sets_active`` (not ``selected_wells``, which is empty in passive
+# rep-mode); without this they fall back to first/all wells.
+_REP_MIRROR_TABS = PLOTTING_TABS | frozenset({"Spatial", "Multivariate"})
+
 
 def select_row(app, row: str) -> None:
     if app._app_state.selection.selections:  # rep-mode
@@ -369,7 +376,7 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
         tab = app._current_centre_tab()
     except Exception:
         tab = ""
-    if tab in app._REP_MIRROR_TABS:
+    if tab in _REP_MIRROR_TABS:
         sid = app._sel_id_for_well(well_id)
         if sid is not None:
             app._sel_toggle_hidden(sid)
@@ -647,7 +654,7 @@ def refresh_sidebar_map_now(app) -> None:
     # identical whether the Scatter or the Cell Browser pane is focused (no
     # focus-driven flip / apparent "loss"). Other rep-mode tabs (Image Table /
     # smFISH / etc) keep the legacy "no per-well selection" override.
-    plotting_tab = tab_name in app._REP_MIRROR_TABS
+    plotting_tab = tab_name in _REP_MIRROR_TABS
     mirror_tab = plotting_tab or tab_name == "Cell Browser"
     if rep_mode and not mirror_tab:
         plate.setSelectedWellIds([])

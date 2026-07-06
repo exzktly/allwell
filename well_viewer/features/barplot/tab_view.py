@@ -40,6 +40,8 @@ from ui.theme import ACCENT
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
 
 
+from widgets.flow_layout import FlowLayout
+
 def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
 
@@ -67,7 +69,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # ── controls bar ─────────────────────────────────────────────────────────
     bar_ctrl = QWidget(bar_right)
     bar_ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(bar_ctrl)
+    cl = FlowLayout(bar_ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
     # Channel combo hidden — the global ctxbar combo is the only visible
@@ -137,7 +139,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # that change HOW it's exported — keeps the main row uncluttered.
     shape_ctrl = QWidget(bar_right)
     shape_ctrl.setObjectName("TabCtrl")
-    sl = QHBoxLayout(shape_ctrl)
+    sl = FlowLayout(shape_ctrl)
     sl.setContentsMargins(10, 2, 10, 6)
 
     # Multi-timepoint picker — mirrors the scatter plot's

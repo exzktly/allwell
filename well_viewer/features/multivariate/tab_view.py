@@ -39,6 +39,8 @@ _FACET_FACTORS = (("well", "Well"), ("timepoint", "Timepoint"), ("group", "Group
 _AGGS = ("mean", "median", "count", "std")
 
 
+from widgets.flow_layout import FlowLayout
+
 def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.icon_button import IconButton
@@ -60,7 +62,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # ── controls row 1: mode + features + standardize + actions ──────────────
     row1 = QWidget(parent)
     row1.setObjectName("TabCtrl")
-    r1 = QHBoxLayout(row1)
+    r1 = FlowLayout(row1)
     r1.setContentsMargins(10, 6, 10, 4)
 
     mode_seg = SegmentedControl(row1)
@@ -101,7 +103,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # ── controls row 2: per-mode options + timepoint ─────────────────────────
     row2 = QWidget(parent)
     row2.setObjectName("TabCtrl")
-    r2 = QHBoxLayout(row2)
+    r2 = FlowLayout(row2)
     r2.setContentsMargins(10, 2, 10, 6)
 
     # Correlation: heatmap / SPLOM.

@@ -13,7 +13,7 @@ from well_viewer.core.plot_card_actions import (
 )
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox,
+    QCheckBox, QComboBox, QLabel, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
@@ -27,6 +27,8 @@ from well_viewer.data.data_loading import get_all_timepoints
 _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
 _LAYOUT_OPTIONS = ["Overlay", "Faceted (one per group)"]
 
+
+from widgets.flow_layout import FlowLayout
 
 def build_distribution_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -49,7 +51,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(ctrl)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
     # Channel combo hidden — global ctxbar combo is the only visible

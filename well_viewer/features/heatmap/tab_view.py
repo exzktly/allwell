@@ -16,7 +16,7 @@ from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QFrame, QInputDialog, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
@@ -33,6 +33,8 @@ from well_viewer.core.safe import swallowed
 _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
 _SCALE_OPTIONS = ["Auto", "Fixed"]
 
+
+from widgets.flow_layout import FlowLayout
 
 def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # Defer matplotlib + heatmap_controller imports until the tab actually
@@ -62,7 +64,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # plotting parameters only.
     ctrl1 = QWidget(parent)
     ctrl1.setObjectName("TabCtrl")
-    cl1 = QHBoxLayout(ctrl1)
+    cl1 = FlowLayout(ctrl1)
     cl1.setContentsMargins(10, 6, 10, 6)
 
     # Channel combo hidden — global ctxbar combo is the only visible
@@ -108,7 +110,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # ── Control row 2: cmap / scale / log ───────────────────────────────────
     ctrl2 = QWidget(parent)
     ctrl2.setObjectName("TabCtrl")
-    cl2 = QHBoxLayout(ctrl2)
+    cl2 = FlowLayout(ctrl2)
     cl2.setContentsMargins(10, 0, 10, 6)
 
     cl2.addWidget(QLabel("Color map:", ctrl2))
@@ -175,7 +177,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # ── Timepoint slider (placed directly under the option rows) ────────────
     slider_row = QWidget(parent)
     slider_row.setObjectName("TabCtrl")
-    sl = QHBoxLayout(slider_row)
+    sl = FlowLayout(slider_row)
     sl.setContentsMargins(10, 4, 10, 6)
     sl.addWidget(QLabel("t (h):", slider_row))
     from widgets.styled_slider import StyledSlider as _StyledSlider

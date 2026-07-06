@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QTextEdit,
+    QComboBox, QFrame, QGridLayout, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -26,6 +26,8 @@ from well_viewer.features.stats.controller import stats_resync_from_sample_defs
 from well_viewer.core.channel_state_controller import refresh_stats_property_combo
 from well_viewer.core.safe import swallowed
 
+
+from widgets.flow_layout import FlowLayout
 
 def build_stats_tab(ctx, parent: QWidget) -> None:
     ctx.state.stats.groups = []
@@ -235,7 +237,7 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # appeared to float beside the Channel row, disconnected from the form).
     run_row = QWidget(parent)
     run_row.setObjectName("TabCtrl")  # data-gated with the stats form above
-    rrl = QHBoxLayout(run_row)
+    rrl = FlowLayout(run_row)
     rrl.setContentsMargins(0, 0, 0, 6)
     run_btn = btn_primary(run_row, "Run test", ctx.runtime.stats.run)
     rrl.addWidget(run_btn)

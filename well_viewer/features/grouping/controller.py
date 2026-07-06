@@ -165,10 +165,11 @@ from well_viewer.domain.selections_model import (  # noqa: E402,F401
 
 def rep_refresh_map(ctx) -> None:
     """Push selection state onto the GROUPS-panel plate (a WellPlateSelector):
-    every selection's wells take that selection's rank colour; the *current*
-    selection's wells are shown as the plate's selection (sunken/accent), which
-    is also what a drag on the plate edits."""
-    from well_viewer.core.selection_controller import sel_color
+    every well takes its canonical plate-rank colour (so a well is the same
+    colour here as on the main sidebar and the plots — "the plate is the
+    legend"); the *current* selection's wells are shown as the plate's selection
+    (sunken/accent), which is also what a drag on the plate edits."""
+    from well_viewer.domain.selections_model import color_for_well
     plate = ctx.widgets.get_or_none("_rep_map_plate")
     if plate is None:
         return
@@ -177,10 +178,9 @@ def rep_refresh_map(ctx) -> None:
     plate.setEnabledWells(list(well_paths.keys()))
     colors: Dict[str, str] = {}
     for s in sel_state.selections:
-        c = sel_color(ctx, s)
         for tok in (s.get("wells") or []):
             if tok in well_paths:
-                colors[tok] = c
+                colors[tok] = color_for_well(tok)
     plate.clearWellColors()
     plate.setWellColors(colors)
     cur_id = sel_state.current_selection_id

@@ -1851,6 +1851,58 @@ calls inside its domain; off by default.
 - **Pipeline-only run:** `python process_microscopy.py --input_dir … --output_dir …`.
   No GUI deps required.
 
+### 10.4 Running the tests — the full-app OOM caveat (read before `pytest tests/`)
+
+The pytest suite has two very different kinds of test, and running them the
+wrong way will **hang the run and OOM-kill the container**. Know which lane
+you're in before you type the command.
+
+- **Pure-logic / unit tests** (Qt-free: `pipeline/*`, `domain/*`,
+  `spatial_compute`, `multivariate_compute`, layout math, …). Fast, cheap,
+  safe to run in bulk. This is the CI "fast lane": `pytest tests/ -m "not slow"`.
+- **Full-app tests** (anything using the `viewer_app` / `loaded_app` /
+  `loaded_app_shape` / `image_table_app` fixtures — ~70 files). Each one
+  constructs a **real `WellViewerApp`** under the offscreen QPA. `conftest.py`'s
+  `pytest_collection_modifyitems` auto-marks these `slow`, precisely so the fast
+  lane skips them.
+
+**Why the full-app tests are dangerous in bulk.** Constructing the app builds
+~1,800 QObjects wired together with signal→bound-method connections
+(`signal.connect(app._method)`), closures that capture `app`, and child widgets
+that keep an `_app` back-reference (coordinators, `LabelGrid`,
+`RatioMetricsPanel`, the `WidgetRegistry` / `ViewerContext` / `PersistenceRegistry`).
+That web of Qt-C++ ↔ Python references **is not reclaimed within the process**:
+`close()` + `deleteLater()` + `gc.collect()` do **not** free it — measured, the
+`WellViewerApp` instance and its widgets survive teardown, so `app.allWidgets()`
+climbs ~1,800 per test and RSS grows ~40 MB per test, monotonically. pytest runs
+every test in **one process**, and the container has **no swap**, so a big slow
+run:
+- **hangs** — the ever-growing live-widget count makes each later test's Qt work
+  progressively slower, until the suite crawls; and/or
+- **gets OOM-killed** — RSS climbs unbounded until the orchestrator kills the
+  container (which looks like a mid-run "restart").
+
+This is an inherent property of tearing a large PySide app up and down in-process,
+not a bug in any one test — do not try to "fix" it by adding `gc.collect()` to a
+fixture (it doesn't help).
+
+**Rules for running tests here:**
+
+1. **Bulk runs use the fast lane only:** `pytest tests/ -m "not slow"`. Never run
+   a bare `pytest tests/` (or `-m slow` across everything) in this environment —
+   that's the command that kills the container.
+2. **Run full-app tests in small, fresh processes.** Invoke them a *file or two at
+   a time* — `pytest tests/test_app_smoke.py`,
+   `pytest tests/test_multivariate_tab.py` — so the OS reclaims the leaked memory
+   when each short-lived process exits. Budget roughly ≤ ~15–20 full-app tests per
+   process.
+3. **Prefer the pure-logic layer.** New behaviour should be testable without the
+   full app wherever possible (the `collect.py` / `_compute.py` / renderer-snapshot
+   split exists partly for this). A Qt-free unit test never pays the per-app cost.
+4. **Long runs will be interrupted.** A single `pytest` invocation that takes many
+   minutes is at risk of a container recycle. Keep each invocation short; if you
+   need broad coverage, script several small invocations rather than one large one.
+
 ---
 
 ## 11. Recipes

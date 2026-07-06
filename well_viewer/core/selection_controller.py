@@ -369,7 +369,7 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
         tab = app._current_centre_tab()
     except Exception:
         tab = ""
-    if tab in app._PLOTTING_TABS:
+    if tab in app._REP_MIRROR_TABS:
         sid = app._sel_id_for_well(well_id)
         if sid is not None:
             app._sel_toggle_hidden(sid)
@@ -647,7 +647,7 @@ def refresh_sidebar_map_now(app) -> None:
     # identical whether the Scatter or the Cell Browser pane is focused (no
     # focus-driven flip / apparent "loss"). Other rep-mode tabs (Image Table /
     # smFISH / etc) keep the legacy "no per-well selection" override.
-    plotting_tab = tab_name in app._PLOTTING_TABS
+    plotting_tab = tab_name in app._REP_MIRROR_TABS
     mirror_tab = plotting_tab or tab_name == "Cell Browser"
     if rep_mode and not mirror_tab:
         plate.setSelectedWellIds([])
@@ -876,22 +876,24 @@ def rebuild_all(app) -> None:
         scatter_redraw_active(app._ctx)
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
-    # Group edits change which wells the plots draw from, and the Cell Browser
-    # gallery follows the same wells (rep_sets_active). Selection-change events
-    # already fan out to it, but group mutations come through here and never
-    # emit selection_changed — so without this the Scatter pane updates while a
-    # side-by-side Cell Browser pane goes stale. Routed through the feature
-    # registry so core stays decoupled from the removable Cell Browser feature;
-    # the hook self-guards on _split_active (a no-op outside Split View, where
-    # the gallery stays Generate-gated).
-    desc = app._features.get("Cell Browser") if hasattr(app, "_features") else None
-    if (desc is not None and desc.on_selection_changed is not None
-            and app._is_tab_visible("Cell Browser")):
-        try:
-            desc.on_selection_changed(app)
-        except Exception:
-            __import__("logging").getLogger("well_viewer.runtime_app").exception(
-                "Cell Browser refresh after group edit failed")
+    # Group edits change which wells the plots draw from, and several per-well
+    # features follow the same active set (rep_sets_active): the Cell Browser
+    # gallery, the Spatial facets, and the Multivariate projection. Selection-
+    # change events already fan out to them, but group mutations come through
+    # here and never emit selection_changed — so without this a side-by-side
+    # (or focused) Cell Browser / Spatial / Multivariate pane goes stale while
+    # the Scatter pane updates. Routed through the feature registry so core
+    # stays decoupled from these removable features; each hook self-guards
+    # (visibility + Split View), so this is a no-op when the tab isn't shown.
+    for _name in ("Cell Browser", "Spatial", "Multivariate"):
+        desc = app._features.get(_name) if hasattr(app, "_features") else None
+        if (desc is not None and desc.on_selection_changed is not None
+                and app._is_tab_visible(_name)):
+            try:
+                desc.on_selection_changed(app)
+            except Exception:
+                __import__("logging").getLogger("well_viewer.runtime_app").exception(
+                    "%s refresh after group edit failed", _name)
     if hasattr(app, "_notebook"):
         if app._current_centre_tab() == "Line Graphs":
             app._show_line_sidebar()

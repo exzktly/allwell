@@ -678,8 +678,16 @@ QTableView::item, QTableWidget::item {{
 }}
 
 /* ── Splitter ────────────────────────────────────────────────────────── */
+/* A styled ::handle with no width/height collapses the grab area to ~1px and
+   overrides setHandleWidth — so give it an explicit size per orientation. */
 QSplitter::handle {{
     background-color: {c.border_subtle};
+}}
+QSplitter::handle:horizontal {{
+    width: 6px;
+}}
+QSplitter::handle:vertical {{
+    height: 6px;
 }}
 QSplitter::handle:hover {{
     background-color: {c.border_strong};

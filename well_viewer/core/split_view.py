@@ -98,8 +98,15 @@ def enter_split(app, tab_a: str, tab_b: str) -> None:
     split.addWidget(wb)
     wa.show()
     wb.show()
-    split.setSizes([1, 1])
     split.setVisible(True)
+    # Equal LARGE targets force a ~50/50 split regardless of each pane's
+    # minimumSizeHint. The old ``setSizes([1, 1])`` — set while the splitter was
+    # still hidden — let QSplitter fall back to the (unequal) per-pane minimums,
+    # so one side came up consistently wider. Set after ``setVisible`` so the
+    # proportions apply to the real width.
+    split.setStretchFactor(0, 1)
+    split.setStretchFactor(1, 1)
+    split.setSizes([1_000_000, 1_000_000])
     nb.setVisible(False)
     _install_split_focus_filter(app)
     on_tab_change(app._ctx, None)
@@ -361,6 +368,7 @@ def install_split_view(app) -> None:
     split = QSplitter(Qt.Horizontal)
     split.setObjectName("CentreSplit")
     split.setChildrenCollapsible(False)
+    split.setHandleWidth(6)  # a real grab target (paired with the QSS width)
     split.hide()
     parent = nb.parentWidget()
     layout = parent.layout() if parent is not None else None

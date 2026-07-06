@@ -201,11 +201,31 @@ def sp_set_summary_display(ctx, mode: str) -> None:
 
 # ── recompute pipeline ───────────────────────────────────────────────────────
 
+def _rep_active_wells(ctx) -> list:
+    """Active wells in replicate (group) mode: every non-hidden group's members
+    plus active solo wells, plate-order sorted.
+
+    In rep-mode the plate is passive and the per-well ``selected_wells`` set is
+    not maintained — the active set lives in the group ``hidden`` flags. This is
+    the same source the plotting tabs use (``rep_sets_active``) and the plate
+    highlights, so the Spatial tab tracks group selection in lock-step."""
+    sel = ctx.state.selection
+    well_paths = ctx.state.dataset.well_paths
+    wells = {
+        w for s in (sel.selections or []) if not s.get("hidden")
+        for w in (s.get("wells") or []) if w in well_paths
+    }
+    wells |= {w for w in (sel.active_solo_wells or set()) if w in well_paths}
+    return sorted(wells)
+
+
 def _frame_wells(ctx, st) -> list:
-    """Wells to facet at a per-frame level — the current plate selection in
-    plate order, falling back to the first loaded well when nothing is
-    selected. Unlike the Summary walk this stays bounded by the caller's cap
-    (one figure panel per well)."""
+    """Wells to facet at a per-frame level. In replicate (group) mode this is the
+    active set (non-hidden groups + solo wells), matching the plate highlight and
+    the plotting tabs; otherwise the current per-well plate selection, falling
+    back to the first loaded well. Bounded by the caller's panel cap."""
+    if ctx.state.selection.selections:
+        return _rep_active_wells(ctx)
     selected = list(ctx.state.selection.selected_wells or [])
     if selected:
         return sorted(selected)
@@ -320,9 +340,11 @@ def _compute_frame_payload(ctx, st, well: str) -> dict:
 # ── LEVEL_SUMMARY (per-(well,timepoint) matrix) ──────────────────────────────
 
 def _summary_wells(ctx) -> list:
-    """Wells to include in the Summary walk — the current plate selection
-    (plate-order sorted), falling back to every loaded well if the selection
-    is empty."""
+    """Wells to include in the Summary walk. In replicate (group) mode this is
+    the active set (non-hidden groups + solo wells); otherwise the current plate
+    selection, falling back to every loaded well when nothing is selected."""
+    if ctx.state.selection.selections:
+        return _rep_active_wells(ctx)
     selected = list(ctx.state.selection.selected_wells or [])
     if selected:
         return sorted(selected)

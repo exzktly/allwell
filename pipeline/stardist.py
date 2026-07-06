@@ -99,6 +99,37 @@ def set_fov_label(name: str) -> None:
     _SEG_FOV_LABEL = name
 
 
+def quiet_frozen_tf_logging() -> None:
+    """Silence two frozen-build-only TensorFlow messages that print as red
+    "errors" in the app log but do not affect StarDist inference:
+
+    * "Limited tf.compat.v2.summary API due to missing TensorBoard" — TensorBoard
+      is intentionally not bundled (tf.summary is unused for inference); emitted
+      when TF is first imported.
+    * "AutoGraph could not transform <Model.make_predict_function> ... Unable to
+      locate the source code" — a frozen build ships compiled .pyc, not .py, so
+      AutoGraph cannot ``inspect.getsource()`` the ``tf.function`` body. It runs
+      the function as-is, which is correct here (the predict graph is built from
+      ops, not converted Python control flow); emitted at first predict.
+
+    Call BEFORE TF is first imported so the tensorflow logger level is raised in
+    time to catch the summary warning. No-op off-frozen so developers running
+    from source keep full TF logging. Imports TF only when frozen, so the
+    module-import-is-TF-free invariant above is preserved.
+    """
+    import sys
+    if not getattr(sys, "frozen", False):
+        return
+    logging.getLogger("tensorflow").setLevel(logging.ERROR)
+    try:
+        import tensorflow as tf
+        tf.get_logger().setLevel(logging.ERROR)
+        tf.autograph.set_verbosity(0)
+    except Exception:
+        from util.aw_safe import swallowed
+        swallowed("quiet_frozen_tf_logging: TF import/config failed")
+
+
 def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
     from csbdeep.utils import normalize
     if _STARDIST_MODEL is None:

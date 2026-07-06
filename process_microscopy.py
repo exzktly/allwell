@@ -2783,33 +2783,11 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     # backed by importlib.metadata before stardist loads so the worker
     # doesn't crash with ``ModuleNotFoundError: pkg_resources``.
     _ensure_pkg_resources_shim()
-    # Quiet two TensorFlow messages that appear ONLY in a frozen (PyInstaller)
-    # build and print as red "errors" in the app log, yet do not affect StarDist
-    # inference:
-    #   * "Limited tf.compat.v2.summary API due to missing TensorBoard" — TensorBoard
-    #     is intentionally not bundled (tf.summary is never used for inference).
-    #     Emitted when TF is imported just below.
-    #   * "AutoGraph could not transform <Model.make_predict_function> ... Unable to
-    #     locate the source code" — a frozen build ships compiled .pyc, not .py,
-    #     so AutoGraph cannot inspect.getsource() the tf.function body. It runs the
-    #     function as-is, which is correct here (the predict graph is built from
-    #     ops, not from converted Python control flow). Emitted at first predict.
-    # Raise the tensorflow logger to ERROR *before* the import so the summary
-    # warning is caught too. Left untouched off-frozen so developers running from
-    # source keep full TF logging.
-    import sys as _sys
-    _frozen = bool(getattr(_sys, "frozen", False))
-    if _frozen:
-        logging.getLogger("tensorflow").setLevel(logging.ERROR)
+    # Frozen builds only: silence harmless-for-inference TF summary / AutoGraph
+    # noise before TF is first imported (see pipeline.stardist for the details).
+    _stardist.quiet_frozen_tf_logging()
     from csbdeep.utils import normalize as _normalize   # noqa: F401 — triggers TF init
     from stardist.models import StarDist2D as _StarDist2D
-    if _frozen:
-        try:
-            import tensorflow as _tf_quiet
-            _tf_quiet.get_logger().setLevel(logging.ERROR)
-            _tf_quiet.autograph.set_verbosity(0)
-        except Exception:
-            swallowed()  # quieting is best-effort; never block model load
 
     # Disable GPU on non-Mac platforms (or when --cpu_only is set).
     # On macOS we leave GPU visible so tensorflow-metal can use Metal.

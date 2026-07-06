@@ -229,16 +229,14 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
     # gates). This overlay still *renders* the QC verdict — excluded cells show
     # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
-    # here again, via the quick-edit Stepper in the LUT ▾ popover on the row above.
+    # here again, via the inline "ON threshold" quick-edit on the control row above.
     status = reg.register("_review_image_status", QLabel("", inner))
     status.setObjectName("Muted")
     il.addWidget(status)
 
-    # ── LUT ▾ popover — display brightness + ON/OFF threshold ───────────
+    # ── LUT ▾ popover — display brightness (min/max) ────────────────────
     lut_btn, lut_panel, lut_lay = make_popover_button("LUT ▾", ctrl)
-    lut_btn.setToolTip(
-        "Display brightness (min/max) and the ON/OFF intensity threshold for "
-        "the active channel")
+    lut_btn.setToolTip("Display brightness (min/max) for the active channel")
 
     lut_range_row = QWidget(lut_panel)
     lut_range_lay = QHBoxLayout(lut_range_row)
@@ -260,11 +258,14 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                                           lambda: review_image_auto_lut(ctx)))
     lut_lay.addWidget(lut_range_row)
 
-    # ON/OFF intensity threshold quick-edit. Edits the active channel's
-    # ThreshFracOn — the same value the Cell Gating tab and the Plotting
-    # quick-edit own — and re-renders, so the Binary (≥ ON threshold) overlay
-    # updates live without leaving the tab.
-    thr_row = QWidget(lut_panel)
+    cl.addWidget(lut_btn)
+
+    # ON/OFF intensity threshold quick-edit — inline on the control row (its
+    # original home), not tucked inside the LUT ▾ popover. Edits the active
+    # channel's ThreshFracOn — the same value the Cell Gating tab and the
+    # Plotting quick-edit own — and re-renders, so the Binary (≥ ON threshold)
+    # overlay updates live without leaving the tab.
+    thr_row = QWidget(ctrl)
     thr_lay = QHBoxLayout(thr_row)
     thr_lay.setContentsMargins(0, 0, 0, 0)
     thr_lay.setSpacing(6)
@@ -286,8 +287,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         lambda v: (set_thresh_frac_on(ctx, v), refresh_review_image_ctx(ctx))
     )
     thr_lay.addWidget(thresh_stepper)
-    lut_lay.addWidget(thr_row)
-    cl.addWidget(lut_btn)
+    cl.addWidget(thr_row)
 
     # ── Colors ▾ popover — per-element display colours + reset ──────────
     colors_btn, colors_panel, colors_lay = make_popover_button("Colors ▾", ctrl)

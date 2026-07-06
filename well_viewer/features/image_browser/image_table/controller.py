@@ -97,6 +97,12 @@ def image_table_refresh_picker(ctx) -> None:
             (w for w in ctx.state.image_table.active_wells if w in ctx.state.dataset.well_paths),
             key=parse_rc,
         )
+        # Tint each well its canonical plate-rank colour so the picker matches
+        # the main sidebar / plots ("the plate is the legend") instead of the
+        # widget's selection-order fallback palette.
+        from well_viewer.domain.selections_model import color_for_well
+        plate.clearWellColors()
+        plate.setWellColors({tok: color_for_well(tok) for tok in active})
         plate.setSelectedWellIds(active)
     lbl = getattr(ctx.runtime.image_table, "count_lbl", None)
     if lbl is not None:

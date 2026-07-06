@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QHBoxLayout, QLabel, QSpinBox, QWidget,
+    QComboBox, QDoubleSpinBox, QLabel, QSpinBox, QWidget,
 )
+
+from widgets.flow_layout import FlowLayout
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.export.style import copy_figure_to_clipboard
@@ -129,9 +131,10 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     st = ctx.state.feature_slice("spatial")
     reg = ctx.widgets
 
-    # A right-side dock hosts the shared Export-Style / Properties sidebar,
-    # mirroring the plotting tabs. The tab body then builds inside the plot
-    # area (left of the dock) instead of directly on ``parent``.
+    # The tab body builds inside the plot area (left of the Properties dock).
+    # The two control rows use FlowLayout, so when the dock opens — or Split View
+    # narrows the pane — they wrap onto extra lines instead of crushing / hiding
+    # the dense combos.
     plot_area, layout, export_dock = make_plot_with_right_dock(parent)
     reg.register("_spatial_export_dock", export_dock)
     parent = plot_area
@@ -141,7 +144,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # ── row 1: level + viz + metric + timepoint + actions ────────────────────
     row1 = QWidget(parent)
     row1.setObjectName("TabCtrl")
-    r1 = QHBoxLayout(row1)
+    r1 = FlowLayout(row1)
     r1.setContentsMargins(10, 6, 10, 4)
 
     level_seg = SegmentedControl(row1)
@@ -236,7 +239,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # crowded with irrelevant knobs.
     row2 = QWidget(parent)
     row2.setObjectName("TabCtrl")
-    r2 = QHBoxLayout(row2)
+    r2 = FlowLayout(row2)
     r2.setContentsMargins(10, 2, 10, 6)
 
     colonies_label = QLabel("Colonies:", row2)

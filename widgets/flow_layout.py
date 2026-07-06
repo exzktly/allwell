@@ -16,7 +16,7 @@ No All-Well coupling — a plain reusable widget (belongs in ``widgets/``).
 from __future__ import annotations
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
-from PySide6.QtWidgets import QLayout, QSizePolicy, QWidget
+from PySide6.QtWidgets import QLayout, QSizePolicy, QStyle, QWidget
 
 
 class FlowLayout(QLayout):
@@ -56,6 +56,37 @@ class FlowLayout(QLayout):
             return self._items.pop(index)
         return None
 
+    # ── QBoxLayout drop-in convenience ───────────────────────────────────────
+    # These let a toolbar row swap ``QHBoxLayout`` → ``FlowLayout`` without
+    # rewriting its call sites. A flow layout left-packs and wraps, so a stretch
+    # spacer is meaningless (no-op); fixed spacing and nested layouts flow as
+    # ordinary items.
+    def addStretch(self, stretch: int = 0) -> None:  # noqa: N802
+        return None
+
+    def addSpacing(self, size: int) -> None:  # noqa: N802
+        from PySide6.QtWidgets import QSizePolicy, QSpacerItem
+        self.addItem(QSpacerItem(int(size), 0,
+                                 QSizePolicy.Fixed, QSizePolicy.Minimum))
+
+    def addLayout(self, layout, stretch: int = 0) -> None:  # noqa: N802
+        self.addItem(layout)
+
+    def addWidget(self, widget, *args) -> None:  # noqa: N802
+        # Tolerate the QBoxLayout ``addWidget(w, stretch, alignment)`` signature —
+        # flow layouts ignore stretch/alignment, but accepting the extra args lets
+        # a toolbar swap in without editing every call site.
+        super().addWidget(widget)
+
+    def insertWidget(self, index: int, widget, *args) -> None:  # noqa: N802
+        super().addWidget(widget)  # appended; move it to *index*
+        if 0 <= index < len(self._items) - 1:
+            self._items.insert(index, self._items.pop())
+
+    def setSpacing(self, spacing: int) -> None:  # noqa: N802
+        self._h_space = int(spacing)
+        self._v_space = int(spacing)
+
     # ── spacing ─────────────────────────────────────────────────────────────
     def horizontalSpacing(self) -> int:  # noqa: N802
         if self._h_space >= 0:
@@ -73,8 +104,11 @@ class FlowLayout(QLayout):
             return -1
         if parent.isWidgetType():
             style = parent.style()
-            metric = (style.PM_LayoutHorizontalSpacing if horizontal
-                      else style.PM_LayoutVerticalSpacing)
+            # PySide6 exposes PixelMetric as a scoped enum on the QStyle class,
+            # not as attributes on the style *instance* — ``style.PM_*`` raises
+            # AttributeError. (Only reached when no explicit spacing was passed.)
+            metric = (QStyle.PixelMetric.PM_LayoutHorizontalSpacing if horizontal
+                      else QStyle.PixelMetric.PM_LayoutVerticalSpacing)
             return style.pixelMetric(metric, None, parent)
         return parent.spacing()
 

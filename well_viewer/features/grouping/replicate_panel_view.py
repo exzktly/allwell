@@ -50,6 +50,8 @@ class _NotesEdit(QPlainTextEdit):
             swallowed()  # was: pass (silent except)
 
 
+from widgets.flow_layout import FlowLayout as _FlowLayout
+
 def build_replicate_panel(ctx, parent: QWidget) -> None:
     """Sample-Definitions LEFT sidebar: the plate map only.
 
@@ -243,7 +245,6 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
         QFrame as _QFrame,
-        QHBoxLayout as _QHBoxLayout,
         QTabWidget as _QTabWidget,
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
@@ -272,7 +273,7 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     # definitions.
     toolbar = _QWidget(parent)
     toolbar.setObjectName("TabCtrl")
-    tl = _QHBoxLayout(toolbar)
+    tl = _FlowLayout(toolbar)
     tl.setContentsMargins(8, 6, 8, 6)
     tl.setSpacing(6)
 

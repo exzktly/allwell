@@ -25,7 +25,7 @@ import re
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QComboBox, QDialog, QLabel, QLineEdit, QMessageBox, QPushButton,
     QVBoxLayout, QWidget,
 )
 
@@ -69,6 +69,8 @@ _NO_SMFISH_MESSAGE = (
     "Re-run the analysis with smFISH channels enabled to populate this tab."
 )
 
+
+from widgets.flow_layout import FlowLayout
 
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
@@ -127,7 +129,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # Row 1: channel/fov/tp/threshold/LUT
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(ctrl)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(0, 0, 0, 6)
 
     cl.addWidget(QLabel("Channel:", ctrl))
@@ -174,7 +176,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # Row 2: action buttons
     btn_row = QWidget(parent)
     btn_row.setObjectName("TabCtrl")
-    bl = QHBoxLayout(btn_row)
+    bl = FlowLayout(btn_row)
     bl.setContentsMargins(0, 2, 0, 2)
 
     apply_btn = QPushButton("Apply Global Threshold", btn_row)

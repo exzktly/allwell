@@ -44,3 +44,22 @@ def test_spatial_properties_panel_opens_and_toggles(loaded_app_shape):
     # path, invoked directly since the offscreen window reports not-visible).
     sb._close_dock()
     assert sb.isHidden()
+
+
+@pytest.mark.slow
+def test_control_rows_use_reflowing_flow_layout(loaded_app_shape):
+    """The Spatial control rows are backed by a FlowLayout, so they wrap onto
+    extra lines when the pane narrows — e.g. when the Properties dock opens or in
+    Split View — instead of crushing / overlapping the dense combos. (The
+    wrapping geometry itself is covered by tests/test_flow_layout.py; here we
+    assert the rows are wired to it, which the offscreen harness can verify
+    without shown widgets.)
+    """
+    from widgets.flow_layout import FlowLayout
+    app = loaded_app_shape
+    _open_spatial(app)
+    reg = app._ctx.widgets
+    row1 = reg.get_or_none("_sp_level_seg").parentWidget()  # controls row 1
+    row2 = reg.get_or_none("_sp_method_cb").parentWidget()  # controls row 2
+    assert isinstance(row1.layout(), FlowLayout)
+    assert isinstance(row2.layout(), FlowLayout)

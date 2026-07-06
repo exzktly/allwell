@@ -27,6 +27,8 @@ from well_viewer.features.lineplot.controller import on_fig_click
 _FIG_W, _FIG_H, _DPI = 7.2, 14.0, 100
 
 
+from widgets.flow_layout import FlowLayout
+
 def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
 
@@ -48,7 +50,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # ── controls row above the card (Channel / Metric / style / Export CSV) ──
     line_ctrl = QWidget(parent)
     line_ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(line_ctrl)
+    cl = FlowLayout(line_ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
     # Channel combo: kept as an offscreen widget so the rest of the app can

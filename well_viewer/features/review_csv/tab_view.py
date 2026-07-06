@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
+    QComboBox, QHeaderView, QLabel, QPushButton, QTableWidget,
     QVBoxLayout, QWidget,
 )
 from well_viewer.core.lazy import lazy as _lazy
@@ -14,6 +14,8 @@ on_review_csv_row_double_click = _lazy(_RCSV, "on_review_csv_row_double_click")
 refresh_review_csv = _lazy(_RCSV, "refresh_review_csv")
 refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
+
+from widgets.flow_layout import FlowLayout
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
@@ -32,7 +34,7 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
 
     ctrl = QWidget(parent)
     ctrl.setObjectName("TabCtrl")
-    cl = QHBoxLayout(ctrl)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(0, 0, 0, 6)
 
     cl.addWidget(QLabel("Well:", ctrl))

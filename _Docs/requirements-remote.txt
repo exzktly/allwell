@@ -43,30 +43,33 @@ imagecodecs==2023.9.18
 # scientific stack.
 pandas==2.2.3
 
-# ── Label-free segmentation + cell tracking (v5.3) ───────────────────────────
+# ── Label-free segmentation (v5.3) ───────────────────────────────────────────
+# Torch is retained for Cellpose label-free segmentation *inference* only.
 # Empirically resolved (pip --dry-run, full set) to coexist with the
 # TF 2.13 / numpy 1.24.3 / numba 0.57 / StarDist stack. The binding constraint
 # is typing-extensions: TF 2.13 caps it <4.6, while Torch >=2.2 requires >=4.8 —
-# so the entire ML stack is pinned to the Torch 2.0.1 line with
-# typing-extensions==4.5.0. pydantic stays on v1 (pulled by btrack), so there is
-# no typing-extensions clash. CUDA wheels are pulled by torch on Linux x86_64;
-# the macOS arm64 (MPS) and Windows (CPU) targets get the appropriate wheels by
-# platform. For a CPU-only Linux remote, install torch from the +cpu index.
+# so the Torch line is pinned to 2.0.1 with typing-extensions==4.5.0. CUDA wheels
+# are pulled by torch on Linux x86_64; the macOS arm64 (MPS) and Windows (CPU)
+# targets get the appropriate wheels by platform. For a CPU-only Linux remote,
+# install torch from the +cpu index.
 #
-# laptrack is intentionally NOT included: every laptrack >=0.16.1 requires
-# numpy>=1.26 (conflicts with TF 2.13's numpy<=1.24.3) and <=0.16.0 requires
-# pandas<2.0 (conflicts with pandas==2.2.3 / btrack). btrack is the in-core
-# lightweight + lineage tracker; trackastra is the deep-learning option.
+# Multi-frame cell tracking (btrack, trackastra) and its training stack
+# (lightning, kornia) are OPTIONAL and no longer installed by default: the base
+# install targets StarDist/Cellpose *inference* only — no tracking, no training.
+# The pins were not deleted — they moved to the opt-in extras file
+# ``requirements-tracking.txt``. To restore tracking, install it on top:
+#
+#   pip install --no-build-isolation -r requirements-tracking.txt
+#
+# The guarded lazy imports (pipeline.cellpose-style) remain, so a tracking
+# feature invoked without the extra installed raises a clear "not installed"
+# error instead of crashing. Leaving these out of the base set also drops their
+# transitive-only deps (cvxopt, lightning-cloud + fastapi/uvicorn/starlette,
+# sentry-sdk, wandb, tensorboard), which is the bulk of the install-size saving.
 typing-extensions==4.5.0   # ceiling under TF 2.13's <4.6; satisfies torch 2.0.1
-torch==2.0.1
-torchvision==0.15.2
+torch==2.0.1               # Cellpose backend (MPS/CPU inference)
+torchvision==0.15.2        # torch companion pin
 cellpose==3.1.1.2          # label-free segmentation (cyto3); numpy<2.1,>=1.20
-btrack==0.6.5              # cell tracking (Bayesian + lineage); uses pydantic v1
-trackastra==0.3.2          # transformer-based cell tracking
-kornia==0.7.0              # pinned for trackastra on the torch 2.0.1 line
-lightning==2.0.9.post0     # pinned for trackastra on the torch 2.0.1 line
-# motile (ILP linking for trackastra) is the sole optional extra — it needs a
-# SCIP/Gurobi solver; trackastra defaults to greedy linking without it.
 
 # ── TOML config (used by services/remote_config.py on Python 3.10) ───────────
 tomli ; python_version < "3.11"

@@ -37,7 +37,14 @@ if ! command -v pyinstaller >/dev/null 2>&1; then
     exit 1
 fi
 
+# The default bundle ships StarDist + Cellpose inference only (slim). To include
+# multi-frame tracking + its training stack, install the extras first
+# (pip install --no-build-isolation -r _Docs/requirements-tracking.txt) and build
+# with: ALLWELL_WITH_TRACKING=1 scripts/build_executable.sh
 echo "Running PyInstaller against $SPEC_FILE ..."
+if [[ -n "${ALLWELL_WITH_TRACKING:-}" && "${ALLWELL_WITH_TRACKING}" != "0" ]]; then
+    echo "  (ALLWELL_WITH_TRACKING set — bundling tracking/training stack)"
+fi
 pyinstaller "$SPEC_FILE" --noconfirm --log-level WARN
 
 if [[ -d "dist/AllWell.app" ]]; then

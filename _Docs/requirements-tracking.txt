@@ -1,0 +1,32 @@
+# requirements-tracking.txt
+# -------------------------
+# OPTIONAL extras — multi-frame cell tracking + its training stack.
+#
+# The base install (requirements.txt / requirements-remote.txt) targets
+# StarDist + Cellpose *inference* only. This file adds the multi-frame cell
+# tracking backends and the training/logging stack they pull in. It is NOT
+# referenced by requirements.txt, so it is only installed when you ask for it:
+#
+#   # after the base env is installed (see requirements.txt header):
+#   pip install --no-build-isolation -r _Docs/requirements-tracking.txt
+#
+# For a frozen bundle that includes tracking, build with the flag:
+#
+#   ALLWELL_WITH_TRACKING=1 pyinstaller _Docs/_Installation/all_well.spec
+#
+# All pins stay on the Torch 2.0.1 line so they coexist with the base stack's
+# typing-extensions==4.5.0 ceiling (TF 2.13 caps it <4.6). Before bumping any
+# pin, re-run ``pip install --dry-run -r requirements.txt -r
+# requirements-tracking.txt`` and confirm numpy / typing-extensions / numba are
+# not perturbed.
+#
+# laptrack stays excluded on purpose: every laptrack >=0.16.1 requires
+# numpy>=1.26 (conflicts with TF 2.13's numpy<=1.24.3) and <=0.16.0 requires
+# pandas<2.0 (conflicts with pandas==2.2.3 / btrack).
+
+btrack==0.6.5              # cell tracking (Bayesian + lineage); uses pydantic v1
+trackastra==0.3.2          # transformer-based cell tracking
+kornia==0.7.0              # pinned for trackastra on the torch 2.0.1 line
+lightning==2.0.9.post0     # pinned for trackastra on the torch 2.0.1 line
+# motile (ILP linking for trackastra) is the sole optional extra — it needs a
+# SCIP/Gurobi solver; trackastra defaults to greedy linking without it.

@@ -76,7 +76,8 @@ Write-Host "Running PyInstaller against $specFile ..."
 if ($env:ALLWELL_WITH_TRACKING -and $env:ALLWELL_WITH_TRACKING -ne '0') {
     Write-Host '  (ALLWELL_WITH_TRACKING set - bundling tracking/training stack)'
 }
-& $pythonCmd @pyArgs -m PyInstaller $specFile --noconfirm --log-level WARN
+$logLevel = if ($env:ALLWELL_LOG_LEVEL) { $env:ALLWELL_LOG_LEVEL } else { 'INFO' }
+& $pythonCmd @pyArgs -m PyInstaller $specFile --noconfirm --log-level $logLevel
 if ($LASTEXITCODE -ne 0) {
     Write-Error "PyInstaller exited with code $LASTEXITCODE"
     exit $LASTEXITCODE

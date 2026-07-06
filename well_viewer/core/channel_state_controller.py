@@ -816,11 +816,15 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     # combo (including the global ctxbar chip), so refresh those now —
     # otherwise the new ratio doesn't appear in the dropdown until the
     # next dataset reload.
-    if hasattr(app, "_update_channel_selector"):
-        try:
-            update_channel_selector(app._ctx)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+    # ctx-native: update_channel_selector self-guards on missing widgets
+    # (get_or_none per combo), so no app-attr guard is needed. The stale
+    # ``hasattr(app, ...)`` here referenced an undefined ``app`` (this function
+    # takes ``ctx``), raising NameError and aborting the ratio/channel refresh —
+    # which left the channel selectors empty.
+    try:
+        update_channel_selector(ctx)
+    except Exception:
+        swallowed()  # was: pass (silent except)
 
 
 

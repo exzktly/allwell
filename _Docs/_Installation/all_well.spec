@@ -593,6 +593,13 @@ pyz = PYZ(a.pure, a.zipped_data)   # noqa: F821
 # Executable
 # ---------------------------------------------------------------------------
 
+# Strip native symbols from the bundled binaries — a real size win on the large
+# .dylib/.so payloads (TF, torch, …). Enabled on macOS and Linux, where the
+# `strip` utility is present. NOT on Windows: a stock conda/Miniforge env has no
+# `strip` binary, so PyInstaller would warn and skip it (or error on some
+# setups). Unlike UPX, strip does not break macOS code-signing.
+_STRIP = sys.platform != "win32"
+
 exe = EXE(   # noqa: F821
     pyz,
     a.scripts,
@@ -601,13 +608,18 @@ exe = EXE(   # noqa: F821
     name="AllWell",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=True,          # strip native symbols from bundled .dylib/.so — safe
-                         # (unlike UPX it does not break macOS code-signing)
+    strip=_STRIP,        # see _STRIP note above (on: macOS/Linux, off: Windows)
     upx=False,           # UPX breaks macOS code-signing
     console=False,       # GUI app — no terminal window
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,    # None = native; use "universal2" for M1+Intel fat binary
+    # macOS: target Apple Silicon (arm64) explicitly. The dependency wheels are
+    # arm64 (tensorflow-macos requires it), and many others (PySide6, …) ship as
+    # universal2 fat binaries — target_arch="arm64" makes PyInstaller thin those
+    # to the arm64 slice, dropping the dead x86_64 halves. Must be built on an
+    # Apple-Silicon Mac. Off macOS this is None (Linux/Windows are single-arch:
+    # ELF/PE aren't fat, so an arm64 Linux build is just built on an aarch64 host).
+    target_arch=("arm64" if sys.platform == "darwin" else None),
     codesign_identity=None,
     entitlements_file=None,
 )
@@ -617,7 +629,7 @@ coll = COLLECT(   # noqa: F821
     a.binaries,
     a.zipfiles,
     a.datas,
-    strip=True,          # match EXE — strip the collected binaries too
+    strip=_STRIP,        # match EXE — strip the collected binaries too
     upx=False,
     upx_exclude=[],
     name="AllWell",

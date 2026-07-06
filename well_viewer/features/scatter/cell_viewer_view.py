@@ -654,6 +654,40 @@ class ScatterCellViewer(QWidget):
         interior = cell_mask & up & down & left & right
         return cell_mask & ~interior
 
+    @staticmethod
+    def _resize_mask_nearest(mask, shape):
+        """Nearest-neighbour resize of a boolean *mask* to ``shape`` (h, w).
+
+        Keeps the outline usable when the displayed channel crop and the
+        segmentation-mask crop differ in size (they're cropped with the same
+        bounds but out of full frames that may not share a resolution)."""
+        import numpy as np
+        mask = np.asarray(mask, dtype=bool)
+        src_h, src_w = mask.shape[:2]
+        dst_h, dst_w = int(shape[0]), int(shape[1])
+        if min(src_h, src_w, dst_h, dst_w) == 0:
+            return np.zeros((dst_h, dst_w), dtype=bool)
+        ys = np.minimum((np.arange(dst_h) * src_h) // dst_h, src_h - 1)
+        xs = np.minimum((np.arange(dst_w) * src_w) // dst_w, src_w - 1)
+        return mask[ys][:, xs]
+
+    @classmethod
+    def _paint_outline(cls, rgb, outline_mask) -> None:
+        """Paint the red cell outline into the ``(H, W, 3)`` uint8 *rgb* buffer.
+
+        Resamples the outline to the buffer's shape when it differs (previously a
+        shape mismatch silently dropped the outline — the "boundary circle gone"
+        bug); an exact-shape outline takes the fast path unchanged."""
+        import numpy as np
+        if outline_mask is None:
+            return
+        outline = np.asarray(outline_mask, dtype=bool)
+        target = rgb.shape[:2]
+        if outline.shape != target:
+            outline = cls._resize_mask_nearest(outline, target)
+        if outline.shape == target:
+            rgb[outline] = np.array([255, 0, 0], dtype=np.uint8)
+
     def _load_and_crop_channel(self, channel: str) -> Optional:
         try:
             if channel in ("mask", "overlay"):
@@ -1026,10 +1060,7 @@ class ScatterCellViewer(QWidget):
             disp = ((np.clip(arr, alo, ahi) - alo) / (ahi - alo) * 255).astype(np.uint8)
             rgb = np.stack([disp, disp, disp], axis=-1)
 
-            if outline_mask is not None:
-                outline = np.asarray(outline_mask, dtype=bool)
-                if outline.shape == disp.shape:
-                    rgb[outline] = np.array([255, 0, 0], dtype=np.uint8)
+            self._paint_outline(rgb, outline_mask)
 
             h, w, _ = rgb.shape
             rgb_c = np.ascontiguousarray(rgb)

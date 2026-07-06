@@ -31,79 +31,7 @@ live in the code, how to add features, how to debug), see
 
 ---
 
-## What's new
-
-The 5.5.x series layers new analysis capabilities on top of the 5.4 line.
-Newest first:
-
-- **7.4.0 — Remote execution on HPC lobby/login nodes (SLURM).** Run the
-  Analyze pipeline on a cluster you reach through a JupyterHub **lobby / login
-  node**: a per-host *Run compute* toggle (on the SSH host itself, or on a node
-  the scheduler allocates) submits the pipeline into a fresh `srun` allocation
-  on a compute node while staging/cache/fetch/cleanup stay on the login node
-  against the shared filesystem. The **Compute profile** dropdown reads the
-  cluster's `jupyterhub_config.py` over SSH and lists the same discrete options
-  the JupyterHub spawn page offers — no JupyterHub webpage needed — and picking
-  one fills in the scheduler command. The scheduler job is **always torn down**
-  (on completion, failure, or cancel), and the run log now narrates the SLURM
-  hand-off: the resources requested, the queue wait, the **job id + node** the
-  moment a node is granted, and a definite end-of-job marker. See
-  `REMOTE_EXECUTION_SLURM.md`.
-
-- **7.3.1 — Saved Plots polish & optimizer fix.** Patch release: export all saved plots as a multi-page **PDF report** (cover page + one full-quality page per plot with its parameters); **save the Image Browser grid** to Saved Plots (downsampled, brightness-preserving so contrast isn't washed out); and a fix to the **Optimize ThreshFracOn** metric under fold-change *subtraction* (the validation curve no longer inverts / picks the wrong threshold).
-
-- **7.3.0 — Saved Plots, per-tab axis properties & clearer fold-change titles.**
-  - **Saved Plots tab.** Hover any plot panel's top-right corner and click the new **save** button to send that panel — plus the exact parameters/thresholds that produced it — to a per-dataset **Saved Plots** gallery (with Restore / Export / Delete). The gallery now has its own sidebar icon.
-  - **Properties no longer leak across tabs.** Axis **limits** and **log-scale** toggles set in a plot's Properties sidebar are now scoped to that plot — changing them on one tab no longer silently changes another tab. (Global publication style — fonts, line/marker, grid, legend — is still shared.)
-  - **Fold change is named in the graph title.** When a plot is fold-change-normalised, every affected panel title (not just the first) now says so and names the operator, e.g. *(fold change vs DMSO (ratio), vs t0 (subtraction))*.
-
-- **7.2.0 — Legend labels, fold-change panels, persistence & Image Table columns.** A round of plotting and review-side fixes:
-  - **Sample-definition labels in every legend.** The **Scatter Plot** and **Distribution** legends now show your custom well / group labels (set on **Sample Definitions → Well Labels**) instead of the raw well token or group name — matching what Line Graphs and Bar Plots already did.
-  - **Fold change now rescales all three Line Graphs panels.** Turning on fold change previously only rescaled the **mean** panel; the **fraction-on** and **N-events** panels stayed on raw values. Now all three normalize together (including in FOV-spread mode, where the N panel shows per-FOV mean counts).
-  - **More selections persist across a reopen.** The **Heat Map** timepoint slider position and the **FOV** (per-FOV spread) toggle on Line Graphs / Bar Plots now come back where you left them.
-  - **Image Table column management.** New one-click **×** buttons remove any row or column, and an **Add column…** item in the **More ▾** menu mirrors the existing **Add row…** (clone a column, varying channel / timepoint / FOV / well uniformly or stepped).
-  - **Active channel restored on reopen.** Reopening a dataset no longer reverts the plot channel to the first one — your last-selected channel is restored.
-  - **Cell Gating tab tidy-up.** Clearer section dividers, and the **Optimize ThreshFracOn** tool can now optimise over a **fold-change-adjusted** fraction-on — pick a Control and/or Baseline (its own controls, independent of the plot tabs) so the threshold is chosen on the normalised metric.
-  - **Log-scale images.** Image Table rows have a new **Log** toggle to display the image on a log10 intensity scale (high-dynamic-range stains read better); it persists with the rest of the row's display settings.
-
-- **7.1.1 — ThreshFracOn optimizer + persistence fixes + Plot Groups on Image Table.** A consolidated round of Cell Gating fixes plus reach-back across the rest of the app.
-
-  *Cell Gating sub-tab (Sample Definitions).*
-  - **Optimize ThreshFracOn** scans the QC + Crop-valid population (not the *Included* gate it's trying to set) for a fraction-on cut that **maximises the relative gap** between two wells: `|fa - fb| / max(fa, fb)`. Surfaces a 0.05 vs 0 split (1.0 relative gap) over a 0.96 vs 0.99 split (≈0.03), which is what a fraction-on cut is supposed to discriminate. Renames the *Steps* control to **# Points** (it's the number of thresholds scanned, not a step size — a small value collapses the scan to its endpoints) and floors it at 10.
-  - **Validation popup** opens after every Optimize, plotting `fraction-on(A)`, `fraction-on(B)`, and `|Δ| / max(fa, fb)` as functions of the scanned threshold with a dashed line at the applied value. Non-modal — stays open so you can iterate.
-  - Tab reflows top-down: QC controls → FluorGating + *Auto-threshold all channels (ThreshFracOn)* button → ThreshFracOn / scatter-gate toggles → optimizer panel → CDFs at the bottom.
-
-  *Persistence.* The active channel and Bar Plots timepoint multi-selection now round-trip correctly across app restarts. The channel restore previously no-op'd silently behind a bogus `hasattr` guard; the Bar timepoint set restored to internal state but never repainted the popup / count label.
-
-  *Image Browser.* The **Plot Groups** drawer is now reachable from the Image Table sidebar (read-only — authoring stays with the plotting workflow). Loading a Plot Group from any sidebar drives both the plotting selection and the Image Table's tab-local `active_wells`. Image Table rows also now default to **grayscale (Greys)** when built from a channel rather than picking a per-row palette tint (Reds / Greens / Blues), which was implying a meaning the data may not carry; recolor a row via its LutSelector to opt back in.
-
-- **6.12.0 — Separate gate selections + axis-correct gates.** Cell inclusion (gating) and fraction-on (thresholding) now have **independent** gate pickers — each its own multi-select *Gates* checkbox menu — so you can gate on one set of gates and compute fraction-on from a different set. Also fixes a bug where gates drawn on one X/Y axis pair stayed visible (and editable) after switching the Scatter Plot to different axes; gates now only show on the axes they were drawn on.
-
-- **6.11.0 — Multi-select filtering gates.** The Cell Gating "filtering gate" picker is now a **multi-select checkbox menu** (the *Filtering gates* button) instead of a single-choice dropdown — tick any combination of named gates and they're combined as a union, applied to both inclusion and fraction-on. Defaults to all gates (new gates auto-included).
-
-- **6.10.0 — Scatter gate as a fraction-on threshold.** On the **Cell Gating** tab the scatter gate can now be applied two independent ways: **inclusion** (the existing checkbox — cells outside the gate drop out) and/or **thresholding** (a new checkbox — cells *inside* the gate count as "on" for fraction-on stats, replacing the per-channel ThreshFracOn cutoff; no cells are removed). Both use the same filtering-gate dropdown and can be on at once. Also fixes a bug where a persisted QC debris gate (e.g. min/max circularity) loaded its values into the fields on reload but didn't re-apply to the dataset.
-
-- **6.9.0 — Scatter "Color by time".** The per-cell **Scatter Plot** has a new **Color by time** toggle (beside the Layout control). Turn it on to colour each point by its timepoint instead of by well — so a well's cell cloud shows how it moves through the X/Y feature space over time (early timepoints purple, late timepoints yellow), with a per-timepoint legend. Select a single well to read one cloud's evolution on one set of axes; with several wells selected the view automatically stacks into one panel per well so the time-coloured clouds don't overlap into noise.
-
-- **6.8.0 — Scatter-gate cell inclusion.** The rectangular gates you draw on the **Scatter Plot** can now define which cells count as *included*, not just label a percentage. Each gate is **auto-named** (`Gate 1`, `Gate 2`, …) as you draw it and shows its name on the plot; rename it in the **Scatter Plot** Properties sidebar's gate list. On the **Cell Gating** tab tick **"Use scatter-plot gates for cell inclusion"** and pick a **filtering gate** from the dropdown — a single named gate, or *All gates (union)* — to replace the per-channel FluorGating thresholds. A cell is kept if it falls inside the chosen gate(s), on whichever metric axes (intensity, ratio, or shape) each gate was drawn. The gated population takes effect immediately as you draw, edit, or clear gates, and flows into every plot, statistic and export. The per-cell Scatter Plot keeps showing the full cloud (with the gates drawn over it) so you can always see and refine your gates, and the gates are saved with the dataset so they come back on reload. The **QC debris gate** (size / solidity bounds) also now lives on the Cell Gating tab as a fundamental layer that is *always* applied, on top of FluorGating and any scatter gates — it moved here from the Segmentation tab (which still highlights the excluded cells in its overlay).
-
-- **6.1.x — Background-correction Playground & UI polish.** The **Segmentation** tab is now split into **Review Image** and a new **Playground** sub-tab — an interactive testbed for the pipeline's background-flattening / subtraction methods on a single raw frame chosen by well/channel/timepoint/FOV. Pick any flat-field + background method, tune its parameters, and see the result with the same LUT / colormap / binary / mask-overlay controls as the review image, plus a Raw/Flat-field/Corrected toggle, click-drag pan, per-source LUT memory, a frame-local binary threshold, a hover pixel-intensity readout, and a QC size-cleanup preview — all without re-running the pipeline (it shares the pipeline's exact correction code). Alongside: Bar Plots is now the default Plotting tab and Cell Gating leads Sample Definitions; the cell-gating CDFs respect the crop region + QC gate; and a batch of review-image fixes (crop button auto-deselects, thicker crop outline, zoom kept when switching wells).
-
-- **5.5.6 — Label-free segmentation (§A).** Segment unlabelled / phase channels: Cellpose and a classical engine are selectable with per-method parameter panels, and channels can be designated as phase on ingestion.
-
-- **5.5.5 — Editable QC layer (§B).** Debris removal is now non-destructive — cells are *flagged, not deleted* — and editable after the run from the **Cell Gating** tab (moved there from Segmentation in 6.8.0): tune the size / solidity gate and the cells it removes highlight live on the image while every plot, statistic and the Review table re-flag, with no re-segmentation. The QC verdict is the single source of area/shape gating and composes with manual curation (a cell counts only when manually kept **and** it passes QC). A **Max region area** bound additionally rejects bright debris that StarDist shatters into many small "cells" — they share one over-large bright region that per-cell size can't see. Flat-field correction stays a run-time option.
-
-- **5.5.2 — Quality control (§B).** New **Quality Control** section in Analyze: optional flat-field correction, a **background-subtraction method** (`none` / `top_hat` / `rolling_ball` / `empty_well` — rolling-ball gives a smooth baseline without the square top-hat's halos; empty-well subtracts a measured per-channel background, and when flat-field is *also* empty-well the two combine into one correct `(raw − B)/(B/mean(B))` pass), and debris removal (min/max area + solidity gates), so noisy plates clean up before quantification.
-
-- **5.5.1 — Per-cell shape features (§C).** The pipeline can emit per-cell morphology columns (area, perimeter, solidity, eccentricity, …); pick them from the **Shape Metrics** dropdown in Analyze, and they appear in Review as a sectioned *Shape Features* virtual-channel group for plotting.
-
-- **5.5.0 — Feature-stack foundation (PR1).** Locks the empirically-verified dependency set and bundles the optional engines (PyTorch, Cellpose, btrack, trackastra) in the PyInstaller build, adds the `shape_features_core` module, and makes dataset reads backwards-compatible with pre-5.5 CSVs.
-
----
-
 ## Contents
-
-- [What's new](#whats-new)
 
 1. [What you get](#what-you-get)
 2. [Install](#install)
@@ -112,6 +40,12 @@ Newest first:
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
 5. [Review mode — exploring results](#review-mode--exploring-results)
+   - [The Review window at a glance](#the-review-window-at-a-glance)
+   - [Controls shared by every tab](#controls-shared-by-every-tab)
+   - Plotting: [Bar Plots](#bar-plots) · [Line Graphs](#line-graphs) · [Scatter Plot](#scatter-plot) · [Distribution](#distribution) · [Heat Map](#heat-map)
+   - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
+   - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
+   - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
 6. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -498,8 +432,8 @@ outside the bounds below — **min / max area** (px) and **min solidity** (0–1
 Unlike the pixel corrections above, this gate is *non-destructive and editable
 after the run*: cells are flagged rather than deleted, and the Segmentation tab
 recomputes the verdict live as you tune the thresholds, with no re-segmentation
-(see [§B Editable QC layer](#whats-new)). A cell counts only when it is manually
-kept **and** it passes QC.
+(the debris gate is edited from the [Cell Gating](#cell-gating) tab in Review).
+A cell counts only when it is manually kept **and** it passes QC.
 
 ### 6. Compute options
 
@@ -534,18 +468,21 @@ kept **and** it passes QC.
 
 ## Review mode — exploring results
 
-Open a results folder with the Open button (or `Ctrl+O`, or
-`python allwell.py --data_dir <path>`). The viewer accepts:
+Review is where you explore an already-analyzed dataset. Open a results folder
+with the **Open** button (or `Ctrl+O`, or launch with
+`python allwell.py --data_dir <path>`); a finished Analyze run hands off here
+automatically. The viewer accepts:
 
 - A folder of per-well CSVs (flat).
 - A folder containing an `out/` subfolder of CSVs.
 - A folder with both `in/` (source ZIPs) and `out/` (results).
 
-Per-well image ZIPs (`<well>_out.zip`) are discovered on demand when an
-image-using tab is open. `pipeline_info.json` is read on every open and
-keeps the viewer in sync with the schema + channel tokens.
+Per-well image ZIPs (`<well>_out.zip`) are discovered on demand the first time
+an image-using tab is opened. `pipeline_info.json` is re-read on every open, so
+the viewer always tracks the schema + channel tokens the dataset was built with
+— if you re-run the pipeline with different tokens, just re-open the folder.
 
-### The window in one diagram
+### The Review window at a glance
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -572,24 +509,32 @@ keeps the viewer in sync with the schema + channel tokens.
 │ ● Ready.                       ⌘O Open  ⌘E Export  ⌘W Close     │  ← status bar
 └─────────────────────────────────────────────────────────────────┘
 ```
+**Getting around the window.**
 
-### The Review tabs
+- **Title bar** — the `[Review | Analyze]` segmented control switches modes;
+  the icons to its right are Refresh (re-read the folder), presentation
+  toggle (flip every plot Screen ↔ Publication), Open, and the **`i`** Help
+  drawer.
+- **Section rail** — the left "SECTION" navigator lists every centre tab in
+  three groups: **Analysis** (Plotting, Statistics, Multivariate, Spatial),
+  **Images** (Image Browser, smFISH), and **Data** (Review CSV, Sample
+  Definitions, Saved Plots, Batch Export). Tabs that own sub-tabs — Plotting,
+  Image Browser, Sample Definitions — show a sub-tab bar across the top of the
+  centre pane. `Ctrl+B` collapses the rail.
+- **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
+  well selection they drive is what every tab plots (see below).
+- **Context bar** — the row directly above the plot canvas: the shared channel
+  selector plus the current tab's own controls and figure-action buttons.
+- **Status bar** — a live status dot on the left, keyboard-shortcut chips on
+  the right.
+- **Tab history** — `Ctrl+←` / `Ctrl+→` step back and forward through the tabs
+  you have visited, like a browser's back/forward.
 
-The left-rail "SECTION" navigator selects one of the centre tabs:
+### Controls shared by every tab
 
-| Tab | What it shows |
-|-----|---------------|
-| **Plotting** | Five sub-tabs (default **Bar Plots**): **Bar Plots** (bar / beeswarm / violin, drag-to-reorder), **Line Graphs** (mean ± SD/SEM + fraction above threshold + CDF), **Scatter Plot** (per-cell scatter and aggregate scatter; per-cell points can be coloured by well or, via the **Color by time** toggle, by timepoint), **Distribution** (histogram / KDE / violin of per-cell values at one timepoint), **Heat Map** (custom layout heatmap). Bar Plots and Line Graphs additionally support **Fold-change normalization** — divide every bar / curve by a control well or replicate set, by each member's own t0, or both (see [Fold-change normalization](#fold-change-normalization)). |
-| **Statistics** | Pairwise tests across saved selections (t-test, Mann-Whitney, KS) with KS CDF. |
-| **Multivariate** | Higher-dimensional / per-cell analysis of many features at once: feature correlation, PCA / UMAP / t-SNE projection, k-means / hierarchical clustering (phenotyping), and multi-factor faceting. See [Multivariate analysis](#multivariate-analysis). |
-| **Image Table** | Grid of per-FOV image thumbnails; configurable rows/columns/channels; bulk export. Hosts a read-only mirror of the **Plot Groups** drawer so a saved well set can drive the image grid (loads also propagate to the plotting selection). Per-row LUT defaults to grayscale; recolor via the row's LutSelector. |
-| **Segmentation** | Two sub-tabs. **Review Image** — per-FOV overlay viewer: click a nucleus to flag/unflag it for inclusion in stats; draw a **crop rectangle** to keep only cells whose centroid is inside (applied dataset-wide across all FOVs/timepoints/channels/wells, with a Reset that restores every cell and a Clear crop that removes just the box); a Raw / Flat-field / Corrected source toggle; tune the LUT and the QC debris gate. **Playground** — an interactive testbed to try any background-flattening / subtraction method (with adjustable parameters) on a single chosen raw frame, with Raw/Flat-field/Corrected, LUT/colormap, binary + precomputed-mask overlay, pan/zoom, per-source LUT memory, a frame-local threshold, a hover intensity readout, and a QC size-cleanup preview — no re-run needed. |
-| **smFISH** | Spot detection, parameter sweep, and **Apply to All** threshold. Its own rail tab (formerly a Segmentation sub-tab). |
-| **Review CSV** | Tabular view of the loaded per-well CSVs; supports filtering, jumping to the Segmentation tab for any row. |
-| **Sample Definitions** | Sub-tabs led by **Cell Gating** (per-channel inclusion-threshold defaults; its fluorescence CDFs anchor the bottom of the tab and respect the crop region + QC gate; or tick *Use scatter-plot gates* to let the Scatter Plot's rectangular gates define inclusion instead). Cell Gating also hosts **Auto-threshold all channels (ThreshFracOn)** (Otsu pass over per-cell + matched-background pixels) and **Optimize ThreshFracOn** — pick two wells, a timepoint, and a Min / Max / # Points range to scan; the optimizer finds the threshold that maximises the **relative** fraction-on gap `|fa - fb| / max(fa, fb)` and opens a non-modal popup graphing the curve so you can sanity-check the pick. After Cell Gating come the saved-selection / replicate-set editor (Groups / Well Labels / Ratios), Pipeline Info, and Notes. |
-| **Batch Export** | Define export groups (or use the Sample Definitions groups), pick timepoints, run a bulk export of CSVs + figures + ZIPs. |
+These affordances are global — set them once and every tab honours them.
 
-### Channel selector
+#### Channel selector
 
 The single channel dropdown at the top of every plotting sub-tab is shared
 across the whole window — picking a different channel re-renders every
@@ -597,7 +542,7 @@ plot, every axis label, every threshold range, and every export against
 the new channel. Ratio channels (e.g. `GFP/MCHERRY`) defined under the
 Sample Definitions ratio editor appear here as virtual channels.
 
-### Plate-map well picker
+#### Plate-map well picker
 
 The 8×12 plate map in the left sidebar drives every plot and table. Click
 a well to toggle it; drag across wells to multi-toggle; click a row letter
@@ -605,7 +550,42 @@ or column number to toggle the whole row / column; **Select all** /
 **Select none** clear or fill in one click. The selection survives across
 tabs and is what every plot / aggregate / export consumes.
 
-### Fold-change normalization
+#### Plot Groups and Split View
+
+- **Plot Groups** — the collapsible drawer under the plate map saves the
+  current well selection under a name so you can reload it in one click. Plot
+  Groups are *plotting selections only* — not replicate sets or stats groups —
+  and loading one drives both the plate selection and, where a tab keeps its
+  own well set, that tab's set too. The Image Table sidebar mirrors the drawer
+  read-only, so a saved set can drive the image grid as well.
+- **Split View** — the **Split** toggle in the top bar puts two *different*
+  centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
+  Click into a pane to focus it — the focused pane drives the sidebar and the
+  well picker, and both panes refresh on a selection or channel change. It
+  needs a second tab to show something; a tab can't be split against itself.
+
+#### Figure actions — Export CSV · Copy SVG · Save · Properties
+
+Every plot tab carries the same action buttons on its controls row:
+
+- **Export CSV** — writes the underlying data behind the current plot.
+- **Copy SVG** — puts a vector copy of the figure on the clipboard (paste into
+  Illustrator / Inkscape / Keynote / Slides). On macOS the clipboard is written
+  natively (PDF + SVG) so Illustrator pastes editable vector; this needs
+  `pyobjc-framework-Cocoa` (see `requirements.txt`).
+- **Save figure** — saves to disk; the file dialog picks the format from the
+  extension (`.svg` / `.pdf` / `.eps` / `.png`).
+- **Save to Saved Plots** — hover a plot panel's top-right corner and click the
+  **save** button to send that panel, plus the exact parameters that produced
+  it, to the per-dataset [Saved Plots](#saved-plots) gallery.
+- **Properties** — opens a slide-out sidebar that styles the active figure:
+  axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
+  line / marker widths, axis limits + log-scale, layout engine, and an
+  export-profile picker. Axis **limits** and **log-scale** are scoped to the
+  one plot; global publication style (fonts, line/marker, grid, legend) is
+  shared across tabs. Settings persist across redraws.
+
+#### Fold-change normalization
 
 The Bar Plots and Line Graphs tabs (and their Batch Export panels) carry
 two parallel dropdowns on the controls row:
@@ -678,37 +658,124 @@ statistics across numerator and denominator, which produced biased
 ratios; bar / curve values for fold-change vs multi-well controls may
 shift slightly after this fix.
 
-### Properties (figure styling)
+### Bar Plots
 
-The **Properties** button on each plot tab's controls row opens a slide-out
-sidebar that styles the active figure: axis label / tick / title sizes,
-grid on/off + alpha + linestyle, legend, line / marker widths, axis
-limits + log-scale, layout engine, and an export-profile picker. Settings
-are per-figure and persist across redraws.
+**What it shows.** Per-well summaries of a metric at one or more timepoints, as
+grouped **bars**, a **violin** of the per-cell distribution, or a **beeswarm**
+of individual cells. This is the default Plotting sub-tab.
 
-### Saved figures and CSV exports
+- **Needs** — at least one selected well and a channel. The **Timepoints**
+  dropdown (`Select Timepoints`) fills from the selected wells'
+  `timepoint_hours`; tick any set.
+- **Controls** (the **Display ▾** menu gathers the view options):
+  - **Grouping** — how bars are grouped (default *Well*; a replicate set groups
+    its members).
+  - **Pool cells** — pool every selected well's cells before summarising,
+    rather than averaging per-well means.
+  - **Violin** / **Beeswarm** — swap the bars for a per-cell distribution
+    (violin) or every individual cell (beeswarm). **Smooth** is active only
+    when Violin is on and tunes the KDE bandwidth.
+  - **Significance** (On / Off) — draw pairwise significance brackets.
+  - **Reset Order** — restore the default order after you **drag bars to
+    reorder** them.
+  - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in
+    all three view modes.
+- **Optimal use** — reorder so your control condition reads first; switch to
+  violin / beeswarm when the story is spread or per-cell scatter rather than a
+  mean; normalize vs a control well or replicate set to put every bar on a
+  fold-change axis.
 
-Every plot tab carries the same action buttons on its controls row:
+### Line Graphs
 
-- **Export CSV** — writes the underlying data behind the current plot.
-- **Copy SVG** — puts a vector copy of the figure on the clipboard
-  (paste into Illustrator / Inkscape / Keynote / Slides). On macOS the
-  clipboard is written natively (PDF + SVG) so Illustrator pastes editable
-  vector; this needs `pyobjc-framework-Cocoa` (see `requirements.txt`).
-- **Save figure** — saves to disk; the file dialog picks the format from
-  the extension (`.svg` / `.pdf` / `.eps` / `.png`).
-- **Properties** — opens the styling sidebar described above.
+**What it shows.** A metric over time as three stacked panels — **mean ±
+SD/SEM**, **fraction above threshold** (fraction-on), and **N events** (cell
+count) — plus a CDF.
 
-### Batch export
+- **Needs** — selected wells spanning more than one timepoint to see a trend
+  (single-timepoint data draws a single point).
+- **Controls** (under **Display ▾**) — the **error band** (SEM / SD); the
+  **per-FOV spread** toggle, which treats each field of view as a replicate so
+  the band reflects field-to-field variability; the shared
+  [Fold-change](#fold-change-normalization) dropdowns (all three panels — mean,
+  fraction-on, and N — normalize together).
+- **Optimal use** — turn on FOV spread when you have several fields per well
+  and want the error band to reflect field-to-field variability; normalize vs
+  **t0** to collapse every curve to a shared start of 1.0 for shape comparison.
 
-Define one or more groups (replicate sets + solo wells), pick a set of
-timepoints, and the Batch Export tab generates one figure + one CSV per
-group per timepoint into a folder of your choosing. Useful for paper
-figures where every condition needs the same plot at the same time
-points. The bar and line batch panels also expose the same
-[Fold-change normalization](#fold-change-normalization) dropdowns, with
-panel-local state so a batch run isn't tied to whatever the on-screen
-plot has set.
+### Scatter Plot
+
+**What it shows.** Two sub-views on a sub-tab bar — **Per-cell points** (one
+point per cell, X vs Y feature) and **Per-well aggregate** (one point per
+well/timepoint). Per-cell points can be coloured **by well** or, via **Color by
+time**, by timepoint.
+
+- **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
+  metric (any intensity, ratio, or `shape_*` column) chosen from the axis
+  dropdowns. A **Timepoints** multi-select (`Select Timepoints`) restricts the
+  frames drawn.
+- **Per-cell controls** — X-axis / Y-axis / Channel pickers; **Layout**
+  (*Overlay* all wells on one axis, or *Separate axes* one panel per well);
+  **Color by time** (one well → a single cloud's trajectory; several wells →
+  auto-stacked one panel per well so the time-coloured clouds don't overlap);
+  **Show gates**; **draw rectangular gates** by dragging on the canvas.
+- **Aggregate controls** — X-axis / Y-axis pickers over aggregate metrics
+  (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
+  (SEM / SD) on the points.
+- **Gates (definition).** Each gate you draw is auto-named (`Gate 1`, `Gate 2`,
+  …), shown on the plot, and renameable in Properties. Gates become selectable
+  **cell-inclusion** or **fraction-on** filters on the [Cell Gating](#cell-gating)
+  tab, on whichever metric axes they were drawn. They are saved with the
+  dataset and reload with it.
+- **Optimal use** — draw a gate around a population of interest, then open Cell
+  Gating and tick *Use scatter-plot gates* to make that gate define which cells
+  count in every plot, statistic, and export.
+
+### Distribution
+
+**What it shows.** The distribution of a per-cell metric at **one timepoint**,
+as a histogram, KDE, or violin.
+
+- **Needs** — a well selection, a channel, and a timepoint (**t (h)**).
+- **Controls** — **Mode** (*Histogram*, *Histogram + KDE*, or *Violin (per
+  group)*); **Layout** (*Overlay* all wells, or *Faceted (one per group)*);
+  **Bins** count; **log x** / **log y** toggles; the timepoint picker; the
+  channel-wide threshold reference line.
+- **Optimal use** — compare a handful of wells at a single timepoint to read
+  how a treatment shifts the *whole* population, not just its mean; facet when
+  overlaid distributions get too crowded to read.
+
+### Heat Map
+
+**What it shows.** A custom-layout heatmap of one metric across wells — you
+place cells in a grid that mirrors your plate or your experimental design.
+
+- **Needs** — a well selection and a channel; a timepoint (**t (h)**) chosen
+  with the slider.
+- **Controls** —
+  - **t (h)** timepoint slider (its position persists across reopen).
+  - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
+    *Rep-set avg*).
+  - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
+  - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
+  - **Log scale** toggle.
+  - **⇄ Transpose** — swap the rows and columns of the layout.
+  - The layout editor: drag wells into the grid and **Edit label** on any row /
+    column header.
+- **Optimal use** — build a layout once that matches your plate, pin the colour
+  **Scale** to *Fixed* vmin/vmax so frames are comparable, then scrub the
+  timepoint slider to watch the metric evolve.
+
+### Statistics
+
+**What it shows.** Pairwise significance tests across your saved selections /
+replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF plot.
+
+- **Needs** — at least two groups. On first visit the tab auto-populates from
+  the replicate sets defined on [Sample Definitions](#sample-definitions).
+- **Controls** — the group editor (sidebar); the test selection; the timepoint;
+  an FOV-replicate indicator that mirrors the plot tabs' FOV mode.
+- **Optimal use** — define replicate sets first so the tests run on
+  biologically meaningful groups rather than single wells.
 
 ### Multivariate analysis
 
@@ -894,6 +961,174 @@ format: one row per `well × timepoint_hours`), so downstream analysis
 in pandas or Excel isn't restricted to whichever summary is currently
 plotted. The single-timepoint picker in row 1 is disabled at Summary
 level — timepoints are already the X-axis.
+
+### Image Browser
+
+The **Image Browser** rail entry (Images group) hosts four image-review
+sub-tabs on a sub-tab bar: **Segmentation**, **Image Table**, **Cell Browser**,
+and **Playground**. All read the per-well processed-image ZIPs, loaded on
+demand — if a sub-tab reports "No images found", confirm the results folder
+holds `<well>_out.zip` files.
+
+#### Segmentation
+
+**What it shows.** A per-FOV overlay of the segmentation on the raw image, for
+reviewing and curating individual cells.
+
+- **Needs** — a loaded well with image ZIPs; pick the FOV / timepoint / channel
+  from the in-tab pickers.
+- **Navigational controls** — click a nucleus to **flag / unflag** it for
+  inclusion; **draw a crop rectangle** to keep only cells whose centroid is
+  inside it (applied dataset-wide across every FOV/timepoint/channel/well),
+  with **Reset** to restore every cell and **Clear crop** to remove just the
+  box; click-drag to pan and scroll to zoom (zoom is kept when you switch
+  wells); a **Raw / Flat-field / Corrected** source toggle; LUT + colormap +
+  binary + mask-overlay controls; the QC debris gate.
+- **Definition.** *Included* is the per-cell keep/drop flag every plot and
+  export honours. A cell counts only when it is manually **kept** *and* it
+  passes QC. Overrides persist to `cell_overrides.json` next to the CSVs.
+- **Optimal use** — exclude a well's edge artifacts in one gesture with the
+  crop rectangle; click away obvious mis-segmentations.
+
+#### Image Table
+
+**What it shows.** A configurable grid of per-FOV image thumbnails for
+side-by-side comparison across wells / channels / timepoints / FOVs.
+
+- **Needs** — image ZIPs present, and a well set (drive it from the plate
+  picker or a Plot Group via the read-only Plot Groups mirror in this sidebar).
+- **Controls** — **Add row… / Add column…** (clone a row/column, varying
+  channel / timepoint / FOV / well uniformly or stepped); a per-row/column **×**
+  to remove it; a per-row **Log** toggle (log10 intensity display, persisted);
+  a per-row **LUT** selector (defaults to grayscale — recolor to opt into a
+  tint); bulk **export** of the grid.
+- **Optimal use** — one row per channel and one column per timepoint reads a
+  treatment's time-course at a glance; save the composed grid to Saved Plots.
+
+#### Cell Browser
+
+**What it shows.** A scrollable gallery of individual segmented-cell
+thumbnails, filtered by criteria — for eyeballing what a gate or phenotype
+actually looks like at the single-cell level.
+
+- **Needs** — a well selection (the gallery is scoped to the selected wells)
+  and image ZIPs.
+- **Controls** — the sidebar **criteria** filter (per-metric ranges) plus
+  timepoint / FOV pickers; centre-row **channel toggles**, a **boundary**
+  toggle, a **page size**, and **Load next** (the gallery fills incrementally).
+- **Optimal use** — pair it with the Scatter Plot in Split View: gate a
+  population on the scatter and watch the matching cells populate the gallery.
+
+#### Playground
+
+**What it shows.** An interactive testbed for the pipeline's
+background-flattening / subtraction methods on a **single raw frame**, without
+re-running the pipeline (it shares the pipeline's exact correction code).
+
+- **Needs** — a loaded dataset with image ZIPs.
+- **Controls** — pick a well / channel / timepoint / FOV; choose any flat-field
+  + background method and tune its parameters; a **Raw / Flat-field /
+  Corrected** toggle; LUT / colormap / binary + precomputed-mask overlay;
+  pan / zoom; per-source LUT memory; a frame-local binary threshold; a hover
+  pixel-intensity readout; a QC size-cleanup preview.
+- **Optimal use** — dial in a correction method + radius here on a
+  representative frame *before* committing to a full Analyze re-run with those
+  settings.
+
+### smFISH
+
+**What it shows.** Single-molecule FISH spot detection on channels you
+configured as smFISH, with a parameter sweep and an **Apply to All** threshold.
+Operates on **one well at a time** (spot detection is per-frame).
+
+- **Needs** — at least one channel configured as smFISH at pipeline time (its
+  CSV carries a `_smfish_count` column) and image ZIPs. Selecting several wells
+  collapses the view to a single well.
+- **Controls** — the detection parameters + threshold sweep; **Apply to All**
+  to push one threshold across the whole dataset.
+- **Optimal use** — sweep the threshold on one representative well, confirm the
+  spot overlay, then Apply to All.
+
+### Review CSV
+
+**What it shows.** A tabular view of the loaded per-well CSVs — the raw
+per-nucleus rows behind every plot.
+
+- **Controls** — the **Well** picker; column filtering; **double-click a row**
+  to jump to that cell in the Segmentation tab.
+- **Optimal use** — sanity-check outliers: filter to a suspicious metric range,
+  then double-click into Segmentation to see the actual cell.
+
+### Sample Definitions
+
+**Sample Definitions** is where you tell the app what your wells *mean*. Its
+sub-tabs are led by **Cell Gating**:
+
+#### Cell Gating
+
+**What it is.** The single place that decides which cells are *included* and
+which count as *on* for fraction-on statistics — the gating layer every plot,
+statistic, and export consumes. Its fluorescence CDFs anchor the bottom of the
+tab and respect the crop region + QC gate, so you can place thresholds by eye.
+
+- **QC debris gate** (min/max area + solidity) — the fundamental layer, *always*
+  applied on top of everything else.
+- **Inclusion** — per-channel **FluorGating** thresholds, or tick **Use
+  scatter-plot gates** and pick a filtering gate to let the [Scatter
+  Plot](#scatter-plot)'s rectangular gates define inclusion instead.
+- **Fraction-on** — per-channel **ThreshFracOn** cutoffs, with
+  **Auto-threshold all channels** (an Otsu pass over per-cell + matched-
+  background pixels) to derive sensible defaults, and **Optimize ThreshFracOn**
+  — pick two wells, a timepoint, and a Min / Max / # Points range, and the
+  optimizer finds the threshold that maximises the *relative* fraction-on gap
+  `|fa − fb| / max(fa, fb)`, opening a non-modal validation graph so you can
+  sanity-check the pick. Independent Control / Baseline pickers let you optimize
+  on a fold-change-adjusted fraction-on.
+- Inclusion and fraction-on have **independent** gate pickers, so you can gate
+  on one set of gates and compute fraction-on from a different set.
+- **Optimal use** — set the QC gate first, auto-threshold to get baseline
+  ThreshFracOn values, then use Optimize on the one channel that separates your
+  conditions.
+
+#### Groups, Well Labels & Ratios
+
+- **Groups (replicate sets)** — name a set of wells as replicates; every plot,
+  the Statistics tab, and Batch Export can then treat them as one condition.
+- **Well Labels** — give wells / groups human-readable names; these show in
+  every plot legend instead of the raw well token.
+- **Ratios** — define a ratio channel (e.g. `GFP/MCHERRY`); it appears as a
+  virtual channel in the channel selector everywhere.
+
+#### Pipeline Info & Notes
+
+Read the schema + channel tokens + FOVs + timepoints the dataset was built with
+(**Pipeline Info**), and keep free-text **Notes** saved next to the data.
+
+### Saved Plots
+
+**What it is.** A per-dataset gallery of plots you have captured. Hover any plot
+panel's top-right corner and click the **save** button to send that panel —
+plus the exact parameters / thresholds that produced it — here.
+
+- **Per-card controls** — **Restore** (reload the plot with its saved
+  parameters), **Export**, **Rename**, **Delete**, and a collapsible parameter
+  summary.
+- **Export all** — write the whole gallery as a multi-page **PDF report** (a
+  cover page plus one full-quality page per plot with its parameters). The
+  Image Table grid can be saved here too.
+- **Optimal use** — capture each figure as you finalize it, then export the
+  gallery as one PDF to hand off alongside your analysis.
+
+### Batch export
+
+Define one or more groups (replicate sets + solo wells), pick a set of
+timepoints, and the Batch Export tab generates one figure + one CSV per
+group per timepoint into a folder of your choosing. Useful for paper
+figures where every condition needs the same plot at the same time
+points. The bar and line batch panels also expose the same
+[Fold-change normalization](#fold-change-normalization) dropdowns, with
+panel-local state so a batch run isn't tied to whatever the on-screen
+plot has set.
 
 ---
 

@@ -21,7 +21,7 @@ from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QEvent, QObject
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QScrollArea, QTextBrowser, QVBoxLayout, QWidget,
+    QMessageBox, QScrollArea, QSizePolicy, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 import theme as theme_v2
@@ -639,30 +639,39 @@ class AllWellApp(QMainWindow):
                     f"QTextBrowser {{ background: transparent; border: none; "
                     f"color: {theme_v2.Colors.text_primary}; }}"
                 )
-                # Drop the inner viewport's own scrollbar — the outer
-                # QScrollArea is what scrolls the help drawer, and a
-                # nested scrollbar would double up.
+                # Drop the inner viewport's own scrollbar (the outer QScrollArea
+                # scrolls the drawer; a nested bar would double up) and its frame
+                # so the browser's height is exactly its document height with no
+                # border to account for.
                 manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                 manual_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                manual_view.document().setTextWidth(manual_view.viewport().width())
-                manual_view.setMinimumHeight(
-                    int(manual_view.document().size().height()) + 16
+                manual_view.setFrameShape(QFrame.NoFrame)
+                # Pin the browser to exactly its rendered document height. Its
+                # default vertical size policy is *Expanding*, so inside the
+                # width-resizable QScrollArea it would inflate to fill a tall
+                # viewport and leave a blank band under the last line — the
+                # "excess white space at the bottom". Fixed policy + a
+                # content-exact height stops that; the trailing stretch added
+                # below soaks up any slack instead of the browser.
+                manual_view.setSizePolicy(
+                    QSizePolicy.Preferred, QSizePolicy.Fixed
                 )
 
                 def _resize_manual(_dw=manual_view) -> None:
+                    # document().size() already includes the document margin;
+                    # +2 guards the last line's descent against rounding.
                     _dw.document().setTextWidth(_dw.viewport().width())
-                    _dw.setMinimumHeight(int(_dw.document().size().height()) + 16)
+                    _dw.setFixedHeight(int(_dw.document().size().height()) + 2)
 
+                _resize_manual()
                 manual_view.document().contentsChanged.connect(_resize_manual)
 
-                # The manual's minimum height is derived from the document
-                # height at the *current* text width. On the very first build
-                # the drawer isn't shown yet, so the viewport width is a
-                # placeholder and the estimate is wrong — usually far too tall,
-                # which is what left a big band of blank space under the text.
-                # Recompute whenever the manual is actually resized (i.e. once
-                # the drawer opens and every time the window changes width) so
-                # its height tracks the real wrapped text with no trailing gap.
+                # The height is derived from the document at the *current* text
+                # width. On the very first build the drawer isn't shown yet, so
+                # the viewport width is a placeholder and the estimate is wrong.
+                # Recompute whenever the manual is actually resized (once the
+                # drawer opens, and every time the window changes width) so the
+                # height tracks the real wrapped text with no trailing gap.
                 class _ManualResizeFilter(QObject):
                     def eventFilter(self, obj, ev):  # noqa: N802
                         if ev.type() == QEvent.Resize:
@@ -674,6 +683,9 @@ class AllWellApp(QMainWindow):
                 cl.addWidget(manual_view)
                 self._help_manual_view = manual_view
 
+            # Absorb any leftover vertical space so a short manual (or a tall
+            # drawer) never stretches the last widget into a blank band.
+            cl.addStretch(1)
             scroll.setWidget(content)
             drawer.setContentWidget(scroll)
             self._help_drawer = drawer
@@ -694,28 +706,30 @@ class AllWellApp(QMainWindow):
     # documents it. Keys are the leaf-tab names returned by
     # ``well_viewer.core.tab_controller.current_centre_tab`` (plus the special
     # "Analyze" pane). Values are exact heading texts in
-    # ``README_WellViewer.md``. Pages without a dedicated heading point at the
-    # "The Review tabs" overview, which describes every centre tab in one table.
+    # ``README_WellViewer.md``. Every Review leaf now has its own dedicated
+    # per-feature heading; unknown leaves fall back to the Review-mode overview.
     _HELP_SECTION_BY_PAGE = {
         "Analyze": "Analyze mode — running the pipeline",
+        "Bar Plots": "Bar Plots",
+        "Line Graphs": "Line Graphs",
+        "Scatter Plot": "Scatter Plot",
+        "Distribution": "Distribution",
+        "Heat Map": "Heat Map",
+        "Statistics": "Statistics",
         "Multivariate": "Multivariate analysis",
         "Spatial": "Spatial analysis",
         "Spatial Map": "Spatial analysis",
+        "Image Table": "Image Table",
+        "Segmentation": "Segmentation",
+        "Review Image": "Segmentation",
+        "Cell Browser": "Cell Browser",
+        "Playground": "Playground",
+        "smFISH": "smFISH",
+        "Review CSV": "Review CSV",
+        "Cell Gating": "Cell Gating",
+        "Sample Definitions": "Sample Definitions",
+        "Saved Plots": "Saved Plots",
         "Batch Export": "Batch export",
-        "Bar Plots": "The Review tabs",
-        "Line Graphs": "The Review tabs",
-        "Scatter Plot": "The Review tabs",
-        "Distribution": "The Review tabs",
-        "Heat Map": "The Review tabs",
-        "Statistics": "The Review tabs",
-        "Image Table": "The Review tabs",
-        "Segmentation": "The Review tabs",
-        "Review Image": "The Review tabs",
-        "Playground": "The Review tabs",
-        "smFISH": "The Review tabs",
-        "Review CSV": "The Review tabs",
-        "Cell Gating": "The Review tabs",
-        "Sample Definitions": "The Review tabs",
     }
 
     def _help_section_for_current_page(self) -> str:
@@ -743,7 +757,8 @@ class AllWellApp(QMainWindow):
         for key, section in self._HELP_SECTION_BY_PAGE.items():
             if key.lower() in leaf.lower():
                 return section
-        return "The Review tabs"
+        # Unknown leaf → land on the Review-mode overview heading.
+        return "Review mode — exploring results"
 
     def _scroll_help_to_current_section(self) -> None:
         """Scroll the open help drawer so the heading for the current page sits

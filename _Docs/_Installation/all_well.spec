@@ -507,6 +507,19 @@ for _pkg in _ml_packages:
     _ml_binaries  += _ml_b
     hiddenimports += _ml_h
 
+# torch subsystems unused by Cellpose *inference*. collect_all("torch") pulls
+# the whole package, including torch.distributed (multi-node / multi-GPU
+# TRAINING) — many of whose submodules do not cleanly import on macOS, producing
+# a wall of "Hidden import 'torch.distributed...' not found" ERRORs during
+# Analysis and needlessly enlarging/slowing the build. Excluding them here drops
+# those modules from the graph (excludes win over the collect_all hiddenimports),
+# silencing the errors. `import torch` does not import torch.distributed eagerly,
+# and label-free inference never touches distributed/testing/tensorboard paths.
+_torch_excludes = [
+    "torch.distributed", "torch.testing",
+    "torch.utils.tensorboard", "torch.utils.benchmark",
+]
+
 # When tracking is off, keep its packages — and the training-only deps they
 # pull in — out of the bundle even if they happen to be importable in the build
 # env. The app's tracking entry points import these lazily behind a guard, so a
@@ -589,7 +602,7 @@ a = Analysis(
         "keras.src.benchmarks",
         # NOTE: ssl intentionally NOT excluded — process_microscopy patches
         # ssl._create_default_https_context for StarDist model download
-    ] + _qt_excludes + _tracking_excludes,
+    ] + _qt_excludes + _tracking_excludes + _torch_excludes,
     noarchive=False,
     optimize=1,
 )

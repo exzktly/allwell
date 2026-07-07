@@ -16,6 +16,14 @@ import os
 from pathlib import Path
 import importlib.util
 
+# Raise the interpreter recursion limit for the build. PyInstaller walks the
+# module-dependency graph recursively during Analysis; on a tree this large and
+# densely cross-linked (TensorFlow, torch, scipy, …) it overflows Python's
+# default limit of 1000 with "maximum recursion depth exceeded". Bumping it here
+# only affects the build process, not the frozen app. This is PyInstaller's
+# documented fix for the error.
+sys.setrecursionlimit(max(sys.getrecursionlimit(), 5000))
+
 
 # ---------------------------------------------------------------------------
 # Helper: locate a package's data directory
@@ -470,24 +478,88 @@ _icd_datas, _icd_binaries, _icd_hidden = collect_all("imagecodecs")
 datas         += _icd_datas
 hiddenimports += _icd_hidden
 
-# Label-free segmentation (cellpose) + cell tracking (btrack / trackastra).
-# torch / torchvision carry large compiled extensions; cellpose, btrack,
-# trackastra, kornia and lightning each have submodules and (trackastra) bundled
-# data (pretrained-model configs). collect_all grabs the Python shims, the
-# .so/.dylib binaries, and data files so the frozen app can segment and track
-# without a Python toolchain present. The macOS/Windows build wheels are
-# CPU/MPS (no CUDA), so the torch payload stays manageable.
-# NOTE: not yet exercised by a frozen build — verify on the dev env via
-# build_all_well.sh / build_executable.ps1 (prune unused torch backends if the
-# bundle grows too large). cellpose/trackastra download model weights at
-# runtime; those are not bundled.
+# Label-free segmentation (cellpose) is ALWAYS bundled; multi-frame cell
+# tracking (btrack / trackastra) + its training stack (lightning / kornia /
+# torchmetrics) is OPTIONAL and OFF by default. The app ships for StarDist +
+# Cellpose *inference* only, so the default bundle omits the tracking/training
+# packages (the single biggest install-size lever after Qt). Opt back in at
+# build time with ALLWELL_WITH_TRACKING=1 — and install the extras first:
+#   pip install --no-build-isolation -r _Docs/requirements-tracking.txt
+#
+# torch / torchvision carry large compiled extensions; cellpose (and, when
+# enabled, btrack / trackastra / kornia / lightning) have submodules and
+# (trackastra) bundled data. collect_all grabs the Python shims, the .so/.dylib
+# binaries, and data files so the frozen app runs without a Python toolchain.
+# The macOS/Windows build wheels are CPU/MPS (no CUDA). cellpose/trackastra
+# download model weights at runtime; those are not bundled.
+_WITH_TRACKING = os.environ.get("ALLWELL_WITH_TRACKING", "").strip().lower() \
+    not in ("", "0", "false", "no", "off")
+
+_ml_packages = ["torch", "torchvision", "cellpose"]
+if _WITH_TRACKING:
+    _ml_packages += ["btrack", "trackastra", "kornia", "lightning",
+                     "pytorch_lightning", "torchmetrics"]
+
 _ml_binaries = []
-for _pkg in ("torch", "torchvision", "cellpose", "btrack", "trackastra",
-             "kornia", "lightning", "pytorch_lightning", "torchmetrics"):
+for _pkg in _ml_packages:
     _ml_d, _ml_b, _ml_h = collect_all(_pkg)
     datas         += _ml_d
     _ml_binaries  += _ml_b
     hiddenimports += _ml_h
+
+# torch subsystems unused by Cellpose *inference*. collect_all("torch") pulls
+# the whole package, including torch.distributed (multi-node / multi-GPU
+# TRAINING) — many of whose submodules do not cleanly import on macOS, producing
+# a wall of "Hidden import 'torch.distributed...' not found" ERRORs during
+# Analysis and needlessly enlarging/slowing the build. Excluding them here drops
+# those modules from the graph (excludes win over the collect_all hiddenimports),
+# silencing the errors. `import torch` does not import torch.distributed eagerly,
+# and label-free inference never touches distributed/testing/tensorboard paths.
+_torch_excludes = [
+    "torch.distributed", "torch.testing",
+    "torch.utils.tensorboard", "torch.utils.benchmark",
+]
+
+# When tracking is off, keep its packages — and the training-only deps they
+# pull in — out of the bundle even if they happen to be importable in the build
+# env. The app's tracking entry points import these lazily behind a guard, so a
+# tracking action invoked in a slim build raises a clean "not installed" error
+# rather than crashing at startup.
+_tracking_excludes = [] if _WITH_TRACKING else [
+    "btrack", "trackastra", "kornia",
+    "lightning", "lightning_fabric", "lightning_cloud", "pytorch_lightning",
+    "torchmetrics", "wandb", "tensorboard", "tensorboard_data_server",
+    "cvxopt", "fastapi", "uvicorn", "starlette", "sentry_sdk",
+]
+
+# Qt/PySide6 module trimming — always on. The app imports only QtCore, QtGui,
+# QtWidgets and QtSvg (verified across the tree), so the entire pyside6-addons
+# payload (QtWebEngine, Qt3D, QtQuick3D, QtMultimedia, QtPdf, QtCharts,
+# QtDataVisualization, QtVirtualKeyboard, QtDesigner, …) and the QML/Quick
+# runtime are dead weight — hundreds of MB. PyInstaller's PySide6 hook drops the
+# matching Qt shared libraries and QML plugins for every excluded module.
+_qt_excludes = [
+    "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
+    "PySide6.QtWebEngineQuick", "PySide6.QtWebChannel", "PySide6.QtWebSockets",
+    "PySide6.QtWebView",
+    "PySide6.Qt3DCore", "PySide6.Qt3DRender", "PySide6.Qt3DInput",
+    "PySide6.Qt3DLogic", "PySide6.Qt3DAnimation", "PySide6.Qt3DExtras",
+    "PySide6.QtQuick", "PySide6.QtQuick3D", "PySide6.QtQuickWidgets",
+    "PySide6.QtQuickControls2", "PySide6.QtQml", "PySide6.QtQmlModels",
+    "PySide6.QtQmlWorkerScript",
+    "PySide6.QtMultimedia", "PySide6.QtMultimediaWidgets",
+    "PySide6.QtSpatialAudio",
+    "PySide6.QtCharts", "PySide6.QtDataVisualization", "PySide6.QtGraphs",
+    "PySide6.QtGraphsWidgets",
+    "PySide6.QtPdf", "PySide6.QtPdfWidgets",
+    "PySide6.QtDesigner", "PySide6.QtHelp", "PySide6.QtUiTools",
+    "PySide6.QtPositioning", "PySide6.QtLocation", "PySide6.QtSensors",
+    "PySide6.QtSerialPort", "PySide6.QtSerialBus", "PySide6.QtBluetooth",
+    "PySide6.QtNfc", "PySide6.QtRemoteObjects", "PySide6.QtScxml",
+    "PySide6.QtStateMachine", "PySide6.QtTextToSpeech",
+    "PySide6.QtVirtualKeyboard", "PySide6.QtSql", "PySide6.QtTest",
+    "PySide6.QtNetworkAuth", "PySide6.QtOpenGL", "PySide6.QtOpenGLWidgets",
+]
 
 # Collect data files
 datas += collect_data_files("numba")
@@ -530,7 +602,7 @@ a = Analysis(
         "keras.src.benchmarks",
         # NOTE: ssl intentionally NOT excluded — process_microscopy patches
         # ssl._create_default_https_context for StarDist model download
-    ],
+    ] + _qt_excludes + _tracking_excludes + _torch_excludes,
     noarchive=False,
     optimize=1,
 )
@@ -542,6 +614,13 @@ pyz = PYZ(a.pure, a.zipped_data)   # noqa: F821
 # Executable
 # ---------------------------------------------------------------------------
 
+# Strip native symbols from the bundled binaries — a real size win on the large
+# .dylib/.so payloads (TF, torch, …). Enabled on macOS and Linux, where the
+# `strip` utility is present. NOT on Windows: a stock conda/Miniforge env has no
+# `strip` binary, so PyInstaller would warn and skip it (or error on some
+# setups). Unlike UPX, strip does not break macOS code-signing.
+_STRIP = sys.platform != "win32"
+
 exe = EXE(   # noqa: F821
     pyz,
     a.scripts,
@@ -550,12 +629,18 @@ exe = EXE(   # noqa: F821
     name="AllWell",
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=_STRIP,        # see _STRIP note above (on: macOS/Linux, off: Windows)
     upx=False,           # UPX breaks macOS code-signing
     console=False,       # GUI app — no terminal window
     disable_windowed_traceback=False,
     argv_emulation=False,
-    target_arch=None,    # None = native; use "universal2" for M1+Intel fat binary
+    # macOS: target Apple Silicon (arm64) explicitly. The dependency wheels are
+    # arm64 (tensorflow-macos requires it), and many others (PySide6, …) ship as
+    # universal2 fat binaries — target_arch="arm64" makes PyInstaller thin those
+    # to the arm64 slice, dropping the dead x86_64 halves. Must be built on an
+    # Apple-Silicon Mac. Off macOS this is None (Linux/Windows are single-arch:
+    # ELF/PE aren't fat, so an arm64 Linux build is just built on an aarch64 host).
+    target_arch=("arm64" if sys.platform == "darwin" else None),
     codesign_identity=None,
     entitlements_file=None,
 )
@@ -565,7 +650,7 @@ coll = COLLECT(   # noqa: F821
     a.binaries,
     a.zipfiles,
     a.datas,
-    strip=False,
+    strip=_STRIP,        # match EXE — strip the collected binaries too
     upx=False,
     upx_exclude=[],
     name="AllWell",

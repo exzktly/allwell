@@ -2783,6 +2783,9 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     # backed by importlib.metadata before stardist loads so the worker
     # doesn't crash with ``ModuleNotFoundError: pkg_resources``.
     _ensure_pkg_resources_shim()
+    # Frozen builds only: silence harmless-for-inference TF summary / AutoGraph
+    # noise before TF is first imported (see pipeline.stardist for the details).
+    _stardist.quiet_frozen_tf_logging()
     from csbdeep.utils import normalize as _normalize   # noqa: F401 — triggers TF init
     from stardist.models import StarDist2D as _StarDist2D
 
@@ -2918,7 +2921,15 @@ def _save_fov_checkpoint(
     with open(tmp, "w", encoding="utf-8") as fh:
         fh.write(text)
         fh.flush()
-        os.fsync(fh.fileno())
+        try:
+            os.fsync(fh.fileno())
+        except OSError:
+            # fsync isn't supported on every filesystem (e.g. some network
+            # mounts and external volumes on macOS, where it raises OSError
+            # "Invalid argument"/"Inappropriate ioctl for device"). The replace
+            # below is still atomic without it. Matches the guarded fsync in
+            # pipeline/io.py and well_viewer/persistence/_io.py.
+            pass
     tmp.replace(records_file)
     # The marker is the atomicity boundary — present iff records_file
     # is on disk and complete.

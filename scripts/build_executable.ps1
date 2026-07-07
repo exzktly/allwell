@@ -14,6 +14,13 @@
 #   .\scripts\build_executable.ps1            # incremental build
 #   .\scripts\build_executable.ps1 -Clean     # wipe build\ and dist\ first
 #
+# The default build is slim: StarDist + Cellpose inference only. Multi-frame
+# tracking + its training stack is opt-in — install the extras and set the flag
+# (the spec reads it via os.environ, same as the macOS/Linux build):
+#   pip install --no-build-isolation -r _Docs\requirements-tracking.txt
+#   $env:ALLWELL_WITH_TRACKING = '1'
+#   .\scripts\build_executable.ps1 -Clean
+#
 # Output:
 #   dist\AllWell\AllWell.exe    (the spec's BUNDLE step is a macOS-only
 #                               no-op off macOS; no AllWell.app is produced).
@@ -66,7 +73,11 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Running PyInstaller against $specFile ..."
-& $pythonCmd @pyArgs -m PyInstaller $specFile --noconfirm --log-level WARN
+if ($env:ALLWELL_WITH_TRACKING -and $env:ALLWELL_WITH_TRACKING -ne '0') {
+    Write-Host '  (ALLWELL_WITH_TRACKING set - bundling tracking/training stack)'
+}
+$logLevel = if ($env:ALLWELL_LOG_LEVEL) { $env:ALLWELL_LOG_LEVEL } else { 'INFO' }
+& $pythonCmd @pyArgs -m PyInstaller $specFile --noconfirm --log-level $logLevel
 if ($LASTEXITCODE -ne 0) {
     Write-Error "PyInstaller exited with code $LASTEXITCODE"
     exit $LASTEXITCODE

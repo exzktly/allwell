@@ -168,18 +168,25 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # the controller (avoids a scatter-internal import cycle).
     ctx.runtime.scatter.gate_redraw_cb = redraw_scatter_orchestrate
 
-    # Export / copy / save / figure-properties collapse into one "Export ▾" menu
-    # (they were four trailing icon buttons — the first controls clipped when the
-    # pane narrows). The X/Y selectors, Timepoints and Display ▾ stay inline.
+    # Export / copy / save collapse into one "Export ▾" menu (they were trailing
+    # icon buttons — the first controls clipped when the pane narrows). The X/Y
+    # selectors, Timepoints and Display ▾ stay inline.
     _export_btn, _export_menu = make_action_menu_button(
-        "Export ▾", ctrl, tooltip="Export, copy, save, and figure properties")
+        "Export ▾", ctrl, tooltip="Export, copy, and save")
     add_menu_action(_export_menu, "Export CSV…", lambda: export_scatter_data(ctx))
     add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
     add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx))
-    _export_menu.addSeparator()
-    add_menu_action(_export_menu, "Figure properties…",
-                    lambda: ctx.open_export_style_panel("scatter_cells"))
     cl.addWidget(_export_btn)
+    # Figure properties gets its own trailing button, matching every other plot
+    # tab (line/bar/distribution/spatial/heatmap) — flush with the right edge
+    # where the properties dock slides out.
+    from widgets.icon_button import IconButton as _IconButton
+    _style_btn = _IconButton(
+        "sliders-horizontal", ctrl,
+        tooltip="Show / hide the figure properties panel",
+    )
+    _style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("scatter_cells"))
+    cl.addWidget(_style_btn)
     layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)

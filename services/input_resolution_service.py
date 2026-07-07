@@ -20,6 +20,43 @@ def find_zipper_script() -> Path | None:
     return ZIPPER_SCRIPT if ZIPPER_SCRIPT.exists() else None
 
 
+def build_zipper_cmd(
+    zipper: Path,
+    tif_folder: Path,
+    out_folder: Path,
+    filename_schema: str,
+    filename_sep: str,
+    *,
+    move_source_tifs: bool = False,
+) -> list[str]:
+    """Build the argv for the WellPlateZipper subprocess.
+
+    Frozen bundle: re-invoke the launcher with the ``--run-zipper`` sentinel,
+    which routes argv into ``WellPlateZipper.main()`` (mirrors the pipeline's
+    ``--run-pipeline`` path in :mod:`services.pipeline_service`). Passing the
+    ``.py`` path there would make ``sys.executable`` (the .app binary) relaunch
+    the GUI instead of running the zipper — the frozen-only failure this guards.
+    From source, invoke the interpreter on the script path as before.
+    """
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "--run-zipper"]
+    else:
+        cmd = [sys.executable, str(zipper)]
+    cmd += [
+        "--search-dir",
+        str(tif_folder),
+        "--output-dir",
+        str(out_folder),
+        "--filename_schema",
+        filename_schema,
+        "--filename_sep",
+        filename_sep,
+    ]
+    if move_source_tifs:
+        cmd.append("--move-source-tifs")
+    return cmd
+
+
 def tif_files_in(folder: Path) -> list[Path]:
     files: list[Path] = []
     for pat in TIF_GLOB:
@@ -454,20 +491,10 @@ def run_zipper(
         raise RuntimeError(f"WellPlateZipper.py not found. Expected: {ZIPPER_SCRIPT}")
 
     out_folder.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        sys.executable,
-        str(zipper),
-        "--search-dir",
-        str(tif_folder),
-        "--output-dir",
-        str(out_folder),
-        "--filename_schema",
-        filename_schema,
-        "--filename_sep",
-        filename_sep,
-    ]
-    if move_source_tifs:
-        cmd.append("--move-source-tifs")
+    cmd = build_zipper_cmd(
+        zipper, tif_folder, out_folder, filename_schema, filename_sep,
+        move_source_tifs=move_source_tifs,
+    )
     if log_fn:
         log_fn(f"[zipper] $ {' '.join(cmd)}\n")
 

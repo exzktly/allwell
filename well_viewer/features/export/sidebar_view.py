@@ -72,6 +72,12 @@ _EXPORT_FILTERS: dict[str, str] = {
 }
 _EXPORT_FILTER_ORDER = ("png", "tiff", "svg", "eps", "pdf")
 
+# Font-size keys scoped per-axis by the "Axis #" selector. They live in the same
+# per-axis ``axis_buckets`` as the axis limits, but (unlike limits) fall back to
+# the shared global size when a panel has no override, and an "All" edit resets
+# them. See ``well_viewer.core.plot_style.apply_export_style_prefs``.
+_PER_AXIS_FONT_KEYS = ("tick_label_size", "axis_label_size", "title_size")
+
 
 class ExportStyleSidebar(QWidget):
     def __init__(self, app, parent, fig, canvas, default_name: str):
@@ -305,6 +311,10 @@ class ExportStyleSidebar(QWidget):
         self._axis_keys = (
             "x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max",
             "x_log", "y_log",
+            # Font sizes are per-axis too: an "Axis #" selection scopes tick /
+            # axis-label / title sizes to that one panel; "All" applies to every
+            # panel. Stored in the same per-axis buckets as the limits.
+            *_PER_AXIS_FONT_KEYS,
         )
         self._axis_buckets: dict[str, dict] = dict(self._prefs.get("axis_buckets") or {})
         # Default the targeted axis to the subplot showing the active metric (so
@@ -805,14 +815,30 @@ class ExportStyleSidebar(QWidget):
         self._on_fields_changed()
 
     def _persist(self) -> None:
+        _t_getter = self._getters.get("axis_target")
+        target = str(_t_getter()) if _t_getter is not None else "All"
         for k, getter in self._getters.items():
+            # Per-axis font sizes must not leak into the shared global style when
+            # a single axis is targeted — they live only in that axis's bucket.
+            # (When "All" is selected they *do* write the global baseline.)
+            if k in _PER_AXIS_FONT_KEYS and target != "All":
+                continue
             self._prefs[k] = getter()
         # Mirror the axis-specific keys into the bucket for the currently
-        # selected axis so each axis retains its own xlim/ylim/scale.
-        self._current_axis = str(self._prefs.get("axis_target", "All"))
+        # selected axis so each axis retains its own xlim/ylim/scale + font sizes.
+        self._current_axis = target
         bucket = self._axis_buckets.setdefault(self._current_axis, {})
         for k in self._axis_keys:
-            bucket[k] = self._prefs.get(k)
+            g = self._getters.get(k)
+            bucket[k] = g() if g is not None else self._prefs.get(k)
+        # An "All" font edit resets every panel: drop the per-axis font overrides
+        # so they fall back to the freshly-set global size.
+        if target == "All":
+            for i in range(1, len(self._fig.axes) + 1):
+                b = self._axis_buckets.get(str(i))
+                if b:
+                    for k in _PER_AXIS_FONT_KEYS:
+                        b.pop(k, None)
         self._prefs["axis_buckets"] = self._axis_buckets
 
     def _default_axis_target(self) -> str:
@@ -893,6 +919,11 @@ class ExportStyleSidebar(QWidget):
                     continue
                 if k in new_bucket and new_bucket[k] is not None:
                     setter(new_bucket[k])
+                elif k in _PER_AXIS_FONT_KEYS:
+                    # A panel with no font override shows the current global size
+                    # (not the neutral default), so switching axes doesn't make
+                    # the field misreport what's actually rendered.
+                    setter(self._prefs.get(k, DEFAULT_EXPORT_STYLE_PREFS[k]))
                 else:
                     setter(DEFAULT_EXPORT_STYLE_PREFS[k])
         finally:

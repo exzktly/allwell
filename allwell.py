@@ -17,11 +17,11 @@ import argparse
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal, QRectF, QEvent, QObject
+from PySide6.QtCore import Qt, QTimer, Signal, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
-    QMessageBox, QScrollArea, QSizePolicy, QTextBrowser, QVBoxLayout, QWidget,
+    QMessageBox, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 import theme as theme_v2
@@ -63,6 +63,42 @@ def _stop_analyze_runner(analyze) -> None:
             runner.stop()
     except Exception:
         swallowed()
+
+
+def _gh_slug(text: str) -> str:
+    """GitHub-style heading slug — matches the anchors the README's TOC links to.
+
+    Lower-case, drop everything except word chars / spaces / hyphens (so an
+    em-dash in a heading collapses to the double hyphen GitHub produces), then
+    spaces → hyphens.
+    """
+    import html as _htmllib
+    import re
+    s = _htmllib.unescape(text).strip().lower()
+    s = re.sub(r"[^\w\s-]", "", s)
+    return s.replace(" ", "-")
+
+
+def _render_manual_html(md_text: str) -> str:
+    """Render the README markdown to HTML with GitHub-slug heading anchors.
+
+    Qt's ``QTextBrowser.setMarkdown`` keeps the table-of-contents' ``#slug`` link
+    *targets* but emits no matching heading anchors, so every TOC / cross-ref link
+    lands nowhere (the reported "links don't work"). Round-trip through a
+    QTextDocument and inject an ``<a name="slug">`` at each heading so anchor
+    navigation resolves.
+    """
+    import re
+    from PySide6.QtGui import QTextDocument
+    doc = QTextDocument()
+    doc.setMarkdown(md_text)
+    html_text = doc.toHtml()
+
+    def _inject(m):
+        heading_text = re.sub(r"<[^>]+>", "", m.group(2))
+        return f'{m.group(1)}<a name="{_gh_slug(heading_text)}"></a>{m.group(2)}{m.group(3)}'
+
+    return re.sub(r"(<h[1-6][^>]*>)(.*?)(</h[1-6]>)", _inject, html_text, flags=re.S)
 
 
 class AllWellApp(QMainWindow):
@@ -209,7 +245,6 @@ class AllWellApp(QMainWindow):
         self._help_btn.clicked.connect(self._toggle_help_drawer)
         hl.addWidget(self._help_btn)
         self._help_drawer = None  # built lazily on first open
-        self._help_scroll = None
         self._help_content = None
         self._help_manual_view = None  # None in trimmed builds without the manual
 
@@ -535,14 +570,13 @@ class AllWellApp(QMainWindow):
         if self._help_drawer is None:
             from widgets.drawer import Drawer
             drawer = Drawer(self, width_hint=420)
-            # The drawer hosts a single content widget. Wrap the help body
-            # in a scroll area so the bundled README (rendered below the
-            # quick-help section) doesn't push the drawer beyond the
-            # window height.
-            scroll = QScrollArea(drawer)
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.NoFrame)
-            content = QWidget(scroll)
+            # The drawer hosts a single content widget: a short fixed quick-help
+            # section at the top, and (when bundled) the reference manual in a
+            # self-scrolling QTextBrowser that fills the rest. The manual owns its
+            # own scrollbar so its links can scroll to anchors and its height
+            # tracks the viewport exactly — no outer scroll area pinning the
+            # browser to its document height (the old source of the trailing gap).
+            content = QWidget(drawer)
             cl = QVBoxLayout(content)
             cl.setContentsMargins(0, 0, 0, 0)
             cl.setSpacing(theme_v2.Spacing.md)
@@ -632,74 +666,58 @@ class AllWellApp(QMainWindow):
                 cl.addWidget(manual_heading)
 
                 manual_view = QTextBrowser(content)
-                manual_view.setOpenExternalLinks(True)
                 manual_view.setSearchPaths([str(readme_path.parent)])
-                manual_view.setMarkdown(readme_text)
+                # Render markdown -> HTML with injected heading anchors so the
+                # README's table-of-contents / cross-reference links resolve
+                # (setMarkdown alone keeps the #slug targets but emits no
+                # anchors, so the links go nowhere).
+                manual_view.setHtml(_render_manual_html(readme_text))
                 manual_view.setStyleSheet(
                     f"QTextBrowser {{ background: transparent; border: none; "
                     f"color: {theme_v2.Colors.text_primary}; }}"
                 )
-                # Drop the inner viewport's own scrollbar (the outer QScrollArea
-                # scrolls the drawer; a nested bar would double up) and its frame
-                # so the browser's height is exactly its document height with no
-                # border to account for.
-                manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+                # The manual owns its scrolling and fills the drawer (stretch=1),
+                # so anchor links can actually scroll and there's no pinned-height
+                # trailing gap.
+                manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
                 manual_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
                 manual_view.setFrameShape(QFrame.NoFrame)
-                # Pin the browser to exactly its rendered document height. Its
-                # default vertical size policy is *Expanding*, so inside the
-                # width-resizable QScrollArea it would inflate to fill a tall
-                # viewport and leave a blank band under the last line — the
-                # "excess white space at the bottom". Fixed policy + a
-                # content-exact height stops that; the trailing stretch added
-                # below soaks up any slack instead of the browser.
-                manual_view.setSizePolicy(
-                    QSizePolicy.Preferred, QSizePolicy.Fixed
-                )
 
-                def _resize_manual(_dw=manual_view) -> None:
-                    # document().size() already includes the document margin;
-                    # +2 guards the last line's descent against rounding.
-                    _dw.document().setTextWidth(_dw.viewport().width())
-                    _dw.setFixedHeight(int(_dw.document().size().height()) + 2)
+                # Route links ourselves: external URLs open in the system browser,
+                # in-document ``#slug`` anchors scroll the manual. (QTextBrowser's
+                # default openLinks would try to setSource() to relative targets
+                # and either fail or blank the document.)
+                manual_view.setOpenLinks(False)
 
-                _resize_manual()
-                manual_view.document().contentsChanged.connect(_resize_manual)
+                def _help_anchor_clicked(url, _mv=manual_view) -> None:
+                    from PySide6.QtGui import QDesktopServices
+                    frag = url.fragment()
+                    if url.scheme() in ("http", "https", "mailto"):
+                        QDesktopServices.openUrl(url)
+                    elif frag or url.toString().startswith("#"):
+                        _mv.scrollToAnchor(frag or url.toString().lstrip("#"))
+                    # relative file links (e.g. ARCHITECTURE.md) aren't bundled —
+                    # ignore rather than blank the manual.
 
-                # The height is derived from the document at the *current* text
-                # width. On the very first build the drawer isn't shown yet, so
-                # the viewport width is a placeholder and the estimate is wrong.
-                # Recompute whenever the manual is actually resized (once the
-                # drawer opens, and every time the window changes width) so the
-                # height tracks the real wrapped text with no trailing gap.
-                class _ManualResizeFilter(QObject):
-                    def eventFilter(self, obj, ev):  # noqa: N802
-                        if ev.type() == QEvent.Resize:
-                            _resize_manual()
-                        return False
-
-                self._help_manual_resize_filter = _ManualResizeFilter(manual_view)
-                manual_view.installEventFilter(self._help_manual_resize_filter)
-                cl.addWidget(manual_view)
+                manual_view.anchorClicked.connect(_help_anchor_clicked)
+                cl.addWidget(manual_view, 1)
                 self._help_manual_view = manual_view
+            else:
+                # No manual (trimmed build) — absorb slack so the quick-help
+                # doesn't stretch into a blank band.
+                cl.addStretch(1)
 
-            # Absorb any leftover vertical space so a short manual (or a tall
-            # drawer) never stretches the last widget into a blank band.
-            cl.addStretch(1)
-            scroll.setWidget(content)
-            drawer.setContentWidget(scroll)
+            drawer.setContentWidget(content)
             self._help_drawer = drawer
-            self._help_scroll = scroll
             self._help_content = content
         if self._help_drawer.isVisible():
             self._help_drawer.close()
         else:
             self._help_drawer.open()
             # Once the drawer is laid out, jump to the help section that
-            # matches the page the user is currently looking at. Deferred by a
-            # short beat so the manual's resize-driven height recompute and the
-            # scroll area's layout (which fixes the scrollbar range) have both
-            # flushed before we compute where to scroll.
+            # matches the page the user is currently looking at. Deferred a short
+            # beat so the manual browser is laid out (its scrollbar range valid)
+            # before scrollToAnchor runs.
             QTimer.singleShot(60, self._scroll_help_to_current_section)
 
     # Map the app's current leaf page → the reference-manual heading that
@@ -762,40 +780,17 @@ class AllWellApp(QMainWindow):
 
     def _scroll_help_to_current_section(self) -> None:
         """Scroll the open help drawer so the heading for the current page sits
-        at the top of the manual. No-op if the drawer/manual isn't built, the
-        page can't be resolved, or the heading isn't found."""
+        at the top of the manual. No-op if the drawer/manual isn't built or the
+        page can't be resolved. The manual is a self-scrolling browser, so this
+        just jumps to the heading's injected anchor (same GitHub slugs the TOC
+        links use)."""
         mv = getattr(self, "_help_manual_view", None)
-        scroll = getattr(self, "_help_scroll", None)
-        content = getattr(self, "_help_content", None)
-        if mv is None or scroll is None or content is None:
+        if mv is None:
             return
         target = self._help_section_for_current_page()
         if not target:
             return
-        # Find the actual heading block (headingLevel > 0) — matching on block
-        # text alone would also hit the table-of-contents links and inline
-        # cross-references that repeat the same words earlier in the document.
-        doc = mv.document()
-        block = doc.begin()
-        heading_block = None
-        while block.isValid():
-            if block.blockFormat().headingLevel() > 0 \
-                    and block.text().strip() == target:
-                heading_block = block
-                break
-            block = block.next()
-        if heading_block is None:
-            return
-        from PySide6.QtGui import QTextCursor
-        cursor = QTextCursor(heading_block)
-        # cursorRect is in the browser's viewport space; its own scrollbar is
-        # off and it is expanded to full document height, so the top of that
-        # rect equals the heading's y-offset from the document top.
-        y_in_manual = mv.cursorRect(cursor).top()
-        y_offset = mv.mapTo(content, mv.rect().topLeft()).y()
-        target_y = int(y_offset + y_in_manual) - theme_v2.Spacing.md
-        bar = scroll.verticalScrollBar()
-        bar.setValue(max(0, min(target_y, bar.maximum())))
+        mv.scrollToAnchor(_gh_slug(target))
 
     def _current_data_dir(self):
         """Return the directory of the dataset currently loaded in the

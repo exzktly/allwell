@@ -140,6 +140,17 @@ def _dispatch() -> None:
         import process_microscopy
         process_microscopy.main()
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-zipper":
+        # Same frozen-dispatch trick as ``--run-pipeline``: the Analyze tab's
+        # grouping phase spawns WellPlateZipper as a subprocess, but in a frozen
+        # bundle ``sys.executable`` is the .app binary, not a Python interpreter,
+        # so ``[sys.executable, "WellPlateZipper.py", ...]`` would just relaunch
+        # the GUI and the zipper would never run. Route argv past the sentinel
+        # into WellPlateZipper.main() (which parse_args() the rest).
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        import WellPlateZipper
+        WellPlateZipper.main()
+        return
     from allwell import main
     main()
 

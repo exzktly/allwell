@@ -139,13 +139,11 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     _save_btn = _IconButton("save", ctrl, tooltip="Save figure")
     _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
     cl.addWidget(_save_btn)
-    style_btn = _IconButton(
-        "sliders-horizontal", ctrl,
-        tooltip="Show / hide the figure properties panel",
-    )
-    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("distribution"))
-    cl.addWidget(style_btn)
-    layout.addWidget(ctrl)
+    # Pin the figure-properties button to the right edge of the plot area (where
+    # the export-style dock slides out); the FlowLayout row can't right-align it.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    layout.addWidget(wrap_ctrl_row_with_properties(
+        ctrl, lambda: ctx.open_export_style_panel("distribution")))
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery

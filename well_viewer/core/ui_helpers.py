@@ -241,6 +241,31 @@ def build_section_header(
     return hdr
 
 
+def wrap_ctrl_row_with_properties(ctrl_row, on_click, *,
+                                  tooltip="Show / hide the figure properties panel"):
+    """Wrap a plot tab's control row so the figure-properties button pins to the
+    right edge of the plot area — aligned with where the export-style dock slides
+    out (``make_plot_with_right_dock``).
+
+    The control rows are ``FlowLayout``s, whose ``addStretch()`` and per-widget
+    alignment are no-ops (widgets/flow_layout.py), so the button cannot be
+    right-aligned inside them. Lift it into an outer ``QHBoxLayout``:
+    ``[ctrl_row (stretch 1)] [properties IconButton, top-right]``. ``AlignTop``
+    keeps the button in the top-right corner when the FlowLayout wraps to
+    multiple lines. ``on_click`` is invoked with no args on click.
+    """
+    from widgets.icon_button import IconButton
+    wrap = QWidget()
+    hl = QHBoxLayout(wrap)
+    hl.setContentsMargins(0, 0, 0, 0)
+    hl.setSpacing(4)
+    hl.addWidget(ctrl_row, 1)
+    btn = IconButton("sliders-horizontal", wrap, tooltip=tooltip)
+    btn.clicked.connect(lambda _=False: on_click())
+    hl.addWidget(btn, 0, Qt.AlignTop | Qt.AlignRight)
+    return wrap
+
+
 def build_hline_separator(parent: QWidget) -> QFrame:
     """Return the project's standard 1-px horizontal separator frame."""
     sep = QFrame(parent)

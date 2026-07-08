@@ -23,6 +23,9 @@ from PySide6.QtWidgets import (
 
 from well_viewer.data.crop_tool import CropTool
 from well_viewer.core.ui_helpers import btn_primary
+from well_viewer.features.image_browser.image_table.grid_layout import (
+    _fov_options, _timepoint_options,
+)
 from widgets.flow_layout import FlowLayout
 from well_viewer.features.image_browser.image_table.controller import image_table_open_export_settings
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_dimensions
@@ -213,6 +216,69 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         setattr(ctx.runtime.image_table, f"{which}_dims_refresh", _refresh)
         return btn
 
+    def _make_filter_picker(head: str, opts_fn, state_attr: str, tooltip: str) -> QToolButton:
+        """Self-refreshing checkable filter for a dimension's on-axis values.
+
+        Mirrors the Channels dropdown for Timepoints / FOVs: the checked set is the
+        subset that appears when that dimension is on the Rows/Columns axis (empty =
+        all — a no-op). Keeps the nested product from exploding when a dataset has
+        many timepoints / FOVs. Self-contained (rebuilds on ``aboutToShow``) so it
+        needs no controller repopulate hook."""
+        btn = QToolButton(axes_row)
+        btn.setPopupMode(QToolButton.InstantPopup)
+        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
+        btn.setProperty("variant", "secondary")
+        btn.setToolTip(tooltip)
+        menu = QMenu(btn)
+        btn.setMenu(menu)
+
+        def _state() -> set:
+            return getattr(ctx.state.image_table, state_attr, None) or set()
+
+        def _refresh_text() -> None:
+            opts = opts_fn(ctx)
+            sel = [o for o in opts if o in _state()]
+            if not sel or len(sel) == len(opts):
+                btn.setText(f"{head}: all")
+            elif len(sel) <= 2:
+                btn.setText(f"{head}: " + ", ".join(sel))
+            else:
+                btn.setText(f"{head}: {len(sel)} selected")
+
+        def _toggle(val: str, on: bool) -> None:
+            sel = set(_state())
+            sel.add(val) if on else sel.discard(val)
+            setattr(ctx.state.image_table, state_attr, sel)
+            _refresh_text()
+
+        def _set_all(on: bool) -> None:
+            setattr(ctx.state.image_table, state_attr,
+                    set(opts_fn(ctx)) if on else set())
+            _rebuild()
+
+        def _rebuild() -> None:
+            menu.clear()
+            opts = opts_fn(ctx)
+            setattr(ctx.state.image_table, state_attr,
+                    {v for v in _state() if v in opts})  # prune stale
+            menu.addAction("Select all").triggered.connect(
+                lambda _=False: _set_all(True))
+            menu.addAction("Clear").triggered.connect(
+                lambda _=False: _set_all(False))
+            menu.addSeparator()
+            for val in opts:
+                act = menu.addAction(val)
+                act.setCheckable(True)
+                act.setChecked(val in _state())
+                act.toggled.connect(lambda on, v=val: _toggle(v, on))
+            _refresh_text()
+
+        _rebuild()
+        menu.aboutToShow.connect(_rebuild)
+        _refresh_text()
+        return btn
+
     ar.addWidget(QLabel("Rows:", axes_row))
     ar.addWidget(_make_dims_picker("row"))
 
@@ -233,6 +299,22 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     reg.register("_image_table_channel_btn", chan_btn)
     reg.register("_image_table_channel_menu", chan_menu)
     ar.addWidget(chan_btn)
+
+    # Timepoint / FOV value filters — bound the nested product when those dims are
+    # on an axis (mirror the Channels dropdown). Empty = all.
+    tp_filter_btn = _make_filter_picker(
+        "Time", _timepoint_options, "active_timepoints",
+        "Filter which timepoints appear when Timepoints is a Rows/Columns "
+        "dimension (none = all).")
+    reg.register("_image_table_tp_filter_btn", tp_filter_btn)
+    ar.addWidget(tp_filter_btn)
+
+    fov_filter_btn = _make_filter_picker(
+        "FOV", _fov_options, "active_fovs",
+        "Filter which FOVs appear when FOVs is a Rows/Columns dimension "
+        "(none = all).")
+    reg.register("_image_table_fov_filter_btn", fov_filter_btn)
+    ar.addWidget(fov_filter_btn)
 
     ar.addSpacing(8)
 

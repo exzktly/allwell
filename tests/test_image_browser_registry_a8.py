@@ -18,7 +18,7 @@ from well_viewer.features.image_browser.image_table.tab_view import build_image_
 from well_viewer.features.image_browser.cell_browser.tab_view import build_cell_browser_tab
 
 _IMAGE_TABLE = (
-    "_image_table_row_axis_cb", "_image_table_col_axis_cb", "_image_table_channel_btn",
+    "_image_table_row_dims_btn", "_image_table_col_dims_btn", "_image_table_channel_btn",
     "_image_table_channel_menu", "_image_table_global_chan_cb", "_image_table_global_tp_cb",
     "_image_table_global_fov_cb", "_image_table_rows_spin", "_image_table_cols_spin",
     "_image_table_selector_grid", "_image_table_lut_container", "_image_table_crop_act",

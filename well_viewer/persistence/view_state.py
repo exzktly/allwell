@@ -328,6 +328,16 @@ def _snapshot_image_table(ctx) -> dict:
         v = getattr(ctx.state.image_table, fld, None)
         if isinstance(v, str) and v:
             out[key] = v
+    # Nested / compound axes (row_dims / col_dims). The per-cell combos above stay
+    # authoritative for the grid *content*, so a nested layout already round-trips
+    # cell-by-cell; capturing the dim lists lets a re-Build after restore reproduce
+    # the same product layout (and the per-channel LUT keying) instead of falling
+    # back to the single axis. Only written when non-empty, so flat layouts and
+    # older snapshots are unchanged.
+    for key, fld in (("row_dims", "row_dims"), ("col_dims", "col_dims")):
+        v = getattr(ctx.state.image_table, fld, None)
+        if isinstance(v, list) and v:
+            out[key] = [str(d) for d in v]
     # Per-row channel / well convenience combos (one per grid row); their value
     # is mirrored into each cell, but capturing them keeps the per-row UI in sync.
     for key, cbs in (
@@ -885,6 +895,18 @@ def _apply_image_table(ctx, state: dict) -> None:
         try:
             setattr(ctx.state.image_table, f"{which}_axis", axis)
             setattr(ctx.runtime.image_table, f"{which}_axis", axis)
+        except Exception:
+            swallowed()
+
+    # Nested / compound axis dim lists (row_dims / col_dims). Restored as plain
+    # state so a re-Build reproduces the product layout; empty / absent keeps the
+    # flat single-axis behaviour. Cleared to [] when the snapshot has none so a
+    # nested layout doesn't linger after loading a flat one.
+    for key, fld in (("row_dims", "row_dims"), ("col_dims", "col_dims")):
+        dims = state.get(key)
+        try:
+            setattr(ctx.state.image_table, fld,
+                    [str(d) for d in dims] if isinstance(dims, list) else [])
         except Exception:
             swallowed()
 

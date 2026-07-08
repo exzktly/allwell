@@ -45,6 +45,7 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_load_heatmap_layout
 from well_viewer.features.image_browser.image_table.controller import image_table_build_layout
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_preset
+from well_viewer.features.image_browser.image_table.controller import image_table_apply_dims_preset
 
 
 def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") -> QToolButton:
@@ -133,14 +134,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     _AXES = [("Channels", "channel"), ("Wells", "well"),
              ("Timepoints", "timepoint"), ("FOVs", "fov")]
-
-    def _axis_combo(default_key: str) -> QComboBox:
-        cb = QComboBox(builder)
-        for label, key in _AXES:
-            cb.addItem(label, key)
-        idx = cb.findData(default_key)
-        cb.setCurrentIndex(idx if idx >= 0 else 0)
-        return cb
+    _AXIS_LABELS = {key: label for label, key in _AXES}
 
     # Row 1 — axes + channels + Build▾ + More▾.
     axes_row = QWidget(builder)
@@ -148,15 +142,82 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ar.setContentsMargins(0, 0, 0, 0)
     ar.setSpacing(6)
 
+    def _make_dims_picker(which: str) -> QToolButton:
+        """Ordered multi-select picker for a row/col axis.
+
+        Check dimensions to nest them (check order = outer › inner); the axis then
+        expands to the mixed-radix product of the chosen dims (e.g. Wells › Channels
+        gives one grid row per well×channel). A single check reduces to the classic
+        flat axis. State (``row_dims``/``col_dims`` + the legacy ``row_axis``/
+        ``col_axis`` outer-dim mirror) is the source of truth; the picker keeps both
+        the state list and the runtime axis attr in sync so the flat build path and
+        saved view-state round-trip unchanged."""
+        st = ctx.state.image_table
+        state_list = f"{which}_dims"
+        axis_attr = f"{which}_axis"
+        default_axis = getattr(st, axis_attr)
+        head = "Rows" if which == "row" else "Columns"
+
+        btn = QToolButton(axes_row)
+        btn.setPopupMode(QToolButton.InstantPopup)
+        btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
+        btn.setProperty("variant", "secondary")
+        btn.setToolTip(
+            "Choose one or more dimensions for this axis. Check order sets the "
+            "nesting (outer › inner); the axis expands to their combined product."
+        )
+        menu = QMenu(btn)
+        btn.setMenu(menu)
+
+        def _current() -> list:
+            dims = list(getattr(st, state_list) or [])
+            return dims if dims else [getattr(st, axis_attr)]
+
+        def _refresh() -> None:
+            names = " › ".join(_AXIS_LABELS.get(d, d) for d in _current())
+            btn.setText(f"{head}: {names}")
+
+        def _toggle(key: str, on: bool) -> None:
+            dims = list(getattr(st, state_list) or [])
+            if not dims:
+                base = getattr(st, axis_attr)
+                dims = [base] if base else []
+            if on and key not in dims:
+                dims.append(key)
+            elif not on:
+                dims = [d for d in dims if d != key]
+            setattr(st, state_list, dims)
+            new_axis = dims[0] if dims else default_axis
+            setattr(st, axis_attr, new_axis)
+            setattr(ctx.runtime.image_table, axis_attr, new_axis)
+            _refresh()
+
+        def _rebuild_menu() -> None:
+            menu.clear()
+            active = _current()
+            for label, key in _AXES:
+                act = menu.addAction(label)
+                act.setCheckable(True)
+                act.setChecked(key in active)
+                act.toggled.connect(lambda on, k=key: _toggle(k, on))
+
+        _rebuild_menu()
+        menu.aboutToShow.connect(_rebuild_menu)
+        _refresh()
+        # A8: the ordered-dims picker is a widget handle → through the registry
+        # (stamps app._image_table_{which}_dims_btn). Replaces the old single-select
+        # axis combos.
+        reg.register(f"_image_table_{which}_dims_btn", btn)
+        # Let the Build▾ presets refresh this button's text after they mutate state.
+        setattr(ctx.runtime.image_table, f"{which}_dims_refresh", _refresh)
+        return btn
+
     ar.addWidget(QLabel("Rows:", axes_row))
-    row_axis_cb = _axis_combo(ctx.state.image_table.row_axis)
-    ar.addWidget(row_axis_cb)
-    reg.register("_image_table_row_axis_cb", row_axis_cb)
+    ar.addWidget(_make_dims_picker("row"))
 
     ar.addWidget(QLabel("×  Columns:", axes_row))
-    col_axis_cb = _axis_combo(ctx.state.image_table.col_axis)
-    ar.addWidget(col_axis_cb)
-    reg.register("_image_table_col_axis_cb", col_axis_cb)
+    ar.addWidget(_make_dims_picker("col"))
 
     # Channel multi-select dropdown (drives the "Channels" axis; default all).
     chan_btn = QToolButton(axes_row)
@@ -192,6 +253,20 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         act = build_btn.menu().addAction(label)
         act.triggered.connect(
             lambda _=False, r=ra_, c=ca_: image_table_apply_preset(ctx, r, c)
+        )
+    # Nested (compound-axis) presets — rows and/or columns carry more than one
+    # dimension, expanded as a mixed-radix product. "Wells › Channels × Time" is
+    # the headline case: a time-series of every channel for every well.
+    build_btn.menu().addSeparator()
+    for label, (rd_, cd_) in (
+        ("Wells › Channels × Time", (["well", "channel"], ["timepoint"])),
+        ("Channels › Wells × Time", (["channel", "well"], ["timepoint"])),
+        ("Wells × Channels › Time", (["well"], ["channel", "timepoint"])),
+        ("FOV montage per Well", (["well"], ["fov"])),
+    ):
+        act = build_btn.menu().addAction(label)
+        act.triggered.connect(
+            lambda _=False, r=rd_, c=cd_: image_table_apply_dims_preset(ctx, r, c)
         )
     ar.addWidget(build_btn)
 

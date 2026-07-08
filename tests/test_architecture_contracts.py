@@ -285,6 +285,10 @@ FEATURE_NAME_EXCEPTIONS = {
     # split out of image_table/controller.py to hold its line budget; paired with
     # it and the image_compose LUT layer.
     "lut_ops.py",
+    # image_table smart-layout builders (flat + nested/compound-axis grid assembly,
+    # per-channel LUT re-keying, Build presets), split out of image_table/
+    # controller.py to hold its line budget; paired with it and the grid_layout math.
+    "build_layout.py",
     # the feature registry: the single assembly point for FeatureDescriptors and
     # the sole sanctioned importer of well_viewer.features.* (the import-inversion
     # seam) — not a per-feature module, so it sits outside the naming scheme.

@@ -993,17 +993,39 @@ reviewing and curating individual cells.
 #### Image Table
 
 **What it shows.** A configurable grid of per-FOV image thumbnails for
-side-by-side comparison across wells / channels / timepoints / FOVs.
+side-by-side comparison — now across **any combination** of wells / channels /
+timepoints / FOVs, including more than two at once (e.g. a time-course of every
+channel for every well).
 
 - **Needs** — image ZIPs present, and a well set (drive it from the plate
   picker or a Plot Group via the read-only Plot Groups mirror in this sidebar).
-- **Controls** — **Add row… / Add column…** (clone a row/column, varying
-  channel / timepoint / FOV / well uniformly or stepped); a per-row/column **×**
-  to remove it; a per-row **Log** toggle (log10 intensity display, persisted);
-  a per-row **LUT** selector (defaults to grayscale — recolor to opt into a
-  tint); bulk **export** of the grid.
-- **Optimal use** — one row per channel and one column per timepoint reads a
-  treatment's time-course at a glance; save the composed grid to Saved Plots.
+- **Workflow** — in the **Build Layout** strip, declare what varies down
+  **Rows** and across **Columns**, press **Build table** to lay out the selector
+  grid, then **Generate** to render. Build only assembles the grid (auto-sizing
+  it and filling every cell); Generate draws the images.
+- **Rows / Columns axes** — each is an **ordered multi-select**: tick one or more
+  of Channels / Wells / Timepoints / FOVs; the tick order sets the nesting
+  (**outer › inner**). One dimension is a plain axis; several expand the axis to
+  their full combination, so >2 dimensions can vary at once (e.g. Rows =
+  *Wells › Channels*, Columns = *Timepoints*). **Build table ▾** carries quick
+  presets — flat (Channels × Time, Wells × Channels, …) and nested (**Wells ›
+  Channels × Time**, FOV montage per Well, …).
+- **Controls** — **Channels / Time / FOV** filters cap which values appear on an
+  axis (none = all — handy to keep a big product in bounds); **Hold off-axis**
+  pins the dimensions not on either axis to a single Ch / Time / FOV value;
+  **Group** wraps the columns into stacked bands (a legacy tiler, mostly replaced
+  by nesting). Below the grid, a **Per-row levels & display** table gives each row
+  its own colormap, LUT min/max (+ **Fit**), and Top-hat / Boundaries / Binary
+  toggles — and when **Channels** is on the Rows axis, every row of the same
+  channel **shares one LUT/colormap** (per-channel display). **Composite** appends
+  a merged row summing the channels above it; **Crop**, **Export**, and **Zoom**
+  finish the strip. The **Selector** cells are directly editable, and **More▾**
+  keeps the manual helpers (Distribute Wells / Timepoints, Load Heatmap Layout,
+  **Add row… / Add column…**).
+- **Optimal use** — pick the **Wells › Channels × Time** preset for a treatment's
+  full time-course at a glance (one row per well×channel, one column per
+  timepoint, each channel auto-sharing a LUT); tighten the Time/FOV filters if the
+  grid gets large, then save the composed grid to Saved Plots.
 
 #### Cell Browser
 

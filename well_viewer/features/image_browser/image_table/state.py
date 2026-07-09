@@ -40,6 +40,19 @@ class ImageTableState:
     row_axis: str = "channel"
     col_axis: str = "timepoint"
 
+    # Nested / compound axes: each of rows and columns can be an ORDERED list of
+    # dims (outer→inner), e.g. row_dims=["well", "channel"]. row_vals / col_vals
+    # then become the mixed-radix Cartesian product of the chosen dims, so >2
+    # dimensions can vary at once (e.g. wells × channels on rows, timepoints
+    # across columns). Empty list = fall back to the single row_axis / col_axis
+    # (today's flat behaviour), so saved view-state round-trips unchanged.
+    row_dims: list = field(default_factory=list)
+    col_dims: list = field(default_factory=list)
+    # Per-dimension selection filters for the product (mirror active_wells /
+    # active_channels for the other two dims) so a nested product doesn't explode.
+    active_timepoints: set = field(default_factory=set)
+    active_fovs: set = field(default_factory=set)
+
     # grouped / tiled layout. ``group_size`` wraps the COLUMNS axis into
     # vertically-stacked bands of this many columns; the ROWS axis repeats per
     # band. 0 = off (one band → today's flat layout). ``group_row_span`` records
@@ -71,3 +84,15 @@ class ImageTableState:
         """Drop the per-generate render / image caches (call on dataset swap)."""
         self.last_render.clear()
         self.image_cache.clear()
+
+    def effective_row_dims(self) -> list:
+        """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.
+
+        Lets the layout code treat the flat (single-axis) and nested (multi-dim)
+        cases uniformly, and keeps saved states that only have ``row_axis`` working
+        with no migration."""
+        return list(self.row_dims) if self.row_dims else [self.row_axis]
+
+    def effective_col_dims(self) -> list:
+        """Ordered column dimensions — ``col_dims`` if set, else ``[col_axis]``."""
+        return list(self.col_dims) if self.col_dims else [self.col_axis]

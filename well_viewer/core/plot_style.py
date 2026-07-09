@@ -367,7 +367,24 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
     axis_target = str(prefs.get("axis_target", "All"))
     target_idx = None if axis_target == "All" else int(axis_target)
 
+    # Per-axis font sizes: an "Axis #" selection scopes tick / axis-label / title
+    # sizes to that one panel (stored in that panel's ``axis_buckets`` entry by
+    # the properties editor), falling back to the shared global size for panels
+    # with no override. This is why editing a size no longer changes every panel
+    # of a multi-panel figure (multivariate / spatial). Callers that pass a plain
+    # dict without ``axis_buckets`` just get the global size everywhere.
+    _axis_buckets = prefs.get("axis_buckets") or {}
+
+    def _axis_font_size(_idx, key, default):
+        v = (_axis_buckets.get(str(_idx)) or {}).get(key)
+        if v in (None, ""):
+            v = prefs.get(key, default)
+        return int(float(v))
+
     for idx, ax in enumerate(fig.axes, start=1):
+        _tick_sz = _axis_font_size(idx, "tick_label_size", 10)
+        _label_sz = _axis_font_size(idx, "axis_label_size", 12)
+        _title_sz = _axis_font_size(idx, "title_size", 14)
         # Theme-aware chrome: this function used to hardcode "black" everywhere
         # (publication-ink), which was correct on export but overrode the
         # PlotCard's screen-theme styling whenever it was called from a redraw.
@@ -375,18 +392,18 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         ax.patch.set_alpha(1.0)
         ax.xaxis.label.set_color(_muted_fg)
         ax.yaxis.label.set_color(_muted_fg)
-        ax.xaxis.label.set_fontsize(int(prefs.get("axis_label_size", 12)))
-        ax.yaxis.label.set_fontsize(int(prefs.get("axis_label_size", 12)))
-        ax.tick_params(axis="x", labelsize=int(prefs.get("tick_label_size", 10)), colors=_muted_fg)
-        ax.tick_params(axis="y", labelsize=int(prefs.get("tick_label_size", 10)), colors=_muted_fg)
-        ax.title.set_fontsize(int(prefs.get("title_size", 14)))
+        ax.xaxis.label.set_fontsize(_label_sz)
+        ax.yaxis.label.set_fontsize(_label_sz)
+        ax.tick_params(axis="x", labelsize=_tick_sz, colors=_muted_fg)
+        ax.tick_params(axis="y", labelsize=_tick_sz, colors=_muted_fg)
+        ax.title.set_fontsize(_title_sz)
         ax.title.set_color(_title_fg)
 
         _fam = _plot_font_family()
         for tick in [*ax.get_xticklabels(), *ax.get_yticklabels()]:
             tick.set_color(_muted_fg)
             tick.set_fontfamily(_fam)
-            tick.set_fontsize(int(prefs.get("tick_label_size", 10)))
+            tick.set_fontsize(_tick_sz)
 
         ax.xaxis.label.set_fontfamily(_fam)
         ax.yaxis.label.set_fontfamily(_fam)

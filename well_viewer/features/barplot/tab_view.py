@@ -124,15 +124,12 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _save_btn = _IconButton("save", bar_ctrl, tooltip="Save figure")
     _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
     cl.addWidget(_save_btn)
-    # Properties button last in the row so it sits flush with the right
-    # edge of the plot area — adjacent to where the dock slides out.
-    style_btn = _IconButton(
-        "sliders-horizontal", bar_ctrl,
-        tooltip="Show / hide the figure properties panel",
-    )
-    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("bar"))
-    cl.addWidget(style_btn)
-    right_l.addWidget(bar_ctrl)
+    # Pin the figure-properties button to the right edge of the plot area (where
+    # the export-style dock slides out) — the FlowLayout control row can't
+    # right-align it, so wrap the row.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    right_l.addWidget(wrap_ctrl_row_with_properties(
+        bar_ctrl, lambda: ctx.open_export_style_panel("bar")))
 
     # ── plot-shape row (Timepoint / Beeswarm / Violin / Smooth) ──────────────
     # Split off the controls that change WHAT is plotted from the controls

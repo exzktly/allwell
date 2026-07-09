@@ -76,7 +76,14 @@ FEATURE_PREFIX = "well_viewer.features"
 # / threshold-map / flat-field field) were promoted to a single module-level
 # ``review_image.collect`` import — collect is the Qt-free data half and never
 # imports the renderer, so there is no cycle to defer.
-MAX_DEFERRED_FEATURE_IMPORTS = 124
+# Raised to 125 for the image_table build_layout module: the smart-layout builder
+# cluster (flat + nested grid assembly) was split out of controller.py to hold its
+# line budget. build_layout defers its ``controller`` import (for the Qt-side
+# rebuild helpers ``image_table_rebuild_grid`` / ``image_table_rebuild_lut_row``,
+# the latter defined below controller's re-export point so a module-level import
+# would fail during partial init) — the standard one-defer cycle break for an
+# extraction, exactly like grid_ops above.
+MAX_DEFERRED_FEATURE_IMPORTS = 125
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

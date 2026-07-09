@@ -121,16 +121,12 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
     add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx))
     cl.addWidget(_export_btn)
-    # Figure properties gets its own trailing button, matching every other plot
-    # tab and the per-cell scatter tab.
-    from widgets.icon_button import IconButton as _IconButton
-    _style_btn = _IconButton(
-        "sliders-horizontal", ctrl,
-        tooltip="Show / hide the figure properties panel",
-    )
-    _style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("scatter_agg"))
-    cl.addWidget(_style_btn)
-    layout.addWidget(ctrl)
+    # Figure-properties button, pinned to the right edge of the plot area (where
+    # the export-style dock slides out) — matching every other plot tab. The
+    # FlowLayout control row can't right-align it, so wrap the row.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    layout.addWidget(wrap_ctrl_row_with_properties(
+        ctrl, lambda: ctx.open_export_style_panel("scatter_agg")))
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
     from well_viewer.features.saved_plots.controller import wire_save_to_gallery

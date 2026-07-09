@@ -222,16 +222,11 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     save_btn.clicked.connect(lambda _=False: _save_spatial_figure(ctx))
     r1.addWidget(save_btn)
 
-    # Properties button last so it sits flush with the right edge of the plot
-    # area — adjacent to where the export-style dock slides out.
-    props_btn = IconButton(
-        "sliders-horizontal", row1,
-        tooltip="Show / hide the figure properties panel")
-    props_btn.clicked.connect(
-        lambda _=False: ctx.open_export_style_panel("spatial"))
-    r1.addWidget(props_btn)
-
-    layout.addWidget(row1)
+    # Pin the figure-properties button to the right edge of the plot area (where
+    # the export-style dock slides out); the FlowLayout row can't right-align it.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    layout.addWidget(wrap_ctrl_row_with_properties(
+        row1, lambda: ctx.open_export_style_panel("spatial")))
 
     # ── row 2: parameters (colony detection + summary display + boundary) ────
     # Row 2 hosts every parameter control. Groups are shown / hidden based on

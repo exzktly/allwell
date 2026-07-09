@@ -140,21 +140,46 @@ def _well_options(ctx) -> List[str]:
     return sorted(ctx.state.dataset.well_paths.keys(), key=parse_rc)
 
 
-def _axis_values(ctx, axis: str) -> List[str]:
-    """Ordered value list an axis expands into, drawn from the live selections."""
-    if axis == "channel":
+def _axis_dim_values(ctx, dim: str) -> List[str]:
+    """Ordered value list a single dimension expands into, from live selections.
+
+    Channel/well filter by ``active_channels``/``active_wells``; timepoint/fov
+    filter by ``active_timepoints``/``active_fovs`` (empty set = all, so this is a
+    no-op until those filters are populated)."""
+    if dim == "channel":
         opts = _channel_options(ctx)
         sel = getattr(ctx.state.image_table, "active_channels", None) or set()
         return [c for c in opts if c in sel] if sel else list(opts)
-    if axis == "well":
+    if dim == "well":
         sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
                      key=parse_rc)
         return sel if sel else _well_options(ctx)
-    if axis == "timepoint":
-        return _timepoint_options(ctx)
-    if axis == "fov":
-        return _fov_options(ctx)
+    if dim == "timepoint":
+        opts = _timepoint_options(ctx)
+        sel = getattr(ctx.state.image_table, "active_timepoints", None) or set()
+        return [t for t in opts if t in sel] if sel else list(opts)
+    if dim == "fov":
+        opts = _fov_options(ctx)
+        sel = getattr(ctx.state.image_table, "active_fovs", None) or set()
+        return [f for f in opts if f in sel] if sel else list(opts)
     return []
+
+
+def _axis_values(ctx, axis: str) -> List[str]:
+    """Back-compat single-dim wrapper around :func:`_axis_dim_values`."""
+    return _axis_dim_values(ctx, axis)
+
+
+def _product_values(ctx, dims) -> List[tuple]:
+    """Mixed-radix Cartesian product of *dims* (outer→inner order).
+
+    Returns a list of value tuples aligned to *dims*. Empty *dims* → ``[()]`` (a
+    single implicit cell). If any dim has no values the product is empty."""
+    import itertools
+    if not dims:
+        return [()]
+    lists = [_axis_dim_values(ctx, d) for d in dims]
+    return [tuple(p) for p in itertools.product(*lists)]
 
 
 def _fixed_off_axis(ctx, on_axis: set) -> Dict[str, str]:
@@ -192,6 +217,30 @@ def _current_axis(ctx, which: str) -> str:
     # state fallback / default
     return getattr(ctx.runtime.image_table, f"{which}_axis",
                    "channel" if which == "row" else "timepoint")
+
+
+def _current_dims(ctx, which: str) -> List[str]:
+    """Ordered dimension list for the row/col axis (outer→inner).
+
+    State (``row_dims``/``col_dims``, kept in sync by the multi-dim picker) is the
+    source of truth; ``effective_*_dims`` falls back to the single legacy axis so
+    the flat case and old saved states keep working."""
+    st = ctx.state.image_table
+    return st.effective_row_dims() if which == "row" else st.effective_col_dims()
+
+
+def _layout_cell_values_nested(row_dims, col_dims, row_tuple, col_tuple,
+                               fixed) -> Dict[str, str]:
+    """Per-cell dim values for a NESTED layout: off-axis dims held at *fixed*, the
+    row dims set from *row_tuple* (aligned to *row_dims*) and col dims from
+    *col_tuple*. The caller supplies the already-decoded product tuples
+    ``row_prod[r]`` / ``col_prod[c]``."""
+    vals = dict(fixed)
+    for d, v in zip(row_dims, row_tuple):
+        vals[d] = v
+    for d, v in zip(col_dims, col_tuple):
+        vals[d] = v
+    return vals
 
 
 def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c,

@@ -116,16 +116,12 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     _save_btn = _IconButton("save", line_ctrl, tooltip="Save figure")
     _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
     cl.addWidget(_save_btn)
-    # Properties button last in the row so it sits flush with the right
-    # edge of the plot area — adjacent to where the figure-properties
-    # dock slides out, instead of the old "▸" floating mid-row.
-    style_btn = _IconButton(
-        "sliders-horizontal", line_ctrl,
-        tooltip="Show / hide the figure properties panel",
-    )
-    style_btn.clicked.connect(lambda _=False: ctx.open_export_style_panel("line"))
-    cl.addWidget(style_btn)
-    layout.addWidget(line_ctrl)
+    # Pin the figure-properties button to the right edge of the plot area (where
+    # the export-style dock slides out). The FlowLayout control row can't
+    # right-align it, so wrap the row via the shared helper.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    layout.addWidget(wrap_ctrl_row_with_properties(
+        line_ctrl, lambda: ctx.open_export_style_panel("line")))
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)

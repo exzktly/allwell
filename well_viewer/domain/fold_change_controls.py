@@ -77,6 +77,16 @@ def _all_member_labels(ctx) -> list[str]:
             entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
             names.append(entry)
             seen.add(w)
+    # Expose every remaining dataset well too, so a well used purely as a
+    # reference — e.g. a negative-control or background well subtracted from the
+    # samples via "vs Control → Subtract" at each matching timepoint — can be
+    # chosen as the Control even when it isn't part of the current plot
+    # selection. Plotted members stay first; the rest follow in plate order.
+    for w in sorted(well_paths.keys(), key=lambda x: x):
+        if w not in seen:
+            entry = w + _WELL_DISAMBIG_SUFFIX if w in repset_names else w
+            names.append(entry)
+            seen.add(w)
     return names
 
 
@@ -207,6 +217,25 @@ class _ControlCombo(QComboBox):
 
     def showPopup(self) -> None:  # type: ignore[override]
         _repopulate_control_combo(self._app, self)
+        super().showPopup()
+
+
+class _BaselineCombo(QComboBox):
+    """QComboBox that re-lists the dataset's timepoints on every popup.
+
+    Without this, the Baseline combo is only populated at build time and on
+    fold-change state mutations. If it was built before the dataset's timepoint
+    cache was filled (the common case on first load), it would keep showing only
+    ``—`` / ``earliest`` and none of the real timepoints. Refreshing on popup —
+    like ``_ControlCombo`` — guarantees the live timepoint list is shown.
+    """
+
+    def __init__(self, ctx, parent=None):
+        super().__init__(parent)
+        self._app = ctx
+
+    def showPopup(self) -> None:  # type: ignore[override]
+        _repopulate_baseline_combo(self._app, self)
         super().showPopup()
 
 
@@ -357,7 +386,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     layout.addWidget(op_ctrl_combo)
 
     layout.addWidget(QLabel("Baseline", parent))
-    baseline_combo = QComboBox(parent)
+    baseline_combo = _BaselineCombo(ctx, parent)
     baseline_combo.setMinimumWidth(140)
     baseline_combo.setToolTip(
         "Normalise each bar / curve against its own value at the "

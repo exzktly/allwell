@@ -281,6 +281,27 @@ def _snapshot_scatter(ctx) -> dict:
     return out
 
 
+def _snapshot_image_table_axes(ctx) -> dict:
+    """Row/col grid axes + nested row_dims/col_dims for the image-table snapshot.
+
+    Split out of :func:`_snapshot_image_table` to keep that function under the
+    cyclomatic-complexity ratchet (``test_complexity_ratchet``). Captured so a
+    restore lays the selector grid out on the same axes — and can re-Build the
+    same nested product — before the per-cell values (authoritative for content)
+    are replayed. row_dims/col_dims are only written when non-empty, so flat
+    layouts and older snapshots round-trip unchanged."""
+    axes: dict[str, Any] = {}
+    for key, fld in (("row_axis", "row_axis"), ("col_axis", "col_axis")):
+        v = getattr(ctx.state.image_table, fld, None)
+        if isinstance(v, str) and v:
+            axes[key] = v
+    for key, fld in (("row_dims", "row_dims"), ("col_dims", "col_dims")):
+        v = getattr(ctx.state.image_table, fld, None)
+        if isinstance(v, list) and v:
+            axes[key] = [str(d) for d in v]
+    return axes
+
+
 def _snapshot_image_table(ctx) -> dict:
     """Capture the Image Table grid: dimensions, per-cell well/chan/tp/fov,
     overlay toggles, and per-channel LUT min/max edits.
@@ -320,14 +341,11 @@ def _snapshot_image_table(ctx) -> dict:
             row_out.append(slc)
         grid.append(row_out)
     out["cells"] = grid
-    # Grid axes (which dimension varies down rows vs across cols). Captured so a
-    # restore lays the selector grid out the same way before per-cell values are
-    # replayed — otherwise the per-row channel/well combos + labels can land on
-    # the wrong axis.
-    for key, fld in (("row_axis", "row_axis"), ("col_axis", "col_axis")):
-        v = getattr(ctx.state.image_table, fld, None)
-        if isinstance(v, str) and v:
-            out[key] = v
+    # Grid axes (row_axis/col_axis) + nested row_dims/col_dims — extracted to a
+    # helper to hold the complexity ratchet. Captured so a restore lays the
+    # selector grid out the same way (and can re-Build the same nested product)
+    # before per-cell values are replayed.
+    out.update(_snapshot_image_table_axes(ctx))
     # Per-row channel / well convenience combos (one per grid row); their value
     # is mirrored into each cell, but capturing them keeps the per-row UI in sync.
     for key, cbs in (
@@ -885,6 +903,18 @@ def _apply_image_table(ctx, state: dict) -> None:
         try:
             setattr(ctx.state.image_table, f"{which}_axis", axis)
             setattr(ctx.runtime.image_table, f"{which}_axis", axis)
+        except Exception:
+            swallowed()
+
+    # Nested / compound axis dim lists (row_dims / col_dims). Restored as plain
+    # state so a re-Build reproduces the product layout; empty / absent keeps the
+    # flat single-axis behaviour. Cleared to [] when the snapshot has none so a
+    # nested layout doesn't linger after loading a flat one.
+    for key, fld in (("row_dims", "row_dims"), ("col_dims", "col_dims")):
+        dims = state.get(key)
+        try:
+            setattr(ctx.state.image_table, fld,
+                    [str(d) for d in dims] if isinstance(dims, list) else [])
         except Exception:
             swallowed()
 

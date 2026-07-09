@@ -17,12 +17,14 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu,
-    QPushButton, QScrollArea, QSpinBox, QToolButton, QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QListWidget, QListWidgetItem, QMenu, QPushButton, QScrollArea, QSpinBox,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.data.crop_tool import CropTool
-from well_viewer.core.ui_helpers import btn_primary
+from well_viewer.core.ui_helpers import btn_primary, btn_secondary
+from widgets.icon_button import IconButton
 from well_viewer.features.image_browser.image_table.grid_layout import (
     _fov_options, _timepoint_options,
 )
@@ -49,6 +51,8 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_build_layout
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_preset
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_dims_preset
+from well_viewer.features.image_browser.image_table.build_layout import image_table_reset_layout
+from well_viewer.features.image_browser.image_table.build_layout import image_table_clear_render
 
 
 def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") -> QToolButton:
@@ -146,15 +150,19 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ar.setSpacing(6)
 
     def _make_dims_picker(which: str) -> QToolButton:
-        """Ordered multi-select picker for a row/col axis.
+        """Ordered multi-select picker for a row/col axis, with drag reordering.
 
-        Check dimensions to nest them (check order = outer › inner); the axis then
-        expands to the mixed-radix product of the chosen dims (e.g. Wells › Channels
-        gives one grid row per well×channel). A single check reduces to the classic
-        flat axis. State (``row_dims``/``col_dims`` + the legacy ``row_axis``/
-        ``col_axis`` outer-dim mirror) is the source of truth; the picker keeps both
-        the state list and the runtime axis attr in sync so the flat build path and
-        saved view-state round-trip unchanged."""
+        Check dimensions to include them on the axis; their top-to-bottom order in
+        the popup sets the nesting (outer › inner) — reorder by dragging a row by
+        its ⋮⋮ grip, or with the ▲/▼ buttons below the list. A single checked dim is
+        the classic flat axis. State (``row_dims``/``col_dims`` + the legacy
+        ``row_axis``/``col_axis`` outer-dim mirror) is the source of truth; the
+        picker keeps both in sync so the flat build path and saved view-state
+        round-trip unchanged.
+
+        The dropdown is a frameless ``Qt.Popup`` frame rather than a ``QMenu``: a
+        QMenu grabs the mouse, which breaks the list's internal drag-reorder. The
+        popup still dismisses on click-outside / Esc like a menu."""
         st = ctx.state.image_table
         state_list = f"{which}_dims"
         axis_attr = f"{which}_axis"
@@ -162,16 +170,38 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         head = "Rows" if which == "row" else "Columns"
 
         btn = QToolButton(axes_row)
-        btn.setPopupMode(QToolButton.InstantPopup)
         btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        btn.setProperty("hasMenu", True)  # reserve caret space (see theme.qss)
         btn.setProperty("variant", "secondary")
         btn.setToolTip(
-            "Choose one or more dimensions for this axis. Check order sets the "
-            "nesting (outer › inner); the axis expands to their combined product."
+            "Choose which dimensions vary on this axis, then drag (⋮⋮) or use ▲▼ "
+            "to set their nesting order (outer › inner)."
         )
-        menu = QMenu(btn)
-        btn.setMenu(menu)
+
+        popup = QFrame(btn, Qt.Popup)
+        popup.setObjectName("Panel")
+        pl = QVBoxLayout(popup)
+        pl.setContentsMargins(8, 8, 8, 8)
+        pl.setSpacing(6)
+        cap = QLabel("Check to include · drag ⋮⋮ or ▲▼ to order (outer → inner)",
+                     popup)
+        cap.setProperty("role", "muted")
+        pl.addWidget(cap)
+
+        listw = QListWidget(popup)
+        listw.setDragDropMode(QAbstractItemView.InternalMove)
+        listw.setSelectionMode(QAbstractItemView.SingleSelection)
+        listw.setFixedWidth(250)
+        pl.addWidget(listw)
+
+        mv_row = QHBoxLayout()
+        mv_row.setContentsMargins(0, 0, 0, 0)
+        mv_row.setSpacing(4)
+        up_btn = IconButton("chevron-up", popup, size=13, tooltip="Move up (outer)")
+        dn_btn = IconButton("chevron-down", popup, size=13, tooltip="Move down (inner)")
+        mv_row.addWidget(up_btn)
+        mv_row.addWidget(dn_btn)
+        mv_row.addStretch(1)
+        pl.addLayout(mv_row)
 
         def _current() -> list:
             dims = list(getattr(st, state_list) or [])
@@ -179,40 +209,74 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
         def _refresh() -> None:
             names = " › ".join(_AXIS_LABELS.get(d, d) for d in _current())
-            btn.setText(f"{head}: {names}")
+            btn.setText(f"{head}: {names}  ▾")
 
-        def _toggle(key: str, on: bool) -> None:
-            dims = list(getattr(st, state_list) or [])
-            if not dims:
-                base = getattr(st, axis_attr)
-                dims = [base] if base else []
-            if on and key not in dims:
-                dims.append(key)
-            elif not on:
-                dims = [d for d in dims if d != key]
+        def _selected_order() -> list:
+            """Checked dims in the list's current top→bottom order (outer→inner)."""
+            out = []
+            for i in range(listw.count()):
+                it = listw.item(i)
+                if it.checkState() == Qt.Checked:
+                    out.append(it.data(Qt.UserRole))
+            return out
+
+        def _commit() -> None:
+            dims = _selected_order()
             setattr(st, state_list, dims)
             new_axis = dims[0] if dims else default_axis
             setattr(st, axis_attr, new_axis)
             setattr(ctx.runtime.image_table, axis_attr, new_axis)
             _refresh()
 
-        def _rebuild_menu() -> None:
-            menu.clear()
-            active = _current()
-            for label, key in _AXES:
-                act = menu.addAction(label)
-                act.setCheckable(True)
-                act.setChecked(key in active)
-                act.toggled.connect(lambda on, k=key: _toggle(k, on))
+        def _rebuild_list() -> None:
+            listw.blockSignals(True)
+            listw.clear()
+            active = list(getattr(st, state_list) or [])
+            # Checked dims first, in their nesting order; unchecked dims after (in
+            # the canonical _AXES order) so ticking one appends it at the inner end.
+            ordered = active + [k for _l, k in _AXES if k not in active]
+            for key in ordered:
+                it = QListWidgetItem(f"⋮⋮    {_AXIS_LABELS.get(key, key)}")
+                it.setData(Qt.UserRole, key)
+                it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled
+                            | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
+                it.setCheckState(Qt.Checked if key in active else Qt.Unchecked)
+                listw.addItem(it)
+            listw.blockSignals(False)
 
-        _rebuild_menu()
-        menu.aboutToShow.connect(_rebuild_menu)
+        def _move_selected(delta: int) -> None:
+            row = listw.currentRow()
+            if row < 0:
+                return
+            new = row + int(delta)
+            if not (0 <= new < listw.count()):
+                return
+            it = listw.takeItem(row)
+            listw.insertItem(new, it)
+            listw.setCurrentRow(new)
+            _commit()
+
+        up_btn.clicked.connect(lambda: _move_selected(-1))
+        dn_btn.clicked.connect(lambda: _move_selected(+1))
+        listw.itemChanged.connect(lambda _it: _commit())
+        listw.model().rowsMoved.connect(lambda *_a: _commit())
+
+        def _open_popup() -> None:
+            from PySide6.QtCore import QPoint
+            _rebuild_list()
+            popup.adjustSize()
+            popup.move(btn.mapToGlobal(QPoint(0, btn.height())))
+            popup.show()
+
+        btn.clicked.connect(_open_popup)
+
         _refresh()
         # A8: the ordered-dims picker is a widget handle → through the registry
         # (stamps app._image_table_{which}_dims_btn). Replaces the old single-select
         # axis combos.
         reg.register(f"_image_table_{which}_dims_btn", btn)
-        # Let the Build▾ presets refresh this button's text after they mutate state.
+        # Let the Build▾ presets / Reset table refresh this button's text after they
+        # mutate state.
         setattr(ctx.runtime.image_table, f"{which}_dims_refresh", _refresh)
         return btn
 
@@ -277,6 +341,10 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         _rebuild()
         menu.aboutToShow.connect(_rebuild)
         _refresh_text()
+        # Let "Reset table" redraw this button's label after it clears the filter
+        # (mirrors the {which}_dims_refresh hook). Keyed by the state attr, e.g.
+        # active_timepoints_refresh / active_fovs_refresh.
+        setattr(ctx.runtime.image_table, f"{state_attr}_refresh", _refresh_text)
         return btn
 
     ar.addWidget(QLabel("Rows:", axes_row))
@@ -533,6 +601,23 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     comp_btn.toggled.connect(_on_composite_toggled)
     tr.addWidget(comp_btn)
+
+    # Two independent clears. "Reset table" returns the Build Layout generator to
+    # defaults (empty selector, Channels × Time, 2×3, no selection/nesting) but
+    # leaves the rendered images. "Clear images" wipes only the rendered grid,
+    # keeping the selector so a re-Generate is one click away.
+    reset_btn = btn_secondary(action_row, "Reset table",
+                              partial(image_table_reset_layout, ctx))
+    reset_btn.setToolTip(
+        "Reset the Build Layout to defaults (empty selector, Channels × Time, "
+        "2×3). Leaves the rendered images below.")
+    tr.addWidget(reset_btn)
+    clear_img_btn = btn_secondary(action_row, "Clear images",
+                                  partial(image_table_clear_render, ctx))
+    clear_img_btn.setToolTip(
+        "Clear the rendered image grid. Keeps the selector layout so Generate "
+        "re-renders instantly.")
+    tr.addWidget(clear_img_btn)
 
     # The per-display options (Tophat / Boundaries / Binary) are now per-row,
     # in the LUT boxes below the grid (each row independent). This menu keeps the

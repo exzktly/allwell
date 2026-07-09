@@ -334,3 +334,85 @@ def image_table_apply_dims_preset(ctx, row_dims, col_dims) -> None:
         setattr(st, f"{which}_axis", axis)
     _refresh_dims_pickers(ctx)
     image_table_build_layout(ctx)
+
+
+# Build Layout defaults — the fresh-tab state the "Reset table" action returns to.
+_DEFAULT_ROW_AXIS = "channel"
+_DEFAULT_COL_AXIS = "timepoint"
+_DEFAULT_ROWS = 2
+_DEFAULT_COLS = 3
+
+
+def _refresh_dim_filter_buttons(ctx) -> None:
+    """Redraw the Channels / Time / FOV filter button labels from state.
+
+    The Time/FOV filter pickers register an optional ``active_*_refresh`` hook on
+    the runtime (see ``_make_filter_picker``); the Channels dropdown label is owned
+    by the controller (``_update_channel_btn_text``). All calls are guarded so this
+    is a no-op headless / before the tab is built."""
+    for attr in ("active_timepoints_refresh", "active_fovs_refresh"):
+        fn = getattr(ctx.runtime.image_table, attr, None)
+        if callable(fn):
+            fn()
+    upd = getattr(_ctrl(), "_update_channel_btn_text", None)
+    if callable(upd):
+        upd(ctx)
+
+
+def image_table_reset_layout(ctx) -> None:
+    """Reset the Build Layout generator to defaults ("Reset table").
+
+    Empties the selector grid and restores the fresh-tab state: Channels ×
+    Timepoints axes, a 2×3 grid, no grouping, and every dimension selection +
+    nesting cleared (wells / channels / timepoints / fovs, ``row_dims`` /
+    ``col_dims``). The rendered images below are left untouched — ``Clear images``
+    (``image_table_clear_render``) is the separate action for those."""
+    st = ctx.state.image_table
+    st.row_dims = []
+    st.col_dims = []
+    st.row_axis = _DEFAULT_ROW_AXIS
+    st.col_axis = _DEFAULT_COL_AXIS
+    st.rows = _DEFAULT_ROWS
+    st.cols = _DEFAULT_COLS
+    st.group_size = 0
+    st.group_row_span = 0
+    st.active_wells = set()
+    st.active_channels = set()
+    st.active_timepoints = set()
+    st.active_fovs = set()
+
+    rt = ctx.runtime.image_table
+    rt.row_axis = _DEFAULT_ROW_AXIS
+    rt.col_axis = _DEFAULT_COL_AXIS
+    for attr, val in (("rows_spin", _DEFAULT_ROWS), ("cols_spin", _DEFAULT_COLS),
+                      ("group_spin", 0)):
+        spin = getattr(rt, attr, None)
+        if spin is not None:
+            spin.blockSignals(True)
+            spin.setValue(val)
+            spin.blockSignals(False)
+
+    _refresh_dims_pickers(ctx)
+    _refresh_dim_filter_buttons(ctx)
+    C = _ctrl()
+    C.image_table_refresh_picker(ctx)
+    C.image_table_rebuild_grid(ctx)
+    ctx.set_status("Image Table: layout reset to defaults. Choose axes and Build.")
+
+
+def image_table_clear_render(ctx) -> None:
+    """Wipe the rendered image grid ("Clear images").
+
+    Blanks the Generate output and re-shows the empty-state placeholder, leaving
+    the selector layout and the decoded-image cache intact so a re-Generate is one
+    click away (and cheap — no zip re-read). Independent of ``Reset table``."""
+    from well_viewer.core.ui_helpers import clear_layout
+    rt = ctx.runtime.image_table
+    grid = getattr(rt, "render_grid", None)
+    if grid is not None:
+        clear_layout(grid)
+    ctx.state.image_table.last_render = {}
+    empty = getattr(rt, "empty_state", None)
+    if empty is not None:
+        empty.setVisible(True)
+    ctx.set_status("Image Table: cleared rendered images. Press Generate to re-render.")

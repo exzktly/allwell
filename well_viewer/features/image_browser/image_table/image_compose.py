@@ -31,6 +31,8 @@ LUT_COLORS: Dict[str, Optional[Tuple[float, float, float]]] = {
     "Blues":   (0.0, 0.0, 1.0),
     "Purples": (0.56, 0.0, 1.0),
     "Oranges": (1.0, 0.55, 0.0),
+    "Cyan":    (0.0, 1.0, 1.0),
+    "Magenta": (1.0, 0.0, 1.0),
 }
 
 LUT_COLOR_NAMES: List[str] = list(LUT_COLORS.keys())

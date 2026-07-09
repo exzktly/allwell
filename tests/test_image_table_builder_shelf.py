@@ -154,6 +154,23 @@ def test_channel_menu_is_parented_and_lists_render_modes(qtbot):
     assert "Boundary outline" in labels
 
 
+def test_recognised_fluorophores_get_standard_colours():
+    # Name-based standard shading, matched case-insensitively as a substring.
+    assert B._standard_cmap("GFP") == "Greens"
+    assert B._standard_cmap("eGFP") == "Greens"
+    assert B._standard_cmap("RFP") == "Reds"
+    assert B._standard_cmap("mCherry") == "Reds"
+    assert B._standard_cmap("BFP") == "Cyan"
+    assert B._standard_cmap("DAPI") == "Blues"
+    assert B._standard_cmap("NIR") == "Magenta"
+    assert B._standard_cmap("NUC+SEG") is None      # unrecognised → nearest-tint
+    # Cyan / Magenta are real, selectable LUTs that ramp black→colour.
+    from well_viewer.features.image_browser.image_table.image_compose import LUT_COLOR_NAMES
+    assert "Cyan" in LUT_COLOR_NAMES and "Magenta" in LUT_COLOR_NAMES
+    from widgets.lut_cmaps import lut_cmap
+    assert tuple(round(x) for x in lut_cmap("Magenta")(1.0)[:3]) == (1, 0, 1)
+
+
 def test_lut_box_shows_each_channel_once():
     ctx = _fake_ctx(wells=["A01"], channels=["gfp", "rfp"], timepoints=["T01"])
     spec = B.builder_spec(ctx)

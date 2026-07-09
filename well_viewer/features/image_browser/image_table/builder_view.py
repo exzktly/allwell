@@ -65,9 +65,19 @@ _RENDER_SHORT = {"corrected": "corr", "raw": "raw", "mask": "mask", "threshold":
 _DIM_SWATCH = {"well": "#6B8AFD", "timepoint": "#F59E0B", "fov": "#98A2B3"}
 _CMAP_SWATCH = {
     "Greys": "#C8CDD8", "Reds": "#F87171", "Greens": "#4ADE80", "Blues": "#6EA8FF",
-    "Purples": "#A78BFA", "Oranges": "#FB923C", "viridis": "#4ADE80",
-    "magma": "#F472B6", "inferno": "#F59E0B", "cividis": "#6EA8FF",
+    "Purples": "#A78BFA", "Oranges": "#FB923C", "Cyan": "#22D3EE", "Magenta": "#E879F9",
+    "viridis": "#4ADE80", "magma": "#F472B6", "inferno": "#F59E0B", "cividis": "#6EA8FF",
 }
+
+# Recognised fluorophores → their conventional display colour. Matched
+# case-insensitively as a substring of the channel token, so "eGFP", "GFP-A",
+# "mCherry" … all resolve; unrecognised channels fall back to the nearest-tint
+# default. Longer/more-specific tokens are listed first so they win.
+_STANDARD_CMAP = (
+    ("mcherry", "Reds"), ("hoechst", "Blues"),
+    ("gfp", "Greens"), ("rfp", "Reds"), ("yfp", "Oranges"),
+    ("bfp", "Cyan"), ("cfp", "Cyan"), ("dapi", "Blues"), ("nir", "Magenta"),
+)
 
 # Scoped stylesheet — applied to the shelf root; object-name selectors keep it
 # from leaking onto the rest of the app. Colours mirror ``theme.py`` tokens.
@@ -415,12 +425,26 @@ def _cmap_swatch(cmap: str) -> str:
     return _CMAP_SWATCH.get(cmap, "#C8CDD8")
 
 
+def _standard_cmap(name: str) -> Optional[str]:
+    """The conventional display colour for a recognised fluorophore in *name*
+    (GFP→Greens, RFP→Reds, BFP→Cyan, NIR→Magenta, DAPI→Blues, …), or None."""
+    s = str(name or "").strip().lower()
+    for token, cmap in _STANDARD_CMAP:
+        if token in s:
+            return cmap
+    return None
+
+
 def _default_colormap_for(ctx, name: str) -> str:
-    """The channel's default display colormap: the named LUT colour nearest the
-    channel's palette tint (its Cell Browser / composite identity). This is what
-    a tray chip's swatch shows *and* what the channel adopts when dragged in — so
-    the colour carries through instead of resetting to grey — and it stays fully
-    editable in the LUT box below."""
+    """The channel's default display colormap. A recognised fluorophore gets its
+    conventional colour (GFP→Greens, BFP→Cyan, NIR→Magenta, …); otherwise the
+    named LUT colour nearest the channel's palette tint. This is what a tray chip's
+    swatch shows *and* what the channel adopts when dragged in — so the colour
+    carries through instead of resetting to grey — and it stays fully editable in
+    the LUT box below."""
+    std = _standard_cmap(name)
+    if std is not None:
+        return std
     with swallow("image table builder: default colormap"):
         names = _base_channels(ctx)
         idx = names.index(name) if name in names else 0

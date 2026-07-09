@@ -14,7 +14,7 @@ split-buttons rather than a wall of flat buttons):
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 
 from well_viewer.data.crop_tool import CropTool
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary
-from widgets.icon_button import IconButton
 from well_viewer.features.image_browser.image_table.grid_layout import (
     _fov_options, _timepoint_options,
 )
@@ -53,6 +52,61 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_dims_preset
 from well_viewer.features.image_browser.image_table.build_layout import image_table_reset_layout
 from well_viewer.features.image_browser.image_table.build_layout import image_table_clear_render
+
+
+class _ReorderList(QListWidget):
+    """A single-column list whose internal-move drops commit the new order.
+
+    QListWidget's ``InternalMove`` DnD emits rows-inserted / rows-removed (not
+    ``rowsMoved``), so we hook ``dropEvent`` to fire *on_reordered* once the move
+    has landed and the final top→bottom order is readable."""
+
+    def __init__(self, parent, on_reordered) -> None:
+        super().__init__(parent)
+        self._on_reordered = on_reordered
+        self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setDefaultDropAction(Qt.MoveAction)
+        self.setSelectionMode(QAbstractItemView.SingleSelection)
+
+    def dropEvent(self, e) -> None:  # noqa: N802 (Qt override)
+        super().dropEvent(e)
+        self._on_reordered()
+
+
+class _DropdownPanel(QFrame):
+    """A frameless dropdown panel that dismisses when it loses activation.
+
+    Unlike a ``Qt.Popup`` (or a ``QMenu``) it does **not** grab the mouse, so a
+    child ``QListWidget``'s drag-reorder can actually start — a Qt.Popup's global
+    mouse grab silently blocks the drag. Dismissal is handled manually on
+    ``WindowDeactivate`` (click-away) and Esc, matching a popup's feel."""
+
+    def __init__(self, anchor: QWidget) -> None:
+        # Parent to the anchor (not its window) so it stays a QObject child of the
+        # button — the window flags still make it a top-level, and Qt uses the
+        # anchor's window as the transient parent for stacking.
+        super().__init__(anchor,
+                         Qt.Tool | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.setObjectName("Panel")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+
+    def show_under(self, anchor: QWidget) -> None:
+        self.adjustSize()
+        self.move(anchor.mapToGlobal(QPoint(0, anchor.height())))
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def event(self, e) -> bool:  # noqa: N802 (Qt override)
+        if e.type() == QEvent.WindowDeactivate:
+            self.hide()
+        return super().event(e)
+
+    def keyPressEvent(self, e) -> None:  # noqa: N802 (Qt override)
+        if e.key() == Qt.Key_Escape:
+            self.hide()
+            return
+        super().keyPressEvent(e)
 
 
 def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") -> QToolButton:
@@ -150,58 +204,48 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ar.setSpacing(6)
 
     def _make_dims_picker(which: str) -> QToolButton:
-        """Ordered multi-select picker for a row/col axis, with drag reordering.
+        """Ordered multi-select picker for a row/col axis, reordered by dragging.
 
-        Check dimensions to include them on the axis; their top-to-bottom order in
-        the popup sets the nesting (outer › inner) — reorder by dragging a row by
-        its ⋮⋮ grip, or with the ▲/▼ buttons below the list. A single checked dim is
-        the classic flat axis. State (``row_dims``/``col_dims`` + the legacy
+        Check dimensions to include them on the axis; drag a row by its ⋮⋮ grip to
+        set the nesting order (top→bottom = outer › inner). A single checked dim is
+        the classic flat axis. A dimension already on the *other* axis is shown
+        greyed-out and un-checkable here (a dim can only vary on one axis) — uncheck
+        it there to free it. State (``row_dims``/``col_dims`` + the legacy
         ``row_axis``/``col_axis`` outer-dim mirror) is the source of truth; the
         picker keeps both in sync so the flat build path and saved view-state
         round-trip unchanged.
 
-        The dropdown is a frameless ``Qt.Popup`` frame rather than a ``QMenu``: a
-        QMenu grabs the mouse, which breaks the list's internal drag-reorder. The
-        popup still dismisses on click-outside / Esc like a menu."""
+        The dropdown is a frameless ``_DropdownPanel`` (a non-grabbing top-level)
+        rather than a ``QMenu``/``Qt.Popup``: those grab the mouse, which blocks the
+        list's internal drag-reorder from ever starting."""
         st = ctx.state.image_table
         state_list = f"{which}_dims"
         axis_attr = f"{which}_axis"
         default_axis = getattr(st, axis_attr)
         head = "Rows" if which == "row" else "Columns"
+        other_head = "Columns" if which == "row" else "Rows"
 
         btn = QToolButton(axes_row)
         btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
         btn.setProperty("variant", "secondary")
         btn.setToolTip(
-            "Choose which dimensions vary on this axis, then drag (⋮⋮) or use ▲▼ "
-            "to set their nesting order (outer › inner)."
+            "Choose which dimensions vary on this axis, then drag rows by the ⋮⋮ "
+            "grip to set their nesting order (outer › inner)."
         )
 
-        popup = QFrame(btn, Qt.Popup)
-        popup.setObjectName("Panel")
+        popup = _DropdownPanel(btn)
         pl = QVBoxLayout(popup)
         pl.setContentsMargins(8, 8, 8, 8)
         pl.setSpacing(6)
-        cap = QLabel("Check to include · drag ⋮⋮ or ▲▼ to order (outer → inner)",
-                     popup)
+        cap = QLabel("Check to include · drag ⋮⋮ to order (outer → inner)", popup)
         cap.setProperty("role", "muted")
         pl.addWidget(cap)
 
-        listw = QListWidget(popup)
-        listw.setDragDropMode(QAbstractItemView.InternalMove)
-        listw.setSelectionMode(QAbstractItemView.SingleSelection)
-        listw.setFixedWidth(250)
-        pl.addWidget(listw)
-
-        mv_row = QHBoxLayout()
-        mv_row.setContentsMargins(0, 0, 0, 0)
-        mv_row.setSpacing(4)
-        up_btn = IconButton("chevron-up", popup, size=13, tooltip="Move up (outer)")
-        dn_btn = IconButton("chevron-down", popup, size=13, tooltip="Move down (inner)")
-        mv_row.addWidget(up_btn)
-        mv_row.addWidget(dn_btn)
-        mv_row.addStretch(1)
-        pl.addLayout(mv_row)
+        def _other_dims() -> set:
+            """Dimensions occupied by the *other* axis (its effective dim list)."""
+            eff = (st.effective_col_dims() if which == "row"
+                   else st.effective_row_dims())
+            return set(eff)
 
         def _current() -> list:
             dims = list(getattr(st, state_list) or [])
@@ -212,61 +256,69 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
             btn.setText(f"{head}: {names}  ▾")
 
         def _selected_order() -> list:
-            """Checked dims in the list's current top→bottom order (outer→inner)."""
+            """Checked (checkable) dims in top→bottom list order (outer→inner)."""
             out = []
             for i in range(listw.count()):
                 it = listw.item(i)
-                if it.checkState() == Qt.Checked:
+                if (it.flags() & Qt.ItemIsUserCheckable
+                        and it.checkState() == Qt.Checked):
                     out.append(it.data(Qt.UserRole))
             return out
 
         def _commit() -> None:
+            prev = list(getattr(st, state_list) or [])
             dims = _selected_order()
             setattr(st, state_list, dims)
-            new_axis = dims[0] if dims else default_axis
+            if dims:
+                new_axis = dims[0]
+            else:
+                # Nothing checked → fall back to a dim that isn't claimed by the
+                # other axis and isn't the one just unchecked (so freeing a dim to
+                # move it doesn't immediately snap back), then relax if needed.
+                other = _other_dims()
+                new_axis = (
+                    next((k for _l, k in _AXES if k not in other and k not in prev), None)
+                    or next((k for _l, k in _AXES if k not in other), default_axis)
+                )
             setattr(st, axis_attr, new_axis)
             setattr(ctx.runtime.image_table, axis_attr, new_axis)
             _refresh()
 
+        listw = _ReorderList(popup, _commit)
+        listw.setFixedWidth(260)
+        pl.addWidget(listw)
+
         def _rebuild_list() -> None:
             listw.blockSignals(True)
             listw.clear()
-            active = list(getattr(st, state_list) or [])
-            # Checked dims first, in their nesting order; unchecked dims after (in
-            # the canonical _AXES order) so ticking one appends it at the inner end.
+            active = _current()
+            blocked = _other_dims() - set(active)   # dims held by the other axis
+            # Checked dims first, in their nesting order; the rest after (canonical
+            # _AXES order) so ticking one appends it at the inner end.
             ordered = active + [k for _l, k in _AXES if k not in active]
             for key in ordered:
-                it = QListWidgetItem(f"⋮⋮    {_AXIS_LABELS.get(key, key)}")
+                label = _AXIS_LABELS.get(key, key)
+                it = QListWidgetItem()
                 it.setData(Qt.UserRole, key)
-                it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled
-                            | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
-                it.setCheckState(Qt.Checked if key in active else Qt.Unchecked)
+                if key in blocked:
+                    # Greyed + un-checkable + un-draggable: it's on the other axis.
+                    it.setText(f"      {label}   (on {other_head})")
+                    it.setFlags(Qt.ItemIsSelectable)
+                    it.setToolTip(f"Already on the {other_head} axis — uncheck it "
+                                  f"there to move it here.")
+                else:
+                    it.setText(f"⋮⋮    {label}")
+                    it.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled
+                                | Qt.ItemIsUserCheckable | Qt.ItemIsDragEnabled)
+                    it.setCheckState(Qt.Checked if key in active else Qt.Unchecked)
                 listw.addItem(it)
             listw.blockSignals(False)
 
-        def _move_selected(delta: int) -> None:
-            row = listw.currentRow()
-            if row < 0:
-                return
-            new = row + int(delta)
-            if not (0 <= new < listw.count()):
-                return
-            it = listw.takeItem(row)
-            listw.insertItem(new, it)
-            listw.setCurrentRow(new)
-            _commit()
-
-        up_btn.clicked.connect(lambda: _move_selected(-1))
-        dn_btn.clicked.connect(lambda: _move_selected(+1))
         listw.itemChanged.connect(lambda _it: _commit())
-        listw.model().rowsMoved.connect(lambda *_a: _commit())
 
         def _open_popup() -> None:
-            from PySide6.QtCore import QPoint
             _rebuild_list()
-            popup.adjustSize()
-            popup.move(btn.mapToGlobal(QPoint(0, btn.height())))
-            popup.show()
+            popup.show_under(btn)
 
         btn.clicked.connect(_open_popup)
 

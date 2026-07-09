@@ -16,6 +16,8 @@ from typing import Dict, List, Optional  # noqa: F401
 
 from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: F401
     NUC_SEG_TOKEN,
+    _binary_variant,
+    _is_binary_variant,
     _norm_token,
 )
 
@@ -57,6 +59,12 @@ def _channel_options(ctx) -> List[str]:
             chans.append(tok)
 
     options = [c.upper() for c in chans]
+
+    # Binary variants — "<CHAN> (binary)" renders that channel's ThreshFracOn
+    # threshold-binary (positive cells white). Offered right after the real
+    # channels so a nested row axis can mix e.g. NIR, GFP and GFP (binary). The
+    # render/load path decodes the token (see image_compose._binary_base).
+    options += [_binary_variant(c) for c in options]
 
     seg_tok = (ctx.state.channel.seg_channel_token or "").strip()
     if not seg_tok:
@@ -149,7 +157,12 @@ def _axis_dim_values(ctx, dim: str) -> List[str]:
     if dim == "channel":
         opts = _channel_options(ctx)
         sel = getattr(ctx.state.image_table, "active_channels", None) or set()
-        return [c for c in opts if c in sel] if sel else list(opts)
+        if sel:
+            return [c for c in opts if c in sel]
+        # Default (nothing ticked) = the real channels only. Binary variants are
+        # opt-in — they only join the axis when explicitly selected, so a plain
+        # "Channels × Time" build isn't silently doubled.
+        return [c for c in opts if not _is_binary_variant(c)]
     if dim == "well":
         sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
                      key=parse_rc)

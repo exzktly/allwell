@@ -356,21 +356,23 @@ QToolButton[hasMenu="true"]::menu-indicator {{
 /* Split buttons (MenuButtonPopup — Build table / Export): ``menu-button`` is the
    *clickable* dropdown region, not just decoration. It must span the full button
    height and the whole reserved right strip, otherwise arrow clicks land on the
-   default-action area and fire it instead of opening the menu. Give it the full
-   20px reserved width (no ``right`` inset, no height clamp). Paint the chevron as
-   a centered ``background-image`` — that draws the 10px SVG at its natural size so
-   the caret matches the instant-popup ``menu-indicator``, while ``width`` alone
-   sizes the (full-height) clickable box. Using ``image`` here would instead scale
-   the glyph up to the 20px box. */
+   default-action area and fire it instead of opening the menu. Keep it a
+   transparent, full-height 20px box — the glyph is drawn by ``menu-arrow`` below. */
 QToolButton[hasMenu="true"]::menu-button {{
     width: 20px;
     subcontrol-origin: padding;
     subcontrol-position: center right;
     border: none;
-    background-color: transparent;
-    background-image: url({_chev});
-    background-repeat: no-repeat;
-    background-position: center;
+    background: transparent;
+}}
+/* The caret glyph inside the split button's menu-button. Pin it to the same 10x10
+   chevron as the instant-popup ``menu-indicator`` — otherwise Qt paints its own
+   native down-arrow, which scales with the full-height menu-button and reads as a
+   huge caret next to the small carets on Channels / More / Crop. */
+QToolButton[hasMenu="true"]::menu-arrow {{
+    image: url({_chev});
+    width: 10px;
+    height: 10px;
 }}
 
 QPushButton#Primary {{

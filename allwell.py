@@ -576,28 +576,25 @@ class AllWellApp(QMainWindow):
             # own scrollbar so its links can scroll to anchors and its height
             # tracks the viewport exactly — no outer scroll area pinning the
             # browser to its document height (the old source of the trailing gap).
+            import re
+
             content = QWidget(drawer)
             cl = QVBoxLayout(content)
-            cl.setContentsMargins(0, 0, 0, 0)
-            cl.setSpacing(theme_v2.Spacing.md)
-            heading = QLabel("All-Well — quick help", content)
-            heading.setObjectName("Heading")
-            cl.addWidget(heading)
-            credit = QLabel(
-                "Constructed by Zak Singer, 2026",
-                content,
+            cl.setContentsMargins(theme_v2.Spacing.md, theme_v2.Spacing.md,
+                                  theme_v2.Spacing.md, theme_v2.Spacing.md)
+            cl.setSpacing(0)
+
+            # Quick help + the reference manual render into ONE self-scrolling
+            # QTextBrowser, so the whole drawer is a single scrollable pane rather
+            # than a fixed header band above a separately-scrolling document.
+            _credit_style = (
+                f"color:{theme_v2.Colors.text_muted};font-style:italic;"
+                f"font-size:{theme_v2.Typography.caption_size}px;"
             )
-            credit.setObjectName("HelpCredit")
-            credit.setStyleSheet(
-                f"color: {theme_v2.Colors.text_muted}; "
-                f"font-size: {theme_v2.Typography.caption_size}px; "
-                f"font-style: italic; padding-bottom: 4px;"
-            )
-            cl.addWidget(credit)
-            body = QLabel(content)
-            body.setWordWrap(True)
-            body.setText(
-                "<b>Typical workflow</b><br>"
+            quick_help_html = (
+                "<h1>All-Well — quick help</h1>"
+                f'<p style="{_credit_style}">Constructed by Zak Singer, 2026</p>'
+                "<p><b>Typical workflow</b><br>"
                 "1. Put every raw image in a folder called <tt>in/</tt> at "
                 "the root of the dataset directory.<br>"
                 "2. Open the <b>Analyze</b> tab, point it at that "
@@ -613,18 +610,18 @@ class AllWellApp(QMainWindow):
                 "re-derive ThreshFracOn defaults.<br>"
                 "4. Define replicate groups (Sample Definitions → Groups) "
                 "and explore the data on the plotting tabs (Line / Bar / "
-                "Scatter / Distribution / Heat Map).<br><br>"
-                "<b>Review tab</b> — explore an already-analyzed dataset: "
+                "Scatter / Distribution / Heat Map).</p>"
+                "<p><b>Review tab</b> — explore an already-analyzed dataset: "
                 "Line / Bar / Scatter / Distribution / Heat Map plots, "
-                "per-cell Segmentation review, and the rendered Image Table.<br><br>"
-                "<b>Analyze tab</b> — run the segmentation + measurement "
-                "pipeline on a fresh dataset.<br><br>"
-                "<b>Header buttons</b> — Open a results directory, toggle "
+                "per-cell Segmentation review, and the rendered Image Table.</p>"
+                "<p><b>Analyze tab</b> — run the segmentation + measurement "
+                "pipeline on a fresh dataset.</p>"
+                "<p><b>Header buttons</b> — Open a results directory, toggle "
                 "presentation mode (all plots Screen ↔ Publication), or this "
-                "help drawer.<br><br>"
-                "<b>Style panel</b> — the per-card sliders button on every "
-                "plot opens the export-style sidebar; click again to hide.<br><br>"
-                "<b>Keyboard shortcuts</b><br>"
+                "help drawer.</p>"
+                "<p><b>Style panel</b> — the per-card sliders button on every "
+                "plot opens the export-style sidebar; click again to hide.</p>"
+                "<p><b>Keyboard shortcuts</b><br>"
                 "<tt>⌘O</tt> / <tt>Ctrl+O</tt> — Open results directory<br>"
                 "<tt>⌘E</tt> / <tt>Ctrl+E</tt> — Export the active figure "
                 "(drives the visible plot card's save-figure action)<br>"
@@ -633,16 +630,13 @@ class AllWellApp(QMainWindow):
                 "<tt>⌘→</tt> / <tt>Ctrl+→</tt> — Forward to the next section "
                 "tab in history<br>"
                 "<tt>⌘/</tt> / <tt>Ctrl+/</tt> — Toggle this help drawer<br>"
-                "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window"
+                "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window</p>"
             )
-            cl.addWidget(body)
 
-            # README section — rendered from the bundled Markdown file so
-            # the full reference manual is reachable without leaving the
-            # app. In the source tree the file lives under _Docs/Markdowns/;
-            # PyInstaller bundles it to Markdowns/ at the app root — try
-            # both. Missing files fail silently (e.g. trimmed-down builds
-            # that ship without the Markdowns/ folder).
+            # README manual — rendered from the bundled Markdown file so the full
+            # reference is reachable without leaving the app. Source tree keeps it
+            # under _Docs/Markdowns/; PyInstaller bundles it to Markdowns/ at the
+            # app root — try both. Missing file → quick help only (trimmed builds).
             base = Path(__file__).resolve().parent
             readme_text = ""
             readme_path = base / "Markdowns" / "README_WellViewer.md"
@@ -654,58 +648,49 @@ class AllWellApp(QMainWindow):
                     break
                 except OSError:
                     continue
+
+            manual_view = QTextBrowser(content)
             if readme_text:
-                rule = QFrame(content)
-                rule.setFrameShape(QFrame.HLine)
-                rule.setObjectName("Separator")
-                rule.setFixedHeight(1)
-                cl.addWidget(rule)
-
-                manual_heading = QLabel("Reference manual", content)
-                manual_heading.setObjectName("Heading")
-                cl.addWidget(manual_heading)
-
-                manual_view = QTextBrowser(content)
                 manual_view.setSearchPaths([str(readme_path.parent)])
                 # Render markdown -> HTML with injected heading anchors so the
-                # README's table-of-contents / cross-reference links resolve
-                # (setMarkdown alone keeps the #slug targets but emits no
-                # anchors, so the links go nowhere).
-                manual_view.setHtml(_render_manual_html(readme_text))
-                manual_view.setStyleSheet(
-                    f"QTextBrowser {{ background: transparent; border: none; "
-                    f"color: {theme_v2.Colors.text_primary}; }}"
-                )
-                # The manual owns its scrolling and fills the drawer (stretch=1),
-                # so anchor links can actually scroll and there's no pinned-height
-                # trailing gap.
-                manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-                manual_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-                manual_view.setFrameShape(QFrame.NoFrame)
-
-                # Route links ourselves: external URLs open in the system browser,
-                # in-document ``#slug`` anchors scroll the manual. (QTextBrowser's
-                # default openLinks would try to setSource() to relative targets
-                # and either fail or blank the document.)
-                manual_view.setOpenLinks(False)
-
-                def _help_anchor_clicked(url, _mv=manual_view) -> None:
-                    from PySide6.QtGui import QDesktopServices
-                    frag = url.fragment()
-                    if url.scheme() in ("http", "https", "mailto"):
-                        QDesktopServices.openUrl(url)
-                    elif frag or url.toString().startswith("#"):
-                        _mv.scrollToAnchor(frag or url.toString().lstrip("#"))
-                    # relative file links (e.g. ARCHITECTURE.md) aren't bundled —
-                    # ignore rather than blank the manual.
-
-                manual_view.anchorClicked.connect(_help_anchor_clicked)
-                cl.addWidget(manual_view, 1)
-                self._help_manual_view = manual_view
+                # README's TOC / cross-reference #slug links resolve, then splice
+                # the quick help + a rule in at the top of the same document.
+                manual_html = _render_manual_html(readme_text)
+                prefix = quick_help_html + "<hr/>"
+                combined, n = re.subn(r"(<body[^>]*>)", lambda m: m.group(1) + prefix,
+                                      manual_html, count=1)
+                manual_view.setHtml(combined if n else prefix + manual_html)
             else:
-                # No manual (trimmed build) — absorb slack so the quick-help
-                # doesn't stretch into a blank band.
-                cl.addStretch(1)
+                manual_view.setHtml(quick_help_html)
+            manual_view.setStyleSheet(
+                f"QTextBrowser {{ background: transparent; border: none; "
+                f"color: {theme_v2.Colors.text_primary}; }}"
+            )
+            # One browser owns the scrolling and fills the drawer (stretch=1), so
+            # anchor links scroll and there's no pinned-height trailing gap.
+            manual_view.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            manual_view.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            manual_view.setFrameShape(QFrame.NoFrame)
+
+            # Route links ourselves: external URLs open in the system browser,
+            # in-document ``#slug`` anchors scroll the manual. (QTextBrowser's
+            # default openLinks would try to setSource() to relative targets and
+            # either fail or blank the document.)
+            manual_view.setOpenLinks(False)
+
+            def _help_anchor_clicked(url, _mv=manual_view) -> None:
+                from PySide6.QtGui import QDesktopServices
+                frag = url.fragment()
+                if url.scheme() in ("http", "https", "mailto"):
+                    QDesktopServices.openUrl(url)
+                elif frag or url.toString().startswith("#"):
+                    _mv.scrollToAnchor(frag or url.toString().lstrip("#"))
+                # relative file links (e.g. ARCHITECTURE.md) aren't bundled —
+                # ignore rather than blank the manual.
+
+            manual_view.anchorClicked.connect(_help_anchor_clicked)
+            cl.addWidget(manual_view, 1)
+            self._help_manual_view = manual_view
 
             drawer.setContentWidget(content)
             self._help_drawer = drawer

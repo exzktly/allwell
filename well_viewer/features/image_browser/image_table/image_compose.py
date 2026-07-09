@@ -59,6 +59,33 @@ def _tint_from_colormap(name: str) -> Optional[Tuple[float, float, float]]:
 
 NUC_SEG_TOKEN = "NUC+SEG"
 
+# A "binary" channel variant — e.g. ``"GFP (binary)"`` — is a virtual channel that
+# renders its base channel as the ThreshFracOn threshold-binary (positive cells
+# white). It flows through the axis picker / product / per-cell combo like any
+# channel token; the two leaf helpers that turn a token into pixels
+# (``_load_array`` for the image, ``cell_display_rgb`` for the render) decode it:
+# load the *base* channel, force ``binary_mode="threshold"``.
+_BINARY_SUFFIX = " (binary)"
+
+
+def _binary_variant(chan: str) -> str:
+    """The binary-variant token for a base channel (``"GFP"`` → ``"GFP (binary)"``)."""
+    return f"{chan}{_BINARY_SUFFIX}"
+
+
+def _is_binary_variant(chan: str) -> bool:
+    s = str(chan or "").strip().lower()
+    return s.endswith(_BINARY_SUFFIX.lower()) and len(s) > len(_BINARY_SUFFIX)
+
+
+def _binary_base(chan: str) -> str:
+    """Strip a trailing ``" (binary)"`` (case-insensitive) → the base channel token."""
+    s = str(chan or "").strip()
+    if _is_binary_variant(s):
+        return s[: len(s) - len(_BINARY_SUFFIX)].strip()
+    return s
+
+
 def _is_nuc_seg(chan: str) -> bool:
     return str(chan or "").strip().upper() == NUC_SEG_TOKEN
 
@@ -521,7 +548,9 @@ def _load_array(ctx, cache: Dict, well: str, chan_upper: str, tp: str, fov: str,
     dropdown is empty), match the first available FOV for the requested
     timepoint so single-FOV datasets still render.
     """
-    chan_lower = chan_upper.strip().lower()
+    # A "GFP (binary)" token loads the same pixels as "GFP" — the binary render is
+    # applied downstream (cell_display_rgb); here we just resolve the base channel.
+    chan_lower = _binary_base(chan_upper).strip().lower()
     fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=use_tophat)
     # When tophat is requested but not produced for this well/channel, drop
     # back to raw rather than rendering "(no image)".
@@ -754,6 +783,11 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
     fov = cell["fov_cb"].currentText().strip()
 
     _use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
+    # A "GFP (binary)" cell renders the base channel's threshold-binary regardless
+    # of the row's Binary box: resolve the real channel + force threshold mode.
+    if _is_binary_variant(chan):
+        chan = _binary_base(chan)
+        binary_mode = "threshold"
     cropped = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
     lo, hi = _parse_lut(ctx, r)
 

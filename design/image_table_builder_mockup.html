@@ -1,0 +1,588 @@
+<title>All-Well · Table Builder</title>
+<style>
+  :root {
+    --bg: #0e0f14;
+    --panel: #16181f;
+    --panel-2: #1c1f28;
+    --edge: #2a2e3a;
+    --edge-soft: #23262f;
+    --ink: #e8eaf0;
+    --ink-dim: #9aa0b0;
+    --ink-faint: #6b7180;
+    --accent: #6366f1;
+    --accent-soft: rgba(99,102,241,0.14);
+    --accent-line: rgba(99,102,241,0.42);
+    --accent-ink: #b3b7ff;
+    --good: #34d399;
+    --warn: #fbbf24;
+    --dapi: #6ea8ff;
+    --gfp: #4ade80;
+    --rfp: #f472b6;
+    --radius: 9px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #eef0f5; --panel: #ffffff; --panel-2: #f4f5f9; --edge: #d6d9e3;
+      --edge-soft: #e4e6ee; --ink: #1a1d27; --ink-dim: #5a6070; --ink-faint: #8a90a0;
+      --accent-soft: rgba(99,102,241,0.12); --accent-line: rgba(99,102,241,0.4);
+      --accent-ink: #4f46e5;
+      --dapi:#3b82f6; --gfp:#16a34a; --rfp:#db2777;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#0e0f14; --panel:#16181f; --panel-2:#1c1f28; --edge:#2a2e3a; --edge-soft:#23262f;
+    --ink:#e8eaf0; --ink-dim:#9aa0b0; --ink-faint:#6b7180; --accent-soft:rgba(99,102,241,0.14);
+    --accent-line:rgba(99,102,241,0.42); --accent-ink:#b3b7ff;
+    --dapi:#6ea8ff; --gfp:#4ade80; --rfp:#f472b6;
+  }
+  :root[data-theme="light"] {
+    --bg:#eef0f5; --panel:#ffffff; --panel-2:#f4f5f9; --edge:#d6d9e3; --edge-soft:#e4e6ee;
+    --ink:#1a1d27; --ink-dim:#5a6070; --ink-faint:#8a90a0; --accent-soft:rgba(99,102,241,0.12);
+    --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5;
+    --dapi:#3b82f6; --gfp:#16a34a; --rfp:#db2777;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 26px 22px 60px; }
+
+  /* header */
+  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .logo {
+    width: 30px; height: 30px; border-radius: 8px; flex: none;
+    background: linear-gradient(140deg, var(--accent), #8b8ef7);
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 6px;
+  }
+  .logo span { background: rgba(255,255,255,0.85); border-radius: 1px; }
+  .logo span:nth-child(2){ background: rgba(255,255,255,0.5);}
+  .logo span:nth-child(3){ background: rgba(255,255,255,0.5);}
+  h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; font-weight: 640; }
+  .sub { color: var(--ink-dim); font-size: 12.5px; margin-top: 1px; }
+  .eyebrow {
+    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent-ink); font-weight: 600;
+  }
+  .theme-btn {
+    font: inherit; font-size: 12px; color: var(--ink-dim); background: var(--panel);
+    border: 1px solid var(--edge); border-radius: 7px; padding: 6px 11px; cursor: pointer;
+  }
+  .theme-btn:hover { color: var(--ink); border-color: var(--accent-line); }
+
+  .lede {
+    margin: 18px 0 22px; max-width: 68ch; color: var(--ink-dim); font-size: 13.5px;
+  }
+  .lede b { color: var(--ink); font-weight: 600; }
+
+  /* builder shell */
+  .builder {
+    background: var(--panel); border: 1px solid var(--edge); border-radius: 14px;
+    overflow: hidden; box-shadow: 0 18px 44px -30px rgba(0,0,0,0.7);
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 12px 16px; border-bottom: 1px solid var(--edge-soft); background: var(--panel-2);
+  }
+  .toolbar .tag {
+    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
+    font-weight: 600; margin-right: 2px;
+  }
+  .shape {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-dim);
+    display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  }
+  .shape b { color: var(--accent-ink); font-weight: 600; }
+  .shape .arrow { color: var(--ink-faint); }
+  .toolbar .spacer { flex: 1; }
+  .wrapctl { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-dim); }
+  .wrapctl input {
+    width: 46px; font: inherit; font-family: var(--mono); text-align: center;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: 3px 4px;
+  }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--good);
+    background: color-mix(in srgb, var(--good) 14%, transparent); border: 1px solid color-mix(in srgb, var(--good) 34%, transparent);
+    padding: 4px 9px; border-radius: 999px; font-weight: 600;
+  }
+  .live-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
+  @media (prefers-reduced-motion: reduce){ .live-pill .dot{ animation:none; } }
+
+  .stage { display: grid; grid-template-columns: 210px 1fr; }
+  @media (max-width: 760px){ .stage { grid-template-columns: 1fr; } }
+
+  /* palette */
+  .palette { border-right: 1px solid var(--edge-soft); padding: 14px; background: var(--panel); }
+  @media (max-width: 760px){ .palette { border-right: none; border-bottom: 1px solid var(--edge-soft); } }
+  .palette h2, .zones h2 {
+    font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 10px; font-weight: 640;
+  }
+  .palette .hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 12px; line-height: 1.45; }
+
+  /* chips */
+  .chip {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 8px 10px; margin-bottom: 8px; cursor: grab; user-select: none;
+    transition: border-color .12s, transform .06s, box-shadow .12s;
+  }
+  .chip:active { cursor: grabbing; }
+  .chip:hover { border-color: var(--accent-line); }
+  .chip.dragging { opacity: 0.4; }
+  .chip .grip { color: var(--ink-faint); font-size: 13px; letter-spacing: -2px; margin-right: -2px; }
+  .chip .name { font-weight: 600; font-size: 13px; }
+  .chip .count {
+    margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+    background: var(--bg); border: 1px solid var(--edge-soft); border-radius: 999px; padding: 1px 7px;
+  }
+  .chip .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .chip[data-dim="well"] .swatch { background: var(--accent); }
+  .chip[data-dim="channel"] .swatch { background: linear-gradient(90deg, var(--dapi), var(--gfp), var(--rfp)); }
+  .chip[data-dim="timepoint"] .swatch { background: var(--warn); }
+  .chip[data-dim="fov"] .swatch { background: var(--ink-dim); }
+  .chip.filtered .count { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+
+  /* zones */
+  .zones { padding: 14px 16px 16px; }
+  .zone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 560px){ .zone-grid { grid-template-columns: 1fr; } }
+  .zone {
+    border: 1.5px dashed var(--edge); border-radius: var(--radius); padding: 10px 11px 11px;
+    min-height: 74px; background: var(--panel-2); transition: border-color .12s, background .12s;
+  }
+  .zone.over { border-color: var(--accent); background: var(--accent-soft); }
+  .zone .zhead { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .zone .zname { font-size: 12px; font-weight: 650; letter-spacing: .01em; }
+  .zone .zrole { font-size: 10.5px; color: var(--ink-faint); }
+  .zone .icon { width: 15px; height: 15px; flex: none; color: var(--accent-ink); }
+  .zone .slot { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; min-height: 30px; }
+  .zone .empty { font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; background: var(--panel);
+    border: 1px solid var(--edge); border-radius: 7px; padding: 5px 8px; cursor: grab;
+    font-size: 12px; user-select: none; transition: border-color .12s;
+  }
+  .pill:hover { border-color: var(--accent-line); }
+  .pill.dragging { opacity: 0.4; }
+  .pill .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+  .pill[data-dim="well"] .swatch { background: var(--accent); }
+  .pill[data-dim="channel"] .swatch { background: linear-gradient(90deg,var(--dapi),var(--gfp),var(--rfp)); }
+  .pill[data-dim="timepoint"] .swatch { background: var(--warn); }
+  .pill[data-dim="fov"] .swatch { background: var(--ink-dim); }
+  .pill .hold-val {
+    font-family: var(--mono); font-size: 11px; color: var(--accent-ink);
+    background: var(--accent-soft); border-radius: 5px; padding: 0 5px; margin-left: 1px;
+  }
+  .pill select {
+    font: inherit; font-family: var(--mono); font-size: 11px; color: var(--accent-ink);
+    background: transparent; border: none; cursor: pointer; padding: 0 2px; margin-left: 1px;
+  }
+  .pill .nest-i { font-family: var(--mono); font-size: 9.5px; color: var(--ink-faint); }
+
+  /* filter popover */
+  .pop {
+    position: absolute; z-index: 30; background: var(--panel); border: 1px solid var(--edge);
+    border-radius: 9px; padding: 9px; box-shadow: 0 14px 34px -18px rgba(0,0,0,0.7); min-width: 150px;
+  }
+  .pop h3 { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 7px; }
+  .pop label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 2px; cursor: pointer; font-family: var(--mono); }
+  .pop input { accent-color: var(--accent); }
+
+  /* render grid */
+  .render { padding: 4px 16px 18px; }
+  .render-head { display: flex; align-items: baseline; gap: 10px; margin: 14px 2px 12px; }
+  .render-head .rlbl { font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-faint); font-weight: 640; }
+  .render-head .rcount { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); }
+  .band + .band { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--edge-soft); }
+  .band-label { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-bottom: 8px; }
+  .tablewrap { overflow-x: auto; }
+  table.grid { border-collapse: separate; border-spacing: 4px; }
+  table.grid th {
+    font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--ink-dim);
+    padding: 2px 6px; text-align: center; white-space: nowrap;
+  }
+  table.grid th.corner { color: var(--ink-faint); text-align: right; }
+  table.grid td.rowhead {
+    font-family: var(--mono); font-size: 11px; color: var(--ink-dim); text-align: right;
+    padding-right: 8px; white-space: nowrap; vertical-align: middle;
+  }
+  .cell {
+    width: 92px; height: 92px; border-radius: 6px; position: relative; overflow: hidden;
+    border: 1px solid var(--edge-soft); background: #05060a;
+  }
+  .cell canvas { width: 100%; height: 100%; display: block; }
+  .cell .coord {
+    position: absolute; left: 0; right: 0; bottom: 0; font-family: var(--mono); font-size: 9.5px;
+    color: #dfe2ee; background: linear-gradient(0deg, rgba(0,0,0,0.72), transparent);
+    padding: 8px 5px 3px; letter-spacing: .01em; line-height: 1.25;
+  }
+  .cell .coord .c-chan { color: #fff; font-weight: 600; }
+  .cell.merged { border-color: var(--accent-line); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+
+  footer { margin-top: 26px; color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
+  footer .note { max-width: 74ch; }
+  footer code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--edge-soft); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+  .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="logo"><span></span><span></span><span></span><span></span></div>
+      <div>
+        <div class="eyebrow">Design proposal · Image Browser</div>
+        <h1>Table Builder</h1>
+        <div class="sub">Give each dimension a role — the table renders itself.</div>
+      </div>
+    </div>
+    <button class="theme-btn" id="themeBtn" type="button">◐ Theme</button>
+  </header>
+
+  <p class="lede">
+    Replaces the build-then-generate grid of dropdowns. Your data varies across four dimensions —
+    <b>Well</b>, <b>Channel</b>, <b>Timepoint</b>, <b>FOV</b>. Drag each one into a role: stack it down the
+    <b>Rows</b>, spread it across the <b>Columns</b>, <b>Hold</b> it at one value, or <b>Merge</b> channels into a
+    single composite. Drop two into a zone to nest them. The image grid re-lays-out live — no separate Build step.
+  </p>
+
+  <div class="builder">
+    <div class="toolbar">
+      <span class="tag">Shape</span>
+      <div class="shape" id="shape"></div>
+      <span class="spacer"></span>
+      <label class="wrapctl" title="Wrap a long Columns axis into stacked bands (0 = off).">
+        Wrap cols <input type="number" id="wrap" min="0" max="8" value="0" />
+      </label>
+      <span class="live-pill"><span class="dot"></span>Live</span>
+    </div>
+
+    <div class="stage">
+      <aside class="palette">
+        <h2>Dimensions</h2>
+        <div id="palette"></div>
+        <p class="hint">Drag a chip into a role. Click it to filter which values appear.</p>
+      </aside>
+
+      <section class="zones">
+        <h2>Roles</h2>
+        <div class="zone-grid">
+          <div class="zone" data-zone="rows">
+            <div class="zhead">
+              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="3.2" rx="1"/><rect x="2" y="6.4" width="12" height="3.2" rx="1"/><rect x="2" y="10.3" width="12" height="3.2" rx="1"/></svg>
+              <span class="zname">Rows</span><span class="zrole">facet ↓ · nest outer→inner</span>
+            </div>
+            <div class="slot" id="slot-rows"></div>
+          </div>
+          <div class="zone" data-zone="cols">
+            <div class="zhead">
+              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2" width="3.2" height="12" rx="1"/><rect x="6.4" y="2" width="3.2" height="12" rx="1"/><rect x="10.3" y="2" width="3.2" height="12" rx="1"/></svg>
+              <span class="zname">Columns</span><span class="zrole">facet → · wrap into bands</span>
+            </div>
+            <div class="slot" id="slot-cols"></div>
+          </div>
+          <div class="zone" data-zone="hold">
+            <div class="zhead">
+              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>
+              <span class="zname">Hold</span><span class="zrole">pin at one value</span>
+            </div>
+            <div class="slot" id="slot-hold"></div>
+          </div>
+          <div class="zone" data-zone="merge">
+            <div class="zhead">
+              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="8" r="4"/><circle cx="10" cy="8" r="4"/></svg>
+              <span class="zname">Merge</span><span class="zrole">channels → one composite cell</span>
+            </div>
+            <div class="slot" id="slot-merge"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="render">
+      <div class="render-head">
+        <span class="rlbl">Image Table</span>
+        <span class="rcount" id="rcount"></span>
+      </div>
+      <div id="render"></div>
+    </div>
+  </div>
+
+  <footer>
+    <p class="note">
+      Interactive mockup — synthetic thumbnails. This is the <b>control surface</b> only; underneath, the shelf writes
+      the same <code>row_dims</code> / <code>col_dims</code> / <code>group_size</code> / <code>active_*</code> state the
+      current layout math and render pipeline already consume, so <code>image_table_generate</code>, the compose/LUT/export
+      layers, and view-state persistence are reused. Full write-up:
+      <code>_Docs/Markdowns/IMAGE_TABLE_BUILDER_DESIGN.md</code>.
+    </p>
+    <div class="legend">
+      <span><i style="background:var(--dapi)"></i>DAPI</span>
+      <span><i style="background:var(--gfp)"></i>GFP</span>
+      <span><i style="background:var(--rfp)"></i>RFP</span>
+      <span><i style="background:var(--accent)"></i>Well</span>
+      <span><i style="background:var(--warn)"></i>Timepoint</span>
+      <span><i style="background:var(--ink-dim)"></i>FOV</span>
+    </div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ── domain: four dimensions + their values ───────────────────────────────
+  const DIMS = {
+    well:      { label: "Well",      values: ["A1","A2","B1"] },
+    channel:   { label: "Channel",   values: ["DAPI","GFP","RFP"] },
+    timepoint: { label: "Timepoint", values: ["T01","T04","T08","T12"] },
+    fov:       { label: "FOV",       values: ["1","2"] },
+  };
+  const CHAN_HUE = { DAPI: [110,168,255], GFP: [74,222,128], RFP: [244,114,182] };
+
+  // assignment: which dims are in which zone (ordered), + per-dim filter + held value
+  const state = {
+    rows:  ["channel"],
+    cols:  ["timepoint"],
+    hold:  ["well","fov"],
+    merge: [],
+    filter: { well:new Set(DIMS.well.values), channel:new Set(DIMS.channel.values),
+              timepoint:new Set(DIMS.timepoint.values), fov:new Set(DIMS.fov.values) },
+    held:  { well:"A1", channel:"DAPI", timepoint:"T01", fov:"1" },
+    wrap:  0,
+  };
+
+  const $ = (s,r=document)=>r.querySelector(s);
+  const enabledVals = (dim)=> DIMS[dim].values.filter(v=>state.filter[dim].has(v));
+
+  // ── seeded synthetic microscopy thumbnail ────────────────────────────────
+  function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+  function rng(seed){ let x=seed||1; return ()=>{ x^=x<<13; x^=x>>>17; x^=x<<5; return ((x>>>0)/4294967296); }; }
+
+  function drawThumb(canvas, chans, key){
+    const S = 92; canvas.width=S; canvas.height=S;
+    const g = canvas.getContext("2d");
+    g.fillStyle = "#05060a"; g.fillRect(0,0,S,S);
+    const img = g.createImageData(S,S);
+    // accumulate additive blobs per channel
+    const blobs = [];
+    chans.forEach((ch,ci)=>{
+      const r = rng(hashStr(key+"|"+ch));
+      const n = 5 + Math.floor(r()*5);
+      for(let i=0;i<n;i++){
+        blobs.push({ x:r()*S, y:r()*S, rad:6+r()*13, amp:0.55+r()*0.5, hue:CHAN_HUE[ch]||[200,200,210] });
+      }
+    });
+    for(let y=0;y<S;y++) for(let x=0;x<S;x++){
+      let rr=6,gg=8,bb=12;
+      for(const b of blobs){
+        const dx=x-b.x, dy=y-b.y; const d2=dx*dx+dy*dy;
+        const v = b.amp*255*Math.exp(-d2/(2*b.rad*b.rad));
+        rr += v*b.hue[0]/255; gg += v*b.hue[1]/255; bb += v*b.hue[2]/255;
+      }
+      const idx=(y*S+x)*4;
+      img.data[idx]=Math.min(255,rr); img.data[idx+1]=Math.min(255,gg);
+      img.data[idx+2]=Math.min(255,bb); img.data[idx+3]=255;
+    }
+    g.putImageData(img,0,0);
+  }
+
+  // ── product helpers ──────────────────────────────────────────────────────
+  function product(dims){
+    // returns array of combos; each combo is {dim:val,...}. empty dims -> [{}]
+    let out=[{}];
+    for(const d of dims){
+      const vals=enabledVals(d); const next=[];
+      for(const combo of out) for(const v of vals){ const c=Object.assign({},combo); c[d]=v; next.push(c); }
+      out = next.length?next:out;
+      if(!vals.length) out=[{}];
+    }
+    return out;
+  }
+  const comboLabel = (combo, dims)=> dims.map(d=>combo[d]).filter(Boolean).join(" · ");
+
+  // resolve a cell's full coordinate given row+col combos
+  function coordFor(rowCombo, colCombo){
+    const c = { well:state.held.well, channel:state.held.channel, timepoint:state.held.timepoint, fov:state.held.fov };
+    for(const d of state.hold) c[d]=state.held[d];
+    Object.assign(c, rowCombo, colCombo);
+    return c;
+  }
+
+  // ── render the image grid ────────────────────────────────────────────────
+  function renderGrid(){
+    const host = $("#render"); host.innerHTML="";
+    const rowDims=state.rows, colDims=state.cols;
+    const rowCombos=product(rowDims), colCombosAll=product(colDims);
+    const mergeChans = state.merge.includes("channel") ? enabledVals("channel") : null;
+
+    // wrap columns into bands
+    const wrap = state.wrap|0;
+    let bands;
+    if(wrap>0 && colCombosAll.length>wrap){
+      bands=[]; for(let i=0;i<colCombosAll.length;i+=wrap) bands.push(colCombosAll.slice(i,i+wrap));
+    } else bands=[colCombosAll];
+
+    let total=0;
+    bands.forEach((colCombos,bi)=>{
+      const band=document.createElement("div"); band.className="band";
+      if(bands.length>1){
+        const bl=document.createElement("div"); bl.className="band-label";
+        bl.textContent="Band "+(bi+1)+" — "+colDims.map(d=>DIMS[d].label).join(" · ")+" "+(bi*wrap+1)+"–"+(bi*wrap+colCombos.length);
+        band.appendChild(bl);
+      }
+      const tw=document.createElement("div"); tw.className="tablewrap";
+      const tbl=document.createElement("table"); tbl.className="grid";
+
+      // header row (column labels)
+      const thead=document.createElement("thead"); const htr=document.createElement("tr");
+      const corner=document.createElement("th"); corner.className="corner";
+      corner.textContent = rowDims.length? rowDims.map(d=>DIMS[d].label).join("·")+" ↓" : "";
+      htr.appendChild(corner);
+      colCombos.forEach(cc=>{ const th=document.createElement("th"); th.textContent=comboLabel(cc,colDims)||"—"; htr.appendChild(th); });
+      thead.appendChild(htr); tbl.appendChild(thead);
+
+      const tbody=document.createElement("tbody");
+      rowCombos.forEach(rc=>{
+        const tr=document.createElement("tr");
+        const rh=document.createElement("td"); rh.className="rowhead"; rh.textContent=comboLabel(rc,rowDims)||"—"; tr.appendChild(rh);
+        colCombos.forEach(cc=>{
+          const td=document.createElement("td");
+          const coord=coordFor(rc,cc);
+          const chans = mergeChans ? mergeChans : [coord.channel];
+          const cell=document.createElement("div"); cell.className="cell"+(mergeChans?" merged":"");
+          const cv=document.createElement("canvas"); cell.appendChild(cv);
+          const key=[coord.well,coord.timepoint,coord.fov].join("|");
+          drawThumb(cv, chans, key);
+          const lab=document.createElement("div"); lab.className="coord";
+          lab.innerHTML = '<span class="c-chan">'+(mergeChans?mergeChans.join("+"):coord.channel)+'</span> '
+                        + coord.well+' · '+coord.timepoint+' · f'+coord.fov;
+          cell.appendChild(lab);
+          td.appendChild(cell); tr.appendChild(td); total++;
+        });
+        tbody.appendChild(tr);
+      });
+      tbl.appendChild(tbody); tw.appendChild(tbl); band.appendChild(tw); band.dataset.b=bi;
+      host.appendChild(band);
+    });
+    $("#rcount").textContent = total+" cell"+(total===1?"":"s")
+      + (bands.length>1? " · "+bands.length+" bands":"");
+  }
+
+  // ── shape summary line ───────────────────────────────────────────────────
+  function renderShape(){
+    const parts=[];
+    if(state.rows.length) parts.push('<b>'+state.rows.map(d=>DIMS[d].label).join(" › ")+'</b> <span class="arrow">↓ rows</span>');
+    if(state.cols.length) parts.push('<b>'+state.cols.map(d=>DIMS[d].label).join(" › ")+'</b> <span class="arrow">→ cols</span>');
+    if(state.merge.length) parts.push('<b>'+state.merge.map(d=>DIMS[d].label).join("+")+'</b> <span class="arrow">merged</span>');
+    if(state.hold.length) parts.push('<span class="arrow">hold</span> '+state.hold.map(d=>DIMS[d].label+"="+state.held[d]).join(", "));
+    $("#shape").innerHTML = parts.join('<span class="arrow">·</span> ') || '<span class="arrow">empty — drag a dimension into a role</span>';
+  }
+
+  // ── build the pills inside each zone + palette ───────────────────────────
+  function zoneOf(dim){ for(const z of ["rows","cols","hold","merge"]) if(state[z].includes(dim)) return z; return null; }
+
+  function makePill(dim, zone, idx){
+    const p=document.createElement("div"); p.className="pill"; p.dataset.dim=dim; p.draggable=true;
+    p.innerHTML='<span class="swatch"></span><span>'+DIMS[dim].label+'</span>';
+    if((zone==="rows"||zone==="cols") && state[zone].length>1){
+      const ni=document.createElement("span"); ni.className="nest-i"; ni.textContent=idx===0?"outer":"inner"; p.appendChild(ni);
+    }
+    if(zone==="hold"){
+      const sel=document.createElement("select");
+      DIMS[dim].values.forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; if(v===state.held[dim])o.selected=true; sel.appendChild(o); });
+      sel.addEventListener("change",()=>{ state.held[dim]=sel.value; renderShape(); renderGrid(); });
+      sel.addEventListener("mousedown",e=>e.stopPropagation());
+      p.appendChild(sel); p.draggable=true;
+    }
+    p.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/dim",dim); p.classList.add("dragging"); });
+    p.addEventListener("dragend",()=>p.classList.remove("dragging"));
+    return p;
+  }
+
+  function makePaletteChip(dim){
+    const filtered = state.filter[dim].size < DIMS[dim].values.length;
+    const c=document.createElement("div"); c.className="chip"+(filtered?" filtered":""); c.dataset.dim=dim; c.draggable=true;
+    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch"></span><span class="name">'+DIMS[dim].label
+      +'</span><span class="count">'+state.filter[dim].size+"/"+DIMS[dim].values.length+'</span>';
+    c.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/dim",dim); c.classList.add("dragging"); });
+    c.addEventListener("dragend",()=>c.classList.remove("dragging"));
+    c.addEventListener("click",e=>openFilter(dim, c, e));
+    return c;
+  }
+
+  function refresh(){
+    // palette shows every dim (source of truth for filtering); zones show placement
+    const pal=$("#palette"); pal.innerHTML="";
+    Object.keys(DIMS).forEach(d=>pal.appendChild(makePaletteChip(d)));
+    ["rows","cols","hold","merge"].forEach(z=>{
+      const slot=$("#slot-"+z); slot.innerHTML="";
+      if(!state[z].length){ const e=document.createElement("span"); e.className="empty";
+        e.textContent = z==="merge"?"drop Channel to composite":"drop a dimension"; slot.appendChild(e); }
+      state[z].forEach((d,i)=>slot.appendChild(makePill(d,z,i)));
+    });
+    renderShape(); renderGrid();
+  }
+
+  // ── drag/drop onto zones ─────────────────────────────────────────────────
+  function moveDim(dim, targetZone){
+    if(targetZone==="merge" && dim!=="channel") return; // Merge only accepts Channel
+    for(const z of ["rows","cols","hold","merge"]){ const k=state[z].indexOf(dim); if(k>=0) state[z].splice(k,1); }
+    // every unplaced dim must live somewhere; when leaving a zone it just moves.
+    state[targetZone].push(dim);
+    refresh();
+  }
+  document.querySelectorAll(".zone").forEach(zone=>{
+    const name=zone.dataset.zone;
+    zone.addEventListener("dragover",e=>{ e.preventDefault(); zone.classList.add("over"); });
+    zone.addEventListener("dragleave",()=>zone.classList.remove("over"));
+    zone.addEventListener("drop",e=>{ e.preventDefault(); zone.classList.remove("over");
+      const dim=e.dataTransfer.getData("text/dim"); if(dim) moveDim(dim,name); });
+  });
+
+  // ── filter popover ───────────────────────────────────────────────────────
+  let popEl=null;
+  function closePop(){ if(popEl){ popEl.remove(); popEl=null; document.removeEventListener("mousedown",onDoc); } }
+  function onDoc(e){ if(popEl && !popEl.contains(e.target)) closePop(); }
+  function openFilter(dim, anchor, ev){
+    ev.stopPropagation(); closePop();
+    popEl=document.createElement("div"); popEl.className="pop";
+    popEl.innerHTML='<h3>'+DIMS[dim].label+' values</h3>';
+    DIMS[dim].values.forEach(v=>{
+      const lab=document.createElement("label");
+      const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=state.filter[dim].has(v);
+      cb.addEventListener("change",()=>{ cb.checked?state.filter[dim].add(v):state.filter[dim].delete(v);
+        if(!state.filter[dim].size) state.filter[dim].add(v), cb.checked=true; // keep ≥1
+        if(!state.filter[dim].has(state.held[dim])) state.held[dim]=enabledVals(dim)[0];
+        refresh(); });
+      lab.appendChild(cb); lab.appendChild(document.createTextNode(v)); popEl.appendChild(lab);
+    });
+    document.body.appendChild(popEl);
+    const r=anchor.getBoundingClientRect();
+    popEl.style.left=(r.left+window.scrollX)+"px";
+    popEl.style.top=(r.bottom+window.scrollY+6)+"px";
+    setTimeout(()=>document.addEventListener("mousedown",onDoc),0);
+  }
+
+  // ── wrap control + theme ─────────────────────────────────────────────────
+  $("#wrap").addEventListener("input",e=>{ state.wrap=Math.max(0,parseInt(e.target.value||"0",10)); renderGrid(); });
+  $("#themeBtn").addEventListener("click",()=>{
+    const cur=document.documentElement.getAttribute("data-theme");
+    const sysDark=matchMedia("(prefers-color-scheme: dark)").matches;
+    const now = cur ? cur : (sysDark?"dark":"light");
+    const next = now==="dark"?"light":"dark";
+    document.documentElement.setAttribute("data-theme",next);
+    renderGrid(); // recolor thumbnails' neutrals unaffected; safe repaint
+  });
+
+  refresh();
+})();
+</script>

@@ -16,7 +16,8 @@ The shelf edits a Qt-free :class:`~...state.TableSpec` held on
 layout state + renders. The tree is the single source of truth; the per-cell
 selector grid + the render seam are downstream of it.
 
-ctx-native — never ``app = ctx.app`` (the tab-unwrap guardrail is 0).
+ctx-native — reads ``ctx.state`` / ``ctx.runtime`` / ``ctx.widgets`` only, never the
+unwrapped app god-object (the tab-unwrap guardrail is 0).
 """
 
 from __future__ import annotations

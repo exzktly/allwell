@@ -425,10 +425,20 @@ def _snapshot_image_table(ctx) -> dict:
         out["zoom"] = float(ctx.state.image_table.zoom)
     except Exception:
         swallowed()
-    # Builder (root + nested-channels tree) state: the per-channel render options
-    # and the Fixed panel's pinned values. Plain JSON (str/bool/float/None), so the
-    # shelf reconstructs its spec (spec_from_state) on restore. Only written when
-    # present so pre-builder saved states round-trip unchanged.
+    # Builder (root + nested-channels) state — extracted to a helper to hold this
+    # function's cyclomatic-complexity ratchet.
+    out.update(_snapshot_image_table_builder(ctx))
+    return out
+
+
+def _snapshot_image_table_builder(ctx) -> dict:
+    """Builder tree state for the image-table snapshot: the per-channel render
+    options (``channel_opts``) + the Fixed panel's pinned values (``fixed_vals``).
+
+    Plain JSON (str/bool/float/None), so the shelf reconstructs its spec
+    (``spec_from_state``) on restore. Only emits a key when present, so pre-builder
+    saved states round-trip unchanged."""
+    out: dict = {}
     copts = dict(getattr(ctx.state.image_table, "channel_opts", None) or {})
     if copts:
         out["channel_opts"] = copts

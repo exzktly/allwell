@@ -13,7 +13,13 @@ from well_viewer.features.image_browser.controller import (
     show_image_browser_subtab,
 )
 
-_SUBTABS = ("Segmentation", "Image Table", "Cell Browser", "Playground")
+_SUBTABS = ("Image Table", "Segmentation", "Cell Browser", "Playground")
+
+
+def test_image_table_is_the_first_subtab():
+    # Image Table is the primary image-review surface → first (default) sub-tab.
+    from well_viewer.features.image_browser.tab_view import SUBTABS
+    assert SUBTABS[0] == "Image Table"
 
 
 def _build_image_browser_parent(app):

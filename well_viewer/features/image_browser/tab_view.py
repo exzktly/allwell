@@ -17,9 +17,9 @@ from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
 from well_viewer.features.image_browser import controller as ctl
 
-#: Sub-tab order. Leaf names must match the dispatch branches in
-#: ``core.tab_controller.on_tab_change``.
-SUBTABS = ("Segmentation", "Image Table", "Cell Browser", "Playground")
+#: Sub-tab order (Image Table first — the primary image-review surface). Leaf
+#: names must match the dispatch branches in ``core.tab_controller.on_tab_change``.
+SUBTABS = ("Image Table", "Segmentation", "Cell Browser", "Playground")
 
 
 def build_image_browser_tab(ctx, parent: QWidget) -> None:
@@ -50,7 +50,12 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs.currentChanged.connect(
         lambda idx: ctl.on_image_browser_subtab_changed(ctx, idx))
 
-    # Eagerly build Segmentation (the initial, current sub-tab) so the canvas
-    # is ready on first open. Image Table / Cell Browser / Playground stay lazy:
-    # built on first sub-tab click.
+    # Eagerly build the initial (now first) Image Table sub-tab so it's ready on
+    # open, plus the Segmentation review-image canvas (kept ready for the CSV /
+    # cell-review push flows). Cell Browser / Playground stay lazy — built on
+    # first sub-tab click.
     ctl.build_image_browser_subtab(ctx, sub_tabs.currentIndex())
+    for i in range(sub_tabs.count()):
+        if sub_tabs.tabText(i) == "Segmentation":
+            ctl.build_image_browser_subtab(ctx, i)
+            break

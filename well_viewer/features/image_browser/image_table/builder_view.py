@@ -157,6 +157,12 @@ QToolButton#ITBLutFit {
     border-radius: 5px; padding: 2px 9px; font-size: 11px;
 }
 QToolButton#ITBLutFit:hover { color: #E6E9EF; border-color: #6B8AFD; }
+
+QToolButton#ITBClear {
+    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    border-radius: 6px; padding: 3px 10px; font-size: 11px;
+}
+QToolButton#ITBClear:hover { color: #F87171; border-color: #F87171; }
 """
 
 
@@ -308,6 +314,19 @@ def builder_notify_rendered(ctx) -> None:
     rt.builder_dirty = False
     if getattr(rt, "rows_zone_body", None) is not None:
         _refresh_shape(ctx, builder_spec(ctx))
+
+
+def builder_clear(ctx) -> None:
+    """Empty the builder (top half): drop every root + nested channel and clear
+    any value filters, so the user can assemble a fresh table. Leaves the
+    rendered grid untouched — 'Clear images' clears the bottom half."""
+    spec = builder_spec(ctx)
+    spec.rows = Axis(root=None, channels=[])
+    spec.cols = Axis(root=None, channels=[])
+    spec.filters = {}
+    for dim in _ROOT_DIMS:
+        spec.fixed.setdefault(dim, _default_value(ctx, dim))
+    _edit(ctx)
 
 
 # ── drag-and-drop primitives ────────────────────────────────────────────────
@@ -498,6 +517,15 @@ def build_shelf(ctx, parent: QWidget) -> None:
     shape.setObjectName("ITBShape")
     header.addWidget(shape, 1)
     _rt(ctx).shape_label = shape
+    clear_btn = QToolButton(parent)
+    clear_btn.setObjectName("ITBClear")
+    clear_btn.setText("Clear builder")
+    clear_btn.setCursor(Qt.PointingHandCursor)
+    clear_btn.setToolTip("Remove every root + channel and start the table fresh "
+                         "(leaves the rendered images — use 'Clear images' for those).")
+    clear_btn.clicked.connect(lambda: builder_clear(ctx))
+    reg.register("_image_table_clear_builder_btn", clear_btn)
+    header.addWidget(clear_btn)
     layout.addLayout(header)
 
     # Channels tray (drag source) at the top.

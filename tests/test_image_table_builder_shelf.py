@@ -116,3 +116,22 @@ def test_channel_opts_absent_falls_back_to_row_widgets():
     # no channel_opts and no lut widgets → all-off defaults, not an error
     assert IC._row_display_opts(ctx, 0, "GFP") == (False, False, "")
     assert IC._row_log_scale(ctx, 0, "GFP") is False
+
+
+# ── render is gated on Generate — edits flatten state but never draw ─────────
+
+def test_shelf_apply_never_renders(monkeypatch):
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
+    seen = []
+    monkeypatch.setattr(B, "image_table_apply_spec",
+                        lambda c, spec, *, render=True: seen.append(render))
+    B._apply_now(ctx)
+    assert seen == [False]   # the debounced edit path flattens spec→state, no draw
+
+
+def test_generate_notify_clears_dirty_cue():
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
+    rt = ctx.runtime.image_table
+    rt.builder_dirty = True            # an edit left the table stale
+    B.builder_notify_rendered(ctx)     # Generate ran → cue clears
+    assert rt.builder_dirty is False

@@ -52,7 +52,9 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_dims_preset
 from well_viewer.features.image_browser.image_table.build_layout import image_table_reset_layout
 from well_viewer.features.image_browser.image_table.build_layout import image_table_clear_render
-from well_viewer.features.image_browser.image_table.builder_view import build_shelf
+from well_viewer.features.image_browser.image_table.builder_view import (
+    build_shelf, builder_notify_rendered,
+)
 
 
 class _ReorderList(QListWidget):
@@ -667,7 +669,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr = FlowLayout(action_row, h_spacing=6, v_spacing=4)
     tr.setContentsMargins(0, 0, 0, 0)
 
-    tr.addWidget(btn_primary(action_row, "Generate", partial(image_table_generate, ctx)))
+    def _generate(_=None) -> None:
+        # The one render trigger: draw the grid from current state, then clear the
+        # shelf's "edited — press Generate" cue.
+        image_table_generate(ctx)
+        builder_notify_rendered(ctx)
+
+    tr.addWidget(btn_primary(action_row, "Generate", _generate))
 
     # Composite: append a merged bottom row (each cell additively sums the
     # LUT-colored rows above it). A checkable toggle button styled like the rest

@@ -13,8 +13,10 @@ on a root drops it back). A root's channels get a **Separate ↔ Overlay** switc
 The shelf edits a Qt-free :class:`~...state.TableSpec` held on
 ``ctx.runtime.image_table.builder_spec`` and, on every edit (debounced), calls
 ``build_layout.image_table_apply_spec`` which flattens it onto the existing
-layout state + renders. The tree is the single source of truth; the per-cell
-selector grid + the render seam are downstream of it.
+layout state — but does *not* render: the grid only draws when the user presses
+**Generate**. Between an edit and that press the header cues "edited — press
+Generate". The tree is the single source of truth; the per-cell selector grid +
+the render seam are downstream of it.
 
 ctx-native — reads ``ctx.state`` / ``ctx.runtime`` / ``ctx.widgets`` only, never the
 unwrapped app god-object (the tab-unwrap guardrail is 0). Styling: a scoped QSS
@@ -255,14 +257,28 @@ def _schedule_apply(ctx) -> None:
 
 
 def _apply_now(ctx) -> None:
+    # Flatten the spec onto state + rebuild the selector layout, but do NOT
+    # render — the table only draws when the user presses Generate.
     with swallow("image table builder: apply spec"):
-        image_table_apply_spec(ctx, builder_spec(ctx))
+        image_table_apply_spec(ctx, builder_spec(ctx), render=False)
 
 
 def _edit(ctx) -> None:
-    """After any shelf edit: redraw the shelf and schedule a rebuild+render."""
+    """After any shelf edit: mark the table stale (so the header cues a Generate),
+    redraw the shelf, and schedule a render-less layout rebuild. Rendering is
+    gated on the Generate button — no live redraw on edit."""
+    _rt(ctx).builder_dirty = True
     builder_refresh(ctx)
     _schedule_apply(ctx)
+
+
+def builder_notify_rendered(ctx) -> None:
+    """Clear the "edited — press Generate" cue once the table has rendered. Called
+    from the Generate action so the header reflects that the grid is now current."""
+    rt = _rt(ctx)
+    rt.builder_dirty = False
+    if getattr(rt, "rows_zone_body", None) is not None:
+        _refresh_shape(ctx, builder_spec(ctx))
 
 
 # ── drag-and-drop primitives ────────────────────────────────────────────────
@@ -561,6 +577,9 @@ def _refresh_shape(ctx, spec) -> None:
         bits.append(f"<b>{c}</b> →")
     if fx:
         bits.append(f"fixed {fx}")
+    if getattr(_rt(ctx), "builder_dirty", False):
+        bits.append("<span style='color:#F5A524;font-weight:640'>"
+                    "edited — press Generate</span>")
     lbl.setText("  ·  ".join(bits))
 
 

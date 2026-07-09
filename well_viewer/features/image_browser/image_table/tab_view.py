@@ -656,6 +656,29 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     lut_outer_layout.addWidget(lut_container)
     adv_layout.addWidget(lut_outer)
 
+    # Composite (legacy) — append a merged bottom row that additively sums the
+    # LUT-colored channels above it in each column. The shelf's per-root
+    # Separate↔Overlay switch is the primary way to blend now, so this lives in
+    # Advanced. Re-renders in place when a table already exists, else the flag is
+    # picked up on the next Generate.
+    comp_btn = reg.register("_image_table_composite_chk",
+                            QPushButton("Composite — merged bottom row", advanced))
+    comp_btn.setCheckable(True)
+    comp_btn.setProperty("variant", "toggle")
+    comp_btn.setChecked(bool(getattr(ctx.state.image_table, "composite", False)))
+    comp_btn.setToolTip(
+        "Append a merged row: each cell additively sums the LUT-colored "
+        "channels above it in that column. (For per-root blending, use the "
+        "Overlay switch in the builder above.)")
+
+    def _on_composite_toggled(checked: bool) -> None:
+        ctx.state.image_table.composite = bool(checked)
+        if getattr(ctx.state.image_table, "last_render", None):
+            image_table_generate(ctx)
+
+    comp_btn.toggled.connect(_on_composite_toggled)
+    adv_layout.addWidget(comp_btn)
+
     sep2 = QFrame(inner)
     sep2.setObjectName("Separator")
     sep2.setFrameShape(QFrame.HLine)
@@ -676,28 +699,6 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         builder_notify_rendered(ctx)
 
     tr.addWidget(btn_primary(action_row, "Generate", _generate))
-
-    # Composite: append a merged bottom row (each cell additively sums the
-    # LUT-colored rows above it). A checkable toggle button styled like the rest
-    # of the toolbar (variant="toggle") so it sits flush beside Generate/Crop at
-    # the same size — not a stray QCheckBox. Re-renders in place when a table
-    # already exists, else just stores the flag for the next Generate.
-    comp_btn = reg.register("_image_table_composite_chk", QPushButton("Composite", action_row))
-    comp_btn.setCheckable(True)
-    comp_btn.setProperty("variant", "toggle")
-    comp_btn.setChecked(bool(getattr(ctx.state.image_table, "composite", False)))
-    comp_btn.setToolTip(
-        "Append a merged row: each cell additively sums the LUT-colored "
-        "channels above it in that column."
-    )
-
-    def _on_composite_toggled(checked: bool) -> None:
-        ctx.state.image_table.composite = bool(checked)
-        if getattr(ctx.state.image_table, "last_render", None):
-            image_table_generate(ctx)
-
-    comp_btn.toggled.connect(_on_composite_toggled)
-    tr.addWidget(comp_btn)
 
     # Two independent clears. "Reset table" returns the Build Layout generator to
     # defaults (empty selector, Channels × Time, 2×3, no selection/nesting) but

@@ -646,7 +646,9 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     gear.setText(f"⚙ {_render_label(cs)}")
     gear.setCursor(Qt.PointingHandCursor)
     gear.setPopupMode(QToolButton.InstantPopup)
-    gear.setMenu(_channel_menu(ctx, cs))
+    # Parent the menu to the button: QToolButton.setMenu does NOT take ownership,
+    # so a parentless QMenu is garbage-collected and the gear opens nothing.
+    gear.setMenu(_channel_menu(ctx, cs, gear))
     h.addWidget(gear)
     h.addWidget(_x_btn("Remove channel",
                        lambda a=axis, i=idx: (_remove_channel(spec, a, i), _edit(ctx))))
@@ -761,23 +763,20 @@ def _render_label(cs: ChannelSpec) -> str:
     return s + ("+outline" if cs.boundary else "")
 
 
-def _channel_menu(ctx, cs: ChannelSpec) -> QMenu:
-    menu = QMenu()
+def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
+    menu = QMenu(parent)
 
-    render_menu = menu.addMenu("Render")
+    # Render mode — corrected / raw / cell mask / ≥ threshold, right at the top
+    # level (radio-like) so they're one click from the ⚙ chip.
+    hdr = menu.addAction("Render")
+    hdr.setEnabled(False)
     for key, label in _RENDER_MODES:
-        act = render_menu.addAction(label)
+        act = menu.addAction(label)
         act.setCheckable(True)
         act.setChecked(cs.render == key)
         act.triggered.connect(lambda _c=False, k=key: (_set_render(cs, k), _edit(ctx)))
 
-    cmap_menu = menu.addMenu("Colour / LUT")
-    for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
-        act = cmap_menu.addAction(name)
-        act.setCheckable(True)
-        act.setChecked(cs.colormap == name)
-        act.triggered.connect(lambda _c=False, n=name: (_set_attr(cs, "colormap", n), _edit(ctx)))
-
+    menu.addSeparator()
     b = menu.addAction("Boundary outline")
     b.setCheckable(True)
     b.setChecked(bool(cs.boundary))
@@ -787,6 +786,14 @@ def _channel_menu(ctx, cs: ChannelSpec) -> QMenu:
     lg.setCheckable(True)
     lg.setChecked(bool(cs.log))
     lg.triggered.connect(lambda c=False: (_set_attr(cs, "log", bool(c)), _edit(ctx)))
+
+    menu.addSeparator()
+    cmap_menu = menu.addMenu("Colour / LUT")
+    for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
+        act = cmap_menu.addAction(name)
+        act.setCheckable(True)
+        act.setChecked(cs.colormap == name)
+        act.triggered.connect(lambda _c=False, n=name: (_set_attr(cs, "colormap", n), _edit(ctx)))
     return menu
 
 

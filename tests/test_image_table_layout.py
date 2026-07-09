@@ -54,9 +54,14 @@ def test_axis_values_channels_filters_to_ticked():
     app = _fake_app(wells=["A01"], channels=["gfp", "rfp"],
                     active_channels={chans[0]})
     assert C._axis_values(app._ctx, "channel") == [chans[0]]
-    # none ticked → all channels
+    # none ticked → the real channels only (binary variants are opt-in, so the
+    # default axis excludes them even though they're in the option list)
+    from well_viewer.features.image_browser.image_table.image_compose import (
+        _is_binary_variant,
+    )
     app._app_state.image_table.active_channels = set()
-    assert C._axis_values(app._ctx, "channel") == chans
+    real = [c for c in chans if not _is_binary_variant(c)]
+    assert C._axis_values(app._ctx, "channel") == real
 
 
 def test_axis_values_timepoints_and_fovs_delegate_to_options():

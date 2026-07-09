@@ -1004,12 +1004,17 @@ channel for every well).
   grid, then **Generate** to render. Build only assembles the grid (auto-sizing
   it and filling every cell); Generate draws the images.
 - **Rows / Columns axes** — each is an **ordered multi-select**: tick one or more
-  of Channels / Wells / Timepoints / FOVs; the tick order sets the nesting
-  (**outer › inner**). One dimension is a plain axis; several expand the axis to
-  their full combination, so >2 dimensions can vary at once (e.g. Rows =
+  of Channels / Wells / Timepoints / FOVs, then **drag rows by the ⋮⋮ grip** to set
+  the nesting (**outer › inner**). A dimension can only sit on one axis — it's
+  greyed out in the other picker. One dimension is a plain axis; several expand the
+  axis to their full combination, so >2 dimensions can vary at once (e.g. Rows =
   *Wells › Channels*, Columns = *Timepoints*). **Build table ▾** carries quick
   presets — flat (Channels × Time, Wells × Channels, …) and nested (**Wells ›
   Channels × Time**, FOV montage per Well, …).
+- **Channel values** — the **Channels** dropdown also offers a **`<CHAN> (binary)`**
+  entry per channel (e.g. *GFP (binary)*), which renders that channel's
+  ThreshFracOn threshold-binary (positive cells white). Tick it alongside the plain
+  channels to mix, say, NIR, GFP and GFP (binary) down the rows in one build.
 - **Controls** — **Channels / Time / FOV** filters cap which values appear on an
   axis (none = all — handy to keep a big product in bounds); **Hold off-axis**
   pins the dimensions not on either axis to a single Ch / Time / FOV value;

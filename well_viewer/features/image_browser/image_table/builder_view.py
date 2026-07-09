@@ -17,7 +17,9 @@ layout state + renders. The tree is the single source of truth; the per-cell
 selector grid + the render seam are downstream of it.
 
 ctx-native — reads ``ctx.state`` / ``ctx.runtime`` / ``ctx.widgets`` only, never the
-unwrapped app god-object (the tab-unwrap guardrail is 0).
+unwrapped app god-object (the tab-unwrap guardrail is 0). Styling: a scoped QSS
+block (``_QSS``) on the shelf root reproduces the design mockup with the app's
+theme tokens (mirrors ``theme.py``).
 """
 
 from __future__ import annotations
@@ -27,11 +29,14 @@ from typing import List, Optional
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton,
+    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QSizePolicy,
     QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.safe import swallow
+from well_viewer.features.image_browser.cell_browser.worker import (
+    resolve_channel_tint,
+)
 from well_viewer.features.image_browser.image_table.state import (
     Axis, ChannelSpec, spec_from_state,
 )
@@ -51,6 +56,80 @@ _ROOT_LABEL = {"well": "Well", "timepoint": "Timepoint", "fov": "FOV"}
 _RENDER_MODES = [("corrected", "corrected"), ("raw", "raw"),
                  ("mask", "cell mask"), ("threshold", "≥ threshold")]
 _RENDER_SHORT = {"corrected": "corr", "raw": "raw", "mask": "mask", "threshold": "≥thr"}
+
+# Colour swatch per root dimension + a rough colour per colormap (mirrors the
+# LUT the render actually applies; the chip swatch is a glanceable hint).
+_DIM_SWATCH = {"well": "#6B8AFD", "timepoint": "#F59E0B", "fov": "#98A2B3"}
+_CMAP_SWATCH = {
+    "Greys": "#C8CDD8", "Reds": "#F87171", "Greens": "#4ADE80", "Blues": "#6EA8FF",
+    "Purples": "#A78BFA", "Oranges": "#FB923C", "viridis": "#4ADE80",
+    "magma": "#F472B6", "inferno": "#F59E0B", "cividis": "#6EA8FF",
+}
+
+# Scoped stylesheet — applied to the shelf root; object-name selectors keep it
+# from leaking onto the rest of the app. Colours mirror ``theme.py`` tokens.
+_QSS = """
+QWidget#ITBShelf { background: transparent; }
+QLabel#ITBTitle { color: #E6E9EF; font-weight: 640; font-size: 12.5px; }
+QLabel#ITBShape { color: #98A2B3; font-size: 11px; }
+QLabel#ITBShape b { color: #B9C6FF; }
+
+QFrame#ITBZone {
+    border: 1px dashed #2A3343; border-radius: 9px; background: #131A24;
+}
+QFrame#ITBZone[dropActive="true"] { border: 1px dashed #6B8AFD; background: #17203A; }
+QFrame#ITBFixed { border: 1px solid #2A3343; border-radius: 9px; background: #131A24; }
+QFrame#ITBTray { border: 1px solid #1B2331; border-radius: 9px; background: #0E131C; }
+
+QLabel#ITBHead { color: #E6E9EF; font-weight: 620; font-size: 12px; }
+QLabel#ITBSub  { color: #5F6B7C; font-size: 10px; }
+QLabel#ITBHint { color: #5F6B7C; font-style: italic; font-size: 11px; }
+
+QFrame#ITBRoot {
+    background: #202B4D; border: 1px solid #4560A8; border-radius: 7px;
+}
+QLabel#ITBRootLbl { color: #E9ECF5; font-weight: 640; font-size: 12px; }
+
+QWidget#ITBNest { border-left: 2px solid #3A4E86; background: transparent; }
+
+QFrame#ITBChan, QFrame#ITBChip {
+    background: #1A2230; border: 1px solid #2A3343; border-radius: 7px;
+}
+QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: #4560A8; }
+QLabel#ITBChanLbl { color: #E6E9EF; font-size: 12px; font-weight: 560; }
+QLabel#ITBVar { color: #98A2B3; font-size: 10.5px; }
+QLabel#ITBGrip { color: #5F6B7C; font-size: 11px; }
+QLabel#ITBNote { color: #5F6B7C; font-size: 10px; }
+
+QToolButton#ITBOpt {
+    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    border-radius: 5px; padding: 1px 7px; font-size: 11px;
+}
+QToolButton#ITBOpt:hover { color: #E6E9EF; border-color: #6B8AFD; }
+QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
+
+QToolButton#ITBX {
+    color: #5F6B7C; background: transparent; border: none;
+    font-size: 15px; padding: 0px 4px;
+}
+QToolButton#ITBX:hover { color: #F87171; }
+
+QToolButton#ITBSeg {
+    background: #131A24; color: #98A2B3; border: 1px solid #2A3343;
+    padding: 3px 11px; font-size: 11px;
+}
+QToolButton#ITBSeg:hover { color: #E6E9EF; }
+QToolButton#ITBSeg[on="true"] { background: #2C3A66; color: #F0F4FF; }
+QToolButton#ITBSeg[on="true"][ov="true"] { background: #3A2E12; color: #F5A524; }
+
+QComboBox#ITBCombo {
+    background: #1A2230; color: #E6E9EF; border: 1px solid #2A3343;
+    border-radius: 6px; padding: 2px 6px; min-height: 20px;
+}
+QComboBox#ITBCombo:hover { border-color: #3B475C; }
+QLabel#ITBFixLbl { color: #E6E9EF; font-size: 12px; }
+QLabel#ITBEq { color: #5F6B7C; font-size: 12px; }
+"""
 
 
 # ── spec accessors ──────────────────────────────────────────────────────────
@@ -189,13 +268,14 @@ def _edit(ctx) -> None:
 # ── drag-and-drop primitives ────────────────────────────────────────────────
 
 class _Chip(QFrame):
-    """A draggable chip carrying a token string."""
+    """A draggable chip carrying a token string. Child labels are made
+    mouse-transparent by the builders so a drag starts from anywhere on the
+    chip while its ⚙ / × buttons stay clickable."""
 
     def __init__(self, token: str, parent=None) -> None:
         super().__init__(parent)
         self._token = token
         self._press = None
-        self.setObjectName("ImageTableChip")
 
     def mousePressEvent(self, e) -> None:  # noqa: N802
         if e.button() == Qt.LeftButton:
@@ -216,22 +296,33 @@ class _Chip(QFrame):
 
 
 class _DropZone(QFrame):
-    """A frame that accepts token drops and forwards them to *on_drop*."""
+    """A frame that accepts token drops and forwards them to *on_drop*, with a
+    drag-over highlight."""
 
     def __init__(self, on_drop, parent=None) -> None:
         super().__init__(parent)
         self._on_drop = on_drop
         self.setAcceptDrops(True)
 
+    def _set_active(self, on: bool) -> None:
+        self.setProperty("dropActive", "true" if on else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
     def dragEnterEvent(self, e) -> None:  # noqa: N802
         if e.mimeData().hasFormat(_MIME):
+            self._set_active(True)
             e.acceptProposedAction()
 
     def dragMoveEvent(self, e) -> None:  # noqa: N802
         if e.mimeData().hasFormat(_MIME):
             e.acceptProposedAction()
 
+    def dragLeaveEvent(self, e) -> None:  # noqa: N802
+        self._set_active(False)
+
     def dropEvent(self, e) -> None:  # noqa: N802
+        self._set_active(False)
         if e.mimeData().hasFormat(_MIME):
             tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
             with swallow("image table builder: drop"):
@@ -239,13 +330,55 @@ class _DropZone(QFrame):
             e.acceptProposedAction()
 
 
-def _x_button(parent, tip, on_click) -> QPushButton:
-    b = QPushButton("×", parent)
-    b.setProperty("variant", "secondary")
-    b.setFixedSize(20, 20)
+# ── small styled widget helpers ─────────────────────────────────────────────
+
+def _swatch(color: str) -> QLabel:
+    sw = QLabel()
+    sw.setFixedSize(11, 11)
+    sw.setStyleSheet(
+        f"background:{color}; border-radius:3px; border:1px solid rgba(255,255,255,0.16);")
+    sw.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    return sw
+
+
+def _grip() -> QLabel:
+    g = QLabel("⣿")
+    g.setObjectName("ITBGrip")
+    g.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    return g
+
+
+def _text(text: str, obj: str) -> QLabel:
+    lbl = QLabel(text)
+    lbl.setObjectName(obj)
+    lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+    return lbl
+
+
+def _x_btn(tip: str, on_click) -> QToolButton:
+    b = QToolButton()
+    b.setObjectName("ITBX")
+    b.setText("✕")
+    b.setCursor(Qt.PointingHandCursor)
     b.setToolTip(tip)
     b.clicked.connect(lambda _=False: on_click())
     return b
+
+
+def _cmap_swatch(cmap: str) -> str:
+    return _CMAP_SWATCH.get(cmap, "#C8CDD8")
+
+
+def _chan_color(ctx, name: str) -> str:
+    """The app's own per-channel palette colour (by index), as a hex string —
+    so a tray chip's dot matches the tint the Cell Browser / composites use."""
+    with swallow("image table builder: channel tint"):
+        names = _base_channels(ctx)
+        idx = names.index(name) if name in names else 0
+        r, g, b = resolve_channel_tint(name, idx, None)
+        return "#{:02X}{:02X}{:02X}".format(
+            int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
+    return "#C8CDD8"
 
 
 # ── shelf construction ──────────────────────────────────────────────────────
@@ -253,78 +386,85 @@ def _x_button(parent, tip, on_click) -> QPushButton:
 def build_shelf(ctx, parent: QWidget) -> None:
     """Build the builder shelf into *parent* (called from build_image_table_tab)."""
     reg = ctx.widgets
+    parent.setObjectName("ITBShelf")
+    parent.setStyleSheet(_QSS)
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(8)
+    layout.setContentsMargins(0, 2, 0, 2)
+    layout.setSpacing(9)
 
-    title = QLabel("Build — drag a root, nest channels under it", parent)
-    title.setProperty("role", "section")
-    layout.addWidget(title)
+    header = QHBoxLayout()
+    header.setContentsMargins(0, 0, 0, 0)
+    header.setSpacing(10)
+    title = QLabel("Build", parent)
+    title.setObjectName("ITBTitle")
+    header.addWidget(title)
+    shape = QLabel("", parent)
+    shape.setObjectName("ITBShape")
+    header.addWidget(shape, 1)
+    _rt(ctx).shape_label = shape
+    layout.addLayout(header)
 
-    axes_row = QWidget(parent)
-    ar = QHBoxLayout(axes_row)
-    ar.setContentsMargins(0, 0, 0, 0)
-    ar.setSpacing(10)
-
-    def _zone(name: str, heading: str, sub: str) -> _DropZone:
-        z = _DropZone(lambda tok, n=name: _on_zone_drop(ctx, n, tok), axes_row)
-        z.setObjectName("ImageTableSelector")
-        zl = QVBoxLayout(z)
-        zl.setContentsMargins(8, 6, 8, 8)
-        zl.setSpacing(4)
-        head = QLabel(f"{heading}", z)
-        head.setProperty("role", "section")
-        zl.addWidget(head)
-        subl = QLabel(sub, z)
-        subl.setObjectName("Muted")
-        zl.addWidget(subl)
-        body = QWidget(z)
-        QVBoxLayout(body).setContentsMargins(0, 0, 0, 0)
-        zl.addWidget(body)
-        reg.register(f"_image_table_{name}_zone", z)
-        setattr(_rt(ctx), f"{name}_zone_body", body)
-        return z
-
-    ar.addWidget(_zone("rows", "Rows", "root ↓ · channels nested"), 1)
-    ar.addWidget(_zone("cols", "Columns", "root → · channels nested"), 1)
-    layout.addWidget(axes_row)
-
-    # Fixed panel (derived) — a drop target for roots + its value pickers.
-    fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), parent)
-    fixed.setObjectName("Panel")
-    fl = QVBoxLayout(fixed)
-    fl.setContentsMargins(8, 6, 8, 8)
-    fl.setSpacing(4)
-    fh = QLabel("Fixed — same value for every cell", fixed)
-    fh.setProperty("role", "section")
-    fl.addWidget(fh)
-    fbody = QWidget(fixed)
-    QHBoxLayout(fbody).setContentsMargins(0, 0, 0, 0)
-    fl.addWidget(fbody)
-    reg.register("_image_table_fixed_panel", fixed)
-    _rt(ctx).fixed_panel_body = fbody
-    layout.addWidget(fixed)
-
-    # Channels tray — a drop target to remove a nested channel.
+    # Channels tray (drag source) at the top.
     tray = _DropZone(lambda tok: _on_tray_drop(ctx, tok), parent)
-    tray.setObjectName("ImageTableSelector")
+    tray.setObjectName("ITBTray")
     tl = QVBoxLayout(tray)
-    tl.setContentsMargins(8, 6, 8, 8)
-    tl.setSpacing(4)
-    th = QLabel("Channels — drag onto a root to nest", tray)
-    th.setProperty("role", "section")
-    tl.addWidget(th)
+    tl.setContentsMargins(11, 8, 11, 9)
+    tl.setSpacing(6)
+    tl.addWidget(_zone_head("Channels", "drag onto a root to nest it"))
     tbody = QWidget(tray)
     tbl = QHBoxLayout(tbody)
     tbl.setContentsMargins(0, 0, 0, 0)
-    tbl.setSpacing(6)
+    tbl.setSpacing(7)
     tl.addWidget(tbody)
     reg.register("_image_table_channels_tray", tray)
     _rt(ctx).channels_tray_body = tbody
     layout.addWidget(tray)
+
+    # Rows / Columns axis zones, side by side.
+    axes_row = QWidget(parent)
+    ar = QHBoxLayout(axes_row)
+    ar.setContentsMargins(0, 0, 0, 0)
+    ar.setSpacing(10)
+    for name, heading, sub in (("rows", "Rows", "root ↓ · channels nested"),
+                               ("cols", "Columns", "root → · channels nested")):
+        z = _DropZone(lambda tok, n=name: _on_zone_drop(ctx, n, tok), axes_row)
+        z.setObjectName("ITBZone")
+        z.setProperty("dropActive", "false")
+        z.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        z.setMinimumHeight(96)
+        zl = QVBoxLayout(z)
+        zl.setContentsMargins(11, 9, 11, 11)
+        zl.setSpacing(7)
+        zl.addWidget(_zone_head(heading, sub))
+        body = QWidget(z)
+        bl = QVBoxLayout(body)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(6)
+        zl.addWidget(body)
+        zl.addStretch(1)
+        reg.register(f"_image_table_{name}_zone", z)
+        setattr(_rt(ctx), f"{name}_zone_body", body)
+        ar.addWidget(z, 1)
+    layout.addWidget(axes_row)
+
+    # Fixed panel (derived) — a drop target for roots + its value pickers.
+    fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), parent)
+    fixed.setObjectName("ITBFixed")
+    fl = QVBoxLayout(fixed)
+    fl.setContentsMargins(11, 8, 11, 9)
+    fl.setSpacing(7)
+    fl.addWidget(_zone_head("Fixed", "same value for every cell · drag a root here to pin it"))
+    fbody = QWidget(fixed)
+    fbl = QHBoxLayout(fbody)
+    fbl.setContentsMargins(0, 0, 0, 0)
+    fbl.setSpacing(8)
+    fl.addWidget(fbody)
+    reg.register("_image_table_fixed_panel", fixed)
+    _rt(ctx).fixed_panel_body = fbody
+    layout.addWidget(fixed)
 
     builder_refresh(ctx)
     # No auto-apply on build: the shelf stays inert until the user edits it, so it
@@ -332,6 +472,21 @@ def build_shelf(ctx, parent: QWidget) -> None:
     # whatever a restore / the Advanced controls / a test sets up. The spec is
     # seeded from current state, so it already reflects reality; the first edit
     # renders.
+
+
+def _zone_head(name: str, sub: str) -> QWidget:
+    w = QWidget()
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(8)
+    lbl = QLabel(name)
+    lbl.setObjectName("ITBHead")
+    h.addWidget(lbl)
+    subl = QLabel(sub)
+    subl.setObjectName("ITBSub")
+    h.addWidget(subl)
+    h.addStretch(1)
+    return w
 
 
 def _on_zone_drop(ctx, zone: str, tok: str) -> None:
@@ -380,10 +535,33 @@ def builder_refresh(ctx) -> None:
     _build_tree(ctx, spec, "cols")
     _build_fixed(ctx, spec)
     _build_tray(ctx, spec)
+    _refresh_shape(ctx, spec)
 
 
-def _swatch_style(cmap: str) -> str:
-    return "min-width:11px;max-width:11px;min-height:11px;max-height:11px;border-radius:3px;"
+def _refresh_shape(ctx, spec) -> None:
+    lbl = getattr(_rt(ctx), "shape_label", None)
+    if lbl is None:
+        return
+
+    def axis_txt(ax):
+        parts = []
+        if ax.root:
+            parts.append(_ROOT_LABEL[ax.root])
+        if ax.channels:
+            names = ",".join(c.channel for c in ax.channels)
+            parts.append(("⧉[" if ax.overlay else "[") + names + "]")
+        return " › ".join(parts)
+
+    r, c = axis_txt(spec.rows), axis_txt(spec.cols)
+    fx = ", ".join(f"{_ROOT_LABEL[d]}={spec.fixed.get(d, '')}" for d in _fixed_dims(spec))
+    bits = []
+    if r:
+        bits.append(f"<b>{r}</b> ↓")
+    if c:
+        bits.append(f"<b>{c}</b> →")
+    if fx:
+        bits.append(f"fixed {fx}")
+    lbl.setText("  ·  ".join(bits))
 
 
 def _build_tree(ctx, spec, axis: str) -> None:
@@ -393,71 +571,104 @@ def _build_tree(ctx, spec, axis: str) -> None:
     ax = getattr(spec, axis)
 
     # root row
-    root_row = QWidget(body)
-    rl = QHBoxLayout(root_row)
-    rl.setContentsMargins(0, 0, 0, 0)
-    rl.setSpacing(6)
     if ax.root:
-        pill = _Chip(ax.root, root_row)
-        pl = QHBoxLayout(pill)
-        pl.setContentsMargins(8, 3, 4, 3)
-        pl.setSpacing(6)
-        lbl = QLabel(_ROOT_LABEL[ax.root], pill)
-        lbl.setToolTip("Filter which values appear on this axis")
-        lbl.mousePressEvent = lambda _e, d=ax.root: _open_root_filter(ctx, d)
-        pl.addWidget(lbl)
-        pl.addWidget(_x_button(pill, "Move to Fixed",
-                               lambda d=ax.root: (_move_facet(ctx, spec, d, "fixed"), _edit(ctx))))
-        rl.addWidget(pill)
+        lay.addWidget(_root_pill(ctx, spec, axis, ax.root))
     else:
-        hint = QLabel("drop a Well / Timepoint / FOV root", root_row)
-        hint.setObjectName("Muted")
-        rl.addWidget(hint)
-    rl.addStretch(1)
-    lay.addWidget(root_row)
+        lay.addWidget(_text("drop a Well / Timepoint / FOV root", "ITBHint"))
 
-    # nested channels (indented)
-    for idx, cs in enumerate(ax.channels):
-        row = QWidget(body)
-        cl = QHBoxLayout(row)
-        cl.setContentsMargins(18, 0, 0, 0)
-        cl.setSpacing(6)
-        pill = _Chip(f"chan:{axis}:{idx}", row)
-        pill.setObjectName("ImageTableChip")
-        ppl = QHBoxLayout(pill)
-        ppl.setContentsMargins(8, 3, 4, 3)
-        ppl.setSpacing(6)
-        sw = QLabel("", pill)
-        sw.setStyleSheet(_swatch_style(cs.colormap) + f"background:{_cmap_swatch(cs.colormap)};")
-        ppl.addWidget(sw)
-        ppl.addWidget(QLabel(str(cs.channel).upper(), pill))
-        gear = QToolButton(pill)
-        gear.setText(f"⚙ {_render_label(cs)}")
-        gear.setPopupMode(QToolButton.InstantPopup)
-        gear.setProperty("variant", "secondary")
-        gear.setMenu(_channel_menu(ctx, cs))
-        ppl.addWidget(gear)
-        ppl.addWidget(_x_button(pill, "Remove channel",
-                                lambda a=axis, i=idx: (_remove_channel(spec, a, i), _edit(ctx))))
-        cl.addWidget(pill)
-        cl.addStretch(1)
-        lay.addWidget(row)
-
-    # overlay toggle when this axis has channels
+    # nested channels (indented under a left accent rail)
     if ax.channels:
-        tog = QToolButton(body)
-        tog.setCheckable(True)
-        tog.setChecked(bool(ax.overlay))
-        tog.setText("⧉ Overlay" if ax.overlay else "Separate")
-        tog.setProperty("variant", "toggle")
-        tog.setToolTip("Separate: one row/column per channel. Overlay: blend this "
-                       "root's channels into one cell.")
+        nest = QWidget(body)
+        nest.setObjectName("ITBNest")
+        nl = QVBoxLayout(nest)
+        nl.setContentsMargins(11, 2, 0, 2)
+        nl.setSpacing(6)
+        for idx, cs in enumerate(ax.channels):
+            nl.addWidget(_chan_pill(ctx, spec, axis, idx, cs))
+        lay.addWidget(nest)
+        lay.addWidget(_overlay_toggle(ctx, ax))
+    elif ax.root:
+        # root present but no channels yet — invite a drop (mirrors the mockup)
+        lay.addWidget(_text("drop channels here", "ITBHint"))
 
-        def _toggle(checked, a=ax):
-            a.overlay = bool(checked)
-            _edit(ctx)
-        tog.toggled.connect(_toggle)
-        lay.addWidget(tog)
+
+def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
+    pill = _Chip(dim)
+    pill.setObjectName("ITBRoot")
+    h = QHBoxLayout(pill)
+    h.setContentsMargins(9, 4, 5, 4)
+    h.setSpacing(7)
+    h.addWidget(_swatch(_DIM_SWATCH.get(dim, "#98A2B3")))
+    lbl = _text(_ROOT_LABEL[dim], "ITBRootLbl")
+    lbl.setAttribute(Qt.WA_TransparentForMouseEvents, False)  # clickable for filter
+    lbl.setCursor(Qt.PointingHandCursor)
+    lbl.setToolTip("Filter which values appear on this axis"
+                   if dim != "well" else "Wells come from the plate — click to focus it")
+    lbl.mousePressEvent = lambda _e, d=dim: _open_root_filter(ctx, d)
+    h.addWidget(lbl)
+    h.addStretch(1)
+    h.addWidget(_x_btn("Move to Fixed",
+                       lambda d=dim: (_move_facet(ctx, spec, d, "fixed"), _edit(ctx))))
+    return pill
+
+
+def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
+    pill = _Chip(f"chan:{axis}:{idx}")
+    pill.setObjectName("ITBChan")
+    h = QHBoxLayout(pill)
+    h.setContentsMargins(8, 3, 5, 3)
+    h.setSpacing(7)
+    h.addWidget(_grip())
+    h.addWidget(_swatch(_cmap_swatch(cs.colormap)))
+    h.addWidget(_text(str(cs.channel).upper(), "ITBChanLbl"))
+    h.addStretch(1)
+    gear = QToolButton(pill)
+    gear.setObjectName("ITBOpt")
+    gear.setText(f"⚙ {_render_label(cs)}")
+    gear.setCursor(Qt.PointingHandCursor)
+    gear.setPopupMode(QToolButton.InstantPopup)
+    gear.setMenu(_channel_menu(ctx, cs))
+    h.addWidget(gear)
+    h.addWidget(_x_btn("Remove channel",
+                       lambda a=axis, i=idx: (_remove_channel(spec, a, i), _edit(ctx))))
+    return pill
+
+
+def _overlay_toggle(ctx, ax) -> QWidget:
+    wrap = QWidget()
+    hl = QHBoxLayout(wrap)
+    hl.setContentsMargins(11, 2, 0, 0)
+    hl.setSpacing(0)
+    seg = QFrame(wrap)
+    seg.setStyleSheet("QFrame{border:1px solid #2A3343;border-radius:7px;}")
+    sl = QHBoxLayout(seg)
+    sl.setContentsMargins(0, 0, 0, 0)
+    sl.setSpacing(0)
+
+    sep = QToolButton(seg)
+    sep.setObjectName("ITBSeg")
+    sep.setText("Separate")
+    sep.setCursor(Qt.PointingHandCursor)
+    sep.setProperty("on", "false" if ax.overlay else "true")
+    ovl = QToolButton(seg)
+    ovl.setObjectName("ITBSeg")
+    ovl.setText("⧉ Overlay")
+    ovl.setCursor(Qt.PointingHandCursor)
+    ovl.setProperty("on", "true" if ax.overlay else "false")
+    ovl.setProperty("ov", "true")
+    sep.setToolTip("One row/column per channel")
+    ovl.setToolTip("Blend this root's channels into one cell")
+
+    def _set(overlay: bool) -> None:
+        ax.overlay = overlay
+        _edit(ctx)
+    sep.clicked.connect(lambda: _set(False))
+    ovl.clicked.connect(lambda: _set(True))
+    sl.addWidget(sep)
+    sl.addWidget(ovl)
+    hl.addWidget(seg)
+    hl.addStretch(1)
+    return wrap
 
 
 def _build_fixed(ctx, spec) -> None:
@@ -466,18 +677,22 @@ def _build_fixed(ctx, spec) -> None:
     lay = body.layout()
     dims = _fixed_dims(spec)
     if not dims:
-        lbl = QLabel("every dimension is on an axis", body)
-        lbl.setObjectName("Muted")
-        lay.addWidget(lbl)
+        lay.addWidget(_text("every dimension is on an axis", "ITBHint"))
         lay.addStretch(1)
         return
     for dim in dims:
-        chip = _Chip(dim, body)
+        chip = _Chip(dim)
+        chip.setObjectName("ITBChip")
         cl = QHBoxLayout(chip)
-        cl.setContentsMargins(8, 3, 8, 3)
-        cl.setSpacing(6)
-        cl.addWidget(QLabel(_ROOT_LABEL[dim] + " =", chip))
+        cl.setContentsMargins(9, 3, 9, 3)
+        cl.setSpacing(7)
+        cl.addWidget(_grip())
+        cl.addWidget(_swatch(_DIM_SWATCH.get(dim, "#98A2B3")))
+        chip.setToolTip("Drag onto Rows or Columns to make it vary")
+        cl.addWidget(_text(_ROOT_LABEL[dim], "ITBFixLbl"))
+        cl.addWidget(_text("=", "ITBEq"))
         combo = QComboBox(chip)
+        combo.setObjectName("ITBCombo")
         vals = _root_values(ctx, dim)
         combo.addItems(vals)
         cur = spec.fixed.get(dim) or (vals[0] if vals else "")
@@ -488,12 +703,11 @@ def _build_fixed(ctx, spec) -> None:
         def _changed(_i, d=dim, cb=combo):
             spec.fixed[d] = cb.currentText()
             _schedule_apply(ctx)
+            _refresh_shape(ctx, spec)
         combo.currentIndexChanged.connect(_changed)
         cl.addWidget(combo)
         if dim == "well":
-            note = QLabel("(from plate)", chip)
-            note.setObjectName("Muted")
-            cl.addWidget(note)
+            cl.addWidget(_text("(from plate)", "ITBNote"))
         lay.addWidget(chip)
     lay.addStretch(1)
 
@@ -502,12 +716,21 @@ def _build_tray(ctx, spec) -> None:
     body = getattr(_rt(ctx), "channels_tray_body")
     _clear(body)
     lay = body.layout()
-    for name in _base_channels(ctx):
-        chip = _Chip(f"newchan:{name}", body)
+    names = _base_channels(ctx)
+    if not names:
+        lay.addWidget(_text("load a dataset to see channels", "ITBHint"))
+        lay.addStretch(1)
+        return
+    for name in names:
+        chip = _Chip(f"newchan:{name}")
+        chip.setObjectName("ITBChip")
         cl = QHBoxLayout(chip)
-        cl.setContentsMargins(8, 3, 8, 3)
-        cl.setSpacing(6)
-        cl.addWidget(QLabel(str(name).upper(), chip))
+        cl.setContentsMargins(9, 3, 10, 3)
+        cl.setSpacing(7)
+        cl.addWidget(_grip())
+        cl.addWidget(_swatch(_chan_color(ctx, name)))
+        cl.addWidget(_text(str(name).upper(), "ITBChanLbl"))
+        chip.setToolTip("Drag onto a root in Rows or Columns")
         lay.addWidget(chip)
     lay.addStretch(1)
 
@@ -517,15 +740,6 @@ def _build_tray(ctx, spec) -> None:
 def _render_label(cs: ChannelSpec) -> str:
     s = _RENDER_SHORT.get(cs.render, cs.render)
     return s + ("+outline" if cs.boundary else "")
-
-
-def _cmap_swatch(cmap: str) -> str:
-    """A rough CSS colour for the chip swatch (best-effort; the real LUT is in the
-    render)."""
-    table = {"Greys": "#c8cdd8", "Reds": "#f472b6", "Greens": "#4ade80",
-             "Blues": "#6ea8ff", "viridis": "#4ade80", "magma": "#f472b6",
-             "inferno": "#fbbf24", "cividis": "#22d3ee"}
-    return table.get(cmap, "#c8cdd8")
 
 
 def _channel_menu(ctx, cs: ChannelSpec) -> QMenu:

@@ -154,6 +154,32 @@ def test_channel_menu_is_parented_and_lists_render_modes(qtbot):
     assert "Boundary outline" in labels
 
 
+def test_drop_zones_reject_incompatible_tokens():
+    # A zone must not highlight for a token its handler ignores (false affordance).
+    assert B._accept_axis("well") and B._accept_axis("newchan:GFP") and B._accept_axis("chan:rows:0")
+    assert B._accept_fixed("timepoint")
+    assert not B._accept_fixed("chan:rows:0") and not B._accept_fixed("newchan:GFP")
+    assert B._accept_tray("chan:rows:0")
+    assert not B._accept_tray("well") and not B._accept_tray("newchan:GFP")
+
+
+def test_root_filter_menu_actually_filters(qtbot):
+    from PySide6.QtWidgets import QWidget
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01", "T02", "T03"])
+    host = QWidget()
+    qtbot.addWidget(host)
+    menu = B._root_filter_menu(ctx, "timepoint", host)
+    checkable = [a for a in menu.actions() if a.isCheckable()]
+    # empty filter ⇒ every value shown/ticked
+    assert len(checkable) == 3 and all(a.isChecked() for a in checkable)
+    checkable[0].setChecked(False)                     # toggled → commit
+    st = ctx.state.image_table
+    assert st.active_timepoints == {checkable[1].text(), checkable[2].text()}
+    assert ctx.runtime.image_table.builder_dirty is True
+    [a for a in menu.actions() if a.text() == "Show all"][0].trigger()
+    assert st.active_timepoints == set()               # back to all
+
+
 def test_channel_menu_actions_mutate_channel_spec(qtbot):
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
     from PySide6.QtWidgets import QWidget

@@ -313,11 +313,14 @@ class _Chip(QFrame):
 
 class _DropZone(QFrame):
     """A frame that accepts token drops and forwards them to *on_drop*, with a
-    drag-over highlight."""
+    drag-over highlight. *accepts* (token -> bool) gates which payloads light the
+    zone up and are actually dropped, so a zone never shows a false "will accept"
+    highlight for a token its handler would ignore."""
 
-    def __init__(self, on_drop, parent=None) -> None:
+    def __init__(self, on_drop, accepts=None, parent=None) -> None:
         super().__init__(parent)
         self._on_drop = on_drop
+        self._accepts = accepts
         self.setAcceptDrops(True)
 
     def _set_active(self, on: bool) -> None:
@@ -325,13 +328,21 @@ class _DropZone(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
+    def _ok(self, e) -> bool:
+        if not e.mimeData().hasFormat(_MIME):
+            return False
+        if self._accepts is None:
+            return True
+        tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
+        return bool(self._accepts(tok))
+
     def dragEnterEvent(self, e) -> None:  # noqa: N802
-        if e.mimeData().hasFormat(_MIME):
+        if self._ok(e):
             self._set_active(True)
             e.acceptProposedAction()
 
     def dragMoveEvent(self, e) -> None:  # noqa: N802
-        if e.mimeData().hasFormat(_MIME):
+        if self._ok(e):
             e.acceptProposedAction()
 
     def dragLeaveEvent(self, e) -> None:  # noqa: N802
@@ -339,7 +350,7 @@ class _DropZone(QFrame):
 
     def dropEvent(self, e) -> None:  # noqa: N802
         self._set_active(False)
-        if e.mimeData().hasFormat(_MIME):
+        if self._ok(e):
             tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
             with swallow("image table builder: drop"):
                 self._on_drop(tok)
@@ -397,6 +408,20 @@ def _chan_color(ctx, name: str) -> str:
     return "#C8CDD8"
 
 
+# ── drop acceptance (so a zone never highlights for a token it ignores) ──────
+
+def _accept_axis(tok: str) -> bool:
+    return tok in _ROOT_DIMS or tok.startswith(("newchan:", "chan:"))
+
+
+def _accept_fixed(tok: str) -> bool:
+    return tok in _ROOT_DIMS          # only roots pin under Fixed
+
+
+def _accept_tray(tok: str) -> bool:
+    return tok.startswith("chan:")    # only an on-axis channel drops back to remove
+
+
 # ── shelf construction ──────────────────────────────────────────────────────
 
 def build_shelf(ctx, parent: QWidget) -> None:
@@ -424,7 +449,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     layout.addLayout(header)
 
     # Channels tray (drag source) at the top.
-    tray = _DropZone(lambda tok: _on_tray_drop(ctx, tok), parent)
+    tray = _DropZone(lambda tok: _on_tray_drop(ctx, tok), _accept_tray, parent)
     tray.setObjectName("ITBTray")
     tl = QVBoxLayout(tray)
     tl.setContentsMargins(11, 8, 11, 9)
@@ -446,7 +471,8 @@ def build_shelf(ctx, parent: QWidget) -> None:
     ar.setSpacing(10)
     for name, heading, sub in (("rows", "Rows", "root ↓ · channels nested"),
                                ("cols", "Columns", "root → · channels nested")):
-        z = _DropZone(lambda tok, n=name: _on_zone_drop(ctx, n, tok), axes_row)
+        z = _DropZone(lambda tok, n=name: _on_zone_drop(ctx, n, tok),
+                      _accept_axis, axes_row)
         z.setObjectName("ITBZone")
         z.setProperty("dropActive", "false")
         z.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -467,7 +493,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     layout.addWidget(axes_row)
 
     # Fixed panel (derived) — a drop target for roots + its value pickers.
-    fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), parent)
+    fixed = _DropZone(lambda tok: _on_zone_drop(ctx, "fixed", tok), _accept_fixed, parent)
     fixed.setObjectName("ITBFixed")
     fl = QVBoxLayout(fixed)
     fl.setContentsMargins(11, 8, 11, 9)
@@ -621,9 +647,9 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
     lbl = _text(_ROOT_LABEL[dim], "ITBRootLbl")
     lbl.setAttribute(Qt.WA_TransparentForMouseEvents, False)  # clickable for filter
     lbl.setCursor(Qt.PointingHandCursor)
-    lbl.setToolTip("Filter which values appear on this axis"
-                   if dim != "well" else "Wells come from the plate — click to focus it")
-    lbl.mousePressEvent = lambda _e, d=dim: _open_root_filter(ctx, d)
+    lbl.setToolTip("Wells come from the plate — click to focus it" if dim == "well"
+                   else "Click to choose which values appear on this axis")
+    lbl.mousePressEvent = lambda _e, d=dim, a=lbl: _open_root_filter(ctx, d, a)
     h.addWidget(lbl)
     h.addStretch(1)
     h.addWidget(_x_btn("Move to Fixed",
@@ -723,6 +749,11 @@ def _build_fixed(ctx, spec) -> None:
 
         def _changed(_i, d=dim, cb=combo):
             spec.fixed[d] = cb.currentText()
+            # Like every other edit, a Fixed-value change leaves the grid stale
+            # until Generate — flag it so the header cues that (a full
+            # builder_refresh would tear down this combo mid-selection, so just
+            # set the flag + repaint the shape line).
+            _rt(ctx).builder_dirty = True
             _schedule_apply(ctx)
             _refresh_shape(ctx, spec)
         combo.currentIndexChanged.connect(_changed)
@@ -788,7 +819,13 @@ def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
     lg.triggered.connect(lambda c=False: (_set_attr(cs, "log", bool(c)), _edit(ctx)))
 
     menu.addSeparator()
-    cmap_menu = menu.addMenu("Colour / LUT")
+    # A QMenu created by ``addMenu(title)`` is not owned by PySide's wrapper the
+    # way ``setMenu`` targets are, so it gets garbage-collected and opening it
+    # raises "C++ object already deleted". Build it explicitly and pin a Python
+    # reference on the (gear-parented, hence surviving) parent menu.
+    cmap_menu = QMenu("Colour / LUT", menu)
+    menu.addMenu(cmap_menu)
+    menu._aw_keepalive = [cmap_menu]
     for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
         act = cmap_menu.addAction(name)
         act.setCheckable(True)
@@ -805,20 +842,71 @@ def _set_attr(cs: ChannelSpec, attr: str, val) -> None:
     setattr(cs, attr, val)
 
 
-def _open_root_filter(ctx, dim: str) -> None:
-    """Filter which timepoint / FOV values appear when *dim* is a root (Well comes
-    from the plate). Reuses the existing per-dim active_* filter sets."""
+def _set_dim_filter(ctx, dim: str, values) -> None:
+    """Write the timepoint / FOV value filter (empty set ⇒ all values), flag the
+    grid stale, and schedule the render-less apply."""
+    st = ctx.state.image_table
+    attr = "active_timepoints" if dim == "timepoint" else "active_fovs"
+    chosen = set(values)
+    setattr(st, attr, chosen)
+    builder_spec(ctx).filters[dim] = set(chosen)
+    _rt(ctx).builder_dirty = True
+    _schedule_apply(ctx)
+    _refresh_shape(ctx, builder_spec(ctx))
+
+
+class _StayOpenMenu(QMenu):
+    """A QMenu that keeps itself open when a *checkable* item is clicked, so the
+    user can tick several values in one pass instead of reopening per value.
+    Non-checkable items (e.g. "Show all") and off-menu clicks close as usual."""
+
+    def mouseReleaseEvent(self, e):  # noqa: N802
+        act = self.activeAction()
+        if act is not None and act.isEnabled() and act.isCheckable():
+            act.trigger()            # toggle in place, don't dismiss
+            return
+        super().mouseReleaseEvent(e)
+
+
+def _root_filter_menu(ctx, dim: str, anchor: QWidget):
+    """Build the checkable timepoint / FOV value-filter menu (all ticked ⇒ show
+    every value). Returns None when there are no values. Split from
+    :func:`_open_root_filter` so the wiring is drivable without a blocking exec."""
+    all_vals = _timepoint_options(ctx) if dim == "timepoint" else _fov_options(ctx)
+    if not all_vals:
+        return None
+    st = ctx.state.image_table
+    active = set(getattr(st, "active_timepoints" if dim == "timepoint"
+                         else "active_fovs", set()) or set())
+    menu = _StayOpenMenu(anchor)
+    acts = []
+
+    def _commit():
+        chosen = {a.text() for a in acts if a.isChecked()}
+        # all (or somehow none) ticked ⇒ canonical "all" = empty filter
+        _set_dim_filter(ctx, dim, set() if chosen == set(all_vals) else chosen)
+
+    for val in all_vals:
+        a = menu.addAction(val)
+        a.setCheckable(True)
+        a.setChecked((not active) or val in active)  # empty filter = all shown
+        acts.append(a)
+        a.toggled.connect(lambda _c=False: _commit())
+    menu.addSeparator()
+    show_all = menu.addAction("Show all")
+    show_all.triggered.connect(lambda _c=False: _set_dim_filter(ctx, dim, set()))
+    return menu
+
+
+def _open_root_filter(ctx, dim: str, anchor: QWidget) -> None:
+    """Pop a checkable value filter for a root on an axis. Wells come from the
+    plate, so for Well this just focuses the plate."""
     if dim == "well":
         with swallow("image table builder: focus plate"):
             plate = getattr(_rt(ctx), "sidebar_plate", None)
             if plate is not None:
                 plate.setFocus()
         return
-    # Toggle-all shortcut: clear the filter (⇒ all values) — a full checkable
-    # popover lives on the Advanced panel; the shelf keeps this lightweight.
-    st = ctx.state.image_table
-    attr = "active_timepoints" if dim == "timepoint" else "active_fovs"
-    setattr(st, attr, set())
-    spec = builder_spec(ctx)
-    spec.filters[dim] = set()
-    _schedule_apply(ctx)
+    menu = _root_filter_menu(ctx, dim, anchor)
+    if menu is not None:
+        menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))

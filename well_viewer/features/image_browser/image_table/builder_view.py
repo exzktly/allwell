@@ -31,11 +31,12 @@ from typing import List, Optional
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QSizePolicy,
-    QToolButton, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.safe import swallow
+from well_viewer.core.ui_helpers import parse_float_edit
 from well_viewer.features.image_browser.cell_browser.worker import (
     resolve_channel_tint,
 )
@@ -131,6 +132,21 @@ QComboBox#ITBCombo {
 QComboBox#ITBCombo:hover { border-color: #3B475C; }
 QLabel#ITBFixLbl { color: #E6E9EF; font-size: 12px; }
 QLabel#ITBEq { color: #5F6B7C; font-size: 12px; }
+
+QFrame#ITBLut { border: 1px solid #2A3343; border-radius: 9px; background: #131A24; }
+QFrame#ITBLutRow { background: transparent; border: none; }
+QLabel#ITBLutChan { color: #E6E9EF; font-size: 12px; font-weight: 560; }
+QLabel#ITBLutTag { color: #5F6B7C; font-size: 11px; }
+QLineEdit#ITBLutEdit {
+    background: #1A2230; color: #E6E9EF; border: 1px solid #2A3343;
+    border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
+}
+QLineEdit#ITBLutEdit:focus { border-color: #6B8AFD; }
+QToolButton#ITBLutFit {
+    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    border-radius: 5px; padding: 2px 9px; font-size: 11px;
+}
+QToolButton#ITBLutFit:hover { color: #E6E9EF; border-color: #6B8AFD; }
 """
 
 
@@ -508,6 +524,23 @@ def build_shelf(ctx, parent: QWidget) -> None:
     _rt(ctx).fixed_panel_body = fbody
     layout.addWidget(fixed)
 
+    # LUT panel (derived) — one row per distinct channel in the table, for its
+    # display colormap + min/max range. Not a drop target.
+    lut = QFrame(parent)
+    lut.setObjectName("ITBLut")
+    lutl = QVBoxLayout(lut)
+    lutl.setContentsMargins(11, 8, 11, 9)
+    lutl.setSpacing(7)
+    lutl.addWidget(_zone_head("LUT", "display range per channel · shown once even if it repeats"))
+    lbody = QWidget(lut)
+    lbl_lay = QVBoxLayout(lbody)
+    lbl_lay.setContentsMargins(0, 0, 0, 0)
+    lbl_lay.setSpacing(5)
+    lutl.addWidget(lbody)
+    reg.register("_image_table_lut_panel", lut)
+    _rt(ctx).lut_box_body = lbody
+    layout.addWidget(lut)
+
     builder_refresh(ctx)
     # No auto-apply on build: the shelf stays inert until the user edits it, so it
     # never clobbers the initial grid (built by image_table_rebuild_grid) or
@@ -576,6 +609,7 @@ def builder_refresh(ctx) -> None:
     _build_tree(ctx, spec, "rows")
     _build_tree(ctx, spec, "cols")
     _build_fixed(ctx, spec)
+    _build_lut_box(ctx, spec)
     _build_tray(ctx, spec)
     _refresh_shape(ctx, spec)
 
@@ -762,6 +796,119 @@ def _build_fixed(ctx, spec) -> None:
             cl.addWidget(_text("(from plate)", "ITBNote"))
         lay.addWidget(chip)
     lay.addStretch(1)
+
+
+def _table_channels(spec) -> "dict":
+    """Distinct channels currently in the table, in row-then-column order, mapped
+    to every ChannelSpec that shares that channel — so a channel shown once here
+    edits all of its instances. Keyed by ``axis_token`` so raw ``GFP`` and
+    ``GFP (binary)`` are separate LUTs (each renders on its own token)."""
+    seen: dict = {}
+    for axis in ("rows", "cols"):
+        for cs in getattr(spec, axis).channels:
+            seen.setdefault(cs.axis_token(), []).append(cs)
+    return seen
+
+
+def _build_lut_box(ctx, spec) -> None:
+    body = getattr(_rt(ctx), "lut_box_body", None)
+    if body is None:
+        return
+    _clear(body)
+    lay = body.layout()
+    chans = _table_channels(spec)
+    if not chans:
+        lay.addWidget(_text("channels dragged into the table appear here", "ITBHint"))
+        return
+    for token, specs in chans.items():
+        lay.addWidget(_lut_row(ctx, token, specs))
+
+
+def _lut_row(ctx, token: str, specs: "list") -> QFrame:
+    """One LUT editor row: colour swatch · channel · colormap · min · max · Auto.
+    Edits fan out to every ChannelSpec sharing this channel token."""
+    cs0 = specs[0]
+    row = QFrame()
+    row.setObjectName("ITBLutRow")
+    h = QHBoxLayout(row)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(7)
+    sw = _swatch(_cmap_swatch(cs0.colormap))
+    h.addWidget(sw)
+    h.addWidget(_text(str(cs0.channel).upper(), "ITBLutChan"))
+    if len(specs) > 1:
+        h.addWidget(_text(f"×{len(specs)}", "ITBLutTag"))
+    h.addStretch(1)
+
+    cmap = QComboBox(row)
+    cmap.setObjectName("ITBCombo")
+    names = ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]
+    cmap.addItems(names)
+    if cs0.colormap in names:
+        cmap.setCurrentText(cs0.colormap)
+
+    def _cmap_changed(_i):
+        name = cmap.currentText()
+        for cs in specs:
+            cs.colormap = name
+        sw.setStyleSheet(
+            f"background:{_cmap_swatch(name)}; border-radius:3px;"
+            " border:1px solid rgba(255,255,255,0.16);")
+        _lut_touched(ctx)
+    cmap.currentIndexChanged.connect(_cmap_changed)
+    h.addWidget(cmap)
+
+    def _edit_field(kind: str) -> QLineEdit:
+        le = QLineEdit(row)
+        le.setObjectName("ITBLutEdit")
+        le.setPlaceholderText("auto")
+        val = cs0.lut_min if kind == "min" else cs0.lut_max
+        le.setText("" if val is None else _fmt_lut(val))
+        le.setToolTip("Blank = auto-fit each image")
+
+        def _committed(_le=le, _kind=kind):
+            v = parse_float_edit(_le, None, allow_auto=True)
+            for cs in specs:
+                setattr(cs, "lut_min" if _kind == "min" else "lut_max", v)
+            _le.setText("" if v is None else _fmt_lut(v))
+            _lut_touched(ctx)
+        le.editingFinished.connect(_committed)
+        return le
+
+    h.addWidget(_text("min", "ITBLutTag"))
+    h.addWidget(_edit_field("min"))
+    h.addWidget(_text("max", "ITBLutTag"))
+    h.addWidget(_edit_field("max"))
+
+    fit = QToolButton(row)
+    fit.setObjectName("ITBLutFit")
+    fit.setText("Auto")
+    fit.setCursor(Qt.PointingHandCursor)
+    fit.setToolTip("Clear the range → auto-fit each image")
+
+    def _auto():
+        for cs in specs:
+            cs.lut_min = cs.lut_max = None
+        builder_refresh(ctx)          # rebuild so the cleared fields show blank
+        _schedule_apply(ctx)
+    fit.clicked.connect(lambda: _auto())
+    h.addWidget(fit)
+    return row
+
+
+def _fmt_lut(v: float) -> str:
+    """Compact LUT number: drop a trailing ``.0`` so 1200.0 shows as ``1200``."""
+    f = float(v)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def _lut_touched(ctx) -> None:
+    """A LUT edit (colormap / min / max): flag the grid stale + schedule the
+    render-less apply, but don't rebuild the box (that would drop focus / kill the
+    field mid-edit)."""
+    _rt(ctx).builder_dirty = True
+    _schedule_apply(ctx)
+    _refresh_shape(ctx, builder_spec(ctx))
 
 
 def _build_tray(ctx, spec) -> None:

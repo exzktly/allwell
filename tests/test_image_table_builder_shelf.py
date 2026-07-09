@@ -154,6 +154,21 @@ def test_channel_menu_is_parented_and_lists_render_modes(qtbot):
     assert "Boundary outline" in labels
 
 
+def test_lut_box_shows_each_channel_once():
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp", "rfp"], timepoints=["T01"])
+    spec = B.builder_spec(ctx)
+    spec.rows.channels = [ChannelSpec("GFP"), ChannelSpec("RFP"), ChannelSpec("GFP")]
+    spec.cols = B.Axis(root="timepoint")
+    table = B._table_channels(spec)
+    # GFP appears twice but collapses to a single LUT entry carrying both specs;
+    # editing that row fans out to every instance.
+    assert list(table.keys()) == ["GFP", "RFP"]
+    assert len(table["GFP"]) == 2 and len(table["RFP"]) == 1
+    # a threshold variant keeps its own LUT (renders on its own token)
+    spec.rows.channels.append(ChannelSpec("GFP", "threshold"))
+    assert set(B._table_channels(spec).keys()) == {"GFP", "RFP", "GFP (binary)"}
+
+
 def test_drop_zones_reject_incompatible_tokens():
     # A zone must not highlight for a token its handler ignores (false affordance).
     assert B._accept_axis("well") and B._accept_axis("newchan:GFP") and B._accept_axis("chan:rows:0")

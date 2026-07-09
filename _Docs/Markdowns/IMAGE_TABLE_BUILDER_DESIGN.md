@@ -111,23 +111,33 @@ with drop zones.
 Borrow JMP Graph Builder's shelf-and-zones idea and specialise it to the image
 domain.
 
-### 3.1 The dimensions are Well, Layer, Timepoint, FOV
+### 3.1 The chips: Layers + Facets
 
-A **palette** lists the draggable dimensions. Three of them behave like classic
-faceting variables; two details make the model fit this domain:
+The palette is a **tray of chips**, each a concrete thing you drag onto the map.
+There are two kinds, and — importantly — **every layer is its own chip**, not a
+single "Layer" dimension hiding a list:
 
-- **Well** — its values are **the wells selected on the plate map**, i.e. the
-  existing sidebar `WellPlateSelector` (`picker_view.build_image_table_picker`,
-  which already sets `ctx.state.image_table.active_wells`). There is **no
-  separate well dropdown.** The Well chip just reflects the plate selection's
-  count; clicking it focuses the plate map. Selecting wells stays where users
-  already do it — on the plate — and the Well role only decides whether that
-  selection varies down the rows, across the columns, or is held at one well.
-- **Timepoint** / **FOV** — ordinary value dimensions; the chip shows a count
-  and opens a **value filter** on click (the existing `active_timepoints` /
-  `active_fovs` sets) so a long axis can be pared down without leaving the
-  builder.
-- **Layer** — see §3.4. This is the generalisation of "Channel."
+- **Layer chips.** A **Layer** is a channel rendered a particular way, with its
+  own colour/LUT (§3.2). Each defined layer — *DAPI corrected*, *GFP raw*, a
+  *cell mask*, an *outline* — is one draggable chip, edited in place (a small
+  ✎ popover on the chip: channel / variant / LUT). "Add layer" makes another.
+  The tray defaults to one *corrected* layer per channel, reproducing today's
+  rows-are-channels look.
+- **Facet chips** — **Well**, **Timepoint**, **FOV** — arrange *copies* of the
+  layers:
+  - **Well**'s values are **the wells selected on the plate map**, i.e. the
+    existing sidebar `WellPlateSelector` (`picker_view.build_image_table_picker`,
+    already setting `ctx.state.image_table.active_wells`). There is **no separate
+    well dropdown**; the Well chip reflects the plate count and clicking it
+    focuses the plate. Selecting wells stays on the plate; the Well role only
+    decides whether that selection varies on rows / columns / is held.
+  - **Timepoint** / **FOV** carry a **value filter** on click (the existing
+    `active_timepoints` / `active_fovs` sets) to pare a long axis down.
+
+A chip lives in the tray until you drag it onto a role; drag it back to the tray
+to remove it. So the map's chips *are* the table — you read the whole shape off
+one shelf, and you build it by dragging clear, individual chips, never by
+editing a buried master list.
 
 ### 3.2 A Layer is a channel rendered a particular way, with its own LUT
 
@@ -143,19 +153,14 @@ Layer = (channel, variant ∈ {raw, corrected, binary≥thr, mask, outline, NUC+
          colormap/LUT, log)
 ```
 
-The **Layer** dimension's values are the layers you define in a small
-**Layers panel** (a popover on the Layer chip). It defaults to one *corrected*
-layer per channel — today's behaviour — but you can add more: a raw **and** a
-corrected of the same channel, a **binary ≥thr**, a **cell mask**, a **cell
-outline**, the **NUC+SEG** overlay — each carrying **its own LUT/colour**. Then
-you place **Layer** on an axis to vary the layers, hold it at one, or overlay
-them (§3.3). This is exactly the capability that exists today
+Each layer is a chip you drag directly onto an axis. Placing *DAPI corrected*,
+*GFP corrected*, *RFP corrected* on Rows gives three rows; add a *DAPI outline*
+chip and it's a fourth; drag *GFP raw* onto the Columns and raw-vs-corrected
+varies across the table. This is exactly the capability that exists today
 (`_render_mask_binary`, `_render_threshold_binary`,
-`_render_with_boundary_overlay`, the Source combo), but promoted from per-row
-toggles to nameable, axis-placeable values with associated LUTs — so "raw vs
-corrected across the columns" or "corrected + outline as two rows" becomes a
-drag, and challenge #6 dissolves because a layer renders identically wherever it
-sits.
+`_render_with_boundary_overlay`, the Source combo), promoted from per-row toggles
+to nameable, individually-draggable chips with their own LUTs — and challenge #6
+dissolves because a layer renders identically wherever its chip sits.
 
 ### 3.3 Zones — and Facet ↔ Overlay for composites
 
@@ -163,27 +168,29 @@ Drag a chip into exactly one zone:
 
 | Zone | Meaning | Maps onto today's model |
 |---|---|---|
-| **Rows** | Facet down the rows. Multiple chips nest outer→inner. | `row_dims` (ordered) |
-| **Columns** | Facet across the columns. Multiple chips nest, and a **Wrap** control tiles a long columns axis into stacked bands. | `col_dims` (ordered) + `group_size`/`group_row_span` |
-| **Hold** | Not faceted — pinned to a single value shown on the chip; click to change. For **Well**, the held value is one of the plate-selected wells. | `_fixed_off_axis` + the Hold-off-axis combos |
+| **Rows** | Stack down the rows. Chips nest outer→inner in drop order. Layer chips sharing the axis form the row layers. | `row_dims` (ordered) |
+| **Columns** | Spread across the columns. Chips nest; a **Wrap** control tiles a long columns axis into stacked bands. | `col_dims` (ordered) + `group_size`/`group_row_span` |
+| **Hold** | A facet pinned to a single value shown on the chip; click to change. For **Well**, the held value is one of the plate-selected wells. | `_fixed_off_axis` + the Hold-off-axis combos |
 | **Pages** *(optional, later)* | One separate table per value (export as a multi-page/animation set). | new; generalises the montage use-case |
 
-**Composite is a mode of a dimension on an axis, not a separate zone.** A
-dimension placed in **Rows** or **Columns** carries a **Facet ↔ Overlay**
-toggle. *Facet* (default) gives one row/column per value. *Overlay* composites
-that dimension's values into a single cell (additive LUT-coloured RGB, clipped —
-the existing `image_compose.composite_*_rgb`). Because the toggle lives on the
-chip **in the Rows/Columns shelf at its nesting position**, a composite is now a
-row or column level — inner or outer — exactly like any other, rather than a
-free-floating "Merge" zone with no place in the hierarchy. The headline case:
-drop **Layer** on Rows and switch it to *Overlay* → each cell is the additive
-blend of every layer (an on-canvas multi-channel merge); nest **Well** *outside*
-it and each well gets its own overlaid row. This retires the standalone
-Composite toggle and folds it into the shelf; challenge #2 dissolves. (Overlay
-is offered primarily on the Layer dimension, where compositing is meaningful.)
+**Composite is a mode of the layers on an axis, not a separate zone.** The
+layer chips sharing a Rows/Columns axis carry a **Facet ↔ Overlay** switch.
+*Facet* (default) gives one row/column per layer. *Overlay* composites those
+layers into a single cell (additive LUT-coloured RGB, clipped — the existing
+`image_compose.composite_*_rgb`). Because the switch lives on the layers **in
+the Rows/Columns shelf at their nesting position**, a composite is now a row or
+column level — inner or outer — like any other, not a free-floating "Merge" zone
+with no place in the hierarchy. The headline case: drop the channel layers on
+Rows and flip *Overlay* → each cell is the additive blend of every layer (an
+on-canvas multi-channel merge); drop a **Well** chip *ahead* of them and each
+well gets its own overlaid row. This retires the standalone Composite toggle and
+folds it into the shelf; challenge #2 dissolves. (Layers cohere on one axis — a
+cell can't take a channel from its row *and* its column — so dragging a layer to
+the other axis brings its siblings; you still add, remove, and reorder layers
+individually within that axis.)
 
-**Key simplification:** every dimension lives in exactly one zone, and the zone
-plus its Facet/Overlay mode *is* the role. Nesting, grouping, holding, and
+**Key simplification:** every chip lives in exactly one zone, and the zone plus
+the layer Facet/Overlay mode *is* the role. Nesting, grouping, holding, and
 compositing stop being four disjoint mechanisms and become "which zone, in what
 order, in which mode." The shelf is the single source of truth for the table's
 shape — challenges #2 and #3 dissolve.
@@ -191,9 +198,9 @@ shape — challenges #2 and #3 dissolve.
 ### 3.4 Live, single-phase
 
 Any shelf edit triggers one **debounced rebuild-and-render** — Build and
-Generate merge. Dropping Layer on Rows immediately re-lays the grid and renders
-thumbnails. There is no empty selector grid: **the rendered thumbnails are the
-grid.** Challenge #1 dissolves.
+Generate merge. Dropping a layer chip on Rows immediately re-lays the grid and
+renders thumbnails. There is no empty selector grid: **the rendered thumbnails
+are the grid.** Challenge #1 dissolves.
 
 The heavy per-cell dropdown grid is removed from the default surface.
 Per-cell overrides (the genuinely irregular table) move to **progressive
@@ -256,19 +263,19 @@ Each phase is independently shippable and leaves the tab working.
   per-row toggle.
 
 ### Phase 1 — the shelf UI (behind the existing grid)
-- New `builder_view.py`: the palette of dimension chips (Well / Layer /
-  Timepoint / FOV) + the Rows / Columns / Hold drop zones, using Qt
-  drag-and-drop (`QDrag` / `dropEvent`). Reuse the ordered-nesting and
-  value-filter logic already proven in `tab_view._make_dims_picker` /
-  `_make_filter_picker`. The **Well** chip binds to the existing sidebar
-  `WellPlateSelector` (reads `active_wells`, clicking the chip focuses the
-  plate) — no new well control. The **Layer** chip opens a layers editor
-  (channel × variant × LUT rows + "Add layer"), which is the per-row LUT/display
-  table relocated onto a per-layer model.
-- Rows/Columns chips carry a **Facet ↔ Overlay** toggle (writes `spec.overlay`);
-  dropping/reordering/holding/toggling writes the `TableSpec`, calls
-  `apply_spec()`, then the existing `image_table_build_layout` + a debounced
-  `image_table_generate`.
+- New `builder_view.py`: the tray (one chip per layer + Well / Timepoint / FOV
+  facet chips) + the Rows / Columns / Hold drop zones, using Qt drag-and-drop
+  (`QDrag` / `dropEvent`). Reuse the ordered-nesting and value-filter logic
+  already proven in `tab_view._make_dims_picker` / `_make_filter_picker`. The
+  **Well** chip binds to the existing sidebar `WellPlateSelector` (reads
+  `active_wells`, clicking the chip focuses the plate) — no new well control.
+  Each **Layer** chip edits in place (a ✎ popover: channel / variant / LUT);
+  "Add layer" appends one — this is the per-row LUT/display table dissolved into
+  per-layer chips.
+- The layer chips sharing a Rows/Columns axis carry a **Facet ↔ Overlay** toggle
+  (writes `spec.overlay`); dropping/reordering/holding/toggling writes the
+  `TableSpec`, calls `apply_spec()`, then the existing `image_table_build_layout`
+  + a debounced `image_table_generate`.
 - Ship it *above* the current selector grid first, so both drive the same state
   and can be compared side by side.
 

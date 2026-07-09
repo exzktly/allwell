@@ -59,19 +59,25 @@ def test_generate_appends_composite_row(image_table_app):
     C.image_table_apply_preset(ctx, "channel", "timepoint")
     cells = ctx.runtime.image_table.cells
     assert cells, "build should assemble the selector grid"
-    n_rows = len(cells)
     grid = ctx.runtime.image_table.render_grid
 
-    # Composite off: no row at index n_rows.
+    # The composite cells carry a "Composite" tooltip; the faceted layout places
+    # them below the labelled grid rather than at a fixed row index.
+    from PySide6.QtWidgets import QLabel
+
+    def _composite_present():
+        host = grid.parentWidget()
+        return any(lbl.toolTip() == "Composite" for lbl in host.findChildren(QLabel))
+
+    # Composite off: no composite cells.
     ctx.state.image_table.composite = False
     C.image_table_generate(ctx)
-    assert grid.itemAtPosition(n_rows, 0) is None
+    assert not _composite_present()
 
-    # Composite on: an extra bottom row appears (does not raise).
+    # Composite on: an extra bottom row of composite cells appears (no raise).
     ctx.state.image_table.composite = True
     C.image_table_generate(ctx)
-    item = grid.itemAtPosition(n_rows, 0)
-    assert item is not None and item.widget() is not None
+    assert _composite_present()
 
 
 @pytest.mark.qt

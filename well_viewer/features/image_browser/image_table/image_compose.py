@@ -147,7 +147,31 @@ def _lut_index(ctx, r: int) -> int:
     return r
 
 
-def _row_cmap_name(ctx, r: int) -> Optional[str]:
+def _channel_opts_for(ctx, chan) -> Optional[dict]:
+    """The builder's per-channel render spec for *chan*, or None.
+
+    The root + nested-channels shelf stores each channel's render options
+    (render/boundary/colormap/lut/log) on ``ctx.state.image_table.channel_opts``,
+    keyed by the channel token exactly as it appears on the axis (e.g. ``"GFP"``
+    or ``"GFP (binary)"``). When present the four ``_row_*`` helpers resolve from
+    it — so display travels with the channel regardless of which axis it sits on
+    — and fall back to the legacy per-row widget path when it's absent (old saved
+    states, or the collapsed Advanced selector grid)."""
+    if not chan:
+        return None
+    opts = getattr(ctx.state.image_table, "channel_opts", None) or {}
+    return opts.get(chan) or opts.get(str(chan).strip().upper())
+
+
+def _shared_channel_lut_for(ctx, chan) -> Optional[Tuple[float, float]]:
+    """Shared per-channel brightness default (Review Image) for *chan*'s base."""
+    image_view = getattr(ctx.state, "image_view", None)
+    if image_view is None or not hasattr(image_view, "get_lut"):
+        return None
+    return image_view.get_lut(_binary_base(chan) if chan else chan)
+
+
+def _row_cmap_name(ctx, r: int, chan=None) -> Optional[str]:
     """Return the mpl colormap name for row *r*, or None when the row is
     set to ``Greys`` (untinted grayscale fast path).
 
@@ -156,6 +180,10 @@ def _row_cmap_name(ctx, r: int) -> Optional[str]:
     the gradient shown by the LutSelector's strip — high intensity gets
     the cmap's high-end colour, low intensity gets the low end.
     """
+    spec = _channel_opts_for(ctx, chan)
+    if spec is not None:
+        name = (spec.get("colormap") or "").strip()
+        return None if (not name or name == "Greys") else name
     cbs = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
     r = _lut_index(ctx, r)
     if not (0 <= r < len(cbs)):
@@ -353,16 +381,25 @@ def _shared_channel_lut(ctx, row_idx: int) -> Optional[Tuple[float, float]]:
     return image_view.get_lut(_row_channel(ctx, row_idx))
 
 
-def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
+def _parse_lut(ctx, row_idx: int, chan=None) -> Tuple[Optional[float], Optional[float]]:
     """Read (lo, hi) for grid row *row_idx*; falls back to the shared per-channel
     default, else (None, None) for auto-fit.
 
-    The per-row LUT table is keyed per grid row (not per channel) so two rows
-    showing the same channel have independent ranges — see
-    ``grid_view.build_lut_row``. A manual per-row value overrides the shared
-    default; an "auto" row inherits the shared brightness-per-channel default
-    (S4) when one exists, otherwise auto-fits.
+    With a builder channel spec (``chan`` given) the range comes from the
+    channel's own ``lut_min``/``lut_max`` (None ⇒ inherit the shared per-channel
+    default, then auto-fit). Otherwise the legacy per-row LUT table is used: keyed
+    per grid row (not per channel) so two rows showing the same channel have
+    independent ranges — see ``grid_view.build_lut_row``.
     """
+    spec = _channel_opts_for(ctx, chan)
+    if spec is not None:
+        lo = spec.get("lut_min")
+        hi = spec.get("lut_max")
+        if lo is None and hi is None:
+            shared = _shared_channel_lut_for(ctx, chan)
+            if shared is not None:
+                return shared
+        return lo, hi
     luts = getattr(ctx.runtime.image_table, "lut", None) or {}
     entry = luts.get(_lut_index(ctx, row_idx))
     lo = hi = None
@@ -381,12 +418,21 @@ def _parse_lut(ctx, row_idx: int) -> Tuple[Optional[float], Optional[float]]:
     return lo, hi
 
 
-def _row_display_opts(ctx, row_idx: int) -> Tuple[bool, bool, str]:
+def _row_display_opts(ctx, row_idx: int, chan=None) -> Tuple[bool, bool, str]:
     """Per-row display toggles: ``(use_tophat, show_boundaries, binary_mode)``.
 
-    Read from the row's LUT/Display box widgets (``grid_view.build_lut_row``);
-    defaults to all-off when the row has no box yet.
+    With a builder channel spec (``chan`` given) the render mode maps to these:
+    raw→(raw, …), corrected→(tophat, …), mask→binary "mask", threshold→binary
+    "threshold"; ``boundary`` is the outline overlay. Otherwise read from the
+    row's LUT/Display box widgets (``grid_view.build_lut_row``); all-off default.
     """
+    spec = _channel_opts_for(ctx, chan)
+    if spec is not None:
+        render = spec.get("render", "corrected")
+        use_tophat = (render == "corrected")
+        show_boundaries = bool(spec.get("boundary", False))
+        binary_mode = "mask" if render == "mask" else ("threshold" if render == "threshold" else "")
+        return use_tophat, show_boundaries, binary_mode
     entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(_lut_index(ctx, row_idx)) or {}
     source_w = entry.get("source")
     bound_w = entry.get("boundaries")
@@ -399,12 +445,16 @@ def _row_display_opts(ctx, row_idx: int) -> Tuple[bool, bool, str]:
     return use_tophat, show_boundaries, binary_mode
 
 
-def _row_log_scale(ctx, row_idx: int) -> bool:
+def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
     """Whether grid row *row_idx* shows its image on a log intensity scale.
 
     Separate from :func:`_row_display_opts` so that helper's 3-tuple unpack call
-    sites stay unchanged. Reads the row's ``"log"`` checkbox (``build_lut_row``).
+    sites stay unchanged. Reads the builder channel spec's ``log`` (``chan`` given),
+    else the row's ``"log"`` checkbox (``build_lut_row``).
     """
+    spec = _channel_opts_for(ctx, chan)
+    if spec is not None:
+        return bool(spec.get("log", False))
     entry = (getattr(ctx.runtime.image_table, "lut", None) or {}).get(_lut_index(ctx, row_idx)) or {}
     log_w = entry.get("log")
     try:
@@ -778,18 +828,21 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
     if arr is None:
         return None
     chan = cell["chan_cb"].currentText().strip()
+    # channel_opts / the four helpers are keyed by the full axis token (incl. a
+    # trailing " (binary)"); keep it before we strip to the base channel below.
+    chan_token = chan
     well = cell["well_cb"].currentText().strip()
     tp = cell["tp_cb"].currentText().strip()
     fov = cell["fov_cb"].currentText().strip()
 
-    _use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
+    _use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r, chan_token)
     # A "GFP (binary)" cell renders the base channel's threshold-binary regardless
     # of the row's Binary box: resolve the real channel + force threshold mode.
     if _is_binary_variant(chan):
         chan = _binary_base(chan)
         binary_mode = "threshold"
     cropped = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
-    lo, hi = _parse_lut(ctx, r)
+    lo, hi = _parse_lut(ctx, r, chan_token)
 
     mask_arr = None
     if show_boundaries and not _is_nuc_seg(chan):
@@ -804,11 +857,11 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
     return _compose_image_table_rgb(
         cropped, mask_arr,
         lo=lo, hi=hi,
-        cmap_name=_row_cmap_name(ctx, r),
+        cmap_name=_row_cmap_name(ctx, r, chan_token),
         is_overlay=_is_nuc_seg(chan),
         binary_mask=binary_mask,
         show_boundaries=show_boundaries,
-        log_scale=_row_log_scale(ctx, r),
+        log_scale=_row_log_scale(ctx, r, chan_token),
     )
 
 

@@ -425,6 +425,16 @@ def _snapshot_image_table(ctx) -> dict:
         out["zoom"] = float(ctx.state.image_table.zoom)
     except Exception:
         swallowed()
+    # Builder (root + nested-channels tree) state: the per-channel render options
+    # and the Fixed panel's pinned values. Plain JSON (str/bool/float/None), so the
+    # shelf reconstructs its spec (spec_from_state) on restore. Only written when
+    # present so pre-builder saved states round-trip unchanged.
+    copts = dict(getattr(ctx.state.image_table, "channel_opts", None) or {})
+    if copts:
+        out["channel_opts"] = copts
+    fvals = dict(getattr(ctx.state.image_table, "fixed_vals", None) or {})
+    if fvals:
+        out["fixed_vals"] = fvals
     return out
 
 
@@ -917,6 +927,19 @@ def _apply_image_table(ctx, state: dict) -> None:
                     [str(d) for d in dims] if isinstance(dims, list) else [])
         except Exception:
             swallowed()
+
+    # Builder (root + nested-channels) state — per-channel render options + the
+    # Fixed panel's pinned values. Restoring these lets the render seam resolve
+    # per-channel display and lets the shelf reconstruct its tree
+    # (spec_from_state). Clearing the cached builder_spec makes the shelf re-seed
+    # from the restored state the next time it's shown (the render itself is
+    # refreshed by the rebuild below).
+    try:
+        ctx.state.image_table.channel_opts = dict(state.get("channel_opts") or {})
+        ctx.state.image_table.fixed_vals = dict(state.get("fixed_vals") or {})
+        ctx.runtime.image_table.builder_spec = None
+    except Exception:
+        swallowed()
 
     # Grouped/tiled layout state — restore BEFORE the grid rebuild so the LUT
     # row→group map is rebuilt correctly (image_table_rebuild_grid reads

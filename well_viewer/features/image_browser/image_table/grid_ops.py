@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from well_viewer.features.image_browser.image_table.controller import (
+    image_table_generate,
     image_table_rebuild_grid,
     image_table_rebuild_lut_row,
 )
@@ -303,3 +304,41 @@ def image_table_open_add_col_dialog(ctx) -> None:
         mode=str(mode_cb.currentData() or "uniform"),
         value=val_cb.currentText().strip(),
     )
+
+
+def image_table_cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
+    """Right-click override popover for a single rendered cell.
+
+    Progressive disclosure for the odd irregular cell: pick a new Well / Channel
+    / Timepoint / FOV for just this cell from its own combo's values, write it
+    into the selector combo (the same widget the renderer reads), and re-render.
+    The bulk shape still comes from the builder shelf; this is the one-off tweak.
+    """
+    from PySide6.QtWidgets import QMenu
+
+    cells = getattr(ctx.runtime.image_table, "cells", None) or []
+    if not (0 <= r < len(cells) and 0 <= c < len(cells[r])):
+        return
+    cell = cells[r][c]
+    menu = QMenu()
+
+    def _set(cb, val):
+        cb.blockSignals(True)
+        if cb.findText(val) >= 0:
+            cb.setCurrentText(val)
+        cb.blockSignals(False)
+        image_table_generate(ctx)
+
+    for label, key in (("Well", "well_cb"), ("Channel", "chan_cb"),
+                       ("Timepoint", "tp_cb"), ("FOV", "fov_cb")):
+        cb = cell.get(key)
+        if cb is None:
+            continue
+        sub = menu.addMenu(f"{label}: {cb.currentText() or '—'}")
+        for i in range(cb.count()):
+            val = cb.itemText(i)
+            act = sub.addAction(val)
+            act.setCheckable(True)
+            act.setChecked(i == cb.currentIndex())
+            act.triggered.connect(lambda _c=False, _cb=cb, _v=val: _set(_cb, _v))
+    menu.exec(global_pos)

@@ -52,6 +52,7 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_apply_dims_preset
 from well_viewer.features.image_browser.image_table.build_layout import image_table_reset_layout
 from well_viewer.features.image_browser.image_table.build_layout import image_table_clear_render
+from well_viewer.features.image_browser.image_table.builder_view import build_shelf
 
 
 class _ReorderList(QListWidget):
@@ -176,13 +177,49 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     scroll.setWidget(inner)
     layout.addWidget(scroll, 1)
 
-    # ── Build Layout strip ──────────────────────────────────────────────────
-    # One compact framed panel: declare what varies down rows / across columns,
-    # which channels, then Build. Presets live in the Build split-button's menu;
-    # manual-fill + Add-row live in "More". Off-axis held values + grid size sit
-    # on a second line. Build only assembles the selector grid — press Generate
-    # to render.
-    builder = QFrame(inner)
+    # ── Builder shelf: root + nested channels (the primary authoring surface) ─
+    # Drag a root (Well/Timepoint/FOV) onto Rows/Columns, nest channels under it,
+    # set each channel's ⚙ options; the table renders live. Replaces the old
+    # Build-Layout dropdown strip (now demoted to Advanced, below).
+    shelf_host = QWidget(inner)
+    build_shelf(ctx, shelf_host)
+    il.addWidget(shelf_host)
+
+    sep_shelf = QFrame(inner)
+    sep_shelf.setObjectName("Separator")
+    sep_shelf.setFrameShape(QFrame.HLine)
+    sep_shelf.setFixedHeight(2)
+    il.addWidget(sep_shelf)
+
+    # ── Advanced (collapsed): the legacy Build-Layout controls, the per-cell
+    # dropdown selector grid, and the per-row LUT/display table. Kept mounted so
+    # the render path (reads the cell combos), persistence, and their tests keep
+    # working, and so irregular per-cell tables can still be hand-edited. The
+    # shelf above is the primary surface; this is the power/override panel.
+    adv_toggle = QToolButton(inner)
+    adv_toggle.setCheckable(True)
+    adv_toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    adv_toggle.setProperty("variant", "secondary")
+    adv_toggle.setText("▸ Advanced — selector grid & per-cell overrides")
+    il.addWidget(adv_toggle)
+
+    advanced = QFrame(inner)
+    advanced.setObjectName("Panel")
+    advanced.setVisible(False)
+    adv_layout = QVBoxLayout(advanced)
+    adv_layout.setContentsMargins(0, 6, 0, 8)
+    adv_layout.setSpacing(6)
+    il.addWidget(advanced)
+
+    def _toggle_advanced(on: bool) -> None:
+        advanced.setVisible(bool(on))
+        adv_toggle.setText(("▾ " if on else "▸ ") + "Advanced — selector grid & per-cell overrides")
+    adv_toggle.toggled.connect(_toggle_advanced)
+
+    # The legacy Build-Layout strip + selector grid + LUT table live inside the
+    # Advanced panel now (``builder`` parents to it, and the ``il.addWidget`` calls
+    # below target ``adv_layout``).
+    builder = QFrame(advanced)
     builder.setObjectName("ImageTableSelector")
     builder.setFrameShape(QFrame.NoFrame)
     bv = QVBoxLayout(builder)
@@ -562,14 +599,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     reg.register("_image_table_cols_spin", cols_spin)
     bv.addWidget(opts_row)
 
-    il.addWidget(builder)
+    adv_layout.addWidget(builder)
 
     sep1 = QFrame(inner)
     sep1.setObjectName("Separator")
     sep1.setFrameShape(QFrame.HLine)
     sep1.setFixedHeight(2)
-    il.addWidget(sep1)
-    il.addSpacing(6)
+    adv_layout.addWidget(sep1)
+    adv_layout.addSpacing(6)
 
     # ── Selector grid (rows × cols of per-cell dropdowns) ───────────────────
     # Wrap selector area in a styled frame so it is visually distinct from
@@ -591,8 +628,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     selector_grid.setSpacing(4)
     reg.register("_image_table_selector_grid", selector_grid)
     sb_layout.addWidget(selector_host)
-    il.addWidget(selector_box)
-    il.addSpacing(6)
+    adv_layout.addWidget(selector_box)
+    adv_layout.addSpacing(6)
 
     # ── Per-row levels & display table (rebuilt by the controller) ──────────
     # An aligned table — one row per grid row — for the per-row colormap, LUT
@@ -615,7 +652,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     lut_layout.setVerticalSpacing(6)
     reg.register("_image_table_lut_container", lut_container)
     lut_outer_layout.addWidget(lut_container)
-    il.addWidget(lut_outer)
+    adv_layout.addWidget(lut_outer)
 
     sep2 = QFrame(inner)
     sep2.setObjectName("Separator")

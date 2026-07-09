@@ -460,6 +460,7 @@ from well_viewer.features.image_browser.image_table.build_layout import (  # noq
     _refresh_dims_pickers,
     image_table_apply_dims_preset,
     image_table_apply_preset,
+    image_table_apply_spec,
     image_table_build_layout,
 )
 
@@ -1135,9 +1136,17 @@ def _append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered) -> N
         grid.addWidget(cell_widget, comp_row, c)
 
 
+def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
+    """Per-cell override popover (delegates to grid_ops; lazy to avoid a cycle)."""
+    from well_viewer.features.image_browser.image_table.grid_ops import (
+        image_table_cell_override_menu,
+    )
+    image_table_cell_override_menu(ctx, r, c, global_pos)
+
+
 def image_table_generate(ctx) -> None:
     """Load images for every cell and lay out the rendered image table."""
-    from well_viewer.core.ui_helpers import make_fluor_thumb, make_overlay_thumb
+    from well_viewer.core.ui_helpers import make_overlay_thumb
     from well_viewer.core.ui_helpers import clear_layout
 
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
@@ -1169,17 +1178,17 @@ def image_table_generate(ctx) -> None:
     _prefetch_cell_arrays(ctx, cells, cache)
 
     for r, row in enumerate(cells):
-        # Display options (top-hat / boundaries / binary) + LUT are per ROW —
-        # read from this row's box so two rows on the same channel stay
-        # independent (see grid_view.build_lut_row).
-        use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r)
-        log_scale = _row_log_scale(ctx, r)
         for c, cell in enumerate(row):
             well = cell["well_cb"].currentText().strip()
             chan = cell["chan_cb"].currentText().strip()
             tp = cell["tp_cb"].currentText().strip()
             fov = cell["fov_cb"].currentText().strip()
 
+            # Which base image to load (raw vs corrected) is resolved PER CHANNEL
+            # (its render option), so raw/corrected can differ per cell — e.g.
+            # channels nested on the columns axis. Falls back to the per-row
+            # widget for legacy states via _row_display_opts.
+            use_tophat = _row_display_opts(ctx, r, chan)[0]
             arr = None
             ratio = _find_ratio_for_channel(ctx, chan) if chan else None
             if well and chan and tp:
@@ -1189,7 +1198,6 @@ def image_table_generate(ctx) -> None:
                     arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
             rendered[(r, c)] = arr
 
-            lo, hi = _parse_lut(ctx, r)
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
             cl.setContentsMargins(2, 2, 2, 2)
@@ -1211,46 +1219,32 @@ def image_table_generate(ctx) -> None:
             # expand and leave large gaps around the image.
             img_label.setFixedSize(sz, sz)
             if arr is not None:
-                # Apply the shared crop (no-op when not set) and render.
-                cropped = crop_tool.apply_to_array(arr) if crop_tool else arr
-                is_overlay = _is_nuc_seg(chan) or getattr(arr, "ndim", 2) >= 3
-                if is_overlay:
-                    # Pre-rendered RGB overlay: tint and per-channel LUT
-                    # don't apply, so feed it straight to the overlay
-                    # thumbnailer (which still respects lo/hi when set).
+                # One composer for the live grid, the composite row and export:
+                # cell_display_rgb resolves the channel's render / boundary / LUT
+                # / colormap (from channel_opts, or the per-row widgets for legacy
+                # states) so live and exported thumbnails always agree. A
+                # pre-rendered RGB that isn't NUC+SEG goes straight to the overlay
+                # thumbnailer (cell_display_rgb only treats NUC+SEG as overlay).
+                if getattr(arr, "ndim", 2) >= 3 and not _is_nuc_seg(chan):
+                    cropped = crop_tool.apply_to_array(arr) if crop_tool else arr
+                    lo, hi = _parse_lut(ctx, r, chan)
                     pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
-                elif binary_mode == "mask":
-                    # Every segmented cell white on black.
-                    pix = _render_mask_binary(ctx, cache, well, tp, fov, crop_tool, sz)
-                    if pix is None:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(ctx, r), log_scale=log_scale)
-                elif binary_mode == "threshold":
-                    # Only cells above the active ON threshold white on black.
-                    pix = _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz)
-                    if pix is None:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(ctx, r), log_scale=log_scale)
-                elif show_boundaries:
-                    # Overlay white cell-boundary outlines on the fluorescence image.
-                    mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
-                    if mask_arr is not None:
-                        cm = crop_tool.apply_to_array(mask_arr) if crop_tool else mask_arr
-                        pix = _render_with_boundary_overlay(
-                            cropped, sz, sz, lo, hi,
-                            _row_cmap_name(ctx, r), cm, log_scale=log_scale,
-                        )
-                    else:
-                        pix = make_fluor_thumb(cropped, sz, sz, lo, hi, cmap=_row_cmap_name(ctx, r), log_scale=log_scale)
                 else:
-                    pix = make_fluor_thumb(
-                        cropped, sz, sz, lo, hi,
-                        cmap=_row_cmap_name(ctx, r), log_scale=log_scale,
-                    )
+                    rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
+                    pix = make_overlay_thumb(rgb, sz, sz) if rgb is not None else None
                 # CropTool needs the FULL source array + the active crop on
                 # the label so label-pixel → image-pixel coord conversion
                 # works correctly even when the label already shows a crop.
                 img_label._raw_arr = arr  # type: ignore[attr-defined]
                 img_label._crop = crop_tool.crop if crop_tool else None  # type: ignore[attr-defined]
                 _install_cell_events(ctx, img_label, crop_tool, well, chan, tp, fov)
+                # Right-click a rendered cell → one-off per-cell override popover
+                # (writes the cell combos the renderer reads, then re-renders).
+                img_label.setContextMenuPolicy(Qt.CustomContextMenu)
+                img_label.customContextMenuRequested.connect(
+                    lambda pos, rr=r, cc=c, _l=img_label:
+                    _cell_override_menu(ctx, rr, cc, _l.mapToGlobal(pos))
+                )
                 if pix is not None:
                     img_label.setPixmap(pix)
                 else:

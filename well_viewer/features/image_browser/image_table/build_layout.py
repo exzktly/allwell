@@ -21,6 +21,7 @@ from typing import List
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.image_table.image_compose import _row_channel
+from well_viewer.features.image_browser.image_table.state import spec_to_state_fields
 from well_viewer.features.image_browser.image_table.grid_layout import (
     _axis_values,
     _current_axis,
@@ -334,6 +335,82 @@ def image_table_apply_dims_preset(ctx, row_dims, col_dims) -> None:
         setattr(st, f"{which}_axis", axis)
     _refresh_dims_pickers(ctx)
     image_table_build_layout(ctx)
+
+
+# ── The builder shelf entry point ───────────────────────────────────────────
+# ``builder_view`` (the root + nested-channels drag-and-drop tree) is the new
+# authoring surface. It edits a Qt-free ``TableSpec`` and calls this to flatten
+# it onto the existing state fields + build + render. The tree is the single
+# source of truth; the per-cell/-row selector widgets are a derived cache the
+# render path reads.
+
+
+def _sync_fixed_combos(ctx, fixed_vals) -> None:
+    """Mirror the Fixed panel's held values onto the global_*_cb widgets that
+    ``grid_layout._fixed_off_axis`` reads, so off-axis (held) dims resolve to the
+    chosen value. No-op headless / before the tab is built."""
+    key_of = {"channel": "global_chan_cb", "timepoint": "global_tp_cb",
+              "fov": "global_fov_cb"}
+    for dim, val in (fixed_vals or {}).items():
+        attr = key_of.get(dim)
+        cb = getattr(ctx.runtime.image_table, attr, None) if attr else None
+        if cb is None or not val:
+            continue
+        cb.blockSignals(True)
+        try:
+            if cb.findText(val) >= 0:
+                cb.setCurrentText(val)
+        finally:
+            cb.blockSignals(False)
+
+
+def image_table_apply_spec(ctx, spec, *, render: bool = True) -> None:
+    """Author the Image Table from a builder ``TableSpec`` (root + nested channels).
+
+    Flattens the tree onto the existing state fields
+    (``row_dims``/``col_dims``/``active_channels``/``active_timepoints``/
+    ``active_fovs``/``composite``/``group_size``/``channel_opts``/``fixed_vals``),
+    mirrors the Fixed values onto the off-axis combos, builds the selector grid
+    with the existing layout math, then (optionally) renders. ``active_wells``
+    stays owned by the sidebar plate. A threshold channel is carried by its
+    ``"<CHAN> (binary)"`` token (already in ``active_channels`` via
+    ``spec_to_state_fields``), so the tested binary-variant plumbing renders it on
+    either axis; every other per-channel render option is resolved from
+    ``channel_opts`` by the render seam.
+    """
+    st = ctx.state.image_table
+    fields = spec_to_state_fields(spec)
+    st.row_dims = fields["row_dims"]
+    st.col_dims = fields["col_dims"]
+    st.active_channels = fields["active_channels"]
+    st.active_timepoints = fields["active_timepoints"]
+    st.active_fovs = fields["active_fovs"]
+    st.composite = fields["composite"]
+    st.channel_opts = fields["channel_opts"]
+    st.fixed_vals = fields["fixed_vals"]
+
+    _sync_fixed_combos(ctx, fields["fixed_vals"])
+
+    row_dims = list(st.row_dims)
+    col_dims = list(st.col_dims)
+    wrap = int(fields["group_size"] or 0)
+
+    if wrap and len(row_dims) <= 1 and len(col_dims) <= 1:
+        # Grouped/tiled columns — reuse the flat grouped path (single-dim axes).
+        st.group_size = wrap
+        rt = ctx.runtime.image_table
+        rt.row_axis = row_dims[0] if row_dims else "channel"
+        rt.col_axis = col_dims[0] if col_dims else "timepoint"
+        st.row_axis = rt.row_axis
+        st.col_axis = rt.col_axis
+        image_table_build_layout(ctx)
+    else:
+        st.group_size = 0
+        st.group_row_span = 0
+        _build_nested_layout(ctx, row_dims, col_dims)
+
+    if render:
+        _ctrl().image_table_generate(ctx)
 
 
 # Build Layout defaults — the fresh-tab state the "Reset table" action returns to.

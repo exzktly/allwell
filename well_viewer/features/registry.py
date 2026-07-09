@@ -217,12 +217,20 @@ def _activate_batch_export(ctx) -> None:
 
 
 def _activate_review_csv(ctx) -> None:
-    from well_viewer.features.image_browser.review_image.controller import (
-        refresh_review_csv,
-    )
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     ctx.refresh_sidebar_map()
-    refresh_review_csv(ctx)
+    # ``refresh_review_csv`` lives in ``image_browser.review_image``. Review CSV is
+    # its own feature but borrows that hydration logic, so guard the cross-feature
+    # call: when Image Browser has been removed the table just isn't hydrated
+    # (removal contract — mirrors load_controller's guarded review_image import).
+    try:
+        from well_viewer.features.image_browser.review_image.controller import (
+            refresh_review_csv,
+        )
+        refresh_review_csv(ctx)
+    except Exception:
+        from well_viewer.core.safe import swallowed
+        swallowed("Review CSV: Image Browser removed; table not hydrated")
 
 
 def _activate_smfish(ctx) -> None:

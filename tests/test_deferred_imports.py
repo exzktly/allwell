@@ -83,7 +83,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # the latter defined below controller's re-export point so a module-level import
 # would fail during partial init) — the standard one-defer cycle break for an
 # extraction, exactly like grid_ops above.
-MAX_DEFERRED_FEATURE_IMPORTS = 125
+#
+# +1 (125 → 126) for the Image Table builder's per-cell override: ``controller.
+# _cell_override_menu`` lazily imports ``grid_ops.image_table_cell_override_menu``
+# — the same controller↔grid_ops cycle break the two grid_ops imports above use
+# (grid_ops imports controller at module scope, so controller must defer).
+MAX_DEFERRED_FEATURE_IMPORTS = 126
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

@@ -50,7 +50,7 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _channel_options, _fov_options, _timepoint_options, _well_options,
 )
 from well_viewer.features.image_browser.image_table.image_compose import (
-    LUT_COLOR_NAMES, _is_binary_variant,
+    LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant,
 )
 
 _MIME = "application/x-aw-imgtable-token"
@@ -197,7 +197,9 @@ def _default_spec(ctx):
     chans = _base_channels(ctx)
     spec = spec_from_state(st)  # empty axes + current filters
     if chans:
-        spec.rows = Axis(root=None, channels=[ChannelSpec(c, "corrected") for c in chans])
+        spec.rows = Axis(root=None, channels=[
+            ChannelSpec(c, "corrected", colormap=_default_colormap_for(ctx, c))
+            for c in chans])
         if _timepoint_options(ctx):
             spec.cols = Axis(root="timepoint")
     for dim in _ROOT_DIMS:
@@ -235,7 +237,8 @@ def _add_channel(ctx, spec, name: str, target: str) -> None:
         ax.channels.extend(other.channels)
         other.channels = []
         other.overlay = False
-    ax.channels.append(ChannelSpec(channel=name, render="corrected", colormap="Greys"))
+    ax.channels.append(ChannelSpec(channel=name, render="corrected",
+                                   colormap=_default_colormap_for(ctx, name)))
 
 
 def _move_channel(spec, src_axis: str, idx: int, target: str) -> None:
@@ -412,16 +415,25 @@ def _cmap_swatch(cmap: str) -> str:
     return _CMAP_SWATCH.get(cmap, "#C8CDD8")
 
 
-def _chan_color(ctx, name: str) -> str:
-    """The app's own per-channel palette colour (by index), as a hex string —
-    so a tray chip's dot matches the tint the Cell Browser / composites use."""
-    with swallow("image table builder: channel tint"):
+def _default_colormap_for(ctx, name: str) -> str:
+    """The channel's default display colormap: the named LUT colour nearest the
+    channel's palette tint (its Cell Browser / composite identity). This is what
+    a tray chip's swatch shows *and* what the channel adopts when dragged in — so
+    the colour carries through instead of resetting to grey — and it stays fully
+    editable in the LUT box below."""
+    with swallow("image table builder: default colormap"):
         names = _base_channels(ctx)
         idx = names.index(name) if name in names else 0
-        r, g, b = resolve_channel_tint(name, idx, None)
-        return "#{:02X}{:02X}{:02X}".format(
-            int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
-    return "#C8CDD8"
+        tr, tg, tb = resolve_channel_tint(name, idx, None)
+        best, best_d = "Greys", None
+        for cname, rgb in LUT_COLORS.items():
+            if rgb is None:                      # Greys carries no tint
+                continue
+            d = (rgb[0] - tr) ** 2 + (rgb[1] - tg) ** 2 + (rgb[2] - tb) ** 2
+            if best_d is None or d < best_d:
+                best, best_d = cname, d
+        return best
+    return "Greys"
 
 
 # ── drop acceptance (so a zone never highlights for a token it ignores) ──────
@@ -927,9 +939,9 @@ def _build_tray(ctx, spec) -> None:
         cl.setContentsMargins(9, 3, 10, 3)
         cl.setSpacing(7)
         cl.addWidget(_grip())
-        cl.addWidget(_swatch(_chan_color(ctx, name)))
+        cl.addWidget(_swatch(_cmap_swatch(_default_colormap_for(ctx, name))))
         cl.addWidget(_text(str(name).upper(), "ITBChanLbl"))
-        chip.setToolTip("Drag onto a root in Rows or Columns")
+        chip.setToolTip("Drag onto a root in Rows or Columns — it keeps this colour")
         lay.addWidget(chip)
     lay.addStretch(1)
 

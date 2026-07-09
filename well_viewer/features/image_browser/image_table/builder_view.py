@@ -31,11 +31,12 @@ from typing import List, Optional
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QMenu, QSizePolicy,
-    QToolButton, QVBoxLayout, QWidget,
+    QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
+    QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.safe import swallow
+from well_viewer.core.ui_helpers import parse_float_edit
 from well_viewer.features.image_browser.cell_browser.worker import (
     resolve_channel_tint,
 )
@@ -49,7 +50,7 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _channel_options, _fov_options, _timepoint_options, _well_options,
 )
 from well_viewer.features.image_browser.image_table.image_compose import (
-    LUT_COLOR_NAMES, _is_binary_variant,
+    LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant,
 )
 
 _MIME = "application/x-aw-imgtable-token"
@@ -64,9 +65,19 @@ _RENDER_SHORT = {"corrected": "corr", "raw": "raw", "mask": "mask", "threshold":
 _DIM_SWATCH = {"well": "#6B8AFD", "timepoint": "#F59E0B", "fov": "#98A2B3"}
 _CMAP_SWATCH = {
     "Greys": "#C8CDD8", "Reds": "#F87171", "Greens": "#4ADE80", "Blues": "#6EA8FF",
-    "Purples": "#A78BFA", "Oranges": "#FB923C", "viridis": "#4ADE80",
-    "magma": "#F472B6", "inferno": "#F59E0B", "cividis": "#6EA8FF",
+    "Purples": "#A78BFA", "Oranges": "#FB923C", "Cyan": "#22D3EE", "Magenta": "#E879F9",
+    "viridis": "#4ADE80", "magma": "#F472B6", "inferno": "#F59E0B", "cividis": "#6EA8FF",
 }
+
+# Recognised fluorophores → their conventional display colour. Matched
+# case-insensitively as a substring of the channel token, so "eGFP", "GFP-A",
+# "mCherry" … all resolve; unrecognised channels fall back to the nearest-tint
+# default. Longer/more-specific tokens are listed first so they win.
+_STANDARD_CMAP = (
+    ("mcherry", "Reds"), ("hoechst", "Blues"),
+    ("gfp", "Greens"), ("rfp", "Reds"), ("yfp", "Oranges"),
+    ("bfp", "Cyan"), ("cfp", "Cyan"), ("dapi", "Blues"), ("nir", "Magenta"),
+)
 
 # Scoped stylesheet — applied to the shelf root; object-name selectors keep it
 # from leaking onto the rest of the app. Colours mirror ``theme.py`` tokens.
@@ -131,6 +142,21 @@ QComboBox#ITBCombo {
 QComboBox#ITBCombo:hover { border-color: #3B475C; }
 QLabel#ITBFixLbl { color: #E6E9EF; font-size: 12px; }
 QLabel#ITBEq { color: #5F6B7C; font-size: 12px; }
+
+QFrame#ITBLut { border: 1px solid #2A3343; border-radius: 9px; background: #131A24; }
+QFrame#ITBLutRow { background: transparent; border: none; }
+QLabel#ITBLutChan { color: #E6E9EF; font-size: 12px; font-weight: 560; }
+QLabel#ITBLutTag { color: #5F6B7C; font-size: 11px; }
+QLineEdit#ITBLutEdit {
+    background: #1A2230; color: #E6E9EF; border: 1px solid #2A3343;
+    border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
+}
+QLineEdit#ITBLutEdit:focus { border-color: #6B8AFD; }
+QToolButton#ITBLutFit {
+    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    border-radius: 5px; padding: 2px 9px; font-size: 11px;
+}
+QToolButton#ITBLutFit:hover { color: #E6E9EF; border-color: #6B8AFD; }
 """
 
 
@@ -181,7 +207,9 @@ def _default_spec(ctx):
     chans = _base_channels(ctx)
     spec = spec_from_state(st)  # empty axes + current filters
     if chans:
-        spec.rows = Axis(root=None, channels=[ChannelSpec(c, "corrected") for c in chans])
+        spec.rows = Axis(root=None, channels=[
+            ChannelSpec(c, "corrected", colormap=_default_colormap_for(ctx, c))
+            for c in chans])
         if _timepoint_options(ctx):
             spec.cols = Axis(root="timepoint")
     for dim in _ROOT_DIMS:
@@ -219,7 +247,8 @@ def _add_channel(ctx, spec, name: str, target: str) -> None:
         ax.channels.extend(other.channels)
         other.channels = []
         other.overlay = False
-    ax.channels.append(ChannelSpec(channel=name, render="corrected", colormap="Greys"))
+    ax.channels.append(ChannelSpec(channel=name, render="corrected",
+                                   colormap=_default_colormap_for(ctx, name)))
 
 
 def _move_channel(spec, src_axis: str, idx: int, target: str) -> None:
@@ -396,16 +425,39 @@ def _cmap_swatch(cmap: str) -> str:
     return _CMAP_SWATCH.get(cmap, "#C8CDD8")
 
 
-def _chan_color(ctx, name: str) -> str:
-    """The app's own per-channel palette colour (by index), as a hex string —
-    so a tray chip's dot matches the tint the Cell Browser / composites use."""
-    with swallow("image table builder: channel tint"):
+def _standard_cmap(name: str) -> Optional[str]:
+    """The conventional display colour for a recognised fluorophore in *name*
+    (GFP→Greens, RFP→Reds, BFP→Cyan, NIR→Magenta, DAPI→Blues, …), or None."""
+    s = str(name or "").strip().lower()
+    for token, cmap in _STANDARD_CMAP:
+        if token in s:
+            return cmap
+    return None
+
+
+def _default_colormap_for(ctx, name: str) -> str:
+    """The channel's default display colormap. A recognised fluorophore gets its
+    conventional colour (GFP→Greens, BFP→Cyan, NIR→Magenta, …); otherwise the
+    named LUT colour nearest the channel's palette tint. This is what a tray chip's
+    swatch shows *and* what the channel adopts when dragged in — so the colour
+    carries through instead of resetting to grey — and it stays fully editable in
+    the LUT box below."""
+    std = _standard_cmap(name)
+    if std is not None:
+        return std
+    with swallow("image table builder: default colormap"):
         names = _base_channels(ctx)
         idx = names.index(name) if name in names else 0
-        r, g, b = resolve_channel_tint(name, idx, None)
-        return "#{:02X}{:02X}{:02X}".format(
-            int(round(r * 255)), int(round(g * 255)), int(round(b * 255)))
-    return "#C8CDD8"
+        tr, tg, tb = resolve_channel_tint(name, idx, None)
+        best, best_d = "Greys", None
+        for cname, rgb in LUT_COLORS.items():
+            if rgb is None:                      # Greys carries no tint
+                continue
+            d = (rgb[0] - tr) ** 2 + (rgb[1] - tg) ** 2 + (rgb[2] - tb) ** 2
+            if best_d is None or d < best_d:
+                best, best_d = cname, d
+        return best
+    return "Greys"
 
 
 # ── drop acceptance (so a zone never highlights for a token it ignores) ──────
@@ -508,6 +560,23 @@ def build_shelf(ctx, parent: QWidget) -> None:
     _rt(ctx).fixed_panel_body = fbody
     layout.addWidget(fixed)
 
+    # LUT panel (derived) — one row per distinct channel in the table, for its
+    # display colormap + min/max range. Not a drop target.
+    lut = QFrame(parent)
+    lut.setObjectName("ITBLut")
+    lutl = QVBoxLayout(lut)
+    lutl.setContentsMargins(11, 8, 11, 9)
+    lutl.setSpacing(7)
+    lutl.addWidget(_zone_head("LUT", "display range per channel · shown once even if it repeats"))
+    lbody = QWidget(lut)
+    lbl_lay = QVBoxLayout(lbody)
+    lbl_lay.setContentsMargins(0, 0, 0, 0)
+    lbl_lay.setSpacing(5)
+    lutl.addWidget(lbody)
+    reg.register("_image_table_lut_panel", lut)
+    _rt(ctx).lut_box_body = lbody
+    layout.addWidget(lut)
+
     builder_refresh(ctx)
     # No auto-apply on build: the shelf stays inert until the user edits it, so it
     # never clobbers the initial grid (built by image_table_rebuild_grid) or
@@ -576,6 +645,7 @@ def builder_refresh(ctx) -> None:
     _build_tree(ctx, spec, "rows")
     _build_tree(ctx, spec, "cols")
     _build_fixed(ctx, spec)
+    _build_lut_box(ctx, spec)
     _build_tray(ctx, spec)
     _refresh_shape(ctx, spec)
 
@@ -764,6 +834,119 @@ def _build_fixed(ctx, spec) -> None:
     lay.addStretch(1)
 
 
+def _table_channels(spec) -> "dict":
+    """Distinct channels currently in the table, in row-then-column order, mapped
+    to every ChannelSpec that shares that channel — so a channel shown once here
+    edits all of its instances. Keyed by ``axis_token`` so raw ``GFP`` and
+    ``GFP (binary)`` are separate LUTs (each renders on its own token)."""
+    seen: dict = {}
+    for axis in ("rows", "cols"):
+        for cs in getattr(spec, axis).channels:
+            seen.setdefault(cs.axis_token(), []).append(cs)
+    return seen
+
+
+def _build_lut_box(ctx, spec) -> None:
+    body = getattr(_rt(ctx), "lut_box_body", None)
+    if body is None:
+        return
+    _clear(body)
+    lay = body.layout()
+    chans = _table_channels(spec)
+    if not chans:
+        lay.addWidget(_text("channels dragged into the table appear here", "ITBHint"))
+        return
+    for token, specs in chans.items():
+        lay.addWidget(_lut_row(ctx, token, specs))
+
+
+def _lut_row(ctx, token: str, specs: "list") -> QFrame:
+    """One LUT editor row: colour swatch · channel · colormap · min · max · Auto.
+    Edits fan out to every ChannelSpec sharing this channel token."""
+    cs0 = specs[0]
+    row = QFrame()
+    row.setObjectName("ITBLutRow")
+    h = QHBoxLayout(row)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(7)
+    sw = _swatch(_cmap_swatch(cs0.colormap))
+    h.addWidget(sw)
+    h.addWidget(_text(str(cs0.channel).upper(), "ITBLutChan"))
+    if len(specs) > 1:
+        h.addWidget(_text(f"×{len(specs)}", "ITBLutTag"))
+    h.addStretch(1)
+
+    cmap = QComboBox(row)
+    cmap.setObjectName("ITBCombo")
+    names = ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]
+    cmap.addItems(names)
+    if cs0.colormap in names:
+        cmap.setCurrentText(cs0.colormap)
+
+    def _cmap_changed(_i):
+        name = cmap.currentText()
+        for cs in specs:
+            cs.colormap = name
+        sw.setStyleSheet(
+            f"background:{_cmap_swatch(name)}; border-radius:3px;"
+            " border:1px solid rgba(255,255,255,0.16);")
+        _lut_touched(ctx)
+    cmap.currentIndexChanged.connect(_cmap_changed)
+    h.addWidget(cmap)
+
+    def _edit_field(kind: str) -> QLineEdit:
+        le = QLineEdit(row)
+        le.setObjectName("ITBLutEdit")
+        le.setPlaceholderText("auto")
+        val = cs0.lut_min if kind == "min" else cs0.lut_max
+        le.setText("" if val is None else _fmt_lut(val))
+        le.setToolTip("Blank = auto-fit each image")
+
+        def _committed(_le=le, _kind=kind):
+            v = parse_float_edit(_le, None, allow_auto=True)
+            for cs in specs:
+                setattr(cs, "lut_min" if _kind == "min" else "lut_max", v)
+            _le.setText("" if v is None else _fmt_lut(v))
+            _lut_touched(ctx)
+        le.editingFinished.connect(_committed)
+        return le
+
+    h.addWidget(_text("min", "ITBLutTag"))
+    h.addWidget(_edit_field("min"))
+    h.addWidget(_text("max", "ITBLutTag"))
+    h.addWidget(_edit_field("max"))
+
+    fit = QToolButton(row)
+    fit.setObjectName("ITBLutFit")
+    fit.setText("Auto")
+    fit.setCursor(Qt.PointingHandCursor)
+    fit.setToolTip("Clear the range → auto-fit each image")
+
+    def _auto():
+        for cs in specs:
+            cs.lut_min = cs.lut_max = None
+        builder_refresh(ctx)          # rebuild so the cleared fields show blank
+        _schedule_apply(ctx)
+    fit.clicked.connect(lambda: _auto())
+    h.addWidget(fit)
+    return row
+
+
+def _fmt_lut(v: float) -> str:
+    """Compact LUT number: drop a trailing ``.0`` so 1200.0 shows as ``1200``."""
+    f = float(v)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def _lut_touched(ctx) -> None:
+    """A LUT edit (colormap / min / max): flag the grid stale + schedule the
+    render-less apply, but don't rebuild the box (that would drop focus / kill the
+    field mid-edit)."""
+    _rt(ctx).builder_dirty = True
+    _schedule_apply(ctx)
+    _refresh_shape(ctx, builder_spec(ctx))
+
+
 def _build_tray(ctx, spec) -> None:
     body = getattr(_rt(ctx), "channels_tray_body")
     _clear(body)
@@ -780,9 +963,9 @@ def _build_tray(ctx, spec) -> None:
         cl.setContentsMargins(9, 3, 10, 3)
         cl.setSpacing(7)
         cl.addWidget(_grip())
-        cl.addWidget(_swatch(_chan_color(ctx, name)))
+        cl.addWidget(_swatch(_cmap_swatch(_default_colormap_for(ctx, name))))
         cl.addWidget(_text(str(name).upper(), "ITBChanLbl"))
-        chip.setToolTip("Drag onto a root in Rows or Columns")
+        chip.setToolTip("Drag onto a root in Rows or Columns — it keeps this colour")
         lay.addWidget(chip)
     lay.addStretch(1)
 

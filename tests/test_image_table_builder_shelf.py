@@ -212,6 +212,20 @@ def test_root_filter_menu_actually_filters(qtbot):
     assert st.active_timepoints == set()               # back to all
 
 
+def test_channel_menu_is_flat_no_submenus(qtbot):
+    # The ⚙ menu must stay flat: an eager addMenu() submenu + keepalive created a
+    # GC cycle that could fault under native macOS menus. Colour items live at the
+    # top level, and no action carries a child QMenu.
+    from PySide6.QtWidgets import QWidget
+    host = QWidget()
+    qtbot.addWidget(host)
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
+    menu = B._channel_menu(ctx, ChannelSpec("GFP", "corrected"), host)
+    assert all(a.menu() is None for a in menu.actions())      # no submenus at all
+    labels = [a.text() for a in menu.actions()]
+    assert "Greens" in labels and "Magenta" in labels         # colour is flat, top-level
+
+
 def test_channel_menu_actions_mutate_channel_spec(qtbot):
     ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
     from PySide6.QtWidgets import QWidget

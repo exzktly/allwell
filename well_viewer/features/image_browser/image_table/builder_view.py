@@ -742,9 +742,14 @@ def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
     gear.setText(f"⚙ {_render_label(cs)}")
     gear.setCursor(Qt.PointingHandCursor)
     gear.setPopupMode(QToolButton.InstantPopup)
-    # Parent the menu to the button: QToolButton.setMenu does NOT take ownership,
-    # so a parentless QMenu is garbage-collected and the gear opens nothing.
-    gear.setMenu(_channel_menu(ctx, cs, gear))
+    # Build the menu LAZILY on open, not eagerly for every chip at load. Parent it
+    # to the button (setMenu doesn't take ownership, so a parentless QMenu is
+    # GC'd) and (re)fill it in aboutToShow — so nothing is constructed until the
+    # user actually clicks a ⚙, and no long-lived menu objects accumulate across
+    # refreshes (which, with native macOS menus + GC timing, could fault).
+    menu = QMenu(gear)
+    menu.aboutToShow.connect(lambda m=menu, c=cs: _fill_channel_menu(ctx, m, c))
+    gear.setMenu(menu)
     h.addWidget(gear)
     h.addWidget(_x_btn("Remove channel",
                        lambda a=axis, i=idx: (_remove_channel(spec, a, i), _edit(ctx))))
@@ -977,11 +982,14 @@ def _render_label(cs: ChannelSpec) -> str:
     return s + ("+outline" if cs.boundary else "")
 
 
-def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
-    menu = QMenu(parent)
+def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
+    """(Re)populate a channel's ⚙ menu in place. Flat — no submenus and no
+    cross-referenced child menus (an earlier ``addMenu``-submenu + keepalive
+    created a GC cycle that could fault under native macOS menus). Colour also
+    lives in the LUT box below; it's mirrored here for one-click access."""
+    menu.clear()
 
-    # Render mode — corrected / raw / cell mask / ≥ threshold, right at the top
-    # level (radio-like) so they're one click from the ⚙ chip.
+    # Render mode — corrected / raw / cell mask / ≥ threshold (radio-like).
     hdr = menu.addAction("Render")
     hdr.setEnabled(False)
     for key, label in _RENDER_MODES:
@@ -1002,19 +1010,20 @@ def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
     lg.triggered.connect(lambda c=False: (_set_attr(cs, "log", bool(c)), _edit(ctx)))
 
     menu.addSeparator()
-    # A QMenu created by ``addMenu(title)`` is not owned by PySide's wrapper the
-    # way ``setMenu`` targets are, so it gets garbage-collected and opening it
-    # raises "C++ object already deleted". Build it explicitly and pin a Python
-    # reference on the (gear-parented, hence surviving) parent menu.
-    cmap_menu = QMenu("Colour / LUT", menu)
-    menu.addMenu(cmap_menu)
-    menu._aw_keepalive = [cmap_menu]
+    chdr = menu.addAction("Colour / LUT")
+    chdr.setEnabled(False)
     for name in ["Greys"] + [n for n in LUT_COLOR_NAMES if n != "Greys"]:
-        act = cmap_menu.addAction(name)
+        act = menu.addAction(name)
         act.setCheckable(True)
         act.setChecked(cs.colormap == name)
         act.triggered.connect(lambda _c=False, n=name: (_set_attr(cs, "colormap", n), _edit(ctx)))
     return menu
+
+
+def _channel_menu(ctx, cs: ChannelSpec, parent=None) -> QMenu:
+    """Build a fully-populated ⚙ menu (used directly by tests; the live chips
+    build it lazily via :func:`_fill_channel_menu` on ``aboutToShow``)."""
+    return _fill_channel_menu(ctx, QMenu(parent), cs)
 
 
 def _set_render(cs: ChannelSpec, key: str) -> None:

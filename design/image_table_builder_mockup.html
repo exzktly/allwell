@@ -4,7 +4,7 @@
     --bg: #0e0f14; --panel: #16181f; --panel-2: #1c1f28; --edge: #2a2e3a; --edge-soft: #23262f;
     --ink: #e8eaf0; --ink-dim: #9aa0b0; --ink-faint: #6b7180;
     --accent: #6366f1; --accent-soft: rgba(99,102,241,0.14); --accent-line: rgba(99,102,241,0.42); --accent-ink: #b3b7ff;
-    --good: #34d399; --warn: #fbbf24;
+    --good: #34d399; --warn: #fbbf24; --danger: #f87171;
     --ice: #6ea8ff; --green: #4ade80; --magenta: #f472b6; --amber: #fbbf24; --cyan: #22d3ee; --gray: #c8cdd8;
     --radius: 9px;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -14,20 +14,20 @@
     :root {
       --bg:#eef0f5; --panel:#fff; --panel-2:#f4f5f9; --edge:#d6d9e3; --edge-soft:#e4e6ee;
       --ink:#1a1d27; --ink-dim:#5a6070; --ink-faint:#8a90a0; --accent-soft:rgba(99,102,241,0.12);
-      --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5;
+      --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5; --danger:#dc2626;
       --ice:#3b82f6; --green:#16a34a; --magenta:#db2777; --amber:#d97706; --cyan:#0891b2; --gray:#6b7280;
     }
   }
   :root[data-theme="dark"] {
     --bg:#0e0f14; --panel:#16181f; --panel-2:#1c1f28; --edge:#2a2e3a; --edge-soft:#23262f;
     --ink:#e8eaf0; --ink-dim:#9aa0b0; --ink-faint:#6b7180; --accent-soft:rgba(99,102,241,0.14);
-    --accent-line:rgba(99,102,241,0.42); --accent-ink:#b3b7ff;
+    --accent-line:rgba(99,102,241,0.42); --accent-ink:#b3b7ff; --danger:#f87171;
     --ice:#6ea8ff; --green:#4ade80; --magenta:#f472b6; --amber:#fbbf24; --cyan:#22d3ee; --gray:#c8cdd8;
   }
   :root[data-theme="light"] {
     --bg:#eef0f5; --panel:#fff; --panel-2:#f4f5f9; --edge:#d6d9e3; --edge-soft:#e4e6ee;
     --ink:#1a1d27; --ink-dim:#5a6070; --ink-faint:#8a90a0; --accent-soft:rgba(99,102,241,0.12);
-    --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5;
+    --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5; --danger:#dc2626;
     --ice:#3b82f6; --green:#16a34a; --magenta:#db2777; --amber:#d97706; --cyan:#0891b2; --gray:#6b7280;
   }
 
@@ -53,7 +53,6 @@
   .toolbar .tag { font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; }
   .shape { font-family:var(--mono); font-size:12px; color:var(--ink-dim); display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
   .shape b { color:var(--accent-ink); font-weight:600; }
-  .shape .ov { color:var(--amber); }
   .shape .arrow { color:var(--ink-faint); }
   .toolbar .spacer { flex:1; }
   .wrapctl { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-dim); }
@@ -63,17 +62,16 @@
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
   @media (prefers-reduced-motion: reduce){ .live-pill .dot{ animation:none; } }
 
-  .stage { display:grid; grid-template-columns:250px 1fr; }
+  .stage { display:grid; grid-template-columns:240px 1fr; }
   @media (max-width:820px){ .stage { grid-template-columns:1fr; } }
   .palette { border-right:1px solid var(--edge-soft); padding:14px; background:var(--panel); }
   @media (max-width:820px){ .palette { border-right:none; border-bottom:1px solid var(--edge-soft); } }
   .palette h2, .zones h2 { font-size:10.5px; letter-spacing:0.13em; text-transform:uppercase; color:var(--ink-faint); margin:14px 0 9px; font-weight:640; }
   .palette h2:first-child { margin-top:0; }
   .palette .hint { font-size:11.5px; color:var(--ink-faint); margin-top:14px; line-height:1.45; }
-  .lib { display:flex; flex-direction:column; gap:7px; border-radius:9px; padding:2px; transition:background .12s, box-shadow .12s; }
-  .lib.over { background:var(--accent-soft); box-shadow:inset 0 0 0 1px var(--accent-line); }
+  .lib { display:flex; flex-wrap:wrap; gap:7px; border-radius:9px; padding:3px; transition:background .12s, box-shadow .12s; }
+  .lib.over { background:color-mix(in srgb,var(--danger) 12%,transparent); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--danger) 45%,transparent); }
 
-  /* plate map (stands in for the sidebar well picker) */
   .plate-card { border:1px solid var(--edge-soft); border-radius:9px; padding:10px; background:var(--panel-2); transition:box-shadow .2s, border-color .2s; }
   .plate-card.flash { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
   .plate-card .pc-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; }
@@ -86,64 +84,66 @@
   .well.sel { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
   .plate-card .pc-count { font-family:var(--mono); font-size:10px; color:var(--ink-dim); margin-top:7px; text-align:center; }
 
-  /* library chips (draggable tokens) */
-  .chip { display:flex; align-items:center; gap:8px; background:var(--panel-2); border:1px solid var(--edge); border-radius:8px; padding:7px 9px; cursor:grab; user-select:none; transition:border-color .12s, opacity .12s; }
+  /* tray chips */
+  .chip { display:inline-flex; align-items:center; gap:7px; background:var(--panel-2); border:1px solid var(--edge); border-radius:8px; padding:6px 9px; cursor:grab; user-select:none; font-size:12.5px; transition:border-color .12s, opacity .12s; }
   .chip:active { cursor:grabbing; }
   .chip:hover { border-color:var(--accent-line); }
   .chip.dragging { opacity:0.4; }
-  .chip.placed { opacity:0.5; }
-  .chip .grip { color:var(--ink-faint); font-size:12px; letter-spacing:-2px; }
-  .chip .swatch { width:11px; height:11px; border-radius:3px; flex:none; border:1px solid rgba(128,128,128,.35); }
-  .chip .name { font-weight:600; font-size:12.5px; white-space:nowrap; }
-  .chip .vlab { font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); }
-  .chip .count { font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); background:var(--bg); border:1px solid var(--edge-soft); border-radius:999px; padding:1px 6px; }
-  .chip .placed-tag { font-family:var(--mono); font-size:9.5px; color:var(--accent-ink); }
-  .chip .sp { flex:1; }
-  .chip .mini { border:none; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:12px; padding:0 2px; border-radius:4px; }
-  .chip .mini:hover { color:var(--ink); background:var(--edge-soft); }
+  .chip.placed { opacity:0.42; }
+  .chip .grip { color:var(--ink-faint); font-size:11px; letter-spacing:-2px; }
+  .chip .swatch { width:10px; height:10px; border-radius:3px; flex:none; border:1px solid rgba(128,128,128,.35); }
+  .chip .name { font-weight:600; }
   .chip[data-dim="well"] .swatch { background:var(--accent); }
   .chip[data-dim="timepoint"] .swatch { background:var(--amber); }
   .chip[data-dim="fov"] .swatch { background:var(--gray); }
-  .chip.filtered .count { color:var(--warn); border-color:color-mix(in srgb,var(--warn) 40%,transparent); }
-  .chip.add { justify-content:center; color:var(--ink-dim); border-style:dashed; cursor:pointer; font-size:12px; padding:7px; }
-  .chip.add:hover { color:var(--ink); border-color:var(--accent-line); }
+  .chip .tag { font-family:var(--mono); font-size:9.5px; color:var(--accent-ink); }
 
   .zones { padding:14px 16px 16px; }
   .zone-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   @media (max-width:640px){ .zone-grid { grid-template-columns:1fr; } }
-  .zone { border:1.5px dashed var(--edge); border-radius:var(--radius); padding:10px 11px 11px; min-height:70px; background:var(--panel-2); transition:border-color .12s, background .12s; }
+  .zone { border:1.5px dashed var(--edge); border-radius:var(--radius); padding:10px 11px 12px; min-height:74px; background:var(--panel-2); transition:border-color .12s, background .12s; }
   .zone.wide { grid-column:1 / -1; }
   .zone.over { border-color:var(--accent); background:var(--accent-soft); }
-  .zone .zhead { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+  .zone .zhead { display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .zone .zname { font-size:12px; font-weight:650; }
   .zone .zrole { font-size:10.5px; color:var(--ink-faint); }
   .zone .icon { width:15px; height:15px; flex:none; color:var(--accent-ink); }
-  .zone .slot { display:flex; flex-wrap:wrap; gap:7px; align-items:center; min-height:30px; }
-  .zone .empty { font-size:11.5px; color:var(--ink-faint); font-style:italic; }
 
-  .pill { display:inline-flex; align-items:center; gap:6px; background:var(--panel); border:1px solid var(--edge); border-radius:7px; padding:4px 6px 4px 8px; cursor:grab; font-size:12px; user-select:none; transition:border-color .12s; }
+  /* axis tree */
+  .root-row { display:flex; }
+  .drop-hint { font-size:11px; color:var(--ink-faint); font-style:italic; border:1px dashed var(--edge); border-radius:7px; padding:6px 9px; background:transparent; }
+  .chan-list { display:flex; flex-direction:column; gap:6px; margin-top:7px; }
+  .chan-list.indented { margin-left:16px; padding-left:11px; border-left:2px solid var(--accent-line); }
+  .chan-list .drop-hint { align-self:flex-start; }
+
+  .pill { display:inline-flex; align-items:center; gap:7px; background:var(--panel); border:1px solid var(--edge); border-radius:7px; padding:4px 5px 4px 9px; cursor:grab; font-size:12px; user-select:none; transition:border-color .12s; }
   .pill:hover { border-color:var(--accent-line); }
   .pill.dragging { opacity:0.4; }
+  .pill.root { font-weight:640; background:color-mix(in srgb,var(--accent) 10%,var(--panel)); border-color:var(--accent-line); }
   .pill .swatch { width:9px; height:9px; border-radius:2px; flex:none; border:1px solid rgba(128,128,128,.35); }
   .pill[data-dim="well"] .swatch { background:var(--accent); }
   .pill[data-dim="timepoint"] .swatch { background:var(--amber); }
   .pill[data-dim="fov"] .swatch { background:var(--gray); }
-  .pill .vlab { font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); }
-  .pill select { font:inherit; font-family:var(--mono); font-size:11px; color:var(--accent-ink); background:transparent; border:none; cursor:pointer; padding:0 1px; }
-  .pill .nest-i { font-family:var(--mono); font-size:9px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em; }
-  /* facet/overlay toggle for the layer group on an axis */
-  .ovl-toggle { display:inline-flex; align-items:center; border:1px solid var(--edge); border-radius:7px; overflow:hidden; font-family:var(--mono); font-size:10.5px; }
-  .ovl-toggle button { font:inherit; border:none; background:var(--panel); color:var(--ink-dim); padding:4px 8px; cursor:pointer; }
-  .ovl-toggle button.on { background:var(--accent); color:#fff; }
-  .ovl-toggle button.on.ov { background:var(--amber); color:#1a1205; }
+  .pill .opt { font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); background:var(--panel-2); border:1px solid var(--edge-soft); border-radius:5px; padding:1px 6px; cursor:pointer; }
+  .pill .opt:hover { border-color:var(--accent-line); color:var(--ink); }
+  .pill select { font:inherit; font-family:var(--mono); font-size:11px; color:var(--accent-ink); background:transparent; border:none; cursor:pointer; }
+  .x-btn { border:none; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:14px; line-height:1; padding:0 3px; border-radius:4px; }
+  .x-btn:hover { color:var(--danger); background:color-mix(in srgb,var(--danger) 14%,transparent); }
+  .ovl-toggle { display:inline-flex; margin-top:9px; border:1px solid var(--edge); border-radius:7px; overflow:hidden; font-family:var(--mono); font-size:10.5px; }
+  .ovl-toggle button { font:inherit; border:none; background:var(--panel); color:var(--ink-dim); padding:4px 9px; cursor:pointer; }
+  .ovl-toggle button.on { background:var(--amber); color:#1a1205; }
+  .slot { display:flex; flex-wrap:wrap; gap:7px; align-items:center; min-height:30px; }
+  .slot .empty { font-size:11.5px; color:var(--ink-faint); font-style:italic; }
 
   .pop { position:absolute; z-index:30; background:var(--panel); border:1px solid var(--edge); border-radius:9px; padding:10px; box-shadow:0 14px 34px -18px rgba(0,0,0,0.7); }
   .pop h3 { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 8px; }
   .pop.filter label { display:flex; align-items:center; gap:8px; font-size:12.5px; padding:3px 2px; cursor:pointer; font-family:var(--mono); }
   .pop.filter input { accent-color:var(--accent); }
-  .pop.edit { min-width:200px; display:flex; flex-direction:column; gap:8px; }
-  .pop.edit .fld { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:11.5px; color:var(--ink-dim); }
-  .pop.edit select { font:inherit; font-size:11.5px; font-family:var(--mono); background:var(--panel-2); color:var(--ink); border:1px solid var(--edge); border-radius:6px; padding:4px 5px; min-width:104px; }
+  .pop.opt { min-width:210px; display:flex; flex-direction:column; gap:9px; }
+  .pop.opt .fld { display:flex; align-items:center; justify-content:space-between; gap:10px; font-size:11.5px; color:var(--ink-dim); }
+  .pop.opt select { font:inherit; font-size:11.5px; font-family:var(--mono); background:var(--panel-2); color:var(--ink); border:1px solid var(--edge); border-radius:6px; padding:4px 5px; min-width:118px; }
+  .pop.opt label.chk { display:flex; align-items:center; gap:7px; cursor:pointer; }
+  .pop.opt input[type=checkbox]{ accent-color:var(--accent); }
 
   .render { padding:4px 16px 18px; }
   .render-head { display:flex; align-items:baseline; gap:10px; margin:14px 2px 12px; }
@@ -178,18 +178,17 @@
       <div>
         <div class="eyebrow">Design proposal · Image Browser</div>
         <h1>Table Builder</h1>
-        <div class="sub">Drag chips onto the map — the table renders itself.</div>
+        <div class="sub">Set a root, nest channels under it — the table renders itself.</div>
       </div>
     </div>
     <button class="theme-btn" id="themeBtn" type="button">◐ Theme</button>
   </header>
 
   <p class="lede">
-    Every chip in the tray is a thing you can drag onto the map. <b>Layer</b> chips are channels rendered a
-    particular way — DAPI corrected, GFP raw, a cell mask, an outline — each with its own colour/LUT, edited right
-    on the chip. <b>Facet</b> chips (Wells, from the plate map · Timepoints · FOVs) arrange copies of those layers.
-    Drop chips into <b>Rows</b>, <b>Columns</b>, or <b>Hold</b>; the layers sharing an axis get a <b>Facet ↔ Overlay</b>
-    switch to composite them into one cell. Live — no Build step.
+    Each axis — <b>Rows</b> and <b>Columns</b> — starts with a <b>root</b>: a Well (from the plate map), a Timepoint,
+    or an FOV. Drag <b>channels</b> onto a root and they nest under it, indented. Each nested channel carries its own
+    render options — <b>raw / corrected · mask · outline · ≥ threshold</b> and colour — set with the <b>⚙</b> on the chip.
+    Remove anything with its <b>×</b>. Turn a root's channels into a single blended cell with <b>Overlay</b>. Live — no Build step.
   </p>
 
   <div class="builder">
@@ -207,18 +206,18 @@
       <aside class="palette">
         <h2>Plate — well picker</h2>
         <div class="plate-card" id="plateCard">
-          <div class="pc-head"><span class="pc-title">Select wells</span><span class="pc-sub">feeds the Well chip</span></div>
+          <div class="pc-head"><span class="pc-title">Select wells</span><span class="pc-sub">feeds the Well root</span></div>
           <div class="plate" id="plate"></div>
           <div class="pc-count" id="plateCount"></div>
         </div>
 
-        <h2>Layers</h2>
-        <div class="lib" id="layerLib"></div>
+        <h2>Roots</h2>
+        <div class="lib" id="rootLib"></div>
 
-        <h2>Facets</h2>
-        <div class="lib" id="facetLib"></div>
+        <h2>Channels</h2>
+        <div class="lib" id="chanLib"></div>
 
-        <p class="hint">Drag a chip onto a role. Drag it back here to remove it. Edit a layer with ✎; filter Timepoints/FOVs by clicking their chip.</p>
+        <p class="hint">Drag a root onto Rows or Columns, then drag channels onto it. Set per-channel options with ⚙; delete with ×; drag a chip back here to remove it.</p>
       </aside>
 
       <section class="zones">
@@ -227,21 +226,21 @@
           <div class="zone" data-zone="rows">
             <div class="zhead">
               <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="3.2" rx="1"/><rect x="2" y="6.4" width="12" height="3.2" rx="1"/><rect x="2" y="10.3" width="12" height="3.2" rx="1"/></svg>
-              <span class="zname">Rows</span><span class="zrole">stack ↓ · order = outer→inner</span>
+              <span class="zname">Rows</span><span class="zrole">root ↓ · channels nested under it</span>
             </div>
-            <div class="slot" id="slot-rows"></div>
+            <div class="axis-tree" id="tree-rows"></div>
           </div>
           <div class="zone" data-zone="cols">
             <div class="zhead">
               <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2" width="3.2" height="12" rx="1"/><rect x="6.4" y="2" width="3.2" height="12" rx="1"/><rect x="10.3" y="2" width="3.2" height="12" rx="1"/></svg>
-              <span class="zname">Columns</span><span class="zrole">spread → · wrap into bands</span>
+              <span class="zname">Columns</span><span class="zrole">root → · channels nested · wrap into bands</span>
             </div>
-            <div class="slot" id="slot-cols"></div>
+            <div class="axis-tree" id="tree-cols"></div>
           </div>
           <div class="zone wide" data-zone="hold">
             <div class="zhead">
               <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>
-              <span class="zname">Hold</span><span class="zrole">pin a facet at one value</span>
+              <span class="zname">Hold</span><span class="zrole">pin a root dimension at one value</span>
             </div>
             <div class="slot" id="slot-hold"></div>
           </div>
@@ -262,11 +261,10 @@
     <p class="note">
       Interactive mockup — synthetic thumbnails. This is the <b>control surface</b> only; underneath, the shelf writes the
       same <code>row_dims</code> / <code>col_dims</code> / <code>group_size</code> / <code>active_wells</code> state the current
-      layout math and render pipeline already consume — the plate map is the existing sidebar <code>WellPlateSelector</code>,
-      and each Layer chip is a channel + a variant that maps to today's per-row <code>Source</code> (raw/corrected),
-      <code>Boundaries</code>, and <code>Binary</code> (mask / ≥thr) renderers, with its own LUT. So
-      <code>image_table_generate</code>, the compose/LUT/export layers, and view-state persistence are reused. Full write-up:
-      <code>_Docs/Markdowns/IMAGE_TABLE_BUILDER_DESIGN.md</code>.
+      layout math + render pipeline already consume — the plate map is the existing sidebar <code>WellPlateSelector</code>, and a
+      channel's options are today's per-row <code>Source</code> (raw/corrected), <code>Boundaries</code>, and <code>Binary</code>
+      (mask / ≥thr) renderers, each with its own LUT. So <code>image_table_generate</code>, the compose/LUT/export layers, and
+      view-state persistence are reused. Full write-up: <code>_Docs/Markdowns/IMAGE_TABLE_BUILDER_DESIGN.md</code>.
     </p>
     <div class="legend">
       <span><i style="background:var(--ice)"></i>DAPI</span>
@@ -283,43 +281,39 @@
 (function(){
   "use strict";
   const $ = (s,r=document)=>r.querySelector(s);
+  const el = (cls,txt)=>{ const d=document.createElement("div"); if(cls)d.className=cls; if(txt!=null)d.textContent=txt; return d; };
 
-  // ── plate map (the sidebar well picker) drives the Well facet ────────────
+  // ── plate map drives the Well root's values ──────────────────────────────
   const PLATE_ROWS=["A","B","C"], PLATE_COLS=[1,2,3,4];
-  const plate = { selected:new Set(["A1","A2","B1"]) };
+  const plate = { selected:new Set(["A1","A2"]) };
   const selectedWells = ()=>[...plate.selected].sort();
 
-  // ── layers: each a chip. Layer = channel + variant + colour/LUT ──────────
+  // ── render options + colours ─────────────────────────────────────────────
   const CMAP = { ice:[110,168,255], green:[74,222,128], magenta:[244,114,182], amber:[251,191,36], cyan:[34,211,238], gray:[205,210,222] };
   const CMAP_FOR_CHAN = { DAPI:"ice", GFP:"green", RFP:"magenta", "NUC+SEG":"cyan" };
   const CHANNELS = ["DAPI","GFP","RFP","NUC+SEG"];
-  const VARIANTS = [ ["corrected","corr"], ["raw","raw"], ["binary","≥thr"], ["mask","mask"], ["outline","outline"] ];
-  const VLABEL = Object.fromEntries(VARIANTS);
-  let lseq = 4;
-  let layers = [
-    { id:"l1", channel:"DAPI", variant:"corrected", cmap:"ice" },
-    { id:"l2", channel:"GFP",  variant:"corrected", cmap:"green" },
-    { id:"l3", channel:"RFP",  variant:"corrected", cmap:"magenta" },
-  ];
-  const layerById = id => layers.find(l=>l.id===id);
-  const isLayer = t => !!layerById(t);
-  const layerLabel = id => { const l=layerById(id); return l ? l.channel+" "+VLABEL[l.variant] : "—"; };
+  const RENDER = [ ["corrected","corr"], ["raw","raw"], ["mask","mask"], ["binary","≥thr"] ];
+  const RLABEL = Object.fromEntries(RENDER);
 
   const FACETS = { well:{label:"Well"}, timepoint:{label:"Timepoint", vals:["T01","T04","T08","T12"], filter:new Set(["T01","T04","T08","T12"])}, fov:{label:"FOV", vals:["1","2"], filter:new Set(["1","2"])} };
+  const valuesOf = dim => dim==="well" ? selectedWells() : FACETS[dim].vals.filter(v=>FACETS[dim].filter.has(v));
 
-  // Each axis / hold is an ordered list of tokens (facet name or layer id).
+  let cseq = 1;
+  const newChan = name => ({ id:"c"+(cseq++), channel:name, render:"corrected", boundary:false, cmap:CMAP_FOR_CHAN[name]||"gray" });
+  const chanLabel = c => RLABEL[c.render] + (c.boundary?"+outline":"");
+
+  // Each axis: a root dimension (or null) with channels nested under it.
   const state = {
-    rows:["l1","l2","l3"], cols:["timepoint"], hold:["well","fov"],
-    overlay:{ rows:false, cols:false },
-    held:{ well:"A1", timepoint:"T01", fov:"1" },
-    wrap:0,
+    rows: { root:"well", channels:[ newChan("DAPI"), newChan("GFP") ], overlay:false },
+    cols: { root:"timepoint", channels:[], overlay:false },
+    held: { fov:"1" },
+    wrap: 0,
   };
 
-  const placedZone = t => ["rows","cols","hold"].find(z=>state[z].includes(t)) || null;
-  const valuesOf = dim => dim==="well" ? selectedWells() : FACETS[dim].vals.filter(v=>FACETS[dim].filter.has(v));
-  const dispVal = (key,v) => key==="layer" ? layerLabel(v) : v;
+  const rootZone = dim => state.rows.root===dim ? "rows" : state.cols.root===dim ? "cols" : (dim in state.held ? "hold" : null);
+  const channelAxis = ()=> state.rows.channels.length ? "rows" : state.cols.channels.length ? "cols" : null;
 
-  // ── synthetic thumbnail: draw each layer by its variant, additively ──────
+  // ── synthetic thumbnail (channel render options → pixels) ────────────────
   function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
   function rng(seed){ let x=seed||1; return ()=>{ x^=x<<13; x^=x>>>17; x^=x<<5; return ((x>>>0)/4294967296); }; }
   function blobsFor(key){ const r=rng(hashStr(key)); const n=5+Math.floor(r()*4); const b=[]; for(let i=0;i<n;i++) b.push({x:r()*92,y:r()*92,rad:8+r()*12,amp:0.6+r()*0.5}); return b; }
@@ -331,211 +325,221 @@
       for(const l of L){
         let inten=0; for(const b of l.blobs){ const dx=x-b.x, dy=y-b.y; inten += b.amp*Math.exp(-(dx*dx+dy*dy)/(2*b.rad*b.rad)); }
         let f=0, col=l.col;
-        switch(l.sp.variant){
+        switch(l.sp.render){
           case "corrected": f=inten; break;
           case "raw":       f=inten+0.10; break;
-          case "binary":    f=inten>0.55?1:0; break;
           case "mask":      f=inten>0.28?0.85:0; col=CMAP.gray; break;
-          case "outline":   f=(inten>0.26&&inten<0.38)?1:0; col=[235,238,245]; break;
+          case "binary":    f=inten>0.55?1:0; break;
           default:          f=inten;
         }
         rr+=f*col[0]; gg+=f*col[1]; bb+=f*col[2];
+        if(l.sp.boundary){ const e=(inten>0.26&&inten<0.37)?1:0; rr+=e*235; gg+=e*238; bb+=e*245; }
       }
       const i=(y*S+x)*4; img.data[i]=Math.min(255,rr); img.data[i+1]=Math.min(255,gg); img.data[i+2]=Math.min(255,bb); img.data[i+3]=255;
     }
     g.putImageData(img,0,0);
   }
 
-  // ── axis → facets + combos ───────────────────────────────────────────────
-  function axisSpec(zone){
-    const toks=state[zone]; const layerToks=toks.filter(isLayer); const facets=[]; let added=false;
-    for(const t of toks){
-      if(isLayer(t)){ if(!added){ if(!state.overlay[zone]) facets.push({key:"layer", vals:layerToks.slice()}); added=true; } }
-      else facets.push({key:t, vals:valuesOf(t)});
-    }
-    let combos=[{}]; for(const f of facets){ const nx=[]; for(const c of combos) for(const v of f.vals){ const cc=Object.assign({},c); cc[f.key]=v; nx.push(cc);} combos=nx.length?nx:[{}]; }
-    return { facets, combos, hasLayers:layerToks.length>0 };
+  // ── layout: entries per axis (root value × nested channel) ───────────────
+  function axisEntries(axisKey){
+    const ax=state[axisKey]; const rootVals = ax.root ? valuesOf(ax.root) : [null];
+    const entries=[];
+    if(ax.channels.length && !ax.overlay){ for(const rv of rootVals) for(const ch of ax.channels) entries.push({root:rv, chan:ch}); }
+    else { for(const rv of rootVals) entries.push({root:rv, chan:null}); }
+    return entries;
   }
-  const layerAxis = ()=> state.rows.some(isLayer)?"rows":(state.cols.some(isLayer)?"cols":null);
-
-  function coordFor(rc,cc){
+  const heldOrDefault = dim => (dim in state.held) ? state.held[dim] : (valuesOf(dim)[0]||"");
+  function coordFor(rowE, colE){
     const c={};
     for(const d of ["well","timepoint","fov"]){
-      if(state.rows.includes(d)||state.cols.includes(d)) continue;           // faceted → from rc/cc
-      c[d] = state.hold.includes(d) ? state.held[d] : (valuesOf(d)[0]||"");    // held or default
+      c[d] = state.rows.root===d ? rowE.root : state.cols.root===d ? colE.root : heldOrDefault(d);
     }
-    Object.assign(c, rc, cc);
     return c;
   }
-  function layersForCell(coord){
-    const lz=layerAxis(); if(!lz) return null;
-    const toks=state[lz].filter(isLayer);
-    if(state.overlay[lz]) return toks.map(layerById);
-    const lid=coord.layer || toks[0];
-    return [layerById(lid)];
+  function specsFor(rowE, colE){
+    const ca=channelAxis(); if(!ca) return null;
+    const ax=state[ca];
+    if(ax.overlay) return ax.channels;
+    const e = ca==="rows" ? rowE : colE;
+    return e.chan ? [e.chan] : [ax.channels[0]];
+  }
+  function entryLabel(axisKey, e){
+    const ax=state[axisKey]; const parts=[];
+    if(ax.root && e.root!=null) parts.push(e.root);
+    if(e.chan) parts.push(e.chan.channel+" "+RLABEL[e.chan.render]);
+    return parts.join(" · ");
   }
 
   // ── render grid ──────────────────────────────────────────────────────────
   function renderGrid(){
     const host=$("#render"); host.innerHTML="";
-    if(!layerAxis()){ host.innerHTML='<div class="empty-render">Drag a layer chip onto Rows or Columns to render.</div>'; $("#rcount").textContent="0 cells"; return; }
-    if(!selectedWells().length){ host.innerHTML='<div class="empty-render">No wells selected — pick wells on the plate map.</div>'; $("#rcount").textContent="0 cells"; return; }
-    const R=axisSpec("rows"), C=axisSpec("cols");
-    const rowCombos=R.combos, colAll=C.combos; const ov=state.overlay[layerAxis()];
-
+    if(!channelAxis()){ host.innerHTML='<div class="empty-render">Drag a channel onto a root to render.</div>'; $("#rcount").textContent="0 cells"; return; }
+    if(!selectedWells().length && (state.rows.root==="well"||state.cols.root==="well")){ host.innerHTML='<div class="empty-render">No wells selected — pick wells on the plate map.</div>'; $("#rcount").textContent="0 cells"; return; }
+    const rowE=axisEntries("rows"), colAll=axisEntries("cols");
+    const ov = state[channelAxis()].overlay;
     const wrap=state.wrap|0; let bands;
     if(wrap>0 && colAll.length>wrap){ bands=[]; for(let i=0;i<colAll.length;i+=wrap) bands.push(colAll.slice(i,i+wrap)); } else bands=[colAll];
 
     let total=0;
-    bands.forEach((colCombos,bi)=>{
-      const band=document.createElement("div"); band.className="band";
-      if(bands.length>1){ const bl=document.createElement("div"); bl.className="band-label";
-        bl.textContent="Band "+(bi+1)+" — cols "+(bi*wrap+1)+"–"+(bi*wrap+colCombos.length); band.appendChild(bl); }
-      const tw=document.createElement("div"); tw.className="tablewrap"; const tbl=document.createElement("table"); tbl.className="grid";
+    bands.forEach((colE,bi)=>{
+      const band=el("band");
+      if(bands.length>1) band.append(el("band-label","Band "+(bi+1)+" — cols "+(bi*wrap+1)+"–"+(bi*wrap+colE.length)));
+      const tw=el("tablewrap"); const tbl=document.createElement("table"); tbl.className="grid";
       const thead=document.createElement("thead"), htr=document.createElement("tr");
-      const corner=document.createElement("th"); corner.className="corner"; corner.textContent=R.facets.map(f=>f.key==="layer"?"Layer":FACETS[f.key].label).join("·")+(R.facets.length?" ↓":""); htr.appendChild(corner);
-      colCombos.forEach(cc=>{ const th=document.createElement("th"); th.textContent=C.facets.map(f=>dispVal(f.key,cc[f.key])).join(" · ")||"—"; htr.appendChild(th); });
+      const corner=document.createElement("th"); corner.className="corner"; corner.textContent=(state.rows.root?FACETS[state.rows.root].label:"")+(state.rows.channels.length&&!state.rows.overlay?"·Chan":"")+" ↓"; htr.appendChild(corner);
+      colE.forEach(ce=>{ const th=document.createElement("th"); th.textContent=entryLabel("cols",ce)||"—"; htr.appendChild(th); });
       thead.appendChild(htr); tbl.appendChild(thead);
       const tbody=document.createElement("tbody");
-      rowCombos.forEach(rc=>{ const tr=document.createElement("tr");
-        const rh=document.createElement("td"); rh.className="rowhead"; rh.textContent=R.facets.map(f=>dispVal(f.key,rc[f.key])).join(" · ")||(ov?"overlay":"—"); tr.appendChild(rh);
-        colCombos.forEach(cc=>{ const td=document.createElement("td"); const coord=coordFor(rc,cc);
-          const specs=layersForCell(coord); const cell=document.createElement("div"); cell.className="cell"+(ov?" ovl":"");
-          const cv=document.createElement("canvas"); cell.appendChild(cv);
+      rowE.forEach(re=>{ const tr=document.createElement("tr");
+        const rh=document.createElement("td"); rh.className="rowhead"; rh.textContent=entryLabel("rows",re)||(ov?"overlay":"—"); tr.appendChild(rh);
+        colE.forEach(ce=>{ const td=document.createElement("td"); const coord=coordFor(re,ce); const specs=specsFor(re,ce);
+          const cell=el("cell"+(ov?" ovl":"")); const cv=document.createElement("canvas"); cell.appendChild(cv);
           drawThumb(cv, specs, [coord.well,coord.timepoint,coord.fov].join("|"));
-          const lab=document.createElement("div"); lab.className="coord";
-          const lname = ov ? specs.map(s=>s.channel).join("+")+" overlay" : specs[0].channel+" "+VLABEL[specs[0].variant];
+          const lab=el("coord");
+          const lname = ov ? specs.map(s=>s.channel).join("+")+" overlay" : specs[0].channel+" "+chanLabel(specs[0]);
           lab.innerHTML='<span class="c-lyr">'+lname+'</span> '+coord.well+' · '+coord.timepoint+' · f'+coord.fov;
           cell.appendChild(lab); td.appendChild(cell); tr.appendChild(td); total++;
         }); tbody.appendChild(tr);
       });
       tbl.appendChild(tbody); tw.appendChild(tbl); band.appendChild(tw); host.appendChild(band);
     });
-    $("#rcount").textContent=total+" cell"+(total===1?"":"s")+(bands.length>1?" · "+bands.length+" bands":"")+(ov?" · layers overlaid":"");
+    $("#rcount").textContent=total+" cell"+(total===1?"":"s")+(bands.length>1?" · "+bands.length+" bands":"")+(ov?" · channels overlaid":"");
   }
 
   // ── shape summary ────────────────────────────────────────────────────────
-  function zoneDesc(zone){
-    const parts=[]; let addedLayer=false; const ov=state.overlay[zone];
-    for(const t of state[zone]){
-      if(isLayer(t)){ if(!addedLayer){ const ls=state[zone].filter(isLayer).map(layerLabel).join(","); parts.push('<b>['+ls+']</b>'+(ov?' <span class="ov">⧉overlay</span>':'')); addedLayer=true; } }
-      else parts.push('<b>'+FACETS[t].label+'</b>');
-    }
-    return parts.join(' <span class="arrow">›</span> ');
+  function axisDesc(axisKey){
+    const ax=state[axisKey]; if(!ax.root && !ax.channels.length) return "";
+    let s = ax.root ? '<b>'+FACETS[ax.root].label+'</b>' : "";
+    if(ax.channels.length){ const cs=ax.channels.map(c=>c.channel).join(","); s += (s?' <span class="arrow">›</span> ':'')+'<b>['+cs+']</b>'+(ax.overlay?' <span class="arrow" style="color:var(--amber)">⧉overlay</span>':''); }
+    return s;
   }
   function renderShape(){
     const parts=[];
-    if(state.rows.length) parts.push(zoneDesc("rows")+' <span class="arrow">↓ rows</span>');
-    if(state.cols.length) parts.push(zoneDesc("cols")+' <span class="arrow">→ cols</span>');
-    if(state.hold.length) parts.push('<span class="arrow">hold</span> '+state.hold.map(d=>FACETS[d].label+"="+state.held[d]).join(", "));
-    $("#shape").innerHTML=parts.join(' <span class="arrow">·</span> ')||'<span class="arrow">empty — drag a chip onto a role</span>';
+    const r=axisDesc("rows"); if(r) parts.push(r+' <span class="arrow">↓</span>');
+    const c=axisDesc("cols"); if(c) parts.push(c+' <span class="arrow">→</span>');
+    const held=Object.keys(state.held); if(held.length) parts.push('<span class="arrow">hold</span> '+held.map(d=>FACETS[d].label+"="+state.held[d]).join(", "));
+    $("#shape").innerHTML=parts.join(' <span class="arrow">·</span> ')||'<span class="arrow">empty — drag a root onto Rows or Columns</span>';
   }
 
-  // ── library chips ────────────────────────────────────────────────────────
-  function dragify(el, tok){
-    el.draggable=true;
-    el.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/tok",tok); el.classList.add("dragging"); });
-    el.addEventListener("dragend",()=>el.classList.remove("dragging"));
+  // ── tray chips ───────────────────────────────────────────────────────────
+  function dragify(node, tok){ node.draggable=true;
+    node.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/tok",tok); node.classList.add("dragging"); });
+    node.addEventListener("dragend",()=>node.classList.remove("dragging")); }
+  function makeRootChip(dim){
+    const z=rootZone(dim); const c=el("chip"+(z?" placed":"")); c.dataset.dim=dim;
+    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch"></span><span class="name">'+FACETS[dim].label+'</span>';
+    if(z){ c.append(Object.assign(el("tag"),{textContent:"· "+(z==="rows"?"Rows":z==="cols"?"Cols":"Hold")})); }
+    if(dim!=="well"){ c.style.cursor="grab"; c.addEventListener("click",e=>{ if(!e.target.closest('.grip')) openFilter(dim,c,e); }); }
+    else c.addEventListener("click",()=>{ const pc=$("#plateCard"); pc.classList.add("flash"); setTimeout(()=>pc.classList.remove("flash"),900); });
+    dragify(c,dim); return c;
   }
-  function makeLayerChip(l){
-    const zone=placedZone(l.id);
-    const c=document.createElement("div"); c.className="chip"+(zone?" placed":""); c.dataset.kind="layer";
-    const col=CMAP[l.cmap]||CMAP.gray;
-    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch" style="background:rgb('+col.join(",")+')"></span>'
-      +'<span class="name">'+l.channel+'</span><span class="vlab">'+VLABEL[l.variant]+'</span><span class="sp"></span>';
-    if(zone){ const t=document.createElement("span"); t.className="placed-tag"; t.textContent="· "+(zone==="rows"?"Rows":zone==="cols"?"Cols":"Hold"); c.appendChild(t); }
-    const edit=document.createElement("button"); edit.className="mini"; edit.type="button"; edit.textContent="✎"; edit.title="Edit channel / variant / LUT";
-    edit.addEventListener("click",e=>{ e.stopPropagation(); openLayerEdit(l,c,e); }); c.appendChild(edit);
-    const del=document.createElement("button"); del.className="mini"; del.type="button"; del.textContent="✕"; del.title="Delete layer";
-    del.addEventListener("click",e=>{ e.stopPropagation(); if(layers.length>1){ layers=layers.filter(x=>x!==l); ["rows","cols","hold"].forEach(z=>state[z]=state[z].filter(t=>t!==l.id)); refresh(); } }); c.appendChild(del);
-    dragify(c, l.id); return c;
-  }
-  function makeFacetChip(dim){
-    const zone=placedZone(dim); const F=FACETS[dim];
-    let count = dim==="well" ? selectedWells().length : F.filter.size+"/"+F.vals.length;
-    const filtered = dim!=="well" && F.filter.size<F.vals.length;
-    const c=document.createElement("div"); c.className="chip"+(zone?" placed":"")+(filtered?" filtered":""); c.dataset.dim=dim;
-    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch"></span><span class="name">'+F.label+'</span><span class="sp"></span><span class="count">'+count+'</span>';
-    if(zone){ const t=document.createElement("span"); t.className="placed-tag"; t.textContent="· "+(zone==="rows"?"Rows":zone==="cols"?"Cols":"Hold"); c.appendChild(t); }
-    c.addEventListener("click",e=>{ if(dim==="well"){ const pc=$("#plateCard"); pc.classList.add("flash"); setTimeout(()=>pc.classList.remove("flash"),900); } else openFilter(dim,c,e); });
-    dragify(c, dim); return c;
+  function makeChanChip(name){
+    const c=el("chip"); c.dataset.chan=name; const col=CMAP[CMAP_FOR_CHAN[name]||"gray"];
+    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch" style="background:rgb('+col.join(",")+')"></span><span class="name">'+name+'</span>';
+    dragify(c,"newchan:"+name); return c;
   }
 
-  // ── zone pills ───────────────────────────────────────────────────────────
-  function makePill(tok, zone){
-    const p=document.createElement("div"); p.className="pill";
-    if(isLayer(tok)){ const l=layerById(tok); const col=CMAP[l.cmap]||CMAP.gray;
-      p.innerHTML='<span class="swatch" style="background:rgb('+col.join(",")+')"></span><span>'+l.channel+'</span><span class="vlab">'+VLABEL[l.variant]+'</span>';
-    } else {
-      p.dataset.dim=tok; p.innerHTML='<span class="swatch"></span><span>'+FACETS[tok].label+'</span>';
-      if(zone==="hold"){ const sel=document.createElement("select");
-        valuesOf(tok).forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; if(v===state.held[tok])o.selected=true; sel.appendChild(o); });
-        sel.addEventListener("change",()=>{ state.held[tok]=sel.value; renderShape(); renderGrid(); });
-        sel.addEventListener("mousedown",e=>e.stopPropagation()); sel.addEventListener("dragstart",e=>e.preventDefault());
-        p.appendChild(sel);
-      }
-    }
-    dragify(p, tok); return p;
+  // ── zone tree ────────────────────────────────────────────────────────────
+  function rootPill(axisKey){
+    const dim=state[axisKey].root; const p=el("pill root"); p.dataset.dim=dim;
+    p.innerHTML='<span class="swatch"></span><span>'+FACETS[dim].label+'</span>';
+    const x=document.createElement("button"); x.className="x-btn"; x.type="button"; x.textContent="×"; x.title="Remove root";
+    x.addEventListener("click",()=>{ state[axisKey].root=null; refresh(); }); p.appendChild(x);
+    dragify(p,dim); return p;
   }
-
-  function overlayToggle(zone){
-    const wrap=document.createElement("span"); wrap.className="ovl-toggle";
-    const bf=document.createElement("button"); bf.type="button"; bf.textContent="facet"; bf.className=state.overlay[zone]?"":"on";
-    const bo=document.createElement("button"); bo.type="button"; bo.textContent="⧉ overlay"; bo.className=state.overlay[zone]?"on ov":"";
-    bf.addEventListener("click",()=>{ state.overlay[zone]=false; refresh(); });
-    bo.addEventListener("click",()=>{ state.overlay[zone]=true; refresh(); });
-    bf.title=bo.title="Facet: one row/column per layer. Overlay: composite the layers on this axis into one cell.";
-    wrap.appendChild(bf); wrap.appendChild(bo); return wrap;
+  function chanPill(axisKey,c){
+    const p=el("pill"); const col=CMAP[c.cmap]||CMAP.gray;
+    p.innerHTML='<span class="swatch" style="background:rgb('+col.join(",")+')"></span><span>'+c.channel+'</span>';
+    const opt=document.createElement("button"); opt.className="opt"; opt.type="button"; opt.textContent="⚙ "+chanLabel(c); opt.title="Render options";
+    opt.addEventListener("click",e=>{ e.stopPropagation(); openChanOpts(c,opt,e); }); p.appendChild(opt);
+    const x=document.createElement("button"); x.className="x-btn"; x.type="button"; x.textContent="×"; x.title="Remove channel";
+    x.addEventListener("click",()=>{ removeChannel(c.id); refresh(); }); p.appendChild(x);
+    dragify(p,"chan:"+c.id); return p;
+  }
+  function overlayToggle(axisKey){
+    const wrap=el("ovl-toggle");
+    const bf=document.createElement("button"); bf.type="button"; bf.textContent="separate"; bf.className=state[axisKey].overlay?"":"on";
+    const bo=document.createElement("button"); bo.type="button"; bo.textContent="⧉ overlay"; bo.className=state[axisKey].overlay?"on":"";
+    bf.title=bo.title="Separate: one row/column per channel. Overlay: blend this root's channels into one cell.";
+    bf.addEventListener("click",()=>{ state[axisKey].overlay=false; refresh(); });
+    bo.addEventListener("click",()=>{ state[axisKey].overlay=true; refresh(); });
+    wrap.append(bf,bo); return wrap;
+  }
+  function buildTree(axisKey){
+    const box=$("#tree-"+axisKey); box.innerHTML=""; const ax=state[axisKey];
+    const rr=el("root-row");
+    rr.append(ax.root ? rootPill(axisKey) : el("drop-hint","Drop a Well / Timepoint / FOV as the root"));
+    box.append(rr);
+    const list=el("chan-list"+(ax.root?" indented":""));
+    ax.channels.forEach(c=>list.append(chanPill(axisKey,c)));
+    list.append(el("drop-hint", ax.channels.length?"Drop another channel":"Drop channels here"));
+    box.append(list);
+    if(ax.channels.length>=1) box.append(overlayToggle(axisKey));
   }
 
   function refresh(){
-    // libraries
-    const ll=$("#layerLib"); ll.innerHTML=""; layers.forEach(l=>ll.appendChild(makeLayerChip(l)));
-    const add=document.createElement("div"); add.className="chip add"; add.textContent="+ Add layer";
-    add.addEventListener("click",()=>{ const nl={id:"l"+(lseq++),channel:"DAPI",variant:"outline",cmap:"gray"}; layers.push(nl); refresh(); }); ll.appendChild(add);
-    const fl=$("#facetLib"); fl.innerHTML=""; ["well","timepoint","fov"].forEach(d=>fl.appendChild(makeFacetChip(d)));
-    // zones
-    ["rows","cols","hold"].forEach(z=>{ const slot=$("#slot-"+z); slot.innerHTML="";
-      if(!state[z].length){ const e=document.createElement("span"); e.className="empty"; e.textContent="drop a chip"; slot.appendChild(e); return; }
-      state[z].forEach(t=>slot.appendChild(makePill(t,z)));
-      if((z==="rows"||z==="cols") && state[z].filter(isLayer).length>=1) slot.appendChild(overlayToggle(z));
+    const rl=$("#rootLib"); rl.innerHTML=""; ["well","timepoint","fov"].forEach(d=>rl.append(makeRootChip(d)));
+    const cl=$("#chanLib"); cl.innerHTML=""; CHANNELS.forEach(n=>cl.append(makeChanChip(n)));
+    buildTree("rows"); buildTree("cols");
+    const hs=$("#slot-hold"); hs.innerHTML="";
+    const held=Object.keys(state.held);
+    if(!held.length){ hs.append(Object.assign(el("empty"),{textContent:"drop a root dimension to pin it"})); }
+    held.forEach(dim=>{ const p=el("pill"); p.dataset.dim=dim; p.innerHTML='<span class="swatch"></span><span>'+FACETS[dim].label+'</span>';
+      const sel=document.createElement("select"); valuesOf(dim).forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; if(v===state.held[dim])o.selected=true; sel.appendChild(o); });
+      sel.addEventListener("change",()=>{ state.held[dim]=sel.value; renderShape(); renderGrid(); }); sel.addEventListener("mousedown",e=>e.stopPropagation()); sel.addEventListener("dragstart",e=>e.preventDefault());
+      p.appendChild(sel);
+      const x=document.createElement("button"); x.className="x-btn"; x.type="button"; x.textContent="×"; x.title="Unpin";
+      x.addEventListener("click",()=>{ delete state.held[dim]; refresh(); }); p.appendChild(x);
+      dragify(p,dim); hs.append(p);
     });
     syncPlate(); renderShape(); renderGrid();
   }
 
-  // ── drops ────────────────────────────────────────────────────────────────
-  function moveToken(tok, target){
-    const layer=isLayer(tok);
-    if(target==="hold" && layer) target="tray";                         // Hold holds facets, not layers
-    ["rows","cols","hold"].forEach(z=>{ const i=state[z].indexOf(tok); if(i>=0) state[z].splice(i,1); });
-    if(target==="tray"){ refresh(); return; }
-    if(layer && (target==="rows"||target==="cols")){                    // layers cohere on one axis
-      const other=target==="rows"?"cols":"rows"; const sibs=state[other].filter(isLayer);
-      state[other]=state[other].filter(t=>!isLayer(t)); sibs.forEach(s=>{ if(!state[target].includes(s)) state[target].push(s); });
-    }
-    if(!state[target].includes(tok)) state[target].push(tok); refresh();
+  // ── moves ────────────────────────────────────────────────────────────────
+  function moveFacet(dim, target){
+    if(state.rows.root===dim) state.rows.root=null;
+    if(state.cols.root===dim) state.cols.root=null;
+    delete state.held[dim];
+    if(target==="rows") state.rows.root=dim;
+    else if(target==="cols") state.cols.root=dim;
+    else if(target==="hold") state.held[dim]=valuesOf(dim)[0]||"";
+    refresh();
+  }
+  function addChannel(name, axisKey){ state[axisKey].channels.push(newChan(name)); refresh(); }
+  function moveChannel(id, axisKey){
+    for(const k of ["rows","cols"]){ const i=state[k].channels.findIndex(c=>c.id===id); if(i>=0){ const [c]=state[k].channels.splice(i,1); state[axisKey].channels.push(c); break; } }
+    refresh();
+  }
+  function removeChannel(id){ for(const k of ["rows","cols"]) state[k].channels=state[k].channels.filter(c=>c.id!==id); }
+
+  function handleDrop(zoneName, tok){
+    if(!tok) return;
+    if(tok in FACETS){ moveFacet(tok, zoneName); return; }
+    if(zoneName==="hold") return;                                  // channels can't be held
+    if(tok.startsWith("newchan:")) addChannel(tok.slice(8), zoneName);
+    else if(tok.startsWith("chan:")) moveChannel(tok.slice(5), zoneName);
   }
   document.querySelectorAll(".zone").forEach(zone=>{ const name=zone.dataset.zone;
     zone.addEventListener("dragover",e=>{ e.preventDefault(); zone.classList.add("over"); });
     zone.addEventListener("dragleave",()=>zone.classList.remove("over"));
-    zone.addEventListener("drop",e=>{ e.preventDefault(); zone.classList.remove("over"); const t=e.dataTransfer.getData("text/tok"); if(t) moveToken(t,name); });
+    zone.addEventListener("drop",e=>{ e.preventDefault(); zone.classList.remove("over"); handleDrop(name, e.dataTransfer.getData("text/tok")); });
   });
-  ["layerLib","facetLib"].forEach(id=>{ const lib=$("#"+id);
-    lib.addEventListener("dragover",e=>{ e.preventDefault(); lib.classList.add("over"); });
-    lib.addEventListener("dragleave",()=>lib.classList.remove("over"));
-    lib.addEventListener("drop",e=>{ e.preventDefault(); lib.classList.remove("over"); const t=e.dataTransfer.getData("text/tok"); if(t) moveToken(t,"tray"); });
-  });
+  // trays remove
+  $("#rootLib").addEventListener("dragover",e=>{ e.preventDefault(); e.currentTarget.classList.add("over"); });
+  $("#rootLib").addEventListener("dragleave",e=>e.currentTarget.classList.remove("over"));
+  $("#rootLib").addEventListener("drop",e=>{ e.preventDefault(); e.currentTarget.classList.remove("over"); const t=e.dataTransfer.getData("text/tok"); if(t in FACETS){ moveFacet(t,"tray"); } });
+  $("#chanLib").addEventListener("dragover",e=>{ e.preventDefault(); e.currentTarget.classList.add("over"); });
+  $("#chanLib").addEventListener("dragleave",e=>e.currentTarget.classList.remove("over"));
+  $("#chanLib").addEventListener("drop",e=>{ e.preventDefault(); e.currentTarget.classList.remove("over"); const t=e.dataTransfer.getData("text/tok"); if(t.startsWith("chan:")){ removeChannel(t.slice(5)); refresh(); } });
 
   // ── plate map ────────────────────────────────────────────────────────────
   function buildPlate(){
-    const el=$("#plate"); el.innerHTML="";
-    el.appendChild(Object.assign(document.createElement("div"),{className:"ph"}));
-    PLATE_COLS.forEach(c=>{ const h=document.createElement("div"); h.className="ph"; h.textContent=c; el.appendChild(h); });
-    PLATE_ROWS.forEach(r=>{ const rh=document.createElement("div"); rh.className="ph"; rh.textContent=r; el.appendChild(rh);
-      PLATE_COLS.forEach(c=>{ const id=r+c; const w=document.createElement("div"); w.className="well"+(plate.selected.has(id)?" sel":""); w.textContent=id;
-        w.addEventListener("click",()=>{ if(plate.selected.has(id)){ if(plate.selected.size>1) plate.selected.delete(id); } else plate.selected.add(id);
-          if(!plate.selected.has(state.held.well)) state.held.well=selectedWells()[0]; refresh(); });
-        el.appendChild(w); }); });
+    const box=$("#plate"); box.innerHTML=""; box.append(el("ph"));
+    PLATE_COLS.forEach(c=>box.append(Object.assign(el("ph"),{textContent:c})));
+    PLATE_ROWS.forEach(r=>{ box.append(Object.assign(el("ph"),{textContent:r}));
+      PLATE_COLS.forEach(c=>{ const id=r+c; const w=el("well"+(plate.selected.has(id)?" sel":"")); w.textContent=id;
+        w.addEventListener("click",()=>{ if(plate.selected.has(id)){ if(plate.selected.size>1) plate.selected.delete(id); } else plate.selected.add(id); refresh(); });
+        box.append(w); }); });
   }
   function syncPlate(){ $("#plateCount").textContent=plate.selected.size+" well"+(plate.selected.size===1?"":"s")+" selected";
     document.querySelectorAll(".well").forEach(w=>w.classList.toggle("sel",plate.selected.has(w.textContent))); }
@@ -545,32 +549,28 @@
   function closePop(){ if(popEl){ popEl.remove(); popEl=null; document.removeEventListener("mousedown",onDoc); } }
   function onDoc(e){ if(popEl && !popEl.contains(e.target)) closePop(); }
   function placePop(anchor){ document.body.appendChild(popEl); const r=anchor.getBoundingClientRect();
-    let left=r.left+window.scrollX, top=r.bottom+window.scrollY+6;
-    popEl.style.left=left+"px"; popEl.style.top=top+"px";
+    popEl.style.left=(r.left+window.scrollX)+"px"; popEl.style.top=(r.bottom+window.scrollY+6)+"px";
     const w=popEl.getBoundingClientRect(); if(w.right>innerWidth-8) popEl.style.left=(innerWidth-8-w.width)+"px";
     setTimeout(()=>document.addEventListener("mousedown",onDoc),0); }
-
   function openFilter(dim,anchor,ev){ ev.stopPropagation(); closePop();
-    popEl=document.createElement("div"); popEl.className="pop filter"; popEl.innerHTML='<h3>'+FACETS[dim].label+' values</h3>';
+    popEl=el("pop filter"); popEl.innerHTML='<h3>'+FACETS[dim].label+' values</h3>';
     FACETS[dim].vals.forEach(v=>{ const lab=document.createElement("label"); const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=FACETS[dim].filter.has(v);
-      cb.addEventListener("change",()=>{ cb.checked?FACETS[dim].filter.add(v):FACETS[dim].filter.delete(v);
-        if(!FACETS[dim].filter.size){ FACETS[dim].filter.add(v); cb.checked=true; }
-        if(!FACETS[dim].filter.has(state.held[dim])) state.held[dim]=valuesOf(dim)[0]; refresh(); });
+      cb.addEventListener("change",()=>{ cb.checked?FACETS[dim].filter.add(v):FACETS[dim].filter.delete(v); if(!FACETS[dim].filter.size){FACETS[dim].filter.add(v);cb.checked=true;} if((dim in state.held)&&!FACETS[dim].filter.has(state.held[dim])) state.held[dim]=valuesOf(dim)[0]; refresh(); });
       lab.appendChild(cb); lab.appendChild(document.createTextNode(v)); popEl.appendChild(lab); });
     placePop(anchor);
   }
-  function openLayerEdit(l,anchor,ev){ ev.stopPropagation(); closePop();
-    popEl=document.createElement("div"); popEl.className="pop edit"; popEl.innerHTML='<h3>Layer</h3>';
-    const mk=(label,opts,val,on)=>{ const row=document.createElement("div"); row.className="fld"; row.appendChild(Object.assign(document.createElement("span"),{textContent:label}));
+  function openChanOpts(c,anchor,ev){ ev.stopPropagation(); closePop();
+    popEl=el("pop opt"); popEl.innerHTML='<h3>'+c.channel+' — render</h3>';
+    const mk=(label,opts,val,on)=>{ const row=el("fld"); row.append(Object.assign(el(null),{textContent:label}));
       const sel=document.createElement("select"); opts.forEach(([v,t])=>{ const o=document.createElement("option"); o.value=v; o.textContent=t; if(v===val)o.selected=true; sel.appendChild(o); });
-      sel.addEventListener("change",()=>on(sel.value)); row.appendChild(sel); popEl.appendChild(row); };
-    mk("Channel", CHANNELS.map(c=>[c,c]), l.channel, v=>{ l.channel=v; l.cmap=CMAP_FOR_CHAN[v]||l.cmap; refresh(); });
-    mk("Variant", VARIANTS, l.variant, v=>{ l.variant=v; refresh(); });
-    mk("Colour / LUT", Object.keys(CMAP).map(k=>[k,k]), l.cmap, v=>{ l.cmap=v; refresh(); });
+      sel.addEventListener("change",()=>on(sel.value)); row.append(sel); popEl.append(row); };
+    mk("Render", RENDER, c.render, v=>{ c.render=v; refresh(); });
+    mk("Colour / LUT", Object.keys(CMAP).map(k=>[k,k]), c.cmap, v=>{ c.cmap=v; refresh(); });
+    const brow=el("fld"); const bl=document.createElement("label"); bl.className="chk"; const bx=document.createElement("input"); bx.type="checkbox"; bx.checked=c.boundary;
+    bx.addEventListener("change",()=>{ c.boundary=bx.checked; refresh(); }); bl.append(bx, Object.assign(document.createElement("span"),{textContent:"Boundary outline overlay"})); brow.append(bl); popEl.append(brow);
     placePop(anchor);
   }
 
-  // ── wrap + theme ─────────────────────────────────────────────────────────
   $("#wrap").addEventListener("input",e=>{ state.wrap=Math.max(0,parseInt(e.target.value||"0",10)); renderGrid(); });
   $("#themeBtn").addEventListener("click",()=>{ const cur=document.documentElement.getAttribute("data-theme");
     const sysDark=matchMedia("(prefers-color-scheme: dark)").matches; const now=cur||(sysDark?"dark":"light");

@@ -123,20 +123,23 @@ Rows
 ```
 
 - **Root.** Each axis starts with a **root** — a facet dimension: **Well**,
-  **Timepoint**, or **FOV** — dragged from the *Roots* tray. The root is what the
-  axis primarily steps through (the wells down the rows, the timepoints across
-  the columns). **Well**'s values come from the plate map (the existing sidebar
-  `WellPlateSelector` / `active_wells`); Timepoint and FOV carry a value filter
-  (`active_timepoints` / `active_fovs`) on click.
+  **Timepoint**, or **FOV**. The root is what the axis primarily steps through
+  (the wells down the rows, the timepoints across the columns). You drag a root
+  onto the axis from the **Fixed** panel (§3.3), where every not-yet-laid-out
+  dimension sits; there is no separate roots tray. **Well**'s values come from the
+  plate map (the existing sidebar `WellPlateSelector` / `active_wells`); Timepoint
+  and FOV carry a value filter (`active_timepoints` / `active_fovs`) — click the
+  root to set it.
 - **Channels nested under the root.** Drag a **channel** (DAPI / GFP / RFP /
   NUC+SEG) from the *Channels* tray onto an axis and it **nests under that axis's
   root, indented**. Multiple channels stack as sub-rows/-columns — so *Rows =
   Well › {DAPI, GFP}* renders each well's DAPI and GFP as two adjacent rows. The
   root is optional: with no root the channels sit at the top level (today's
   "channels down the rows"); adding a root just groups them under it.
-- **Delete anything with its ×.** Every element on the map — a root, a nested
-  channel, a held value — carries a small **×** to remove it. Drag a chip back to
-  a tray to do the same.
+- **Delete with ×.** Every channel and root carries a small **×**. On a channel
+  it removes it; on a root it drops the dimension back to **Fixed** (a dimension
+  can't be deleted — it's always a coordinate, so it's either on an axis or
+  Fixed).
 
 You read the whole table's shape off the two trees, and you build it by dragging
 clear, individual chips — no "layer vs facet" abstraction and no buried list.
@@ -169,8 +172,17 @@ with its chip wherever it sits.
 |---|---|---|
 | **Rows** | Root steps down the rows; its channels nest as sub-rows. | `row_dims` (ordered) |
 | **Columns** | Root steps across the columns; channels nest; a **Wrap** control tiles a long columns axis into stacked bands. | `col_dims` (ordered) + `group_size`/`group_row_span` |
-| **Hold** | A root dimension pinned to a single value shown on the chip; click to change. For **Well**, the held value is one of the plate-selected wells. | `_fixed_off_axis` + the Hold-off-axis combos |
+| **Fixed** | **Derived, not dragged-into.** Every root dimension *not* on an axis (Well / Timepoint / FOV) auto-appears here, pinned to one value for the whole table, with a value picker. Drag one onto Rows/Columns to make it vary; removing a root drops it back here. | `_fixed_off_axis` + the Hold-off-axis combos |
 | **Pages** *(optional, later)* | One separate table per value (export as a multi-page/animation set). | new; generalises the montage use-case |
+
+**Fixed is auto-filled.** With four coordinates and two axes, whatever you don't
+lay out *must* resolve to a single value or a cell is ambiguous. Rather than make
+the user remember that and drag the leftovers somewhere, **Fixed is derived**: it
+lists exactly the root dimensions that aren't a root on either axis, each with a
+value picker (Well's values come from the plate selection). It doubles as where
+those dimensions rest — drag one up onto an axis to make it vary, and the moment
+a root leaves an axis it reappears in Fixed. A dimension is therefore always in
+exactly one place: a row root, a column root, or Fixed.
 
 **Composite is an Overlay switch on a root's channels, not a separate zone.**
 The channels nested under a root carry a **Separate ↔ Overlay** switch. *Separate*
@@ -243,7 +255,9 @@ Each phase is independently shippable and leaves the tab working.
 - Introduce a Qt-free `TableSpec` in `state.py`. Each axis is a small tree:
   `Axis = {root: dim|None, channels: [ChannelSpec...], overlay: bool}` with
   `dim ∈ {well, timepoint, fov}`; the whole spec is `{rows: Axis, cols: Axis,
-  hold: {dim: value}, wrap: int, filters: {dim: set}}`. A
+  fixed: {dim: value}, wrap: int, filters: {dim: set}}` — where the *Fixed set is
+  derived* (every dim not a root on either axis) and `fixed[dim]` just remembers
+  its pinned value. A
   `ChannelSpec = (channel, render ∈ {raw, corrected, mask, binary}, boundary:
   bool, colormap, lut)`. It is a *view* over the existing fields — `root` +
   `channels` flatten to `row_dims` / `col_dims`, `overlay` → `composite`, `wrap`
@@ -257,15 +271,16 @@ Each phase is independently shippable and leaves the tab working.
   reproducing today's look.
 
 ### Phase 1 — the shelf UI (behind the existing grid)
-- New `builder_view.py`: two axis trees (Rows / Columns) + the Hold slot, a
-  *Roots* tray (Well / Timepoint / FOV) and a *Channels* tray (the channel
-  tokens), using Qt drag-and-drop (`QDrag` / `dropEvent`). Reuse the
-  value-filter logic already proven in `tab_view._make_filter_picker`. The
-  **Well** root binds to the existing sidebar `WellPlateSelector` (reads
+- New `builder_view.py`: two axis trees (Rows / Columns), a derived **Fixed**
+  panel, and a *Channels* tray, using Qt drag-and-drop (`QDrag` / `dropEvent`).
+  Reuse the value-filter logic already proven in `tab_view._make_filter_picker`.
+  The **Fixed** panel is rebuilt from state each refresh (the dims not a root on
+  either axis, each with a value combo); its chips drag onto an axis to become a
+  root. The **Well** root binds to the existing sidebar `WellPlateSelector` (reads
   `active_wells`, clicking focuses the plate) — no new well control. Dropping a
   root sets `axis.root`; dropping a channel appends a `ChannelSpec` nested under
   it; each channel chip has a **⚙** popover (render / boundary / LUT) and an **×**;
-  roots and held values have an **×** too.
+  a root's **×** returns it to Fixed.
 - The channels under a root carry a **Separate ↔ Overlay** toggle
   (writes `axis.overlay`); any edit writes the `TableSpec`, calls `apply_spec()`,
   then the existing `image_table_build_layout` + a debounced
@@ -275,7 +290,7 @@ Each phase is independently shippable and leaves the tab working.
 
 ### Phase 2 — live render, collapse the selector grid
 - Merge Build + Generate into one debounced `rebuild()` on any shelf change
-  (drop, root/channel change, option edit, hold-value, filter, wrap, overlay).
+  (drop, root/channel change, option edit, fixed-value, filter, wrap, overlay).
 - Hide the always-on per-cell dropdown grid; add click-to-edit cell popovers for
   overrides (write into `cells`). Keep a "Show selector grid" escape toggle for
   one release for irregular-table users.
@@ -312,7 +327,8 @@ Each phase is independently shippable and leaves the tab working.
 | Configure → see result | Build, then Generate (2 phases) | live (1 phase) |
 | Per-cell widgets | `rows × cols × 4` combos, always shown | rendered thumbnails; edit on click |
 | Delete an element | no direct affordance | an **×** on every root / channel / held value |
-| Well selection | plate map, but Well can't easily be an axis | plate map feeds a Well root you can nest/hold |
+| Well selection | plate map, but Well can't easily be an axis | plate map feeds a Well root you can nest or fix |
+| Off-axis dims | manual "Hold off-axis" combos, easy to forget | **Fixed** auto-lists every dim you didn't lay out, with a value picker |
 | Composite | a separate row with no place in the hierarchy | a Separate↔Overlay switch on a root's channels |
 | Channel variants (raw/corrected, mask, outline, ≥thr) | per-row toggles, only right when rows=channels | a **⚙** on each nested channel, with its own LUT |
 

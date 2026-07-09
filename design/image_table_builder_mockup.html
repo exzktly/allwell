@@ -127,6 +127,7 @@
   .pill .opt { font-family:var(--mono); font-size:10.5px; color:var(--ink-dim); background:var(--panel-2); border:1px solid var(--edge-soft); border-radius:5px; padding:1px 6px; cursor:pointer; }
   .pill .opt:hover { border-color:var(--accent-line); color:var(--ink); }
   .pill select { font:inherit; font-family:var(--mono); font-size:11px; color:var(--accent-ink); background:transparent; border:none; cursor:pointer; }
+  .pill .fx-note { font-family:var(--mono); font-size:9.5px; color:var(--ink-faint); }
   .x-btn { border:none; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:14px; line-height:1; padding:0 3px; border-radius:4px; }
   .x-btn:hover { color:var(--danger); background:color-mix(in srgb,var(--danger) 14%,transparent); }
   .ovl-toggle { display:inline-flex; margin-top:9px; border:1px solid var(--edge); border-radius:7px; overflow:hidden; font-family:var(--mono); font-size:10.5px; }
@@ -188,7 +189,8 @@
     Each axis — <b>Rows</b> and <b>Columns</b> — starts with a <b>root</b>: a Well (from the plate map), a Timepoint,
     or an FOV. Drag <b>channels</b> onto a root and they nest under it, indented. Each nested channel carries its own
     render options — <b>raw / corrected · mask · outline · ≥ threshold</b> and colour — set with the <b>⚙</b> on the chip.
-    Remove anything with its <b>×</b>. Turn a root's channels into a single blended cell with <b>Overlay</b>. Live — no Build step.
+    Any dimension you don't lay out drops into <b>Fixed</b>, pinned to one value for the whole table — change it there, or drag it back onto an axis to make it vary.
+    Remove a channel with its <b>×</b>; turn a root's channels into a single blended cell with <b>Overlay</b>. Live — no Build step.
   </p>
 
   <div class="builder">
@@ -211,13 +213,10 @@
           <div class="pc-count" id="plateCount"></div>
         </div>
 
-        <h2>Roots</h2>
-        <div class="lib" id="rootLib"></div>
-
         <h2>Channels</h2>
         <div class="lib" id="chanLib"></div>
 
-        <p class="hint">Drag a root onto Rows or Columns, then drag channels onto it. Set per-channel options with ⚙; delete with ×; drag a chip back here to remove it.</p>
+        <p class="hint">Drag a channel onto a root to nest it under it; set its options with ⚙, delete with ×. The <b>Roots</b> you're not laying out — Well · Timepoint · FOV — appear under <b>Fixed</b> with a value picker; drag one from there onto Rows or Columns to make it vary.</p>
       </aside>
 
       <section class="zones">
@@ -237,12 +236,12 @@
             </div>
             <div class="axis-tree" id="tree-cols"></div>
           </div>
-          <div class="zone wide" data-zone="hold">
+          <div class="zone wide" data-zone="fixed">
             <div class="zhead">
-              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>
-              <span class="zname">Hold</span><span class="zrole">pin a root dimension at one value</span>
+              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 8h10M3 4.5h10M3 11.5h10"/><circle cx="11" cy="8" r="1.6" fill="currentColor" stroke="none"/></svg>
+              <span class="zname">Fixed</span><span class="zrole">same value for every cell · auto-filled from what you haven't laid out</span>
             </div>
-            <div class="slot" id="slot-hold"></div>
+            <div class="slot" id="slot-fixed"></div>
           </div>
         </div>
       </section>
@@ -303,14 +302,17 @@
   const chanLabel = c => RLABEL[c.render] + (c.boundary?"+outline":"");
 
   // Each axis: a root dimension (or null) with channels nested under it.
+  // Every root dimension NOT on an axis is automatically "Fixed" at one value
+  // (fixedVal), so the Fixed panel is derived — never manually filled.
   const state = {
     rows: { root:"well", channels:[ newChan("DAPI"), newChan("GFP") ], overlay:false },
     cols: { root:"timepoint", channels:[], overlay:false },
-    held: { fov:"1" },
+    fixedVal: { well:"A1", timepoint:"T01", fov:"1" },
     wrap: 0,
   };
 
-  const rootZone = dim => state.rows.root===dim ? "rows" : state.cols.root===dim ? "cols" : (dim in state.held ? "hold" : null);
+  const fixedDims = ()=>["well","timepoint","fov"].filter(d=>state.rows.root!==d && state.cols.root!==d);
+  const fixedValue = dim => (dim in state.fixedVal) ? state.fixedVal[dim] : (valuesOf(dim)[0]||"");
   const channelAxis = ()=> state.rows.channels.length ? "rows" : state.cols.channels.length ? "cols" : null;
 
   // ── synthetic thumbnail (channel render options → pixels) ────────────────
@@ -348,11 +350,10 @@
     else { for(const rv of rootVals) entries.push({root:rv, chan:null}); }
     return entries;
   }
-  const heldOrDefault = dim => (dim in state.held) ? state.held[dim] : (valuesOf(dim)[0]||"");
   function coordFor(rowE, colE){
     const c={};
     for(const d of ["well","timepoint","fov"]){
-      c[d] = state.rows.root===d ? rowE.root : state.cols.root===d ? colE.root : heldOrDefault(d);
+      c[d] = state.rows.root===d ? rowE.root : state.cols.root===d ? colE.root : fixedValue(d);
     }
     return c;
   }
@@ -417,7 +418,7 @@
     const parts=[];
     const r=axisDesc("rows"); if(r) parts.push(r+' <span class="arrow">↓</span>');
     const c=axisDesc("cols"); if(c) parts.push(c+' <span class="arrow">→</span>');
-    const held=Object.keys(state.held); if(held.length) parts.push('<span class="arrow">hold</span> '+held.map(d=>FACETS[d].label+"="+state.held[d]).join(", "));
+    const fx=fixedDims(); if(fx.length) parts.push('<span class="arrow">fixed</span> '+fx.map(d=>FACETS[d].label+"="+fixedValue(d)).join(", "));
     $("#shape").innerHTML=parts.join(' <span class="arrow">·</span> ')||'<span class="arrow">empty — drag a root onto Rows or Columns</span>';
   }
 
@@ -425,14 +426,6 @@
   function dragify(node, tok){ node.draggable=true;
     node.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/tok",tok); node.classList.add("dragging"); });
     node.addEventListener("dragend",()=>node.classList.remove("dragging")); }
-  function makeRootChip(dim){
-    const z=rootZone(dim); const c=el("chip"+(z?" placed":"")); c.dataset.dim=dim;
-    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch"></span><span class="name">'+FACETS[dim].label+'</span>';
-    if(z){ c.append(Object.assign(el("tag"),{textContent:"· "+(z==="rows"?"Rows":z==="cols"?"Cols":"Hold")})); }
-    if(dim!=="well"){ c.style.cursor="grab"; c.addEventListener("click",e=>{ if(!e.target.closest('.grip')) openFilter(dim,c,e); }); }
-    else c.addEventListener("click",()=>{ const pc=$("#plateCard"); pc.classList.add("flash"); setTimeout(()=>pc.classList.remove("flash"),900); });
-    dragify(c,dim); return c;
-  }
   function makeChanChip(name){
     const c=el("chip"); c.dataset.chan=name; const col=CMAP[CMAP_FOR_CHAN[name]||"gray"];
     c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch" style="background:rgb('+col.join(",")+')"></span><span class="name">'+name+'</span>';
@@ -443,8 +436,10 @@
   function rootPill(axisKey){
     const dim=state[axisKey].root; const p=el("pill root"); p.dataset.dim=dim;
     p.innerHTML='<span class="swatch"></span><span>'+FACETS[dim].label+'</span>';
-    const x=document.createElement("button"); x.className="x-btn"; x.type="button"; x.textContent="×"; x.title="Remove root";
-    x.addEventListener("click",()=>{ state[axisKey].root=null; refresh(); }); p.appendChild(x);
+    const x=document.createElement("button"); x.className="x-btn"; x.type="button"; x.textContent="×"; x.title="Move to Fixed (stop varying)";
+    x.addEventListener("click",e=>{ e.stopPropagation(); state[axisKey].root=null; if(!(dim in state.fixedVal)) state.fixedVal[dim]=valuesOf(dim)[0]||""; refresh(); }); p.appendChild(x);
+    p.addEventListener("click",e=>{ if(e.target.closest('.x-btn')) return;
+      if(dim==="well"){ const pc=$("#plateCard"); pc.classList.add("flash"); setTimeout(()=>pc.classList.remove("flash"),900); } else openFilter(dim,p,e); });
     dragify(p,dim); return p;
   }
   function chanPill(axisKey,c){
@@ -478,19 +473,23 @@
   }
 
   function refresh(){
-    const rl=$("#rootLib"); rl.innerHTML=""; ["well","timepoint","fov"].forEach(d=>rl.append(makeRootChip(d)));
     const cl=$("#chanLib"); cl.innerHTML=""; CHANNELS.forEach(n=>cl.append(makeChanChip(n)));
     buildTree("rows"); buildTree("cols");
-    const hs=$("#slot-hold"); hs.innerHTML="";
-    const held=Object.keys(state.held);
-    if(!held.length){ hs.append(Object.assign(el("empty"),{textContent:"drop a root dimension to pin it"})); }
-    held.forEach(dim=>{ const p=el("pill"); p.dataset.dim=dim; p.innerHTML='<span class="swatch"></span><span>'+FACETS[dim].label+'</span>';
-      const sel=document.createElement("select"); valuesOf(dim).forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; if(v===state.held[dim])o.selected=true; sel.appendChild(o); });
-      sel.addEventListener("change",()=>{ state.held[dim]=sel.value; renderShape(); renderGrid(); }); sel.addEventListener("mousedown",e=>e.stopPropagation()); sel.addEventListener("dragstart",e=>e.preventDefault());
+    // Fixed panel is derived: every root dimension not on an axis, with a value picker.
+    const fs=$("#slot-fixed"); fs.innerHTML="";
+    const fx=fixedDims();
+    if(!fx.length){ fs.append(Object.assign(el("empty"),{textContent:"every dimension is on an axis — nothing left to fix"})); }
+    fx.forEach(dim=>{ const p=el("pill"); p.dataset.dim=dim;
+      p.title="Drag onto Rows or Columns to make it vary";
+      p.innerHTML='<span class="grip" style="color:var(--ink-faint);font-size:11px;letter-spacing:-2px">⋮⋮</span><span class="swatch"></span><span>'+FACETS[dim].label+'</span><span style="color:var(--ink-faint)">=</span>';
+      const sel=document.createElement("select");
+      valuesOf(dim).forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; if(v===fixedValue(dim))o.selected=true; sel.appendChild(o); });
+      if(!valuesOf(dim).length){ const o=document.createElement("option"); o.textContent="—"; sel.appendChild(o); }
+      sel.addEventListener("change",()=>{ state.fixedVal[dim]=sel.value; renderShape(); renderGrid(); });
+      sel.addEventListener("mousedown",e=>e.stopPropagation()); sel.addEventListener("dragstart",e=>e.preventDefault());
       p.appendChild(sel);
-      const x=document.createElement("button"); x.className="x-btn"; x.type="button"; x.textContent="×"; x.title="Unpin";
-      x.addEventListener("click",()=>{ delete state.held[dim]; refresh(); }); p.appendChild(x);
-      dragify(p,dim); hs.append(p);
+      if(dim==="well"){ const n=document.createElement("span"); n.className="fx-note"; n.textContent="from plate"; p.appendChild(n); }
+      dragify(p,dim); fs.append(p);
     });
     syncPlate(); renderShape(); renderGrid();
   }
@@ -499,10 +498,10 @@
   function moveFacet(dim, target){
     if(state.rows.root===dim) state.rows.root=null;
     if(state.cols.root===dim) state.cols.root=null;
-    delete state.held[dim];
     if(target==="rows") state.rows.root=dim;
     else if(target==="cols") state.cols.root=dim;
-    else if(target==="hold") state.held[dim]=valuesOf(dim)[0]||"";
+    // any other target (incl. "fixed"): off both axes → auto-listed under Fixed
+    if(!(dim in state.fixedVal)) state.fixedVal[dim]=valuesOf(dim)[0]||"";
     refresh();
   }
   function addChannel(name, axisKey){ state[axisKey].channels.push(newChan(name)); refresh(); }
@@ -515,7 +514,7 @@
   function handleDrop(zoneName, tok){
     if(!tok) return;
     if(tok in FACETS){ moveFacet(tok, zoneName); return; }
-    if(zoneName==="hold") return;                                  // channels can't be held
+    if(zoneName==="fixed") return;                                 // channels can't be fixed
     if(tok.startsWith("newchan:")) addChannel(tok.slice(8), zoneName);
     else if(tok.startsWith("chan:")) moveChannel(tok.slice(5), zoneName);
   }
@@ -524,10 +523,7 @@
     zone.addEventListener("dragleave",()=>zone.classList.remove("over"));
     zone.addEventListener("drop",e=>{ e.preventDefault(); zone.classList.remove("over"); handleDrop(name, e.dataTransfer.getData("text/tok")); });
   });
-  // trays remove
-  $("#rootLib").addEventListener("dragover",e=>{ e.preventDefault(); e.currentTarget.classList.add("over"); });
-  $("#rootLib").addEventListener("dragleave",e=>e.currentTarget.classList.remove("over"));
-  $("#rootLib").addEventListener("drop",e=>{ e.preventDefault(); e.currentTarget.classList.remove("over"); const t=e.dataTransfer.getData("text/tok"); if(t in FACETS){ moveFacet(t,"tray"); } });
+  // Channels tray is a remove target (drag a nested channel back to delete it).
   $("#chanLib").addEventListener("dragover",e=>{ e.preventDefault(); e.currentTarget.classList.add("over"); });
   $("#chanLib").addEventListener("dragleave",e=>e.currentTarget.classList.remove("over"));
   $("#chanLib").addEventListener("drop",e=>{ e.preventDefault(); e.currentTarget.classList.remove("over"); const t=e.dataTransfer.getData("text/tok"); if(t.startsWith("chan:")){ removeChannel(t.slice(5)); refresh(); } });
@@ -555,7 +551,7 @@
   function openFilter(dim,anchor,ev){ ev.stopPropagation(); closePop();
     popEl=el("pop filter"); popEl.innerHTML='<h3>'+FACETS[dim].label+' values</h3>';
     FACETS[dim].vals.forEach(v=>{ const lab=document.createElement("label"); const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=FACETS[dim].filter.has(v);
-      cb.addEventListener("change",()=>{ cb.checked?FACETS[dim].filter.add(v):FACETS[dim].filter.delete(v); if(!FACETS[dim].filter.size){FACETS[dim].filter.add(v);cb.checked=true;} if((dim in state.held)&&!FACETS[dim].filter.has(state.held[dim])) state.held[dim]=valuesOf(dim)[0]; refresh(); });
+      cb.addEventListener("change",()=>{ cb.checked?FACETS[dim].filter.add(v):FACETS[dim].filter.delete(v); if(!FACETS[dim].filter.size){FACETS[dim].filter.add(v);cb.checked=true;} if(!FACETS[dim].filter.has(state.fixedVal[dim])) state.fixedVal[dim]=valuesOf(dim)[0]||""; refresh(); });
       lab.appendChild(cb); lab.appendChild(document.createTextNode(v)); popEl.appendChild(lab); });
     placePop(anchor);
   }

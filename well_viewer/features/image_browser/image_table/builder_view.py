@@ -326,8 +326,11 @@ def build_shelf(ctx, parent: QWidget) -> None:
     layout.addWidget(tray)
 
     builder_refresh(ctx)
-    # Render the default (or restored) tree once the tab is up.
-    _schedule_apply(ctx)
+    # No auto-apply on build: the shelf stays inert until the user edits it, so it
+    # never clobbers the initial grid (built by image_table_rebuild_grid) or
+    # whatever a restore / the Advanced controls / a test sets up. The spec is
+    # seeded from current state, so it already reflects reality; the first edit
+    # renders.
 
 
 def _on_zone_drop(ctx, zone: str, tok: str) -> None:

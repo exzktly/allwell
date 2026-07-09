@@ -137,6 +137,24 @@ def test_generate_notify_clears_dirty_cue():
     assert rt.builder_dirty is False
 
 
+def test_wrap_applicable_and_set(qtbot):
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp"], timepoints=["T01"])
+    spec = B.builder_spec(ctx)
+    # flat single-dim axes (channels down rows, timepoint across cols) → wrap ok
+    spec.rows = B.Axis(root=None, channels=[ChannelSpec("GFP")])
+    spec.cols = B.Axis(root="timepoint")
+    assert B._wrap_applicable(spec)
+    # an axis nesting a root AND channels is 2-D → wrap doesn't apply
+    spec.rows = B.Axis(root="well", channels=[ChannelSpec("GFP")])
+    assert not B._wrap_applicable(spec)
+    # _set_wrap writes the spec's wrap (→ group_size banding)
+    spec.rows = B.Axis(root=None, channels=[ChannelSpec("GFP")])
+    B._set_wrap(ctx, 3)
+    assert B.builder_spec(ctx).wrap == 3
+    B._set_wrap(ctx, -2)
+    assert B.builder_spec(ctx).wrap == 0          # clamped ≥ 0
+
+
 def test_builder_clear_empties_the_shelf(qtbot):
     ctx = _fake_ctx(wells=["A01"], channels=["gfp", "rfp"], timepoints=["T01"])
     spec = B.builder_spec(ctx)

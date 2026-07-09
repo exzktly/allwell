@@ -77,6 +77,12 @@ class ImageTableState:
     row_group_gap: int = 18
     col_group_gap: int = 18
 
+    # Rendered-table label font sizes (px). ``label_font_pt`` sizes the per-value
+    # axis labels (and the corner); ``group_font_pt`` sizes the facet-group band
+    # strips. Tunable from the Properties sidebar.
+    label_font_pt: int = 11
+    group_font_pt: int = 11
+
     # composite: when True, image_table_generate appends one extra row at the
     # bottom whose cells additively merge (LUT-colored RGB summed, clipped to
     # white) every row above them in the same column. A transient display

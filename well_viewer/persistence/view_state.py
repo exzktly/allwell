@@ -303,18 +303,21 @@ def _snapshot_image_table_axes(ctx) -> dict:
 
 
 def _snapshot_image_table_spacing(ctx) -> dict:
-    """The user-tuned rendered-grid gaps (px), so a restore keeps the spacing."""
+    """The user-tuned rendered-table gaps + label font sizes (px), so a restore
+    keeps the Properties-sidebar spacing/typography."""
     it = ctx.state.image_table
     return {k: int(getattr(it, k, d)) for k, d in
-            (("cell_gap", 2), ("row_group_gap", 18), ("col_group_gap", 18))}
+            (("cell_gap", 2), ("row_group_gap", 18), ("col_group_gap", 18),
+             ("label_font_pt", 11), ("group_font_pt", 11))}
 
 
 def _restore_image_table_spacing(ctx, state: dict) -> None:
     it = ctx.state.image_table
-    for k in ("cell_gap", "row_group_gap", "col_group_gap"):
+    for k, lo in (("cell_gap", 0), ("row_group_gap", 0), ("col_group_gap", 0),
+                  ("label_font_pt", 6), ("group_font_pt", 6)):
         v = state.get(k)
         if isinstance(v, int):
-            setattr(it, k, max(0, v))
+            setattr(it, k, max(lo, v))
 
 
 def _snapshot_image_table(ctx) -> dict:

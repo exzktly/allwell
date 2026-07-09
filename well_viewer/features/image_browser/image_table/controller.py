@@ -904,12 +904,14 @@ def image_table_set_zoom(ctx, factor: float, *, relative: bool = False) -> None:
 
 
 def image_table_set_spacing(ctx, key: str, value) -> None:
-    """Set a rendered-grid spacing in px — ``cell_gap`` (between adjacent cells),
-    ``row_group_gap`` / ``col_group_gap`` (between facet groups down rows / across
-    columns) — and re-render if a table already exists."""
-    if key not in ("cell_gap", "row_group_gap", "col_group_gap"):
+    """Set a rendered-table display property in px and re-render if a table
+    exists: the spacing gaps ``cell_gap`` / ``row_group_gap`` / ``col_group_gap``
+    (min 0) or the label font sizes ``label_font_pt`` / ``group_font_pt`` (min 6)."""
+    if key not in ("cell_gap", "row_group_gap", "col_group_gap",
+                   "label_font_pt", "group_font_pt"):
         return
-    setattr(ctx.state.image_table, key, max(0, int(round(float(value)))))
+    lo = 6 if key.endswith("_pt") else 0
+    setattr(ctx.state.image_table, key, max(lo, int(round(float(value)))))
     if getattr(ctx.state.image_table, "last_render", None):
         image_table_generate(ctx)
 

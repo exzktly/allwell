@@ -78,6 +78,15 @@ def test_facet_plan_reads_independent_gaps():
     assert plan.row_gap == 40 and plan.col_gap == 6
 
 
+def test_facet_plan_reads_font_sizes():
+    cells = [[_cell("A01", "GFP", tp) for tp in ("0h", "24h")]]
+    ctx = _ctx([], ["timepoint"])
+    ctx.state.image_table.label_font_pt = 20
+    ctx.state.image_table.group_font_pt = 24
+    plan = F.plan_facets(ctx, cells)
+    assert plan.label_pt == 20 and plan.group_pt == 24
+
+
 def test_facet_plan_nested_columns_group_space():
     # cols = well › timepoint  → column groups get the horizontal spacer
     cells = [[_cell(well, "GFP", tp) for well in ("A01", "A02") for tp in ("0h", "24h")]]

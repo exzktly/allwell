@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.safe import swallow
 from well_viewer.core.ui_helpers import parse_float_edit
+from widgets.stepper import Stepper
 from well_viewer.features.image_browser.cell_browser.worker import (
     resolve_channel_tint,
 )
@@ -316,6 +317,29 @@ def builder_notify_rendered(ctx) -> None:
         _refresh_shape(ctx, builder_spec(ctx))
 
 
+def _set_wrap(ctx, n: int) -> None:
+    builder_spec(ctx).wrap = max(0, int(n))
+    _edit(ctx)
+
+
+def _wrap_applicable(spec) -> bool:
+    """Wrap only applies when neither axis nests a root *and* channels (the
+    grouped/banding layout path is single-dimension per axis)."""
+    return not (spec.rows.root and spec.rows.channels) \
+        and not (spec.cols.root and spec.cols.channels)
+
+
+def _refresh_wrap(ctx, spec) -> None:
+    w = getattr(_rt(ctx), "wrap_stepper", None)
+    if w is None:
+        return
+    w.setEnabled(_wrap_applicable(spec))
+    with swallow("image table builder: wrap sync"):
+        w.blockSignals(True)
+        w.setValue(float(spec.wrap or 0))
+        w.blockSignals(False)
+
+
 def builder_clear(ctx) -> None:
     """Empty the builder (top half): drop every root + nested channel and clear
     any value filters, so the user can assemble a fresh table. Leaves the
@@ -517,6 +541,25 @@ def build_shelf(ctx, parent: QWidget) -> None:
     shape.setObjectName("ITBShape")
     header.addWidget(shape, 1)
     _rt(ctx).shape_label = shape
+
+    # Wrap cols: fold the columns into vertically-stacked bands of N — e.g. the
+    # first N wells across all channels, then the next N below. Writes the spec's
+    # wrap; enabled only when each axis carries a single dimension (the banding
+    # path can't mix with nested root+channels axes).
+    wrap_lbl = QLabel("Wrap cols:", parent)
+    wrap_lbl.setObjectName("ITBSub")
+    header.addWidget(wrap_lbl)
+    wrap = Stepper(parent, value=float(getattr(builder_spec(ctx), "wrap", 0) or 0),
+                   minimum=0.0, maximum=50.0, single_step=1.0, decimals=0)
+    wrap.setFixedWidth(84)
+    wrap.setToolTip("Wrap the columns into vertically-stacked bands of this many "
+                    "columns (e.g. the first N wells across all channels, then the "
+                    "next N below). 0 = off. Applies when each axis has one dimension.")
+    wrap.valueChanged.connect(lambda v: _set_wrap(ctx, int(v)))
+    reg.register("_image_table_wrap_stepper", wrap)
+    _rt(ctx).wrap_stepper = wrap
+    header.addWidget(wrap)
+
     clear_btn = QToolButton(parent)
     clear_btn.setObjectName("ITBClear")
     clear_btn.setText("Clear builder")
@@ -676,6 +719,7 @@ def builder_refresh(ctx) -> None:
     _build_lut_box(ctx, spec)
     _build_tray(ctx, spec)
     _refresh_shape(ctx, spec)
+    _refresh_wrap(ctx, spec)
 
 
 def _refresh_shape(ctx, spec) -> None:

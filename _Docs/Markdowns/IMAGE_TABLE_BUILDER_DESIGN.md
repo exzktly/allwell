@@ -100,8 +100,8 @@ Grounded in the current code, the pain points are:
    by re-keying the LUT table by channel (`_rebuild_lut_row_map_by_channel`).
 
 The through-line: **the rectangular-grid-of-dropdowns is the wrong primary
-abstraction.** The natural abstraction is *"assign each of my four dimensions a
-role, and style each channel,"* which is exactly what JMP's Graph Builder does
+abstraction.** The natural abstraction is *"assign each of my dimensions a
+role, and define the layers to render,"* which is what JMP's Graph Builder does
 with drop zones.
 
 ---
@@ -111,60 +111,96 @@ with drop zones.
 Borrow JMP Graph Builder's shelf-and-zones idea and specialise it to the image
 domain.
 
-### 3.1 Dimensions become draggable chips
+### 3.1 The dimensions are Well, Layer, Timepoint, FOV
 
-A **palette** lists the available dimensions as chips:
+A **palette** lists the draggable dimensions. Three of them behave like classic
+faceting variables; two details make the model fit this domain:
 
-- **Well**, **Channel**, **Timepoint**, **FOV** — the four intrinsic dims.
-- Channel implicitly includes the virtual `NUC+SEG` overlay and ratio metrics,
-  exactly as `_channel_options` already enumerates them.
+- **Well** — its values are **the wells selected on the plate map**, i.e. the
+  existing sidebar `WellPlateSelector` (`picker_view.build_image_table_picker`,
+  which already sets `ctx.state.image_table.active_wells`). There is **no
+  separate well dropdown.** The Well chip just reflects the plate selection's
+  count; clicking it focuses the plate map. Selecting wells stays where users
+  already do it — on the plate — and the Well role only decides whether that
+  selection varies down the rows, across the columns, or is held at one well.
+- **Timepoint** / **FOV** — ordinary value dimensions; the chip shows a count
+  and opens a **value filter** on click (the existing `active_timepoints` /
+  `active_fovs` sets) so a long axis can be pared down without leaving the
+  builder.
+- **Layer** — see §3.4. This is the generalisation of "Channel."
 
-Each chip shows its current value-count (e.g. "Channel · 3", "Timepoint · 8")
-and opens a **value filter** on click (the existing `active_*` sets) so you can
-restrict which values participate without leaving the builder.
+### 3.2 A Layer is a channel rendered a particular way, with its own LUT
 
-### 3.2 Zones give each dimension a role
+Today's per-row controls already treat each row as *a channel rendered a
+particular way*: a **Source** (raw / corrected via `use_tophat`), a
+**Boundaries** outline, a **Binary** mode (cell **mask** / **≥ threshold**), a
+colormap, and LUT min/max (`grid_view.build_lut_row`,
+`controller._row_display_opts`). The redesign makes that unit first-class and
+names it a **Layer**:
+
+```
+Layer = (channel, variant ∈ {raw, corrected, binary≥thr, mask, outline, NUC+SEG},
+         colormap/LUT, log)
+```
+
+The **Layer** dimension's values are the layers you define in a small
+**Layers panel** (a popover on the Layer chip). It defaults to one *corrected*
+layer per channel — today's behaviour — but you can add more: a raw **and** a
+corrected of the same channel, a **binary ≥thr**, a **cell mask**, a **cell
+outline**, the **NUC+SEG** overlay — each carrying **its own LUT/colour**. Then
+you place **Layer** on an axis to vary the layers, hold it at one, or overlay
+them (§3.3). This is exactly the capability that exists today
+(`_render_mask_binary`, `_render_threshold_binary`,
+`_render_with_boundary_overlay`, the Source combo), but promoted from per-row
+toggles to nameable, axis-placeable values with associated LUTs — so "raw vs
+corrected across the columns" or "corrected + outline as two rows" becomes a
+drag, and challenge #6 dissolves because a layer renders identically wherever it
+sits.
+
+### 3.3 Zones — and Facet ↔ Overlay for composites
 
 Drag a chip into exactly one zone:
 
 | Zone | Meaning | Maps onto today's model |
 |---|---|---|
 | **Rows** | Facet down the rows. Multiple chips nest outer→inner. | `row_dims` (ordered) |
-| **Columns** | Facet across the columns. Multiple chips nest, and a **Wrap** toggle tiles a long columns axis into stacked bands. | `col_dims` (ordered) + `group_size`/`group_row_span` |
-| **Hold** | Not faceted — pinned to a single value shown on the chip; click to change. | `_fixed_off_axis` + the Hold-off-axis combos |
+| **Columns** | Facet across the columns. Multiple chips nest, and a **Wrap** control tiles a long columns axis into stacked bands. | `col_dims` (ordered) + `group_size`/`group_row_span` |
+| **Hold** | Not faceted — pinned to a single value shown on the chip; click to change. For **Well**, the held value is one of the plate-selected wells. | `_fixed_off_axis` + the Hold-off-axis combos |
 | **Pages** *(optional, later)* | One separate table per value (export as a multi-page/animation set). | new; generalises the montage use-case |
-| **Merge** | Channels dropped here composite additively into one cell (LUT-coloured RGB summed → white). | `state.composite` + `image_compose.composite_*_rgb`, generalised from "one appended row" to "a cell role" |
+
+**Composite is a mode of a dimension on an axis, not a separate zone.** A
+dimension placed in **Rows** or **Columns** carries a **Facet ↔ Overlay**
+toggle. *Facet* (default) gives one row/column per value. *Overlay* composites
+that dimension's values into a single cell (additive LUT-coloured RGB, clipped —
+the existing `image_compose.composite_*_rgb`). Because the toggle lives on the
+chip **in the Rows/Columns shelf at its nesting position**, a composite is now a
+row or column level — inner or outer — exactly like any other, rather than a
+free-floating "Merge" zone with no place in the hierarchy. The headline case:
+drop **Layer** on Rows and switch it to *Overlay* → each cell is the additive
+blend of every layer (an on-canvas multi-channel merge); nest **Well** *outside*
+it and each well gets its own overlaid row. This retires the standalone
+Composite toggle and folds it into the shelf; challenge #2 dissolves. (Overlay
+is offered primarily on the Layer dimension, where compositing is meaningful.)
 
 **Key simplification:** every dimension lives in exactly one zone, and the zone
-*is* the role. Nesting, grouping, and holding stop being three disjoint
-mechanisms and become "which zone, in what order, with what modifier." The
-shelf is the single source of truth for the table's shape — challenge #3 and #2
-dissolve.
+plus its Facet/Overlay mode *is* the role. Nesting, grouping, holding, and
+compositing stop being four disjoint mechanisms and become "which zone, in what
+order, in which mode." The shelf is the single source of truth for the table's
+shape — challenges #2 and #3 dissolve.
 
-### 3.3 Live, single-phase
+### 3.4 Live, single-phase
 
 Any shelf edit triggers one **debounced rebuild-and-render** — Build and
-Generate merge. Dropping Channel on Rows immediately re-lays the grid and
-renders thumbnails. There is no empty selector grid: **the rendered thumbnails
-are the grid.** Challenge #1 dissolves.
+Generate merge. Dropping Layer on Rows immediately re-lays the grid and renders
+thumbnails. There is no empty selector grid: **the rendered thumbnails are the
+grid.** Challenge #1 dissolves.
 
 The heavy per-cell dropdown grid is removed from the default surface.
 Per-cell overrides (the genuinely irregular table) move to **progressive
 disclosure**: click a rendered cell → a small popover exposes that cell's
-(Well/Channel/Timepoint/FOV) for a one-off override, writing into the same
+(Well / Layer / Timepoint / FOV) for a one-off override, writing into the same
 `cells` model the renderer already reads. Challenge #5 dissolves for the 95%
 case while keeping the escape hatch.
-
-### 3.4 Channel styling is a channel property
-
-Move LUT / colormap / source / boundaries / binary / log off the per-row table
-and onto **per-channel** style records, edited from a popover on the Channel
-chip (or a compact "Channels" panel). A channel renders the same way wherever it
-sits — rows, columns, held, or merged. Challenge #6 dissolves. The existing
-per-row `lut` dict becomes a per-channel `channel_style` dict; the render path
-(`_row_display_opts`, `_row_cmap_name`, `_parse_lut`) changes from "look up by
-row index" to "look up by the cell's channel," which is what
-`_rebuild_lut_row_map_by_channel` already approximates.
 
 ---
 
@@ -181,10 +217,14 @@ value-producing layers stay:
 - **Render + compose** — `image_table_generate`, `image_compose.*`, `lut_ops.*`,
   the zip cache, and `export.py` are untouched. They read the `cells` grid and
   per-cell/-row style; the reshaping only changes *who writes* those.
+- **Well selection** — the plate map is the existing sidebar
+  `WellPlateSelector`; the Well dimension reads `active_wells` straight from it,
+  so nothing about how wells are picked changes.
 - **Persistence** — `persistence/view_state.py` already round-trips
   `row_dims` / `col_dims` / `group_size` / `group_row_span` / `active_*`. The
-  shelf serialises to the same fields, so saved states keep loading. Per-channel
-  style is a small additive block.
+  shelf serialises to the same fields, so saved states keep loading. The layer
+  list (channel/variant/LUT per layer) is a small additive block, generalising
+  the per-row LUT/display snapshot that is already persisted.
 - **Feature-removal contract** — the work stays inside
   `features/image_browser/image_table/`; no new module-scope imports of the
   feature from core, so the §5 removability guards hold.
@@ -201,49 +241,62 @@ Each phase is independently shippable and leaves the tab working.
 
 ### Phase 0 — extract the value model (no UI change)
 - Introduce a Qt-free `TableSpec` in `state.py`: `{rows: [dim...], cols:
-  [dim...], hold: {dim: value}, wrap: int, merge: [chan...], filters:
-  {dim: set}}`. It is a *view* over the existing fields (`row_dims`, `col_dims`,
-  `group_size`, `active_*`) — add a `to_spec()` / `apply_spec()` pair so old and
-  new code read/write the same state.
-- Add `channel_style: dict[str, ChannelStyle]` to `ImageTableState`
-  (colormap/source/boundaries/binary/log/lut per channel), defaulting from
-  today's per-row values. Render path reads channel-keyed style with the per-row
-  table as fallback.
+  [dim...], hold: {dim: value}, wrap: int, overlay: set[dim], filters:
+  {dim: set}}`, where `dim ∈ {well, layer, timepoint, fov}`. It is a *view* over
+  the existing fields (`row_dims`, `col_dims`, `group_size`, `active_*`,
+  `composite`) — add a `to_spec()` / `apply_spec()` pair so old and new code
+  read/write the same state. `well`'s values resolve from `active_wells`.
+- Introduce a `layers: list[Layer]` field on `ImageTableState`, each `Layer =
+  (channel, variant, colormap, lut, log)` where `variant ∈ {raw, corrected,
+  binary, mask, outline, nuc_seg}`. Default: one `corrected` layer per channel,
+  reproducing today's rows-are-channels behaviour. The render path maps a cell's
+  layer(s) to the existing `_row_display_opts` / `_render_mask_binary` /
+  `_render_threshold_binary` / `_render_with_boundary_overlay` / `_row_cmap_name`
+  calls — the *same* renderers, selected by the layer's variant instead of by a
+  per-row toggle.
 
 ### Phase 1 — the shelf UI (behind the existing grid)
-- New `builder_view.py`: the palette of dimension chips + the Rows / Columns /
-  Hold / Merge drop zones, using Qt drag-and-drop (`QDrag` / `dropEvent`) with
-  chips as `QToolButton`-like widgets. Reuse the ordered-nesting and value-filter
-  logic already proven in `tab_view._make_dims_picker` / `_make_filter_picker`.
-- Dropping/reordering/holding writes the `TableSpec`, calls `apply_spec()`, then
-  the existing `image_table_build_layout` + a debounced `image_table_generate`.
+- New `builder_view.py`: the palette of dimension chips (Well / Layer /
+  Timepoint / FOV) + the Rows / Columns / Hold drop zones, using Qt
+  drag-and-drop (`QDrag` / `dropEvent`). Reuse the ordered-nesting and
+  value-filter logic already proven in `tab_view._make_dims_picker` /
+  `_make_filter_picker`. The **Well** chip binds to the existing sidebar
+  `WellPlateSelector` (reads `active_wells`, clicking the chip focuses the
+  plate) — no new well control. The **Layer** chip opens a layers editor
+  (channel × variant × LUT rows + "Add layer"), which is the per-row LUT/display
+  table relocated onto a per-layer model.
+- Rows/Columns chips carry a **Facet ↔ Overlay** toggle (writes `spec.overlay`);
+  dropping/reordering/holding/toggling writes the `TableSpec`, calls
+  `apply_spec()`, then the existing `image_table_build_layout` + a debounced
+  `image_table_generate`.
 - Ship it *above* the current selector grid first, so both drive the same state
   and can be compared side by side.
 
 ### Phase 2 — live render, collapse the selector grid
 - Merge Build + Generate into one debounced `rebuild()` on any shelf change
-  (drop, reorder, hold-value change, filter change, wrap toggle).
+  (drop, reorder, hold-value change, filter change, wrap toggle, Facet/Overlay).
 - Hide the always-on per-cell dropdown grid; add click-to-edit cell popovers for
   overrides (write into `cells`). Keep a "Show selector grid" escape toggle for
   one release for irregular-table users.
 
-### Phase 3 — channel styling panel
-- Replace the per-row levels table with a per-channel style popover on each
-  Channel chip (and/or a compact Channels panel). The render path switches to
-  channel-keyed style lookup as the primary; per-row becomes legacy-only.
+### Phase 3 — layers panel as the styling home
+- Make the Layer editor the primary place display is configured; the render path
+  switches to layer-keyed lookup as the primary and the per-row levels table
+  becomes legacy-only. A cell's variant (mask / outline / ≥thr / raw / corrected)
+  and LUT come from its layer, position-independent.
 
 ### Phase 4 — polish & retire
-- Fold Wrap and Merge fully into the shelf (retire the Group spinner and the
-  Composite toggle button). Retire the legacy selector grid + per-row LUT table
-  once the popover path has soaked. Update `test_monolith_budgets.py` ratchets
-  and `ARCHITECTURE.md` §5.5.
+- Fold Wrap and Overlay fully into the shelf (retire the Group spinner and the
+  standalone Composite toggle button). Retire the legacy selector grid + per-row
+  LUT table once the popover path has soaked. Update `test_monolith_budgets.py`
+  ratchets and `ARCHITECTURE.md` §5.5.
 
 ### Testing
-- The Qt-free `TableSpec` ↔ state round-trip is pure-Python and unit-testable
-  with no Qt (matches the `tests/` no-Qt scaffold).
+- The Qt-free `TableSpec` ↔ state round-trip and the `Layer`-list model are
+  pure-Python and unit-testable with no Qt (matches the `tests/` no-Qt scaffold).
 - A `test_feature_removal`-style boot+load test still passes (no new core
   imports).
-- `view_state` round-trip test extended for `channel_style`.
+- `view_state` round-trip test extended for the `layers` list.
 
 ---
 
@@ -256,7 +309,9 @@ Each phase is independently shippable and leaves the tab working.
 | See the table's shape | read 5+ scattered controls | read one shelf |
 | Configure → see result | Build, then Generate (2 phases) | live (1 phase) |
 | Per-cell widgets | `rows × cols × 4` combos, always shown | rendered thumbnails; edit on click |
-| Channel display | per-row table (only right when rows=channels) | per-channel style, position-independent |
+| Well selection | plate map, but Well can't easily be an axis | plate map feeds a Well role you can facet/hold |
+| Composite | a separate row with no place in the hierarchy | a Facet↔Overlay mode on a Rows/Columns chip |
+| Channel variants (raw/corrected, mask, outline, ≥thr) | per-row toggles, only right when rows=channels | Layers: nameable, axis-placeable, each with its own LUT |
 | Reorder | drag inside a popup | drag chips / thumbnails on the canvas |
 
 The rendered grid, the compose/LUT/export layers, and persistence are reused;

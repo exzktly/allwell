@@ -1,237 +1,171 @@
 <title>All-Well · Table Builder</title>
 <style>
   :root {
-    --bg: #0e0f14;
-    --panel: #16181f;
-    --panel-2: #1c1f28;
-    --edge: #2a2e3a;
-    --edge-soft: #23262f;
-    --ink: #e8eaf0;
-    --ink-dim: #9aa0b0;
-    --ink-faint: #6b7180;
-    --accent: #6366f1;
-    --accent-soft: rgba(99,102,241,0.14);
-    --accent-line: rgba(99,102,241,0.42);
-    --accent-ink: #b3b7ff;
-    --good: #34d399;
-    --warn: #fbbf24;
-    --dapi: #6ea8ff;
-    --gfp: #4ade80;
-    --rfp: #f472b6;
+    --bg: #0e0f14; --panel: #16181f; --panel-2: #1c1f28; --edge: #2a2e3a; --edge-soft: #23262f;
+    --ink: #e8eaf0; --ink-dim: #9aa0b0; --ink-faint: #6b7180;
+    --accent: #6366f1; --accent-soft: rgba(99,102,241,0.14); --accent-line: rgba(99,102,241,0.42); --accent-ink: #b3b7ff;
+    --good: #34d399; --warn: #fbbf24;
+    --ice: #6ea8ff; --green: #4ade80; --magenta: #f472b6; --amber: #fbbf24; --cyan: #22d3ee; --gray: #c8cdd8;
     --radius: 9px;
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
     --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #eef0f5; --panel: #ffffff; --panel-2: #f4f5f9; --edge: #d6d9e3;
-      --edge-soft: #e4e6ee; --ink: #1a1d27; --ink-dim: #5a6070; --ink-faint: #8a90a0;
-      --accent-soft: rgba(99,102,241,0.12); --accent-line: rgba(99,102,241,0.4);
-      --accent-ink: #4f46e5;
-      --dapi:#3b82f6; --gfp:#16a34a; --rfp:#db2777;
+      --bg:#eef0f5; --panel:#fff; --panel-2:#f4f5f9; --edge:#d6d9e3; --edge-soft:#e4e6ee;
+      --ink:#1a1d27; --ink-dim:#5a6070; --ink-faint:#8a90a0; --accent-soft:rgba(99,102,241,0.12);
+      --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5;
+      --ice:#3b82f6; --green:#16a34a; --magenta:#db2777; --amber:#d97706; --cyan:#0891b2; --gray:#6b7280;
     }
   }
   :root[data-theme="dark"] {
     --bg:#0e0f14; --panel:#16181f; --panel-2:#1c1f28; --edge:#2a2e3a; --edge-soft:#23262f;
     --ink:#e8eaf0; --ink-dim:#9aa0b0; --ink-faint:#6b7180; --accent-soft:rgba(99,102,241,0.14);
     --accent-line:rgba(99,102,241,0.42); --accent-ink:#b3b7ff;
-    --dapi:#6ea8ff; --gfp:#4ade80; --rfp:#f472b6;
+    --ice:#6ea8ff; --green:#4ade80; --magenta:#f472b6; --amber:#fbbf24; --cyan:#22d3ee; --gray:#c8cdd8;
   }
   :root[data-theme="light"] {
-    --bg:#eef0f5; --panel:#ffffff; --panel-2:#f4f5f9; --edge:#d6d9e3; --edge-soft:#e4e6ee;
+    --bg:#eef0f5; --panel:#fff; --panel-2:#f4f5f9; --edge:#d6d9e3; --edge-soft:#e4e6ee;
     --ink:#1a1d27; --ink-dim:#5a6070; --ink-faint:#8a90a0; --accent-soft:rgba(99,102,241,0.12);
     --accent-line:rgba(99,102,241,0.4); --accent-ink:#4f46e5;
-    --dapi:#3b82f6; --gfp:#16a34a; --rfp:#db2777;
+    --ice:#3b82f6; --green:#16a34a; --magenta:#db2777; --amber:#d97706; --cyan:#0891b2; --gray:#6b7280;
   }
 
   * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans);
-    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
-  }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 26px 22px 60px; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1200px; margin:0 auto; padding:26px 22px 60px; }
 
-  /* header */
-  header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
-  .brand { display: flex; align-items: center; gap: 11px; }
-  .logo {
-    width: 30px; height: 30px; border-radius: 8px; flex: none;
-    background: linear-gradient(140deg, var(--accent), #8b8ef7);
-    display: grid; grid-template-columns: 1fr 1fr; gap: 2px; padding: 6px;
-  }
-  .logo span { background: rgba(255,255,255,0.85); border-radius: 1px; }
-  .logo span:nth-child(2){ background: rgba(255,255,255,0.5);}
-  .logo span:nth-child(3){ background: rgba(255,255,255,0.5);}
-  h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; font-weight: 640; }
-  .sub { color: var(--ink-dim); font-size: 12.5px; margin-top: 1px; }
-  .eyebrow {
-    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
-    color: var(--accent-ink); font-weight: 600;
-  }
-  .theme-btn {
-    font: inherit; font-size: 12px; color: var(--ink-dim); background: var(--panel);
-    border: 1px solid var(--edge); border-radius: 7px; padding: 6px 11px; cursor: pointer;
-  }
-  .theme-btn:hover { color: var(--ink); border-color: var(--accent-line); }
+  header { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; flex-wrap:wrap; }
+  .brand { display:flex; align-items:center; gap:11px; }
+  .logo { width:30px; height:30px; border-radius:8px; flex:none; background:linear-gradient(140deg,var(--accent),#8b8ef7); display:grid; grid-template-columns:1fr 1fr; gap:2px; padding:6px; }
+  .logo span { background:rgba(255,255,255,0.85); border-radius:1px; }
+  .logo span:nth-child(2),.logo span:nth-child(3){ background:rgba(255,255,255,0.5); }
+  h1 { font-size:17px; margin:0; letter-spacing:-0.01em; font-weight:640; }
+  .sub { color:var(--ink-dim); font-size:12.5px; margin-top:1px; }
+  .eyebrow { font-size:10.5px; letter-spacing:0.14em; text-transform:uppercase; color:var(--accent-ink); font-weight:600; }
+  .theme-btn { font:inherit; font-size:12px; color:var(--ink-dim); background:var(--panel); border:1px solid var(--edge); border-radius:7px; padding:6px 11px; cursor:pointer; }
+  .theme-btn:hover { color:var(--ink); border-color:var(--accent-line); }
+  .lede { margin:18px 0 22px; max-width:70ch; color:var(--ink-dim); font-size:13.5px; }
+  .lede b { color:var(--ink); font-weight:600; }
 
-  .lede {
-    margin: 18px 0 22px; max-width: 68ch; color: var(--ink-dim); font-size: 13.5px;
-  }
-  .lede b { color: var(--ink); font-weight: 600; }
-
-  /* builder shell */
-  .builder {
-    background: var(--panel); border: 1px solid var(--edge); border-radius: 14px;
-    overflow: hidden; box-shadow: 0 18px 44px -30px rgba(0,0,0,0.7);
-  }
-  .toolbar {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-    padding: 12px 16px; border-bottom: 1px solid var(--edge-soft); background: var(--panel-2);
-  }
-  .toolbar .tag {
-    font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
-    font-weight: 600; margin-right: 2px;
-  }
-  .shape {
-    font-family: var(--mono); font-size: 12px; color: var(--ink-dim);
-    display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
-  }
-  .shape b { color: var(--accent-ink); font-weight: 600; }
-  .shape .arrow { color: var(--ink-faint); }
-  .toolbar .spacer { flex: 1; }
-  .wrapctl { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-dim); }
-  .wrapctl input {
-    width: 46px; font: inherit; font-family: var(--mono); text-align: center;
-    background: var(--panel); color: var(--ink); border: 1px solid var(--edge); border-radius: 6px; padding: 3px 4px;
-  }
-  .live-pill {
-    display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--good);
-    background: color-mix(in srgb, var(--good) 14%, transparent); border: 1px solid color-mix(in srgb, var(--good) 34%, transparent);
-    padding: 4px 9px; border-radius: 999px; font-weight: 600;
-  }
-  .live-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--good); animation: pulse 2s infinite; }
+  .builder { background:var(--panel); border:1px solid var(--edge); border-radius:14px; overflow:hidden; box-shadow:0 18px 44px -30px rgba(0,0,0,0.7); }
+  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:12px 16px; border-bottom:1px solid var(--edge-soft); background:var(--panel-2); }
+  .toolbar .tag { font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:var(--ink-faint); font-weight:600; }
+  .shape { font-family:var(--mono); font-size:12px; color:var(--ink-dim); display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .shape b { color:var(--accent-ink); font-weight:600; }
+  .shape .ov { color:var(--amber); }
+  .shape .arrow { color:var(--ink-faint); }
+  .toolbar .spacer { flex:1; }
+  .wrapctl { display:flex; align-items:center; gap:7px; font-size:12px; color:var(--ink-dim); }
+  .wrapctl input { width:46px; font:inherit; font-family:var(--mono); text-align:center; background:var(--panel); color:var(--ink); border:1px solid var(--edge); border-radius:6px; padding:3px 4px; }
+  .live-pill { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--good); background:color-mix(in srgb,var(--good) 14%,transparent); border:1px solid color-mix(in srgb,var(--good) 34%,transparent); padding:4px 9px; border-radius:999px; font-weight:600; }
+  .live-pill .dot { width:6px; height:6px; border-radius:50%; background:var(--good); animation:pulse 2s infinite; }
   @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.35;} }
   @media (prefers-reduced-motion: reduce){ .live-pill .dot{ animation:none; } }
 
-  .stage { display: grid; grid-template-columns: 210px 1fr; }
-  @media (max-width: 760px){ .stage { grid-template-columns: 1fr; } }
+  .stage { display:grid; grid-template-columns:230px 1fr; }
+  @media (max-width:800px){ .stage { grid-template-columns:1fr; } }
+  .palette { border-right:1px solid var(--edge-soft); padding:14px; background:var(--panel); }
+  @media (max-width:800px){ .palette { border-right:none; border-bottom:1px solid var(--edge-soft); } }
+  .palette h2, .zones h2 { font-size:10.5px; letter-spacing:0.13em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 10px; font-weight:640; }
+  .palette .hint { font-size:11.5px; color:var(--ink-faint); margin-top:12px; line-height:1.45; }
 
-  /* palette */
-  .palette { border-right: 1px solid var(--edge-soft); padding: 14px; background: var(--panel); }
-  @media (max-width: 760px){ .palette { border-right: none; border-bottom: 1px solid var(--edge-soft); } }
-  .palette h2, .zones h2 {
-    font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase; color: var(--ink-faint);
-    margin: 0 0 10px; font-weight: 640;
-  }
-  .palette .hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 12px; line-height: 1.45; }
+  /* plate map (stands in for the sidebar well picker) */
+  .plate-card { border:1px solid var(--edge-soft); border-radius:9px; padding:10px; margin-bottom:16px; background:var(--panel-2); transition:box-shadow .2s, border-color .2s; }
+  .plate-card.flash { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+  .plate-card .pc-head { display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px; }
+  .plate-card .pc-title { font-size:11px; font-weight:640; }
+  .plate-card .pc-sub { font-size:10px; color:var(--ink-faint); }
+  .plate { display:grid; grid-template-columns:16px repeat(4,1fr); gap:3px; }
+  .plate .ph { font-family:var(--mono); font-size:9px; color:var(--ink-faint); text-align:center; align-self:center; }
+  .well { aspect-ratio:1; border-radius:50%; border:1px solid var(--edge); background:var(--panel); cursor:pointer; font-family:var(--mono); font-size:8.5px; color:var(--ink-faint); display:flex; align-items:center; justify-content:center; transition:background .1s, border-color .1s, color .1s; }
+  .well:hover { border-color:var(--accent-line); }
+  .well.sel { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
+  .plate-card .pc-count { font-family:var(--mono); font-size:10px; color:var(--ink-dim); margin-top:7px; text-align:center; }
 
-  /* chips */
-  .chip {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    background: var(--panel-2); border: 1px solid var(--edge); border-radius: 8px;
-    padding: 8px 10px; margin-bottom: 8px; cursor: grab; user-select: none;
-    transition: border-color .12s, transform .06s, box-shadow .12s;
-  }
-  .chip:active { cursor: grabbing; }
-  .chip:hover { border-color: var(--accent-line); }
-  .chip.dragging { opacity: 0.4; }
-  .chip .grip { color: var(--ink-faint); font-size: 13px; letter-spacing: -2px; margin-right: -2px; }
-  .chip .name { font-weight: 600; font-size: 13px; }
-  .chip .count {
-    margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
-    background: var(--bg); border: 1px solid var(--edge-soft); border-radius: 999px; padding: 1px 7px;
-  }
-  .chip .swatch { width: 9px; height: 9px; border-radius: 2px; flex: none; }
-  .chip[data-dim="well"] .swatch { background: var(--accent); }
-  .chip[data-dim="channel"] .swatch { background: linear-gradient(90deg, var(--dapi), var(--gfp), var(--rfp)); }
-  .chip[data-dim="timepoint"] .swatch { background: var(--warn); }
-  .chip[data-dim="fov"] .swatch { background: var(--ink-dim); }
-  .chip.filtered .count { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .chip { display:flex; align-items:center; gap:8px; width:100%; background:var(--panel-2); border:1px solid var(--edge); border-radius:8px; padding:8px 10px; margin-bottom:8px; cursor:grab; user-select:none; transition:border-color .12s; }
+  .chip:active { cursor:grabbing; }
+  .chip:hover { border-color:var(--accent-line); }
+  .chip.dragging { opacity:0.4; }
+  .chip .grip { color:var(--ink-faint); font-size:13px; letter-spacing:-2px; }
+  .chip .name { font-weight:600; font-size:13px; }
+  .chip .count { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--ink-dim); background:var(--bg); border:1px solid var(--edge-soft); border-radius:999px; padding:1px 7px; }
+  .chip .swatch { width:9px; height:9px; border-radius:2px; flex:none; }
+  .chip[data-dim="well"] .swatch { background:var(--accent); }
+  .chip[data-dim="layer"] .swatch { background:linear-gradient(90deg,var(--ice),var(--green),var(--magenta)); }
+  .chip[data-dim="timepoint"] .swatch { background:var(--amber); }
+  .chip[data-dim="fov"] .swatch { background:var(--gray); }
+  .chip.filtered .count { color:var(--warn); border-color:color-mix(in srgb,var(--warn) 40%,transparent); }
+  .chip[data-dim="well"] { cursor:pointer; }
 
-  /* zones */
-  .zones { padding: 14px 16px 16px; }
-  .zone-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-  @media (max-width: 560px){ .zone-grid { grid-template-columns: 1fr; } }
-  .zone {
-    border: 1.5px dashed var(--edge); border-radius: var(--radius); padding: 10px 11px 11px;
-    min-height: 74px; background: var(--panel-2); transition: border-color .12s, background .12s;
-  }
-  .zone.over { border-color: var(--accent); background: var(--accent-soft); }
-  .zone .zhead { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
-  .zone .zname { font-size: 12px; font-weight: 650; letter-spacing: .01em; }
-  .zone .zrole { font-size: 10.5px; color: var(--ink-faint); }
-  .zone .icon { width: 15px; height: 15px; flex: none; color: var(--accent-ink); }
-  .zone .slot { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; min-height: 30px; }
-  .zone .empty { font-size: 11.5px; color: var(--ink-faint); font-style: italic; }
+  .zones { padding:14px 16px 16px; }
+  .zone-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  @media (max-width:620px){ .zone-grid { grid-template-columns:1fr; } }
+  .zone { border:1.5px dashed var(--edge); border-radius:var(--radius); padding:10px 11px 11px; min-height:70px; background:var(--panel-2); transition:border-color .12s, background .12s; }
+  .zone.wide { grid-column:1 / -1; }
+  .zone.over { border-color:var(--accent); background:var(--accent-soft); }
+  .zone .zhead { display:flex; align-items:center; gap:8px; margin-bottom:9px; }
+  .zone .zname { font-size:12px; font-weight:650; }
+  .zone .zrole { font-size:10.5px; color:var(--ink-faint); }
+  .zone .icon { width:15px; height:15px; flex:none; color:var(--accent-ink); }
+  .zone .slot { display:flex; flex-wrap:wrap; gap:7px; align-items:center; min-height:30px; }
+  .zone .empty { font-size:11.5px; color:var(--ink-faint); font-style:italic; }
 
-  .pill {
-    display: inline-flex; align-items: center; gap: 6px; background: var(--panel);
-    border: 1px solid var(--edge); border-radius: 7px; padding: 5px 8px; cursor: grab;
-    font-size: 12px; user-select: none; transition: border-color .12s;
-  }
-  .pill:hover { border-color: var(--accent-line); }
-  .pill.dragging { opacity: 0.4; }
-  .pill .swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
-  .pill[data-dim="well"] .swatch { background: var(--accent); }
-  .pill[data-dim="channel"] .swatch { background: linear-gradient(90deg,var(--dapi),var(--gfp),var(--rfp)); }
-  .pill[data-dim="timepoint"] .swatch { background: var(--warn); }
-  .pill[data-dim="fov"] .swatch { background: var(--ink-dim); }
-  .pill .hold-val {
-    font-family: var(--mono); font-size: 11px; color: var(--accent-ink);
-    background: var(--accent-soft); border-radius: 5px; padding: 0 5px; margin-left: 1px;
-  }
-  .pill select {
-    font: inherit; font-family: var(--mono); font-size: 11px; color: var(--accent-ink);
-    background: transparent; border: none; cursor: pointer; padding: 0 2px; margin-left: 1px;
-  }
-  .pill .nest-i { font-family: var(--mono); font-size: 9.5px; color: var(--ink-faint); }
+  .pill { display:inline-flex; align-items:center; gap:6px; background:var(--panel); border:1px solid var(--edge); border-radius:7px; padding:4px 6px 4px 8px; cursor:grab; font-size:12px; user-select:none; transition:border-color .12s; }
+  .pill:hover { border-color:var(--accent-line); }
+  .pill.dragging { opacity:0.4; }
+  .pill.overlay { border-color:color-mix(in srgb,var(--amber) 55%,var(--edge)); background:color-mix(in srgb,var(--amber) 9%,var(--panel)); }
+  .pill .swatch { width:8px; height:8px; border-radius:2px; flex:none; }
+  .pill[data-dim="well"] .swatch { background:var(--accent); }
+  .pill[data-dim="layer"] .swatch { background:linear-gradient(90deg,var(--ice),var(--green),var(--magenta)); }
+  .pill[data-dim="timepoint"] .swatch { background:var(--amber); }
+  .pill[data-dim="fov"] .swatch { background:var(--gray); }
+  .pill select { font:inherit; font-family:var(--mono); font-size:11px; color:var(--accent-ink); background:transparent; border:none; cursor:pointer; padding:0 1px; }
+  .pill .nest-i { font-family:var(--mono); font-size:9px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em; }
+  .pill .mode-btn { font:inherit; font-size:10px; font-family:var(--mono); border:1px solid var(--edge); background:var(--panel-2); color:var(--ink-dim); border-radius:5px; padding:1px 6px; cursor:pointer; margin-left:2px; }
+  .pill .mode-btn:hover { border-color:var(--accent-line); color:var(--ink); }
+  .pill.overlay .mode-btn { color:var(--amber); border-color:color-mix(in srgb,var(--amber) 45%,transparent); background:color-mix(in srgb,var(--amber) 12%,transparent); }
 
-  /* filter popover */
-  .pop {
-    position: absolute; z-index: 30; background: var(--panel); border: 1px solid var(--edge);
-    border-radius: 9px; padding: 9px; box-shadow: 0 14px 34px -18px rgba(0,0,0,0.7); min-width: 150px;
-  }
-  .pop h3 { font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 7px; }
-  .pop label { display: flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 3px 2px; cursor: pointer; font-family: var(--mono); }
-  .pop input { accent-color: var(--accent); }
+  .pop { position:absolute; z-index:30; background:var(--panel); border:1px solid var(--edge); border-radius:9px; padding:9px; box-shadow:0 14px 34px -18px rgba(0,0,0,0.7); }
+  .pop h3 { font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 7px; }
+  .pop.filter label { display:flex; align-items:center; gap:8px; font-size:12.5px; padding:3px 2px; cursor:pointer; font-family:var(--mono); }
+  .pop.filter input { accent-color:var(--accent); }
 
-  /* render grid */
-  .render { padding: 4px 16px 18px; }
-  .render-head { display: flex; align-items: baseline; gap: 10px; margin: 14px 2px 12px; }
-  .render-head .rlbl { font-size: 10.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--ink-faint); font-weight: 640; }
-  .render-head .rcount { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); }
-  .band + .band { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--edge-soft); }
-  .band-label { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-bottom: 8px; }
-  .tablewrap { overflow-x: auto; }
-  table.grid { border-collapse: separate; border-spacing: 4px; }
-  table.grid th {
-    font-family: var(--mono); font-size: 11px; font-weight: 500; color: var(--ink-dim);
-    padding: 2px 6px; text-align: center; white-space: nowrap;
-  }
-  table.grid th.corner { color: var(--ink-faint); text-align: right; }
-  table.grid td.rowhead {
-    font-family: var(--mono); font-size: 11px; color: var(--ink-dim); text-align: right;
-    padding-right: 8px; white-space: nowrap; vertical-align: middle;
-  }
-  .cell {
-    width: 92px; height: 92px; border-radius: 6px; position: relative; overflow: hidden;
-    border: 1px solid var(--edge-soft); background: #05060a;
-  }
-  .cell canvas { width: 100%; height: 100%; display: block; }
-  .cell .coord {
-    position: absolute; left: 0; right: 0; bottom: 0; font-family: var(--mono); font-size: 9.5px;
-    color: #dfe2ee; background: linear-gradient(0deg, rgba(0,0,0,0.72), transparent);
-    padding: 8px 5px 3px; letter-spacing: .01em; line-height: 1.25;
-  }
-  .cell .coord .c-chan { color: #fff; font-weight: 600; }
-  .cell.merged { border-color: var(--accent-line); box-shadow: inset 0 0 0 1px var(--accent-soft); }
+  /* layers editor */
+  .pop.layers { min-width:330px; }
+  .lyr { display:flex; align-items:center; gap:6px; padding:5px 0; border-bottom:1px solid var(--edge-soft); }
+  .lyr:last-of-type { border-bottom:none; }
+  .lyr .lsw { width:11px; height:11px; border-radius:3px; flex:none; border:1px solid rgba(255,255,255,.15); }
+  .lyr select { font:inherit; font-size:11.5px; font-family:var(--mono); background:var(--panel-2); color:var(--ink); border:1px solid var(--edge); border-radius:6px; padding:3px 4px; }
+  .lyr .rm { margin-left:auto; border:none; background:transparent; color:var(--ink-faint); cursor:pointer; font-size:14px; padding:0 4px; }
+  .lyr .rm:hover { color:var(--magenta); }
+  .pop.layers .addlyr { margin-top:9px; width:100%; font:inherit; font-size:12px; border:1px dashed var(--edge); background:var(--panel-2); color:var(--ink-dim); border-radius:7px; padding:6px; cursor:pointer; }
+  .pop.layers .addlyr:hover { border-color:var(--accent-line); color:var(--ink); }
+  .pop.layers .lhint { font-size:11px; color:var(--ink-faint); margin-top:8px; line-height:1.45; }
 
-  footer { margin-top: 26px; color: var(--ink-faint); font-size: 12px; line-height: 1.6; }
-  footer .note { max-width: 74ch; }
-  footer code { font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; border: 1px solid var(--edge-soft); }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
-  .legend span { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
-  .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+  .render { padding:4px 16px 18px; }
+  .render-head { display:flex; align-items:baseline; gap:10px; margin:14px 2px 12px; }
+  .render-head .rlbl { font-size:10.5px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); font-weight:640; }
+  .render-head .rcount { font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); }
+  .band + .band { margin-top:18px; padding-top:14px; border-top:1px solid var(--edge-soft); }
+  .band-label { font-family:var(--mono); font-size:11px; color:var(--ink-faint); margin-bottom:8px; }
+  .tablewrap { overflow-x:auto; }
+  table.grid { border-collapse:separate; border-spacing:4px; }
+  table.grid th { font-family:var(--mono); font-size:11px; font-weight:500; color:var(--ink-dim); padding:2px 6px; text-align:center; white-space:nowrap; }
+  table.grid th.corner { color:var(--ink-faint); text-align:right; }
+  table.grid td.rowhead { font-family:var(--mono); font-size:11px; color:var(--ink-dim); text-align:right; padding-right:8px; white-space:nowrap; vertical-align:middle; }
+  .cell { width:92px; height:92px; border-radius:6px; position:relative; overflow:hidden; border:1px solid var(--edge-soft); background:#05060a; }
+  .cell canvas { width:100%; height:100%; display:block; }
+  .cell .coord { position:absolute; left:0; right:0; bottom:0; font-family:var(--mono); font-size:9px; color:#dfe2ee; background:linear-gradient(0deg,rgba(0,0,0,0.75),transparent); padding:9px 5px 3px; line-height:1.3; }
+  .cell .coord .c-lyr { color:#fff; font-weight:600; }
+  .cell.ovl { border-color:color-mix(in srgb,var(--amber) 45%,var(--edge)); }
+
+  footer { margin-top:26px; color:var(--ink-faint); font-size:12px; line-height:1.6; }
+  footer .note { max-width:76ch; }
+  footer code { font-family:var(--mono); font-size:11.5px; color:var(--ink-dim); background:var(--panel-2); padding:1px 5px; border-radius:4px; border:1px solid var(--edge-soft); }
+  .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; }
+  .legend span { display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); }
+  .legend i { width:9px; height:9px; border-radius:2px; display:inline-block; }
 </style>
 
 <div class="wrap">
@@ -248,10 +182,12 @@
   </header>
 
   <p class="lede">
-    Replaces the build-then-generate grid of dropdowns. Your data varies across four dimensions —
-    <b>Well</b>, <b>Channel</b>, <b>Timepoint</b>, <b>FOV</b>. Drag each one into a role: stack it down the
-    <b>Rows</b>, spread it across the <b>Columns</b>, <b>Hold</b> it at one value, or <b>Merge</b> channels into a
-    single composite. Drop two into a zone to nest them. The image grid re-lays-out live — no separate Build step.
+    Replaces the build-then-generate grid of dropdowns. Your data varies across
+    <b>Wells</b> (chosen on the plate map, left), <b>Layers</b>, <b>Timepoints</b>, and <b>FOVs</b>.
+    Drag each dimension into a role: stack it down the <b>Rows</b>, spread it across the <b>Columns</b>,
+    or <b>Hold</b> it at one value. A <b>Layer</b> is a channel rendered a particular way — raw, corrected,
+    binary&nbsp;≥thr, cell mask, or outline — each with its own colour/LUT. Any Rows/Columns dimension
+    can switch from <b>Facet</b> to <b>Overlay</b> to composite its values into one cell. Live — no Build step.
   </p>
 
   <div class="builder">
@@ -267,9 +203,16 @@
 
     <div class="stage">
       <aside class="palette">
+        <h2>Plate — well picker</h2>
+        <div class="plate-card" id="plateCard">
+          <div class="pc-head"><span class="pc-title">Select wells</span><span class="pc-sub">feeds the Well role</span></div>
+          <div class="plate" id="plate"></div>
+          <div class="pc-count" id="plateCount"></div>
+        </div>
+
         <h2>Dimensions</h2>
         <div id="palette"></div>
-        <p class="hint">Drag a chip into a role. Click it to filter which values appear.</p>
+        <p class="hint">Drag a chip into a role. Wells come from the plate above; click <b>Layer</b> to add channel variants, <b>Timepoint</b>/<b>FOV</b> to filter values.</p>
       </aside>
 
       <section class="zones">
@@ -278,30 +221,23 @@
           <div class="zone" data-zone="rows">
             <div class="zhead">
               <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2.5" width="12" height="3.2" rx="1"/><rect x="2" y="6.4" width="12" height="3.2" rx="1"/><rect x="2" y="10.3" width="12" height="3.2" rx="1"/></svg>
-              <span class="zname">Rows</span><span class="zrole">facet ↓ · nest outer→inner</span>
+              <span class="zname">Rows</span><span class="zrole">facet ↓ · nest outer→inner · overlay</span>
             </div>
             <div class="slot" id="slot-rows"></div>
           </div>
           <div class="zone" data-zone="cols">
             <div class="zhead">
               <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2.5" y="2" width="3.2" height="12" rx="1"/><rect x="6.4" y="2" width="3.2" height="12" rx="1"/><rect x="10.3" y="2" width="3.2" height="12" rx="1"/></svg>
-              <span class="zname">Columns</span><span class="zrole">facet → · wrap into bands</span>
+              <span class="zname">Columns</span><span class="zrole">facet → · wrap into bands · overlay</span>
             </div>
             <div class="slot" id="slot-cols"></div>
           </div>
-          <div class="zone" data-zone="hold">
+          <div class="zone wide" data-zone="hold">
             <div class="zhead">
               <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></svg>
-              <span class="zname">Hold</span><span class="zrole">pin at one value</span>
+              <span class="zname">Hold</span><span class="zrole">pin at one value (Well pins to a selected well)</span>
             </div>
             <div class="slot" id="slot-hold"></div>
-          </div>
-          <div class="zone" data-zone="merge">
-            <div class="zhead">
-              <svg class="icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="6" cy="8" r="4"/><circle cx="10" cy="8" r="4"/></svg>
-              <span class="zname">Merge</span><span class="zrole">channels → one composite cell</span>
-            </div>
-            <div class="slot" id="slot-merge"></div>
           </div>
         </div>
       </section>
@@ -318,19 +254,20 @@
 
   <footer>
     <p class="note">
-      Interactive mockup — synthetic thumbnails. This is the <b>control surface</b> only; underneath, the shelf writes
-      the same <code>row_dims</code> / <code>col_dims</code> / <code>group_size</code> / <code>active_*</code> state the
-      current layout math and render pipeline already consume, so <code>image_table_generate</code>, the compose/LUT/export
-      layers, and view-state persistence are reused. Full write-up:
-      <code>_Docs/Markdowns/IMAGE_TABLE_BUILDER_DESIGN.md</code>.
+      Interactive mockup — synthetic thumbnails. This is the <b>control surface</b> only; underneath, the shelf writes the
+      same <code>row_dims</code> / <code>col_dims</code> / <code>group_size</code> / <code>active_wells</code> state the current
+      layout math and render pipeline already consume — the plate map is the existing sidebar <code>WellPlateSelector</code>,
+      and each Layer's variant maps to today's per-row <code>Source</code> (raw/corrected), <code>Boundaries</code>, and
+      <code>Binary</code> (mask / ≥thr) toggles. So <code>image_table_generate</code>, the compose/LUT/export layers, and
+      view-state persistence are reused. Full write-up: <code>_Docs/Markdowns/IMAGE_TABLE_BUILDER_DESIGN.md</code>.
     </p>
     <div class="legend">
-      <span><i style="background:var(--dapi)"></i>DAPI</span>
-      <span><i style="background:var(--gfp)"></i>GFP</span>
-      <span><i style="background:var(--rfp)"></i>RFP</span>
+      <span><i style="background:var(--ice)"></i>DAPI</span>
+      <span><i style="background:var(--green)"></i>GFP</span>
+      <span><i style="background:var(--magenta)"></i>RFP</span>
+      <span><i style="background:var(--gray)"></i>mask / outline</span>
       <span><i style="background:var(--accent)"></i>Well</span>
-      <span><i style="background:var(--warn)"></i>Timepoint</span>
-      <span><i style="background:var(--ink-dim)"></i>FOV</span>
+      <span><i style="background:var(--amber)"></i>Timepoint / overlay</span>
     </div>
   </footer>
 </div>
@@ -338,170 +275,177 @@
 <script>
 (function(){
   "use strict";
-
-  // ── domain: four dimensions + their values ───────────────────────────────
-  const DIMS = {
-    well:      { label: "Well",      values: ["A1","A2","B1"] },
-    channel:   { label: "Channel",   values: ["DAPI","GFP","RFP"] },
-    timepoint: { label: "Timepoint", values: ["T01","T04","T08","T12"] },
-    fov:       { label: "FOV",       values: ["1","2"] },
-  };
-  const CHAN_HUE = { DAPI: [110,168,255], GFP: [74,222,128], RFP: [244,114,182] };
-
-  // assignment: which dims are in which zone (ordered), + per-dim filter + held value
-  const state = {
-    rows:  ["channel"],
-    cols:  ["timepoint"],
-    hold:  ["well","fov"],
-    merge: [],
-    filter: { well:new Set(DIMS.well.values), channel:new Set(DIMS.channel.values),
-              timepoint:new Set(DIMS.timepoint.values), fov:new Set(DIMS.fov.values) },
-    held:  { well:"A1", channel:"DAPI", timepoint:"T01", fov:"1" },
-    wrap:  0,
-  };
-
   const $ = (s,r=document)=>r.querySelector(s);
-  const enabledVals = (dim)=> DIMS[dim].values.filter(v=>state.filter[dim].has(v));
 
-  // ── seeded synthetic microscopy thumbnail ────────────────────────────────
+  // ── plate map (the sidebar well picker) drives the Well dimension ─────────
+  const PLATE_ROWS=["A","B","C"], PLATE_COLS=[1,2,3,4];
+  const plate = { selected: new Set(["A1","A2","B1"]) };
+
+  // ── layers: a Layer = channel + render variant + colour/LUT ──────────────
+  const CMAP = { ice:[110,168,255], green:[74,222,128], magenta:[244,114,182], amber:[251,191,36], cyan:[34,211,238], gray:[205,210,222] };
+  const CMAP_FOR_CHAN = { DAPI:"ice", GFP:"green", RFP:"magenta", "NUC+SEG":"cyan" };
+  const CHANNELS = ["DAPI","GFP","RFP","NUC+SEG"];
+  const VARIANTS = [ ["corrected","corr"], ["raw","raw"], ["binary","≥thr"], ["mask","mask"], ["outline","outline"] ];
+  const VLABEL = Object.fromEntries(VARIANTS);
+  let lseq = 4;
+  let layers = [
+    { id:"l1", channel:"DAPI", variant:"corrected", cmap:"ice" },
+    { id:"l2", channel:"GFP",  variant:"corrected", cmap:"green" },
+    { id:"l3", channel:"RFP",  variant:"corrected", cmap:"magenta" },
+  ];
+  const layerById = id => layers.find(l=>l.id===id);
+  const layerLabel = id => { const l=layerById(id); return l ? l.channel+" "+VLABEL[l.variant] : "—"; };
+
+  const DIMS = {
+    well:      { label:"Well",      kind:"plate" },
+    layer:     { label:"Layer",     kind:"layer" },
+    timepoint: { label:"Timepoint", vals:["T01","T04","T08","T12"], filter:new Set(["T01","T04","T08","T12"]) },
+    fov:       { label:"FOV",       vals:["1","2"], filter:new Set(["1","2"]) },
+  };
+
+  const state = {
+    rows:["layer"], cols:["timepoint"], hold:["well","fov"],
+    composite:new Set(),                       // dims rendered as Overlay (meaningful for 'layer')
+    held:{ well:"A1", layer:"l1", timepoint:"T01", fov:"1" },
+    wrap:0,
+  };
+
+  const selectedWells = ()=>[...plate.selected].sort();
+  const valuesOf = dim => {
+    if(dim==="well") return selectedWells();
+    if(dim==="layer") return layers.map(l=>l.id);
+    return DIMS[dim].vals.filter(v=>DIMS[dim].filter.has(v));
+  };
+  const dispVal = (dim,v)=> dim==="layer" ? layerLabel(v) : v;
+  const overlayLayer = ()=> state.composite.has("layer") && (state.rows.includes("layer")||state.cols.includes("layer"));
+
+  // ── synthetic thumbnail: draw each layer by its variant, additively ──────
   function hashStr(s){ let h=2166136261; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
   function rng(seed){ let x=seed||1; return ()=>{ x^=x<<13; x^=x>>>17; x^=x<<5; return ((x>>>0)/4294967296); }; }
+  function blobsFor(key){ const r=rng(hashStr(key)); const n=5+Math.floor(r()*4); const b=[];
+    for(let i=0;i<n;i++) b.push({x:r()*92,y:r()*92,rad:8+r()*12,amp:0.6+r()*0.5}); return b; }
 
-  function drawThumb(canvas, chans, key){
-    const S = 92; canvas.width=S; canvas.height=S;
-    const g = canvas.getContext("2d");
-    g.fillStyle = "#05060a"; g.fillRect(0,0,S,S);
-    const img = g.createImageData(S,S);
-    // accumulate additive blobs per channel
-    const blobs = [];
-    chans.forEach((ch,ci)=>{
-      const r = rng(hashStr(key+"|"+ch));
-      const n = 5 + Math.floor(r()*5);
-      for(let i=0;i<n;i++){
-        blobs.push({ x:r()*S, y:r()*S, rad:6+r()*13, amp:0.55+r()*0.5, hue:CHAN_HUE[ch]||[200,200,210] });
-      }
-    });
+  function drawThumb(canvas, specs, key){
+    const S=92; canvas.width=S; canvas.height=S;
+    const g=canvas.getContext("2d"); const img=g.createImageData(S,S);
+    // precompute blobs per layer (seeded by well/tp/fov + channel so a layer is stable)
+    const L = specs.map(sp=>({ sp, col:CMAP[sp.cmap]||CMAP.gray, blobs:blobsFor(key+"|"+sp.channel) }));
     for(let y=0;y<S;y++) for(let x=0;x<S;x++){
-      let rr=6,gg=8,bb=12;
-      for(const b of blobs){
-        const dx=x-b.x, dy=y-b.y; const d2=dx*dx+dy*dy;
-        const v = b.amp*255*Math.exp(-d2/(2*b.rad*b.rad));
-        rr += v*b.hue[0]/255; gg += v*b.hue[1]/255; bb += v*b.hue[2]/255;
+      let rr=6, gg=8, bb=12;
+      for(const l of L){
+        let inten=0; for(const b of l.blobs){ const dx=x-b.x, dy=y-b.y; inten += b.amp*Math.exp(-(dx*dx+dy*dy)/(2*b.rad*b.rad)); }
+        let f=0, col=l.col;
+        switch(l.sp.variant){
+          case "corrected": f=inten; break;
+          case "raw":       f=inten+0.10; break;                         // background haze
+          case "binary":    f=inten>0.55?1:0; break;                     // hard ≥thr
+          case "mask":      f=inten>0.28?0.85:0; col=CMAP.gray; break;    // filled cells
+          case "outline":   f=(inten>0.26&&inten<0.38)?1:0; col=[235,238,245]; break;
+          default:          f=inten;
+        }
+        rr += f*col[0]; gg += f*col[1]; bb += f*col[2];
       }
-      const idx=(y*S+x)*4;
-      img.data[idx]=Math.min(255,rr); img.data[idx+1]=Math.min(255,gg);
-      img.data[idx+2]=Math.min(255,bb); img.data[idx+3]=255;
+      const i=(y*S+x)*4; img.data[i]=Math.min(255,rr); img.data[i+1]=Math.min(255,gg); img.data[i+2]=Math.min(255,bb); img.data[i+3]=255;
     }
     g.putImageData(img,0,0);
   }
 
-  // ── product helpers ──────────────────────────────────────────────────────
-  function product(dims){
-    // returns array of combos; each combo is {dim:val,...}. empty dims -> [{}]
-    let out=[{}];
-    for(const d of dims){
-      const vals=enabledVals(d); const next=[];
-      for(const combo of out) for(const v of vals){ const c=Object.assign({},combo); c[d]=v; next.push(c); }
-      out = next.length?next:out;
-      if(!vals.length) out=[{}];
-    }
-    return out;
-  }
-  const comboLabel = (combo, dims)=> dims.map(d=>combo[d]).filter(Boolean).join(" · ");
+  // ── product + coordinate resolution ──────────────────────────────────────
+  const axisDims = zone => state[zone].filter(d=>!state.composite.has(d));
+  function product(dims){ let out=[{}]; for(const d of dims){ const vals=valuesOf(d); const nx=[];
+    for(const c of out) for(const v of vals){ const cc=Object.assign({},c); cc[d]=v; nx.push(cc);} out=nx.length?nx:[{}]; } return out; }
+  const comboLabel=(combo,dims)=>dims.map(d=>dispVal(d,combo[d])).filter(Boolean).join(" · ");
 
-  // resolve a cell's full coordinate given row+col combos
-  function coordFor(rowCombo, colCombo){
-    const c = { well:state.held.well, channel:state.held.channel, timepoint:state.held.timepoint, fov:state.held.fov };
+  function coordFor(rc,cc){
+    const c={};
     for(const d of state.hold) c[d]=state.held[d];
-    Object.assign(c, rowCombo, colCombo);
+    Object.assign(c, rc, cc);
     return c;
   }
+  function layersForCell(coord){
+    if(overlayLayer()) return layers.slice();
+    const lid = coord.layer || (state.hold.includes("layer")?state.held.layer:layers[0].id);
+    const l=layerById(lid); return l?[l]:[layers[0]];
+  }
 
-  // ── render the image grid ────────────────────────────────────────────────
+  // ── render grid ──────────────────────────────────────────────────────────
   function renderGrid(){
-    const host = $("#render"); host.innerHTML="";
-    const rowDims=state.rows, colDims=state.cols;
-    const rowCombos=product(rowDims), colCombosAll=product(colDims);
-    const mergeChans = state.merge.includes("channel") ? enabledVals("channel") : null;
+    const host=$("#render"); host.innerHTML="";
+    if(!selectedWells().length){ host.innerHTML='<div style="color:var(--ink-faint);font-size:12.5px;padding:14px 2px;">No wells selected — pick wells on the plate map.</div>'; $("#rcount").textContent="0 cells"; return; }
+    const rowDims=axisDims("rows"), colDims=axisDims("cols");
+    const rowCombos=product(rowDims), colAll=product(colDims);
+    const ov=overlayLayer();
 
-    // wrap columns into bands
-    const wrap = state.wrap|0;
-    let bands;
-    if(wrap>0 && colCombosAll.length>wrap){
-      bands=[]; for(let i=0;i<colCombosAll.length;i+=wrap) bands.push(colCombosAll.slice(i,i+wrap));
-    } else bands=[colCombosAll];
+    const wrap=state.wrap|0; let bands;
+    if(wrap>0 && colAll.length>wrap){ bands=[]; for(let i=0;i<colAll.length;i+=wrap) bands.push(colAll.slice(i,i+wrap)); } else bands=[colAll];
 
     let total=0;
     bands.forEach((colCombos,bi)=>{
       const band=document.createElement("div"); band.className="band";
-      if(bands.length>1){
-        const bl=document.createElement("div"); bl.className="band-label";
-        bl.textContent="Band "+(bi+1)+" — "+colDims.map(d=>DIMS[d].label).join(" · ")+" "+(bi*wrap+1)+"–"+(bi*wrap+colCombos.length);
-        band.appendChild(bl);
-      }
+      if(bands.length>1){ const bl=document.createElement("div"); bl.className="band-label";
+        bl.textContent="Band "+(bi+1)+" — "+colDims.map(d=>DIMS[d].label).join(" · ")+" "+(bi*wrap+1)+"–"+(bi*wrap+colCombos.length); band.appendChild(bl); }
       const tw=document.createElement("div"); tw.className="tablewrap";
       const tbl=document.createElement("table"); tbl.className="grid";
-
-      // header row (column labels)
-      const thead=document.createElement("thead"); const htr=document.createElement("tr");
-      const corner=document.createElement("th"); corner.className="corner";
-      corner.textContent = rowDims.length? rowDims.map(d=>DIMS[d].label).join("·")+" ↓" : "";
-      htr.appendChild(corner);
+      const thead=document.createElement("thead"), htr=document.createElement("tr");
+      const corner=document.createElement("th"); corner.className="corner"; corner.textContent=rowDims.length?rowDims.map(d=>DIMS[d].label).join("·")+" ↓":""; htr.appendChild(corner);
       colCombos.forEach(cc=>{ const th=document.createElement("th"); th.textContent=comboLabel(cc,colDims)||"—"; htr.appendChild(th); });
       thead.appendChild(htr); tbl.appendChild(thead);
-
       const tbody=document.createElement("tbody");
-      rowCombos.forEach(rc=>{
-        const tr=document.createElement("tr");
-        const rh=document.createElement("td"); rh.className="rowhead"; rh.textContent=comboLabel(rc,rowDims)||"—"; tr.appendChild(rh);
-        colCombos.forEach(cc=>{
-          const td=document.createElement("td");
-          const coord=coordFor(rc,cc);
-          const chans = mergeChans ? mergeChans : [coord.channel];
-          const cell=document.createElement("div"); cell.className="cell"+(mergeChans?" merged":"");
+      rowCombos.forEach(rc=>{ const tr=document.createElement("tr");
+        const rh=document.createElement("td"); rh.className="rowhead"; rh.textContent=comboLabel(rc,rowDims)||(ov?"overlay":"—"); tr.appendChild(rh);
+        colCombos.forEach(cc=>{ const td=document.createElement("td"); const coord=coordFor(rc,cc);
+          const specs=layersForCell(coord); const cell=document.createElement("div"); cell.className="cell"+(ov?" ovl":"");
           const cv=document.createElement("canvas"); cell.appendChild(cv);
-          const key=[coord.well,coord.timepoint,coord.fov].join("|");
-          drawThumb(cv, chans, key);
+          drawThumb(cv, specs, [coord.well,coord.timepoint,coord.fov].join("|"));
           const lab=document.createElement("div"); lab.className="coord";
-          lab.innerHTML = '<span class="c-chan">'+(mergeChans?mergeChans.join("+"):coord.channel)+'</span> '
-                        + coord.well+' · '+coord.timepoint+' · f'+coord.fov;
-          cell.appendChild(lab);
-          td.appendChild(cell); tr.appendChild(td); total++;
-        });
-        tbody.appendChild(tr);
+          const lname = ov ? specs.map(s=>s.channel).join("+")+" overlay" : specs[0].channel+" "+VLABEL[specs[0].variant];
+          lab.innerHTML='<span class="c-lyr">'+lname+'</span> '+coord.well+' · '+coord.timepoint+' · f'+coord.fov;
+          cell.appendChild(lab); td.appendChild(cell); tr.appendChild(td); total++;
+        }); tbody.appendChild(tr);
       });
-      tbl.appendChild(tbody); tw.appendChild(tbl); band.appendChild(tw); band.dataset.b=bi;
-      host.appendChild(band);
+      tbl.appendChild(tbody); tw.appendChild(tbl); band.appendChild(tw); host.appendChild(band);
     });
-    $("#rcount").textContent = total+" cell"+(total===1?"":"s")
-      + (bands.length>1? " · "+bands.length+" bands":"");
+    $("#rcount").textContent=total+" cell"+(total===1?"":"s")+(bands.length>1?" · "+bands.length+" bands":"")+(ov?" · layers overlaid":"");
   }
 
-  // ── shape summary line ───────────────────────────────────────────────────
+  // ── shape summary ────────────────────────────────────────────────────────
+  function zoneDesc(zone){
+    return state[zone].map(d=>{ const ov=state.composite.has(d)&&(zone==="rows"||zone==="cols");
+      return '<b>'+DIMS[d].label+'</b>'+(ov?' <span class="ov">⧉overlay</span>':''); }).join(' <span class="arrow">›</span> ');
+  }
   function renderShape(){
     const parts=[];
-    if(state.rows.length) parts.push('<b>'+state.rows.map(d=>DIMS[d].label).join(" › ")+'</b> <span class="arrow">↓ rows</span>');
-    if(state.cols.length) parts.push('<b>'+state.cols.map(d=>DIMS[d].label).join(" › ")+'</b> <span class="arrow">→ cols</span>');
-    if(state.merge.length) parts.push('<b>'+state.merge.map(d=>DIMS[d].label).join("+")+'</b> <span class="arrow">merged</span>');
-    if(state.hold.length) parts.push('<span class="arrow">hold</span> '+state.hold.map(d=>DIMS[d].label+"="+state.held[d]).join(", "));
-    $("#shape").innerHTML = parts.join('<span class="arrow">·</span> ') || '<span class="arrow">empty — drag a dimension into a role</span>';
+    if(state.rows.length) parts.push(zoneDesc("rows")+' <span class="arrow">↓ rows</span>');
+    if(state.cols.length) parts.push(zoneDesc("cols")+' <span class="arrow">→ cols</span>');
+    if(state.hold.length) parts.push('<span class="arrow">hold</span> '+state.hold.map(d=>DIMS[d].label+"="+dispVal(d,state.held[d])).join(", "));
+    $("#shape").innerHTML=parts.join(' <span class="arrow">·</span> ')||'<span class="arrow">empty — drag a dimension into a role</span>';
   }
 
-  // ── build the pills inside each zone + palette ───────────────────────────
-  function zoneOf(dim){ for(const z of ["rows","cols","hold","merge"]) if(state[z].includes(dim)) return z; return null; }
-
+  // ── pills + palette ──────────────────────────────────────────────────────
   function makePill(dim, zone, idx){
-    const p=document.createElement("div"); p.className="pill"; p.dataset.dim=dim; p.draggable=true;
+    const comp = state.composite.has(dim) && (zone==="rows"||zone==="cols");
+    const p=document.createElement("div"); p.className="pill"+(comp?" overlay":""); p.dataset.dim=dim; p.draggable=true;
     p.innerHTML='<span class="swatch"></span><span>'+DIMS[dim].label+'</span>';
-    if((zone==="rows"||zone==="cols") && state[zone].length>1){
+    if((zone==="rows"||zone==="cols") && axisDims(zone).length>1 && !state.composite.has(dim)){
       const ni=document.createElement("span"); ni.className="nest-i"; ni.textContent=idx===0?"outer":"inner"; p.appendChild(ni);
     }
     if(zone==="hold"){
       const sel=document.createElement("select");
-      DIMS[dim].values.forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=v; if(v===state.held[dim])o.selected=true; sel.appendChild(o); });
+      valuesOf(dim).forEach(v=>{ const o=document.createElement("option"); o.value=v; o.textContent=dispVal(dim,v); if(v===state.held[dim])o.selected=true; sel.appendChild(o); });
       sel.addEventListener("change",()=>{ state.held[dim]=sel.value; renderShape(); renderGrid(); });
       sel.addEventListener("mousedown",e=>e.stopPropagation());
-      p.appendChild(sel); p.draggable=true;
+      sel.addEventListener("dragstart",e=>e.preventDefault());
+      p.appendChild(sel);
+    }
+    // Facet ↔ Overlay toggle — only for Layer on a Rows/Columns axis (composite
+    // now lives *inside* the shelf at its nesting position, not as a separate zone).
+    if(dim==="layer" && (zone==="rows"||zone==="cols")){
+      const mb=document.createElement("button"); mb.className="mode-btn"; mb.type="button";
+      mb.textContent = comp ? "⧉ overlay" : "facet";
+      mb.title="Switch this dimension between one cell per value (facet) and all values composited into one cell (overlay).";
+      mb.addEventListener("mousedown",e=>e.stopPropagation());
+      mb.addEventListener("click",e=>{ e.stopPropagation(); state.composite.has(dim)?state.composite.delete(dim):state.composite.add(dim); refresh(); });
+      p.appendChild(mb);
     }
     p.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/dim",dim); p.classList.add("dragging"); });
     p.addEventListener("dragend",()=>p.classList.remove("dragging"));
@@ -509,80 +453,112 @@
   }
 
   function makePaletteChip(dim){
-    const filtered = state.filter[dim].size < DIMS[dim].values.length;
+    const kind=DIMS[dim].kind;
+    let count;
+    if(dim==="well") count=selectedWells().length;
+    else if(dim==="layer") count=layers.length;
+    else count=DIMS[dim].filter.size+"/"+DIMS[dim].vals.length;
+    const filtered = kind===undefined && DIMS[dim].filter.size < DIMS[dim].vals.length;
     const c=document.createElement("div"); c.className="chip"+(filtered?" filtered":""); c.dataset.dim=dim; c.draggable=true;
-    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch"></span><span class="name">'+DIMS[dim].label
-      +'</span><span class="count">'+state.filter[dim].size+"/"+DIMS[dim].values.length+'</span>';
+    c.innerHTML='<span class="grip">⋮⋮</span><span class="swatch"></span><span class="name">'+DIMS[dim].label+'</span><span class="count">'+count+'</span>';
     c.addEventListener("dragstart",e=>{ e.dataTransfer.setData("text/dim",dim); c.classList.add("dragging"); });
     c.addEventListener("dragend",()=>c.classList.remove("dragging"));
-    c.addEventListener("click",e=>openFilter(dim, c, e));
+    c.addEventListener("click",e=>{
+      if(dim==="well"){ const pc=$("#plateCard"); pc.classList.add("flash"); setTimeout(()=>pc.classList.remove("flash"),900); }
+      else if(dim==="layer") openLayers(c,e);
+      else openFilter(dim,c,e);
+    });
     return c;
   }
 
   function refresh(){
-    // palette shows every dim (source of truth for filtering); zones show placement
     const pal=$("#palette"); pal.innerHTML="";
     Object.keys(DIMS).forEach(d=>pal.appendChild(makePaletteChip(d)));
-    ["rows","cols","hold","merge"].forEach(z=>{
-      const slot=$("#slot-"+z); slot.innerHTML="";
-      if(!state[z].length){ const e=document.createElement("span"); e.className="empty";
-        e.textContent = z==="merge"?"drop Channel to composite":"drop a dimension"; slot.appendChild(e); }
-      state[z].forEach((d,i)=>slot.appendChild(makePill(d,z,i)));
-    });
+    ["rows","cols","hold"].forEach(z=>{ const slot=$("#slot-"+z); slot.innerHTML="";
+      if(!state[z].length){ const e=document.createElement("span"); e.className="empty"; e.textContent="drop a dimension"; slot.appendChild(e); }
+      state[z].forEach((d,i)=>slot.appendChild(makePill(d,z,i))); });
     renderShape(); renderGrid();
   }
 
-  // ── drag/drop onto zones ─────────────────────────────────────────────────
-  function moveDim(dim, targetZone){
-    if(targetZone==="merge" && dim!=="channel") return; // Merge only accepts Channel
-    for(const z of ["rows","cols","hold","merge"]){ const k=state[z].indexOf(dim); if(k>=0) state[z].splice(k,1); }
-    // every unplaced dim must live somewhere; when leaving a zone it just moves.
-    state[targetZone].push(dim);
-    refresh();
+  // ── drop onto zones ──────────────────────────────────────────────────────
+  function moveDim(dim,target){
+    for(const z of ["rows","cols","hold"]){ const k=state[z].indexOf(dim); if(k>=0) state[z].splice(k,1); }
+    if(target==="hold") state.composite.delete(dim);   // overlay only meaningful on an axis
+    state[target].push(dim); refresh();
   }
-  document.querySelectorAll(".zone").forEach(zone=>{
-    const name=zone.dataset.zone;
+  document.querySelectorAll(".zone").forEach(zone=>{ const name=zone.dataset.zone;
     zone.addEventListener("dragover",e=>{ e.preventDefault(); zone.classList.add("over"); });
     zone.addEventListener("dragleave",()=>zone.classList.remove("over"));
-    zone.addEventListener("drop",e=>{ e.preventDefault(); zone.classList.remove("over");
-      const dim=e.dataTransfer.getData("text/dim"); if(dim) moveDim(dim,name); });
+    zone.addEventListener("drop",e=>{ e.preventDefault(); zone.classList.remove("over"); const dim=e.dataTransfer.getData("text/dim"); if(dim) moveDim(dim,name); });
   });
 
-  // ── filter popover ───────────────────────────────────────────────────────
+  // ── plate map ────────────────────────────────────────────────────────────
+  function buildPlate(){
+    const el=$("#plate"); el.innerHTML="";
+    const corner=document.createElement("div"); corner.className="ph"; corner.textContent=""; el.appendChild(corner);
+    PLATE_COLS.forEach(c=>{ const h=document.createElement("div"); h.className="ph"; h.textContent=c; el.appendChild(h); });
+    PLATE_ROWS.forEach(r=>{ const rh=document.createElement("div"); rh.className="ph"; rh.textContent=r; el.appendChild(rh);
+      PLATE_COLS.forEach(c=>{ const id=r+c; const w=document.createElement("div");
+        w.className="well"+(plate.selected.has(id)?" sel":""); w.textContent=id;
+        w.addEventListener("click",()=>{ if(plate.selected.has(id)){ if(plate.selected.size>1) plate.selected.delete(id); }
+          else plate.selected.add(id);
+          if(!plate.selected.has(state.held.well)) state.held.well=selectedWells()[0];
+          syncPlate(); refresh(); });
+        el.appendChild(w); }); });
+    syncPlate();
+  }
+  function syncPlate(){ $("#plateCount").textContent=plate.selected.size+" well"+(plate.selected.size===1?"":"s")+" selected";
+    document.querySelectorAll(".well").forEach(w=>w.classList.toggle("sel",plate.selected.has(w.textContent))); }
+
+  // ── popovers: value filter + layers editor ───────────────────────────────
   let popEl=null;
   function closePop(){ if(popEl){ popEl.remove(); popEl=null; document.removeEventListener("mousedown",onDoc); } }
   function onDoc(e){ if(popEl && !popEl.contains(e.target)) closePop(); }
-  function openFilter(dim, anchor, ev){
-    ev.stopPropagation(); closePop();
-    popEl=document.createElement("div"); popEl.className="pop";
-    popEl.innerHTML='<h3>'+DIMS[dim].label+' values</h3>';
-    DIMS[dim].values.forEach(v=>{
-      const lab=document.createElement("label");
-      const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=state.filter[dim].has(v);
-      cb.addEventListener("change",()=>{ cb.checked?state.filter[dim].add(v):state.filter[dim].delete(v);
-        if(!state.filter[dim].size) state.filter[dim].add(v), cb.checked=true; // keep ≥1
-        if(!state.filter[dim].has(state.held[dim])) state.held[dim]=enabledVals(dim)[0];
-        refresh(); });
-      lab.appendChild(cb); lab.appendChild(document.createTextNode(v)); popEl.appendChild(lab);
-    });
-    document.body.appendChild(popEl);
-    const r=anchor.getBoundingClientRect();
-    popEl.style.left=(r.left+window.scrollX)+"px";
-    popEl.style.top=(r.bottom+window.scrollY+6)+"px";
-    setTimeout(()=>document.addEventListener("mousedown",onDoc),0);
+  function placePop(anchor){ document.body.appendChild(popEl); const r=anchor.getBoundingClientRect();
+    popEl.style.left=(r.left+window.scrollX)+"px"; popEl.style.top=(r.bottom+window.scrollY+6)+"px";
+    setTimeout(()=>document.addEventListener("mousedown",onDoc),0); }
+
+  function openFilter(dim,anchor,ev){ ev.stopPropagation(); closePop();
+    popEl=document.createElement("div"); popEl.className="pop filter"; popEl.innerHTML='<h3>'+DIMS[dim].label+' values</h3>';
+    DIMS[dim].vals.forEach(v=>{ const lab=document.createElement("label"); const cb=document.createElement("input"); cb.type="checkbox"; cb.checked=DIMS[dim].filter.has(v);
+      cb.addEventListener("change",()=>{ cb.checked?DIMS[dim].filter.add(v):DIMS[dim].filter.delete(v);
+        if(!DIMS[dim].filter.size){ DIMS[dim].filter.add(v); cb.checked=true; }
+        if(!DIMS[dim].filter.has(state.held[dim])) state.held[dim]=valuesOf(dim)[0]; refresh(); });
+      lab.appendChild(cb); lab.appendChild(document.createTextNode(v)); popEl.appendChild(lab); });
+    placePop(anchor);
   }
 
-  // ── wrap control + theme ─────────────────────────────────────────────────
-  $("#wrap").addEventListener("input",e=>{ state.wrap=Math.max(0,parseInt(e.target.value||"0",10)); renderGrid(); });
-  $("#themeBtn").addEventListener("click",()=>{
-    const cur=document.documentElement.getAttribute("data-theme");
-    const sysDark=matchMedia("(prefers-color-scheme: dark)").matches;
-    const now = cur ? cur : (sysDark?"dark":"light");
-    const next = now==="dark"?"light":"dark";
-    document.documentElement.setAttribute("data-theme",next);
-    renderGrid(); // recolor thumbnails' neutrals unaffected; safe repaint
-  });
+  function openLayers(anchor,ev){ ev.stopPropagation(); closePop();
+    popEl=document.createElement("div"); popEl.className="pop layers"; popEl.innerHTML='<h3>Layers — channel × variant × LUT</h3>';
+    const rebuild=()=>{
+      popEl.querySelectorAll(".lyr,.addlyr,.lhint").forEach(n=>n.remove());
+      layers.forEach(l=>{
+        const row=document.createElement("div"); row.className="lyr";
+        const sw=document.createElement("span"); sw.className="lsw"; const col=CMAP[l.cmap]||CMAP.gray; sw.style.background="rgb("+col.join(",")+")"; row.appendChild(sw);
+        const chan=document.createElement("select"); CHANNELS.forEach(c=>{ const o=document.createElement("option"); o.value=c; o.textContent=c; if(c===l.channel)o.selected=true; chan.appendChild(o); });
+        chan.addEventListener("change",()=>{ l.channel=chan.value; l.cmap=CMAP_FOR_CHAN[l.channel]||l.cmap; rebuild(); refresh(); }); row.appendChild(chan);
+        const varn=document.createElement("select"); VARIANTS.forEach(([v,lb])=>{ const o=document.createElement("option"); o.value=v; o.textContent=lb; if(v===l.variant)o.selected=true; varn.appendChild(o); });
+        varn.addEventListener("change",()=>{ l.variant=varn.value; refresh(); }); row.appendChild(varn);
+        const cm=document.createElement("select"); Object.keys(CMAP).forEach(k=>{ const o=document.createElement("option"); o.value=k; o.textContent=k; if(k===l.cmap)o.selected=true; cm.appendChild(o); });
+        cm.title="Colour / LUT"; cm.addEventListener("change",()=>{ l.cmap=cm.value; rebuild(); refresh(); }); row.appendChild(cm);
+        const rm=document.createElement("button"); rm.className="rm"; rm.type="button"; rm.textContent="×"; rm.title="Remove layer";
+        rm.addEventListener("click",()=>{ if(layers.length>1){ layers=layers.filter(x=>x!==l); if(!layerById(state.held.layer)) state.held.layer=layers[0].id; rebuild(); refresh(); } }); row.appendChild(rm);
+        popEl.appendChild(row);
+      });
+      const add=document.createElement("button"); add.className="addlyr"; add.type="button"; add.textContent="+ Add layer";
+      add.addEventListener("click",()=>{ layers.push({ id:"l"+(lseq++), channel:"DAPI", variant:"outline", cmap:"gray" }); rebuild(); refresh(); }); popEl.appendChild(add);
+      const h=document.createElement("div"); h.className="lhint"; h.textContent="Each layer is a channel rendered one way, with its own LUT. Put Layer on an axis to vary them, Hold for one, or set it to Overlay to composite.";
+      popEl.appendChild(h);
+    };
+    rebuild(); placePop(anchor);
+  }
 
-  refresh();
+  // ── wrap + theme ─────────────────────────────────────────────────────────
+  $("#wrap").addEventListener("input",e=>{ state.wrap=Math.max(0,parseInt(e.target.value||"0",10)); renderGrid(); });
+  $("#themeBtn").addEventListener("click",()=>{ const cur=document.documentElement.getAttribute("data-theme");
+    const sysDark=matchMedia("(prefers-color-scheme: dark)").matches; const now=cur||(sysDark?"dark":"light");
+    document.documentElement.setAttribute("data-theme", now==="dark"?"light":"dark"); });
+
+  buildPlate(); refresh();
 })();
 </script>

@@ -73,6 +73,9 @@ from well_viewer.features.image_browser.image_table.lut_ops import (  # noqa: E4
     _refresh_lut_fields_from_render,
     image_table_auto_lut,
 )
+# Faceted render placement (axis labels + group spacing) — same-feature sibling,
+# module-scope like the grid_layout import above so it isn't a deferred import.
+from well_viewer.features.image_browser.image_table import facet_view as _facet  # noqa: E402
 
 
 
@@ -1100,42 +1103,6 @@ def _prefetch_cell_arrays(ctx, cells, cache) -> None:
             "image_table: parallel prefetch failed", exc_info=True)
 
 
-def _append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered) -> None:
-    """Append one extra bottom grid row whose cells additively merge the
-    LUT-colored RGB of every row above them in the same column.
-
-    Derives entirely from the rows above (no selector cell, no ``lut[r]`` entry),
-    so the grid's row-indexed lookups are unaffected. Extracted from
-    ``image_table_generate`` to keep that function's complexity in budget.
-    """
-    from well_viewer.core.ui_helpers import make_overlay_thumb
-
-    comp_row = len(cells)
-    n_cols = max(len(row) for row in cells)
-    for c in range(n_cols):
-        comp = composite_column_rgb(ctx, cache, cells, crop_tool, c, rendered)
-
-        cell_widget = QWidget()
-        cl = QVBoxLayout(cell_widget)
-        cl.setContentsMargins(2, 2, 2, 2)
-        cl.setSpacing(2)
-        header = QLabel("Composite", cell_widget)
-        header.setAlignment(Qt.AlignCenter)
-        cl.addWidget(header)
-
-        img_label = QLabel(cell_widget)
-        img_label.setAlignment(Qt.AlignCenter)
-        img_label.setFixedSize(sz, sz)
-        pix = make_overlay_thumb(comp, sz, sz, 0.0, 255.0) if comp is not None else None
-        if pix is not None:
-            img_label.setPixmap(pix)
-        else:
-            img_label.setText("(no image)")
-        cl.addWidget(img_label)
-
-        grid.addWidget(cell_widget, comp_row, c)
-
-
 def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
     """Per-cell override popover (delegates to grid_ops; lazy to avoid a cycle)."""
     from well_viewer.features.image_browser.image_table.grid_ops import (
@@ -1177,6 +1144,15 @@ def image_table_generate(ctx) -> None:
 
     _prefetch_cell_arrays(ctx, cells, cache)
 
+    # Faceted placement: group cells by the builder's nesting, label the row/col
+    # axes once, and space groups apart (falls back to a plain grid when absent).
+    plan = _facet.plan_facets(ctx, cells)
+
+    def _pos(r, c):
+        if plan is None:
+            return r, c
+        return plan.grid_row_of[r], plan.grid_col_of[c]
+
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             well = cell["well_cb"].currentText().strip()
@@ -1203,17 +1179,15 @@ def image_table_generate(ctx) -> None:
             cl.setContentsMargins(2, 2, 2, 2)
             cl.setSpacing(2)
 
+            # Identity now lives on the row/col axes (see facet_view), so the
+            # cell carries no repeated title — just a tooltip for the exact combo.
             if well and chan and tp:
-                header_text = f"{well}  {chan.upper()}  T:{tp}"
-                if fov:
-                    header_text += f"  FOV:{fov}"
+                title = f"{well}  {chan.upper()}  T:{tp}" + (f"  FOV:{fov}" if fov else "")
             else:
-                header_text = "(unset)"
-            header = QLabel(header_text, cell_widget)
-            header.setAlignment(Qt.AlignCenter)
-            cl.addWidget(header)
+                title = "(unset)"
 
             img_label = QLabel(cell_widget)
+            img_label.setToolTip(title)
             img_label.setAlignment(Qt.AlignCenter)
             # Pin to the rendered pixmap size so the surrounding QLabel doesn't
             # expand and leave large gaps around the image.
@@ -1253,12 +1227,17 @@ def image_table_generate(ctx) -> None:
                 img_label.setText("(no image)")
             cl.addWidget(img_label)
 
-            grid.addWidget(cell_widget, r, c)
+            gr, gc = _pos(r, c)
+            grid.addWidget(cell_widget, gr, gc)
+
+    # Axis labels + inter-group spacing that mirror the builder's nesting.
+    if plan is not None:
+        _facet.render_facet_chrome(grid, plan)
 
     # Composite row: append one extra bottom row whose cells additively merge
     # the LUT-colored RGB of every row above them in the same column.
     if getattr(ctx.state.image_table, "composite", False) and cells:
-        _append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered)
+        _facet.append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered, plan)
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache

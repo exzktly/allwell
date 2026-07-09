@@ -336,13 +336,13 @@ QPushButton:disabled, QToolButton:disabled {{
 /* Dropdown-caret tool buttons (those marked ``hasMenu``). Reserve room on the
    right and paint one shared chevron so every menu caret is the same size.
    Qt's native arrows are inconsistent — the small ``menu-indicator`` on
-   instant-popup buttons (Channels / More / Crop) vs the large ``menu-button``
-   arrow on split buttons (Build table / Export) — so we override both (and the
-   combo ``down-arrow`` below) with the same 10x10 SVG glyph. */
+   instant-popup buttons (Channels / More / Crop) vs the ``menu-button`` on split
+   buttons (Build table / Export) — so we override both with the same SVG glyph. */
 QToolButton[hasMenu="true"] {{
     padding-right: 20px;
 }}
-QToolButton[hasMenu="true"]::menu-button,
+/* Instant-popup buttons: the whole button opens the menu, so ``menu-indicator``
+   is purely decorative — a fixed 10x10 chevron inset from the right edge. */
 QToolButton[hasMenu="true"]::menu-indicator {{
     image: url({_chev});
     width: 10px;
@@ -352,6 +352,25 @@ QToolButton[hasMenu="true"]::menu-indicator {{
     right: 6px;
     border: none;
     background: transparent;
+}}
+/* Split buttons (MenuButtonPopup — Build table / Export): ``menu-button`` is the
+   *clickable* dropdown region, not just decoration. It must span the full button
+   height and the whole reserved right strip, otherwise arrow clicks land on the
+   default-action area and fire it instead of opening the menu. Give it the full
+   20px reserved width (no ``right`` inset, no height clamp). Paint the chevron as
+   a centered ``background-image`` — that draws the 10px SVG at its natural size so
+   the caret matches the instant-popup ``menu-indicator``, while ``width`` alone
+   sizes the (full-height) clickable box. Using ``image`` here would instead scale
+   the glyph up to the 20px box. */
+QToolButton[hasMenu="true"]::menu-button {{
+    width: 20px;
+    subcontrol-origin: padding;
+    subcontrol-position: center right;
+    border: none;
+    background-color: transparent;
+    background-image: url({_chev});
+    background-repeat: no-repeat;
+    background-position: center;
 }}
 
 QPushButton#Primary {{

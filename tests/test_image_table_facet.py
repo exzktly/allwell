@@ -66,6 +66,18 @@ def test_facet_plan_flat_axes_no_group_spacing():
     assert not any(grp for (*_x, grp) in plan.left)            # no group strips
 
 
+def test_facet_plan_reads_independent_gaps():
+    # The row-group and column-group gaps are separate knobs — one number can't
+    # cover the different spaces in the grouped view.
+    cells = [[_cell("A01", chan, tp) for tp in ("0h", "24h")]
+             for chan in ("GFP", "DAPI")]
+    ctx = _ctx(["channel"], ["timepoint"])
+    ctx.state.image_table.row_group_gap = 40
+    ctx.state.image_table.col_group_gap = 6
+    plan = F.plan_facets(ctx, cells)
+    assert plan.row_gap == 40 and plan.col_gap == 6
+
+
 def test_facet_plan_nested_columns_group_space():
     # cols = well › timepoint  → column groups get the horizontal spacer
     cells = [[_cell(well, "GFP", tp) for well in ("A01", "A02") for tp in ("0h", "24h")]]

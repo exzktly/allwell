@@ -302,6 +302,21 @@ def _snapshot_image_table_axes(ctx) -> dict:
     return axes
 
 
+def _snapshot_image_table_spacing(ctx) -> dict:
+    """The user-tuned rendered-grid gaps (px), so a restore keeps the spacing."""
+    it = ctx.state.image_table
+    return {k: int(getattr(it, k, d)) for k, d in
+            (("cell_gap", 2), ("row_group_gap", 18), ("col_group_gap", 18))}
+
+
+def _restore_image_table_spacing(ctx, state: dict) -> None:
+    it = ctx.state.image_table
+    for k in ("cell_gap", "row_group_gap", "col_group_gap"):
+        v = state.get(k)
+        if isinstance(v, int):
+            setattr(it, k, max(0, v))
+
+
 def _snapshot_image_table(ctx) -> dict:
     """Capture the Image Table grid: dimensions, per-cell well/chan/tp/fov,
     overlay toggles, and per-channel LUT min/max edits.
@@ -423,6 +438,7 @@ def _snapshot_image_table(ctx) -> dict:
             swallowed()
     try:
         out["zoom"] = float(ctx.state.image_table.zoom)
+        out.update(_snapshot_image_table_spacing(ctx))
     except Exception:
         swallowed()
     # Builder (root + nested-channels) state — extracted to a helper to hold this
@@ -1185,6 +1201,8 @@ def _apply_image_table(ctx, state: dict) -> None:
             image_table_set_zoom(ctx, float(state["zoom"]))
         except Exception:
             _logger.debug("image_table: zoom restore failed", exc_info=True)
+
+    _restore_image_table_spacing(ctx, state)
 
     # Intentionally NOT calling image_table_generate here — restore only
     # pre-fills the dropdowns, the user clicks Generate when they actually

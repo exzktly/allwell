@@ -35,6 +35,7 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
 from well_viewer.features.image_browser.image_table.controller import image_table_set_zoom
 from well_viewer.features.image_browser.image_table.controller import image_table_set_thresh_frac
+from well_viewer.features.image_browser.image_table.controller import image_table_set_spacing
 from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import image_table_open_add_row_dialog
 from well_viewer.features.image_browser.image_table.grid_ops import image_table_open_add_col_dialog
@@ -811,6 +812,45 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_in.setToolTip("Zoom in")
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
     tr.addWidget(zoom_in)
+
+    # Spacing ▾ — independently tune the grouped table's gaps (px): between
+    # adjacent cells, and between row / column facet groups (they can differ).
+    sp_btn = reg.register("_image_table_spacing_btn", QToolButton(action_row))
+    sp_btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
+    sp_btn.setText("Spacing ▾")
+    sp_btn.setProperty("variant", "secondary")
+    sp_btn.setToolTip("Adjust the grouped table's spacing: gap between cells, and "
+                      "between row / column facet groups.")
+    sp_pop = _DropdownPanel(sp_btn)
+    spl = QVBoxLayout(sp_pop)
+    spl.setContentsMargins(10, 10, 10, 10)
+    spl.setSpacing(6)
+    _sp_cap = QLabel("Grid spacing (px)", sp_pop)
+    _sp_cap.setProperty("role", "muted")
+    spl.addWidget(_sp_cap)
+    _its = ctx.state.image_table
+
+    def _sp_row(label, key, default, tip):
+        row = QWidget(sp_pop)
+        h = QHBoxLayout(row)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        lab = QLabel(label, row)
+        lab.setFixedWidth(88)
+        h.addWidget(lab)
+        st = Stepper(row, value=float(getattr(_its, key, default)),
+                     minimum=0.0, maximum=200.0, single_step=2.0, decimals=0)
+        st.setFixedWidth(92)
+        st.setToolTip(tip)
+        st.valueChanged.connect(lambda v, k=key: image_table_set_spacing(ctx, k, v))
+        h.addWidget(st)
+        spl.addWidget(row)
+
+    _sp_row("Cell gap", "cell_gap", 2, "Gap between adjacent images within a group.")
+    _sp_row("Row groups", "row_group_gap", 18, "Vertical gap between row facet groups.")
+    _sp_row("Col groups", "col_group_gap", 18, "Horizontal gap between column facet groups.")
+    sp_btn.clicked.connect(lambda _=False: sp_pop.show_under(sp_btn))
+    tr.addWidget(sp_btn)
 
     il.addWidget(action_row)
 

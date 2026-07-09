@@ -903,6 +903,17 @@ def image_table_set_zoom(ctx, factor: float, *, relative: bool = False) -> None:
         image_table_generate(ctx)
 
 
+def image_table_set_spacing(ctx, key: str, value) -> None:
+    """Set a rendered-grid spacing in px — ``cell_gap`` (between adjacent cells),
+    ``row_group_gap`` / ``col_group_gap`` (between facet groups down rows / across
+    columns) — and re-render if a table already exists."""
+    if key not in ("cell_gap", "row_group_gap", "col_group_gap"):
+        return
+    setattr(ctx.state.image_table, key, max(0, int(round(float(value)))))
+    if getattr(ctx.state.image_table, "last_render", None):
+        image_table_generate(ctx)
+
+
 def image_table_set_thresh_frac(ctx, value) -> None:
     """Edit the active channel's ON/OFF intensity threshold (ThreshFracOn) from
     the Image Table controls row, then re-composite so the per-row "≥ Thr"
@@ -1119,6 +1130,13 @@ def image_table_generate(ctx) -> None:
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     grid = ctx.runtime.image_table.render_grid
     clear_layout(grid)
+    # Reset any spacing left by a prior layout (row/col minimums are sticky on a
+    # QGridLayout even after its items are cleared), then apply the cell gap.
+    for _r in range(grid.rowCount()):
+        grid.setRowMinimumHeight(_r, 0)
+    for _c in range(grid.columnCount()):
+        grid.setColumnMinimumWidth(_c, 0)
+    grid.setSpacing(max(0, int(getattr(ctx.state.image_table, "cell_gap", 2))))
     if not cells:
         ctx.set_status("Image Table: build a grid first (set rows/cols and click Apply).")
         return

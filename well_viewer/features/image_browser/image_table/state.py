@@ -68,6 +68,15 @@ class ImageTableState:
     # the per-row LUT/Display boxes — see grid_view.build_lut_row), not global.
     zoom: float = 1.0
 
+    # Rendered-grid spacing (px), independently user-tunable (Spacing ▾ in the
+    # action strip). ``cell_gap`` is the gap between adjacent cells within a
+    # group; ``row_group_gap`` / ``col_group_gap`` are the extra gaps inserted
+    # between facet groups down the rows / across the columns (the non-uniform
+    # spacing of the grouped view — different axes can differ).
+    cell_gap: int = 2
+    row_group_gap: int = 18
+    col_group_gap: int = 18
+
     # composite: when True, image_table_generate appends one extra row at the
     # bottom whose cells additively merge (LUT-colored RGB summed, clipped to
     # white) every row above them in the same column. A transient display

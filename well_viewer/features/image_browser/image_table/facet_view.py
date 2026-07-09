@@ -85,7 +85,8 @@ class FacetPlan:
     """Placement + labelling derived from the layout's nesting."""
 
     __slots__ = ("grid_row_of", "grid_col_of", "spacer_rows", "spacer_cols",
-                 "top", "left", "corner", "first_row", "first_col", "bottom_row")
+                 "top", "left", "corner", "first_row", "first_col", "bottom_row",
+                 "row_gap", "col_gap")
 
     def __init__(self) -> None:
         self.grid_row_of: List[int] = []
@@ -99,6 +100,8 @@ class FacetPlan:
         self.first_row = 0
         self.first_col = 0
         self.bottom_row = 0
+        self.row_gap = _GROUP_GAP
+        self.col_gap = _GROUP_GAP
 
 
 def _slots(vals, depth: int, base: int):
@@ -152,6 +155,8 @@ def plan_facets(ctx, cells) -> Optional[FacetPlan]:
     plan.spacer_rows, plan.spacer_cols = spacer_rows, spacer_cols
     plan.first_row, plan.first_col = tl, rl
     plan.bottom_row = next_row
+    plan.row_gap = max(0, int(getattr(st, "row_group_gap", _GROUP_GAP)))
+    plan.col_gap = max(0, int(getattr(st, "col_group_gap", _GROUP_GAP)))
 
     # Column axis (top): inner value per column, outer group spanning its columns.
     if tl >= 1:
@@ -214,9 +219,9 @@ def render_facet_chrome(grid, plan: FacetPlan) -> None:
         grid.addWidget(c, 0, 0, plan.first_row, plan.first_col)
 
     for sr in plan.spacer_rows:
-        grid.setRowMinimumHeight(sr, _GROUP_GAP)
+        grid.setRowMinimumHeight(sr, plan.row_gap)
     for sc in plan.spacer_cols:
-        grid.setColumnMinimumWidth(sc, _GROUP_GAP)
+        grid.setColumnMinimumWidth(sc, plan.col_gap)
 
 
 def append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered,
@@ -226,7 +231,7 @@ def append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered,
     facet columns, labelled once on the left axis."""
     comp_row = (plan.bottom_row + 1) if plan is not None else len(cells)
     if plan is not None:
-        grid.setRowMinimumHeight(plan.bottom_row, _GROUP_GAP)
+        grid.setRowMinimumHeight(plan.bottom_row, plan.row_gap)
         if plan.first_col:
             lbl = QLabel("Composite")
             lbl.setStyleSheet(_INNER_QSS)

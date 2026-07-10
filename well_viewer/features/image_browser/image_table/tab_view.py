@@ -35,6 +35,7 @@ from well_viewer.features.image_browser.image_table.controller import image_tabl
 from well_viewer.features.image_browser.image_table.controller import image_table_repopulate_dropdowns
 from well_viewer.features.image_browser.image_table.controller import image_table_set_zoom
 from well_viewer.features.image_browser.image_table.controller import image_table_set_thresh_frac
+from well_viewer.features.image_browser.image_table.controller import image_table_set_spacing
 from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import image_table_open_add_row_dialog
 from well_viewer.features.image_browser.image_table.grid_ops import image_table_open_add_col_dialog
@@ -136,6 +137,79 @@ def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") 
     return btn
 
 
+def _toggle_props_dock(ctx) -> None:
+    # isHidden() is the dock's own explicit flag (ancestor-independent), so the
+    # toggle is correct regardless of whether the tab is currently shown.
+    dock = getattr(ctx.runtime.image_table, "props_dock", None)
+    if dock is not None:
+        dock.setVisible(dock.isHidden())
+
+
+def _build_properties_dock(ctx, dock) -> None:
+    """Fill the right-side Properties inspector: the grouped-view spacing gaps +
+    label font sizes, as Label:[Stepper] rows that live-re-render. A header with a
+    close button matches the figure-properties panel other tabs slide out."""
+    from widgets.icon_button import IconButton
+    dock.setFixedWidth(248)
+    panel = QFrame(dock)
+    panel.setObjectName("Panel")
+    pl = QVBoxLayout(panel)
+    pl.setContentsMargins(12, 10, 12, 12)
+    pl.setSpacing(8)
+
+    hdr = QHBoxLayout()
+    title = QLabel("Properties", panel)
+    title.setObjectName("Heading")
+    hdr.addWidget(title)
+    hdr.addStretch(1)
+    close = IconButton("x", panel, tooltip="Close")
+    close.clicked.connect(lambda _=False: dock.setVisible(False))
+    hdr.addWidget(close)
+    pl.addLayout(hdr)
+
+    grid = QGridLayout()
+    grid.setColumnMinimumWidth(0, 104)
+    grid.setColumnStretch(0, 0)
+    grid.setColumnStretch(1, 1)
+    grid.setHorizontalSpacing(8)
+    grid.setVerticalSpacing(5)
+    its = ctx.state.image_table
+    r = [0]
+
+    def _cap(text: str) -> None:
+        cap = QLabel(text, panel)
+        cap.setObjectName("Muted")
+        grid.addWidget(cap, r[0], 0, 1, 2)
+        r[0] += 1
+
+    def _prop(label: str, key: str, default: int, lo: int, hi: int, tip: str) -> None:
+        lab = QLabel(label, panel)
+        lab.setToolTip(tip)
+        grid.addWidget(lab, r[0], 0)
+        st = Stepper(panel, value=float(getattr(its, key, default)),
+                     minimum=float(lo), maximum=float(hi), single_step=1.0, decimals=0)
+        st.setToolTip(tip)
+        st.valueChanged.connect(lambda v, k=key: image_table_set_spacing(ctx, k, v))
+        grid.addWidget(st, r[0], 1)
+        r[0] += 1
+
+    _cap("Spacing (px)")
+    _prop("Cell gap", "cell_gap", 2, 0, 200,
+          "Gap between adjacent images within a group.")
+    _prop("Row-group gap", "row_group_gap", 18, 0, 400,
+          "Vertical gap between row facet groups.")
+    _prop("Col-group gap", "col_group_gap", 18, 0, 400,
+          "Horizontal gap between column facet groups.")
+    _cap("Label font (px)")
+    _prop("Axis labels", "label_font_pt", 11, 6, 48,
+          "Font size of the row / column axis value labels.")
+    _prop("Group labels", "group_font_pt", 11, 6, 48,
+          "Font size of the facet-group band labels.")
+    pl.addLayout(grid)
+    pl.addStretch(1)
+    dock.layout().addWidget(panel)
+
+
 def build_image_table_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: Qt widget handles go through the WidgetRegistry
     # (``ctx.widgets``), which stamps ``app._image_table_*`` so legacy
@@ -169,7 +243,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
             on_change=lambda: image_table_generate(ctx),
         )
 
-    scroll = QScrollArea(parent)
+    # Host the tab body with a right-side dock that slides out the Properties
+    # inspector — matching every other tab's figure-properties panel.
+    from well_viewer.core.ui_helpers import make_plot_with_right_dock
+    body_area, body_layout, props_dock = make_plot_with_right_dock(parent)
+    ctx.runtime.image_table.props_dock = props_dock
+    reg.register("_image_table_props_dock", props_dock)
+
+    scroll = QScrollArea(body_area)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     inner = QWidget()
@@ -177,7 +258,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     il.setContentsMargins(12, 12, 12, 12)
     il.setSpacing(6)
     scroll.setWidget(inner)
-    layout.addWidget(scroll, 1)
+    body_layout.addWidget(scroll, 1)
+    _build_properties_dock(ctx, props_dock)
 
     # ── Builder shelf: root + nested channels (the primary authoring surface) ─
     # Drag a root (Well/Timepoint/FOV) onto Rows/Columns, nest channels under it,
@@ -812,9 +894,12 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
     tr.addWidget(zoom_in)
 
-    # Spacing + label font sizes live in the Properties sidebar (build_image_table_picker).
-
-    il.addWidget(action_row)
+    # Properties (spacing + label fonts) live in the right-side dock; the
+    # sliders button toggles it, pinned to the action strip's right edge.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    il.addWidget(wrap_ctrl_row_with_properties(
+        action_row, lambda: _toggle_props_dock(ctx),
+        tooltip="Show / hide the table Properties (spacing & label fonts)"))
 
     # ── Rendered image table (drawn BELOW the action strip) ────────────────
     render_lbl = QLabel("Image Table:", inner)

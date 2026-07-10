@@ -998,7 +998,7 @@ timepoints / FOVs, including more than two at once (e.g. a time-course of every
 channel for every well).
 
 - **Needs** — image ZIPs present, and a well set (drive it from the plate
-  picker or a Plot Group via the read-only Plot Groups mirror in this sidebar).
+  picker, or save/pick a **Plot Group** in this sidebar's Plot Groups panel).
 - **Build with the shelf** — the top **Build** shelf is a drag-and-drop tree.
   Drag a **channel** from the **Channels** tray onto the **Rows** or **Columns**
   zone; drag a **root** dimension (Well / Timepoint / FOV) onto a zone to make that

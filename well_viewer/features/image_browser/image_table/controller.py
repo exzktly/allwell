@@ -270,7 +270,9 @@ def image_table_set_spacing(ctx, key: str, value) -> None:
         return
     lo = 6 if key.endswith("_pt") else 0
     setattr(ctx.state.image_table, key, max(lo, int(round(float(value)))))
-    if getattr(ctx.state.image_table, "last_render", None):
+    # Re-render whenever a table has been built (cells assembled) — not only after
+    # a first Generate — so the very first Properties tweak takes effect live.
+    if getattr(ctx.runtime.image_table, "cells", None):
         image_table_generate(ctx)
 
 

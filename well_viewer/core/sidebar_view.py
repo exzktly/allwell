@@ -186,13 +186,20 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True):
             "Save the currently selected wells as a Plot Group. Plot Groups only "
             "reload well selections; they are not stats or replicate groups."
         )
-        add_btn.clicked.connect(lambda _=False: _plot_groups_add_current(ctx))
+        # Pass THIS drawer's own name field into the handler (closure) so several
+        # author-capable drawers (main sidebar + Image Table) don't fight over the
+        # single shared ``_plot_group_name_edit`` registry key — each Add reads the
+        # name typed into its own drawer.
+        add_btn.clicked.connect(
+            lambda _=False, ne=name_edit: _plot_groups_add_current(ctx, ne))
         nr.addWidget(add_btn)
         section.addWidget(name_row)
         # Back-compat: the original main-sidebar API exposed these directly
         # (register() stamps app._plot_group_name_edit / _plot_groups_add_btn).
-        ctx.widgets.register("_plot_group_name_edit", name_edit)
-        ctx.widgets.register("_plot_groups_add_btn", add_btn)
+        # First drawer wins the singular key (the main sidebar builds first).
+        if not ctx.widgets.has("_plot_group_name_edit"):
+            ctx.widgets.register("_plot_group_name_edit", name_edit)
+            ctx.widgets.register("_plot_groups_add_btn", add_btn)
 
     empty_label = QLabel("No Plot Groups yet.", section)
     empty_label.setObjectName("Muted")
@@ -265,12 +272,14 @@ def _wells_for_new_plot_group(ctx) -> "list[str]":
     return sorted(raw, key=parse_rc)
 
 
-def _plot_groups_add_current(ctx) -> None:
+def _plot_groups_add_current(ctx, name_edit=None) -> None:
     wells = _wells_for_new_plot_group(ctx)
     if not wells:
         ctx.set_status("Select wells (or show a group) before adding a Plot Group.")
         return
-    edit = ctx.widgets.get_or_none("_plot_group_name_edit")
+    # Prefer the drawer that triggered this (its own name field); fall back to the
+    # shared registry key for any other caller.
+    edit = name_edit if name_edit is not None else ctx.widgets.get_or_none("_plot_group_name_edit")
     name = edit.text().strip() if edit is not None else ""
     existing = ctx.state.selection.plot_groups or []
     used_names = {g.get("name") for g in existing}

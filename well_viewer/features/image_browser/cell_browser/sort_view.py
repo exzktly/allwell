@@ -10,7 +10,7 @@ add/remove pattern in ``criteria_view``.
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QHBoxLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.safe import swallowed
@@ -19,16 +19,22 @@ from well_viewer.features.image_browser.cell_browser.collect import sort_field_o
 
 def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     """Build the "Sort by" heading + rows host + add button into *parent_layout*."""
-    title = QLabel("Sort by")
-    title.setObjectName("Heading")
-    parent_layout.addWidget(title)
+    from well_viewer.core.ui_helpers import build_section_header
+    parent_layout.addWidget(build_section_header(None, "Sort by"))
 
+    # Rows live in a capped, frameless scroll (mirrors the Plot Groups drawer) so
+    # several sort keys scroll inside the drawer instead of growing the rail.
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QScrollArea.NoFrame)
+    scroll.setMaximumHeight(200)
     host = QWidget()
     rows_lay = QVBoxLayout(host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
     rows_lay.setSpacing(4)
-    rows_lay.addStretch(1)
-    parent_layout.addWidget(host)
+    rows_lay.addStretch(1)   # add_sort_row inserts before this trailing stretch
+    scroll.setWidget(host)
+    parent_layout.addWidget(scroll)
     ctx.runtime.cell_browser.sort_host = rows_lay
     ctx.runtime.cell_browser.sort_rows = []
 

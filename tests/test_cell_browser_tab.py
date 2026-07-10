@@ -34,6 +34,25 @@ def test_cell_browser_tab_builds_and_registers(loaded_app):
     assert set(chips) == set(app._app_state.channel.fluor_channels or [])
 
 
+def test_gate_mode_toggle_reveals_gate_picker(loaded_app):
+    """Regression: turning on 'From scatter gate' must reveal the gate picker +
+    hint. The reveal previously read stale ``ctx._cell_browser_*`` attrs (never
+    set) instead of ``ctx.runtime.cell_browser.gate_pick_row``/``.gate_hint``, so
+    nothing appeared."""
+    app = loaded_app
+    _goto_cell_browser(app)
+    cb = app._ctx.runtime.cell_browser
+    assert cb.gate_pick_row is not None and cb.gate_hint is not None
+    assert not cb.gate_pick_row.isVisible()
+
+    cb.gate_mode_cb.setChecked(True)   # fires _on_gate_mode_toggled
+    assert cb.gate_pick_row.isVisibleTo(cb.gate_pick_row.parentWidget())
+    assert cb.gate_hint.isVisibleTo(cb.gate_hint.parentWidget())
+
+    cb.gate_mode_cb.setChecked(False)
+    assert not cb.gate_pick_row.isVisibleTo(cb.gate_pick_row.parentWidget())
+
+
 def test_cell_browser_bar_survives_empty_refresh(loaded_app):
     """Regression: a built channel bar must NOT be wiped by a later refresh that
     transiently resolves no channels (channel state not ready / rows uncached).

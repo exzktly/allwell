@@ -389,12 +389,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     render_grid = QGridLayout(render_host)
     render_grid.setContentsMargins(0, 0, 0, 0)
     render_grid.setSpacing(2)
-    # Pin cells to the top-left; otherwise QGridLayout distributes excess
-    # space across rows/columns and the per-cell pixmaps render with large
-    # gaps between them.
-    render_grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     reg.register("_image_table_render_grid", render_grid)
-    il.addWidget(render_host)
+    # Align the render host to the top-left of its slot (the trailing stretch
+    # below already keeps it at its sizeHint; each cell is sized to its actual
+    # pixmap in image_table_generate, so rows stay tight). NOTE: a QLayout's own
+    # setAlignment is ignored when it's installed directly on a widget — the
+    # alignment must be applied to the host *item* here to take effect.
+    il.addWidget(render_host, 0, Qt.AlignTop | Qt.AlignLeft)
 
     il.addStretch(1)
 

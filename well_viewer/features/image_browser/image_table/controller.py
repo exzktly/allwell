@@ -384,7 +384,8 @@ def _install_cell_events(
             if not intensity:
                 _show_tip(_lbl, ev, "")
                 return
-            prefix = f"{well} {chan.upper()} T:{tp}"
+            from well_viewer.domain.selections_model import well_display_label
+            prefix = f"{well_display_label(ctx, well)} {chan.upper()} T:{tp}"
             if fov:
                 prefix += f" FOV:{fov}"
             _show_tip(_lbl, ev, f"{prefix}  ({x}, {y}) = {intensity}")
@@ -564,16 +565,15 @@ def image_table_generate(ctx) -> None:
             # Identity now lives on the row/col axes (see facet_view), so the
             # cell carries no repeated title — just a tooltip for the exact combo.
             if well and chan and tp:
-                title = f"{well}  {chan.upper()}  T:{tp}" + (f"  FOV:{fov}" if fov else "")
+                from well_viewer.domain.selections_model import well_display_label
+                title = f"{well_display_label(ctx, well)}  {chan.upper()}  T:{tp}" + (
+                    f"  FOV:{fov}" if fov else "")
             else:
                 title = "(unset)"
 
             img_label = QLabel(cell_widget)
             img_label.setToolTip(title)
             img_label.setAlignment(Qt.AlignCenter)
-            # Pin to the rendered pixmap size so the surrounding QLabel doesn't
-            # expand and leave large gaps around the image.
-            img_label.setFixedSize(sz, sz)
             if arr is not None:
                 # One composer for the live grid, the composite row and export:
                 # cell_display_rgb resolves the channel's render / boundary / LUT
@@ -603,10 +603,17 @@ def image_table_generate(ctx) -> None:
                 )
                 if pix is not None:
                     img_label.setPixmap(pix)
+                    # Pin the label to the ACTUAL pixmap size. make_overlay_thumb
+                    # scales KeepAspectRatio, so a non-square image is shorter/
+                    # narrower than sz; a fixed sz×sz square would letterbox it and
+                    # leave large blank bands that read as huge gaps between rows.
+                    img_label.setFixedSize(pix.width(), pix.height())
                 else:
                     img_label.setText("(render failed)")
+                    img_label.setFixedSize(sz, sz)
             else:
                 img_label.setText("(no image)")
+                img_label.setFixedSize(sz, sz)
             cl.addWidget(img_label)
 
             gr, gc = _pos(r, c)

@@ -57,7 +57,7 @@ def _cv(cell, dim: str) -> str:
     return (cell.get(_DIM_CB.get(dim, "")) or "").strip()
 
 
-def _fmt(dim: str, val: str) -> str:
+def _fmt(ctx, dim: str, val: str) -> str:
     if not val:
         return ""
     if dim == "timepoint":
@@ -66,6 +66,11 @@ def _fmt(dim: str, val: str) -> str:
         return f"FOV:{val}"
     if dim == "channel":
         return str(val).upper()
+    if dim == "well":
+        # Show the well's custom label (Sample Definitions → Well Labels) instead
+        # of its A01-style position when one is defined — matching every plot tab.
+        from well_viewer.domain.selections_model import well_display_label
+        return well_display_label(ctx, str(val))
     return str(val)
 
 
@@ -173,21 +178,21 @@ def plan_facets(ctx, cells) -> Optional[FacetPlan]:
     # Column axis (top): inner value per column, outer group spanning its columns.
     if tl >= 1:
         for c in range(ncols):
-            plan.top.append((_fmt(col_dims[-1], col_vals[c][-1]),
+            plan.top.append((_fmt(ctx, col_dims[-1], col_vals[c][-1]),
                              tl - 1, grid_col_of[c], 1, 1, False))
     if tl >= 2:
         for prefix, gs, ge in _group_spans(col_vals, grid_col_of):
-            plan.top.append((_fmt(col_dims[0], prefix[0]),
+            plan.top.append((_fmt(ctx, col_dims[0], prefix[0]),
                              0, gs, 1, ge - gs + 1, True))
 
     # Row axis (left): inner value per row, outer group as a vertical strip.
     if rl >= 1:
         for r in range(nrows):
-            plan.left.append((_fmt(row_dims[-1], row_vals[r][-1]),
+            plan.left.append((_fmt(ctx, row_dims[-1], row_vals[r][-1]),
                               grid_row_of[r], rl - 1, 1, 1, False))
     if rl >= 2:
         for prefix, gs, ge in _group_spans(row_vals, grid_row_of):
-            plan.left.append((_fmt(row_dims[0], prefix[0]),
+            plan.left.append((_fmt(ctx, row_dims[0], prefix[0]),
                               gs, 0, ge - gs + 1, 1, True))
 
     # Corner: the dimensions pinned off both axes (constant for every cell).
@@ -196,8 +201,7 @@ def plan_facets(ctx, cells) -> Optional[FacetPlan]:
         if dim not in row_dims and dim not in col_dims:
             v = _cv(cells[0][0], dim)
             if v:
-                fixed.append(_fmt(dim if dim != "well" else "well", v)
-                             if dim != "well" else v)
+                fixed.append(_fmt(ctx, dim, v))
     plan.corner = "  ·  ".join(fixed)
     return plan
 

@@ -213,9 +213,12 @@ def test_lut_box_shows_each_channel_once():
     # editing that row fans out to every instance.
     assert list(table.keys()) == ["GFP", "RFP"]
     assert len(table["GFP"]) == 2 and len(table["RFP"]) == 1
-    # a threshold variant keeps its own LUT (renders on its own token)
+    # A ≥Thresh binary of GFP does NOT add a second row: a binary render has no
+    # display range, so GFP stays a single LUT row (its fluorescence instances).
     spec.rows.channels.append(ChannelSpec("GFP", "threshold"))
-    assert set(B._table_channels(spec).keys()) == {"GFP", "RFP", "GFP (binary)"}
+    table2 = B._table_channels(spec)
+    assert set(table2.keys()) == {"GFP", "RFP"}
+    assert len(table2["GFP"]) == 2   # only the two fluorescence GFP specs
 
 
 def test_drop_zones_reject_incompatible_tokens():

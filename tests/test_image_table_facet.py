@@ -20,9 +20,23 @@ def _cell(well, chan, tp, fov="1"):
     return {"well": well, "chan": chan, "tp": tp, "fov": fov}
 
 
-def _ctx(row_dims, col_dims):
+def _ctx(row_dims, col_dims, well_labels=None):
     st = SimpleNamespace(row_dims=row_dims, col_dims=col_dims)
-    return SimpleNamespace(state=SimpleNamespace(image_table=st))
+    ds = SimpleNamespace(well_labels=dict(well_labels or {}))
+    return SimpleNamespace(state=SimpleNamespace(image_table=st, dataset=ds))
+
+
+def test_facet_well_axis_shows_label_when_defined():
+    # rows = well › channel; A01 is labelled "Control", A02 has no label.
+    cells = []
+    for well in ("A01", "A02"):
+        for chan in ("GFP", "DAPI"):
+            cells.append([_cell(well, chan, tp) for tp in ("0h",)])
+    plan = F.plan_facets(_ctx(["well", "channel"], ["timepoint"],
+                              well_labels={"A01": "Control"}), cells)
+    groups = [t for (t, *_rest, grp) in plan.left if grp]
+    assert "Control" in groups          # labelled well → its label
+    assert "A02" in groups              # unlabelled well → its position
 
 
 def test_facet_plan_nested_rows_group_space_and_axes():

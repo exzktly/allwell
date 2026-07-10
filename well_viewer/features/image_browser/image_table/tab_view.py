@@ -137,14 +137,16 @@ def _build_properties_dock(ctx, dock) -> None:
     _prop("Cell gap", "cell_gap", 2, 0, 200,
           "Gap between adjacent images within a group.")
     _prop("Row-group gap", "row_group_gap", 18, 0, 400,
-          "Vertical gap between row facet groups.")
+          "Vertical gap between row facet groups. Only applies when the Rows axis "
+          "nests a root + channels (≥2 dimensions).")
     _prop("Col-group gap", "col_group_gap", 18, 0, 400,
-          "Horizontal gap between column facet groups.")
+          "Horizontal gap between column facet groups. Only applies when the "
+          "Columns axis nests a root + channels (≥2 dimensions).")
     _cap("Label font (px)")
     _prop("Axis labels", "label_font_pt", 11, 6, 48,
           "Font size of the row / column axis value labels.")
     _prop("Group labels", "group_font_pt", 11, 6, 48,
-          "Font size of the facet-group band labels.")
+          "Font size of the facet-group band labels (nested axes only).")
     pl.addLayout(grid)
     pl.addStretch(1)
     dock.layout().addWidget(panel)

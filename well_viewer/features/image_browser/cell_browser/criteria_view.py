@@ -35,9 +35,8 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     lay.setContentsMargins(8, 8, 8, 8)
     lay.setSpacing(6)
 
-    title = QLabel("Cell filters", parent)
-    title.setObjectName("Heading")
-    lay.addWidget(title)
+    from well_viewer.core.ui_helpers import build_section_header
+    lay.addWidget(build_section_header(parent, "Cell filters"))
 
     # ── source: scatter gate vs criteria (N1) ────────────────────────────────
     gate_cb = QCheckBox("From scatter gate", parent)
@@ -81,16 +80,18 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     gate_pick_row.setVisible(False)
     gate_hint.setVisible(False)
 
-    # ── criteria rows (scrollable) ───────────────────────────────────────────
+    # ── criteria rows (scrollable, capped so it never balloons) ──────────────
     rows_scroll = QScrollArea(parent)
     rows_scroll.setWidgetResizable(True)
+    rows_scroll.setFrameShape(QScrollArea.NoFrame)
+    rows_scroll.setMaximumHeight(200)
     rows_host = QWidget()
     rows_lay = QVBoxLayout(rows_host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
     rows_lay.setSpacing(4)
     rows_lay.addStretch(1)
     rows_scroll.setWidget(rows_host)
-    lay.addWidget(rows_scroll, 1)
+    lay.addWidget(rows_scroll)
     ctx.runtime.cell_browser.criteria_host = rows_lay
     ctx.runtime.cell_browser.criteria_rows_host = rows_host
     ctx.runtime.cell_browser.criteria_rows = []
@@ -151,6 +152,11 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
         lambda _app=ctx: (_refresh_gate_choices(_app),
                           ctl.cell_browser_sync_scatter_gates(_app)))
 
+    # Pin all content to the top; the capped criteria/sort scrolls absorb their
+    # own overflow, and this trailing stretch takes any remaining slack so nothing
+    # balloons (the frame itself is stretch 0 — the main plate owns the rail slack).
+    lay.addStretch(1)
+
     cell_browser_sidebar_refresh(ctx)
 
 
@@ -159,8 +165,8 @@ def _on_gate_mode_toggled(ctx, on: bool) -> None:
     Disables the criteria editor in gate mode, reveals the gate picker + hint,
     and re-collects immediately."""
     _set_criteria_enabled(ctx, not on)
-    for attr in ("_cell_browser_gate_pick_row", "_cell_browser_gate_hint"):
-        w = getattr(ctx, attr, None)
+    cb = ctx.runtime.cell_browser
+    for w in (cb.gate_pick_row, cb.gate_hint):
         if w is not None:
             w.setVisible(on)
     if on:

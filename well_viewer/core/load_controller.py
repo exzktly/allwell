@@ -228,6 +228,13 @@ def load_directory(app, d: Path, label=None) -> None:
         _invalidate_zip_cache()
     except Exception:
         swallowed()  # was: pass (silent except)
+    # Drop the app-wide decoded-array LRU too — its cached pixels belong to the
+    # previous dataset (keyed by resolved image identity + mtime).
+    try:
+        from well_viewer.data.image_discovery import invalidate_decode_cache
+        invalidate_decode_cache()
+    except Exception:
+        swallowed()  # was: pass (silent except)
     # Clear the prior dataset's gate / override / cell-gating state before the
     # new dataset hydrates (audit X1 — stops cross-dataset gate leakage).
     _reset_gating_state(app)

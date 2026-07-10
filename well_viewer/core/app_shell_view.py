@@ -120,11 +120,17 @@ def build_ui(app) -> None:
         "_sidebar_cell_browser_frame", QWidget())
     for w in (app._sidebar_preview_frame, app._sidebar_image_table_frame,
               app._sidebar_sample_frame,
-              app._sidebar_stats_frame,
-              app._sidebar_cell_browser_frame):
+              app._sidebar_stats_frame):
         QVBoxLayout(w).setContentsMargins(0, 0, 0, 0)
         sidebar_layout.addWidget(w, 1)
         w.hide()
+    # Cell Browser is the one sub-tab that shows ALONGSIDE the main well-plate
+    # frame (it has no plate of its own — it filters cells by criteria). Give it
+    # stretch 0 so the plate (stretch 1) owns the vertical slack and the Cell
+    # filters sit compact beneath it, instead of the rail splitting 50/50.
+    QVBoxLayout(app._sidebar_cell_browser_frame).setContentsMargins(0, 0, 0, 0)
+    sidebar_layout.addWidget(app._sidebar_cell_browser_frame, 0)
+    app._sidebar_cell_browser_frame.hide()
 
     app._h_pane.addWidget(sidebar)
     app._sidebar_root = sidebar  # so mode toggles can hide/show the whole rail

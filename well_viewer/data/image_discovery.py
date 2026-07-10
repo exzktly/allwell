@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import re
+import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -135,9 +138,108 @@ def read_member_bytes(zip_path: Path, member: str) -> Optional[bytes]:
     return _preview_read_member_bytes(zip_path=zip_path, member=member, logger=_logger)
 
 
+# ── Decoded-array cache ──────────────────────────────────────────────────────
+# ``open_imgref_as_array`` is the single choke point every pixel-decoding path
+# funnels through (Image Table, Cell Browser, Review Image, Playground, scatter
+# cell viewer, auto-threshold). Decoding a zip member (inflate + tifffile/PIL)
+# is the dominant per-image cost — the zip-handle cache below in
+# ``zipfile_cache`` only saves the file-open/central-dir parse, not the decode.
+# Memoizing decoded arrays here makes a near-identical re-render (a second Image
+# Table Generate, a crop/zoom/LUT tweak) nearly free on the decode axis, and it
+# collapses the Image Table's prefetch double-decode into one (the warm pass
+# fills the cache, the render pass hits it).
+DEFAULT_MAX_DECODE_ENTRIES = 96
+DEFAULT_MAX_DECODE_BYTES = 1 << 30   # 1 GiB
+
+
+class _DecodedArrayCache:
+    """Bounded LRU of decoded numpy arrays, keyed by resolved image identity.
+
+    Thread-safe (the Image Table prefetch warms it from a ``ThreadPoolExecutor``).
+    Bounded by BOTH an entry count and a total-bytes budget so a large plate walk
+    churns via LRU eviction instead of growing without limit. Values are shared by
+    reference — callers must treat a returned array as READ-ONLY (the hot consumers
+    already copy-on-write: ``crop_tool.apply_to_array`` returns a view, the RGB
+    composer does ``a.astype(float32)``, ``_load_mask_array`` copies via ``rint``)."""
+
+    def __init__(self, max_entries: int = DEFAULT_MAX_DECODE_ENTRIES,
+                 max_bytes: int = DEFAULT_MAX_DECODE_BYTES) -> None:
+        self._max_entries = max_entries
+        self._max_bytes = max_bytes
+        self._store: "OrderedDict[tuple, tuple]" = OrderedDict()
+        self._total_bytes = 0
+        self._lock = threading.Lock()
+
+    def get(self, key: tuple):
+        with self._lock:
+            hit = self._store.get(key)
+            if hit is None:
+                return None
+            self._store.move_to_end(key)
+            return hit[0]
+
+    def put(self, key: tuple, arr) -> None:
+        nbytes = int(getattr(arr, "nbytes", 0) or 0)
+        # An array bigger than the whole budget can never fit; don't thrash on it.
+        if nbytes > self._max_bytes:
+            return
+        with self._lock:
+            old = self._store.pop(key, None)
+            if old is not None:
+                self._total_bytes -= old[1]
+            self._store[key] = (arr, nbytes)
+            self._total_bytes += nbytes
+            while self._store and (len(self._store) > self._max_entries
+                                   or self._total_bytes > self._max_bytes):
+                _k, (_a, nb) = self._store.popitem(last=False)
+                self._total_bytes -= nb
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._store.clear()
+            self._total_bytes = 0
+
+
+_DECODE_CACHE = _DecodedArrayCache()
+
+
+def invalidate_decode_cache() -> None:
+    """Drop every cached decoded array — called on dataset load (new pixels)."""
+    _DECODE_CACHE.invalidate()
+
+
+def _source_mtime_ns(ref: ImgRef) -> int:
+    """mtime of the ref's backing file (disk image or outer zip), 0 if unavailable.
+
+    Part of the cache key so a pipeline re-run that rewrites a zip within the same
+    session auto-misses instead of serving stale pixels (mirrors
+    ``zipfile_cache._get_or_open``)."""
+    src = ref.disk_path or ref.zip_path
+    if src is None:
+        return 0
+    try:
+        return os.stat(src).st_mtime_ns
+    except OSError:
+        return 0
+
+
 def open_imgref_as_array(ref: ImgRef, greyscale: bool = False):
-    """Load an image as a numpy array at full native bit depth."""
-    return _preview_open_imgref_as_array(
+    """Load an image as a numpy array at full native bit depth (memoized).
+
+    Decoded arrays are cached in a bounded LRU keyed by the *resolved* image
+    identity — all token normalization (``_match_image_ref``) happens upstream, so
+    keying on the concrete ref avoids the ``"1.0"`` vs ``"1"`` pitfalls. A returned
+    array is shared by reference; **treat it as read-only** (see ``_DecodedArrayCache``)."""
+    if ref is None:
+        return None
+    key = None
+    fps = ref.full_path_str
+    if fps and fps != "unknown":
+        key = (fps, bool(greyscale), _source_mtime_ns(ref))
+        hit = _DECODE_CACHE.get(key)
+        if hit is not None:
+            return hit
+    arr = _preview_open_imgref_as_array(
         ref=ref,
         greyscale=greyscale,
         np_available=_NP_AVAILABLE,
@@ -150,6 +252,9 @@ def open_imgref_as_array(ref: ImgRef, greyscale: bool = False):
         read_member_bytes_fn=read_member_bytes,
         logger=_logger,
     )
+    if key is not None and arr is not None:
+        _DECODE_CACHE.put(key, arr)
+    return arr
 
 
 def _default_fov_tp_extractor(stem: str) -> Tuple[str, str]:

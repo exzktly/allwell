@@ -85,15 +85,16 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 
-    # Plot Groups drawer — same widget that lives on the plotting sidebar,
-    # added here so users can pick a saved well set and have it drive the
-    # Image Table grid immediately. ``include_add_controls=False`` because
-    # authoring new groups belongs with the plotting workflow.
+    # Plot Groups drawer — same widget that lives on the plotting sidebar, added
+    # here so users can save the current plate selection as a group and pick a
+    # saved group to drive the Image Table grid, without leaving the tab. The
+    # drawer's Add uses its own name field (see build_plot_groups_drawer), so it
+    # doesn't collide with the main sidebar's Add.
     from well_viewer.core.sidebar_view import build_plot_groups_drawer
     # build_plot_groups_drawer is a shared core sidebar builder; it takes ctx
     # (drawer registry on ctx.runtime.plot_groups, widgets via ctx.widgets).
     plot_groups_section = build_plot_groups_drawer(
-        ctx, parent, include_add_controls=False,
+        ctx, parent, include_add_controls=True,
     )
     layout.addWidget(plot_groups_section)
 

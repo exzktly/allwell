@@ -282,7 +282,8 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
 
             if show_titles:
                 if well and chan and tp:
-                    title = f"{well}  {chan.upper()}  T:{tp}"
+                    from well_viewer.domain.selections_model import well_display_label
+                    title = f"{well_display_label(ctx, well)}  {chan.upper()}  T:{tp}"
                     if fov:
                         title += f"  FOV:{fov}"
                 else:

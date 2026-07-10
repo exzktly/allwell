@@ -1029,6 +1029,9 @@ channel for every well).
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
+- **Well labels** — where a well would show its `A01` position (axis / group labels,
+  cell tooltips, exported titles), its custom label is shown instead when one is set
+  under Sample Definitions → Well Labels.
 - **Optimal use** — drag **Well** onto Rows and nest a couple of channels, drag
   **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
   for a treatment's full time-course at a glance. Flip a root to **Overlay** for a

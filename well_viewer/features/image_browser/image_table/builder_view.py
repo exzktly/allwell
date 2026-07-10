@@ -912,14 +912,23 @@ def _build_fixed(ctx, spec) -> None:
 
 
 def _table_channels(spec) -> "dict":
-    """Distinct channels currently in the table, in row-then-column order, mapped
-    to every ChannelSpec that shares that channel — so a channel shown once here
-    edits all of its instances. Keyed by ``axis_token`` so raw ``GFP`` and
-    ``GFP (binary)`` are separate LUTs (each renders on its own token)."""
+    """Distinct LUT-adjustable channels in the table, in row-then-column order,
+    mapped to every ChannelSpec that shares that channel — so a channel shown once
+    here edits all of its instances.
+
+    Keyed by the BASE channel (not ``axis_token``): a binary render (``mask`` /
+    ``≥threshold``) has no display range, so it never gets a LUT row. A channel
+    shown as both its fluorescence and its ≥Thresh binary therefore appears
+    exactly once (its fluorescence instance drives the LUT); a channel shown only
+    as binary/mask gets no LUT row."""
     seen: dict = {}
     for axis in ("rows", "cols"):
         for cs in getattr(spec, axis).channels:
-            seen.setdefault(cs.axis_token(), []).append(cs)
+            if cs.render not in ("raw", "corrected"):
+                continue  # binary/mask renders ignore the LUT — no row for them
+            key = str(cs.channel or "").strip().upper()
+            if key:
+                seen.setdefault(key, []).append(cs)
     return seen
 
 

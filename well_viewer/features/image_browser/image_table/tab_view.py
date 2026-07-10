@@ -812,6 +812,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
     tr.addWidget(zoom_in)
 
+    # Spacing + label font sizes live in the Properties sidebar (build_image_table_picker).
+
     il.addWidget(action_row)
 
     # ── Rendered image table (drawn BELOW the action strip) ────────────────

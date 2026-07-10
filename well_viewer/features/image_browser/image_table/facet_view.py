@@ -34,11 +34,23 @@ _DIM_LABEL = {"well": "Well", "channel": "Channel",
 _GROUP_GAP = 18          # px gap between facet groups (the non-uniform spacing)
 
 # Scoped label styling — muted per-value labels, a subtle strip behind the
-# outer/group labels so they read as facet bands.
-_INNER_QSS = "color:#98A2B3; font-size:11px;"
-_GROUP_QSS = ("color:#E6E9EF; font-size:11px; font-weight:600;"
-              " background:#1A2230; border-radius:5px; padding:2px 6px;")
-_CORNER_QSS = "color:#5F6B7C; font-size:10px;"
+# outer/group labels so they read as facet bands. Font sizes come from state
+# (Properties sidebar), so the QSS is built per-render from the plan.
+_LABEL_PT = 11           # default per-value axis-label font size (px)
+_GROUP_PT = 11           # default facet-group band-label font size (px)
+
+
+def _inner_qss(pt: int) -> str:
+    return f"color:#98A2B3; font-size:{pt}px;"
+
+
+def _group_qss(pt: int) -> str:
+    return (f"color:#E6E9EF; font-size:{pt}px; font-weight:600;"
+            " background:#1A2230; border-radius:5px; padding:2px 6px;")
+
+
+def _corner_qss(pt: int) -> str:
+    return f"color:#5F6B7C; font-size:{max(8, pt - 1)}px;"
 
 
 def _cv(cell, dim: str) -> str:
@@ -85,7 +97,8 @@ class FacetPlan:
     """Placement + labelling derived from the layout's nesting."""
 
     __slots__ = ("grid_row_of", "grid_col_of", "spacer_rows", "spacer_cols",
-                 "top", "left", "corner", "first_row", "first_col", "bottom_row")
+                 "top", "left", "corner", "first_row", "first_col", "bottom_row",
+                 "row_gap", "col_gap", "label_pt", "group_pt")
 
     def __init__(self) -> None:
         self.grid_row_of: List[int] = []
@@ -99,6 +112,10 @@ class FacetPlan:
         self.first_row = 0
         self.first_col = 0
         self.bottom_row = 0
+        self.row_gap = _GROUP_GAP
+        self.col_gap = _GROUP_GAP
+        self.label_pt = _LABEL_PT
+        self.group_pt = _GROUP_PT
 
 
 def _slots(vals, depth: int, base: int):
@@ -152,6 +169,10 @@ def plan_facets(ctx, cells) -> Optional[FacetPlan]:
     plan.spacer_rows, plan.spacer_cols = spacer_rows, spacer_cols
     plan.first_row, plan.first_col = tl, rl
     plan.bottom_row = next_row
+    plan.row_gap = max(0, int(getattr(st, "row_group_gap", _GROUP_GAP)))
+    plan.col_gap = max(0, int(getattr(st, "col_group_gap", _GROUP_GAP)))
+    plan.label_pt = max(6, int(getattr(st, "label_font_pt", _LABEL_PT)))
+    plan.group_pt = max(6, int(getattr(st, "group_font_pt", _GROUP_PT)))
 
     # Column axis (top): inner value per column, outer group spanning its columns.
     if tl >= 1:
@@ -187,12 +208,13 @@ def plan_facets(ctx, cells) -> Optional[FacetPlan]:
 
 def render_facet_chrome(grid, plan: FacetPlan) -> None:
     """Add the axis labels + inter-group spacers described by *plan* to *grid*."""
+    inner_qss, group_qss = _inner_qss(plan.label_pt), _group_qss(plan.group_pt)
     for text, gr, gc, rs, cs, is_group in plan.top:
         if not text:
             continue
         lbl = QLabel(text)
         lbl.setAlignment(Qt.AlignCenter | Qt.AlignBottom)
-        lbl.setStyleSheet(_GROUP_QSS if is_group else _INNER_QSS)
+        lbl.setStyleSheet(group_qss if is_group else inner_qss)
         grid.addWidget(lbl, gr, gc, rs, cs)
 
     for text, gr, gc, rs, cs, is_group in plan.left:
@@ -200,23 +222,23 @@ def render_facet_chrome(grid, plan: FacetPlan) -> None:
             continue
         if is_group:
             lbl = _VLabel(text)
-            lbl.setStyleSheet(_GROUP_QSS)
+            lbl.setStyleSheet(group_qss)
         else:
             lbl = QLabel(text)
-            lbl.setStyleSheet(_INNER_QSS)
+            lbl.setStyleSheet(inner_qss)
         lbl.setAlignment(Qt.AlignCenter)
         grid.addWidget(lbl, gr, gc, rs, cs)
 
     if plan.corner and plan.first_row and plan.first_col:
         c = QLabel(plan.corner)
-        c.setStyleSheet(_CORNER_QSS)
+        c.setStyleSheet(_corner_qss(plan.label_pt))
         c.setAlignment(Qt.AlignCenter)
         grid.addWidget(c, 0, 0, plan.first_row, plan.first_col)
 
     for sr in plan.spacer_rows:
-        grid.setRowMinimumHeight(sr, _GROUP_GAP)
+        grid.setRowMinimumHeight(sr, plan.row_gap)
     for sc in plan.spacer_cols:
-        grid.setColumnMinimumWidth(sc, _GROUP_GAP)
+        grid.setColumnMinimumWidth(sc, plan.col_gap)
 
 
 def append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered,
@@ -226,10 +248,10 @@ def append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered,
     facet columns, labelled once on the left axis."""
     comp_row = (plan.bottom_row + 1) if plan is not None else len(cells)
     if plan is not None:
-        grid.setRowMinimumHeight(plan.bottom_row, _GROUP_GAP)
+        grid.setRowMinimumHeight(plan.bottom_row, plan.row_gap)
         if plan.first_col:
             lbl = QLabel("Composite")
-            lbl.setStyleSheet(_INNER_QSS)
+            lbl.setStyleSheet(_inner_qss(plan.label_pt))
             lbl.setAlignment(Qt.AlignCenter)
             grid.addWidget(lbl, comp_row, 0, 1, plan.first_col)
     n_cols = max(len(row) for row in cells)

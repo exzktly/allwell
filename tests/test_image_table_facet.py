@@ -1,8 +1,9 @@
 """Faceted render layout — plan_facets groups + labels the grid from the nesting.
 
-Fast + Qt-light: drives the pure placement planner on fake cells (combo stubs),
-asserting the group spacing, axis labels, and the vertical outer strip that the
-rendered Image Table uses instead of a title under every cell.
+Fast + Qt-light: drives the pure placement planner on the plain-data render model
+(``{"well","chan","tp","fov"}`` string dicts), asserting the group spacing, axis
+labels, and the vertical outer strip that the rendered Image Table uses instead of
+a title under every cell.
 """
 from __future__ import annotations
 
@@ -15,17 +16,8 @@ pytest.importorskip("PySide6")
 from well_viewer.features.image_browser.image_table import facet_view as F  # noqa: E402
 
 
-class _CB:
-    def __init__(self, t):
-        self._t = t
-
-    def currentText(self):
-        return self._t
-
-
 def _cell(well, chan, tp, fov="1"):
-    return {"well_cb": _CB(well), "chan_cb": _CB(chan),
-            "tp_cb": _CB(tp), "fov_cb": _CB(fov)}
+    return {"well": well, "chan": chan, "tp": tp, "fov": fov}
 
 
 def _ctx(row_dims, col_dims):

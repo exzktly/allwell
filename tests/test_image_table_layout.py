@@ -102,22 +102,6 @@ def test_set_zoom_absolute_and_relative_clamp():
     assert app._app_state.image_table.zoom == C._ZOOM_MIN
 
 
-def test_channel_selection_helpers():
-    app = _fake_app(wells=["A01"], channels=["gfp", "rfp"])
-    opts = C._channel_options(app._ctx)
-    app._app_state.image_table.active_channels = set()
-    # toggling a channel on/off mutates the active set
-    C.image_table_toggle_channel(app._ctx, opts[0], True)
-    assert app._app_state.image_table.active_channels == {opts[0]}
-    C.image_table_toggle_channel(app._ctx, opts[0], False)
-    assert app._app_state.image_table.active_channels == set()
-    # select-all / clear
-    C.image_table_set_all_channels(app._ctx, True)
-    assert app._app_state.image_table.active_channels == set(opts)
-    C.image_table_set_all_channels(app._ctx, False)
-    assert app._app_state.image_table.active_channels == set()
-
-
 def test_layout_cell_values_wells_x_channels():
     fixed = {"well": "", "channel": "", "timepoint": "0", "fov": "1"}
     rows = ["A01", "A02"]   # rows = wells

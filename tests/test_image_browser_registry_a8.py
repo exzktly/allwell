@@ -17,13 +17,15 @@ from PySide6.QtWidgets import QWidget
 from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
 from well_viewer.features.image_browser.cell_browser.tab_view import build_cell_browser_tab
 
+# The builder shelf owns authoring; the render model is headless plain data, so
+# the old per-cell selector grid / per-row LUT table / grid-size + held-value
+# combos are gone (not registered). What remains are the action-strip + render
+# handles the controller / persistence still read.
 _IMAGE_TABLE = (
-    "_image_table_row_dims_btn", "_image_table_col_dims_btn", "_image_table_channel_btn",
-    "_image_table_channel_menu", "_image_table_global_chan_cb", "_image_table_global_tp_cb",
-    "_image_table_global_fov_cb", "_image_table_rows_spin", "_image_table_cols_spin",
-    "_image_table_selector_grid", "_image_table_lut_container", "_image_table_crop_act",
+    "_image_table_props_dock", "_image_table_crop_act",
+    "_image_table_thresh_chan_cb", "_image_table_thresh_frac_stepper",
     "_image_table_render_grid", "_image_table_zoom_lbl",
-    "_image_table_thresh_frac_stepper", "_image_table_empty_state",
+    "_image_table_empty_state",
 )
 
 _CELL_BROWSER = (

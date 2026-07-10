@@ -1,9 +1,9 @@
 """Image Table action-strip controls.
 
 Covers the ON-threshold channel picker (choose which channel the threshold
-applies to) and the retirement of the old Advanced selector grid — it stays
-mounted as hidden render plumbing (the cell combos are the render contract) but
-is no longer a visible UI surface.
+applies to) and the removal of the old Advanced selector grid — the render model
+is now headless plain data (no per-cell selector-grid widgets), so there is no
+Advanced UI surface and no ``_image_table_selector_grid`` handle at all.
 """
 from __future__ import annotations
 
@@ -27,20 +27,24 @@ def test_on_threshold_has_a_channel_dropdown(image_table_app):
 
 
 @pytest.mark.qt
-def test_advanced_selector_grid_is_hidden_plumbing(image_table_app):
-    from PySide6.QtWidgets import QFrame, QToolButton
+def test_render_model_is_headless_plain_data(image_table_app):
+    from PySide6.QtWidgets import QToolButton
 
     ctx = image_table_app._ctx
-    # The per-cell selector grid is the render contract → still registered.
-    sel = ctx.widgets.get("_image_table_selector_grid")
-    assert sel is not None
+    # The old Advanced per-cell selector grid is gone entirely — not hidden.
+    assert ctx.widgets.get_or_none("_image_table_selector_grid") is None
+    assert ctx.widgets.get_or_none("_image_table_lut_container") is None
 
-    # …but it lives inside a hidden Panel — the Advanced UI is gone from view.
-    frame = sel.parentWidget()
-    while frame is not None and not (
-            isinstance(frame, QFrame) and frame.objectName() == "Panel"):
-        frame = frame.parentWidget()
-    assert frame is not None and not frame.isVisible()
+    # The render model is a rows × cols grid of plain value dicts (no Qt widgets):
+    # that IS the render contract the renderer reads.
+    C = _controller()
+    C.image_table_rebuild_grid(ctx)
+    cells = ctx.runtime.image_table.cells
+    assert cells and all(
+        isinstance(cell, dict) and set(cell) == {"well", "chan", "tp", "fov"}
+        and all(isinstance(v, str) for v in cell.values())
+        for row in cells for cell in row
+    )
 
     # And there is no "Advanced" disclosure button anywhere in the tab.
     sub = ctx.runtime.image_browser.subtabs
@@ -48,3 +52,8 @@ def test_advanced_selector_grid_is_hidden_plumbing(image_table_app):
     tab = sub.widget(idx)
     assert not [b for b in tab.findChildren(QToolButton)
                 if "Advanced" in (b.text() or "")]
+
+
+def _controller():
+    from well_viewer.features.image_browser.image_table import controller as C
+    return C

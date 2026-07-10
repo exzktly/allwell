@@ -27,8 +27,8 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     composite_column_rgb,
 )
 
-_DIM_CB = {"well": "well_cb", "channel": "chan_cb",
-           "timepoint": "tp_cb", "fov": "fov_cb"}
+_DIM_CB = {"well": "well", "channel": "chan",
+           "timepoint": "tp", "fov": "fov"}
 _DIM_LABEL = {"well": "Well", "channel": "Channel",
               "timepoint": "Timepoint", "fov": "FOV"}
 _GROUP_GAP = 18          # px gap between facet groups (the non-uniform spacing)
@@ -54,11 +54,7 @@ def _corner_qss(pt: int) -> str:
 
 
 def _cv(cell, dim: str) -> str:
-    cb = cell.get(_DIM_CB.get(dim, ""))
-    try:
-        return cb.currentText().strip() if cb is not None else ""
-    except Exception:
-        return ""
+    return (cell.get(_DIM_CB.get(dim, "")) or "").strip()
 
 
 def _fmt(dim: str, val: str) -> str:

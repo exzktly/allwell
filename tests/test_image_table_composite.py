@@ -102,17 +102,7 @@ def test_export_figure_includes_composite_row(image_table_app):
     assert len(fig.axes) == (n_rows + 1) * n_cols
 
 
-@pytest.mark.qt
-def test_composite_control_is_a_checkable_toggle_button(image_table_app):
-    from PySide6.QtWidgets import QAbstractButton
-
-    app = image_table_app
-    btn = app._image_table_composite_chk
-    # A toolbar toggle button (not a stray QCheckBox), styled to match the row.
-    assert isinstance(btn, QAbstractButton) and btn.isCheckable()
-    assert btn.property("variant") == "toggle"
-    # Toggling drives the state flag through the same handler.
-    btn.setChecked(True)
-    assert app._ctx.state.image_table.composite is True
-    btn.setChecked(False)
-    assert app._ctx.state.image_table.composite is False
+# The composite flag is authored by the shelf's per-root Separate↔Overlay switch
+# now (the old Advanced "Composite" toggle button was retired); the state flag
+# ``ctx.state.image_table.composite`` still drives the merged bottom row, which
+# ``test_generate_appends_composite_row`` above exercises end-to-end.

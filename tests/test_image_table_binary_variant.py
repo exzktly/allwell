@@ -87,8 +87,7 @@ def test_build_and_render_with_binary_variant_row(image_table_app):
     C.image_table_apply_dims_preset(app._ctx, ["well", "channel"], ["timepoint"])
 
     cells = app._ctx.runtime.image_table.cells
-    grid_chans = {cells[r][0]["chan_cb"].currentText().strip()
-                  for r in range(len(cells))}
+    grid_chans = {cells[r][0]["chan"] for r in range(len(cells))}
     assert variant in grid_chans, f"binary variant missing from grid: {grid_chans}"
 
     # Render must not raise; the binary decode loads the base channel + forces

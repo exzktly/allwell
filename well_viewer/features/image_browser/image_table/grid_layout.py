@@ -198,11 +198,10 @@ def _product_values(ctx, dims) -> List[tuple]:
 def _fixed_off_axis(ctx, on_axis: set) -> Dict[str, str]:
     """Pick a single held value for each dimension NOT on a row/col axis.
 
-    Prefers the matching Global Options dropdown (so the user can change it and
-    re-Build), else the first selected/available value."""
-    def _global(attr: str) -> str:
-        cb = getattr(ctx.runtime.image_table, attr, None)
-        return cb.currentText().strip() if cb is not None else ""
+    Prefers the builder's held value (``state.fixed_vals``, set by the shelf's
+    Fixed panel via ``image_table_apply_spec``), else the first selected/available
+    value. ``well`` is anchored on the sidebar plate's active set."""
+    held = getattr(ctx.state.image_table, "fixed_vals", None) or {}
 
     def _first(seq) -> str:
         return seq[0] if seq else ""
@@ -211,13 +210,13 @@ def _fixed_off_axis(ctx, on_axis: set) -> Dict[str, str]:
     if "well" not in on_axis:
         sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
                      key=parse_rc)
-        fixed["well"] = sel[0] if sel else _first(_well_options(ctx))
+        fixed["well"] = held.get("well") or (sel[0] if sel else _first(_well_options(ctx)))
     if "channel" not in on_axis:
-        fixed["channel"] = _global("global_chan_cb") or _first(_axis_values(ctx, "channel"))
+        fixed["channel"] = held.get("channel") or _first(_axis_values(ctx, "channel"))
     if "timepoint" not in on_axis:
-        fixed["timepoint"] = _global("global_tp_cb") or _first(_timepoint_options(ctx))
+        fixed["timepoint"] = held.get("timepoint") or _first(_timepoint_options(ctx))
     if "fov" not in on_axis:
-        fixed["fov"] = _global("global_fov_cb") or _first(_fov_options(ctx))
+        fixed["fov"] = held.get("fov") or _first(_fov_options(ctx))
     return fixed
 
 
@@ -294,16 +293,17 @@ def _all_dim_options(ctx, dim: str) -> List[str]:
     return []
 
 
-_DIM_KEY = {"well": "well_cb", "channel": "chan_cb",
-            "timepoint": "tp_cb", "fov": "fov_cb"}
+# Maps a dimension name → the plain render-model cell key.
+_DIM_KEY = {"well": "well", "channel": "chan",
+            "timepoint": "tp", "fov": "fov"}
 
 
 def _snapshot_cells(ctx) -> List[List[Dict[str, str]]]:
-    """Capture every cell's (well, channel, timepoint, fov) selections."""
+    """Capture every cell's (well, channel, timepoint, fov) values."""
     snap: List[List[Dict[str, str]]] = []
     for row in (getattr(ctx.runtime.image_table, "cells", None) or []):
         snap.append([
-            {dim: cell[key].currentText().strip() for dim, key in _DIM_KEY.items()}
+            {dim: (cell.get(key) or "") for dim, key in _DIM_KEY.items()}
             for cell in row
         ])
     return snap
@@ -311,13 +311,6 @@ def _snapshot_cells(ctx) -> List[List[Dict[str, str]]]:
 
 def _write_cell(cell, vals: Dict[str, str]) -> None:
     for dim, key in _DIM_KEY.items():
-        cb = cell.get(key)
         txt = vals.get(dim, "")
-        if cb is None or not txt:
-            continue
-        cb.blockSignals(True)
-        try:
-            if cb.findText(txt) >= 0:
-                cb.setCurrentText(txt)
-        finally:
-            cb.blockSignals(False)
+        if txt:
+            cell[key] = txt

@@ -2,9 +2,9 @@
 (well, channel, variant) at most once and skips keys already in the persistent
 cache — so a second Generate on an unchanged dataset performs zero new reads.
 
-Exercises ``_prefetch_cell_arrays`` directly with stub widgets + a stub loader,
-so it doesn't need image archives or a full app. Imports the controller (Qt), so
-it runs in CI's fast lane rather than the local Qt-free subset.
+Exercises ``_prefetch_cell_arrays`` directly with the plain-data render model +
+a stub loader, so it doesn't need image archives or a full app. Imports the
+controller (Qt), so it runs in CI's fast lane rather than the Qt-free subset.
 """
 
 from __future__ import annotations
@@ -18,24 +18,13 @@ pytest.importorskip("PySide6")
 from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
 
 
-class _Combo:
-    def __init__(self, text: str):
-        self._t = text
-
-    def currentText(self) -> str:
-        return self._t
-
-
 def _cell(well, chan, tp="0", fov="1"):
-    return {
-        "well_cb": _Combo(well), "chan_cb": _Combo(chan),
-        "tp_cb": _Combo(tp), "fov_cb": _Combo(fov),
-    }
+    return {"well": well, "chan": chan, "tp": tp, "fov": fov}
 
 
 def _patch(monkeypatch, loaded):
     """Stub the per-row helpers + the array loader; record decoded keys."""
-    monkeypatch.setattr(C, "_row_display_opts", lambda app, r: (False, False, ""))
+    monkeypatch.setattr(C, "_row_display_opts", lambda app, r, chan=None: (False, False, ""))
     monkeypatch.setattr(C, "_find_ratio_for_channel", lambda app, chan: None)
     monkeypatch.setattr(C, "_is_nuc_seg", lambda chan: False)
 

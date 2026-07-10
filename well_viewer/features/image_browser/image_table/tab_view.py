@@ -275,34 +275,18 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     sep_shelf.setFixedHeight(2)
     il.addWidget(sep_shelf)
 
-    # ── Advanced (collapsed): the legacy Build-Layout controls, the per-cell
-    # dropdown selector grid, and the per-row LUT/display table. Kept mounted so
-    # the render path (reads the cell combos), persistence, and their tests keep
-    # working, and so irregular per-cell tables can still be hand-edited. The
-    # shelf above is the primary surface; this is the power/override panel.
-    adv_toggle = QToolButton(inner)
-    adv_toggle.setCheckable(True)
-    adv_toggle.setToolButtonStyle(Qt.ToolButtonTextOnly)
-    adv_toggle.setProperty("variant", "secondary")
-    adv_toggle.setText("▸ Advanced — selector grid & per-cell overrides")
-    il.addWidget(adv_toggle)
-
+    # The legacy Build-Layout strip, per-cell dropdown selector grid, and per-row
+    # LUT table are retired from the UI — the drag-and-drop shelf above fully
+    # replaces them. They stay built but PERMANENTLY HIDDEN so the render path
+    # (which reads the cell combos), the right-click per-cell override popover,
+    # persistence, and their tests keep working; the user never sees them.
     advanced = QFrame(inner)
     advanced.setObjectName("Panel")
     advanced.setVisible(False)
     adv_layout = QVBoxLayout(advanced)
-    adv_layout.setContentsMargins(0, 6, 0, 8)
+    adv_layout.setContentsMargins(0, 0, 0, 0)
     adv_layout.setSpacing(6)
     il.addWidget(advanced)
-
-    def _toggle_advanced(on: bool) -> None:
-        advanced.setVisible(bool(on))
-        adv_toggle.setText(("▾ " if on else "▸ ") + "Advanced — selector grid & per-cell overrides")
-    adv_toggle.toggled.connect(_toggle_advanced)
-
-    # The legacy Build-Layout strip + selector grid + LUT table live inside the
-    # Advanced panel now (``builder`` parents to it, and the ``il.addWidget`` calls
-    # below target ``adv_layout``).
     builder = QFrame(advanced)
     builder.setObjectName("ImageTableSelector")
     builder.setFrameShape(QFrame.NoFrame)
@@ -826,10 +810,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Crop status, shown inline so an active crop is visible at a glance.
     tr.addWidget(_crop.make_status_label(action_row))
 
-    # ON/OFF intensity threshold quick-edit for the active channel — drives the
-    # per-row "≥ Thr" binary overlay. Edits the same ThreshFracOn value as the
-    # Cell Gating tab / the plot tabs, and re-composites the generated table.
+    # ON/OFF intensity threshold quick-edit — drives the "≥ Thr" binary overlay.
+    # A channel dropdown chooses which channel it applies to (its own ThreshFracOn,
+    # shared with the Cell Gating tab / plot tabs); the stepper edits that channel.
     tr.addWidget(QLabel("ON threshold:", action_row))
+    thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
+    thresh_chan_cb.setToolTip("Which channel the ON threshold applies to.")
+    thresh_chan_cb.setMinimumWidth(96)
+    tr.addWidget(thresh_chan_cb)
     thresh_stepper = reg.register("_image_table_thresh_frac_stepper", Stepper(
         action_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
     thresh_stepper.setFixedWidth(96)
@@ -838,13 +826,28 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     if _it_edit is not None:
         _it_edit.setFocusPolicy(Qt.ClickFocus)
     thresh_stepper.setToolTip(
-        "ON/OFF intensity threshold for the active channel — drives a row's "
-        "≥ Thr binary overlay. Same value as the Cell Gating tab's "
-        "ThreshFracOn and the plot tabs' Threshold quick-edit."
+        "ON/OFF intensity threshold for the chosen channel — drives its ≥ Thr "
+        "binary overlay. Same value as the Cell Gating tab's ThreshFracOn and "
+        "the plot tabs' Threshold quick-edit."
     )
+    # The combo shows uppercase display names; the gating tokens are the
+    # canonical lowercase fluor tokens, so normalise before set/get.
+    def _thresh_chan() -> str | None:
+        return thresh_chan_cb.currentText().strip().lower() or None
+
     thresh_stepper.valueChanged.connect(
-        lambda v: image_table_set_thresh_frac(ctx, v)
+        lambda v: image_table_set_thresh_frac(ctx, v, _thresh_chan())
     )
+
+    def _sync_thresh_for_channel(_chan: str) -> None:
+        from well_viewer.core.channel_state_controller import get_thresh_frac_on
+        val = get_thresh_frac_on(ctx, _thresh_chan())
+        blocked = thresh_stepper.blockSignals(True)
+        try:
+            thresh_stepper.setValue(float(val))
+        finally:
+            thresh_stepper.blockSignals(blocked)
+    thresh_chan_cb.currentTextChanged.connect(_sync_thresh_for_channel)
     tr.addWidget(thresh_stepper)
 
     # Export ▾ split button: click = Export; menu = Copy / settings.

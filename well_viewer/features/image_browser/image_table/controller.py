@@ -183,6 +183,10 @@ def image_table_repopulate_dropdowns(ctx) -> None:
 
     if ctx.runtime.image_table.global_chan_cb is not None:
         set_combo_values(ctx.runtime.image_table.global_chan_cb, chan_opts)
+    # ON-threshold channel picker (action strip) — real fluor channels only.
+    thresh_cb = ctx.widgets.get_or_none("_image_table_thresh_chan_cb")
+    if thresh_cb is not None:
+        set_combo_values(thresh_cb, [c for c in chan_opts if " (binary)" not in c])
     if ctx.runtime.image_table.global_tp_cb is not None:
         set_combo_values(ctx.runtime.image_table.global_tp_cb, tp_opts)
         set_combo_values(ctx.runtime.image_table.global_fov_cb, fov_opts)
@@ -916,10 +920,11 @@ def image_table_set_spacing(ctx, key: str, value) -> None:
         image_table_generate(ctx)
 
 
-def image_table_set_thresh_frac(ctx, value) -> None:
-    """Edit the active channel's ON/OFF intensity threshold (ThreshFracOn) from
-    the Image Table controls row, then re-composite so the per-row "≥ Thr"
-    binary overlay reflects it.
+def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
+    """Edit a channel's ON/OFF intensity threshold (ThreshFracOn) from the Image
+    Table controls row, then re-composite so its "≥ Thr" binary overlay reflects
+    it. ``channel`` picks which channel (from the ON-threshold dropdown); ``None``
+    falls back to the active channel.
 
     Writes through ``set_thresh_frac_on`` (the single source of truth shared with
     the Cell Gating tab and the other quick-edits). Re-renders only when a table
@@ -927,7 +932,7 @@ def image_table_set_thresh_frac(ctx, value) -> None:
     cheap re-composite the zoom control does; before the first Generate it just
     stores the value.
     """
-    set_thresh_frac_on(ctx, value)
+    set_thresh_frac_on(ctx, value, channel)
     if getattr(ctx.state.image_table, "last_render", None):
         image_table_generate(ctx)
 

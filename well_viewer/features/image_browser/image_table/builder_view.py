@@ -1120,14 +1120,15 @@ def _set_dim_filter(ctx, dim: str, values) -> None:
 
 
 class _StayOpenMenu(QMenu):
-    """A QMenu that keeps itself open when a *checkable* item is clicked, so the
-    user can tick several values in one pass instead of reopening per value.
-    Non-checkable items (e.g. "Show all") and off-menu clicks close as usual."""
+    """A QMenu that keeps itself open when a *checkable* item (or one flagged
+    ``stayOpen``, e.g. Select all / Select none) is clicked, so the user can tick
+    several values in one pass. Other items and off-menu clicks close as usual."""
 
     def mouseReleaseEvent(self, e):  # noqa: N802
         act = self.activeAction()
-        if act is not None and act.isEnabled() and act.isCheckable():
-            act.trigger()            # toggle in place, don't dismiss
+        if act is not None and act.isEnabled() and (
+                act.isCheckable() or bool(act.property("stayOpen"))):
+            act.trigger()            # act in place, don't dismiss
             return
         super().mouseReleaseEvent(e)
 
@@ -1150,15 +1151,27 @@ def _root_filter_menu(ctx, dim: str, anchor: QWidget):
         # all (or somehow none) ticked ⇒ canonical "all" = empty filter
         _set_dim_filter(ctx, dim, set() if chosen == set(all_vals) else chosen)
 
+    def _bulk(check: bool):
+        for a in acts:
+            a.blockSignals(True)
+            a.setChecked(check)
+            a.blockSignals(False)
+        _commit()
+
+    sel_all = menu.addAction("Select all")
+    sel_all.setProperty("stayOpen", True)
+    sel_all.triggered.connect(lambda _c=False: _bulk(True))
+    sel_none = menu.addAction("Select none")
+    sel_none.setProperty("stayOpen", True)
+    sel_none.triggered.connect(lambda _c=False: _bulk(False))
+    menu.addSeparator()
+
     for val in all_vals:
         a = menu.addAction(val)
         a.setCheckable(True)
         a.setChecked((not active) or val in active)  # empty filter = all shown
         acts.append(a)
         a.toggled.connect(lambda _c=False: _commit())
-    menu.addSeparator()
-    show_all = menu.addAction("Show all")
-    show_all.triggered.connect(lambda _c=False: _set_dim_filter(ctx, dim, set()))
     return menu
 
 

@@ -999,38 +999,41 @@ channel for every well).
 
 - **Needs** — image ZIPs present, and a well set (drive it from the plate
   picker or a Plot Group via the read-only Plot Groups mirror in this sidebar).
-- **Workflow** — in the **Build Layout** strip, declare what varies down
-  **Rows** and across **Columns**, press **Build table** to lay out the selector
-  grid, then **Generate** to render. Build only assembles the grid (auto-sizing
-  it and filling every cell); Generate draws the images.
-- **Rows / Columns axes** — each is an **ordered multi-select**: tick one or more
-  of Channels / Wells / Timepoints / FOVs, then **drag rows by the ⋮⋮ grip** to set
-  the nesting (**outer › inner**). A dimension can only sit on one axis — it's
-  greyed out in the other picker. One dimension is a plain axis; several expand the
-  axis to their full combination, so >2 dimensions can vary at once (e.g. Rows =
-  *Wells › Channels*, Columns = *Timepoints*). **Build table ▾** carries quick
-  presets — flat (Channels × Time, Wells × Channels, …) and nested (**Wells ›
-  Channels × Time**, FOV montage per Well, …).
-- **Channel values** — the **Channels** dropdown also offers a **`<CHAN> (binary)`**
-  entry per channel (e.g. *GFP (binary)*), which renders that channel's
-  ThreshFracOn threshold-binary (positive cells white). Tick it alongside the plain
-  channels to mix, say, NIR, GFP and GFP (binary) down the rows in one build.
-- **Controls** — **Channels / Time / FOV** filters cap which values appear on an
-  axis (none = all — handy to keep a big product in bounds); **Hold off-axis**
-  pins the dimensions not on either axis to a single Ch / Time / FOV value;
-  **Group** wraps the columns into stacked bands (a legacy tiler, mostly replaced
-  by nesting). Below the grid, a **Per-row levels & display** table gives each row
-  its own colormap, LUT min/max (+ **Fit**), and Top-hat / Boundaries / Binary
-  toggles — and when **Channels** is on the Rows axis, every row of the same
-  channel **shares one LUT/colormap** (per-channel display). **Composite** appends
-  a merged row summing the channels above it; **Crop**, **Export**, and **Zoom**
-  finish the strip. The **Selector** cells are directly editable, and **More▾**
-  keeps the manual helpers (Distribute Wells / Timepoints, Load Heatmap Layout,
-  **Add row… / Add column…**).
-- **Optimal use** — pick the **Wells › Channels × Time** preset for a treatment's
-  full time-course at a glance (one row per well×channel, one column per
-  timepoint, each channel auto-sharing a LUT); tighten the Time/FOV filters if the
-  grid gets large, then save the composed grid to Saved Plots.
+- **Build with the shelf** — the top **Build** shelf is a drag-and-drop tree.
+  Drag a **channel** from the **Channels** tray onto the **Rows** or **Columns**
+  zone; drag a **root** dimension (Well / Timepoint / FOV) onto a zone to make that
+  axis vary by it, with its channels nested underneath (*root ↓ channels* for Rows,
+  *root → channels* for Columns). Then press **Generate** to render. Editing the
+  shelf only stages the layout — **Generate** draws the images. More than two
+  dimensions can vary at once (e.g. Rows = *Well › Channels*, Columns = *Timepoint*).
+- **Fixed panel** — every root dimension **not** on an axis is listed under
+  **Fixed**, pinned to a single value you choose. Drag a root out of Fixed onto an
+  axis to make it vary; click the **×** on a root to drop it back to Fixed. Wells
+  come from the sidebar plate.
+- **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
+  Corrected**, **Mask**, **≥ threshold** (renders that channel's ThreshFracOn
+  threshold-binary, positive cells white), a **boundary** outline overlay, and a
+  **colormap + LUT** min/max. The options travel with the channel wherever it sits,
+  so the same channel looks identical on either axis. Remove a chip with its **×**.
+- **Separate ↔ Overlay** — a switch on each root's channel group: **Separate** shows
+  one cell per channel; **Overlay** additively blends that root's channels into one
+  composite cell (LUT-coloured, clipped to white).
+- **Wrap cols** folds the columns into vertically-stacked bands of *N* (handy for a
+  long single-dimension column axis). **Clear builder** empties the shelf and starts
+  fresh (it leaves the rendered images — use **Clear images** for those).
+- **Action strip** — **Generate** · **Reset table** (back to defaults) · **Clear
+  images** · **Crop** (drag a region on any image) · an **ON threshold** value with
+  a **channel** dropdown choosing which channel it applies to (the same ThreshFracOn
+  shared with Cell Gating and the plot tabs) · **Export** (to file · Copy PNG / SVG ·
+  Save to Saved Plots) · **Zoom** · a **Properties** button that slides out a
+  right-side panel for the grouped view's **spacing gaps** and **label font sizes**.
+- **Per-cell tweak** — right-click any rendered cell to override just that cell's
+  well / channel / timepoint / FOV.
+- **Optimal use** — drag **Well** onto Rows and nest a couple of channels, drag
+  **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
+  for a treatment's full time-course at a glance. Flip a root to **Overlay** for a
+  merged view; if the grid gets large, narrow the well/timepoint selection, then
+  save the composed grid to Saved Plots.
 
 #### Cell Browser
 

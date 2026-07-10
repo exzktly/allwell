@@ -207,14 +207,15 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     img_h: Optional[int] = None
     img_w: Optional[int] = None
     for r, row in enumerate(cells):
-        use_tophat, _sb, _bm = _row_display_opts(ctx, r)
         for c, cell in enumerate(row):
             arr = rendered.get((r, c))
             if arr is None:
-                well = cell["well_cb"].currentText().strip()
-                chan = cell["chan_cb"].currentText().strip()
-                tp = cell["tp_cb"].currentText().strip()
-                fov = cell["fov_cb"].currentText().strip()
+                well = cell["well"]
+                chan = cell["chan"]
+                tp = cell["tp"]
+                fov = cell["fov"]
+                # raw vs corrected is a per-channel render option (channel_opts).
+                use_tophat = _row_display_opts(ctx, r, chan)[0]
                 if well and chan and tp:
                     arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
             if arr is not None and crop_tool is not None:
@@ -243,17 +244,17 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     fig.patch.set_alpha(0.0 if transparent_bg else 1.0)
 
     for r, row in enumerate(cells):
-        use_tophat = _row_display_opts(ctx, r)[0]
         for c, cell in enumerate(row):
             ax = fig.add_subplot(rows, cols, r * cols + c + 1)
             ax.set_facecolor("none" if transparent_bg else "white")
-            well = cell["well_cb"].currentText().strip()
-            chan = cell["chan_cb"].currentText().strip()
-            tp = cell["tp_cb"].currentText().strip()
-            fov = cell["fov_cb"].currentText().strip()
+            well = cell["well"]
+            chan = cell["chan"]
+            tp = cell["tp"]
+            fov = cell["fov"]
 
             arr = rendered.get((r, c))
             if arr is None and well and chan and tp:
+                use_tophat = _row_display_opts(ctx, r, chan)[0]
                 arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
 
             if arr is not None:

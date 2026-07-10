@@ -97,16 +97,17 @@ def test_build_grouped_layout_and_shared_lut(image_table_app):
     assert len(cells) == n_ch * expected_bands
     assert len(cells[0]) == G
 
-    # One LUT row per channel (collapsed), shared across bands via lut_row_map.
+    # The row axis (channel) repeats every band → group_row_span records it.
     assert ctx.state.image_table.group_row_span == n_ch
-    assert ctx.runtime.image_table.lut_row_map == [r % n_ch for r in range(len(cells))]
-    assert len(ctx.runtime.image_table.lut) == n_ch
 
-    # Set the first channel's colormap once; every band showing it resolves to it.
-    ctx.runtime.image_table.row_lut_color_cbs[0].setLut("Reds")
-    assert _row_cmap_name(ctx, 0) == "Reds"
+    # Per-channel display is keyed by channel token now (channel_opts), so every
+    # band showing a channel resolves to the same colormap regardless of grid row.
+    chan0 = cells[0][0]["chan"]
+    ctx.state.image_table.channel_opts = {chan0: {"colormap": "Reds"}}
+    assert _row_cmap_name(ctx, 0, chan0) == "Reds"
     if len(cells) > n_ch:  # a second band exists → same channel, same colormap
-        assert _row_cmap_name(ctx, n_ch) == "Reds"
+        assert cells[n_ch][0]["chan"] == chan0
+        assert _row_cmap_name(ctx, n_ch, chan0) == "Reds"
 
     # Generate + export must not raise and the export mirrors the grid shape.
     C.image_table_generate(ctx)
@@ -124,7 +125,6 @@ def test_group_zero_is_flat_layout(image_table_app):
     ctx.state.image_table.group_size = 0
     C.image_table_apply_preset(ctx, "channel", "well")
 
-    # No grouping → identity LUT map, group state cleared.
-    cells = ctx.runtime.image_table.cells
+    # No grouping → group state cleared (flat one-value-per-row layout).
     assert ctx.state.image_table.group_row_span == 0
-    assert ctx.runtime.image_table.lut_row_map == list(range(len(cells)))
+    assert ctx.state.image_table.group_size == 0

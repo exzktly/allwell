@@ -128,7 +128,6 @@ ALLOWLIST = {
     "well_viewer/features/barplot/controller.py::render_bar_items",
     "well_viewer/core/load_controller.py::load_directory",
     "well_viewer/features/lineplot/controller.py::collect_line_series",
-    "well_viewer/features/image_browser/image_table/grid_view.py::build_lut_row",
     "well_viewer/features/barplot/renderer.py::draw_per_cell_bar_mode",
     "well_viewer/features/barplot/renderer.py::draw_significance_brackets",
     "well_viewer/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",

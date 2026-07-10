@@ -343,91 +343,20 @@ def _snapshot_image_table(ctx) -> dict:
     for row in cells:
         row_out: list[dict[str, str]] = []
         for cell in row:
-            slc: dict[str, str] = {}
-            for key, ck in (
-                ("well", "well_cb"),
-                ("chan", "chan_cb"),
-                ("tp", "tp_cb"),
-                ("fov", "fov_cb"),
-            ):
-                w = cell.get(ck) if isinstance(cell, dict) else None
-                if w is not None:
-                    try:
-                        slc[key] = str(w.currentText())
-                    except Exception:
-                        swallowed()  # was: pass (silent except)
-            row_out.append(slc)
+            # The render model is plain string dicts now (no widgets), so the
+            # per-cell values snapshot directly.
+            row_out.append({k: str(cell.get(k, ""))
+                            for k in ("well", "chan", "tp", "fov")
+                            if cell.get(k)})
         grid.append(row_out)
     out["cells"] = grid
     # Grid axes (row_axis/col_axis) + nested row_dims/col_dims — extracted to a
     # helper to hold the complexity ratchet. Captured so a restore lays the
-    # selector grid out the same way (and can re-Build the same nested product)
-    # before per-cell values are replayed.
+    # render model out the same way (and can re-Build the same nested product)
+    # before per-cell values are replayed. Per-channel display options round-trip
+    # via ``channel_opts`` and the held Fixed values via ``fixed_vals`` (see
+    # ``_snapshot_image_table_builder``) — no per-row LUT widgets to capture.
     out.update(_snapshot_image_table_axes(ctx))
-    # Per-row channel / well convenience combos (one per grid row); their value
-    # is mirrored into each cell, but capturing them keeps the per-row UI in sync.
-    for key, cbs in (
-        ("row_chans", ctx.runtime.image_table.row_chan_cbs),
-        ("row_wells", ctx.runtime.image_table.row_well_cbs),
-    ):
-        if cbs:
-            try:
-                out[key] = [str(cb.currentText()) for cb in cbs]
-            except Exception:
-                swallowed()
-    for key, attr in (
-        ("global_chan", "_image_table_global_chan_cb"),
-        ("global_tp",   "_image_table_global_tp_cb"),
-        ("global_fov",  "_image_table_global_fov_cb"),
-    ):
-        v = _combo_text(ctx, attr)
-        if v is not None:
-            out[key] = v
-    # Per-row LUT + display options (top-hat / boundaries / binary), keyed by
-    # row index. Display is now per-row (grid_view.build_lut_row), not a set of
-    # global toggles.
-    luts = ctx.runtime.image_table.lut or {}
-    color_cbs = ctx.runtime.image_table.row_lut_color_cbs or []
-    row_luts: dict[str, dict[str, Any]] = {}
-    if isinstance(luts, dict):
-        for r, edits in luts.items():
-            if not isinstance(edits, dict):
-                continue
-            slot: dict[str, Any] = {}
-            mn = edits.get("min")
-            mx = edits.get("max")
-            # Raw/Corrected is a "source" combo (it replaced the old top-hat
-            # checkbox), so the displayed image stage round-trips.
-            src = edits.get("source")
-            bound = edits.get("boundaries")
-            binw = edits.get("binary")
-            logw = edits.get("log")
-            try:
-                if mn is not None:
-                    slot["min"] = str(mn.text())
-                if mx is not None:
-                    slot["max"] = str(mx.text())
-                slot["auto"] = bool(edits.get("auto", True))
-                if src is not None:
-                    slot["source"] = str(src.currentData() or "raw")
-                if bound is not None:
-                    slot["boundaries"] = bool(bound.isChecked())
-                if binw is not None:
-                    slot["binary"] = str(binw.currentData() or "")
-                if logw is not None:
-                    slot["log"] = bool(logw.isChecked())
-                # Per-row colormap (LutSelector: lut()/isReversed()).
-                if isinstance(r, int) and 0 <= r < len(color_cbs):
-                    sel = color_cbs[r]
-                    slot["cmap"] = str(sel.lut())
-                    slot["cmap_reversed"] = bool(sel.isReversed())
-            except Exception:
-                swallowed()  # silent except
-                continue
-            if slot:
-                row_luts[str(r)] = slot
-    if row_luts:
-        out["row_luts"] = row_luts
     # Crop region (shared CropTool; (y0,x0,y1,x1) source pixels or None) plus the
     # display-only zoom, so a restored grid re-crops/re-scales. The ON-threshold
     # is intentionally NOT captured here — it's a global value shared with Cell
@@ -913,32 +842,19 @@ def _apply_image_table(ctx, state: dict) -> None:
     try:
         from well_viewer.features.image_browser.image_table.controller import (
             image_table_rebuild_grid,
-            image_table_rebuild_lut_row,
             image_table_set_zoom,
         )
     except Exception:  # pragma: no cover - import failure leaves these no-ops
         image_table_set_zoom = None
-        image_table_rebuild_lut_row = image_table_rebuild_grid = None
+        image_table_rebuild_grid = None
 
-    # Grid axes first (before the dimension rebuild), so the per-row channel/well
-    # combos + labels are laid out on the same axes the plot was saved with. The
-    # per-cell combos restored below remain authoritative for the actual values.
+    # Grid axes first (before the dimension rebuild), so the render model is laid
+    # out on the same axes the plot was saved with. The per-cell values restored
+    # below remain authoritative for the actual values.
     for key, which in (("row_axis", "row"), ("col_axis", "col")):
         axis = state.get(key)
         if not isinstance(axis, str) or not axis:
             continue
-        cb = getattr(ctx.runtime.image_table, f"{which}_axis_cb", None)
-        if cb is not None:
-            try:
-                idx = cb.findData(axis)
-                if idx >= 0:
-                    blocked = cb.blockSignals(True)
-                    try:
-                        cb.setCurrentIndex(idx)
-                    finally:
-                        cb.blockSignals(blocked)
-            except Exception:
-                swallowed()
         try:
             setattr(ctx.state.image_table, f"{which}_axis", axis)
             setattr(ctx.runtime.image_table, f"{which}_axis", axis)
@@ -970,62 +886,32 @@ def _apply_image_table(ctx, state: dict) -> None:
     except Exception:
         swallowed()
 
-    # Grouped/tiled layout state — restore BEFORE the grid rebuild so the LUT
-    # row→group map is rebuilt correctly (image_table_rebuild_grid reads
-    # group_row_span). Sync the Group spinner so the UI matches.
+    # Grouped/tiled layout state — restore BEFORE the grid rebuild so the render
+    # model is sized to match. 0 = not grouped.
     grp = state.get("group_size")
     span = state.get("group_row_span")
     if isinstance(grp, int):
         ctx.state.image_table.group_size = int(grp)
-        gspin = getattr(ctx.runtime.image_table, "group_spin", None)
-        if gspin is not None:
-            try:
-                blocked = gspin.blockSignals(True)
-                try:
-                    gspin.setValue(int(grp))
-                finally:
-                    gspin.blockSignals(blocked)
-            except Exception:
-                swallowed()
     if isinstance(span, int):
         ctx.state.image_table.group_row_span = int(span)
 
-    # Dimensions — set the spinners first; rebuild the selector grid + cells
-    # list against the new size. Use rebuild_grid directly (not apply_dimensions,
-    # which resets grouping) so a restored banded layout keeps its LUT sharing.
+    # Dimensions — set the row/col state, then rebuild the plain-data render model
+    # against the new size (rebuild_grid reads state.rows/state.cols).
     rows = state.get("rows")
     cols = state.get("cols")
-    if isinstance(rows, int) or isinstance(cols, int):
-        rows_spin = ctx.runtime.image_table.rows_spin
-        cols_spin = ctx.runtime.image_table.cols_spin
-        changed = False
-        for spin, val, fld in ((rows_spin, rows, "rows"), (cols_spin, cols, "cols")):
-            if not isinstance(val, int):
-                continue
-            try:
-                setattr(ctx.state.image_table, fld, int(val))
-            except Exception:
-                swallowed()
-            if spin is None:
-                continue
-            try:
-                if int(spin.value()) != int(val):
-                    blocked = spin.blockSignals(True)
-                    try:
-                        spin.setValue(int(val))
-                    finally:
-                        spin.blockSignals(blocked)
-                    changed = True
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        # Rebuild if the dimensions changed, or if a grouped layout was restored
-        # (so the LUT row→group map is (re)built even when rows/cols already match).
-        if (changed or (isinstance(grp, int) and grp > 0)) and image_table_rebuild_grid is not None:
-            try:
-                image_table_rebuild_grid(ctx)
-            except Exception:
-                _logger.debug("image_table: rebuild_grid failed", exc_info=True)
+    if isinstance(rows, int):
+        ctx.state.image_table.rows = int(rows)
+    if isinstance(cols, int):
+        ctx.state.image_table.cols = int(cols)
+    if (isinstance(rows, int) or isinstance(cols, int)) and image_table_rebuild_grid is not None:
+        try:
+            image_table_rebuild_grid(ctx)
+        except Exception:
+            _logger.debug("image_table: rebuild_grid failed", exc_info=True)
 
+    # Per-cell values — write straight into the plain render-model dicts (the
+    # render contract). Per-channel display options are restored via channel_opts
+    # above; there are no per-row LUT / global held-value widgets to replay.
     cells = state.get("cells") or []
     live = ctx.runtime.image_table.cells or []
     if isinstance(cells, list) and live:
@@ -1038,148 +924,10 @@ def _apply_image_table(ctx, state: dict) -> None:
                 cell = live[r][c]
                 if not isinstance(cell, dict):
                     continue
-                for key, ck in (
-                    ("well", "well_cb"),
-                    ("chan", "chan_cb"),
-                    ("tp", "tp_cb"),
-                    ("fov", "fov_cb"),
-                ):
+                for key in ("well", "chan", "tp", "fov"):
                     val = cell_state.get(key)
-                    if not isinstance(val, str) or not val:
-                        continue
-                    w = cell.get(ck)
-                    if w is None:
-                        continue
-                    try:
-                        items = [w.itemText(i) for i in range(w.count())]
-                        if val in items:
-                            blocked = w.blockSignals(True)
-                            try:
-                                w.setCurrentText(val)
-                            finally:
-                                w.blockSignals(blocked)
-                    except Exception:
-                        swallowed()  # was: pass (silent except)
-
-    # Per-row channel / well convenience combos — set to match (the per-cell
-    # values are already restored above and stay authoritative).
-    for key, cbs in (
-        ("row_chans", ctx.runtime.image_table.row_chan_cbs),
-        ("row_wells", ctx.runtime.image_table.row_well_cbs),
-    ):
-        texts = state.get(key)
-        if not isinstance(texts, list) or not cbs:
-            continue
-        for cb, text in zip(cbs, texts):
-            if not isinstance(text, str) or not text or cb is None:
-                continue
-            try:
-                if cb.findText(text) >= 0:
-                    blocked = cb.blockSignals(True)
-                    try:
-                        cb.setCurrentText(text)
-                    finally:
-                        cb.blockSignals(blocked)
-            except Exception:
-                swallowed()
-
-    for key, attr in (
-        ("global_chan", "_image_table_global_chan_cb"),
-        ("global_tp",   "_image_table_global_tp_cb"),
-        ("global_fov",  "_image_table_global_fov_cb"),
-    ):
-        if key in state and isinstance(state[key], str):
-            _set_combo_if_valid(ctx, attr, state[key])
-
-    # Rebuild the per-row levels & display table now that the channel combos are
-    # restored. The per-row labels ("Row N · CHAN") + colour selectors are
-    # derived from the channel combos when the table is built; restore set those
-    # combos with signals blocked, so the usual channel-change rebuild never
-    # fired and the labels showed the pre-restore channels. Rebuilding here (it
-    # preserves prior per-row values across rebuilds) makes the labels match the
-    # restored channels before the row_luts values are re-applied below.
-    if image_table_rebuild_lut_row is not None:
-        try:
-            image_table_rebuild_lut_row(ctx)
-        except Exception:
-            _logger.debug("image_table: per-row LUT table rebuild failed", exc_info=True)
-
-    # Per-row LUT + display restore (row_luts keyed by str(row index)). Display
-    # (top-hat / boundaries / binary) is per-row now, so it round-trips here
-    # alongside min/max rather than as separate global toggles.
-    row_luts = state.get("row_luts") or {}
-    live_luts = ctx.runtime.image_table.lut or {}
-    color_cbs = ctx.runtime.image_table.row_lut_color_cbs or []
-    if isinstance(row_luts, dict) and isinstance(live_luts, dict):
-        for r_key, slot in row_luts.items():
-            try:
-                r = int(r_key)
-            except (TypeError, ValueError):
-                continue
-            edits = live_luts.get(r)
-            if not isinstance(edits, dict) or not isinstance(slot, dict):
-                continue
-            # Min/max first (via setText, which doesn't fire textEdited under
-            # blockSignals) so the explicit "auto" restore below isn't flipped.
-            for k in ("min", "max"):
-                v = slot.get(k)
-                edit = edits.get(k)
-                if edit is None or not isinstance(v, str):
-                    continue
-                try:
-                    blocked = edit.blockSignals(True)
-                    try:
-                        edit.setText(v)
-                    finally:
-                        edit.blockSignals(blocked)
-                except Exception:
-                    swallowed()  # was: pass (silent except)
-            if "auto" in slot:
-                edits["auto"] = bool(slot["auto"])
-            for k in ("boundaries", "log"):
-                w = edits.get(k)
-                if w is None or k not in slot:
-                    continue
-                try:
-                    blocked = w.blockSignals(True)
-                    try:
-                        w.setChecked(bool(slot[k]))
-                    finally:
-                        w.blockSignals(blocked)
-                except Exception:
-                    swallowed()
-            # Raw/Corrected ("source") + Binary are userData combos; legacy
-            # snapshots only carried a "tophat" bool → map True→corrected.
-            src_val = slot.get("source")
-            if src_val is None and "tophat" in slot:
-                src_val = "corrected" if slot.get("tophat") else "raw"
-            for cb_key, want in (("source", src_val), ("binary", slot.get("binary"))):
-                w = edits.get(cb_key)
-                if w is None or not isinstance(want, str):
-                    continue
-                try:
-                    for i in range(w.count()):
-                        if w.itemData(i) == want:
-                            blocked = w.blockSignals(True)
-                            try:
-                                w.setCurrentIndex(i)
-                            finally:
-                                w.blockSignals(blocked)
-                            break
-                except Exception:
-                    swallowed()
-            # Per-row colormap (LutSelector).
-            cmap = slot.get("cmap")
-            if isinstance(cmap, str) and cmap and isinstance(r, int) and 0 <= r < len(color_cbs):
-                sel = color_cbs[r]
-                try:
-                    blocked = sel.blockSignals(True)
-                    try:
-                        sel.setLut(cmap, reversed=bool(slot.get("cmap_reversed", False)))
-                    finally:
-                        sel.blockSignals(blocked)
-                except Exception:
-                    swallowed()
+                    if isinstance(val, str) and val:
+                        cell[key] = val
 
     # Crop region: re-apply the saved rectangle (or clear it) + crop mode.
     # notify=False so the CropTool's on_change (image_table_generate) does NOT

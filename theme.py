@@ -286,6 +286,14 @@ QLabel#Heading {{
     font-size: {t.h3_size}px;
     font-weight: {t.semibold};
 }}
+/* Section titles from ui_helpers.build_section_header (role="section") — a
+   labelled band above each divided section, e.g. on the Cell Gating / Stats
+   tabs. Without this they render as plain body text and read as no header. */
+QLabel[role="section"] {{
+    font-size: {t.h3_size}px;
+    font-weight: {t.semibold};
+    color: {c.accent};
+}}
 QLabel#Caption, QLabel[caption="true"] {{
     font-size: {t.caption_size}px;
     font-weight: {t.medium};

@@ -240,8 +240,12 @@ def test_root_filter_menu_actually_filters(qtbot):
     st = ctx.state.image_table
     assert st.active_timepoints == {checkable[1].text(), checkable[2].text()}
     assert ctx.runtime.image_table.builder_dirty is True
-    [a for a in menu.actions() if a.text() == "Show all"][0].trigger()
-    assert st.active_timepoints == set()               # back to all
+    boxes = [a for a in menu.actions() if a.isCheckable()]
+    [a for a in menu.actions() if a.text() == "Select none"][0].trigger()
+    assert not any(a.isChecked() for a in boxes)       # Select none unchecks all
+    [a for a in menu.actions() if a.text() == "Select all"][0].trigger()
+    assert all(a.isChecked() for a in boxes)           # Select all rechecks all
+    assert st.active_timepoints == set()               # all ticked ⇒ show all
 
 
 def test_channel_menu_is_flat_no_submenus(qtbot):

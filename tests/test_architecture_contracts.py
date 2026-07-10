@@ -278,13 +278,9 @@ FEATURE_NAME_EXCEPTIONS = {
     # density math, gate stats, RectangleSelector wiring) — a draw-mode of the
     # scatter canvas, paired with scatter/controller.py.
     "gating.py",
-    # image_table row/column add+remove helpers (and the Add-column dialog),
-    # paired with image_table/controller.py.
+    # image_table right-click per-cell override popover, paired with
+    # image_table/controller.py.
     "grid_ops.py",
-    # image_table per-row LUT min/max pooling (Fit + post-render auto-refresh),
-    # split out of image_table/controller.py to hold its line budget; paired with
-    # it and the image_compose LUT layer.
-    "lut_ops.py",
     # image_table smart-layout builders (flat + nested/compound-axis grid assembly,
     # per-channel LUT re-keying, Build presets), split out of image_table/
     # controller.py to hold its line budget; paired with it and the grid_layout math.

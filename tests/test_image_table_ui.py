@@ -1,5 +1,10 @@
-"""Live (headless Qt) checks for the Image Table tab controls overhaul:
-channel dropdown, binary modes, zoom, and Build-without-render.
+"""Live (headless Qt) checks for the Image Table tab: the plain-data render
+model builds without rendering, and zoom updates its label.
+
+The old channel dropdown, per-row LUT/Display boxes, and Add-row/step controls
+were retired with the drag-and-drop builder shelf; per-channel display now lives
+on the shelf's ⚙ (``channel_opts``) and per-cell tweaks on the right-click
+override popover.
 """
 from __future__ import annotations
 
@@ -10,110 +15,17 @@ pytest.importorskip("PySide6")
 from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
 
 
-def test_channel_dropdown_populates_and_filters(image_table_app):
-    app = image_table_app
-    # Activating the tab repopulates the dropdowns (same as the global combos).
-    C.image_table_repopulate_dropdowns(app._ctx)
-    # The layout-row channel dropdown menu exists and is populated.
-    menu = getattr(app, "_image_table_channel_menu", None)
-    assert menu is not None
-    checkable = [a for a in menu.actions() if a.isCheckable()]
-    opts = C._channel_options(app._ctx)
-    assert {a.text() for a in checkable} == set(opts)
-    # Toggling channels off the dropdown filters the Channels axis.
-    app._app_state.image_table.active_channels = set()
-    C.image_table_toggle_channel(app._ctx, opts[0], True)
-    assert C._axis_values(app._ctx, "channel") == [opts[0]]
-
-
 def test_build_does_not_render(image_table_app):
-    app = app = image_table_app
+    app = image_table_app
     app._app_state.image_table.last_render = {}
     # rows=channels, cols=timepoints
     C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    # Selector grid was built…
-    assert app._ctx.runtime.image_table.cells, "Build should assemble the selector grid"
+    # The plain-data render model was assembled…
+    cells = app._ctx.runtime.image_table.cells
+    assert cells, "Build should assemble the render model"
+    assert all(isinstance(cell, dict) for row in cells for cell in row)
     # …but no images were rendered (Build must not auto-generate).
     assert not app._app_state.image_table.last_render
-
-
-def test_display_options_are_per_row(image_table_app):
-    """Top-hat / boundaries / binary now live in each row's LUT/Display box and
-    are read per-row by the renderer (image_compose._row_display_opts)."""
-    from well_viewer.features.image_browser.image_table.image_compose import _row_display_opts
-
-    app = image_table_app
-    C.image_table_repopulate_dropdowns(app._ctx)
-    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    luts = app._ctx.runtime.image_table.lut or {}
-    assert luts, "per-row LUT/Display boxes should exist after a build"
-    # Each row has its own source/boundaries/binary widgets.
-    for r, entry in luts.items():
-        assert {"source", "boundaries", "binary"} <= set(entry)
-
-    rows = sorted(luts)
-    assert len(rows) >= 2, "need ≥2 rows to prove independence"
-    r0, r1 = rows[0], rows[1]
-    # Flip row r0's options; r1 must stay untouched.
-    luts[r0]["source"].setCurrentText("Corrected")
-    luts[r0]["boundaries"].setChecked(True)
-    for i in range(luts[r0]["binary"].count()):
-        if luts[r0]["binary"].itemData(i) == "mask":
-            luts[r0]["binary"].setCurrentIndex(i)
-            break
-    assert _row_display_opts(app._ctx, r0) == (True, True, "mask")
-    assert _row_display_opts(app._ctx, r1) == (False, False, "")
-
-
-def _row_values(app, dim):
-    key = {"channel": "chan_cb", "timepoint": "tp_cb",
-           "fov": "fov_cb", "well": "well_cb"}[dim]
-    return [[cell[key].currentText().strip() for cell in row]
-            for row in app._ctx.runtime.image_table.cells]
-
-
-def test_add_row_uniform_clones_and_varies_channel(image_table_app):
-    app = image_table_app
-    C.image_table_repopulate_dropdowns(app._ctx)
-    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    n0 = len(app._ctx.runtime.image_table.cells)
-    cols0 = len(app._ctx.runtime.image_table.cells[0])
-    tps_before = _row_values(app, "timepoint")
-
-    # Add a row cloned from row 1, uniformly set to a chosen channel.
-    chans = C._channel_options(app._ctx)
-    target = chans[-1]
-    C.image_table_add_varied_row(
-        app._ctx, src_idx=0, dim="channel", mode="uniform", value=target)
-
-    assert len(app._ctx.runtime.image_table.cells) == n0 + 1
-    new_row = app._ctx.runtime.image_table.cells[-1]
-    # whole new row carries the chosen channel…
-    assert all(cell["chan_cb"].currentText().strip() == target for cell in new_row)
-    # …but the other dimension (timepoints) is copied from the source row.
-    assert _row_values(app, "timepoint")[-1] == tps_before[0]
-    assert len(new_row) == cols0
-
-
-def test_add_row_step_advances_each_cell(image_table_app):
-    app = image_table_app
-    C.image_table_repopulate_dropdowns(app._ctx)
-    # rows = wells, cols = timepoints so the source row has a single channel
-    C.image_table_apply_preset(app._ctx, "well", "timepoint")
-    tp_opts = C._timepoint_options(app._ctx)
-    if len(tp_opts) < 2:
-        import pytest as _pytest
-        _pytest.skip("need ≥2 timepoints to test Step mode")
-    src_tps = _row_values(app, "timepoint")[0]
-
-    C.image_table_add_varied_row(
-        app._ctx, src_idx=0, dim="timepoint", mode="step", value="")
-
-    new_tps = _row_values(app, "timepoint")[-1]
-    # each cell advanced one timepoint (clamped at the last value)
-    for src, new in zip(src_tps, new_tps):
-        i = tp_opts.index(src)
-        assert new == tp_opts[min(i + 1, len(tp_opts) - 1)]
 
 
 def test_zoom_updates_label(image_table_app):
@@ -121,35 +33,3 @@ def test_zoom_updates_label(image_table_app):
     C.image_table_set_zoom(app._ctx, 1.5)
     assert abs(app._app_state.image_table.zoom - 1.5) < 1e-9
     assert app._image_table_zoom_lbl.text() == "150%"
-
-
-def test_lut_boxes_autofill_real_numbers_from_render(image_table_app):
-    import numpy as np
-    app = image_table_app
-    C.image_table_repopulate_dropdowns(app._ctx)
-    C.image_table_apply_preset(app._ctx, "channel", "timepoint")
-    cells = app._ctx.runtime.image_table.cells
-    assert cells
-    # Synthesize a rendered array per cell (real image discovery is dataset-
-    # specific); the autofill must pool these into the LUT boxes as numbers.
-    rendered = {}
-    for r, row in enumerate(cells):
-        for c, _cell in enumerate(row):
-            rendered[(r, c)] = (np.arange(16, dtype=np.float32).reshape(4, 4) + r)
-    C._refresh_lut_fields_from_render(app._ctx, rendered)
-
-    luts = app._ctx.runtime.image_table.lut or {}
-    filled = []
-    for chan, entry in luts.items():
-        txt = entry["min"].text().strip()
-        if txt and txt.lower() != "auto":
-            float(txt)  # parses as a real number, not "auto"
-            filled.append(chan)
-    assert filled, "LUT boxes should auto-fill with real numbers, not 'auto'"
-
-    # A user override (auto=False) must NOT be clobbered by a later refresh.
-    chan0 = next(iter(luts))
-    luts[chan0]["auto"] = False
-    luts[chan0]["min"].setText("999")
-    C._refresh_lut_fields_from_render(app._ctx, rendered)
-    assert luts[chan0]["min"].text() == "999"

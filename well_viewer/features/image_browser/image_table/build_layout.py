@@ -19,8 +19,6 @@ from __future__ import annotations
 
 from typing import List
 
-from well_viewer.core.safe import swallowed
-from well_viewer.features.image_browser.image_table.image_compose import _row_channel
 from well_viewer.features.image_browser.image_table.state import spec_to_state_fields
 from well_viewer.features.image_browser.image_table.grid_layout import (
     _axis_values,
@@ -38,6 +36,22 @@ _AXIS_MAX = 12  # non-grouped grid is capped at 12×12; longer axes are truncate
 _ROW_MAX = 60   # grouped/tiled grids may stack many bands — cap total rows here
 
 
+# Maps a layout-math dim key → the plain render-model cell key.
+_DIM_TO_CELL = {"well": "well", "channel": "chan",
+                "timepoint": "tp", "fov": "fov"}
+
+
+def _fill_cell(cell: dict, vals: dict) -> None:
+    """Write a layout-math ``{dim: value}`` result into a plain render-model cell.
+
+    The cell is a ``{"well", "chan", "tp", "fov"}`` string dict (no Qt widgets);
+    empty values are skipped so an off-axis dim already held fixed isn't cleared."""
+    for dim, ckey in _DIM_TO_CELL.items():
+        val = vals.get(dim)
+        if val:
+            cell[ckey] = val
+
+
 def _ctrl():
     """Lazy controller handle — breaks the controller↔build_layout import cycle.
 
@@ -46,49 +60,6 @@ def _ctrl():
     so we resolve them at call time (controller is fully loaded by then)."""
     from well_viewer.features.image_browser.image_table import controller as C
     return C
-
-
-def _apply_row_channel_styling(ctx, channels: List[str]) -> None:
-    """When rows are channels, mirror each channel onto its row-0 channel combo
-    and default every row to grayscale (Greys). The user can recolor any row
-    via its LutSelector — defaulting to grayscale makes channels comparable at a
-    glance and avoids implying meaning (e.g. green = GFP) that the data may not
-    carry."""
-    row_chan = getattr(ctx.runtime.image_table, "row_chan_cbs", None) or []
-    row_lut = getattr(ctx.runtime.image_table, "row_lut_color_cbs", None) or []
-    for r, chan in enumerate(channels):
-        if r < len(row_chan) and row_chan[r] is not None:
-            cb = row_chan[r]
-            cb.blockSignals(True)
-            if cb.findText(chan) >= 0:
-                cb.setCurrentText(chan)
-            cb.blockSignals(False)
-        if r < len(row_lut) and row_lut[r] is not None and hasattr(row_lut[r], "setLut"):
-            sel = row_lut[r]
-            sel.blockSignals(True)
-            try:
-                sel.setLut("Greys")
-            except Exception:  # noqa: BLE001 — colormap styling is best-effort
-                swallowed()  # was: pass (silent except)
-            sel.blockSignals(False)
-
-
-def _rebuild_lut_row_map_by_channel(ctx) -> None:
-    """Key the per-row LUT/Display editor by CHANNEL: grid rows showing the same
-    channel share one LUT/colormap (per-channel display, shared across wells /
-    panels — the chosen default). Recomputed from the filled cells' channels; a
-    row with no resolvable channel gets its own index. Reproduces the grouped-
-    movie ``group_row_span`` behaviour (bands of one channel → one LUT)."""
-    cells = getattr(ctx.runtime.image_table, "cells", None) or []
-    index_of: dict = {}
-    row_map: List[int] = []
-    for r in range(len(cells)):
-        chan = (_row_channel(ctx, r) or "").strip().lower()
-        key = chan or f"__row{r}"
-        if key not in index_of:
-            index_of[key] = len(index_of)
-        row_map.append(index_of[key])
-    ctx.runtime.image_table.lut_row_map = row_map
 
 
 def _build_nested_layout(ctx, row_dims: List[str], col_dims: List[str]) -> None:
@@ -123,45 +94,15 @@ def _build_nested_layout(ctx, row_dims: List[str], col_dims: List[str]) -> None:
     st.group_row_span = 0
     st.rows = rows
     st.cols = cols
-    for attr, val in (("rows_spin", rows), ("cols_spin", cols)):
-        spin = getattr(ctx.runtime.image_table, attr, None)
-        if spin is not None:
-            spin.blockSignals(True)
-            spin.setValue(val)
-            spin.blockSignals(False)
     _ctrl().image_table_rebuild_grid(ctx)
 
     fixed = _fixed_off_axis(ctx, set(row_dims) | set(col_dims))
-    key_of = {"well": "well_cb", "channel": "chan_cb",
-              "timepoint": "tp_cb", "fov": "fov_cb"}
-
-    def _set(cb, text):
-        if cb is None or not text:
-            return
-        cb.blockSignals(True)
-        try:
-            if cb.findText(text) >= 0:
-                cb.setCurrentText(text)
-        finally:
-            cb.blockSignals(False)
-
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             vals = _layout_cell_values_nested(
                 row_dims, col_dims, row_prod[r], col_prod[c], fixed)
-            for dim, ckey in key_of.items():
-                _set(cell.get(ckey), vals[dim])
-
-    # Per-channel LUT keying + row styling only when channel varies down the rows
-    # (each row then has exactly one channel). When channel is off-rows the map
-    # stays identity (set by rebuild_grid with group_row_span=0), so we don't
-    # collapse distinct rows that merely happen to share a fixed channel.
-    if "channel" in row_dims:
-        ci = row_dims.index("channel")
-        _apply_row_channel_styling(ctx, [row_prod[r][ci] for r in range(rows)])
-        _rebuild_lut_row_map_by_channel(ctx)
-    _ctrl().image_table_rebuild_lut_row(ctx)
+            _fill_cell(cell, vals)
 
     clamped = (n_rows_wanted - rows) + (n_cols_wanted - cols)
     rlabel = " › ".join(_AXIS_LABEL[d] for d in row_dims)
@@ -241,37 +182,14 @@ def image_table_build_layout(ctx) -> None:
     _ctrl().image_table_rebuild_grid(ctx)
 
     fixed = _fixed_off_axis(ctx, {row_axis, col_axis})
-    key_of = {"well": "well_cb", "channel": "chan_cb",
-              "timepoint": "tp_cb", "fov": "fov_cb"}
-
-    def _set(cb, text):
-        if cb is None or not text:
-            return
-        cb.blockSignals(True)
-        try:
-            if cb.findText(text) >= 0:
-                cb.setCurrentText(text)
-        finally:
-            cb.blockSignals(False)
-
     tiled = {"n_row_vals": n_row_vals, "group_size": cols} if grouped else {}
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             vals = _layout_cell_values(row_axis, col_axis, row_vals, col_vals,
                                        fixed, r, c, **tiled)
-            for dim, ckey in key_of.items():
-                _set(cell.get(ckey), vals[dim])
+            _fill_cell(cell, vals)
 
-    if row_axis == "channel":
-        # Repeat the channel per band so every grid row's selector-col-0 combo
-        # shows its band channel.
-        grid_channels = (
-            [row_vals[r % n_row_vals] for r in range(rows)] if grouped else row_vals
-        )
-        _apply_row_channel_styling(ctx, grid_channels)
-
-    _ctrl().image_table_rebuild_lut_row(ctx)
     status = (
         f"Image Table: built {rows}×{cols} selector grid — rows = {_AXIS_LABEL[row_axis]}, "
         f"cols = {_AXIS_LABEL[col_axis]}"
@@ -338,30 +256,12 @@ def image_table_apply_dims_preset(ctx, row_dims, col_dims) -> None:
 
 
 # ── The builder shelf entry point ───────────────────────────────────────────
-# ``builder_view`` (the root + nested-channels drag-and-drop tree) is the new
+# ``builder_view`` (the root + nested-channels drag-and-drop tree) is the sole
 # authoring surface. It edits a Qt-free ``TableSpec`` and calls this to flatten
 # it onto the existing state fields + build + render. The tree is the single
-# source of truth; the per-cell/-row selector widgets are a derived cache the
-# render path reads.
-
-
-def _sync_fixed_combos(ctx, fixed_vals) -> None:
-    """Mirror the Fixed panel's held values onto the global_*_cb widgets that
-    ``grid_layout._fixed_off_axis`` reads, so off-axis (held) dims resolve to the
-    chosen value. No-op headless / before the tab is built."""
-    key_of = {"channel": "global_chan_cb", "timepoint": "global_tp_cb",
-              "fov": "global_fov_cb"}
-    for dim, val in (fixed_vals or {}).items():
-        attr = key_of.get(dim)
-        cb = getattr(ctx.runtime.image_table, attr, None) if attr else None
-        if cb is None or not val:
-            continue
-        cb.blockSignals(True)
-        try:
-            if cb.findText(val) >= 0:
-                cb.setCurrentText(val)
-        finally:
-            cb.blockSignals(False)
+# source of truth; the per-cell render model (plain value dicts) is a derived
+# cache the render path reads. Off-axis held values live on ``state.fixed_vals``
+# (read directly by ``grid_layout._fixed_off_axis``) — no mirror widgets.
 
 
 def image_table_apply_spec(ctx, spec, *, render: bool = True) -> None:
@@ -388,8 +288,6 @@ def image_table_apply_spec(ctx, spec, *, render: bool = True) -> None:
     st.composite = fields["composite"]
     st.channel_opts = fields["channel_opts"]
     st.fixed_vals = fields["fixed_vals"]
-
-    _sync_fixed_combos(ctx, fields["fixed_vals"])
 
     row_dims = list(st.row_dims)
     col_dims = list(st.col_dims)
@@ -420,30 +318,14 @@ _DEFAULT_ROWS = 2
 _DEFAULT_COLS = 3
 
 
-def _refresh_dim_filter_buttons(ctx) -> None:
-    """Redraw the Channels / Time / FOV filter button labels from state.
-
-    The Time/FOV filter pickers register an optional ``active_*_refresh`` hook on
-    the runtime (see ``_make_filter_picker``); the Channels dropdown label is owned
-    by the controller (``_update_channel_btn_text``). All calls are guarded so this
-    is a no-op headless / before the tab is built."""
-    for attr in ("active_timepoints_refresh", "active_fovs_refresh"):
-        fn = getattr(ctx.runtime.image_table, attr, None)
-        if callable(fn):
-            fn()
-    upd = getattr(_ctrl(), "_update_channel_btn_text", None)
-    if callable(upd):
-        upd(ctx)
-
-
 def image_table_reset_layout(ctx) -> None:
-    """Reset the Build Layout generator to defaults ("Reset table").
+    """Reset the builder to defaults ("Reset table").
 
-    Empties the selector grid and restores the fresh-tab state: Channels ×
+    Empties the render model and restores the fresh-tab state: Channels ×
     Timepoints axes, a 2×3 grid, no grouping, and every dimension selection +
     nesting cleared (wells / channels / timepoints / fovs, ``row_dims`` /
-    ``col_dims``). The rendered images below are left untouched — ``Clear images``
-    (``image_table_clear_render``) is the separate action for those."""
+    ``col_dims`` / ``fixed_vals``). The rendered images below are left untouched —
+    ``Clear images`` (``image_table_clear_render``) is the separate action."""
     st = ctx.state.image_table
     st.row_dims = []
     st.col_dims = []
@@ -457,24 +339,16 @@ def image_table_reset_layout(ctx) -> None:
     st.active_channels = set()
     st.active_timepoints = set()
     st.active_fovs = set()
+    st.fixed_vals = {}
 
     rt = ctx.runtime.image_table
     rt.row_axis = _DEFAULT_ROW_AXIS
     rt.col_axis = _DEFAULT_COL_AXIS
-    for attr, val in (("rows_spin", _DEFAULT_ROWS), ("cols_spin", _DEFAULT_COLS),
-                      ("group_spin", 0)):
-        spin = getattr(rt, attr, None)
-        if spin is not None:
-            spin.blockSignals(True)
-            spin.setValue(val)
-            spin.blockSignals(False)
 
-    _refresh_dims_pickers(ctx)
-    _refresh_dim_filter_buttons(ctx)
     C = _ctrl()
     C.image_table_refresh_picker(ctx)
     C.image_table_rebuild_grid(ctx)
-    ctx.set_status("Image Table: layout reset to defaults. Choose axes and Build.")
+    ctx.set_status("Image Table: layout reset to defaults.")
 
 
 def image_table_clear_render(ctx) -> None:

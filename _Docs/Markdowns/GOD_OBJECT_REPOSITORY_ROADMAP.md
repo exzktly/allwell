@@ -333,6 +333,21 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
 - Guard: existing `RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 0` holds; add
   `PERSIST_APP_PARAM_BUDGET` counting `save_to_data_dir(app)` signatures (seed ~12).
 
+> **Attempt log (2026-07-11, reverted).** A first pass migrated all ~21 persistence
+> public `save/load/reset(app)` funcs + the `PersistenceRegistry` to `ctx` (bridge)
+> and made the registry pass `ctx`. **Production compiled and the frozen guard was
+> clean**, but the change fanned out into ~6 persistence *test* files whose
+> mocks each need bespoke ctx-shaping (the migrated funcs read `ctx.window._app_state`
+> *and* pass `ctx` to `_doc.set_section`, so a mock must expose `.window` **and**
+> `.state`). A scripted bridge-injection also over-matched the word `app` inside
+> comments of already-`ctx`-native `view_state` internals. Rather than rush the
+> per-test surgery at the tail of a long session, the whole attempt was reverted to
+> keep the tree green. **Next time:** migrate persistence in a focused pass —
+> (1) do it per-file with clean-`ctx` bodies (`ctx.state.…`, not the `app=ctx.window`
+> bridge, since persistence rarely needs the window); (2) give the shared test mocks
+> a real `_ctx` helper (like `test_split_view`'s) instead of self-refs; (3) add the
+> `PERSIST_APP_PARAM_BUDGET` ratchet last.
+
 ### B5 · Image repository facade *(optional, later, isolated)*
 Unify the de-facto image repository (`find_well_images_and_masks` discovery →
 `resolve_channel_frame_refs` precedence → `open_imgref_as_array` decode, backed by
@@ -433,7 +448,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | B1b · load_controller decouple | ⊘ | *deferred — see note* | — |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
-| B4 · load converge + persistence→ctx | ☐ | `PERSIST_APP_PARAM_BUDGET == 0` | — |
+| B4 · load converge + persistence→ctx | ☐ | `PERSIST_APP_PARAM_BUDGET == 0` | *attempted 2026-07-11, reverted — see note* |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
 **Changelog** (newest first):

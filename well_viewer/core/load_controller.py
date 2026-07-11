@@ -330,7 +330,8 @@ def load_directory(app, d: Path, label=None) -> None:
         _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
-    if hasattr(app, "_image_table_refresh_picker"):
+    if (app._features.get("Image Table") is not None
+            and hasattr(app, "_image_table_refresh_picker")):
         try:
             from well_viewer.features.image_browser.image_table.controller import (
                 image_table_refresh_picker, image_table_repopulate_dropdowns,
@@ -373,13 +374,14 @@ def load_directory(app, d: Path, label=None) -> None:
     # The smFISH tab is built lazily, so this primarily populates the
     # in-memory cache (app._smfish_thresholds_saved); the spinbox itself
     # is restored when the tab populates its channel combo.
-    try:
-        from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.load_from_pipeline_info(app._ctx)
-    except Exception:
-        logging.getLogger("well_viewer").exception(
-            "Eager smFISH threshold load from pipeline_info failed"
-        )
+    if app._features.get("smFISH") is not None:
+        try:
+            from well_viewer.persistence import smfish as _smfish_persist
+            _smfish_persist.load_from_pipeline_info(app._ctx)
+        except Exception:
+            logging.getLogger("well_viewer").exception(
+                "Eager smFISH threshold load from pipeline_info failed"
+            )
     app._persistence.load("heatmap_layouts")
     # Hydrate view-state (active tab, selected wells, channel, fold-change
     # scopes, per-tab combos) — must come after the cross-cutting state
@@ -412,11 +414,12 @@ def load_directory(app, d: Path, label=None) -> None:
     # at the previous dataset's zips and shows no images until the user
     # re-selects a well. (Stays a direct call — a tab-specific resync, not a
     # redraw; it moves onto the bus when the smFISH tab is relocated.)
-    try:
-        from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-        smfish_sync_from_app(app._ctx)
-    except Exception:
-        logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
+    if app._features.get("smFISH") is not None:
+        try:
+            from well_viewer.features.smfish.tab_view import smfish_sync_from_app
+            smfish_sync_from_app(app._ctx)
+        except Exception:
+            logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
     # the post-load plot redraw — the emit is the redraw trigger.
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)

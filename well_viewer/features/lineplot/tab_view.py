@@ -125,8 +125,9 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
-    from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx, card, "Line Graphs")
+    if ctx.features.get("Saved Plots") is not None:
+        from well_viewer.features.saved_plots.controller import wire_save_to_gallery
+        wire_save_to_gallery(ctx, card, "Line Graphs")
     _sw = make_plot_view_switcher(ctx, 'Line Graphs')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

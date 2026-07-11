@@ -172,9 +172,13 @@ def _snapshot_tabs(ctx) -> dict[str, dict]:
     scat = _snapshot_scatter(ctx)
     if scat:
         tabs["Scatter Plot"] = scat
-    img = _snapshot_image_table(ctx)
-    if img:
-        tabs["Image Table"] = img
+    # Image Table's snapshot reaches into its feature module; skip entirely when
+    # the feature isn't in this build (a profile-excluded / binary-stripped tab).
+    # An existing "Image Table" block from another build survives in ``pending``.
+    if ctx.features.get("Image Table") is not None:
+        img = _snapshot_image_table(ctx)
+        if img:
+            tabs["Image Table"] = img
     return tabs
 
 
@@ -640,7 +644,7 @@ def apply_pending_tab_state(ctx, tab_name: str) -> bool:
             _apply_distribution(ctx, state)
         elif tab_name == "Scatter Plot":
             _apply_scatter(ctx, state)
-        elif tab_name == "Image Table":
+        elif tab_name == "Image Table" and ctx.features.get("Image Table") is not None:
             _apply_image_table(ctx, state)
     except Exception:
         _logger.debug("view_state: apply_pending_tab_state(%r) failed", tab_name, exc_info=True)

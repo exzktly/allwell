@@ -101,8 +101,8 @@ allwell/
 ├── ui/theme/                    ← dark colour tokens (get_color + plot/well constants)
 ├── services/                    ← Analyze-side service modules
 ├── scripts/                     ← build_executable.sh, dev helpers
-├── _Docs/                       ← installer / requirements / icon SVGs + this Planning.md
-├── Markdowns/                   ← live docs (this file, README, model contract, icons readme)
+├── _Docs/                       ← installer / requirements / icon SVGs
+├── Markdowns/                   ← live docs (this file + README_WellViewer.md)
 ├── tests/                       ← pytest scaffold (pure-Python, no Qt)
 └── design/                      ← HTML mockups + screenshots — visual reference only
 ```
@@ -141,9 +141,7 @@ needs `>=4.8`; the whole stack (incl. lightning/kornia) is pinned to coexist.
 laptrack was dropped (no version satisfies `numpy≤1.24.3` *and* `pandas≥2.0`);
 the BaSiC flat-field is a pure-numpy reimplementation (no jax). `read_pipeline_info`
 gains `.get`-defaulted keys (`shape_features` / `qc_options` / `phase_token` /
-`schema_version`) so pre-feature sidecars load unchanged. Full rationale +
-empirical resolution: `_Docs/Markdowns/TODO_segmentation_qc_shape_tracking.md`
-Part 1.
+`schema_version`) so pre-feature sidecars load unchanged.
 
 **Multivariate (Review-side) dependencies.** The Multivariate tab's UMAP / t-SNE
 projections add `scikit-learn==1.3.2` + `umap-learn==0.5.5` to `_Docs/requirements.txt`
@@ -608,8 +606,7 @@ Two seams keep this honest beyond the registry: **cross-build data safety** — 
 sections / `view_state` tabs / `pipeline_info` blocks are preserved, never
 rewritten) — and the pipeline's **lazy Cellpose import** (`process_microscopy`
 resolves `pipeline/cellpose.py` via a PEP 562 module `__getattr__`), so a
-StarDist-only build can omit that file entirely. See
-`_Docs/Markdowns/BUILD_PROFILES.md` for the full workflow. Guarded by
+StarDist-only build can omit that file entirely. Guarded by
 `tests/test_feature_profile.py` (subset boots + loads), `test_derive_profile.py`
 (the strip plan), and `test_profile_build.py` (binary dep-gating).
 
@@ -1349,7 +1346,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 |--------|------|
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including the v8.5.x `--stardist_tile_px` (>0 only) and `--phase_token`); it was decomposed (v8.5.3) into a small table-driven emitter to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). |
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). |
-| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). Full design + the `remotes.toml` schema for this live in `REMOTE_EXECUTION_SLURM.md` (and the Windows client setup in `REMOTE_EXECUTION_WINDOWS.md`). |
+| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
 | `input_resolution_service.py` | Validates the input folder shape (zip set vs flat). |
 
@@ -1907,8 +1904,7 @@ calls inside its domain; off by default.
 - **Feature-subset binary:** `ALLWELL_PROFILE=<name> scripts/build_executable.sh`
   builds a binary containing only that profile's features, with excluded
   features' source and unique heavy deps dropped from the bundle and the profile
-  baked as `active_profile.txt` (§5.3 *Build profiles*; `_Docs/Markdowns/BUILD_PROFILES.md`).
-  Unset = the full app.
+  baked as `active_profile.txt` (§5.3 *Build profiles*). Unset = the full app.
 - **Pipeline-only run:** `python process_microscopy.py --input_dir … --output_dir …`.
   No GUI deps required.
 
@@ -2159,8 +2155,6 @@ remains:
 |------|---------------|
 | `ARCHITECTURE.md` | This document — the developer-oriented architectural overview. |
 | `README_WellViewer.md` | User-facing README — install, run, troubleshoot. |
-| `BUILD_PROFILES.md` | How to run / build / ship the app as a feature subset (§5.3 *Build profiles*): the `ALLWELL_PROFILE` runtime filter, the profile-aware PyInstaller build + automatic dep-gating, and `derive_profile.py` for a physically-stripped tree. |
-| `ui_synergy.md` | Living implementation plan for the UI/UX synergy + usability recommendations (from the design review). Status-tracked, each item constrained to this document's guidelines. Update it (and this table's referenced sections) as items land. |
 
 The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
 selections schema) is described in the `well_viewer/domain/selections_model.py`
@@ -2260,7 +2254,7 @@ The map (each rule links to the test that holds it):
 | `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |
 | Build profiles: a subset boots + loads, the strip plan matches the runtime filter, and the binary drops the excluded features' deps (§5.3 *Build profiles*) | `tests/test_feature_profile.py`, `tests/test_derive_profile.py`, `tests/test_profile_build.py` |
-| CSV / batch export produces the expected values, and the single-plot and batch paths agree byte-for-byte (v8.4) | `tests/test_csv_batch_export_eval.py` (drives a real headless `WellViewerApp`; evaluation write-up in `_Docs/Markdowns/CSV_BATCH_EXPORT_EVALUATION.md`) |
+| CSV / batch export produces the expected values, and the single-plot and batch paths agree byte-for-byte (v8.4) | `tests/test_csv_batch_export_eval.py` (drives a real headless `WellViewerApp`) |
 
 What is **not** statically enforced (and so relies on review + behavioural
 tests): "never block the UI thread", route redraws through the `WellViewerApp`

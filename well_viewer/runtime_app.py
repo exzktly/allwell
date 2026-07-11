@@ -479,7 +479,7 @@ class WellViewerApp(QWidget):
         # Inert Split-View hook (None unless split_view is installed): lets the
         # feature leave split before the rail navigates. Returns False ⇒ proceed.
         hook = _tabctl.split_nav_intercept
-        if hook is not None and hook(self, key):
+        if hook is not None and hook(self._ctx, key):
             return
         self._notebook.setCurrentByName(key)
 

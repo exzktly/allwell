@@ -448,11 +448,24 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | B1b · load_controller decouple | ⊘ | *deferred — see note* | — |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
-| B4 · load converge + persistence→ctx | ☐ | `PERSIST_APP_PARAM_BUDGET == 0` | *attempted 2026-07-11, reverted — see note* |
+| B4 · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 (load-converge sub-item still open) |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **B4 (persistence half) COMPLETE — `PERSIST_APP_PARAM_BUDGET` = 0.**
+  Redid the reverted attempt surgically: migrated exactly the 23
+  registry-facing entry points (`save_to_data_dir`/`load_from_data_dir`/`reset`/
+  `save_notes`/`autosave_to_pipeline_info` across 11 modules) to `ctx`-first via the
+  bridge — AST-verifying real `app` usage so ctx-native `view_state` internals were
+  left untouched — and made `PersistenceRegistry` hold + pass `ctx`
+  (`build_persistence_registry(self._ctx)`, `_vs.reset(self._ctx)`). Shaped the 6
+  persistence test files' mocks to double as their own ctx (`.window`+`.state`) or
+  pass `loaded_app._ctx`; fixed a **pre-existing** latent test bug
+  (`labels_apply_affix(app)` → `app._ctx`). New `test_persistence_is_ctx_native`
+  ratchet. app_smoke (dataset load/save round-trip) + persistence suite green.
+  *(The load-path-convergence sub-item — routing the eager bulk load through
+  `repo.load_well` — remains open.)*
 - 2026-07-11 — **A3 COMPLETE — `APP_FIRST_FUNC_BUDGET` = 0.** Final clusters:
   channel_state_controller (bridge), ui_helpers empty-state/batch-export hosts +
   leaf renderers (playground/review-image/qc/image-browser/status) + the

@@ -56,13 +56,14 @@ def _well_zip_fingerprints(app) -> Dict[str, str]:
     return out
 
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     path = path_for(app)
     if path is None:
         return
     fingerprints = _well_zip_fingerprints(app)
     overrides = []
-    for (well, fov, tp, nid), val in app._ctx.runtime.review.included_overrides.items():
+    for (well, fov, tp, nid), val in ctx.runtime.review.included_overrides.items():
         overrides.append({
             "well": str(well),
             "fov": str(fov),
@@ -85,7 +86,8 @@ def save_to_data_dir(app) -> None:
         _logger.warning("Failed to save cell overrides to %s: %s", path, exc)
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     path = path_for(app)
     if path is None or not path.exists():
         return
@@ -158,8 +160,8 @@ def load_from_data_dir(app) -> None:
     if not new_map:
         # Refuse to wipe a populated in-memory state with a no-op load.
         return
-    app._ctx.runtime.review.included_overrides.clear()
-    app._ctx.runtime.review.included_overrides.update(new_map)
+    ctx.runtime.review.included_overrides.clear()
+    ctx.runtime.review.included_overrides.update(new_map)
     # Bump the include-map version so Review Image recomputes; skipped when
     # Image Browser is disabled (no review_image slice).
     _review_image = app._app_state.feature_slice("review_image")

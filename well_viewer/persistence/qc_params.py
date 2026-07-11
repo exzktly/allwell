@@ -29,19 +29,21 @@ _SECTION = "qc_params"
 _LEGACY_FILENAME = "qc_params.json"
 
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
     params = app._app_state.qc.params
     if params is None:
         return
-    _doc.set_section(app._ctx, _SECTION, params.to_dict())
+    _doc.set_section(ctx, _SECTION, params.to_dict())
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app._ctx, _SECTION)
+    data = _doc.get_section(ctx, _SECTION)
     if data is None:
         data = _absorb_legacy_sidecar(app)
     if data is None:

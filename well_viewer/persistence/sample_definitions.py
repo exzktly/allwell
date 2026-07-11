@@ -15,7 +15,8 @@ from well_viewer.core.safe import swallowed
 _logger = logging.getLogger("well_viewer")
 
 
-def save_notes(app) -> None:
+def save_notes(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     """Debounced-autosave entry for the Notes sub-tab.
 
     Registered as the ``notes`` persistence domain. Tolerates a missing
@@ -30,7 +31,8 @@ def save_notes(app) -> None:
         _logger.exception("Notes auto-save failed")
 
 
-def autosave_to_pipeline_info(app) -> None:
+def autosave_to_pipeline_info(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     """Debounced-autosave variant of :func:`save_to_pipeline_info`.
 
     Writes the sample-definitions block silently — no dialogs, no status toast —

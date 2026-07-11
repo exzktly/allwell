@@ -86,8 +86,11 @@ TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phas
 # delegators (A2/A4) and the `app`-first free functions (A3). The `_not_slack`
 # twin forces the budget down once a phase legitimately shrinks the count.
 CORE_DIR = REPO_ROOT / "well_viewer" / "core"
+PERSIST_DIR = REPO_ROOT / "well_viewer" / "persistence"
 RAW_SELF_DELEGATOR_BUDGET = 5          # `def _m(self,...): return fn(self, ...)` in runtime_app.py
 RAW_SELF_DELEGATOR_SLACK = 6
+# B4: every PersistenceRegistry-facing entry point takes `ctx`, not the god-object.
+PERSIST_APP_PARAM_BUDGET = 0
 APP_FIRST_FUNC_BUDGET = 0             # top-level funcs in core/+features/ whose first param is `app`
 APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107, heatmap-sidebar 107→102, ui_helpers-notify 102→94, plot_orch-save 94→88, tab_controller 88→80, split_view 80→68, selection_controller 68→43, load_controller 43→34, registry hooks 34→26, channel 26→22, ui_helpers 22→19, leaf 19→12, builder-chain 12→5, export/style 5→0 (A3 COMPLETE)
 
@@ -353,4 +356,30 @@ def test_app_first_func_budget_not_slack():
         f"only {count} `app`-first free functions remain but the budget is "
         f"{APP_FIRST_FUNC_BUDGET}: lower APP_FIRST_FUNC_BUDGET to {count} so the "
         "ratchet keeps biting.",
+    )
+
+
+def _persistence_app_entry_points() -> list[str]:
+    """`<file>:<name>` for every PersistenceRegistry-facing entry point
+    (`save_to_data_dir` / `load_from_data_dir` / `reset` / `save_notes` /
+    `autosave_to_pipeline_info`) whose first parameter is still `app`. B4 makes
+    the persistence layer ctx-native, so this ratchets to 0."""
+    names = {"save_to_data_dir", "load_from_data_dir", "reset",
+             "save_notes", "autosave_to_pipeline_info"}
+    out: list[str] = []
+    for py in sorted(PERSIST_DIR.glob("*.py")):
+        for node in ast.parse(py.read_text()).body:
+            if (isinstance(node, ast.FunctionDef) and node.name in names
+                    and node.args.args and node.args.args[0].arg == "app"):
+                out.append(f"{py.name}:{node.name}")
+    return out
+
+
+def test_persistence_is_ctx_native():
+    offenders = _persistence_app_entry_points()
+    _enforce(
+        len(offenders) <= PERSIST_APP_PARAM_BUDGET,
+        f"{len(offenders)} persistence entry points still take the god-object "
+        f"`app`, over the {PERSIST_APP_PARAM_BUDGET} budget (B4 — the registry "
+        f"passes `ctx`):\n  " + "\n  ".join(offenders),
     )

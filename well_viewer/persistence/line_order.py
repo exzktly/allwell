@@ -12,7 +12,8 @@ from well_viewer.persistence import _doc
 _logger = logging.getLogger("well_viewer")
 
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
     payload = {
@@ -20,13 +21,14 @@ def save_to_data_dir(app) -> None:
         "rsets": list(app._app_state.plot.line_order_rsets),
         "wells": list(app._app_state.plot.line_order_wells),
     }
-    _doc.set_section(app._ctx, "line_order", payload)
+    _doc.set_section(ctx, "line_order", payload)
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app._ctx, "line_order")
+    data = _doc.get_section(ctx, "line_order")
     if not isinstance(data, dict):
         return
     rsets = data.get("rsets") or []

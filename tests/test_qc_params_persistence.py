@@ -16,6 +16,7 @@ def _app(tmp_path, pipeline_info=None):
     ds = SimpleNamespace(data_dir=tmp_path, persistence_doc=None,
                          pipeline_info=pipeline_info or {})
     app = SimpleNamespace(_app_state=SimpleNamespace(dataset=ds, qc=QcState()))
+    app.window = app; app.state = app._app_state  # mock is its own ctx (B4)
     # get_qc_params takes ``ctx`` (R1); a minimal ctx over the same state.
     app._ctx = SimpleNamespace(state=app._app_state, app=app)
     return app

@@ -36,7 +36,7 @@ def test_active_channel_survives_reopen(loaded_app, mini_dataset, qtbot):
     assert len(fluor) >= 2, f"need >=2 channels to test a non-default pick: {fluor}"
     target = fluor[1]  # a non-default channel (default is fluor[0])
     set_active_channel(app._ctx, target)
-    view_state.save_to_data_dir(app)
+    view_state.save_to_data_dir(app._ctx)
 
     reopened = _reopen(mini_dataset, qtbot)
     assert reopened._app_state.channel.active_channel == target
@@ -47,7 +47,7 @@ def test_stale_saved_channel_falls_back(loaded_app, mini_dataset, qtbot):
     stick to the stale value or crash."""
     app = loaded_app
     set_active_channel(app._ctx, app._app_state.channel.fluor_channels[1])
-    view_state.save_to_data_dir(app)
+    view_state.save_to_data_dir(app._ctx)
 
     # Corrupt the persisted channel to one absent from the dataset.
     pj = Path(mini_dataset) / "persistence.json"

@@ -299,7 +299,7 @@ class WellViewerApp(QWidget):
         wire_event_bus(self, self._event_bus)
         # Phase 4 teardown: one debounce path + save/load dispatch for the
         # data-dir JSON domains, replacing the per-domain wrapper methods.
-        self._persistence = build_persistence_registry(self)
+        self._persistence = build_persistence_registry(self._ctx)
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in
@@ -688,7 +688,7 @@ class WellViewerApp(QWidget):
 
     def _view_state_reset(self) -> None:
         from well_viewer.persistence import view_state as _vs
-        _vs.reset(self)
+        _vs.reset(self._ctx)
 
     def _notes_schedule_save(self) -> None: return notes_schedule_save(self._ctx)
 

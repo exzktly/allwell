@@ -679,7 +679,7 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import bar_groups as _bg_persist
         _bg_persist.load_via_dialog(self)
 
-    def _open_ratio_panel(self) -> None: return open_ratio_panel(self)
+    def _open_ratio_panel(self) -> None: return open_ratio_panel(self._ctx)
 
     # ── Persistence ──────────────────────────────────────────────────────────
     # The data-dir JSON domains (ratios / heatmap_layouts / cell_overrides /
@@ -853,7 +853,7 @@ class WellViewerApp(QWidget):
 
     def _active_channel_label(self) -> str: return active_channel_label(self._ctx)
 
-    def _rebuild_ratio_index(self) -> None: return rebuild_ratio_index(self)
+    def _rebuild_ratio_index(self) -> None: return rebuild_ratio_index(self._ctx)
 
     def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None: return set_ratio_metrics(self._ctx, ratios)
 
@@ -864,11 +864,11 @@ class WellViewerApp(QWidget):
 
     def _on_plot_channel_selected(self, source = None) -> None: return on_plot_channel_selected(self._ctx, source)
 
-    def _on_preview_channel_selected(self, _e = None) -> None: return on_preview_channel_selected(self, _e)
+    def _on_preview_channel_selected(self, _e = None) -> None: return on_preview_channel_selected(self._ctx, _e)
 
     def _on_metric_selected(self) -> None: return on_metric_selected(self._ctx)
 
-    def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self)
+    def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self._ctx)
 
     # Named ``_stats_property_change`` (not ``_on_stats_property_change``) so the
     # stats results-panel builder can wire the Property combo through the

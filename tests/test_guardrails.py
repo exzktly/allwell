@@ -86,10 +86,10 @@ TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phas
 # delegators (A2/A4) and the `app`-first free functions (A3). The `_not_slack`
 # twin forces the budget down once a phase legitimately shrinks the count.
 CORE_DIR = REPO_ROOT / "well_viewer" / "core"
-RAW_SELF_DELEGATOR_BUDGET = 14          # `def _m(self,...): return fn(self, ...)` in runtime_app.py
+RAW_SELF_DELEGATOR_BUDGET = 5          # `def _m(self,...): return fn(self, ...)` in runtime_app.py
 RAW_SELF_DELEGATOR_SLACK = 6
-APP_FIRST_FUNC_BUDGET = 26             # top-level funcs in core/+features/ whose first param is `app`
-APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107, heatmap-sidebar 107→102, ui_helpers-notify 102→94, plot_orch-save 94→88, tab_controller 88→80, split_view 80→68, selection_controller 68→43, load_controller 43→34, registry _sel_ hooks 34→26
+APP_FIRST_FUNC_BUDGET = 22             # top-level funcs in core/+features/ whose first param is `app`
+APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107, heatmap-sidebar 107→102, ui_helpers-notify 102→94, plot_orch-save 94→88, tab_controller 88→80, split_view 80→68, selection_controller 68→43, load_controller 43→34, registry hooks 34→26, channel 26→22
 
 
 def _enforce(ok: bool, message: str) -> None:

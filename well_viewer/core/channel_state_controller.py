@@ -828,7 +828,8 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
 
 
 
-def on_preview_channel_selected(app, _e=None) -> None:
+def on_preview_channel_selected(ctx, _e=None) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Channel-switch handler for the Movie Montage tab."""
     selected_ui_value = ""
     if hasattr(app, "_chan_cb_preview"):
@@ -841,11 +842,12 @@ def on_preview_channel_selected(app, _e=None) -> None:
             selected_ui_value,
             app._app_state.channel.active_image_channel,
         )
-    set_active_image_channel(app._ctx, selected_ui_value.lower())
+    set_active_image_channel(ctx, selected_ui_value.lower())
 
 
 
-def on_metric_selected_global(app) -> None:
+def on_metric_selected_global(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Handle the global Property combo (ctxbar) change."""
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
     cb = getattr(app, "_plotting_metric_cb", None)
@@ -858,7 +860,7 @@ def on_metric_selected_global(app) -> None:
     # empty plot.
     if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
         metric = "mean_intensity"
-    set_active_metric(app._ctx, metric)
+    set_active_metric(ctx, metric)
 
 
 
@@ -888,7 +890,8 @@ def channel_key_for_label(ctx, label: str) -> str:
 
 
 
-def rebuild_ratio_index(app) -> None:
+def rebuild_ratio_index(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Refresh the resolver-friendly ratio index and any dependent UI."""
     app._app_state.channel.ratio_index = build_ratio_index(app._app_state.channel.ratio_metrics)
     # If the active val_col references a deleted ratio, fall back to the
@@ -897,7 +900,7 @@ def rebuild_ratio_index(app) -> None:
         fallback = (app._app_state.channel.fluor_channels or ["gfp"])[0]
         app._app_state.channel.active_channel = fallback
         app._app_state.channel.active_val_col = f"{fallback}_{app._app_state.channel.active_metric}"
-    update_channel_selector(app._ctx)
+    update_channel_selector(ctx)
     app._invalidate_stats_cache()
     if hasattr(app, "_redraw"):
         try:
@@ -1102,7 +1105,8 @@ def on_metric_selected(ctx) -> None:
 
 
 
-def open_ratio_panel(app) -> None:
+def open_ratio_panel(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Bring the Sample Definitions tab forward — the ratio editor lives there now."""
     nb = getattr(app, "_notebook", None)
     if nb is None:

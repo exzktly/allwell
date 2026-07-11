@@ -12,7 +12,7 @@ Called once from ``core/bus_wiring.wire_event_bus``.
 from __future__ import annotations
 
 
-def register_default_scopes(app=None) -> None:
+def register_default_scopes(win=None) -> None:
     """Register the fold-change redraw scopes.
 
     The *feature-owned* scopes (currently just ``bar``) are sourced from the
@@ -29,10 +29,10 @@ def register_default_scopes(app=None) -> None:
     )
     from well_viewer.core.plot_orchestrator import redraw_app
 
-    # Feature-contributed scopes (e.g. bar). Resolve from the app's registry
+    # Feature-contributed scopes (e.g. bar). Resolve from the win's registry
     # when available; otherwise build a transient one so direct callers (tests)
     # still get the feature scopes registered.
-    feats = getattr(app, "_features", None) if app is not None else None
+    feats = getattr(win, "_features", None) if win is not None else None
     if feats is None:
         from well_viewer.features.registry import build_feature_registry
         feats = build_feature_registry()
@@ -41,10 +41,10 @@ def register_default_scopes(app=None) -> None:
             register_fold_change_scope(_desc.fold_change_scope_factory())
 
     # ``redraw_app`` is ctx-native (D-core), but the scope coalescer invokes
-    # ``scope.redraw(app)`` with the *app* (see fold_change_scopes._call_redraw).
-    # Wrap so the app handle is threaded to its ctx — mirroring the bar scope's
-    # ``lambda a: redraw_bars(a._ctx)``. Passing the raw app made redraw_app read
-    # ``app.window`` (a Qt bound method, not the ctx window), which _call_redraw
+    # ``scope.redraw(win)`` with the *win* (see fold_change_scopes._call_redraw).
+    # Wrap so the win handle is threaded to its ctx — mirroring the bar scope's
+    # ``lambda a: redraw_bars(a._ctx)``. Passing the raw win made redraw_app read
+    # ``win.window`` (a Qt bound method, not the ctx window), which _call_redraw
     # then swallowed — silently dropping every line/distribution/heat-map redraw
     # on channel-change, fold-change, and deferred tab-flush.
     def _redraw_app_scope(a):

@@ -88,15 +88,15 @@ def build_playground_rgb(fluor_arr, mask_arr, *, lo=None, hi=None,
     return np.ascontiguousarray(rgb)
 
 
-def render_playground_display(app) -> None:
-    """Blit ``app._app_state.playground.base_rgb`` onto the Playground canvas,
+def render_playground_display(win) -> None:
+    """Blit ``win._app_state.playground.base_rgb`` onto the Playground canvas,
     fit-to-viewport × zoom, honouring pan. Modelled on
     ``render_review_image_display`` but isolated to the Playground widgets."""
-    label = getattr(app, "_playground_image_label", None)
-    canvas = getattr(app, "_playground_image_canvas", None)
+    label = getattr(win, "_playground_image_label", None)
+    canvas = getattr(win, "_playground_image_canvas", None)
     if label is None or canvas is None:
         return
-    st = app._app_state.playground
+    st = win._app_state.playground
     rgb = st.base_rgb
     if rgb is None:
         label.clear()
@@ -116,7 +116,7 @@ def render_playground_display(app) -> None:
     label.setPixmap(pm)
     label.resize(max(nw, cw), max(nh, ch))
     # Geometry for the hover-tooltip pixel mapping (label space → image pixel).
-    app._playground_disp = {"nw": nw, "nh": nh, "iw": iw, "ih": ih}
+    win._playground_disp = {"nw": nw, "nh": nh, "iw": iw, "ih": ih}
 
     cx = max(0, (max(nw, cw) - cw) // 2) - int(st.pan_x)
     cy = max(0, (max(nh, ch) - ch) // 2) - int(st.pan_y)

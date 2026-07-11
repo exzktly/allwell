@@ -42,20 +42,20 @@ class _GUILogHandler(logging.Handler):
             swallowed()  # was: pass (silent except)
 
 
-def build_bottom(app) -> None:
+def build_bottom(win) -> None:
     """Build the persistent status/log footer strip."""
     from well_viewer import runtime_app as rt
 
-    # Root layout on app must accept a bottom strip — we place it as a child.
-    bottom = QWidget(app)
+    # Root layout on win must accept a bottom strip — we place it as a child.
+    bottom = QWidget(win)
     bottom.setObjectName("Sidebar")
     outer = QVBoxLayout(bottom)
     outer.setContentsMargins(0, 0, 0, 0)
     outer.setSpacing(0)
 
-    # Add to app's layout if it has one; otherwise runtime_app must
-    # arrange layout. We assume app has a QVBoxLayout via its own builder.
-    app_layout = app.layout()
+    # Add to win's layout if it has one; otherwise runtime_app must
+    # arrange layout. We assume win has a QVBoxLayout via its own builder.
+    app_layout = win.layout()
     if app_layout is not None:
         app_layout.addWidget(bottom)
 
@@ -70,9 +70,9 @@ def build_bottom(app) -> None:
     sr_l.setContentsMargins(4, 2, 4, 2)
     outer.addWidget(status_row)
 
-    app._status_lbl = QLabel("Ready.", status_row)
-    app._status_lbl.setObjectName("Muted")
-    sr_l.addWidget(app._status_lbl, 1)
+    win._status_lbl = QLabel("Ready.", status_row)
+    win._status_lbl.setObjectName("Muted")
+    sr_l.addWidget(win._status_lbl, 1)
 
     # Actionable context chips (F1): the ON/OFF threshold and the error-band
     # mode, fed live from state. Clicking jumps to / toggles their editor, so
@@ -80,47 +80,47 @@ def build_bottom(app) -> None:
     # duplicate "threshold=… | band=…" text the line plot used to append.
     # Register both chips through the WidgetRegistry so the ctx-native
     # ``refresh_status_chips(ctx)`` resolves them via ``ctx.widgets`` (register
-    # also stamps ``app._status_threshold_chip`` for legacy readers).
-    app._widget_registry.register("_status_threshold_chip", QPushButton("", status_row))
-    app._status_threshold_chip.setProperty("variant", "secondary")
-    app._status_threshold_chip.setCursor(Qt.PointingHandCursor)
-    app._status_threshold_chip.setToolTip(
+    # also stamps ``win._status_threshold_chip`` for legacy readers).
+    win._widget_registry.register("_status_threshold_chip", QPushButton("", status_row))
+    win._status_threshold_chip.setProperty("variant", "secondary")
+    win._status_threshold_chip.setCursor(Qt.PointingHandCursor)
+    win._status_threshold_chip.setToolTip(
         "ON/OFF intensity threshold for the active channel — click to edit it in Cell Gating")
-    app._status_threshold_chip.clicked.connect(lambda _=False: _go_to_threshold_editor(app))
-    sr_l.addWidget(app._status_threshold_chip)
+    win._status_threshold_chip.clicked.connect(lambda _=False: _go_to_threshold_editor(win))
+    sr_l.addWidget(win._status_threshold_chip)
 
-    app._widget_registry.register("_status_band_chip", QPushButton("", status_row))
-    app._status_band_chip.setProperty("variant", "secondary")
-    app._status_band_chip.setCursor(Qt.PointingHandCursor)
-    app._status_band_chip.setToolTip("Error band: SEM or SD — click to toggle")
-    app._status_band_chip.clicked.connect(lambda _=False: app._toggle_sem())
-    sr_l.addWidget(app._status_band_chip)
+    win._widget_registry.register("_status_band_chip", QPushButton("", status_row))
+    win._status_band_chip.setProperty("variant", "secondary")
+    win._status_band_chip.setCursor(Qt.PointingHandCursor)
+    win._status_band_chip.setToolTip("Error band: SEM or SD — click to toggle")
+    win._status_band_chip.clicked.connect(lambda _=False: win._toggle_sem())
+    sr_l.addWidget(win._status_band_chip)
 
     # Register the shared status-bar progress bar through the WidgetRegistry so
     # features reach it via ``ctx.widgets.get_or_none("_progress_bar")`` (A8);
-    # ``register`` also stamps ``app._progress_bar`` so the legacy readers
+    # ``register`` also stamps ``win._progress_bar`` so the legacy readers
     # (ui_helpers.show_progress / step_progress) keep resolving unchanged.
-    app._widget_registry.register("_progress_bar", QProgressBar(status_row))
-    app._progress_bar.setOrientation(Qt.Horizontal)
-    app._progress_bar.setFixedWidth(220)
-    app._progress_bar.setRange(0, 100)
-    app._progress_bar.setValue(0)
-    app._progress_bar.hide()
-    sr_l.addWidget(app._progress_bar)
+    win._widget_registry.register("_progress_bar", QProgressBar(status_row))
+    win._progress_bar.setOrientation(Qt.Horizontal)
+    win._progress_bar.setFixedWidth(220)
+    win._progress_bar.setRange(0, 100)
+    win._progress_bar.setValue(0)
+    win._progress_bar.hide()
+    sr_l.addWidget(win._progress_bar)
 
-    app._log_btn = QPushButton("Log \u25b4", status_row)
-    app._log_btn.setProperty("variant", "secondary")
-    app._log_btn.clicked.connect(lambda _=False: app._toggle_log())
-    sr_l.addWidget(app._log_btn)
+    win._log_btn = QPushButton("Log \u25b4", status_row)
+    win._log_btn.setProperty("variant", "secondary")
+    win._log_btn.clicked.connect(lambda _=False: win._toggle_log())
+    sr_l.addWidget(win._log_btn)
 
     # Log frame (hidden initially)
-    app._log_frame = QWidget(bottom)
-    app._log_frame.setFixedHeight(160)
-    lf_l = QVBoxLayout(app._log_frame)
+    win._log_frame = QWidget(bottom)
+    win._log_frame.setFixedHeight(160)
+    lf_l = QVBoxLayout(win._log_frame)
     lf_l.setContentsMargins(6, 4, 6, 2)
-    outer.addWidget(app._log_frame)
+    outer.addWidget(win._log_frame)
 
-    log_hdr = QWidget(app._log_frame)
+    log_hdr = QWidget(win._log_frame)
     lh_l = QHBoxLayout(log_hdr)
     lh_l.setContentsMargins(0, 0, 0, 2)
     lf_l.addWidget(log_hdr)
@@ -130,18 +130,18 @@ def build_bottom(app) -> None:
     lh_l.addStretch(1)
     clear_btn = QPushButton("Clear", log_hdr)
     clear_btn.setProperty("variant", "secondary")
-    clear_btn.clicked.connect(lambda _=False: app._clear_log())
+    clear_btn.clicked.connect(lambda _=False: win._clear_log())
     lh_l.addWidget(clear_btn)
 
-    app._log_text = QTextEdit(app._log_frame)
-    app._log_text.setReadOnly(True)
-    app._log_text.setLineWrapMode(QTextEdit.NoWrap)
-    lf_l.addWidget(app._log_text, 1)
+    win._log_text = QTextEdit(win._log_frame)
+    win._log_text.setReadOnly(True)
+    win._log_text.setLineWrapMode(QTextEdit.NoWrap)
+    lf_l.addWidget(win._log_text, 1)
 
-    app._log_frame.hide()
-    app._log_visible = False
+    win._log_frame.hide()
+    win._log_visible = False
 
-    handler = _GUILogHandler(app._log_text)
+    handler = _GUILogHandler(win._log_text)
     handler.setFormatter(logging.Formatter(
         "%(asctime)s  %(levelname)-7s  %(message)s", datefmt="%H:%M:%S"))
     handler.setLevel(logging.DEBUG)
@@ -151,10 +151,10 @@ def build_bottom(app) -> None:
 
     # Keep the band chip in lock-step with every SEM/SD toggle (from any
     # toolbar), and seed both chips for the current state.
-    if not app._ctx.runtime.sem.observers:
-        app._ctx.runtime.sem.observers = []
-    app._ctx.runtime.sem.observers.append(lambda _is_sem: refresh_status_chips(app._ctx))
-    refresh_status_chips(app._ctx)
+    if not win._ctx.runtime.sem.observers:
+        win._ctx.runtime.sem.observers = []
+    win._ctx.runtime.sem.observers.append(lambda _is_sem: refresh_status_chips(win._ctx))
+    refresh_status_chips(win._ctx)
 
 
 def refresh_status_chips(ctx) -> None:
@@ -185,10 +185,10 @@ def refresh_status_chips(ctx) -> None:
     band_chip.setText(f"Band {'SEM' if use_sem else 'SD'}")
 
 
-def _go_to_threshold_editor(app) -> None:
+def _go_to_threshold_editor(win) -> None:
     """Jump to the Cell Gating editor (under Sample Definitions) for the
     threshold chip."""
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(win, "_notebook", None)
     if nb is not None:
         nb.setCurrentByName("Sample Definitions")
-    app._set_status("Edit the ON/OFF intensity threshold under Cell Gating.")
+    win._set_status("Edit the ON/OFF intensity threshold under Cell Gating.")

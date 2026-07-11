@@ -691,7 +691,7 @@ def build_centre(win, parent: QWidget) -> None:
     QTimer.singleShot(0, _drain)
 
 
-def drain_pending_centre_builders(win) -> None:
+def drain_pending_centre_builders(ctx) -> None:
     """Force-build any centre tab whose body was deferred at startup.
 
     Tabs marked lazy-only (Cell Gating, smFISH) are intentionally
@@ -699,8 +699,9 @@ def drain_pending_centre_builders(win) -> None:
     tab. The tab-switch handler in ``centre_view`` builds them inline
     on first access.
     """
+    win = ctx.window  # widget host of the pending-builder bookkeeping
     pending = getattr(win, "_centre_pending_builders", None)
-    build = win._ctx.runtime.centre.build_pending
+    build = ctx.runtime.centre.build_pending
     if not pending or build is None:
         return
     lazy_only = getattr(win, "_centre_lazy_only_titles", frozenset())

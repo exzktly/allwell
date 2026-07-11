@@ -87,8 +87,8 @@ TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phas
 # twin forces the budget down once a phase legitimately shrinks the count.
 CORE_DIR = REPO_ROOT / "well_viewer" / "core"
 PERSIST_DIR = REPO_ROOT / "well_viewer" / "persistence"
-RAW_SELF_DELEGATOR_BUDGET = 5          # `def _m(self,...): return fn(self, ...)` in runtime_app.py
-RAW_SELF_DELEGATOR_SLACK = 6
+RAW_SELF_DELEGATOR_BUDGET = 0          # `def _m(self,...): return fn(self, ...)` in runtime_app.py — A2/A4 COMPLETE
+RAW_SELF_DELEGATOR_SLACK = 0
 # B4: every PersistenceRegistry-facing entry point takes `ctx`, not the god-object.
 PERSIST_APP_PARAM_BUDGET = 0
 APP_FIRST_FUNC_BUDGET = 0             # top-level funcs in core/+features/ whose first param is `app`

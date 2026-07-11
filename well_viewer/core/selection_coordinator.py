@@ -1,7 +1,7 @@
 """Redraw / selection-refresh orchestration extracted from ``WellViewerApp`` (A5).
 
 ``SelectionCoordinator`` bundles the two app-level orchestration surfaces that the
-final ``ctx.app`` seams bottomed into:
+final god-object seams bottomed into:
 
 - ``rebuild_all()`` — the master redraw fan-out after a data/selection change
   (invalidate stats cache → refresh sidebar map + Sample-Definitions groups →

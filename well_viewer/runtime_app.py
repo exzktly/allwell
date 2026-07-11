@@ -96,9 +96,6 @@ _stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf
 
 from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.core.ui_helpers import (
-    ask_name_dialog as _ui_ask_name_dialog,
-)
 from ui.theme import (
     ACCENT, ACCENT_DARK, PLOT_BG,
 )
@@ -184,7 +181,6 @@ from well_viewer.core.selection_controller import labels_apply_affix
 update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
 from well_viewer.features.export.service import export_scatter_agg_data
-from well_viewer.features.export.style import open_export_style_panel
 rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded, well_display_label = _lazy_names("well_viewer.features.grouping.controller", "rep_refresh_map", "rep_add", "rep_quick_pairs_from_dropdowns", "rank_color_wells", "rank_color_rset", "rep_color_for", "replicate_display_label", "rep_sets_loaded", "well_display_label")
 from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
@@ -589,10 +585,6 @@ class WellViewerApp(QWidget):
     # ─────────────────────────────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────────────────
 
-    def _ask_name_dialog(self, default: str) -> Optional[str]:
-        return _ui_ask_name_dialog(self, title="Name", prompt="Name:",
-                                   default=default)
-
     # ─────────────────────────────────────────────────────────────────────────
     # Well-label editor
     # ─────────────────────────────────────────────────────────────────────────
@@ -765,7 +757,7 @@ class WellViewerApp(QWidget):
         refresh_plot_empty_states(self)
 
 
-    def _drain_pending_centre_builders(self) -> None: return drain_pending_centre_builders(self)
+    def _drain_pending_centre_builders(self) -> None: return drain_pending_centre_builders(self._ctx)
 
     def _read_pipeline_info(self, path: Path):
         return _read_pipeline_info_shared(path, logger=_logger, check_parent=True)
@@ -800,7 +792,7 @@ class WellViewerApp(QWidget):
         self._app_state.dataset.rebuild_fovs()
 
     @staticmethod
-    def _mute_color(self, factor: float = 0.5) -> str: return mute_color(self, factor)
+    def _mute_color(color: str, factor: float = 0.5) -> str: return mute_color(color, factor)
 
     def _rep_visible_sets(self) -> "List[ReplicateSet]":
         """Alias for _rep_sets_active — visible (non-hidden) loaded rep-sets."""
@@ -934,8 +926,6 @@ class WellViewerApp(QWidget):
     def _review_row_keys(self, row: dict) -> Tuple[str, str, str]: return review_row_keys(self._ctx, row)
 
 
-    @staticmethod
-    def _review_norm_fov(self) -> str: return review_norm_fov(self)
 
     @staticmethod
     def _review_tp_sort_key(tp: str) -> Tuple[int, float, str]:
@@ -1184,7 +1174,6 @@ class WellViewerApp(QWidget):
         """Save the current Bar Plots figure at high resolution."""
         _plot_save_bar_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
-    def _open_export_style_panel(self, plot_key: str) -> None: return open_export_style_panel(self, plot_key)
 
     # ── Scatter Plot tab ───────────────────────────────────────────────────────
 

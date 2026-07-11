@@ -51,22 +51,8 @@ def test_app_boots_loads_and_operates_without_image_browser(qtbot, monkeypatch, 
     _exercise(app)
     assert app._features.get("Image Browser") is None
     assert "Image Browser" not in app._notebook.pageNames()
-    for slc in ("review_image", "preview", "image_table", "playground"):
+    for slc in ("review_image", "preview"):
         assert app._app_state.feature_slice(slc) is None
-
-
-@pytest.mark.slow
-def test_app_boots_and_plots_without_statistics(qtbot, monkeypatch, mini_dataset):
-    rt = _prune_registry(monkeypatch, "Statistics")
-    app = rt.WellViewerApp()
-    qtbot.addWidget(app)
-    app._load_path(mini_dataset)
-    app._notebook.setCurrentByName("Plotting")   # bar/line redraw → stats_compute
-    app._invalidate_stats_cache()
-    assert app._features.get("Statistics") is None
-    assert app._app_state.feature_slice("stats") is None
-    # The shared group-stats cache is core, so it survives without Statistics.
-    assert app._app_state.stats_cache is not None
 
 
 # ── deletion (package import blocked) ────────────────────────────────────────
@@ -84,7 +70,6 @@ class _ImportBlocker:
 @pytest.mark.slow
 @pytest.mark.parametrize("pkg, descriptor", [
     ("image_browser", "Image Browser"),
-    ("stats", "Statistics"),
     ("scatter", "Scatter Plot"),
     ("barplot", "Bar Plots"),
 ])

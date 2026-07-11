@@ -109,16 +109,6 @@ def test_process_microscopy_line_budget():
     )
 
 
-def test_image_table_controller_line_budget():
-    n = _line_count("well_viewer/features/image_browser/image_table/controller.py")
-    assert n <= IMAGE_TABLE_CONTROLLER_BUDGET, (
-        f"image_table/controller.py is {n} lines, over the "
-        f"{IMAGE_TABLE_CONTROLLER_BUDGET} budget. Split a cohesive cluster "
-        "(LUT/RGB composition, grid layout, or export) into its own module. "
-        "The ratchet only moves down."
-    )
-
-
 def test_scatter_controller_line_budget():
     n = _line_count("well_viewer/features/scatter/controller.py")
     assert n <= SCATTER_CONTROLLER_BUDGET, (

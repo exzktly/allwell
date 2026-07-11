@@ -103,7 +103,6 @@ ALLOWLIST = {
     # _merge_scan / _discover_from_layouts / _scan_raw_disk_files /
     # _raw_file_well_passes / _log_find_result — main orchestrator now CC 13,
     # every helper < 40. Removed from the allowlist.
-    "well_viewer/persistence/view_state.py::_apply_image_table",
     "well_viewer/core/plot_style.py::apply_export_style_prefs",
     "well_viewer/core/centre_view.py::build_centre",
     "well_viewer/features/export/sidebar_view.py::ExportStyleSidebar._build_ui",
@@ -116,9 +115,7 @@ ALLOWLIST = {
     "well_viewer/features/barplot/collect.py::collect_bar_items_for_group",
     "services/remote_runner.py::stage_local_zips",
     "well_viewer/features/heatmap/controller.py::redraw_heatmap",
-    "well_viewer/features/image_browser/cell_browser/collect.py::collect_cells",
     "process_microscopy.py::_estimate_thresholds_standalone",
-    "well_viewer/features/image_browser/image_table/export.py::_build_export_figure",
     "well_viewer/core/channel_state_controller.py::update_channel_selector",
     "well_viewer/core/selection_controller.py::refresh_sidebar_map_now",
     # A5 DONE: run_stats (was CC 52) decomposed — the pure report formatters
@@ -130,7 +127,6 @@ ALLOWLIST = {
     "well_viewer/features/lineplot/controller.py::collect_line_series",
     "well_viewer/features/barplot/renderer.py::draw_per_cell_bar_mode",
     "well_viewer/features/barplot/renderer.py::draw_significance_brackets",
-    "well_viewer/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",
     "well_viewer/domain/fold_change.py::normalize_pts",
     "process_microscopy.py::sample_empty_well_images",
     # Was CC 40 (right at the line); the audit-E9 decode-failure counting +

@@ -25,10 +25,6 @@ def test_data_tabs_build_and_register_notes_widget(loaded_app):
     app = loaded_app
     ctx = app._ctx
 
-    # Review CSV built via the direct ctx-native builder (registers its widgets).
-    assert ctx.widgets.has("_review_well_lbl"), "Review CSV tab did not build"
-    assert getattr(app, "_review_well_lbl", None) is ctx.widgets.get("_review_well_lbl")
-
     # Sample Definitions built via the core app-bridge (app-native sub-builders).
     assert hasattr(app, "_sample_definitions_subtabs")
     assert hasattr(app, "_rep_list")

@@ -88,7 +88,10 @@ FEATURE_PREFIX = "well_viewer.features"
 # _cell_override_menu`` lazily imports ``grid_ops.image_table_cell_override_menu``
 # — the same controller↔grid_ops cycle break the two grid_ops imports above use
 # (grid_ops imports controller at module scope, so controller must defer).
-MAX_DEFERRED_FEATURE_IMPORTS = 126
+# Lowered to 83 after the feature-strip (Statistics / Multivariate / Spatial /
+# smFISH / Review CSV / Saved Plots / Batch Export / Image Table / Cell Browser /
+# Playground removed) dropped the deferred-feature-import count.
+MAX_DEFERRED_FEATURE_IMPORTS = 83
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

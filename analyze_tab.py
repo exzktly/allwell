@@ -145,14 +145,6 @@ def _has_well_content(folder: Path) -> bool:
         return False
 
 
-def _safe_seg_float(text: str, default: float) -> float:
-    """Parse a segmentation-parameter field; *default* on empty/invalid."""
-    try:
-        return float(str(text).strip() or default)
-    except (TypeError, ValueError):
-        return default
-
-
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
@@ -257,9 +249,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
     _SEG_METHODS = (
         ("stardist_nuclei", "StarDist — nuclei"),
         ("stardist_seeded_watershed_cell", "StarDist + watershed — cell"),
-        ("cellpose", "Cellpose (general)"),
-        ("cellpose_labelfree", "Label-free (Cellpose, brightfield)"),
-        ("classical_threshold", "Classical (Otsu + watershed)"),
     )
 
     def _seg_method(self) -> str:
@@ -380,8 +369,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         phase_cb = _pin_checkbox("Phase")
         phase_cb.setToolTip(
             "Mark this channel as phase/brightfield: it skips all background "
-            "correction and is resaved from the original image. With the "
-            "Label-free method it is also the Cellpose segmentation input."
+            "correction and is resaved from the original image."
         )
         rl.addStretch(1)
 
@@ -455,11 +443,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     errors.append("Minimum nucleus area must be a positive integer.")
             except ValueError:
                 errors.append("Minimum nucleus area must be a positive integer.")
-        elif method == "cellpose_labelfree":
-            if not self._phase_token():
-                errors.append(
-                    "Label-free segmentation requires exactly one channel marked "
-                    "'Phase' (the brightfield image to segment).")
         return errors
 
     def _background_well_validation_error(self) -> Optional[str]:
@@ -505,9 +488,9 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         """Size the per-method parameter stack to its *current* page only.
 
         A ``QStackedWidget`` reports the max sizeHint over all pages, so without
-        this the empty StarDist page reserves the tall Cellpose page's height
-        (the gap the user saw under channel tokens). Giving every non-current
-        page a vertically-Ignored policy drops it from the height calculation.
+        this an empty page reserves a taller page's height (the gap the user saw
+        under channel tokens). Giving every non-current page a vertically-Ignored
+        policy drops it from the height calculation.
         """
         stack = getattr(self, "_seg_param_stack", None)
         if stack is None:
@@ -530,11 +513,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         if hasattr(self, "_seg_param_stack"):
             self._seg_param_stack.setCurrentByName(method)
             self._collapse_seg_param_stack()
-        # The Label-free preset segments the Phase channel — the explicit
-        # Segmentation-channel field doesn't apply there (it's taken at runtime).
-        phase_locked = method == "cellpose_labelfree"
         if hasattr(self, "_nuclear_row_widget"):
-            self._nuclear_row_widget.setVisible(not phase_locked)
+            self._nuclear_row_widget.setVisible(True)
         errors = self._segmentation_validation_errors()
         if errors:
             self._segmentation_hint_lbl.setText("  ".join(errors))
@@ -543,9 +523,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         hint = {
             "stardist_nuclei": "Best default for a nuclear stain (DAPI/Hoechst/NIR): StarDist segments the 'Segmentation channel' above into nuclei.",
             "stardist_seeded_watershed_cell": "Use for whole-cell (cytoplasm) measurements: StarDist seeds + a cytoplasm mask; also quantifies the cytoplasm channel.",
-            "cellpose": "Use for non-nuclear or tricky morphologies: Cellpose on the 'Segmentation channel' above (fluorescent or brightfield).",
-            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free.",
-            "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
         }.get(method, "")
         self._segmentation_hint_lbl.setText(hint)
 
@@ -844,11 +821,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             segmentation_method=method,
             cytoplasm_token=cyto,
             min_nucleus_area_px=min_area,
-            cellpose_model=self._cellpose_model_cb.currentText(),
-            cellpose_diameter=_safe_seg_float(self._cellpose_diameter_edit.text(), 0.0),
-            cellpose_flow_threshold=_safe_seg_float(self._cellpose_flow_thr_edit.text(), 0.4),
-            cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
-            cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
         )
 
     def _expected_well_count(self, opts: dict) -> int:

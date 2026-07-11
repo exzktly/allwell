@@ -214,24 +214,24 @@ def test_no_module_scope_imports_of_removable_features():
 def test_disabling_a_leaf_feature_drops_it_everywhere():
     """Commenting a descriptor out of ``FEATURES`` removes the feature's rail
     entry, dispatch, and state slice — with no dangling references. Exercised on
-    a leaf feature (Review CSV) by filtering the registry and asserting it
+    a leaf feature (Sample Definitions) by filtering the registry and asserting it
     vanishes from every surface the core consults."""
     from well_viewer.core.app_state import AppState
     from well_viewer.core.feature_registry import FeatureRegistry
     from well_viewer.features.registry import attach_feature_state, build_feature_registry
 
     full = build_feature_registry()
-    assert full.get("Review CSV") is not None  # present by default
+    assert full.get("Sample Definitions") is not None  # present by default
 
-    pruned = FeatureRegistry(d for d in full.all() if d.name != "Review CSV")
+    pruned = FeatureRegistry(d for d in full.all() if d.name != "Sample Definitions")
     # Gone from lookup, group enumeration, and every hook fan-out.
-    assert pruned.get("Review CSV") is None
-    assert "Review CSV" not in {d.name for d in pruned.in_group("Data")}
-    assert "Review CSV" not in {d.name for d in pruned.with_hook("on_activate")}
-    # State attach still works and contributes the same non-Review slices.
+    assert pruned.get("Sample Definitions") is None
+    assert "Sample Definitions" not in {d.name for d in pruned.in_group("Data")}
+    assert "Sample Definitions" not in {d.name for d in pruned.with_hook("on_activate")}
+    # State attach still works and contributes the same non-pruned slices.
     state = AppState()
     attach_feature_state(state, pruned)
-    assert hasattr(state, "bar") and hasattr(state, "stats")
+    assert hasattr(state, "bar") and hasattr(state, "heatmap")
 
 
 # ── EventBus signal catalogue is capped ───────────────────────────────────────

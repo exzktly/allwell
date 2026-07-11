@@ -68,7 +68,6 @@ from tifffile import imread
 import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
-from skimage.segmentation import watershed
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -79,15 +78,6 @@ from skimage.segmentation import watershed
 # Per-worker StarDist model (loaded once at worker startup, not per image)
 # ---------------------------------------------------------------------------
 
-# Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
-# ``pipeline.cellpose`` module (Torch is imported lazily there, so importing it
-# does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
-# ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
-from pipeline.cellpose import (  # noqa: E402,F401
-    _CELLPOSE_MODELS,
-    _cellpose_model,
-    _segment_cellpose,
-)
 # The StarDist segmenters + their per-worker model/FOV state live in the Qt-free
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
@@ -98,14 +88,9 @@ from pipeline.stardist import (  # noqa: E402,F401
     _segment_stardist_seeded_watershed_cell,
 )
 
-# Segmentation-method groups. StarDist methods need the TF model loaded in
-# _worker_init. Cellpose is a *general* segmenter (any channel); the
-# 'cellpose_labelfree' preset is the only label-free method (it remaps the
-# nuclear slot onto the phase channel in main()). classical_threshold is also a
-# general routine (Otsu + watershed on the chosen channel).
+# Segmentation-method group. StarDist is the only supported segmenter; both
+# methods need the TF model loaded in ``_worker_init``.
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
-_CELLPOSE_METHODS = ("cellpose", "cellpose_labelfree")
-_LABELFREE_METHODS = ("cellpose_labelfree",)
 
 
 # ---------------------------------------------------------------------------
@@ -1399,37 +1384,6 @@ def build_flatfield_models(
 
 
 
-def _segment_classical(image: np.ndarray) -> np.ndarray:
-    """Label-free segmentation by Otsu threshold + distance-transform watershed.
-
-    Splits touching objects without any deep-learning model: Otsu (via
-    ``threshold_otsu``) gives the foreground mask; the EDT peaks seed a
-    watershed (both already imported for the seeded-watershed mode). Reads the
-    designated phase channel. No new dependency.
-    """
-    from skimage.feature import peak_local_max
-    from skimage.measure import label as _label
-    img = np.asarray(image, dtype=np.float32)
-    try:
-        thresh = threshold_otsu(img)
-    except ValueError:
-        thresh = float(np.mean(img))
-    mask = img > thresh
-    if not np.any(mask):
-        return np.zeros(img.shape, dtype=np.int32)
-    distance = ndi.distance_transform_edt(mask)
-    # Seed one marker per local distance maximum (≈ one per object).
-    coords = peak_local_max(distance, min_distance=5, labels=mask)
-    markers = np.zeros(distance.shape, dtype=np.int32)
-    for i, (y, x) in enumerate(coords, start=1):
-        markers[y, x] = i
-    if markers.max() == 0:
-        # No peaks (e.g. a single blob) — fall back to connected components.
-        return _label(mask).astype(np.int32)
-    labels = watershed(-distance, markers=markers, mask=mask)
-    return np.asarray(labels, dtype=np.int32)
-
-
 # ---------------------------------------------------------------------------
 # Auto-threshold estimation (self-contained — runs without well_viewer)
 # ---------------------------------------------------------------------------
@@ -1710,7 +1664,7 @@ def build_processed_output_path(
 # process_image_group() is a thin orchestrator over these five phases (T4). Each
 # is a verbatim lift of the corresponding block from the original monolith — the
 # leaf work (background subtraction, segmentation, shape/region features, atomic
-# image writes) still lives in pipeline.background / _stardist / _cellpose /
+# image writes) still lives in pipeline.background / _stardist /
 # _io and the shape_features helpers; these just group the per-FOV sequencing so
 # the orchestrator reads as correct -> segment -> write -> quantify.
 
@@ -1751,16 +1705,15 @@ def _correct_image_group(
 
     Returns ``(nir_raw, fluor_raws, nir_corr, fluor_tophat, fluor_corr)``. The
     *raws* are returned because the flat-field step rewrites them in place — and
-    the (flat-fielded) raws are what segmentation (watershed/cellpose) and the
-    overlay image consume downstream, so the orchestrator must use these, not the
+    the (flat-fielded) raws are what segmentation (StarDist) and the overlay
+    image consume downstream, so the orchestrator must use these, not the
     originals.
 
     *phase_token* designates the phase/brightfield channel: that channel skips
     BOTH flat-field and background subtraction, so its ``nir_corr`` /
     ``fluor_tophat`` entry is the untouched original — which the writer then
     saves under the usual ``_tophat`` suffix. Background-correcting a
-    phase-contrast image is meaningless (and, in label-free mode, feeds Cellpose
-    a raw brightfield image, which is what its model expects).
+    phase-contrast image is meaningless.
     """
     _ph = str(phase_token or "").strip().lower()
 
@@ -1867,10 +1820,10 @@ def _correct_image_group(
 
 def _segment_image_group(
     *, segmentation_method, nir_corr, fluor_raws, fluor_tokens, cytoplasm_token,
-    tophat_radius_fluor, min_nucleus_area_px, cellpose_model, cellpose_diameter,
-    cellpose_flow_threshold, cellpose_cellprob_threshold, cellpose_nuclei_channel,
+    tophat_radius_fluor, min_nucleus_area_px,
 ):
-    """Dispatch to the configured segmenter -> label image (+ watershed extras).
+    """Dispatch to the configured StarDist segmenter -> label image (+ watershed
+    extras).
 
     Returns ``(labels, nuclear_points, cytoplasm_tophat, cytoplasm_binary_mask)``;
     the last three are ``None`` for every method except seeded-watershed cell.
@@ -1903,29 +1856,6 @@ def _segment_image_group(
             time.perf_counter() - _t,
             len(np.unique(labels)) - 1,
         )
-    elif segmentation_method in _CELLPOSE_METHODS:
-        # General Cellpose segments the chosen Segmentation channel (nir_corr).
-        # The 'cellpose_labelfree' preset is identical mechanics: main() already
-        # remapped the nuclear slot onto the phase channel, and forces cyto3, so
-        # nir_corr is the phase image and the params are the brightfield preset.
-        nucleus_image = None
-        nuc_tok = str(cellpose_nuclei_channel or "").strip().lower()
-        if nuc_tok:
-            lowered = [t.lower() for t in fluor_tokens]
-            if nuc_tok in lowered:
-                nucleus_image = fluor_raws[lowered.index(nuc_tok)]
-        labels = _segment_cellpose(
-            nir_corr, model_type=cellpose_model, diameter=cellpose_diameter,
-            flow_threshold=cellpose_flow_threshold,
-            cellprob_threshold=cellpose_cellprob_threshold,
-            nucleus_image=nucleus_image,
-        )
-        log.info("  cellpose:    %.1f s  (%d cells detected; model=%s)",
-                 time.perf_counter() - _t, len(np.unique(labels)) - 1, cellpose_model)
-    elif segmentation_method == "classical_threshold":
-        labels = _segment_classical(nir_corr)
-        log.info("  classical:   %.1f s  (%d objects detected)",
-                 time.perf_counter() - _t, len(np.unique(labels)) - 1)
     else:
         labels = _segment_stardist_nuclei(nir_corr)
         log.info("  stardist:    %.1f s  (%d nuclei detected)",
@@ -2129,11 +2059,6 @@ def process_image_group(
     background_method: str = "sliding_disk",
     background_models: "dict | None" = None,
     qc_remove_debris: bool = False,
-    cellpose_diameter: float = 0.0,
-    cellpose_model: str = "cyto3",
-    cellpose_flow_threshold: float = 0.4,
-    cellpose_cellprob_threshold: float = 0.0,
-    cellpose_nuclei_channel: str = "",
     phase_token: str = "",
 ) -> list[dict]:
     """
@@ -2171,11 +2096,7 @@ def process_image_group(
             segmentation_method=segmentation_method, nir_corr=nir_corr,
             fluor_raws=fluor_raws, fluor_tokens=fluor_tokens,
             cytoplasm_token=cytoplasm_token, tophat_radius_fluor=tophat_radius_fluor,
-            min_nucleus_area_px=min_nucleus_area_px, cellpose_model=cellpose_model,
-            cellpose_diameter=cellpose_diameter,
-            cellpose_flow_threshold=cellpose_flow_threshold,
-            cellpose_cellprob_threshold=cellpose_cellprob_threshold,
-            cellpose_nuclei_channel=cellpose_nuclei_channel,
+            min_nucleus_area_px=min_nucleus_area_px,
         )
     )
 
@@ -2765,14 +2686,6 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
 
     # Install the per-run StarDist tiling threshold (0 = off) before any predict.
     _stardist.set_tile_px(stardist_tile_px)
-
-    # Label-free methods (cellpose / classical_threshold) don't use the StarDist
-    # TF model — skip the (heavy, network-touching) load entirely. Cellpose
-    # lazy-loads its torch model on first use; classical needs none.
-    if segmentation_method not in _STARDIST_METHODS:
-        log.info("Worker %d ready (%s; label-free '%s' — StarDist not loaded).",
-                 os.getpid(), device_note, segmentation_method)
-        return
 
     log.info("Worker %d loading StarDist (%s, %s).", os.getpid(), device_note, thr_note)
 
@@ -4054,56 +3967,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--segmentation_method",
         default=DEFAULT_SEGMENTATION_METHOD,
-        choices=("stardist_nuclei", "stardist_seeded_watershed_cell",
-                 "cellpose", "cellpose_labelfree", "classical_threshold"),
+        choices=("stardist_nuclei", "stardist_seeded_watershed_cell"),
         help=(
-            "Segmentation routine, run on the --nuclear_token channel (any "
-            "fluorescent or brightfield channel) unless noted. 'stardist_nuclei' "
-            "(default) and 'stardist_seeded_watershed_cell' (StarDist seeds + "
-            "cytoplasm watershed) need a fluorescent stain. 'cellpose' is general "
-            "Cellpose (tune --cellpose_model/diameter/flow/cellprob, optional "
-            "--cellpose_nuclei_channel). 'classical_threshold' is Otsu + "
-            "watershed. 'cellpose_labelfree' is a Cellpose cyto3 preset that "
-            "segments the --phase_token (brightfield) channel."
+            "Segmentation routine, run on the --nuclear_token channel. "
+            "'stardist_nuclei' (default) and "
+            "'stardist_seeded_watershed_cell' (StarDist seeds + cytoplasm "
+            "watershed) both need a fluorescent stain."
         ),
     )
     p.add_argument(
         "--phase_token",
         default="",
         help=(
-            "Channel token of the phase / brightfield image segmented by the "
-            "'cellpose_labelfree' preset. Ignored by the other methods."
+            "Channel token of a phase / brightfield image that skips all "
+            "background correction and is resaved from the original."
         ),
-    )
-    p.add_argument(
-        "--cellpose_model",
-        default="cyto3",
-        choices=("cyto3", "cyto2", "cyto", "nuclei"),
-        help="Cellpose model for --segmentation_method=cellpose.",
-    )
-    p.add_argument(
-        "--cellpose_diameter",
-        type=float,
-        default=0.0,
-        help="Cellpose cell diameter in px (0 = auto-estimate).",
-    )
-    p.add_argument(
-        "--cellpose_flow_threshold",
-        type=float,
-        default=0.4,
-        help="Cellpose flow_threshold (mask recovery tolerance).",
-    )
-    p.add_argument(
-        "--cellpose_cellprob_threshold",
-        type=float,
-        default=0.0,
-        help="Cellpose cellprob_threshold (cell probability cut).",
-    )
-    p.add_argument(
-        "--cellpose_nuclei_channel",
-        default="",
-        help="Optional fluor token used as Cellpose's nucleus channel "
-             "(channels=[seg, nucleus]) for cyto models; empty = grayscale.",
     )
     p.add_argument(
         "--cytoplasm_token",
@@ -4339,22 +4217,7 @@ def main() -> None:
             )
         if args.cytoplasm_token == args.nuclear_token:
             parser.error("--cytoplasm_token must be different from --nuclear_token.")
-    # Label-free methods segment the designated phase channel rather than a
-    # fluorescent nuclear stain. The phase image takes the nuclear slot for the
-    # grouping/segmentation machinery — remap the nuclear token onto it so all
-    # existing per-FOV grouping is reused unchanged.
     phase_token = str(args.phase_token or "").strip()
-    if args.segmentation_method in _LABELFREE_METHODS:
-        if not phase_token:
-            parser.error(
-                f"--phase_token is required when --segmentation_method="
-                f"{args.segmentation_method} (the phase/brightfield channel to segment)."
-            )
-        args.nuclear_token = phase_token
-        # The label-free preset is Cellpose with a brightfield model.
-        args.cellpose_model = "cyto3"
-        log.info("Label-free segmentation (%s): Cellpose cyto3 on phase channel "
-                 "%r as the segmentation input.", args.segmentation_method, phase_token)
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -4498,9 +4361,7 @@ def main() -> None:
         nuclear_token=args.nuclear_token,
         fluor_tokens=fluor_tokens_for_quant,
         # The phase/brightfield channel (if any) skips background correction and
-        # is resaved from the original. For label-free, nuclear_token was already
-        # remapped onto this token above, so the same value flags the nuclear
-        # slot; for other methods it flags one of the fluor channels.
+        # is resaved from the original; the token flags one of the fluor channels.
         phase_token=phase_token.lower(),
         tophat_nir=not args.no_tophat_nir,
         tophat_radius_nir=args.tophat_radius_nir,
@@ -4523,11 +4384,6 @@ def main() -> None:
         background_method=args.background,
         background_models={},
         qc_remove_debris=args.qc_remove_debris,
-        cellpose_diameter=args.cellpose_diameter,
-        cellpose_model=args.cellpose_model,
-        cellpose_flow_threshold=args.cellpose_flow_threshold,
-        cellpose_cellprob_threshold=args.cellpose_cellprob_threshold,
-        cellpose_nuclei_channel=args.cellpose_nuclei_channel,
         # Private (leading _) so it's filtered out of the process_image_group
         # kwargs but still read by _run_well_worker_pool to seed each worker's
         # StarDist tiling via _worker_init/set_tile_px. Mirrors _fov_threads.

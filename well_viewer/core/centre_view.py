@@ -647,11 +647,6 @@ def build_centre(app, parent: QWidget) -> None:
             else:
                 pending[title] = builder
 
-    # Special pre-build hooks for tabs that wire app-level state at build
-    # time even though their bodies are deferred (matches the original
-    # eager attribute set so external references keep resolving).
-    app._batch_export_tab_frame = tab_frames["Batch Export"]
-
     app._notebook.setCurrentIndex(0)
 
     def _on_tab_change(_i: int = 0) -> None:

@@ -146,8 +146,6 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctrl, lambda: ctx.open_export_style_panel("distribution")))
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
-    from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx, card, "Distribution")
     _sw = make_plot_view_switcher(ctx, 'Distribution')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

@@ -90,14 +90,6 @@ def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
     assert calls["bars"] == 0
 
 
-def test_review_csv_branch_refreshes_csv(loaded_app):
-    assert loaded_app._notebook.setCurrentByName("Review CSV")
-    counter = _CallCounter(loaded_app, ["_refresh_review_csv", "_redraw"])
-    select_all(loaded_app)
-    assert counter.counts["_refresh_review_csv"] == 1
-    assert counter.counts["_redraw"] == 0
-
-
 def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
     calls = []
     monkeypatch.setattr(
@@ -106,18 +98,5 @@ def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
     )
     _show_plotting_tab(loaded_app, "Scatter Plot")
     calls.clear()  # drop the redraw the tab switch itself triggered
-    select_all(loaded_app)
-    assert len(calls) == 1
-
-
-def test_smfish_branch_syncs(loaded_app, monkeypatch):
-    calls = []
-    monkeypatch.setattr(
-        "well_viewer.features.smfish.tab_view.smfish_sync_from_app",
-        lambda app: calls.append(app),
-    )
-    assert loaded_app._notebook.setCurrentByName("smFISH")
-    assert loaded_app._current_centre_tab() == "smFISH"
-    calls.clear()  # drop the sync the tab switch itself triggered
     select_all(loaded_app)
     assert len(calls) == 1

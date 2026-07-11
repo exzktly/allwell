@@ -178,14 +178,13 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "util/aw_safe.py",
     "util/well_token.py",
     # The Qt-free ``pipeline`` package: analysis-domain modules (background math,
-    # auto-threshold, flat-field, shape-feature catalog) + the Cellpose/StarDist
+    # auto-threshold, flat-field, shape-feature catalog) + the StarDist
     # segmenters and atomic writers. process_microscopy re-imports it at module
-    # top level (Torch/TensorFlow stay lazy), so the remote needs the whole
+    # top level (TensorFlow stays lazy), so the remote needs the whole
     # package or the run aborts with ModuleNotFoundError.
     "pipeline/__init__.py",
     "pipeline/auto_threshold.py",
     "pipeline/background.py",
-    "pipeline/cellpose.py",
     "pipeline/flatfield.py",
     "pipeline/io.py",
     "pipeline/shape_features.py",

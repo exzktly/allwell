@@ -251,11 +251,11 @@ class AnalyzeTabFormMixin:
         # only the selected routine's controls are shown.
         from well_viewer.core.centre_view import NamedPageStack
         self._seg_param_stack = NamedPageStack(sec)
-        # A QStackedWidget's height is the max over *all* pages, so the short
-        # default (StarDist, no params) would still reserve the tall Cellpose
-        # page's height — a big empty gap under the channel-tokens section.
-        # Collapse it to the current page by giving the hidden pages a vertical
-        # size policy of Ignored, re-applied on every page switch.
+        # A QStackedWidget's height is the max over *all* pages, so a short
+        # page would still reserve a taller page's height — a big empty gap
+        # under the channel-tokens section. Collapse it to the current page by
+        # giving the hidden pages a vertical size policy of Ignored, re-applied
+        # on every page switch.
         self._seg_param_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         self._seg_param_stack.currentChanged.connect(
             lambda _=None: self._collapse_seg_param_stack())
@@ -285,41 +285,6 @@ class AnalyzeTabFormMixin:
         area_cell.layout().addStretch(1)
         self._min_nucleus_area_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
         self._seg_param_stack.addPage("stardist_seeded_watershed_cell", ws)
-
-        # Cellpose (general): model, diameter, flow/cell-prob thresholds, optional
-        # second (nucleus) channel for cyto models. Segments the Segmentation
-        # channel above (fluorescent or brightfield).
-        cp = _page()
-        m_cell = self._row(cp, "Model")
-        self._cellpose_model_cb = QComboBox(cp)
-        self._cellpose_model_cb.addItems(["cyto3", "cyto2", "cyto", "nuclei"])
-        m_cell.layout().addWidget(self._cellpose_model_cb)
-        m_cell.layout().addStretch(1)
-        d_cell = self._row(cp, "Diameter (px, 0=auto)")
-        self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
-        d_cell.layout().addStretch(1)
-        f_cell = self._row(cp, "Flow threshold")
-        self._cellpose_flow_thr_edit = self._entry(f_cell, "0.4", width=70)
-        f_cell.layout().addStretch(1)
-        c_cell = self._row(cp, "Cell-prob threshold")
-        self._cellpose_cellprob_thr_edit = self._entry(c_cell, "0.0", width=70)
-        c_cell.layout().addStretch(1)
-        n_cell = self._row(cp, "Nucleus channel (opt)")
-        self._cellpose_nuclei_channel_edit = self._entry(n_cell, "", width=80)
-        n_cell.layout().addStretch(1)
-        self._seg_param_stack.addPage("cellpose", cp)
-
-        # Label-free (Cellpose preset on the Phase channel) — no exposed params.
-        lf = _page()
-        lf_lbl = QLabel("Segments the channel marked 'Phase' above, using a Cellpose "
-                        "brightfield preset (cyto3, auto diameter).", lf)
-        lf_lbl.setObjectName("Muted")
-        lf_lbl.setWordWrap(True)
-        lf.layout().addWidget(lf_lbl)
-        self._seg_param_stack.addPage("cellpose_labelfree", lf)
-
-        # Classical (Otsu + watershed): no extra parameters.
-        self._seg_param_stack.addPage("classical_threshold", _page())
 
         self._segmentation_hint_lbl = QLabel("", sec)
         self._segmentation_hint_lbl.setObjectName("Muted")
@@ -847,12 +812,7 @@ class AnalyzeTabFormMixin:
             phase=str(d.get("phase_token") or "").strip(),
         )
 
-        # Cellpose / watershed params.
-        combo("_cellpose_model_cb", d.get("cellpose_model"))
-        s("_cellpose_diameter_edit", d.get("cellpose_diameter"))
-        s("_cellpose_flow_thr_edit", d.get("cellpose_flow_threshold"))
-        s("_cellpose_cellprob_thr_edit", d.get("cellpose_cellprob_threshold"))
-        s("_cellpose_nuclei_channel_edit", d.get("cellpose_nuclei_channel"))
+        # Watershed params.
         s("_cytoplasm_edit", d.get("cytoplasm_token"))
         s("_min_nucleus_area_edit", d.get("min_nucleus_area_px"))
 

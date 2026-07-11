@@ -238,15 +238,6 @@ def load_directory(app, d: Path, label=None) -> None:
     # Clear the prior dataset's gate / override / cell-gating state before the
     # new dataset hydrates (audit X1 — stops cross-dataset gate leakage).
     _reset_gating_state(app)
-    # Signal any in-flight smFISH "Apply to All" worker to abort so
-    # it doesn't overwrite the *new* dataset's CSVs with counts
-    # computed against the previous dataset.
-    smfish_cancel = app._ctx.runtime.smfish.cancel_event
-    if smfish_cancel is not None:
-        try:
-            smfish_cancel.set()
-        except Exception:
-            swallowed()  # was: pass (silent except)
     n = len(csvs)
     app._show_progress(n, f"Loading {n} CSV file(s)…")
     _opening_set_phase(app, f"Loading {n} well CSV(s)…", value=0, maximum=n)
@@ -272,10 +263,6 @@ def load_directory(app, d: Path, label=None) -> None:
             swallowed()  # was: pass (silent except)
     try:
         app._persistence.load("plot_groups")
-    except Exception:
-        swallowed()
-    try:
-        app._persistence.load("export_groups")
     except Exception:
         swallowed()
     if hasattr(app, "_plot_groups_refresh"):
@@ -330,15 +317,6 @@ def load_directory(app, d: Path, label=None) -> None:
         _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
-    if hasattr(app, "_image_table_refresh_picker"):
-        try:
-            from well_viewer.features.image_browser.image_table.controller import (
-                image_table_refresh_picker, image_table_repopulate_dropdowns,
-            )
-            image_table_repopulate_dropdowns(app._ctx)
-            image_table_refresh_picker(app._ctx)
-        except Exception:
-            swallowed()  # was: pass (silent except)
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
     label_grid_refresh(app._ctx)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
@@ -368,18 +346,6 @@ def load_directory(app, d: Path, label=None) -> None:
             logging.getLogger("well_viewer").exception(
                 "Eager Cell Gating load from pipeline_info failed"
             )
-    # Hydrate saved smFISH thresholds so the spinbox shows the value
-    # that matches the spot counts already baked into the per-well CSVs.
-    # The smFISH tab is built lazily, so this primarily populates the
-    # in-memory cache (app._smfish_thresholds_saved); the spinbox itself
-    # is restored when the tab populates its channel combo.
-    try:
-        from well_viewer.persistence import smfish as _smfish_persist
-        _smfish_persist.load_from_pipeline_info(app._ctx)
-    except Exception:
-        logging.getLogger("well_viewer").exception(
-            "Eager smFISH threshold load from pipeline_info failed"
-        )
     app._persistence.load("heatmap_layouts")
     # Hydrate view-state (active tab, selected wells, channel, fold-change
     # scopes, per-tab combos) — must come after the cross-cutting state
@@ -406,17 +372,6 @@ def load_directory(app, d: Path, label=None) -> None:
     # _recalculate_threshold, which fires on every channel/metric switch)
     # keeps Included flags consistent with the loaded thresholds.
     _kick_off_gating_after_load(app)
-    # Re-sync the smFISH tab so its cached well→zip map, channel list, and
-    # extractor reflect the freshly loaded dataset. Without this, a dataset
-    # reload (e.g., after Analyze pipeline completes) leaves the tab pointing
-    # at the previous dataset's zips and shows no images until the user
-    # re-selects a well. (Stays a direct call — a tab-specific resync, not a
-    # redraw; it moves onto the bus when the smFISH tab is relocated.)
-    try:
-        from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-        smfish_sync_from_app(app._ctx)
-    except Exception:
-        logging.getLogger("well_viewer").exception("smfish_sync_from_app failed after load")
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
     # the post-load plot redraw — the emit is the redraw trigger.
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)

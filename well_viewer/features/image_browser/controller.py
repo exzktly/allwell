@@ -1,37 +1,21 @@
 """Image Browser sub-tab routing: leaf resolution + lazy sub-tab construction.
 
 Reaches the app via the ``app`` argument (never imports ``WellViewerApp``). The
-container (``tab_view``) owns the ``QTabWidget``; this module builds each sub-tab
-body (and its left sidebar, where it has one) on first show and re-runs the
-standard tab-change dispatch so the sidebar swaps to match the active leaf.
+container (``tab_view``) owns the ``QTabWidget``; this module builds the sub-tab
+body (and its left sidebar) on first show and re-runs the standard tab-change
+dispatch so the sidebar swaps to match the active leaf.
 
-The sub-tab leaf names ("Segmentation" / "Image Table" / "Cell Browser" /
-"Playground") are exactly the names ``core.tab_controller.on_tab_change`` already
-dispatches on; ``current_centre_tab`` descends into this ``QTabWidget`` so that
-leaf dispatch keeps working unchanged.
+The sub-tab leaf name ("Segmentation") is exactly the name
+``core.tab_controller.on_tab_change`` already dispatches on;
+``current_centre_tab`` descends into this ``QTabWidget`` so that leaf dispatch
+keeps working unchanged.
 """
 
 from __future__ import annotations
 
 import logging
 
-from PySide6.QtWidgets import QHBoxLayout
-
 from well_viewer.core.safe import swallowed
-# Sub-tab body/sidebar builders. Module-scope (not deferred): these aren't a
-# cycle break — they only resolve when the Image Browser page is first built
-# (centre_view imports this package lazily), so app-startup laziness is
-# preserved while each sub-tab's *widget construction* still happens on demand.
-# (Segmentation's ``build_review_image_panel`` is a god-method that still needs
-# the app handle, so it is reached through the core ``image_browser_subtab_app_bridge``
-# rather than named here — this controller stays fully ctx-native.)
-from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
-from well_viewer.features.image_browser.image_table.picker_view import build_image_table_picker
-from well_viewer.features.image_browser.cell_browser.tab_view import (
-    build_cell_browser_sidebar,
-    build_cell_browser_tab,
-)
-from well_viewer.features.image_browser.playground.tab_view import build_playground_tab
 
 _logger = logging.getLogger("well_viewer")
 
@@ -71,16 +55,6 @@ def build_image_browser_subtab(ctx, idx: int) -> None:
         if name == "Segmentation":
             from well_viewer.core.tab_controller import image_browser_subtab_app_bridge
             image_browser_subtab_app_bridge(ctx, segmentation_frame=frame)
-        elif name == "Image Table":
-            build_image_table_tab(ctx, frame)
-            build_image_table_picker(ctx, ctx.widgets.get("_sidebar_image_table_frame"))
-        elif name == "Cell Browser":
-            build_cell_browser_tab(ctx, frame)
-            build_cell_browser_sidebar(ctx, ctx.widgets.get("_sidebar_cell_browser_frame"))
-        elif name == "Playground":
-            if frame.layout() is None:
-                QHBoxLayout(frame).setContentsMargins(12, 12, 12, 12)
-            build_playground_tab(ctx, frame)
         else:
             return
         built[name] = True

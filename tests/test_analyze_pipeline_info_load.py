@@ -55,8 +55,8 @@ def test_apply_pipeline_info_populates_form(qtbot, tmp_path):
             "nuclear_token": "DAPI",
             "fluor_tokens": ["GFP", "RFP"],
             "smfish_tokens": ["RFP"],
-            "segmentation_method": "cellpose",
-            "cellpose_model": "cyto2",
+            "segmentation_method": "stardist_seeded_watershed_cell",
+            "cytoplasm_token": "GFP",
             "background": "top_hat",
             "flatfield": "gaussian",
             "csv_prefix": "meas2",
@@ -71,12 +71,12 @@ def test_apply_pipeline_info_populates_form(qtbot, tmp_path):
     tab._apply_pipeline_info(info)
 
     assert tab._nuclear_token_edit.text() == "DAPI"
-    assert tab._seg_method_cb.currentData() == "cellpose"
+    assert tab._seg_method_cb.currentData() == "stardist_seeded_watershed_cell"
     assert tab._fluor_tokens_list() == ["GFP", "RFP"]
     assert tab._smfish_tokens_list() == ["RFP"]
     assert tab._background_cb.currentText() == "top_hat"
     assert tab._flatfield_cb.currentText() == "gaussian"
-    assert tab._cellpose_model_cb.currentText() == "cyto2"
+    assert tab._cytoplasm_edit.text() == "GFP"
     assert tab._csv_prefix_edit.text() == "meas2"
     assert tab._scratch_edit.text() == str(tmp_path / "scratch")
     assert tab._scratch_user_set is True

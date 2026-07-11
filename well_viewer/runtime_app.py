@@ -89,10 +89,6 @@ _plot_save_matplotlib_fig_orchestrator = _lazy("well_viewer.core.plot_orchestrat
 
 
 _on_review_image_click_controller = _lazy("well_viewer.features.image_browser.review_image.controller", "on_review_image_click")
-_select_review_csv_row_for_cell_controller = _lazy("well_viewer.features.image_browser.review_image.controller", "select_review_csv_row_for_cell")
-
-_stats_collect_group_values = _lazy("well_viewer.features.stats.controller", "collect_group_values")
-_stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf")
 
 from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.domain.viewer_state import parse_rc
@@ -178,7 +174,6 @@ from well_viewer.data.data_loading import extract_well_token as _extract_well_to
 rep_quick_pairs, = _lazy_names("well_viewer.features.grouping.controller", "rep_quick_pairs")
 redraw_scatter_agg_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_agg_orchestrate")
 redraw_scatter_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_orchestrate")
-stats_refresh_map = _lazy("well_viewer.features.stats.controller", "stats_refresh_map")
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.selection_controller import labels_apply_affix
 update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
@@ -187,14 +182,12 @@ from well_viewer.features.export.service import export_scatter_agg_data
 from well_viewer.features.export.style import open_export_style_panel
 rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded, well_display_label = _lazy_names("well_viewer.features.grouping.controller", "rep_refresh_map", "rep_add", "rep_quick_pairs_from_dropdowns", "rank_color_wells", "rank_color_rset", "rep_color_for", "replicate_display_label", "rep_sets_loaded", "well_display_label")
 from well_viewer.core.load_controller import load_path_shim
-from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
+from well_viewer.core.plot_orchestrator import redraw_app, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
 from well_viewer.features.preview.controller import refresh_preview_picker_shim, sync_preview_well_for_image_tabs
-review_row_keys, review_norm_fov, review_collect_timepoints, refresh_review_csv, refresh_review_csv_rows, review_effective_included, review_load_rows = _lazy_names("well_viewer.features.image_browser.review_image.controller", "review_row_keys", "review_norm_fov", "review_collect_timepoints", "refresh_review_csv", "refresh_review_csv_rows", "review_effective_included", "review_load_rows")
 set_review_image_source, refresh_review_image_source_btn, review_image_set_color, review_image_refresh_color_swatch, reset_review_image_colors, toggle_review_image_binary_mask, refresh_review_image_binary_btn, toggle_review_image_outline, refresh_review_image_outline_btn, draw_review_image, render_review_image_display, review_image_resolve_lut, review_image_auto_lut, review_image_commit_lut, review_image_zoom_step, apply_review_image_cursor, set_review_image_include_mode, invalidate_review_image_frame_cache, review_image_get_color = _lazy_names("well_viewer.features.image_browser.review_image.renderer", "set_review_image_source", "refresh_review_image_source_btn", "review_image_set_color", "review_image_refresh_color_swatch", "reset_review_image_colors", "toggle_review_image_binary_mask", "refresh_review_image_binary_btn", "toggle_review_image_outline", "refresh_review_image_outline_btn", "draw_review_image", "render_review_image_display", "review_image_resolve_lut", "review_image_auto_lut", "review_image_commit_lut", "review_image_zoom_step", "apply_review_image_cursor", "set_review_image_include_mode", "invalidate_review_image_frame_cache", "review_image_get_color")
 open_scatter_cell_viewer = _lazy("well_viewer.features.scatter.cell_viewer_view", "open_scatter_cell_viewer")
 col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_scatter_metric_for_axis, refresh_scatter_agg_metric_for_axis, sync_scatter_agg_stat_combos, compose_scatter_agg_stat, update_tp_selection_display, update_scatter_tp_selection_display, on_scatter_axis_change, on_scatter_agg_axis_change = _lazy_names("well_viewer.features.scatter.controller", "col_for_scatter_axis", "col_for_scatter_entry", "scatter_axis_metric_key", "refresh_scatter_metric_for_axis", "refresh_scatter_agg_metric_for_axis", "sync_scatter_agg_stat_combos", "compose_scatter_agg_stat", "update_tp_selection_display", "update_scatter_tp_selection_display", "on_scatter_axis_change", "on_scatter_agg_axis_change")
 from well_viewer.core.selection_controller import rep_select, rep_clear_all, labels_clear_all, sel_by_id, sel_index_of, sel_strip_wells, sel_add, sel_rename, sel_delete, sel_set_hidden, sel_set_color, sel_export_one, sel_set_composition, sel_select, sel_reorder, sel_duplicate, sel_clear_all, enforce_well_exclusivity, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, select_invert, invalidate_stats_cache
-stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from well_viewer.core import tab_controller as _tabctl
 from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, run_tab_switch_smoke_checks, apply_sidebar_visibility, toggle_sidebar, visible_centre_tabs, is_tab_visible
 from well_viewer.core.ui_helpers import notes_schedule_save, apply_theme, on_theme_change, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
@@ -289,10 +282,8 @@ class WellViewerApp(QWidget):
         # so the residual god-object callbacks that other layers still invoke
         # through the runtime namespace are wired here as explicit live handles
         # (the namespace's documented purpose). These four are the last method
-        # reach-throughs pending the god-method decomposition roadmap: the stats
-        # results-panel Run / Property actions and the barplot key/label helpers.
-        self._runtime.stats.run = self._stats_run
-        self._runtime.stats.property_change = self._stats_property_change
+        # reach-throughs pending the god-method decomposition roadmap: the
+        # barplot key/label helpers.
         self._runtime.barplot.current_keys = self._bar_current_keys
         self._runtime.barplot.well_display_label = self._bar_well_display_label
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
@@ -494,58 +485,17 @@ class WellViewerApp(QWidget):
 
     def _tab_history_forward(self) -> None: return tab_history_forward(self)
 
-    # ── Statistics tab ────────────────────────────────────────────────────────
-    # Tab / panel construction lives in ``views/stats_view.py`` — callers invoke
-    # ``build_stats_tab`` / ``build_stats_group_editor`` / ``build_stats_results_panel``
-    # there directly (teardown Phase 8).
-
-    # Stats tab group-editor methods (delegate to stats_controller)
-
-    def _stats_active_group(self) -> Optional[BarGroup]: return stats_active_group(self._ctx)
-
-
-    def _stats_refresh_single_btn(self, tok: str) -> None: stats_refresh_map(self._ctx)
-
-
-
-
-
-
-
-
-
-
-
-    def _stats_write_result(self, text: str) -> None:
-        self._stats_result_text.setReadOnly(False)
-        self._stats_result_text.setPlainText(text or "")
-        self._stats_result_text.setReadOnly(True)
-
-
-    def _stats_collect_group_values(self, grp: BarGroup, target_t: float) -> List[float]:
-        return stats_collect_group_values_shim(self, grp, target_t)
-
-    _STATS_STATISTIC_KEYS = {
-        "Mean (above threshold)": "mean",
-        "Mean (all cells)": "mean_all",
-        "Median (above threshold)": "median",
-        "Fraction above threshold": "fraction",
-    }
-
-    def _stats_active_channel_entry(self) -> str: return stats_active_channel_entry(self)
-
-    def _stats_active_val_col(self) -> str: return stats_active_val_col(self)
-
-    def _stats_active_threshold(self) -> float: return stats_active_threshold(self)
-
-    def _stats_active_statistic(self) -> str: return stats_active_statistic(self)
-
-    def _stats_run(self) -> None: return stats_run_shim(self)
-
-    def _stats_draw_ks_cdf(self, group_vals: List[Tuple[str, List[float]]], tp_str: str) -> None:
-        return stats_draw_ks_cdf_shim(self, group_vals, tp_str)
-
     # ── Preview sidebar picker ────────────────────────────────────────────────
+
+
+
+
+
+
+
+
+
+
 
     def _refresh_preview_picker(self) -> None: return refresh_preview_picker_shim(self._ctx)
 
@@ -872,13 +822,6 @@ class WellViewerApp(QWidget):
 
     def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self)
 
-    # Named ``_stats_property_change`` (not ``_on_stats_property_change``) so the
-    # stats results-panel builder can wire the Property combo through the
-    # ``ctx.runtime.stats`` namespace (prefix ``_stats_``) without naming the
-    # god-object; the body stays fully app-side.
-    def _stats_property_change(self) -> None: return on_stats_property_change(self)
-        # Stats display refreshes on its own when run; nothing to redraw here.
-
 
 
 
@@ -1016,9 +959,6 @@ class WellViewerApp(QWidget):
 
     def _apply_review_image_cursor(self) -> None: return apply_review_image_cursor(self._ctx)
 
-    def _select_review_csv_row_for_cell(self, fov: str, tp: str, nucleus_id: str) -> None:
-        _select_review_csv_row_for_cell_controller(self._ctx, fov, tp, nucleus_id, _logger)
-
     def _set_review_image_include_mode(self, enabled: bool) -> None: return set_review_image_include_mode(self._ctx, enabled)
 
     def _toggle_selected_review_cell(self) -> None:
@@ -1032,10 +972,6 @@ class WellViewerApp(QWidget):
     # ── Export ────────────────────────────────────────────────────────────────
 
 
-
-    # ── Batch export ──────────────────────────────────────────────────────────
-
-    def _open_batch_export(self) -> None: return open_batch_export_shim(self._ctx)
 
     # ── Montage ───────────────────────────────────────────────────────────────
 
@@ -1066,20 +1002,6 @@ class WellViewerApp(QWidget):
     def _show_line_sidebar(self) -> None:
         """No-op: the unified well picker is always visible for plot tabs."""
         pass
-
-    def _build_review_csv_tab(self, parent) -> None:
-        from well_viewer.features.review_csv.tab_view import build_review_csv_tab as _v
-        _v(self._ctx, parent)
-
-    def _refresh_review_csv(self) -> None: refresh_review_csv(self._ctx)
-
-    def _refresh_review_csv_rows(self, rows=None) -> None: refresh_review_csv_rows(self._ctx, rows)
-
-    def _review_effective_included(self, label: str, row: dict) -> str:
-        return review_effective_included(self._ctx, label, row)
-
-
-    def _review_load_rows(self, label: str) -> List[dict]: return review_load_rows(self._ctx, label)
 
     def _update_bar_tp_menu(self) -> None: return update_bar_tp_menu(self._ctx)
 
@@ -1152,12 +1074,6 @@ class WellViewerApp(QWidget):
 
 
 
-
-    def _open_bar_batch_export(self) -> None: return open_bar_batch_export_shim(self._ctx)
-
-    def _open_scatter_cells_batch_export(self) -> None: return open_scatter_cells_batch_export_shim(self._ctx)
-
-    def _open_scatter_agg_batch_export(self) -> None: return open_scatter_agg_batch_export_shim(self._ctx)
 
     # ── Save current figure ───────────────────────────────────────────────────
 

@@ -109,34 +109,11 @@ def build_pipeline_args(
     cytoplasm_token = (opts.get("cytoplasm_token") or "").strip()
     if segmentation_method == "stardist_seeded_watershed_cell" and cytoplasm_token:
         args += ["--cytoplasm_token", cytoplasm_token]
-    # The phase token has two uses, so it is sent for ANY method when set:
-    #   * cellpose_labelfree — main() remaps it onto the nuclear slot (cyto3
-    #     brightfield preset) as the segmentation input;
-    #   * every method — the phase channel skips background correction and is
-    #     resaved from the original (see _correct_image_group phase passthrough).
+    # The phase channel skips background correction and is resaved from the
+    # original (see _correct_image_group phase passthrough); sent when set.
     phase_token = (opts.get("phase_token") or "").strip()
     if phase_token:
         args += ["--phase_token", phase_token]
-    # General Cellpose: expose model + diameter + thresholds + optional nucleus
-    # channel (works on a fluorescent or brightfield channel; no phase remap).
-    if segmentation_method == "cellpose":
-        args += ["--cellpose_model", str(opts.get("cellpose_model", "cyto3") or "cyto3")]
-        for flag, key, default in (
-            ("--cellpose_diameter", "cellpose_diameter", 0.0),
-            ("--cellpose_flow_threshold", "cellpose_flow_threshold", 0.4),
-            ("--cellpose_cellprob_threshold", "cellpose_cellprob_threshold", 0.0),
-        ):
-            try:
-                val = float(opts.get(key, default))
-            except (TypeError, ValueError):
-                val = default
-            # diameter is only meaningful when > 0; thresholds always emitted
-            if key == "cellpose_diameter" and val <= 0:
-                continue
-            args += [flag, str(val)]
-        nuc = (opts.get("cellpose_nuclei_channel") or "").strip()
-        if nuc:
-            args += ["--cellpose_nuclei_channel", nuc]
     _emit_num_flag(args, opts, "tophat_radius_nir", "--tophat_radius_nir", int)
     _emit_num_flag(args, opts, "tophat_radius_fluor", "--tophat_radius_fluor", int)
     _emit_num_flag(args, opts, "fft_small_nir", "--fft_small_nir", int)

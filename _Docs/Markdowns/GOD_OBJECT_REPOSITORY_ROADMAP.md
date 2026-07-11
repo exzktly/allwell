@@ -426,7 +426,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 14, was 38) | via A3 clusters 2026-07-11 |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 43, was 135) | +selection_controller (9 clusters) 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 34, was 135) | +load_controller (10 clusters, ~75% done) 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,12 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 — load_controller cluster:** migrated the 9 `app`-first funcs in
+  `core/load_controller.py` (load_directory, load_path(_shim), the opening-dialog
+  helpers, reset/kick-off gating, build_tok_to_label) to `ctx`-first via the
+  `app = ctx.window` bridge; fixed the `load_path_shim` / `_load_directory_controller`
+  delegators (`self._ctx`) and the `_reset_gating_state` unit test's mock.
+  `APP_FIRST_FUNC_BUDGET` 43→34. app_smoke (dataset load) + frozen-ctx + guards green.
 - 2026-07-11 — **A3 — selection_controller cluster (largest):** migrated all 25
   `app`-first funcs in `core/selection_controller.py` to `ctx`-first via the
   `app = ctx.window` bridge (incl. the A5-targeted `rebuild_all` /

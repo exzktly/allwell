@@ -28,12 +28,13 @@ def test_reset_clears_all_leaky_gating_attrs():
     rt = AppRuntime()
     rt.review.included_overrides = {"A01/0/1/5": False}
     app = types.SimpleNamespace(
-        _ctx=types.SimpleNamespace(runtime=rt),
+        runtime=rt,
         _app_state=types.SimpleNamespace(
             cell_gating=cg,
             heatmap=types.SimpleNamespace(active_layout_name="old-layout"),
         ),
     )
+    app.window = app  # the mock doubles as its own ctx (ctx.window -> app)
 
     _reset_gating_state(app)
 

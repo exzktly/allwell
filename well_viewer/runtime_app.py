@@ -757,11 +757,11 @@ class WellViewerApp(QWidget):
             # Defer so the dialog closes and the window repaints before load
             QTimer.singleShot(50, lambda: self._load_path(Path(d)))
 
-    def _load_path(self, path): return load_path_shim(self, path)
+    def _load_path(self, path): return load_path_shim(self._ctx, path)
 
     def _load_directory(self, d: Path, label: Optional[str] = None) -> None:
         self._drain_pending_centre_builders()
-        _load_directory_controller(self, d, label=label)
+        _load_directory_controller(self._ctx, d, label=label)
         refresh_plot_empty_states(self)
 
 

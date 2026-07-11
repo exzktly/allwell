@@ -130,7 +130,7 @@ def _refresh_tab_view(ctx, tab: str, *, redrew: bool) -> bool:
     # hook fall through to the shared ``app._redraw()``.
     desc = app._features.get(tab) if hasattr(app, "_features") else None
     if desc is not None and desc.on_selection_changed is not None:
-        desc.on_selection_changed(app)
+        desc.on_selection_changed(ctx)
         return redrew
     if not redrew:
         app._redraw()
@@ -919,7 +919,7 @@ def rebuild_all(ctx) -> None:
         if (desc is not None and desc.on_selection_changed is not None
                 and app._is_tab_visible(_name)):
             try:
-                desc.on_selection_changed(app)
+                desc.on_selection_changed(ctx)
             except Exception:
                 __import__("logging").getLogger("well_viewer.runtime_app").exception(
                     "%s refresh after group edit failed", _name)

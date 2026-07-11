@@ -67,10 +67,10 @@ class FeatureDescriptor:
     so the selection / channel / tab-activation dispatch can still resolve them
     by leaf name.
 
-    Every hook takes the ``WellViewerApp`` instance (``app``) and is optional;
-    a ``None`` hook means "this feature does nothing on that event". Hooks are
-    expected to be self-guarding (``hasattr`` checks for lazily-built widgets),
-    exactly as the inline branches they replace were.
+    Every hook takes the ``ViewerContext`` (``ctx``) and is optional; a ``None``
+    hook means "this feature does nothing on that event". Hooks are expected to
+    be self-guarding (``ctx.widgets.has(...)`` / ``getattr(ctx.window, …)`` checks
+    for lazily-built widgets), exactly as the inline branches they replace were.
     """
 
     name: str

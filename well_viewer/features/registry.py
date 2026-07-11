@@ -396,60 +396,68 @@ def _loaded_smfish(ctx) -> None:
 # ``app._redraw()`` in the controller.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _sel_bar_plots(app) -> None:
+def _sel_bar_plots(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.barplot.renderer import redraw_bars
     app._update_bar_tp_menu()
-    redraw_bars(app._ctx)
+    redraw_bars(ctx)
 
 
-def _sel_scatter(app) -> None:
+def _sel_scatter(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
-    update_scatter_menus(app._ctx)
-    scatter_redraw_active(app._ctx)
+    update_scatter_menus(ctx)
+    scatter_redraw_active(ctx)
 
 
-def _sel_review_csv(app) -> None:
+def _sel_review_csv(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     app._refresh_review_csv()
 
 
-def _sel_multivariate(app) -> None:
+def _sel_multivariate(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.multivariate.controller import mv_recompute
     if hasattr(app, "_mv_canvas"):
-        mv_recompute(app._ctx)
+        mv_recompute(ctx)
 
 
-def _sel_spatial(app) -> None:
+def _sel_spatial(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.spatial.controller import sp_on_selection_changed
     if hasattr(app, "_sp_canvas"):
-        sp_on_selection_changed(app._ctx)
+        sp_on_selection_changed(ctx)
 
 
-def _sel_smfish(app) -> None:
+def _sel_smfish(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-    smfish_sync_from_app(app._ctx)
+    smfish_sync_from_app(ctx)
 
 
-def _sel_sample_definitions(app) -> None:
+def _sel_sample_definitions(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Cell Gating is a sub-tab here; refresh its CDF if the user has opened it.
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
         from well_viewer.features.grouping.cell_gating_tab_view import (
             cell_gating_load_cell_areas,
         )
-        cell_gating_load_cell_areas(app._ctx)
+        cell_gating_load_cell_areas(ctx)
 
 
-def _sel_cell_browser(app) -> None:
+def _sel_cell_browser(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Keep the gallery in sync with the live well selection when both panes are
     # live in Split View — the user expects the Scatter and Cell Browser to track
     # each other. Outside split the gallery stays Generate-gated (deferred) so a
     # selection change doesn't trigger a heavy re-composite unprompted.
-    if not app._ctx.runtime.split.active:
+    if not ctx.runtime.split.active:
         return
     from well_viewer.features.image_browser.cell_browser.controller import (
         apply_filters,
     )
-    apply_filters(app._ctx, live_sync=True)
+    apply_filters(ctx, live_sync=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

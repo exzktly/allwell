@@ -102,9 +102,27 @@ def load_profile(source) -> Profile:
     return Profile(name=name, features=features, subtabs=subtabs)
 
 
+#: Marker file the PyInstaller build writes into the bundle root to bake the
+#: chosen profile, since a frozen binary has no ``ALLWELL_PROFILE`` env at run
+#: time (see ``all_well.spec``). Absent in a dev checkout → the full app.
+_BAKED_MARKER = "active_profile.txt"
+
+
 def active_profile() -> Profile:
-    """Resolve the profile named by ``ALLWELL_PROFILE`` (``FULL`` when unset)."""
+    """Resolve the active profile.
+
+    Precedence: the ``ALLWELL_PROFILE`` env var (dev / explicit override), then a
+    baked ``active_profile.txt`` marker in the bundle root (set at build time),
+    then the full feature set.
+    """
     name = os.environ.get(_ENV_VAR, "").strip()
+    if not name:
+        marker = _repo_root() / _BAKED_MARKER
+        try:
+            if marker.exists():
+                name = marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            name = ""
     if not name or name.lower() == "full":
         return FULL
     return load_profile(name)

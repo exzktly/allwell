@@ -27,6 +27,10 @@ paths = [
   "well_viewer/persistence/multivariate.py",
 ]
 tests = ["tests/test_multivariate_*.py"]
+# Heavy third-party deps ONLY this feature pulls in — the PyInstaller build adds
+# them to `excludes` (and skips their collect_submodules) when Multivariate is
+# profiled out, so a subset binary drops them from the bundle.
+deps = ["sklearn", "umap", "pynndescent"]
 
 [[feature]]
 name = "Spatial"

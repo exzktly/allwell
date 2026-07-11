@@ -51,6 +51,22 @@ def test_active_profile_env(monkeypatch):
     assert active_profile().name == "plotting_only"
 
 
+def test_baked_marker_selects_profile_without_env(monkeypatch, tmp_path):
+    """The PyInstaller build bakes `active_profile.txt` at the bundle root; with
+    no env var, active_profile() must read it (the frozen-binary path)."""
+    import shutil
+    import well_viewer.core.profile as prof
+    monkeypatch.delenv("ALLWELL_PROFILE", raising=False)
+    # Mirror a frozen bundle root: the marker + a profiles/ dir under it.
+    shutil.copytree(prof.profiles_dir(), tmp_path / "profiles")
+    monkeypatch.setattr(prof, "_repo_root", lambda: tmp_path)
+    marker = tmp_path / prof._BAKED_MARKER
+    marker.write_text("thin")
+    assert prof.active_profile().name == "thin"
+    marker.unlink()
+    assert prof.active_profile() is prof.FULL   # gone → full app
+
+
 def test_subtab_filter():
     p = Profile(name="p", features=frozenset({"Image Browser"}),
                 subtabs={"Image Browser": frozenset({"Segmentation"})})

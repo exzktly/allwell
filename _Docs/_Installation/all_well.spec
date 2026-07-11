@@ -52,6 +52,70 @@ _ver_ns: dict = {}
 exec((_parent / "version.py").read_text(), _ver_ns)
 APP_VERSION = _ver_ns["__version__"]
 
+# ---------------------------------------------------------------------------
+# Build profile — select which features go in THIS binary
+# ---------------------------------------------------------------------------
+# `ALLWELL_PROFILE=<name> scripts/build_executable.sh` builds a binary that ships
+# only the profile's features (profiles/<name>.toml). Unset / "full" = the full
+# app. Excluded features' source dirs are omitted from the bundled `well_viewer`
+# tree, their unique heavy deps are excluded from the module graph, and the
+# chosen profile is baked as `active_profile.txt` so the frozen app's registry
+# filters to match the bundled code (a frozen binary has no env at run time).
+import tomllib   # noqa: E402  (Python 3.11+)
+
+_PROFILE = os.environ.get("ALLWELL_PROFILE", "").strip()
+_excluded_features: list = []
+_excluded_repo_dirs: list = []      # repo-relative dirs to omit from the bundle
+_excluded_deps: list = []           # heavy deps unique to excluded features
+_profile_active = bool(_PROFILE) and _PROFILE.lower() != "full"
+
+if _profile_active:
+    _prof = tomllib.loads((_parent / "profiles" / f"{_PROFILE}.toml").read_text())
+    _feat_set = _prof.get("features")          # None => admit all
+    _subtabs = _prof.get("subtabs") or {}
+    _catalog = tomllib.loads(
+        (_parent / "profiles" / "full.toml").read_text()).get("feature", [])
+
+    def _profile_admits(entry: dict) -> bool:
+        if _feat_set is None:
+            return True
+        parent = entry.get("parent")
+        if parent:
+            if parent not in _feat_set:
+                return False
+            allowed = _subtabs.get(parent)
+            return allowed is None or entry["name"] in allowed
+        return entry["name"] in _feat_set
+
+    for _e in _catalog:
+        if _profile_admits(_e):
+            continue
+        _excluded_features.append(_e["name"])
+        _excluded_repo_dirs += [p for p in (_e.get("paths") or [])
+                                if p.startswith("well_viewer/")]
+        _excluded_deps += _e.get("deps") or []
+    print(f"[all_well.spec] ALLWELL_PROFILE={_PROFILE!r} — excluding "
+          f"{len(_excluded_features)} feature(s): {_excluded_features}")
+
+
+def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
+    """Per-file data tuples for *pkg_root* → *dest*, omitting excluded dirs.
+
+    Excludes are repo-relative (e.g. ``well_viewer/features/stats``); any file
+    under one is dropped, so a profiled-out feature's source never lands in the
+    bundle. __pycache__ is always skipped."""
+    out: list = []
+    ex = [d.rstrip("/") for d in exclude_repo_dirs]
+    for f in pkg_root.rglob("*"):
+        if not f.is_file() or "__pycache__" in f.parts:
+            continue
+        repo_rel = f"{dest}/{f.relative_to(pkg_root).as_posix()}"
+        if any(repo_rel == d or repo_rel.startswith(d + "/") for d in ex):
+            continue
+        out.append((str(f), str(Path(dest) / f.relative_to(pkg_root).parent)))
+    return out
+
+
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
     (str(_parent / "analyze_tab.py"),           "."),
@@ -63,11 +127,16 @@ sibling_scripts = [
     (str(_parent / "version.py"),               "."),
 ]
 
-# Bundle every first-party package so module imports resolve at runtime
-# inside the PyInstaller _MEIPASS root.
+# Bundle every first-party package so module imports resolve at runtime inside
+# the PyInstaller _MEIPASS root. ``well_viewer`` is filtered per the build
+# profile (excluded feature dirs dropped); the others ship whole.
 for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util"):
     _pkg_path = _parent / _pkg
-    if _pkg_path.is_dir():
+    if not _pkg_path.is_dir():
+        continue
+    if _pkg == "well_viewer" and _profile_active:
+        sibling_scripts += _pkg_datas(_pkg_path, _pkg, _excluded_repo_dirs)
+    else:
         sibling_scripts.append((str(_pkg_path), _pkg))
 
 # matplotlib ships fonts, styles, and mpl-data at runtime
@@ -102,6 +171,19 @@ if _fonts_dir.is_dir():
 _icons_dir = _parent / "assets" / "icons"
 if _icons_dir.is_dir():
     extra_data.append((str(_icons_dir), "assets/icons"))
+
+# Build-profile manifests + baked marker. Ship profiles/ so the frozen app's
+# ``well_viewer.core.profile.load_profile`` resolves the active manifest, and
+# write ``active_profile.txt`` at the bundle root so ``active_profile()`` picks
+# the profile with no run-time env var. Absent (full build) → the full app.
+_profiles_dir = _parent / "profiles"
+if _profiles_dir.is_dir():
+    extra_data.append((str(_profiles_dir), "profiles"))
+if _profile_active:
+    import tempfile as _tempfile
+    _marker_path = Path(_tempfile.mkdtemp()) / "active_profile.txt"
+    _marker_path.write_text(_PROFILE, encoding="utf-8")
+    extra_data.append((str(_marker_path), "."))
 
 datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 
@@ -413,11 +495,13 @@ datas       += collect_data_files("scipy")
 # Both have submodules loaded lazily (sklearn's manifold/decomposition, umap's
 # numba-compiled layout functions, pynndescent) that the static analyzer misses,
 # plus sklearn ships data files. numba/llvmlite/scipy are already collected
-# above (umap/pynndescent depend on them).
-hiddenimports += collect_submodules("sklearn")
-datas       += collect_data_files("sklearn")
-hiddenimports += collect_submodules("umap")
-hiddenimports += collect_submodules("pynndescent")
+# above (umap/pynndescent depend on them). Skipped when the Multivariate feature
+# is profiled out of this build (its deps are added to `excludes` below).
+if "Multivariate" not in _excluded_features:
+    hiddenimports += collect_submodules("sklearn")
+    datas       += collect_data_files("sklearn")
+    hiddenimports += collect_submodules("umap")
+    hiddenimports += collect_submodules("pynndescent")
 
 # setuptools — TF's eager import of tensorflow._api.v2.compat.v1.lite
 # walks through tensorflow.lite.python.convert, which pulls in
@@ -602,7 +686,7 @@ a = Analysis(
         "keras.src.benchmarks",
         # NOTE: ssl intentionally NOT excluded — process_microscopy patches
         # ssl._create_default_https_context for StarDist model download
-    ] + _qt_excludes + _tracking_excludes + _torch_excludes,
+    ] + _qt_excludes + _tracking_excludes + _torch_excludes + _excluded_deps,
     noarchive=False,
     optimize=1,
 )

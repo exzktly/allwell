@@ -36,7 +36,32 @@ is the day-to-day mechanism — validate a subset *before* stripping anything.
 Guarded by `tests/test_feature_profile.py` (the app boots + loads a dataset
 under a subset profile).
 
-## 2. Produce a physically stripped tree (for distribution)
+## 2. Build a binary with only the chosen features
+
+The PyInstaller build is profile-aware — you specify features, it builds a binary
+with only those:
+
+```bash
+ALLWELL_PROFILE=thin scripts/build_executable.sh     # thin binary
+scripts/build_executable.sh                          # full app (unset = full)
+```
+
+`all_well.spec` reads `ALLWELL_PROFILE` and, for a subset:
+
+1. **Omits excluded features' source** from the bundled `well_viewer` tree
+   (`_pkg_datas` drops each catalog `paths` dir).
+2. **Drops their unique heavy deps** — e.g. excluding Multivariate removes
+   `sklearn` / `umap` / `pynndescent` from the module graph (its catalog `deps`
+   go to PyInstaller `excludes`, and their `collect_submodules` is skipped).
+3. **Bakes the profile** as `active_profile.txt` at the bundle root. A frozen
+   binary has no `ALLWELL_PROFILE` env at run time, so `active_profile()` reads
+   this marker and the runtime registry filters to match the bundled code.
+
+This composes with the existing `ALLWELL_WITH_TRACKING` lever (torch/tracking
+stack). The de-coupling guards (§6) are what let the excluded modules be
+physically absent without the surviving code crashing.
+
+## 3. Produce a physically stripped tree (source, not binary)
 
 When you want the excluded code actually gone, `scripts/derive_profile.py` diffs
 the removable-feature catalog (`profiles/full.toml`) against a target profile —
@@ -56,7 +81,7 @@ profile-boot and feature-removal guards catch any missed cross-reference.
 
 Guarded by `tests/test_derive_profile.py`.
 
-## 3. Cross-version data safety
+## 4. Cross-version data safety
 
 A dataset moved between the full and thin apps must not lose the other's saved
 state. This already holds and is guarded by
@@ -71,7 +96,7 @@ state. This already holds and is guarded by
 
 **Never** add a persistence path that rewrites the whole document.
 
-## 4. Parallel maintenance workflow
+## 5. Parallel maintenance workflow
 
 - **Full = trunk.** All feature work lands there.
 - **Thin = generated / rebased from full.** Shared-region changes flow in;
@@ -80,24 +105,30 @@ state. This already holds and is guarded by
   (`ALLWELL_PROFILE=<p>`) in CI. A new hard-coded reference to an excluded
   feature fails the subset boot at PR time.
 
-## 5. Remaining work to reach 100% (must land in the *full* app)
+## 6. De-coupling: what's done, what's optional
 
-The profile filter is feature-agnostic, but a few spots in the **full** codebase
-still hard-code a specific feature outside the registry. Until these are made
-registry/profile-driven, `derive_profile.py --apply` needs a small manual pass
-(dropping the descriptor line + re-tightening ratchets). Each was hand-removed on
-the thin branch; generalize the pattern on trunk:
+**Done on this branch** — the kept→excluded references that would break a subset
+binary are now guarded on the active registry, so a profiled-out feature's module
+can be physically absent:
 
-| Coupling (full app) | Make it… |
+- centre_view's Batch Export frame stash;
+- the six plot tabs' Saved Plots wiring;
+- load_controller's Image Table / smFISH refresh on dataset load;
+- view_state's Image Table snapshot + restore;
+- Image Browser sub-tabs (profile-filtered; each imports its module only when
+  built).
+
+**Optional polish** (not required for a working subset binary — nice-to-haves
+that make the *source* generator fully hands-free / shrink the binary further):
+
+| Item | Benefit |
 |---|---|
-| `centre_view.py` stashing named per-feature frames on `app` (`app._batch_export_tab_frame`) | features fetch their own frame via `ctx` |
-| `centre_view.py` hard-coded `_PLOT_SUBTABS` list | plot sub-tabs enumerated from the registry (`parent == "Plotting"`) |
-| `image_browser/{tab_view,controller}` hard-coded sub-tab names + `if name == …` branches | an Image Browser sub-registry of descriptors |
-| plot tabs importing `saved_plots.wire_save_to_gallery` | a "card decorator" hook features *register*, not one tabs import |
-| `load_controller` per-feature refresh blocks | an `on_dataset_loaded` registry hook (the descriptor field already exists) |
-| `view_state` per-tab `_snapshot_*` / `_apply_*` | each tab registers its own snapshot/restore pair |
-| `runtime_app` per-feature proxy methods | finish each feature's `ctx` migration; the proxies then vanish |
-| `process_microscopy` `_CELLPOSE_METHODS` branches threaded through `_process_well`/argparse | a segmentation-method **strategy registry** (name → segmenter + CLI args + UI panel) |
+| plot sub-tabs enumerated from the registry (`parent == "Plotting"`) instead of the hard-coded `_PLOT_SUBTABS` | drop an individual plot type by manifest |
+| a "card decorator" hook Saved Plots *registers* (vs plot tabs importing it) | removes the per-tab guard entirely |
+| `on_dataset_loaded` registry hook replacing load_controller's per-feature blocks | fully declarative post-load refresh |
+| per-tab snapshot/restore registered by each feature (vs view_state's `_snapshot_*`) | view_state stops naming Image Table |
+| segmentation-method **strategy registry** (name → segmenter + CLI args + UI panel), + Cellpose as a `profiles` dep like tracking | a StarDist-only binary drops torch/cellpose |
+| `runtime_app` per-feature proxy methods finish their `ctx` migration | the dead proxies vanish |
 
-Knock these out and the excluded set is entirely "a manifest," with no bespoke
-edits and no ratchet surgery.
+None of these block build-time feature selection today; they reduce the residual
+per-feature code and let `derive_profile.py --apply` run with zero manual follow-up.

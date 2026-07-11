@@ -41,6 +41,16 @@ fi
 # multi-frame tracking + its training stack, install the extras first
 # (pip install --no-build-isolation -r _Docs/requirements-tracking.txt) and build
 # with: ALLWELL_WITH_TRACKING=1 scripts/build_executable.sh
+#
+# Build-time FEATURE selection: choose which Review features go in the binary
+# with a profile manifest (profiles/<name>.toml). The spec omits excluded
+# features' source + unique heavy deps and bakes the profile so the frozen app
+# matches. Unset = the full app. Example (thin build — Plotting / Sample
+# Definitions / Segmentation only):
+#   ALLWELL_PROFILE=thin scripts/build_executable.sh
+if [[ -n "${ALLWELL_PROFILE:-}" && "${ALLWELL_PROFILE}" != "full" ]]; then
+    echo "  (ALLWELL_PROFILE=${ALLWELL_PROFILE} — building a feature subset)"
+fi
 echo "Running PyInstaller against $SPEC_FILE ..."
 if [[ -n "${ALLWELL_WITH_TRACKING:-}" && "${ALLWELL_WITH_TRACKING}" != "0" ]]; then
     echo "  (ALLWELL_WITH_TRACKING set — bundling tracking/training stack)"

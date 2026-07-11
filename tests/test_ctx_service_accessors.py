@@ -31,11 +31,11 @@ _ALLOWED = {
     # and can never be god-object-free. Named so those needs don't count against
     # the ctx.app burn-down while staying enumerable + frozen here.
     "window",
-    "persistence",
-    # ``features`` names the feature-descriptor registry — a genuine app-level
-    # catalogue (which tabs exist + their metadata) controllers read to reason
-    # about tab behaviour, not arbitrary god-object access.
-    "features",
+    # NOTE (A5): ``persistence`` and ``features`` were extracted from this frozen
+    # accessor set — they are now direct ctx-held collaborators (dataclass fields /
+    # post-construction attributes), not properties that reach into ``_window``.
+    # ``ctx.persistence`` / ``ctx.features`` still resolve, but as owned objects, so
+    # they no longer count as god-object service accessors here.
     # ``rebuild_all`` / ``refresh_sidebar_map`` name the two genuine app-level
     # *orchestration* services (master redraw fan-out; debounced sidebar-map
     # repaint) that the final ctx.app seams bottomed into. Each fans out into a

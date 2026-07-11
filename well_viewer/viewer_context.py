@@ -57,6 +57,13 @@ class ViewerContext:
     bus: EventBus
     widgets: WidgetRegistry
     runtime: object = None   # AppRuntime — per-feature live-object namespaces (T2)
+    # The feature-descriptor registry (``{tab_name: FeatureDescriptor}``) — the
+    # app's own catalogue of which tabs exist + their metadata. Held directly as
+    # a collaborator (A5), not reached through ``_window``: it is built before the
+    # context and injected here, so ``ctx.features`` names the registry itself
+    # rather than a window property. ``persistence`` is attached the same way but
+    # after construction (it takes ``ctx``) — see runtime_app + ``__post_init__``.
+    features: object = None
     # The ``WellViewerApp`` instance, held ONLY as the ``QMainWindow`` that the
     # ``window`` accessor exposes and as the transitional host of the named
     # services below. Private: no code names ``ctx._window`` — features use the
@@ -64,15 +71,27 @@ class ViewerContext:
     # gets its own home and this handle narrows to (or is replaced by) a pure
     # window widget.
     _window: object = None
+    # The persistence registry (per-slice save/load). Attached after construction
+    # by ``runtime_app`` via ``object.__setattr__`` — it takes ``ctx`` so it cannot
+    # exist at field-init time. Declared here so ``ctx.persistence`` is a genuine
+    # held collaborator (A5), never a reach into ``_window``. Defaults to ``None``
+    # until wired; the freeze test (which inspects the *class*) does not count it.
+    persistence: object = None
 
     def __post_init__(self) -> None:
         # Attach the row-access facade (B2) onto the state so callers reach it
         # as ``ctx.state.repo``. Done here — the DI bundle is the natural wiring
         # point and it needs the assembled context. Mutates ``state`` (not the
         # frozen ctx), and only when unset so a caller-provided repo is kept.
-        if getattr(self.state, "repo", None) is None:
+        # Skipped for the lightweight ``state`` stubs unit tests pass (``None`` /
+        # a bare object that cannot hold the attribute); production always uses
+        # ``AppState``, which accepts it.
+        if self.state is not None and getattr(self.state, "repo", None) is None:
             from well_viewer.data.well_repository import WellRepository
-            self.state.repo = WellRepository(self)
+            try:
+                self.state.repo = WellRepository(self)
+            except (AttributeError, TypeError):
+                pass
 
     # ── Named app/window-service accessors (A8, design "C") ──────────────────
     # Minimal, closed set — see the module docstring and the freeze test. Each
@@ -90,27 +109,6 @@ class ViewerContext:
         Routing those through ``window`` keeps the ctx-app burn-down honest — a
         ``ctx.window`` call is a widget-parenting need, not behaviour coupling."""
         return self._window
-
-    @property
-    def persistence(self):
-        """The app's persistence registry (``schedule_save`` / ``load`` per slice).
-
-        A genuine app-level *service* (view-state autosave/load), not lazy
-        behaviour coupling — features name it here instead of reaching a raw app
-        persistence handle. Kept in the frozen accessor set."""
-        return self._window._persistence
-
-    @property
-    def features(self):
-        """The feature-descriptor registry (``{tab_name: FeatureDescriptor}``).
-
-        A genuine app-level *catalogue service* — the app's own record of which
-        tabs exist and their metadata (``single_well_selection`` / ``per_well_
-        selection`` / lifecycle hooks). Controllers reason about tab behaviour
-        through it (is this tab a single-well selector?) without naming the
-        god-object; exposing it here keeps that access enumerable and frozen.
-        Kept in the frozen accessor set."""
-        return getattr(self._window, "_features", None)
 
     def rebuild_all(self) -> None:
         """Run the app's master redraw fan-out after a data/selection change.

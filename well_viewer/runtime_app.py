@@ -283,23 +283,23 @@ class WellViewerApp(QWidget):
             bus=self._event_bus,
             widgets=self._widget_registry,
             runtime=self._runtime,
+            features=self._features,
             _window=self,
         )
-        # A8 T6: the runtime store no longer forwards to the app via ``getattr``,
-        # so the residual god-object callbacks that other layers still invoke
-        # through the runtime namespace are wired here as explicit live handles
-        # (the namespace's documented purpose). These four are the last method
-        # reach-throughs pending the god-method decomposition roadmap: the stats
-        # results-panel Run / Property actions and the barplot key/label helpers.
+        # A8 T6: wire the residual god-object callbacks other layers invoke
+        # through the runtime namespace as explicit live handles. These four are
+        # the last method reach-throughs pending the god-method decomposition
+        # roadmap (A4): stats Run / Property actions + barplot key/label helpers.
         self._runtime.stats.run = self._stats_run
         self._runtime.stats.property_change = self._stats_property_change
         self._runtime.barplot.current_keys = self._bar_current_keys
         self._runtime.barplot.well_display_label = self._bar_well_display_label
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)
-        # Phase 4 teardown: one debounce path + save/load dispatch for the
-        # data-dir JSON domains, replacing the per-domain wrapper methods.
+        # Phase 4 teardown: one debounce path + save/load dispatch for the data-dir JSON domains.
         self._persistence = build_persistence_registry(self._ctx)
+        # Hold as a direct ctx collaborator (A5); post-construction — it takes ctx.
+        object.__setattr__(self._ctx, "persistence", self._persistence)
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in

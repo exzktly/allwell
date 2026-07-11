@@ -1,0 +1,98 @@
+# The full-app catalog: every REMOVABLE feature and what it owns on disk.
+#
+# This is the reference `scripts/derive_profile.py` diffs a target profile
+# against to produce a physically-stripped tree (real deletion, for
+# distribution). It lives with the full app; on an already-thin tree the listed
+# paths are simply absent and the generator skips them.
+#
+# The runtime filter does NOT read this file — it only needs `features` /
+# `subtabs` in a target profile. Kept-forever features (Plotting, Sample
+# Definitions, Segmentation, and support libs crop/qc/export/preview) are
+# deliberately absent: only removable units appear here.
+
+name = "full"
+
+[[feature]]
+name = "Statistics"
+paths = ["well_viewer/features/stats"]
+tests = ["tests/test_stats_*.py"]
+# stats_compute's group-stats cache is core (kept), not the Statistics feature.
+keep  = ["tests/test_stats_cache_gate_sig.py"]
+
+[[feature]]
+name = "Multivariate"
+paths = [
+  "well_viewer/features/multivariate",
+  "well_viewer/domain/multivariate_compute.py",
+  "well_viewer/persistence/multivariate.py",
+]
+tests = ["tests/test_multivariate_*.py"]
+# Heavy third-party deps ONLY this feature pulls in (import names). The
+# PyInstaller build adds them to `excludes` AND skips their collect when
+# Multivariate is profiled out, so a subset binary drops them from the bundle.
+deps = ["sklearn", "umap", "pynndescent"]
+
+[[feature]]
+name = "Spatial"
+paths = ["well_viewer/features/spatial", "well_viewer/domain/spatial_compute.py"]
+tests = ["tests/test_spatial_*.py"]
+
+[[feature]]
+name = "smFISH"
+paths = ["well_viewer/features/smfish", "well_viewer/persistence/smfish.py"]
+tests = ["tests/test_smfish_*.py"]
+# smFISH _count aggregation lives in data_loading (kept), not the smFISH tab.
+keep  = ["tests/test_smfish_aggregation.py"]
+
+[[feature]]
+name = "Review CSV"
+paths = ["well_viewer/features/review_csv"]
+tests = ["tests/test_review_csv_*.py"]
+
+[[feature]]
+name = "Saved Plots"
+paths = ["well_viewer/features/saved_plots"]
+tests = ["tests/test_saved_plot*.py"]
+
+[[feature]]
+name = "Batch Export"
+paths = ["well_viewer/features/batch_export", "well_viewer/persistence/export_groups.py"]
+tests = ["tests/test_batch_export_*.py", "tests/test_export_groups_*.py"]
+
+[[feature]]
+name = "Image Table"
+parent = "Image Browser"
+paths = ["well_viewer/features/image_browser/image_table"]
+tests = ["tests/test_image_table_*.py", "tests/test_image_compose_*.py"]
+
+[[feature]]
+name = "Cell Browser"
+parent = "Image Browser"
+paths = ["well_viewer/features/image_browser/cell_browser"]
+tests = ["tests/test_cell_browser_*.py"]
+
+[[feature]]
+name = "Playground"
+parent = "Image Browser"
+paths = ["well_viewer/features/image_browser/playground"]
+tests = ["tests/test_playground*.py"]
+
+[[feature]]
+# Pipeline-side removable unit (NOT a Qt tab): the Cellpose segmenter. StarDist
+# is the kept-forever default segmenter; Cellpose is the only method that pulls
+# in Torch. Profiling it out yields a StarDist-only build that drops torch /
+# torchvision / cellpose — the single biggest size lever after Qt. A profile
+# that wants Cellpose lists "Cellpose" in its `features`; every subset that
+# doesn't (thin, plotting_only) excludes it, and the full build keeps it.
+# process_microscopy imports pipeline/cellpose.py lazily, so deleting the path
+# is safe; the spec adds `deps` to `excludes` and skips their collect_all.
+name = "Cellpose"
+paths = ["pipeline/cellpose.py"]
+# No `tests` glob: the Cellpose-touching tests (test_labelfree_phase.py) also
+# cover kept routines — classical_threshold segmentation, Role.PHASE, and the
+# label-free CLI-arg mapping — so they must NOT be auto-deleted with Cellpose.
+# The `test_segment_cellpose_guarded` case skips when cellpose is installed and
+# otherwise asserts the clean "not installed" error, so it stays green either way.
+# `deps` (import names) are added to the binary's `excludes` and their collect is
+# skipped, so a StarDist-only build drops torch/torchvision/cellpose.
+deps = ["cellpose", "torch", "torchvision"]

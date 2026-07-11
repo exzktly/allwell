@@ -70,7 +70,7 @@ _NO_SMFISH_MESSAGE = (
 )
 
 
-from widgets.flow_layout import FlowLayout
+from widgets.flow_layout import FlowLayout, flow_group
 
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
@@ -132,44 +132,38 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cl = FlowLayout(ctrl)
     cl.setContentsMargins(0, 0, 0, 6)
 
-    cl.addWidget(QLabel("Channel:", ctrl))
     channel_cb = reg.register("_smfish_channel_cb", QComboBox(ctrl))
     channel_cb.currentIndexChanged.connect(
         lambda _i: _smfish_on_channel_changed(ctx)
     )
-    cl.addWidget(channel_cb)
+    cl.addWidget(flow_group(ctrl, "Channel:", channel_cb))
 
-    cl.addWidget(QLabel("FOV:", ctrl))
     fov_cb = reg.register("_smfish_fov_cb", QComboBox(ctrl))
     fov_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    cl.addWidget(fov_cb)
+    cl.addWidget(flow_group(ctrl, "FOV:", fov_cb))
 
-    cl.addWidget(QLabel("Timepoint:", ctrl))
     tp_cb = reg.register("_smfish_tp_cb", QComboBox(ctrl))
     tp_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    cl.addWidget(tp_cb)
+    cl.addWidget(flow_group(ctrl, "Timepoint:", tp_cb))
 
-    cl.addWidget(QLabel("smFISH_Thresh:", ctrl))
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500", ctrl))
     threshold_edit.setFixedWidth(90)
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    cl.addWidget(threshold_edit)
+    cl.addWidget(flow_group(ctrl, "smFISH_Thresh:", threshold_edit))
 
-    cl.addWidget(QLabel("LUT Min:", ctrl))
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit("", ctrl))
     lut_min_edit.setFixedWidth(70)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    cl.addWidget(lut_min_edit)
+    cl.addWidget(flow_group(ctrl, "LUT Min:", lut_min_edit))
 
-    cl.addWidget(QLabel("LUT Max:", ctrl))
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit("", ctrl))
     lut_max_edit.setFixedWidth(70)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    cl.addWidget(lut_max_edit)
+    cl.addWidget(flow_group(ctrl, "LUT Max:", lut_max_edit))
     cl.addStretch(1)
     root.addWidget(ctrl)
 

@@ -52,6 +52,64 @@ _ver_ns: dict = {}
 exec((_parent / "version.py").read_text(), _ver_ns)
 APP_VERSION = _ver_ns["__version__"]
 
+# ---------------------------------------------------------------------------
+# Build profile — select which features go in THIS binary
+# ---------------------------------------------------------------------------
+# `ALLWELL_PROFILE=<name> scripts/build_executable.sh` builds a binary that ships
+# only the profile's features (profiles/<name>.toml). Unset / "full" = the full
+# app. Excluded features' source dirs are omitted from the bundled `well_viewer`
+# tree, their unique heavy deps are excluded from the module graph, and the
+# chosen profile is baked as `active_profile.txt` so the frozen app's registry
+# filters to match the bundled code (a frozen binary has no env at run time).
+try:  # noqa: E402  tomllib is stdlib on 3.11+; fall back to tomli on the 3.10 build env.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib   # type: ignore[no-redef]
+
+# The pure profile→exclusions math lives in scripts/profile_build.py (stdlib-only,
+# unit-tested), so this spec stays declarative and the "deps are gated into the
+# binary by feature, automatically" contract is verifiable outside a real build.
+sys.path.insert(0, str(_parent))
+from scripts.profile_build import compute_exclusions, load_catalog  # noqa: E402
+
+_PROFILE = os.environ.get("ALLWELL_PROFILE", "").strip()
+_excluded_features: list = []
+_excluded_repo_dirs: list = []      # repo-relative paths to omit from the bundle
+_excluded_deps: list = []           # import-name heavy deps unique to excluded feats
+_profile_active = bool(_PROFILE) and _PROFILE.lower() != "full"
+
+if _profile_active:
+    _prof = tomllib.loads((_parent / "profiles" / f"{_PROFILE}.toml").read_text())
+    _catalog = load_catalog(_parent / "profiles" / "full.toml")
+    _ex = compute_exclusions(_catalog, _prof.get("features"),
+                             _prof.get("subtabs") or {})
+    # repo_paths spans well_viewer/ tabs AND non-Qt units (pipeline/cellpose.py);
+    # the bundling loop filters every first-party package against this list.
+    _excluded_features = _ex.features
+    _excluded_repo_dirs = _ex.repo_paths
+    _excluded_deps = _ex.deps
+    print(f"[all_well.spec] ALLWELL_PROFILE={_PROFILE!r} — excluding "
+          f"{len(_excluded_features)} feature(s): {_excluded_features}")
+
+
+def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
+    """Per-file data tuples for *pkg_root* → *dest*, omitting excluded dirs.
+
+    Excludes are repo-relative (e.g. ``well_viewer/features/stats``); any file
+    under one is dropped, so a profiled-out feature's source never lands in the
+    bundle. __pycache__ is always skipped."""
+    out: list = []
+    ex = [d.rstrip("/") for d in exclude_repo_dirs]
+    for f in pkg_root.rglob("*"):
+        if not f.is_file() or "__pycache__" in f.parts:
+            continue
+        repo_rel = f"{dest}/{f.relative_to(pkg_root).as_posix()}"
+        if any(repo_rel == d or repo_rel.startswith(d + "/") for d in ex):
+            continue
+        out.append((str(f), str(Path(dest) / f.relative_to(pkg_root).parent)))
+    return out
+
+
 sibling_scripts = [
     (str(_parent / "allwell.py"),               "."),
     (str(_parent / "analyze_tab.py"),           "."),
@@ -63,11 +121,18 @@ sibling_scripts = [
     (str(_parent / "version.py"),               "."),
 ]
 
-# Bundle every first-party package so module imports resolve at runtime
-# inside the PyInstaller _MEIPASS root.
+# Bundle every first-party package so module imports resolve at runtime inside
+# the PyInstaller _MEIPASS root. Under an active profile every package is
+# filtered per-file against ``_excluded_repo_dirs`` (excluded feature dirs +
+# non-Qt units like pipeline/cellpose.py dropped); the full build ships them
+# whole.
 for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util"):
     _pkg_path = _parent / _pkg
-    if _pkg_path.is_dir():
+    if not _pkg_path.is_dir():
+        continue
+    if _profile_active:
+        sibling_scripts += _pkg_datas(_pkg_path, _pkg, _excluded_repo_dirs)
+    else:
         sibling_scripts.append((str(_pkg_path), _pkg))
 
 # matplotlib ships fonts, styles, and mpl-data at runtime
@@ -102,6 +167,19 @@ if _fonts_dir.is_dir():
 _icons_dir = _parent / "assets" / "icons"
 if _icons_dir.is_dir():
     extra_data.append((str(_icons_dir), "assets/icons"))
+
+# Build-profile manifests + baked marker. Ship profiles/ so the frozen app's
+# ``well_viewer.core.profile.load_profile`` resolves the active manifest, and
+# write ``active_profile.txt`` at the bundle root so ``active_profile()`` picks
+# the profile with no run-time env var. Absent (full build) → the full app.
+_profiles_dir = _parent / "profiles"
+if _profiles_dir.is_dir():
+    extra_data.append((str(_profiles_dir), "profiles"))
+if _profile_active:
+    import tempfile as _tempfile
+    _marker_path = Path(_tempfile.mkdtemp()) / "active_profile.txt"
+    _marker_path.write_text(_PROFILE, encoding="utf-8")
+    extra_data.append((str(_marker_path), "."))
 
 datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 
@@ -409,15 +487,31 @@ hiddenimports += collect_submodules("h5py")
 hiddenimports += collect_submodules("scipy")
 datas       += collect_data_files("scipy")
 
+# Heavy per-feature deps are gated OUT of the binary automatically from the
+# catalog. ``_excluded_deps`` is the union of every profiled-out feature's
+# ``deps`` (full.toml); a package is bundled only when it's NOT in that set.
+# This is the single source of truth — adding a new dep-bearing feature to the
+# catalog needs no edit here. NOTE: adding a package to PyInstaller ``excludes``
+# (below) only prunes the *module graph*; it does NOT drop the ``datas`` /
+# ``binaries`` that ``collect_all`` / ``collect_*`` emit. So skipping the collect
+# is what actually keeps the package's .so/.dylib payload out of the bundle.
+def _dep_included(*import_names) -> bool:
+    """True when NONE of *import_names* were excluded by the active profile."""
+    return not any(n in _excluded_deps for n in import_names)
+
 # scikit-learn + umap-learn — the Multivariate tab's UMAP / t-SNE projections.
 # Both have submodules loaded lazily (sklearn's manifold/decomposition, umap's
 # numba-compiled layout functions, pynndescent) that the static analyzer misses,
 # plus sklearn ships data files. numba/llvmlite/scipy are already collected
-# above (umap/pynndescent depend on them).
-hiddenimports += collect_submodules("sklearn")
-datas       += collect_data_files("sklearn")
-hiddenimports += collect_submodules("umap")
-hiddenimports += collect_submodules("pynndescent")
+# above (umap/pynndescent depend on them). Skipped when Multivariate's deps are
+# profiled out (they're added to `excludes` below too).
+if _dep_included("sklearn"):
+    hiddenimports += collect_submodules("sklearn")
+    datas       += collect_data_files("sklearn")
+if _dep_included("umap"):
+    hiddenimports += collect_submodules("umap")
+if _dep_included("pynndescent"):
+    hiddenimports += collect_submodules("pynndescent")
 
 # setuptools — TF's eager import of tensorflow._api.v2.compat.v1.lite
 # walks through tensorflow.lite.python.convert, which pulls in
@@ -478,27 +572,16 @@ _icd_datas, _icd_binaries, _icd_hidden = collect_all("imagecodecs")
 datas         += _icd_datas
 hiddenimports += _icd_hidden
 
-# Label-free segmentation (cellpose) is ALWAYS bundled; multi-frame cell
-# tracking (btrack / trackastra) + its training stack (lightning / kornia /
-# torchmetrics) is OPTIONAL and OFF by default. The app ships for StarDist +
-# Cellpose *inference* only, so the default bundle omits the tracking/training
-# packages (the single biggest install-size lever after Qt). Opt back in at
-# build time with ALLWELL_WITH_TRACKING=1 — and install the extras first:
-#   pip install --no-build-isolation -r _Docs/requirements-tracking.txt
-#
-# torch / torchvision carry large compiled extensions; cellpose (and, when
-# enabled, btrack / trackastra / kornia / lightning) have submodules and
-# (trackastra) bundled data. collect_all grabs the Python shims, the .so/.dylib
-# binaries, and data files so the frozen app runs without a Python toolchain.
-# The macOS/Windows build wheels are CPU/MPS (no CUDA). cellpose/trackastra
-# download model weights at runtime; those are not bundled.
-_WITH_TRACKING = os.environ.get("ALLWELL_WITH_TRACKING", "").strip().lower() \
-    not in ("", "0", "false", "no", "off")
-
-_ml_packages = ["torch", "torchvision", "cellpose"]
-if _WITH_TRACKING:
-    _ml_packages += ["btrack", "trackastra", "kornia", "lightning",
-                     "pytorch_lightning", "torchmetrics"]
+# Cellpose is the only Torch-backed segmenter; StarDist (TF) is the kept default.
+# torch / torchvision / cellpose are the Cellpose feature's catalog ``deps``, so
+# profiling Cellpose out drops them from the bundle automatically — ``plan_ml``
+# returns them only when they're NOT in ``_excluded_deps`` (unit-tested in
+# tests/test_profile_build.py). collect_all grabs the Python shims, the .so/.dylib
+# binaries, and data files so the frozen app runs without a Python toolchain. The
+# macOS/Windows wheels are CPU/MPS (no CUDA); cellpose downloads model weights at
+# runtime, so those are not bundled. The single biggest size lever after Qt.
+from scripts.profile_build import plan_ml  # noqa: E402
+_ml_packages = plan_ml(_excluded_deps)
 
 _ml_binaries = []
 for _pkg in _ml_packages:
@@ -520,12 +603,12 @@ _torch_excludes = [
     "torch.utils.tensorboard", "torch.utils.benchmark",
 ]
 
-# When tracking is off, keep its packages — and the training-only deps they
-# pull in — out of the bundle even if they happen to be importable in the build
-# env. The app's tracking entry points import these lazily behind a guard, so a
-# tracking action invoked in a slim build raises a clean "not installed" error
-# rather than crashing at startup.
-_tracking_excludes = [] if _WITH_TRACKING else [
+# Heavy training/serving packages the app never imports — kept out of the bundle
+# even if a polluted build env has them installed or something pulls them in
+# transitively. (These were the old multi-frame-tracking training stack, which no
+# longer exists in the app; the static exclude is cheap hygiene against a large,
+# unused payload.)
+_dead_ml_excludes = [
     "btrack", "trackastra", "kornia",
     "lightning", "lightning_fabric", "lightning_cloud", "pytorch_lightning",
     "torchmetrics", "wandb", "tensorboard", "tensorboard_data_server",
@@ -602,7 +685,7 @@ a = Analysis(
         "keras.src.benchmarks",
         # NOTE: ssl intentionally NOT excluded — process_microscopy patches
         # ssl._create_default_https_context for StarDist model download
-    ] + _qt_excludes + _tracking_excludes + _torch_excludes,
+    ] + _qt_excludes + _dead_ml_excludes + _torch_excludes + _excluded_deps,
     noarchive=False,
     optimize=1,
 )

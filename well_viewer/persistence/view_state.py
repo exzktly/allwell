@@ -172,9 +172,20 @@ def _snapshot_tabs(ctx) -> dict[str, dict]:
     scat = _snapshot_scatter(ctx)
     if scat:
         tabs["Scatter Plot"] = scat
-    img = _snapshot_image_table(ctx)
-    if img:
-        tabs["Image Table"] = img
+    # Feature-owned view-state (e.g. Image Table). Each feature declares a
+    # ``view_state_io`` hook returning a ``(snapshot, apply)`` pair; we fan out
+    # so this module never names the feature. A profiled-out / binary-stripped
+    # feature isn't in the registry, so its block simply isn't captured — an
+    # existing block from another build survives untouched in ``pending``.
+    for d in ctx.features.with_hook("view_state_io"):
+        try:
+            snapshot, _apply = d.view_state_io()
+            blk = snapshot(ctx)
+        except Exception:
+            _logger.debug("view_state: %s snapshot failed", d.name, exc_info=True)
+            continue
+        if blk:
+            tabs[d.name] = blk
     return tabs
 
 
@@ -278,121 +289,6 @@ def _snapshot_scatter(ctx) -> dict:
     ):
         if isinstance(sel, dict) and sel:
             out[key] = {str(k): bool(v) for k, v in sel.items()}
-    return out
-
-
-def _snapshot_image_table_axes(ctx) -> dict:
-    """Row/col grid axes + nested row_dims/col_dims for the image-table snapshot.
-
-    Split out of :func:`_snapshot_image_table` to keep that function under the
-    cyclomatic-complexity ratchet (``test_complexity_ratchet``). Captured so a
-    restore lays the selector grid out on the same axes — and can re-Build the
-    same nested product — before the per-cell values (authoritative for content)
-    are replayed. row_dims/col_dims are only written when non-empty, so flat
-    layouts and older snapshots round-trip unchanged."""
-    axes: dict[str, Any] = {}
-    for key, fld in (("row_axis", "row_axis"), ("col_axis", "col_axis")):
-        v = getattr(ctx.state.image_table, fld, None)
-        if isinstance(v, str) and v:
-            axes[key] = v
-    for key, fld in (("row_dims", "row_dims"), ("col_dims", "col_dims")):
-        v = getattr(ctx.state.image_table, fld, None)
-        if isinstance(v, list) and v:
-            axes[key] = [str(d) for d in v]
-    return axes
-
-
-def _snapshot_image_table_spacing(ctx) -> dict:
-    """The user-tuned rendered-table gaps + label font sizes (px), so a restore
-    keeps the Properties-sidebar spacing/typography."""
-    it = ctx.state.image_table
-    return {k: int(getattr(it, k, d)) for k, d in
-            (("cell_gap", 2), ("row_group_gap", 18), ("col_group_gap", 18),
-             ("label_font_pt", 11), ("group_font_pt", 11))}
-
-
-def _restore_image_table_spacing(ctx, state: dict) -> None:
-    it = ctx.state.image_table
-    for k, lo in (("cell_gap", 0), ("row_group_gap", 0), ("col_group_gap", 0),
-                  ("label_font_pt", 6), ("group_font_pt", 6)):
-        v = state.get(k)
-        if isinstance(v, int):
-            setattr(it, k, max(lo, v))
-
-
-def _snapshot_image_table(ctx) -> dict:
-    """Capture the Image Table grid: dimensions, per-cell well/chan/tp/fov,
-    overlay toggles, and per-channel LUT min/max edits.
-    """
-    cells = ctx.runtime.image_table.cells
-    if not cells:
-        return {}
-    out: dict[str, Any] = {
-        "rows": int(getattr(ctx.state.image_table, "rows", len(cells))),
-        "cols": int(getattr(ctx.state.image_table, "cols",
-                             len(cells[0]) if cells else 0)),
-        # Grouped/tiled layout: columns-per-band + row-axis-values-per-band. Both
-        # are needed to rebuild the banded grid's LUT row→channel sharing map on
-        # restore (see image_table_rebuild_grid). 0 = not grouped. The dataclass
-        # fields default to 0, so no ``or 0`` guard is needed (keeps this snapshot
-        # function's cyclomatic complexity within the ratchet).
-        "group_size": int(getattr(ctx.state.image_table, "group_size", 0)),
-        "group_row_span": int(getattr(ctx.state.image_table, "group_row_span", 0)),
-    }
-    grid: list[list[dict[str, str]]] = []
-    for row in cells:
-        row_out: list[dict[str, str]] = []
-        for cell in row:
-            # The render model is plain string dicts now (no widgets), so the
-            # per-cell values snapshot directly.
-            row_out.append({k: str(cell.get(k, ""))
-                            for k in ("well", "chan", "tp", "fov")
-                            if cell.get(k)})
-        grid.append(row_out)
-    out["cells"] = grid
-    # Grid axes (row_axis/col_axis) + nested row_dims/col_dims — extracted to a
-    # helper to hold the complexity ratchet. Captured so a restore lays the
-    # render model out the same way (and can re-Build the same nested product)
-    # before per-cell values are replayed. Per-channel display options round-trip
-    # via ``channel_opts`` and the held Fixed values via ``fixed_vals`` (see
-    # ``_snapshot_image_table_builder``) — no per-row LUT widgets to capture.
-    out.update(_snapshot_image_table_axes(ctx))
-    # Crop region (shared CropTool; (y0,x0,y1,x1) source pixels or None) plus the
-    # display-only zoom, so a restored grid re-crops/re-scales. The ON-threshold
-    # is intentionally NOT captured here — it's a global value shared with Cell
-    # Gating and the plot tabs, so a saved-plot restore must not mutate it.
-    ct = ctx.runtime.image_table.crop_tool
-    if ct is not None:
-        try:
-            out["crop"] = list(ct.crop) if ct.crop else None
-            out["crop_mode"] = bool(ct.mode)
-        except Exception:
-            swallowed()
-    try:
-        out["zoom"] = float(ctx.state.image_table.zoom)
-        out.update(_snapshot_image_table_spacing(ctx))
-    except Exception:
-        swallowed()
-    # Builder (root + nested-channels) state — extracted to a helper to hold this
-    # function's cyclomatic-complexity ratchet.
-    out.update(_snapshot_image_table_builder(ctx))
-    return out
-
-
-def _snapshot_image_table_builder(ctx) -> dict:
-    """Builder tree state for the image-table snapshot: the per-channel render
-    options (``channel_opts``) + the Fixed panel's pinned values (``fixed_vals``).
-
-    Plain JSON (str/bool/float/None), so the shelf reconstructs its spec
-    (``spec_from_state``) on restore. Only emits a key when present, so pre-builder
-    saved states round-trip unchanged."""
-    out: dict = {}
-    copts = dict(getattr(ctx.state.image_table, "channel_opts", None) or {})
-    if copts:
-        out["channel_opts"] = copts
-    fvals = dict(getattr(ctx.state.image_table, "fixed_vals", None) or {})
-    if fvals:
-        out["fixed_vals"] = fvals
     return out
 
 
@@ -640,8 +536,15 @@ def apply_pending_tab_state(ctx, tab_name: str) -> bool:
             _apply_distribution(ctx, state)
         elif tab_name == "Scatter Plot":
             _apply_scatter(ctx, state)
-        elif tab_name == "Image Table":
-            _apply_image_table(ctx, state)
+        else:
+            # Feature-owned view-state (e.g. Image Table). Resolve the feature's
+            # ``view_state_io`` apply half via the registry so this module never
+            # names it; a profiled-out tab isn't in the registry, so its pending
+            # block is dropped here (left in ``pending`` for another build).
+            d = ctx.features.get(tab_name)
+            io = d.view_state_io() if (d is not None and d.view_state_io) else None
+            if io is not None:
+                io[1](ctx, state)
     except Exception:
         _logger.debug("view_state: apply_pending_tab_state(%r) failed", tab_name, exc_info=True)
     return True
@@ -827,137 +730,6 @@ def _apply_scatter(ctx, state: dict) -> None:
             set_mode(str(mode))
         except Exception:
             swallowed()
-
-
-def _apply_image_table(ctx, state: dict) -> None:
-    """Restore the Image Table grid (dimensions, per-cell combos, toggles,
-    per-channel LUTs) and re-render via image_table_generate.
-
-    The tab builder constructs widgets lazily; this only runs once the tab
-    is on screen, so the widget references are guaranteed to exist.
-    """
-    # One deferred feature import for the whole function (persistence stays
-    # feature-free at module scope — see test_layering / test_deferred_imports);
-    # both helpers are used below.
-    try:
-        from well_viewer.features.image_browser.image_table.controller import (
-            image_table_rebuild_grid,
-            image_table_set_zoom,
-        )
-    except Exception:  # pragma: no cover - import failure leaves these no-ops
-        image_table_set_zoom = None
-        image_table_rebuild_grid = None
-
-    # Grid axes first (before the dimension rebuild), so the render model is laid
-    # out on the same axes the plot was saved with. The per-cell values restored
-    # below remain authoritative for the actual values.
-    for key, which in (("row_axis", "row"), ("col_axis", "col")):
-        axis = state.get(key)
-        if not isinstance(axis, str) or not axis:
-            continue
-        try:
-            setattr(ctx.state.image_table, f"{which}_axis", axis)
-            setattr(ctx.runtime.image_table, f"{which}_axis", axis)
-        except Exception:
-            swallowed()
-
-    # Nested / compound axis dim lists (row_dims / col_dims). Restored as plain
-    # state so a re-Build reproduces the product layout; empty / absent keeps the
-    # flat single-axis behaviour. Cleared to [] when the snapshot has none so a
-    # nested layout doesn't linger after loading a flat one.
-    for key, fld in (("row_dims", "row_dims"), ("col_dims", "col_dims")):
-        dims = state.get(key)
-        try:
-            setattr(ctx.state.image_table, fld,
-                    [str(d) for d in dims] if isinstance(dims, list) else [])
-        except Exception:
-            swallowed()
-
-    # Builder (root + nested-channels) state — per-channel render options + the
-    # Fixed panel's pinned values. Restoring these lets the render seam resolve
-    # per-channel display and lets the shelf reconstruct its tree
-    # (spec_from_state). Clearing the cached builder_spec makes the shelf re-seed
-    # from the restored state the next time it's shown (the render itself is
-    # refreshed by the rebuild below).
-    try:
-        ctx.state.image_table.channel_opts = dict(state.get("channel_opts") or {})
-        ctx.state.image_table.fixed_vals = dict(state.get("fixed_vals") or {})
-        ctx.runtime.image_table.builder_spec = None
-    except Exception:
-        swallowed()
-
-    # Grouped/tiled layout state — restore BEFORE the grid rebuild so the render
-    # model is sized to match. 0 = not grouped.
-    grp = state.get("group_size")
-    span = state.get("group_row_span")
-    if isinstance(grp, int):
-        ctx.state.image_table.group_size = int(grp)
-    if isinstance(span, int):
-        ctx.state.image_table.group_row_span = int(span)
-
-    # Dimensions — set the row/col state, then rebuild the plain-data render model
-    # against the new size (rebuild_grid reads state.rows/state.cols).
-    rows = state.get("rows")
-    cols = state.get("cols")
-    if isinstance(rows, int):
-        ctx.state.image_table.rows = int(rows)
-    if isinstance(cols, int):
-        ctx.state.image_table.cols = int(cols)
-    if (isinstance(rows, int) or isinstance(cols, int)) and image_table_rebuild_grid is not None:
-        try:
-            image_table_rebuild_grid(ctx)
-        except Exception:
-            _logger.debug("image_table: rebuild_grid failed", exc_info=True)
-
-    # Per-cell values — write straight into the plain render-model dicts (the
-    # render contract). Per-channel display options are restored via channel_opts
-    # above; there are no per-row LUT / global held-value widgets to replay.
-    cells = state.get("cells") or []
-    live = ctx.runtime.image_table.cells or []
-    if isinstance(cells, list) and live:
-        for r, row_state in enumerate(cells):
-            if r >= len(live) or not isinstance(row_state, list):
-                continue
-            for c, cell_state in enumerate(row_state):
-                if c >= len(live[r]) or not isinstance(cell_state, dict):
-                    continue
-                cell = live[r][c]
-                if not isinstance(cell, dict):
-                    continue
-                for key in ("well", "chan", "tp", "fov"):
-                    val = cell_state.get(key)
-                    if isinstance(val, str) and val:
-                        cell[key] = val
-
-    # Crop region: re-apply the saved rectangle (or clear it) + crop mode.
-    # notify=False so the CropTool's on_change (image_table_generate) does NOT
-    # fire here — restore must not composite the grid off disk during dataset
-    # load; the restored crop applies on the next user-triggered Generate.
-    ct = ctx.runtime.image_table.crop_tool
-    if ct is not None and "crop" in state:
-        try:
-            crop = state.get("crop")
-            if isinstance(crop, (list, tuple)) and len(crop) == 4:
-                ct.set_crop(tuple(int(v) for v in crop), notify=False)
-            else:
-                ct.clear(notify=False)
-            if bool(state.get("crop_mode", False)) != bool(ct.mode):
-                ct.toggle_mode(notify=False)
-        except Exception:
-            swallowed()
-
-    # Zoom (display-only) via its feature setter (imported once at the top).
-    if isinstance(state.get("zoom"), (int, float)) and image_table_set_zoom is not None:
-        try:
-            image_table_set_zoom(ctx, float(state["zoom"]))
-        except Exception:
-            _logger.debug("image_table: zoom restore failed", exc_info=True)
-
-    _restore_image_table_spacing(ctx, state)
-
-    # Intentionally NOT calling image_table_generate here — restore only
-    # pre-fills the dropdowns, the user clicks Generate when they actually
-    # want images loaded off disk.
 
 
 # ── save / load entry points ───────────────────────────────────────────────

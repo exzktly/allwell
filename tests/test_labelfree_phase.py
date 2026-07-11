@@ -48,6 +48,30 @@ def test_analyze_form_fits_narrow_sidebar(qapp):
         cb.setChecked(False); assert not cb.isChecked()
 
 
+def test_qc_debris_toggle_hides_its_labels(qapp):
+    """Regression: 'Remove debris' off must hide the size/solidity LABELS too,
+    not just their input cells. ``_row()`` returns the right-hand cell (the label
+    lives in the cell's parent), so toggling the cells left 'Min / Max area (px)'
+    / 'Min solidity (0-1)' stranded/centered with no fields when debris was off —
+    the toggle must target the parent rows (like _bg_radius_rows et al.)."""
+    from PySide6.QtWidgets import QLabel
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    labels = [l for l in tab.findChildren(QLabel)
+              if l.text() in ("Min / Max area (px)", "Min solidity (0-1)")]
+    assert {l.text() for l in labels} == {"Min / Max area (px)", "Min solidity (0-1)"}
+    # Each debris label's containing row is one of the toggled rows (so hiding the
+    # row hides the label, not just the input cell beside it).
+    for lbl in labels:
+        assert lbl.parentWidget() in tab._qc_debris_rows
+
+    tab._qc_remove_debris_cb.setChecked(False)
+    assert all(row.isHidden() for row in tab._qc_debris_rows)
+    tab._qc_remove_debris_cb.setChecked(True)
+    assert not any(row.isHidden() for row in tab._qc_debris_rows)
+
+
 def _set_method(tab, value: str) -> None:
     idx = tab._seg_method_cb.findData(value)
     assert idx >= 0, f"method {value!r} not in combo"

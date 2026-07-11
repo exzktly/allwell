@@ -79,15 +79,20 @@ from skimage.segmentation import watershed
 # Per-worker StarDist model (loaded once at worker startup, not per image)
 # ---------------------------------------------------------------------------
 
-# Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
-# ``pipeline.cellpose`` module (Torch is imported lazily there, so importing it
-# does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
-# ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
-from pipeline.cellpose import (  # noqa: E402,F401
-    _CELLPOSE_MODELS,
-    _cellpose_model,
-    _segment_cellpose,
-)
+# The Cellpose model cache + segmenters live in Qt-free ``pipeline.cellpose``
+# (Torch is imported lazily there). Their re-exports resolve via a PEP 562 module
+# ``__getattr__`` — a DEFERRED import — so ``pipeline/cellpose.py`` can be
+# physically absent in a StarDist-only build (Cellpose profiled out) without
+# breaking this module's import; ``pm._segment_cellpose`` etc. still resolve on
+# first access.
+_CELLPOSE_REEXPORTS = ("_CELLPOSE_MODELS", "_cellpose_model", "_segment_cellpose")
+
+
+def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
+    if name in _CELLPOSE_REEXPORTS:
+        import pipeline.cellpose as _cp
+        return getattr(_cp, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 # The StarDist segmenters + their per-worker model/FOV state live in the Qt-free
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
@@ -1914,6 +1919,10 @@ def _segment_image_group(
             lowered = [t.lower() for t in fluor_tokens]
             if nuc_tok in lowered:
                 nucleus_image = fluor_raws[lowered.index(nuc_tok)]
+        # Deferred import so a StarDist-only build (Cellpose profiled out) can
+        # omit pipeline/cellpose.py entirely; the error only surfaces here, when
+        # a Cellpose method is actually selected.
+        from pipeline.cellpose import _segment_cellpose
         labels = _segment_cellpose(
             nir_corr, model_type=cellpose_model, diameter=cellpose_diameter,
             flow_threshold=cellpose_flow_threshold,

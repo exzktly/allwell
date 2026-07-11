@@ -14,6 +14,7 @@ pytest.importorskip("PySide6")
 
 from well_viewer.persistence import view_state as vs  # noqa: E402
 from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import view_state_io as vsio  # noqa: E402
 
 pytestmark = pytest.mark.qt
 
@@ -48,7 +49,7 @@ def test_apply_image_table_crop_restore_does_not_generate():
         runtime=SimpleNamespace(image_table=_RuntimeNS(crop_tool=ct, cells=[])),
         widgets=SimpleNamespace(get_or_none=lambda _n: None),
     )
-    vs._apply_image_table(ctx, {"crop": [3, 5, 40, 60], "crop_mode": False})
+    vsio.apply_image_table(ctx, {"crop": [3, 5, 40, 60], "crop_mode": False})
     assert tuple(ct.crop) == (3, 5, 40, 60)
     assert calls == [], "restore must not trigger image_table_generate on load"
 
@@ -71,7 +72,7 @@ def test_cells_and_channel_opts_round_trip_minimal():
     )
     app._ctx = app
 
-    snap = vs._snapshot_image_table(app._ctx)
+    snap = vsio.snapshot_image_table(app._ctx)
     assert snap["cells"][0][0]["chan"] == "mCherry"
     assert snap["channel_opts"]["mCherry"]["render"] == "corrected"
     assert snap["channel_opts"]["mCherry"]["colormap"] == "magma"
@@ -79,7 +80,7 @@ def test_cells_and_channel_opts_round_trip_minimal():
     # Wipe, then restore through the apply helper.
     cells[0][0]["chan"] = "GFP"
     st.channel_opts = {}
-    vs._apply_image_table(app._ctx, snap)
+    vsio.apply_image_table(app._ctx, snap)
 
     assert app._ctx.runtime.image_table.cells[0][0]["chan"] == "mCherry"
     assert st.channel_opts["mCherry"]["colormap"] == "magma"
@@ -100,7 +101,7 @@ def test_image_table_display_state_round_trips(image_table_app):
     app._ctx.state.image_table.channel_opts = {
         chan0: {"render": "corrected", "colormap": "magma", "lut_min": 100.0}}
 
-    snap = vs._snapshot_image_table(app._ctx)
+    snap = vsio.snapshot_image_table(app._ctx)
     assert snap.get("crop") == [3, 5, 40, 60]
     assert snap["cells"][0][0]["chan"] == chan0
     assert snap["channel_opts"][chan0]["render"] == "corrected"
@@ -111,7 +112,7 @@ def test_image_table_display_state_round_trips(image_table_app):
     it.cells[0][0]["chan"] = ""
     app._ctx.state.image_table.channel_opts = {}
 
-    vs._apply_image_table(app._ctx, snap)
+    vsio.apply_image_table(app._ctx, snap)
 
     assert tuple(it.crop_tool.crop) == (3, 5, 40, 60)
     assert it.cells[0][0]["chan"] == chan0
@@ -122,7 +123,7 @@ def test_snapshot_tolerates_unbuilt_image_table(loaded_app):
     """No grid built yet → snapshot is an empty dict, not an exception."""
     app = loaded_app
     app._ctx.runtime.image_table.cells = []
-    assert vs._snapshot_image_table(app._ctx) == {}
+    assert vsio.snapshot_image_table(app._ctx) == {}
 
 
 def test_channel_restore_through_full_view_state_path(image_table_app):

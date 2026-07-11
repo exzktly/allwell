@@ -1,0 +1,10 @@
+# The "thin" build: only Plotting, Sample Definitions, and the Segmentation
+# image-review tab. Run the FULL tree as thin with:  ALLWELL_PROFILE=thin
+# and produce a physically-stripped tree with scripts/derive_profile.py.
+name = "thin"
+features = ["Plotting", "Sample Definitions", "Image Browser"]
+
+# Package paths for the offline generator (scripts/derive_profile.py). The runtime
+# filter ignores this table — it only needs `features` / `subtabs`.
+[subtabs]
+"Image Browser" = ["Segmentation"]

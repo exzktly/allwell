@@ -17,6 +17,25 @@ from well_viewer.core.plot_toggles import (
     refresh_fov_btn_state,
 )
 
+from PySide6.QtWidgets import QScrollArea
+
+
+class _ResponsiveScroll(QScrollArea):
+    """Vertical-scroll host that, on resize, pushes its viewport width into the
+    Batch Export panels so they can flip between side-by-side and stacked. The
+    viewport width is the true available width (the panel itself is pinned to its
+    own wider side-by-side minimum with horizontal scroll off)."""
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        host = self.widget()
+        if host is None:
+            return
+        avail = self.viewport().width()
+        for panel in host.findChildren(BatchExportPanel):
+            if panel.isVisible():
+                panel.apply_split_orientation(avail)
+
 
 def _refresh_mode_buttons(ctx, mode: str) -> None:
     """Sync the SegmentedControl's selected segment with the active builder."""
@@ -180,9 +199,25 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     band_row = _build_spread_row(ctx, parent)
     layout.addWidget(band_row)
 
-    host = QWidget(parent)
+    # Host the mode panels inside a vertical-scroll area: when the window is
+    # narrow the panel stacks its plate-map / OUTPUT-SETTINGS vertically (see
+    # BatchExportPanel.apply_split_orientation), which grows taller — vertical
+    # scroll keeps it usable on short windows, and horizontal scroll stays off so
+    # nothing ever scrolls sideways (the stack removes horizontal overflow). The
+    # scroll pushes its viewport width into the panels on resize, since with
+    # h-scroll off a panel is pinned to its own (wide) min and can't measure the
+    # narrow window itself.
+    from PySide6.QtWidgets import QFrame
+    from PySide6.QtCore import Qt
+    host = QWidget()
     QVBoxLayout(host)
-    layout.addWidget(host, 1)
+    scroll = _ResponsiveScroll(parent)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    scroll.setWidget(host)
+    layout.addWidget(scroll, 1)
 
     ctx.runtime.batch_export.inline_state = {
         "host": host,

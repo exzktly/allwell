@@ -16,7 +16,36 @@ No All-Well coupling — a plain reusable widget (belongs in ``widgets/``).
 from __future__ import annotations
 
 from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
-from PySide6.QtWidgets import QLayout, QSizePolicy, QStyle, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout, QLabel, QLayout, QSizePolicy, QStyle, QWidget,
+)
+
+
+def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
+    """Bundle a label and its control(s) into one un-splittable widget.
+
+    A ``FlowLayout`` wraps per *item*, and a label added as its own item can wrap
+    away from the widget it names ("Layout:" landing on a different line than its
+    combo). Grouping the label + control(s) into a single container widget — added
+    to the FlowLayout as ONE item — keeps them together: the whole group is placed
+    or wrapped atomically.
+
+    Each positional *item* is either a ``str`` (wrapped in a ``QLabel``) or an
+    existing ``QWidget`` (used as-is; it is reparented into the group — safe for a
+    widget already stored in a registry, which keeps its own reference). Build and
+    register the control first, then pass it here.
+
+    Note: the FlowLayout sees only the container, so its wrap/visibility logic keys
+    off the group, not the inner widgets — hide the group container, not an inner
+    control, if a call site needs to hide one.
+    """
+    box = QWidget(parent)
+    hl = QHBoxLayout(box)
+    hl.setContentsMargins(0, 0, 0, 0)
+    hl.setSpacing(spacing)
+    for it in items:
+        hl.addWidget(QLabel(it, box) if isinstance(it, str) else it)
+    return box
 
 
 class FlowLayout(QLayout):

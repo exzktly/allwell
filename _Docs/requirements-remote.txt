@@ -53,19 +53,10 @@ pandas==2.2.3
 # targets get the appropriate wheels by platform. For a CPU-only Linux remote,
 # install torch from the +cpu index.
 #
-# Multi-frame cell tracking (btrack, trackastra) and its training stack
-# (lightning, kornia) are OPTIONAL and no longer installed by default: the base
-# install targets StarDist/Cellpose *inference* only — no tracking, no training.
-# The pins were not deleted — they moved to the opt-in extras file
-# ``requirements-tracking.txt``. To restore tracking, install it on top:
-#
-#   pip install --no-build-isolation -r requirements-tracking.txt
-#
-# The guarded lazy imports (pipeline.cellpose-style) remain, so a tracking
-# feature invoked without the extra installed raises a clear "not installed"
-# error instead of crashing. Leaving these out of the base set also drops their
-# transitive-only deps (cvxopt, lightning-cloud + fastapi/uvicorn/starlette,
-# sentry-sdk, wandb, tensorboard), which is the bulk of the install-size saving.
+# In a StarDist-only build/install (Cellpose profiled out — see
+# _Docs/Markdowns/BUILD_PROFILES.md), these three lines are the deps the binary
+# drops; the pipeline imports pipeline/cellpose.py lazily so they're only needed
+# when a Cellpose method actually runs.
 typing-extensions==4.5.0   # ceiling under TF 2.13's <4.6; satisfies torch 2.0.1
 torch==2.0.1               # Cellpose backend (MPS/CPU inference)
 torchvision==0.15.2        # torch companion pin

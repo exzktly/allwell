@@ -189,7 +189,10 @@ def build_centre(app, parent: QWidget) -> None:
     plotting_container = QWidget(app._notebook)
     QVBoxLayout(plotting_container).setContentsMargins(0, 0, 0, 0)
 
-    _PLOT_SUBTABS = [
+    # The plot sub-tabs come from the registry (descriptors whose parent is
+    # "Plotting"), so a build profile that drops one drops its sub-tab with no
+    # edit here. Falls back to the canonical order if none are declared.
+    _PLOT_SUBTABS = app._features.sub_leaves("Plotting") or [
         "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
     ]
 
@@ -649,8 +652,10 @@ def build_centre(app, parent: QWidget) -> None:
 
     # Special pre-build hooks for tabs that wire app-level state at build
     # time even though their bodies are deferred (matches the original
-    # eager attribute set so external references keep resolving).
-    app._batch_export_tab_frame = tab_frames["Batch Export"]
+    # eager attribute set so external references keep resolving). Guarded so
+    # the tab being absent under a build profile is a no-op, not a KeyError.
+    if "Batch Export" in tab_frames:
+        app._batch_export_tab_frame = tab_frames["Batch Export"]
 
     app._notebook.setCurrentIndex(0)
 

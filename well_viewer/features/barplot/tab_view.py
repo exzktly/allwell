@@ -277,8 +277,8 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False)
-    from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx, card, "Bar Plots")
+    from well_viewer.core.ui_helpers import apply_plot_card_decorators
+    apply_plot_card_decorators(ctx, card, "Bar Plots")
     _sw = make_plot_view_switcher(ctx, 'Bar Plots')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

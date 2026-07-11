@@ -18,20 +18,12 @@ import logging
 from PySide6.QtWidgets import QHBoxLayout
 
 from well_viewer.core.safe import swallowed
-# Sub-tab body/sidebar builders. Module-scope (not deferred): these aren't a
-# cycle break — they only resolve when the Image Browser page is first built
-# (centre_view imports this package lazily), so app-startup laziness is
-# preserved while each sub-tab's *widget construction* still happens on demand.
-# (Segmentation's ``build_review_image_panel`` is a god-method that still needs
-# the app handle, so it is reached through the core ``image_browser_subtab_app_bridge``
-# rather than named here — this controller stays fully ctx-native.)
-from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
-from well_viewer.features.image_browser.image_table.picker_view import build_image_table_picker
-from well_viewer.features.image_browser.cell_browser.tab_view import (
-    build_cell_browser_sidebar,
-    build_cell_browser_tab,
-)
-from well_viewer.features.image_browser.playground.tab_view import build_playground_tab
+# Sub-tab body/sidebar builders are imported *inside* each branch of
+# ``build_image_browser_subtab`` (not at module scope) so that a build profile
+# which drops a sub-tab — physically excluding its module from the binary —
+# never imports it. A sub-tab only imports its own module when actually built,
+# which only happens when the profile admits it. (Segmentation's review-image
+# build is a god-method reached through the core ``image_browser_subtab_app_bridge``.)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -72,12 +64,18 @@ def build_image_browser_subtab(ctx, idx: int) -> None:
             from well_viewer.core.tab_controller import image_browser_subtab_app_bridge
             image_browser_subtab_app_bridge(ctx, segmentation_frame=frame)
         elif name == "Image Table":
+            from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
+            from well_viewer.features.image_browser.image_table.picker_view import build_image_table_picker
             build_image_table_tab(ctx, frame)
             build_image_table_picker(ctx, ctx.widgets.get("_sidebar_image_table_frame"))
         elif name == "Cell Browser":
+            from well_viewer.features.image_browser.cell_browser.tab_view import (
+                build_cell_browser_sidebar, build_cell_browser_tab,
+            )
             build_cell_browser_tab(ctx, frame)
             build_cell_browser_sidebar(ctx, ctx.widgets.get("_sidebar_cell_browser_frame"))
         elif name == "Playground":
+            from well_viewer.features.image_browser.playground.tab_view import build_playground_tab
             if frame.layout() is None:
                 QHBoxLayout(frame).setContentsMargins(12, 12, 12, 12)
             build_playground_tab(ctx, frame)

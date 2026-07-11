@@ -173,7 +173,8 @@ class BatchExportPanel(QWidget):
         return "line"
 
     def _build_ui(self) -> None:
-        outer = QHBoxLayout(self)
+        from PySide6.QtWidgets import QBoxLayout
+        outer = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
@@ -203,6 +204,65 @@ class BatchExportPanel(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         self._build_output_panel(right_layout)
         outer.addWidget(right, 1)
+
+        # Handles for the responsive stack/unstack (see apply_split_orientation).
+        self._split_outer = outer
+        self._split_left = left
+        self._split_right = right
+        self._split_sep = sep
+        self._split_right_index = 2   # left(0), sep(1), right(2)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self.apply_split_orientation()
+
+    def apply_split_orientation(self, avail: "int | None" = None) -> None:
+        """Side-by-side when the pane is wide enough for both panels, otherwise
+        stacked vertically (plate map on top, OUTPUT SETTINGS below) so nothing is
+        pushed off-edge.
+
+        *avail* is the width actually available to the panel — the enclosing
+        scroll area's viewport width, pushed in by ``_ResponsiveScroll`` (tab_view).
+        We must NOT use ``self.width()``: with horizontal scroll off the panel is
+        pinned to its own side-by-side minimum (wider than the viewport), so its
+        width never reflects the narrow window and the flip would never fire. The
+        flip point is the panels' real side-by-side minimum, with hysteresis so a
+        scrollbar toggling near it doesn't oscillate the orientation."""
+        from PySide6.QtWidgets import QBoxLayout, QFrame
+        if self._use_sidebar_groups or not hasattr(self, "_split_outer"):
+            return
+        if avail is None:
+            avail = self._viewport_width()
+        need = (self._split_left.minimumSizeHint().width()
+                + self._split_right.minimumSizeHint().width() + 24)
+        stacked_now = (self._split_outer.direction()
+                       == QBoxLayout.Direction.TopToBottom)
+        if not stacked_now and avail < need:
+            stack = True
+        elif stacked_now and avail > need + 60:   # hysteresis
+            stack = False
+        else:
+            return  # no change needed
+        self._split_outer.setDirection(
+            QBoxLayout.Direction.TopToBottom if stack
+            else QBoxLayout.Direction.LeftToRight)
+        self._split_sep.setFrameShape(QFrame.HLine if stack else QFrame.VLine)
+        # Stacked: the plate map takes the full width; side-by-side: keep it capped.
+        self._split_left.setMaximumWidth(16777215 if stack else 560)  # QWIDGETSIZE_MAX
+        # Right panel fills leftover horizontal space when side-by-side; when
+        # stacked it should sit at its natural height (no vertical slack grab).
+        self._split_outer.setStretch(self._split_right_index, 0 if stack else 1)
+
+    def _viewport_width(self) -> int:
+        """Width available to the panel: the enclosing QScrollArea's viewport,
+        else this widget's own width as a fallback."""
+        from PySide6.QtWidgets import QScrollArea
+        g = self.parentWidget()
+        while g is not None:
+            if isinstance(g, QScrollArea):
+                return g.viewport().width()
+            g = g.parentWidget()
+        return self.width()
 
     def _build_group_editor(self, layout: QVBoxLayout) -> None:
         # Row 1: title + the two ways to *create* groups (Add / Quick Setup).

@@ -75,6 +75,8 @@ class FeatureDescriptor:
 
     name: str
     group: str = ""                      # "Analysis" | "Images" | "Data"; "" = sub-leaf
+    parent: str = ""                     # composite container a sub-leaf lives in
+                                         # (e.g. "Plotting"); "" for top-level entries
     build: Optional[Callable] = None     # build(ctx, frame) -> None
     lazy_only: bool = False              # skip the background drain; build on first click
     # State contribution (AppState import-inversion).
@@ -87,6 +89,15 @@ class FeatureDescriptor:
     # Persistence + fold-change contributions.
     persistence: Tuple[PersistenceSpec, ...] = ()
     fold_change_scope_factory: Optional[Callable] = None   # () -> FoldChangeScope
+    # A feature that decorates every plot card (e.g. Saved Plots' "save to
+    # gallery" hover button). Lazy: ``() -> ((ctx, card, tab_name) -> None)``.
+    # Plot tabs apply all registered decorators, so they never name the feature.
+    plot_card_decorator: Optional[Callable] = None
+    # A feature that owns its own view-state (per-tab) serialization, so
+    # ``persistence/view_state.py`` never names it. Lazy factory returning a
+    # ``(snapshot, apply)`` pair: ``snapshot(ctx) -> dict`` (stored under the
+    # descriptor name in the ``tabs`` block) and ``apply(ctx, state) -> None``.
+    view_state_io: Optional[Callable] = None
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
@@ -132,3 +143,12 @@ class FeatureRegistry:
     def with_hook(self, attr: str) -> "list[FeatureDescriptor]":
         """Descriptors whose *attr* hook is set, in declaration order."""
         return [d for d in self._ordered if getattr(d, attr, None) is not None]
+
+    def sub_leaves(self, parent: str) -> "list[str]":
+        """Names of the sub-leaf descriptors under composite *parent*
+        (e.g. ``"Plotting"`` → the plot sub-tab names), in declaration order.
+
+        Lets composite containers enumerate their sub-tabs from the registry
+        instead of a hard-coded list, so a profile that drops one sub-leaf drops
+        its sub-tab automatically."""
+        return [d.name for d in self._ordered if d.parent == parent]

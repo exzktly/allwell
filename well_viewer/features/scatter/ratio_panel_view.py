@@ -71,7 +71,17 @@ class RatioMetricsPanel(QWidget):
             "ε (epsilon)",
         ])
         hdr = self._table.horizontalHeader()
-        hdr.setSectionResizeMode(QHeaderView.Stretch)
+        # Interactive (fixed, user-draggable) widths — NOT Stretch: Stretch forces
+        # every column to share the viewport and never overflow, so at narrow
+        # width the longest header ("Denominator metric") truncated with no way to
+        # reach it. With fixed widths the total can exceed the viewport and the
+        # default AsNeeded horizontal scrollbar reveals it (as the Review CSV table
+        # already does).
+        hdr.setSectionResizeMode(QHeaderView.Interactive)
+        hdr.setStretchLastSection(False)
+        for _col, _w in enumerate((140, 130, 150, 140, 170, 110)):
+            self._table.setColumnWidth(_col, _w)
+        self._table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         # Left-align header labels to match the left-read text columns below.
         hdr.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._table.verticalHeader().setVisible(False)

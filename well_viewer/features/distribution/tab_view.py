@@ -13,7 +13,7 @@ from well_viewer.core.plot_card_actions import (
 )
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QLabel, QSpinBox,
+    QCheckBox, QComboBox, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
@@ -28,7 +28,7 @@ _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per
 _LAYOUT_OPTIONS = ["Overlay", "Faceted (one per group)"]
 
 
-from widgets.flow_layout import FlowLayout
+from widgets.flow_layout import FlowLayout, flow_group
 
 def build_distribution_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -63,22 +63,19 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     )
     chan_cb.hide()
 
-    cl.addWidget(QLabel("t (h):", ctrl))
     tp_cb = reg.register("_distribution_tp_cb", QComboBox(ctrl))
     tp_cb.setMinimumContentsLength(8)
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
-    cl.addWidget(tp_cb)
+    cl.addWidget(flow_group(ctrl, "t (h):", tp_cb))
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
-    cl.addWidget(QLabel("Mode:", ctrl))
     mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))
     mode_cb.addItems(_MODE_OPTIONS)
     mode_cb.setCurrentText("Histogram + KDE")
     mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
-    cl.addWidget(mode_cb)
+    cl.addWidget(flow_group(ctrl, "Mode:", mode_cb))
     reg.register("_distribution_mode_var", mode_cb)   # legacy alias → same widget
 
-    cl.addWidget(QLabel("Bins:", ctrl))
     bins_spin = reg.register("_distribution_bins_spin", QSpinBox(ctrl))
     # No practical upper bound — fine-grained / over-sampled histograms are
     # a legitimate request when distributions are concentrated in a narrow
@@ -92,19 +89,18 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctx.state.distribution.bins = int(val)
         _on_changed(ctx)
     bins_spin.valueChanged.connect(_on_bins_changed)
-    cl.addWidget(bins_spin)
+    cl.addWidget(flow_group(ctrl, "Bins:", bins_spin))
 
     # Histogram layout: overlay every group on one axis (default), or
     # face one axis per group stacked vertically with minimal padding.
     # The combo is always visible but only has an effect for the
     # ``Histogram`` / ``Histogram + KDE`` modes; the renderer ignores it
     # for KDE-only, CDF, and Violin layouts.
-    cl.addWidget(QLabel("Layout:", ctrl))
     layout_cb = reg.register("_distribution_layout_cb", QComboBox(ctrl))
     layout_cb.addItems(_LAYOUT_OPTIONS)
     layout_cb.setCurrentText("Overlay")
     layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
-    cl.addWidget(layout_cb)
+    cl.addWidget(flow_group(ctrl, "Layout:", layout_cb))
     reg.register("_distribution_layout_var", layout_cb)   # legacy alias → same widget
 
     log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", ctrl))
@@ -146,8 +142,8 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctrl, lambda: ctx.open_export_style_panel("distribution")))
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
-    from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-    wire_save_to_gallery(ctx, card, "Distribution")
+    from well_viewer.core.ui_helpers import apply_plot_card_decorators
+    apply_plot_card_decorators(ctx, card, "Distribution")
     _sw = make_plot_view_switcher(ctx, 'Distribution')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

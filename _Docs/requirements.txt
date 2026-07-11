@@ -109,10 +109,7 @@
 # (some of which lack wheels on Linux aarch64 / newer Pythons). See
 # _Docs/requirements-remote.txt for the full list.
 #
-# This base install targets StarDist + Cellpose *inference* only. Multi-frame
-# cell tracking + its training stack (btrack, trackastra, lightning, kornia)
-# are OPTIONAL and live in _Docs/requirements-tracking.txt — install that file
-# on top to enable tracking, and build the bundle with ALLWELL_WITH_TRACKING=1.
+# This install targets StarDist + Cellpose *inference* only.
 -r requirements-remote.txt
 
 # ── GUI toolkit (Qt for Python) ──────────────────────────────────────────────

@@ -361,11 +361,20 @@ def _loaded_image_table(ctx) -> None:
         ctx.window, "_image_table_refresh_picker"
     ):
         return
-    from well_viewer.features.image_browser.image_table.controller import (
-        image_table_refresh_picker, image_table_repopulate_dropdowns,
+    from well_viewer.features.image_browser.image_table.build_layout import (
+        image_table_reset_on_dataset_load,
     )
+    from well_viewer.features.image_browser.image_table.controller import (
+        image_table_repopulate_dropdowns,
+    )
+    # Refresh the dropdown options for the new dataset, then reset the grid to
+    # fresh-tab defaults so a (re)load never inherits the previous dataset's grid.
+    # This is also what makes the "Reset all saved state" trash-can reset the
+    # Image Table: it deletes persistence.json then reloads, landing here. A
+    # dataset that has a saved grid gets it back when the tab is (re)activated —
+    # view_state restore re-applies its Image Table block over this default.
     image_table_repopulate_dropdowns(ctx)
-    image_table_refresh_picker(ctx)
+    image_table_reset_on_dataset_load(ctx)
 
 
 def _loaded_smfish(ctx) -> None:

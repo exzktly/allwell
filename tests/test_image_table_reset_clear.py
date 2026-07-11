@@ -97,3 +97,53 @@ def test_clear_render_wipes_only_the_render():
     # the decoded-image cache and the selector layout are preserved
     assert st.image_cache == {("A01", "gfp"): "decoded"}
     assert st.row_dims == ["well", "channel"]
+
+
+def test_reset_on_dataset_load_resets_layout_and_render(monkeypatch):
+    # Fires from the Image Table on_dataset_loaded hook (and so on the "Reset all
+    # saved state" trash-can, which deletes persistence.json then reloads): a
+    # (re)loaded dataset must not inherit the previous grid — layout defaults AND
+    # rendered images AND per-channel opts / builder cache all reset.
+    app = _fake_app(wells=["A01", "B02"], channels=["gfp", "rfp"],
+                    timepoints=[0, 6], fovs=[1, 2])
+    st = app._app_state.image_table
+    st.row_dims = ["well"]
+    st.col_axis = "fov"
+    st.rows, st.cols = 9, 5
+    st.active_wells = {"A01"}
+    st.active_channels = {"GFP"}
+    st.channel_opts = {"GFP": {"render": "corrected"}}
+    st.last_render = {(0, 0): "arr"}
+    app._ctx.runtime.image_table.builder_spec = object()
+
+    calls = []
+    monkeypatch.setattr(C, "image_table_rebuild_grid", lambda ctx: calls.append("grid"))
+    monkeypatch.setattr(C, "image_table_refresh_picker", lambda ctx: calls.append("picker"))
+
+    B.image_table_reset_on_dataset_load(app._ctx)
+
+    # fresh-tab layout defaults
+    assert st.row_dims == [] and st.col_axis == "timepoint"
+    assert (st.rows, st.cols) == (2, 3)
+    assert st.active_wells == set() and st.active_channels == set()
+    # …plus the extras the dataset-load reset owns (beyond "Reset table"):
+    assert st.channel_opts == {}
+    assert app._ctx.runtime.image_table.builder_spec is None
+    assert st.last_render == {}
+    # rebuilds the empty selector + refreshes the sidebar
+    assert "grid" in calls and "picker" in calls
+
+
+def test_reset_table_button_keeps_channel_opts(monkeypatch):
+    # Scope boundary: the "Reset table" button clears the layout but leaves the
+    # per-channel render options (⚙) intact — only the dataset-load reset drops
+    # those. Locks the two actions apart so they don't silently converge.
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    st = app._app_state.image_table
+    st.channel_opts = {"GFP": {"render": "corrected"}}
+    monkeypatch.setattr(C, "image_table_rebuild_grid", lambda ctx: None)
+    monkeypatch.setattr(C, "image_table_refresh_picker", lambda ctx: None)
+
+    B.image_table_reset_layout(app._ctx)
+
+    assert st.channel_opts == {"GFP": {"render": "corrected"}}

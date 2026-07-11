@@ -318,14 +318,14 @@ _DEFAULT_ROWS = 2
 _DEFAULT_COLS = 3
 
 
-def image_table_reset_layout(ctx) -> None:
-    """Reset the builder to defaults ("Reset table").
+def _reset_layout_state(ctx) -> None:
+    """Restore the builder/layout state to fresh-tab defaults — no widget side
+    effects (no picker refresh / grid rebuild / status). Shared by the "Reset
+    table" button and the dataset-load reset so both agree on "defaults".
 
-    Empties the render model and restores the fresh-tab state: Channels ×
-    Timepoints axes, a 2×3 grid, no grouping, and every dimension selection +
-    nesting cleared (wells / channels / timepoints / fovs, ``row_dims`` /
-    ``col_dims`` / ``fixed_vals``). The rendered images below are left untouched —
-    ``Clear images`` (``image_table_clear_render``) is the separate action."""
+    Matches the historical "Reset table" scope exactly: it does NOT touch the
+    per-channel render options (``channel_opts``) or the cached ``builder_spec`` —
+    the dataset-load reset clears those separately (new dataset ⇒ new channels)."""
     st = ctx.state.image_table
     st.row_dims = []
     st.col_dims = []
@@ -345,18 +345,10 @@ def image_table_reset_layout(ctx) -> None:
     rt.row_axis = _DEFAULT_ROW_AXIS
     rt.col_axis = _DEFAULT_COL_AXIS
 
-    C = _ctrl()
-    C.image_table_refresh_picker(ctx)
-    C.image_table_rebuild_grid(ctx)
-    ctx.set_status("Image Table: layout reset to defaults.")
 
-
-def image_table_clear_render(ctx) -> None:
-    """Wipe the rendered image grid ("Clear images").
-
-    Blanks the Generate output and re-shows the empty-state placeholder, leaving
-    the selector layout and the decoded-image cache intact so a re-Generate is one
-    click away (and cheap — no zip re-read). Independent of ``Reset table``."""
+def _clear_rendered_grid(ctx) -> None:
+    """Tear down the rendered image widgets + re-show the empty-state placeholder,
+    with no status message. Shared by "Clear images" and the dataset-load reset."""
     from well_viewer.core.ui_helpers import clear_layout
     rt = ctx.runtime.image_table
     grid = getattr(rt, "render_grid", None)
@@ -366,4 +358,50 @@ def image_table_clear_render(ctx) -> None:
     empty = getattr(rt, "empty_state", None)
     if empty is not None:
         empty.setVisible(True)
+
+
+def image_table_reset_layout(ctx) -> None:
+    """Reset the builder to defaults ("Reset table").
+
+    Empties the render model and restores the fresh-tab state: Channels ×
+    Timepoints axes, a 2×3 grid, no grouping, and every dimension selection +
+    nesting cleared (wells / channels / timepoints / fovs, ``row_dims`` /
+    ``col_dims`` / ``fixed_vals``). The rendered images below are left untouched —
+    ``Clear images`` (``image_table_clear_render``) is the separate action."""
+    _reset_layout_state(ctx)
+    C = _ctrl()
+    C.image_table_refresh_picker(ctx)
+    C.image_table_rebuild_grid(ctx)
+    ctx.set_status("Image Table: layout reset to defaults.")
+
+
+def image_table_reset_on_dataset_load(ctx) -> None:
+    """Reset the whole Image Table to fresh-tab state on a dataset (re)load.
+
+    A new / reloaded dataset must never inherit the previous grid (its wells /
+    channels differ), and the "Reset all saved state" trash-can relies on this:
+    it deletes ``persistence.json`` then reloads, so the reset lands here. Clears
+    the builder/layout defaults *and* wipes the rendered image widgets, then
+    refreshes the picker + rebuilds the empty grid. No status message — loads are
+    frequent and the reset is implicit. A dataset that *has* a saved grid still
+    gets it back: ``view_state`` restore re-applies its ``Image Table`` block when
+    the tab is (re)activated, overwriting this default."""
+    _reset_layout_state(ctx)
+    # New dataset ⇒ its channels differ, so drop per-channel render options + the
+    # cached builder spec too (beyond the "Reset table" scope).
+    ctx.state.image_table.channel_opts = {}
+    ctx.runtime.image_table.builder_spec = None
+    _clear_rendered_grid(ctx)
+    C = _ctrl()
+    C.image_table_refresh_picker(ctx)
+    C.image_table_rebuild_grid(ctx)
+
+
+def image_table_clear_render(ctx) -> None:
+    """Wipe the rendered image grid ("Clear images").
+
+    Blanks the Generate output and re-shows the empty-state placeholder, leaving
+    the selector layout and the decoded-image cache intact so a re-Generate is one
+    click away (and cheap — no zip re-read). Independent of ``Reset table``."""
+    _clear_rendered_grid(ctx)
     ctx.set_status("Image Table: cleared rendered images. Press Generate to re-render.")

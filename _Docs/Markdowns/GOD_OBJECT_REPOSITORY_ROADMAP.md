@@ -426,7 +426,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 28, was 38) | via A3 clusters 2026-07-11 |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 107, was 135) | playground, stats, grouping 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 102, was 135) | playground, stats, grouping, heatmap-sidebar 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,11 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 — heatmap-sidebar cluster:** migrated the 5 `app`-first funcs in
+  `features/heatmap/sidebar_view.py` to `ctx`-first (helpers were already ctx-native;
+  `build_heatmap_layout_sidebar` uses the `app = ctx.window` bridge for widget
+  building). Updated the two core callers (`core/sidebar_view`, `selection_controller`)
+  to pass `app._ctx`. `APP_FIRST_FUNC_BUDGET` 107→102. Heatmap tests + smoke + guards green.
 - 2026-07-11 — **A3+A2 — stats & grouping clusters:** migrated the 11 `app`-first
   funcs in `features/stats/controller.py` and the 2 in `features/grouping/controller.py`
   to `ctx`-first (clean ctx for state readers; `app = ctx.window` bridge for

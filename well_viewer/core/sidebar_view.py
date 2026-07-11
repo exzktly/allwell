@@ -127,7 +127,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     from well_viewer.features.heatmap.sidebar_view import (
         build_heatmap_layout_sidebar,
     )
-    heatmap_frame = build_heatmap_layout_sidebar(app, parent)
+    heatmap_frame = build_heatmap_layout_sidebar(app._ctx, parent)
     heatmap_frame.setVisible(False)
 
     # Absorb leftover vertical space so the well picker stays pinned to the

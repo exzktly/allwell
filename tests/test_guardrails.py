@@ -88,8 +88,8 @@ TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phas
 CORE_DIR = REPO_ROOT / "well_viewer" / "core"
 RAW_SELF_DELEGATOR_BUDGET = 28          # `def _m(self,...): return fn(self, ...)` in runtime_app.py
 RAW_SELF_DELEGATOR_SLACK = 6
-APP_FIRST_FUNC_BUDGET = 107             # top-level funcs in core/+features/ whose first param is `app`
-APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107
+APP_FIRST_FUNC_BUDGET = 102             # top-level funcs in core/+features/ whose first param is `app`
+APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107, heatmap-sidebar 107→102
 
 
 def _enforce(ok: bool, message: str) -> None:

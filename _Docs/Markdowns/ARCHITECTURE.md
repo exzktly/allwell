@@ -257,6 +257,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 - `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
 - `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `gating_state`) and bare (`fold_change.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
 - `persistence/` modules are named for the `pipeline_info.json` block they persist (`bar_groups.py`, `ratios.py`, `cell_gating.py`) — no `_persistence.py` suffix.
+- `features/image_browser/image_table/view_state_io.py` — a feature-owned `view_state` (de)serialization module (the `view_state_io` descriptor hook, §5.3); a persistence-IO role, not a view/compute one.
 - `runtime_app.py`, `viewer_context.py` — top-level singletons; no suffix.
 
 A few rules of thumb so you know where to put something new:
@@ -518,14 +519,28 @@ everything core used to hard-code:
 - `states` — the `AppState` slices the feature owns (`StateSpec(attr, factory)`),
   attached at construction by `attach_feature_state` so `core/app_state.py`
   imports no feature state class (the import-inversion);
-- `on_activate` / `on_selection_changed` / `on_channel_changed` — dispatch hooks
-  (the bodies that used to live in `tab_controller.on_tab_change`,
-  `selection_controller._refresh_tab_view`, and
-  `channel_state_controller.recalculate_threshold`'s fan-out);
+- `on_activate` / `on_selection_changed` / `on_channel_changed` /
+  `on_dataset_loaded` — dispatch hooks (the bodies that used to live in
+  `tab_controller.on_tab_change`, `selection_controller._refresh_tab_view`,
+  `channel_state_controller.recalculate_threshold`'s fan-out, and
+  `load_controller`'s per-feature post-load refresh). Core fans each out over
+  `registry.with_hook("<name>")` in declaration order, so it names no feature;
 - `fold_change_scope_factory` — the feature's fold-change redraw scope
   (`core/scope_registry` registers these from the descriptors);
+- `plot_card_decorator` — a feature that decorates every plot card (Saved Plots'
+  "save to gallery" hover button); plot tabs apply *all* registered decorators
+  via `ui_helpers.apply_plot_card_decorators`, so no tab imports Saved Plots;
+- `view_state_io` — a feature that owns its own `view_state` snapshot/restore
+  pair (Image Table); `persistence/view_state.py` fans this out and so never
+  names the feature (its `image_table/view_state_io.py` is imported only when the
+  feature is present);
 - `per_well_selection` / `single_well_selection` — selection-behaviour flags
   that replaced the hard-coded tab-name sets in `selection_controller`.
+
+`parent` links a sub-leaf to its composite container (Plotting / Image Browser /
+Sample Definitions); `registry.sub_leaves(parent)` enumerates a container's
+sub-tabs from the descriptor list, so a container never hard-codes its leaf names
+and dropping a leaf is a one-line/manifest edit.
 
 `WellViewerApp.__init__` builds the registry (`app._features`) before `AppState`;
 `centre_view`, `tab_controller`, `selection_controller`, `channel_state_controller`,
@@ -561,6 +576,42 @@ Guards: `test_no_module_scope_imports_of_removable_features` (repo-wide import
 rule), `test_disabling_a_leaf_feature_drops_it_everywhere`, and
 `tests/test_feature_removal.py` (full-app boot+load comment-out *and*
 `sys.meta_path` deletion tests for Image Browser, Statistics, scatter, barplot).
+
+#### Build profiles — running / building / shipping a feature subset
+
+The one-line-removable property above is the mechanism a **profile** drives at
+scale: the full app is the single source of truth, and any thin subset is a
+*profile* of it, not a fork. A profile is a small TOML manifest under `profiles/`
+naming the top-level features (and an optional per-parent sub-tab allowlist) to
+keep; `well_viewer/core/profile.py` loads it (stdlib-only — safe to import from
+the pipeline side too). It applies at three levels, all sharing the one
+`Profile.includes` predicate so they never disagree:
+
+- **Runtime** — `build_feature_registry(profile)` keeps only the admitted
+  descriptors, so `ALLWELL_PROFILE=thin python -m allwell` runs the subset off
+  the *full* tree with nothing deleted. The active profile is the
+  `ALLWELL_PROFILE` env var, or a baked `active_profile.txt` marker in a frozen
+  bundle, else the full app.
+- **Binary** — `all_well.spec` reads the same profile: it omits excluded
+  features' source from the bundle and **drops their unique heavy deps
+  automatically** from the catalog (`profiles/full.toml`'s per-feature `deps`).
+  Both matter — adding a dep to PyInstaller `excludes` only prunes the module
+  graph, so the spec *also* skips that package's `collect_all` (which is what
+  keeps its `.so`/`.dylib` payload out). A StarDist-only `thin` binary thus drops
+  `torch`/`torchvision`/`cellpose` (Cellpose) and `sklearn`/`umap`/`pynndescent`
+  (Multivariate). The pure decision math is `scripts/profile_build.py`.
+- **Source** — `scripts/derive_profile.py --apply` physically deletes the
+  excluded features' paths/tests for a shippable stripped tree.
+
+Two seams keep this honest beyond the registry: **cross-build data safety** — a
+`persistence.json` written by another build round-trips untouched (unknown
+sections / `view_state` tabs / `pipeline_info` blocks are preserved, never
+rewritten) — and the pipeline's **lazy Cellpose import** (`process_microscopy`
+resolves `pipeline/cellpose.py` via a PEP 562 module `__getattr__`), so a
+StarDist-only build can omit that file entirely. See
+`_Docs/Markdowns/BUILD_PROFILES.md` for the full workflow. Guarded by
+`tests/test_feature_profile.py` (subset boots + loads), `test_derive_profile.py`
+(the strip plan), and `test_profile_build.py` (binary dep-gating).
 
 One module sits in `domain/` rather than under a feature package:
 `domain/fold_change_controls.py` exposes
@@ -1853,6 +1904,11 @@ calls inside its domain; off by default.
 - **Source run:** `python allwell.py [--data_dir …]`.
 - **macOS .app:** `_Docs/_Installation/build_all_well.sh` (mamba env +
   PyInstaller), spec at `_Docs/_Installation/all_well.spec`.
+- **Feature-subset binary:** `ALLWELL_PROFILE=<name> scripts/build_executable.sh`
+  builds a binary containing only that profile's features, with excluded
+  features' source and unique heavy deps dropped from the bundle and the profile
+  baked as `active_profile.txt` (§5.3 *Build profiles*; `_Docs/Markdowns/BUILD_PROFILES.md`).
+  Unset = the full app.
 - **Pipeline-only run:** `python process_microscopy.py --input_dir … --output_dir …`.
   No GUI deps required.
 
@@ -2103,6 +2159,7 @@ remains:
 |------|---------------|
 | `ARCHITECTURE.md` | This document — the developer-oriented architectural overview. |
 | `README_WellViewer.md` | User-facing README — install, run, troubleshoot. |
+| `BUILD_PROFILES.md` | How to run / build / ship the app as a feature subset (§5.3 *Build profiles*): the `ALLWELL_PROFILE` runtime filter, the profile-aware PyInstaller build + automatic dep-gating, and `derive_profile.py` for a physically-stripped tree. |
 | `ui_synergy.md` | Living implementation plan for the UI/UX synergy + usability recommendations (from the design review). Status-tracked, each item constrained to this document's guidelines. Update it (and this table's referenced sections) as items land. |
 
 The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
@@ -2202,6 +2259,7 @@ The map (each rule links to the test that holds it):
 | `AppRuntime` is live-object-only — `persistence/` never imports `app_runtime` (§5.9) | `tests/test_app_runtime.py` |
 | `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |
+| Build profiles: a subset boots + loads, the strip plan matches the runtime filter, and the binary drops the excluded features' deps (§5.3 *Build profiles*) | `tests/test_feature_profile.py`, `tests/test_derive_profile.py`, `tests/test_profile_build.py` |
 | CSV / batch export produces the expected values, and the single-plot and batch paths agree byte-for-byte (v8.4) | `tests/test_csv_batch_export_eval.py` (drives a real headless `WellViewerApp`; evaluation write-up in `_Docs/Markdowns/CSV_BATCH_EXPORT_EVALUATION.md`) |
 
 What is **not** statically enforced (and so relies on review + behavioural

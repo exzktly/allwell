@@ -18,7 +18,8 @@ _PER_WELL_TAB_NAMES = ("Sample Definitions", "Review CSV", "Cell Browser")
 _SINGLE_WELL_TAB_NAMES = ("smFISH",)
 
 
-def _is_per_well_tab(app, tab_name: str) -> bool:
+def _is_per_well_tab(ctx, tab_name: str) -> bool:
+    app = ctx.window  # transitional bridge (A3)
     feats = getattr(app, "_features", None)
     if feats is not None:
         d = feats.get(tab_name)
@@ -44,11 +45,13 @@ def _is_single_well_tab(ctx, tab_name: str) -> bool:
 _WELL_EDITING_TAB_NAMES = ("Sample Definitions", "Review CSV")
 
 
-def _is_well_editing_tab(app, tab_name: str) -> bool:
+def _is_well_editing_tab(ctx, tab_name: str) -> bool:
+    app = ctx.window  # transitional bridge (A3)
     return tab_name in _WELL_EDITING_TAB_NAMES
 
 
-def _plate_passive_in_group_mode(app) -> bool:
+def _plate_passive_in_group_mode(ctx) -> bool:
+    app = ctx.window  # transitional bridge (A3)
     """Whether the sidebar plate runs in passive (group-visibility) mode.
 
     Passive in rep-set (group) mode unless a *well-editing* pane (Sample
@@ -64,13 +67,14 @@ def _plate_passive_in_group_mode(app) -> bool:
         return False
     try:
         from well_viewer.core.tab_controller import visible_centre_tabs
-        visible = set(visible_centre_tabs(app._ctx)) or {_active_tab(app)}
+        visible = set(visible_centre_tabs(ctx)) or {_active_tab(ctx)}
     except Exception:
-        visible = {_active_tab(app)}
-    return not any(_is_well_editing_tab(app, t) for t in visible)
+        visible = {_active_tab(ctx)}
+    return not any(_is_well_editing_tab(ctx, t) for t in visible)
 
 
-def _active_tab(app) -> str:
+def _active_tab(ctx) -> str:
+    app = ctx.window  # transitional bridge (A3)
     # Plot tabs (Line Graphs / Bar Plots / Scatter Plot) live inside a nested
     # "Plotting" QTabWidget. Use the app's centre-tab resolver so callers see
     # the leaf tab name and dispatch correctly when the nested notebook is in
@@ -91,7 +95,8 @@ def _active_tab(app) -> str:
         return ""
 
 
-def _visible_tabs(app) -> "list[str]":
+def _visible_tabs(ctx) -> "list[str]":
+    app = ctx.window  # transitional bridge (A3)
     """Leaf names of every centre tab on screen (Split View shows two).
 
     Prefers ``app._visible_centre_tabs``; falls back to the single active tab
@@ -105,11 +110,12 @@ def _visible_tabs(app) -> "list[str]":
                 return tabs
         except Exception:
             swallowed()  # was: pass (silent except)
-    tab = _active_tab(app)
+    tab = _active_tab(ctx)
     return [tab] if tab else []
 
 
-def _refresh_tab_view(app, tab: str, *, redrew: bool) -> bool:
+def _refresh_tab_view(ctx, tab: str, *, redrew: bool) -> bool:
+    app = ctx.window  # transitional bridge (A3)
     """Refresh one visible tab's view after a selection change.
 
     ``redrew`` carries whether the generic line/distribution/heat-map redraw
@@ -131,7 +137,8 @@ def _refresh_tab_view(app, tab: str, *, redrew: bool) -> bool:
     return True
 
 
-def apply_selection_refresh(app) -> None:
+def apply_selection_refresh(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Refresh the sidebar and every visible tab's view after a selection change.
 
     The subscriber body for the ``selection_changed`` bus signal: every
@@ -146,8 +153,8 @@ def apply_selection_refresh(app) -> None:
     """
     app._refresh_sidebar_map()
     redrew = False
-    for tab in _visible_tabs(app):
-        redrew = _refresh_tab_view(app, tab, redrew=redrew)
+    for tab in _visible_tabs(ctx):
+        redrew = _refresh_tab_view(ctx, tab, redrew=redrew)
 
 
 class SelectionRefreshCoordinator(QObject):
@@ -166,7 +173,7 @@ class SelectionRefreshCoordinator(QObject):
         bus.selection_changed.connect(self._on_selection_changed)
 
     def _on_selection_changed(self, _state=None) -> None:
-        apply_selection_refresh(self._app)
+        apply_selection_refresh(self._app._ctx)
 
 
 def on_plate_sel_change(ctx) -> None:
@@ -185,14 +192,16 @@ def on_plate_sel_change(ctx) -> None:
     ctx.bus.selection_changed.emit(ctx.state.selection)
 
 
-def _well_rc(app, w):
+def _well_rc(ctx, w):
+    app = ctx.window  # transitional bridge (A3)
     try:
         return app._parse_rc(w)
     except Exception:
         return ("", "")
 
 
-def _set_groups_hidden(app, sels, *, target=None) -> None:
+def _set_groups_hidden(ctx, sels, *, target=None) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Set ``hidden`` on each of *sels*. ``target`` None ⇒ toggle: hide them all
     if any is currently visible, else show them all."""
     sels = [s for s in sels if isinstance(s, dict)]
@@ -223,60 +232,64 @@ PLOTTING_TABS = frozenset({
 _REP_MIRROR_TABS = PLOTTING_TABS | frozenset({"Spatial", "Multivariate"})
 
 
-def select_row(app, row: str) -> None:
+def select_row(ctx, row: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if app._app_state.selection.selections:  # rep-mode
         crossing = [
             s for s in app._app_state.selection.selections
-            if any(_well_rc(app, w)[0] == row and w in app._app_state.dataset.well_paths
+            if any(_well_rc(ctx, w)[0] == row and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
         # In rep-mode (plotting and non-plotting tabs alike), a row click
         # toggles ``hidden`` on every group crossing that row — groups
         # that don't touch the row are untouched.
         if crossing:
-            _set_groups_hidden(app, crossing)
+            _set_groups_hidden(ctx, crossing)
         return
     else:
-        row_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(app, lbl)[0] == row]
+        row_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(ctx, lbl)[0] == row]
         if not row_labels:
             return
         if any(lbl not in app._app_state.selection.selected_wells for lbl in row_labels):
             app._app_state.selection.selected_wells.update(row_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(row_labels)
-        on_plate_sel_change(app._ctx)
+        on_plate_sel_change(ctx)
 
 
-def select_col(app, col: str) -> None:
+def select_col(ctx, col: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if app._app_state.selection.selections:
         crossing = [
             s for s in app._app_state.selection.selections
-            if any(_well_rc(app, w)[1] == col and w in app._app_state.dataset.well_paths
+            if any(_well_rc(ctx, w)[1] == col and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
         if crossing:
-            _set_groups_hidden(app, crossing)
+            _set_groups_hidden(ctx, crossing)
         return
     else:
-        col_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(app, lbl)[1] == col]
+        col_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(ctx, lbl)[1] == col]
         if not col_labels:
             return
         if any(lbl not in app._app_state.selection.selected_wells for lbl in col_labels):
             app._app_state.selection.selected_wells.update(col_labels)
         else:
             app._app_state.selection.selected_wells.difference_update(col_labels)
-        on_plate_sel_change(app._ctx)
+        on_plate_sel_change(ctx)
 
 
-def select_all(app) -> None:
+def select_all(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if app._app_state.selection.selections:  # rep-mode: show every group
-        _set_groups_hidden(app, app._app_state.selection.selections, target=False)
+        _set_groups_hidden(ctx, app._app_state.selection.selections, target=False)
     else:
         app._app_state.selection.select_wells(app._app_state.dataset.well_paths.keys())
         app._event_bus.selection_changed.emit(app._app_state.selection)
 
 
-def select_none(app) -> None:
+def select_none(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     sel = app._app_state.selection
     # Clear any individually-activated (solo) wells regardless of mode, so
     # "Deselect all" empties everything the plate is showing as active — not
@@ -296,14 +309,14 @@ def select_none(app) -> None:
         _tab = app._current_centre_tab()
     except Exception:
         _tab = ""
-    rep_mode = bool(sel.selections) and not _is_per_well_tab(app, _tab)
+    rep_mode = bool(sel.selections) and not _is_per_well_tab(ctx, _tab)
     if rep_mode:  # group mode: hide every group
         # _set_groups_hidden only refreshes when a group's hidden flag actually
         # flips; if every group was already hidden (or there were none to flip)
         # but we cleared solo wells, repaint + redraw explicitly so the button
         # visibly does something instead of silently no-op'ing.
         any_visible = any(not s.get("hidden") for s in sel.selections)
-        _set_groups_hidden(app, sel.selections, target=True)
+        _set_groups_hidden(ctx, sel.selections, target=True)
         if cleared_solo and not any_visible:
             app._refresh_sidebar_map()
             app._event_bus.selection_changed.emit(sel)
@@ -312,7 +325,8 @@ def select_none(app) -> None:
         app._event_bus.selection_changed.emit(sel)
 
 
-def on_sidebar_plate_selection_changed(app, ids) -> None:
+def on_sidebar_plate_selection_changed(ctx, ids) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Fires per-cell during a drag and once for a click; also fires when
     # _refresh_sidebar_map_now calls setSelectedWellIds / setEnabledWells
     # (those corrections converge harmlessly).
@@ -324,7 +338,7 @@ def on_sidebar_plate_selection_changed(app, ids) -> None:
     # _refresh_sidebar_map_now mirrors the same exception so the painted
     # selection doesn't get wiped on the next refresh tick.
     from PySide6.QtCore import QTimer
-    if _plate_passive_in_group_mode(app):
+    if _plate_passive_in_group_mode(ctx):
         return  # rep-set mode, no per-well pane visible: the plate is passive
     # Keep the invariant _selected_wells ⊆ _well_paths.
     new_set = {w for w in ids if w in app._app_state.dataset.well_paths}
@@ -341,16 +355,18 @@ def on_sidebar_plate_selection_changed(app, ids) -> None:
         QTimer.singleShot(0, app._plate_commit_deferred)
 
 
-def on_sidebar_plate_drag_finished(app) -> None:
-    if _plate_passive_in_group_mode(app):
+def on_sidebar_plate_drag_finished(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    if _plate_passive_in_group_mode(ctx):
         return
     # Cancel any pending deferred commit from the paint events that
     # led here -- we're committing right now.
     app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(app._ctx)
+    on_plate_sel_change(ctx)
 
 
-def on_sidebar_plate_corner_toggled(app, select_all_target: bool) -> None:
+def on_sidebar_plate_corner_toggled(ctx, select_all_target: bool) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Plate corner all/none toggle while the plate is passive (group mode).
 
     In group mode the plate doesn't own per-well selection, so the corner acts
@@ -361,12 +377,13 @@ def on_sidebar_plate_corner_toggled(app, select_all_target: bool) -> None:
     sels = app._app_state.selection.selections
     if sels:
         any_visible = any(not s.get("hidden") for s in sels)
-        select_none(app) if any_visible else select_all(app)
+        select_none(ctx) if any_visible else select_all(ctx)
         return
-    select_all(app) if select_all_target else select_none(app)
+    select_all(ctx) if select_all_target else select_none(ctx)
 
 
-def on_sidebar_plate_well_activated(app, well_id: str) -> None:
+def on_sidebar_plate_well_activated(ctx, well_id: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # On a plotting tab, a single click on a well "activates" that well
     # and (if it belongs to a saved group) every other well in the same
     # group. Solo-well clicks toggle membership in active_solo_wells.
@@ -386,7 +403,7 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
         else:
             app._app_state.selection.active_solo_wells.add(well_id)
         app._refresh_sidebar_map()
-        on_plate_sel_change(app._ctx)
+        on_plate_sel_change(ctx)
         return
     # Legacy fallback for non-plotting tabs that still receive
     # wellActivated in rep-set mode (Image Table / smFISH / etc):
@@ -399,28 +416,31 @@ def on_sidebar_plate_well_activated(app, well_id: str) -> None:
     app._sel_toggle_hidden(sid)
 
 
-def on_sidebar_plate_row_activated(app, row: str) -> None:
+def on_sidebar_plate_row_activated(ctx, row: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if app._app_state.selection.selections:
-        select_row(app, row)
+        select_row(ctx, row)
     else:
         # The widget already toggled the row and synced _selected_wells via
         # the preceding selectionChanged; do the heavy refresh once.
-        on_plate_sel_change(app._ctx)
+        on_plate_sel_change(ctx)
 
 
-def on_sidebar_plate_col_activated(app, col: str) -> None:
+def on_sidebar_plate_col_activated(ctx, col: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if app._app_state.selection.selections:
-        select_col(app, col)
+        select_col(ctx, col)
     else:
-        on_plate_sel_change(app._ctx)
+        on_plate_sel_change(ctx)
 
 
-def on_sidebar_plate_well_dropped(app, well_id: str, token: str) -> None:
+def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if not token:
         return
     try:
         from well_viewer.features.heatmap.sidebar_view import _on_drop_event
-        _on_drop_event(app._ctx, "palette", None, token)
+        _on_drop_event(ctx, "palette", None, token)
     except Exception:
         import logging
         logging.getLogger(__name__).exception("Heat map well drop handling failed")
@@ -577,7 +597,8 @@ def update_active_group_label(ctx) -> None:
 
 
 
-def refresh_sidebar_map_now(app) -> None:
+def refresh_sidebar_map_now(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Push current selection / rep-set state onto the sidebar plate widget.
 
     Rep-set mode: each set's wells take that set's colour (muted when the
@@ -604,7 +625,7 @@ def refresh_sidebar_map_now(app) -> None:
     # Passive (group-visibility) only when no per-well pane is on screen — must
     # stay in lock-step with the plate handlers, or the next refresh tick would
     # repaint passive and wipe the per-well selection the handler just committed.
-    rep_mode = _plate_passive_in_group_mode(app)
+    rep_mode = _plate_passive_in_group_mode(ctx)
 
     colors: Dict[str, object] = {}
     if rep_mode:
@@ -637,10 +658,10 @@ def refresh_sidebar_map_now(app) -> None:
     # the current leaf, so behaviour is unchanged.
     try:
         from well_viewer.core.tab_controller import visible_centre_tabs
-        visible = set(visible_centre_tabs(app._ctx)) or {tab_name}
+        visible = set(visible_centre_tabs(ctx)) or {tab_name}
     except Exception:
         visible = {tab_name}
-    smfish = bool(visible) and all(_is_single_well_tab(app._ctx, t) for t in visible)
+    smfish = bool(visible) and all(_is_single_well_tab(ctx, t) for t in visible)
 
     plate.setEnabledWells(list(app._app_state.dataset.well_paths.keys()))
     plate.setSelectionMode("passive" if rep_mode else "select")
@@ -866,7 +887,8 @@ def enforce_well_exclusivity(ctx) -> None:
 
 
 
-def rebuild_all(app) -> None:
+def rebuild_all(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """
     Single authoritative refresh called after ANY data change.
     Always synchronous — no debounce — because it is only called on
@@ -876,11 +898,11 @@ def rebuild_all(app) -> None:
     app._invalidate_stats_cache()
     app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
-    redraw_bars(app._ctx)
+    redraw_bars(ctx)
     app._redraw()
     try:
         from well_viewer.features.scatter.tab_view import scatter_redraw_active
-        scatter_redraw_active(app._ctx)
+        scatter_redraw_active(ctx)
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
     # Group edits change which wells the plots draw from, and several per-well
@@ -906,7 +928,7 @@ def rebuild_all(app) -> None:
             app._show_line_sidebar()
     # Sample definitions auto-persist (debounced), like notes / ratios /
     # view-state — the explicit Save button is now just "save now".
-    _schedule_sample_def_autosave(app._ctx)
+    _schedule_sample_def_autosave(ctx)
 
 
 def _schedule_sample_def_autosave(ctx) -> None:
@@ -967,7 +989,8 @@ def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
 
 
 
-def select_invert(app) -> None:
+def select_invert(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Phase 13 (B7): flip the current selection — every loaded well that
     was selected becomes unselected, and vice versa. Only wells with data
     (``_well_paths``) participate."""
@@ -976,7 +999,7 @@ def select_invert(app) -> None:
     app._app_state.selection.selected_wells = new
     # Re-use the standard refresh path the click handlers go through.
     app._refresh_sidebar_map()
-    on_plate_sel_change(app._ctx)
+    on_plate_sel_change(ctx)
 
 
 
@@ -1109,14 +1132,15 @@ def sel_color(ctx, s) -> str:
 
 
 
-def plate_commit_deferred(app) -> None:
+def plate_commit_deferred(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Run the deferred commit scheduled by a paint event. No-op if
     a drag_finished handler already cleared the pending flag (which
     means it already committed in the same tick)."""
     if not app._app_state.selection.plate_commit_pending:
         return
     app._app_state.selection.plate_commit_pending = False
-    on_plate_sel_change(app._ctx)
+    on_plate_sel_change(ctx)
 
 
 
@@ -1130,7 +1154,8 @@ def labels_clear_all(ctx) -> None:
 
 
 
-def rep_select(app, idx: int) -> None:
+def rep_select(ctx, idx: int) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Legacy bridge: select the idx-th rep_set-source selection.
     sels = [s for s in app._app_state.selection.selections if s.get("source") == "rep_set"]
     if 0 <= idx < len(sels):

@@ -426,7 +426,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 14, was 38) | via A3 clusters 2026-07-11 |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 68, was 135) | +split_view (7 core/feature clusters + split) 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 43, was 135) | +selection_controller (9 clusters) 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,15 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 — selection_controller cluster (largest):** migrated all 25
+  `app`-first funcs in `core/selection_controller.py` to `ctx`-first via the
+  `app = ctx.window` bridge (incl. the A5-targeted `rebuild_all` /
+  `refresh_sidebar_map_now` — bridging now doesn't block their later extraction).
+  Threaded internal cross-calls, the `SelectionRefreshCoordinator`'s
+  `self._app._ctx` call, the 7 `partial(on_sidebar_plate_*, app)` sidebar wirings +
+  the deselect-all `select_none` closure (through `app._ctx`), and the 4 runtime_app
+  delegators (`self._ctx`). The now-working frozen-ctx guard enumerated the missed
+  direct sites. `APP_FIRST_FUNC_BUDGET` 68→43.
 - 2026-07-11 — **A3 — split_view cluster:** migrated the 12 `app`-first funcs in
   `core/split_view.py` (enter/exit/focus split, focus-filter install, toggle/combo
   handlers, nav-intercept, install_split_view) to `ctx`-first via the

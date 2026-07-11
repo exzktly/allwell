@@ -39,6 +39,7 @@ def _mk_app(tab, *, selections, selected):
             selection_changed=SimpleNamespace(emit=lambda s: emitted.append(s))),
     )
     app._emitted = emitted
+    app.window = app
     return app, sel
 
 

@@ -580,7 +580,7 @@ class WellViewerApp(QWidget):
     def _rep_refresh_map(self) -> None: return rep_refresh_map(self._ctx)
 
 
-    def _rep_select(self, idx: int) -> None: return rep_select(self, idx)
+    def _rep_select(self, idx: int) -> None: return rep_select(self._ctx, idx)
 
     def _rep_add(self) -> None: return rep_add(self._ctx)
 
@@ -656,7 +656,7 @@ class WellViewerApp(QWidget):
     def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self._ctx)
 
 
-    def _rebuild_all(self) -> None: return rebuild_all(self)
+    def _rebuild_all(self) -> None: return rebuild_all(self._ctx)
 
     # ── Quick-group helpers (delegates to grouping_controller) ────────────────
 
@@ -813,7 +813,7 @@ class WellViewerApp(QWidget):
         self._sidebar_map_refresh_pending = True
         QTimer.singleShot(0, self._refresh_sidebar_map_now)
 
-    def _refresh_sidebar_map_now(self) -> None: refresh_sidebar_map_now(self)
+    def _refresh_sidebar_map_now(self) -> None: refresh_sidebar_map_now(self._ctx)
 
     # ── v2 plate-widget bridge (WellPlateSelector ↔ WellViewerApp state) ──────
     # The left-rail plate is now a single ``widgets.WellPlateSelector`` instead
@@ -822,7 +822,7 @@ class WellViewerApp(QWidget):
     # selection onto the widget, and the handlers below take user actions back.
 
 
-    def _plate_commit_deferred(self) -> None: return plate_commit_deferred(self)
+    def _plate_commit_deferred(self) -> None: return plate_commit_deferred(self._ctx)
 
     def _set_selected_wells(self, new_set, *, commit = True) -> None:
         return set_selected_wells(self._ctx, new_set, commit=commit)
@@ -908,7 +908,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _select_invert(self) -> None: return select_invert(self)
+    def _select_invert(self) -> None: return select_invert(self._ctx)
 
     def _selected_labels(self) -> List[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""

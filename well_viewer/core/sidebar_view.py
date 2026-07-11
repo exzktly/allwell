@@ -79,13 +79,13 @@ def build_sidebar(app, parent: QWidget) -> None:
     app._sidebar_btns = {f"{r}{c}": None for r in _PLATE_ROWS for c in _PLATE_COLS}
 
     # Wire the plate to the app's selection / replicate-set / heat-map handlers.
-    plate.selectionChanged.connect(partial(on_sidebar_plate_selection_changed, app))
-    plate.selectionDragFinished.connect(partial(on_sidebar_plate_drag_finished, app))
-    plate.cornerToggled.connect(partial(on_sidebar_plate_corner_toggled, app))
-    plate.wellActivated.connect(partial(on_sidebar_plate_well_activated, app))
-    plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, app))
-    plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, app))
-    plate.wellDropped.connect(partial(on_sidebar_plate_well_dropped, app))
+    plate.selectionChanged.connect(partial(on_sidebar_plate_selection_changed, app._ctx))
+    plate.selectionDragFinished.connect(partial(on_sidebar_plate_drag_finished, app._ctx))
+    plate.cornerToggled.connect(partial(on_sidebar_plate_corner_toggled, app._ctx))
+    plate.wellActivated.connect(partial(on_sidebar_plate_well_activated, app._ctx))
+    plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, app._ctx))
+    plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, app._ctx))
+    plate.wellDropped.connect(partial(on_sidebar_plate_well_dropped, app._ctx))
     # Hover tooltip surfaces the user's Sample-Definitions label when set,
     # alongside the well id, so the rail plate doubles as a quick label
     # readout — useful on tabs where the sidebar doesn't show the labels.
@@ -111,7 +111,7 @@ def build_sidebar(app, parent: QWidget) -> None:
     app._deselect_all_btn = QPushButton("Deselect all", deselect_row)
     app._deselect_all_btn.setProperty("variant", "secondary")
     app._deselect_all_btn.setToolTip("Clear the current well selection.")
-    app._deselect_all_btn.clicked.connect(lambda _=False: _select_none(app))
+    app._deselect_all_btn.clicked.connect(lambda _=False: _select_none(app._ctx))
     deselect_row_layout.addWidget(app._deselect_all_btn)
     deselect_row_layout.addStretch(1)
     layout.addWidget(deselect_row)

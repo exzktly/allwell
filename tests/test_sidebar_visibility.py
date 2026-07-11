@@ -38,6 +38,7 @@ def _make(mode: str, collapsed: bool):
             return mode
 
     app = _App()
+    app.window = app
     app._sidebar_root = review_rail
     app._sidebar_collapsed = collapsed
     az = _Analyze()

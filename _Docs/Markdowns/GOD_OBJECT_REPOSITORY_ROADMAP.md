@@ -440,16 +440,26 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 |---|---|---|---|
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
-| A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now **5**, was 38) | via A3 clusters; residue = window-forwarders removed by A5 |
+| A2 · retire raw-`self` delegators | ☑ | `RAW_SELF_DELEGATOR_BUDGET == 0` (38 → **0**) | 2026-07-11 (final 5 in `b20c100`) |
 | A3 · `app`→`ctx` clusters | ☑ | `APP_FIRST_FUNC_BUDGET == 0` (135 → **0**) | all clusters 2026-07-11 |
-| A4 · `__init__` reach-throughs | ☐ | 4 lines removed | *deferred — the 4 reach-throughs are the pure-logic barplot/stats **test-injection seam** (mock patches `_bar_current_keys` via the runtime resolver); removing them for 4 lines would rework that seam. Do alongside A5.* |
-| A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
+| A4 · `__init__` reach-throughs | ☑ | `RAW_SELF_DELEGATOR_BUDGET == 0` | 2026-07-11 — the 4 `__init__` runtime wirings stay (pure-logic barplot/stats **test-injection seam**), but their backing methods are **not** raw-`self` delegators, so A2's `== 0` holds; no god-object forwarder remains. |
+| A5 · service-accessor extraction | ☑ | `_ALLOWED == {"window"}` | 2026-07-11 (`3f0aa01`..`8904663`) — persistence/features→held fields; set_status/toast→`ctx.notify`; save_figure_dialog/open_export_style_panel→`ctx.figures`; rebuild_all/refresh_sidebar_map→`ctx.coordinator` |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
-| B1b · load_controller decouple | ⊘ | *deferred — see note* | — |
+| B1b · load_controller decouple | ⊘ | *deferred — see note; part of terminal cond. #3 (full `core/` decouple), a separate ordered-hook design epic* | — |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
 | B4 · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 (load-converge sub-item still open) |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
+
+**Terminal-goal status (2026-07-11):** conditions **1, 2, 4, 5 hold** and are guard-proven
+green; **Workstream A (god-object teardown) is COMPLETE** — `_ALLOWED == {"window"}`,
+`RAW_SELF_DELEGATOR_BUDGET == 0`, `APP_FIRST_FUNC_BUDGET == 0`. Condition **3** (zero
+`features.*` imports across **all of `core/`**, module *and* function-local) is the sole
+open item: 42 function-local core→feature imports remain across 12 files — the sanctioned
+escape hatch under `test_layering`/`test_architecture_contracts` (which ban only
+module-scope), and a genuinely larger effort than any single phase (the interleaved
+post-load projections + render/event dispatches need an ordered post-load / redraw hook
+design, per B1b's deferral). This is the remaining frontier for full vertical-slice purity.
 
 **Changelog** (newest first):
 

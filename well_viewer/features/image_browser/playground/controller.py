@@ -27,8 +27,8 @@ from well_viewer.features.image_browser.playground.renderer import (
 from well_viewer.features.image_browser.playground.worker import request_reference_fields
 
 
-def _st(app):
-    return app._app_state.playground
+def _st(ctx):
+    return ctx.state.playground
 
 
 def _is_real_channel(label: str) -> bool:
@@ -39,8 +39,8 @@ def _is_real_channel(label: str) -> bool:
 
 # ── dropdown population ──────────────────────────────────────────────────────
 
-def _set_combo(app, attr: str, options, current):
-    cb = getattr(app, attr, None)
+def _set_combo(win, attr: str, options, current):
+    cb = getattr(win, attr, None)
     if cb is None:
         return
     from well_viewer.core.ui_helpers import set_combo_values
@@ -74,46 +74,47 @@ def playground_repopulate_dropdowns(ctx) -> None:
 
 # ── widget → state ───────────────────────────────────────────────────────────
 
-def _read_combo(app, attr: str):
-    cb = getattr(app, attr, None)
+def _read_combo(win, attr: str):
+    cb = getattr(win, attr, None)
     if cb is None:
         return None
     txt = str(cb.currentText() or "").strip()
     return txt if txt and txt != "—" else None
 
 
-def _read_float(app, attr: str, default: float) -> float:
+def _read_float(win, attr: str, default: float) -> float:
     from well_viewer.core.ui_helpers import parse_float_edit
-    return parse_float_edit(getattr(app, attr, None), default)
+    return parse_float_edit(getattr(win, attr, None), default)
 
 
-def _read_widgets_into_state(app) -> None:
+def _read_widgets_into_state(ctx) -> None:
     """Pull current widget values into state. No-op for widgets not built yet
-    (so headless tests can set ``app._app_state.playground`` fields directly)."""
-    st = _st(app)
+    (so headless tests can set ``ctx.state.playground`` fields directly)."""
+    st = _st(ctx)
+    win = ctx.window
     for attr, field in (("_playground_well_cb", "well"),
                         ("_playground_chan_cb", "channel"),
                         ("_playground_tp_cb", "timepoint"),
                         ("_playground_fov_cb", "fov")):
-        v = _read_combo(app, attr)
+        v = _read_combo(win, attr)
         if v is not None:
             setattr(st, field, v)
-    bg_cb = getattr(app, "_playground_bg_cb", None)
+    bg_cb = getattr(win, "_playground_bg_cb", None)
     if bg_cb is not None:
         st.background_method = str(bg_cb.currentText() or "none")
-    ff_cb = getattr(app, "_playground_ff_cb", None)
+    ff_cb = getattr(win, "_playground_ff_cb", None)
     if ff_cb is not None:
         st.flatfield_mode = str(ff_cb.currentText() or "none")
-    bw = getattr(app, "_playground_bgwell_edit", None)
+    bw = getattr(win, "_playground_bgwell_edit", None)
     if bw is not None:
         st.background_well = str(bw.text() or "").strip() or None
-    st.radius = int(_read_float(app, "_playground_radius_edit", st.radius))
-    st.fft_small = _read_float(app, "_playground_fft_small_edit", st.fft_small)
-    st.mesh_ratio = _read_float(app, "_playground_mesh_ratio_edit", st.mesh_ratio)
-    st.mesh_sigma = _read_float(app, "_playground_mesh_sigma_edit", st.mesh_sigma)
-    st.qc_min_area = _read_float(app, "_playground_qc_min_area_edit", st.qc_min_area)
-    st.qc_max_area = _read_float(app, "_playground_qc_max_area_edit", st.qc_max_area)
-    lut = getattr(app, "_playground_cmap_cb", None)
+    st.radius = int(_read_float(win, "_playground_radius_edit", st.radius))
+    st.fft_small = _read_float(win, "_playground_fft_small_edit", st.fft_small)
+    st.mesh_ratio = _read_float(win, "_playground_mesh_ratio_edit", st.mesh_ratio)
+    st.mesh_sigma = _read_float(win, "_playground_mesh_sigma_edit", st.mesh_sigma)
+    st.qc_min_area = _read_float(win, "_playground_qc_min_area_edit", st.qc_min_area)
+    st.qc_max_area = _read_float(win, "_playground_qc_max_area_edit", st.qc_max_area)
+    lut = getattr(win, "_playground_cmap_cb", None)
     if lut is not None and hasattr(lut, "lut"):
         name = lut.lut()
         st.cmap_name = (name + "_r") if (hasattr(lut, "isReversed") and lut.isReversed()) else name
@@ -121,11 +122,11 @@ def _read_widgets_into_state(app) -> None:
 
 # ── LUT ──────────────────────────────────────────────────────────────────────
 
-def _resolve_lut(app, arr):
+def _resolve_lut(win, arr):
     """Parse the playground LUT min/max edits ('auto'/blank/number); fall back to
     the array's min/max. Mirrors review_image_resolve_lut."""
     def _num(attr, fallback):
-        e = getattr(app, attr, None)
+        e = getattr(win, attr, None)
         if e is None:
             return fallback
         txt = str(e.text() or "").strip().lower()
@@ -147,58 +148,59 @@ def _resolve_lut(app, arr):
     return lo, hi
 
 
-def _set_status(app, text: str) -> None:
+def _set_status(win, text: str) -> None:
     from well_viewer.core.ui_helpers import set_widget_text
-    set_widget_text(app, "_playground_status", text)
+    set_widget_text(win, "_playground_status", text)
 
 
 # ── main render ──────────────────────────────────────────────────────────────
 
-def playground_on_change(app) -> None:
+def playground_on_change(ctx) -> None:
     """Reload + recorrect + rerender on any selector / param / toggle change."""
-    st = _st(app)
-    _read_widgets_into_state(app)
+    st = _st(ctx)
+    win = ctx.window
+    _read_widgets_into_state(ctx)
     if not (st.well and st.channel and st.timepoint and st.fov):
-        _set_status(app, "Select a well, channel, timepoint, and FOV.")
+        _set_status(win, "Select a well, channel, timepoint, and FOV.")
         return
-    if app._app_state.dataset.data_dir is None:
-        _set_status(app, "Load a dataset first.")
+    if ctx.state.dataset.data_dir is None:
+        _set_status(win, "Load a dataset first.")
         return
 
     cache = st.image_cache
-    raw = _load_array(app._ctx, cache, st.well, st.channel, st.timepoint, st.fov,
+    raw = _load_array(ctx, cache, st.well, st.channel, st.timepoint, st.fov,
                       use_tophat=False)
     if raw is None:
         st.raw_arr = None
-        _set_status(app, "No raw image for the selected frame.")
+        _set_status(win, "No raw image for the selected frame.")
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
-    st.mask_arr = _load_mask_array(app._ctx, cache, st.well, st.timepoint, st.fov)
+    st.mask_arr = _load_mask_array(ctx, cache, st.well, st.timepoint, st.fov)
     frame_lbl = f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}"
 
     # The binary threshold is per-frame: when the frame identity changes, drop
     # any local override so the control falls back to the channel's app-wide
     # ThreshFracOn default, and refresh the displayed value.
     frame_key = (st.well, st.channel, st.timepoint, st.fov)
-    if getattr(app, "_playground_frame_key", None) != frame_key:
-        app._playground_frame_key = frame_key
+    if getattr(ctx.runtime.playground, "frame_key", None) != frame_key:
+        ctx.runtime.playground.frame_key = frame_key
         st.threshold = None
-        _refresh_threshold_display(app)
+        _refresh_threshold_display(ctx)
 
     # Raw — no correction.
     if st.source == "raw":
-        _render(app, st.raw_arr)
-        _set_status(app, f"Raw — {frame_lbl}")
+        _render(ctx, st.raw_arr)
+        _set_status(win, f"Raw — {frame_lbl}")
         return
 
     chan_lower = st.channel.lower()
     if _source_needs_reference(st):
         if not st.background_well:
-            _set_status(app, "Pick a background well for empty_well / basic.")
-            _render(app, st.raw_arr)
+            _set_status(win, "Pick a background well for empty_well / basic.")
+            _render(ctx, st.raw_arr)
             return
         if st.model_well != st.background_well:
-            _build_reference_then_render(app, chan_lower)
+            _build_reference_then_render(ctx, chan_lower)
             return
         ff = st.ff_field_by_chan.get(chan_lower)
         bg = st.bg_field_by_chan.get(chan_lower)
@@ -212,10 +214,10 @@ def playground_on_change(app) -> None:
         background_method=bg_method, radius=st.radius,
         fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
         ff_field=ff, bg_field=bg)
-    _render(app, corrected)
+    _render(ctx, corrected)
     label = ("Flat-field" if st.source == "flatfield"
              else f"Corrected ({st.flatfield_mode}+{st.background_method})")
-    _set_status(app, f"{label} — {frame_lbl}")
+    _set_status(win, f"{label} — {frame_lbl}")
 
 
 def _source_needs_reference(st) -> bool:
@@ -228,15 +230,15 @@ def _source_needs_reference(st) -> bool:
     return st.source == "corrected" and st.background_method == "empty_well"
 
 
-def _effective_threshold(app) -> float:
+def _effective_threshold(ctx) -> float:
     """Frame-local binary threshold: the user's override if set, else the
     channel's app-wide ThreshFracOn as a read-only default (never written back)."""
-    st = _st(app)
+    st = _st(ctx)
     if st.threshold is not None:
         return float(st.threshold)
     try:
         from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        return float(get_thresh_frac_on(app._ctx, (st.channel or "").lower()))
+        return float(get_thresh_frac_on(ctx, (st.channel or "").lower()))
     except Exception:
         return 0.0
 
@@ -280,10 +282,10 @@ def _cells_above(arr, mask, threshold: float):
     return {int(i) for i, m in zip(ids, means) if float(m) > threshold}
 
 
-def _render(app, arr) -> None:
-    st = _st(app)
+def _render(ctx, arr) -> None:
+    st = _st(ctx)
     st.display_arr = np.asarray(arr, dtype=np.float32)
-    lo, hi = _resolve_lut(app, arr)
+    lo, hi = _resolve_lut(ctx.window, arr)
     # Apply the QC size-based cleanup to the mask before display, so the overlay
     # and binary reflect the debris gate.
     qc_mask = _qc_size_filtered(st.mask_arr, st.qc_min_area, st.qc_max_area)
@@ -291,21 +293,21 @@ def _render(app, arr) -> None:
     above_ids = None
     thr = None
     if st.binary_mask:
-        thr = _effective_threshold(app)
+        thr = _effective_threshold(ctx)
         if qc_mask is not None:
             above_ids = _cells_above(arr, qc_mask, thr)
     st.base_rgb = build_playground_rgb(
         arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
         show_boundary=st.show_overlay, tint=tuple(st.tint_color),
         above_ids=above_ids, threshold=thr)
-    render_playground_display(app)
+    render_playground_display(ctx.window)
 
 
-def _build_reference_then_render(app, chan_lower: str) -> None:
+def _build_reference_then_render(ctx, chan_lower: str) -> None:
     """Kick off the reference-field worker; re-render when it lands."""
-    st = _st(app)
-    _set_status(app, f"Building {st.flatfield_mode}/{st.background_method} model "
-                     f"from well {st.background_well}…")
+    st = _st(ctx)
+    _set_status(ctx.window, f"Building {st.flatfield_mode}/{st.background_method} model "
+                            f"from well {st.background_well}…")
 
     def _on_done(well, chan, ff_field, bg_field):
         if ff_field is not None:
@@ -313,26 +315,26 @@ def _build_reference_then_render(app, chan_lower: str) -> None:
         if bg_field is not None:
             st.bg_field_by_chan[chan] = bg_field
         st.model_well = st.background_well
-        playground_on_change(app)
+        playground_on_change(ctx)
 
     def _on_failed(msg):
-        _set_status(app, f"Model build failed: {msg}")
+        _set_status(ctx.window, f"Model build failed: {msg}")
 
-    app._playground_ref_bridge = request_reference_fields(
-        app._ctx, st.background_well, chan_lower,
+    ctx.runtime.playground.ref_bridge = request_reference_fields(
+        ctx, st.background_well, chan_lower,
         flatfield_mode=st.flatfield_mode, background_method=st.background_method,
         on_done=_on_done, on_failed=_on_failed)
 
 
-def _refresh_threshold_display(app) -> None:
+def _refresh_threshold_display(ctx) -> None:
     """Sync the Threshold stepper to the effective threshold (signals blocked so
     the display sync doesn't trigger a re-render)."""
-    stp = getattr(app, "_playground_threshold_stepper", None)
+    stp = getattr(ctx.window, "_playground_threshold_stepper", None)
     if stp is None:
         return
     blocked = stp.blockSignals(True)
     try:
-        stp.setValue(_effective_threshold(app))
+        stp.setValue(_effective_threshold(ctx))
     finally:
         stp.blockSignals(blocked)
 
@@ -345,33 +347,34 @@ def _event_xy(event):
         return float(event.x()), float(event.y())
 
 
-def playground_pan_press(app, event) -> None:
+def playground_pan_press(ctx, event) -> None:
     """Record the drag origin so the next moves pan relative to it."""
-    st = _st(app)
+    st = _st(ctx)
     mx, my = _event_xy(event)
-    app._playground_pan_drag = (mx, my, float(st.pan_x), float(st.pan_y))
+    ctx.runtime.playground.pan_drag = (mx, my, float(st.pan_x), float(st.pan_y))
 
 
-def playground_pan_move(app, event) -> None:
+def playground_pan_move(ctx, event) -> None:
     """Pan the image by the drag delta (view is kept in state, so it persists
     across source/parameter changes)."""
-    drag = getattr(app, "_playground_pan_drag", None)
+    drag = getattr(ctx.runtime.playground, "pan_drag", None)
     if drag is None:
         return
-    st = _st(app)
+    st = _st(ctx)
     mx, my = _event_xy(event)
     sx, sy, ox, oy = drag
     st.pan_x = ox + (mx - sx)
     st.pan_y = oy + (my - sy)
-    render_playground_display(app)
+    render_playground_display(ctx.window)
 
 
-def playground_hover(app, event) -> None:
+def playground_hover(ctx, event) -> None:
     """Show a tooltip with the hovered pixel's intensity in the displayed frame."""
-    st = _st(app)
+    st = _st(ctx)
+    win = ctx.window
     arr = st.display_arr
-    disp = getattr(app, "_playground_disp", None)
-    label = getattr(app, "_playground_image_label", None)
+    disp = getattr(win, "_playground_disp", None)
+    label = getattr(win, "_playground_image_label", None)
     if arr is None or disp is None or label is None:
         return
     a = np.asarray(arr)

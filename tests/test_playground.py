@@ -160,14 +160,14 @@ def test_on_change_corrects_and_renders(playground_app, monkeypatch):
     app._playground_bg_cb.setCurrentText("sliding_disk")
     app._playground_radius_edit.setText("12")
     st.source = "corrected"
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     assert st.base_rgb is not None
     assert app._playground_image_label.pixmap() is not None
     corrected_rgb = st.base_rgb.copy()
 
     # Raw vs Corrected differ for a non-none method.
     st.source = "raw"
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     assert not np.array_equal(corrected_rgb, st.base_rgb)
 
 
@@ -190,7 +190,7 @@ def test_flatfield_source_applies_only_flatfield(playground_app, monkeypatch):
     app._playground_ff_cb.setCurrentText("gaussian")
     app._playground_bg_cb.setCurrentText("sliding_disk")
     st.source = "flatfield"
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     # Flat-field source == flatfield only (background = none).
     want = pm.correct_single_frame(frame, flatfield_mode="gaussian",
                                    background_method="none")
@@ -215,7 +215,7 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     st.source = "raw"
     st.binary_mask = True
     st.threshold = 100.0          # local override between the two cells
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     rgb = st.base_rgb
     assert (rgb[3, 3] == (255, 255, 255)).all()    # bright cell ON
     assert (rgb[14, 14] == (0, 0, 0)).all()        # dim cell OFF
@@ -238,11 +238,11 @@ def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):
     st.source = "raw"
     st.binary_mask = True
     st.threshold = 10.0
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     assert int((st.base_rgb == 255).all(axis=2).sum()) == 109   # both cells
     # qc_min_area is read from the widget each change — drive the widget.
     app._playground_qc_min_area_edit.setText("20")
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     assert int((st.base_rgb == 255).all(axis=2).sum()) == 100   # small one dropped
 
 
@@ -270,7 +270,7 @@ def test_pan_updates_state(playground_app, monkeypatch):
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: _frame(12))
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
     st.source = "raw"
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
 
     class _Ev:
         def __init__(self, x, y):
@@ -280,8 +280,8 @@ def test_pan_updates_state(playground_app, monkeypatch):
             from PySide6.QtCore import QPointF
             return QPointF(self._x, self._y)
     before = (st.pan_x, st.pan_y)
-    C.playground_pan_press(app, _Ev(50, 50))
-    C.playground_pan_move(app, _Ev(70, 65))
+    C.playground_pan_press(app._ctx, _Ev(50, 50))
+    C.playground_pan_move(app._ctx, _Ev(70, 65))
     assert (st.pan_x - before[0], st.pan_y - before[1]) == (20.0, 15.0)
 
 
@@ -293,7 +293,7 @@ def test_hover_tooltip_reads_display_value(playground_app, monkeypatch):
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
     st.source = "raw"
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     # display_arr is the shown frame; geometry was recorded for the mapping.
     assert st.display_arr is not None
     assert app._playground_disp["iw"] == frame.shape[1]
@@ -304,7 +304,7 @@ def test_hover_tooltip_reads_display_value(playground_app, monkeypatch):
                 def x(self_inner): return 0.0
                 def y(self_inner): return 0.0
             return _P()
-    C.playground_hover(app, _Ev())     # must not raise
+    C.playground_hover(app._ctx, _Ev())     # must not raise
 
 
 def test_auto_lut_stays_live_and_reflects_param_changes(playground_app, monkeypatch):
@@ -325,14 +325,14 @@ def test_auto_lut_stays_live_and_reflects_param_changes(playground_app, monkeypa
     st.source = "corrected"
 
     app._playground_mesh_sigma_edit.setText("1.0")
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     a = st.base_rgb.copy()
     # The LUT entries are left as "auto" (live), not clobbered with numbers.
     assert app._playground_lmin_entry.text() == "auto"
     assert app._playground_lmax_entry.text() == "auto"
 
     app._playground_mesh_sigma_edit.setText("5.0")
-    C.playground_on_change(app)
+    C.playground_on_change(app._ctx)
     assert not np.array_equal(a, st.base_rgb)
 
 
@@ -340,7 +340,7 @@ def test_on_change_handles_missing_frame(playground_app, monkeypatch):
     app = playground_app
     from well_viewer.features.image_browser.playground import controller as C
     monkeypatch.setattr(C, "_load_array", lambda *a, **k: None)
-    C.playground_on_change(app)        # must not raise
+    C.playground_on_change(app._ctx)        # must not raise
     assert "No raw image" in app._playground_status.text()
 
 

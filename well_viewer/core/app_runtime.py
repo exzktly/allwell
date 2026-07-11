@@ -98,7 +98,7 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre", "view_state", "tab", "grouping")
+                 "centre", "view_state", "tab", "grouping", "playground")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -220,3 +220,9 @@ class AppRuntime:
         # / ``app._grp_iter_order``) the row/col-pair shims + the from-dropdowns
         # reader thread through. Session-only, never persisted.
         object.__setattr__(self, "grouping", _FeatureRuntime(s, "_grp_"))
+        # Playground testbed transient scratch (prefix ``_playground_``): the
+        # current frame identity key (``ctx.runtime.playground.frame_key`` <->
+        # ``app._playground_frame_key``), the reference-field worker bridge
+        # (``.ref_bridge``), and the pan-drag origin tuple (``.pan_drag``). Live
+        # session objects the Playground controller reads/writes, never persisted.
+        object.__setattr__(self, "playground", _FeatureRuntime(s, "_playground_"))

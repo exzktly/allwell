@@ -88,8 +88,8 @@ TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phas
 CORE_DIR = REPO_ROOT / "well_viewer" / "core"
 RAW_SELF_DELEGATOR_BUDGET = 38          # `def _m(self,...): return fn(self, ...)` in runtime_app.py
 RAW_SELF_DELEGATOR_SLACK = 6
-APP_FIRST_FUNC_BUDGET = 135             # top-level funcs in core/+features/ whose first param is `app`
-APP_FIRST_FUNC_SLACK = 15
+APP_FIRST_FUNC_BUDGET = 120             # top-level funcs in core/+features/ whose first param is `app`
+APP_FIRST_FUNC_SLACK = 15               # (A3: playground cluster migrated 15: 135 → 120)
 
 
 def _enforce(ok: bool, message: str) -> None:

@@ -48,7 +48,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     app = ctx.window
     if parent.layout() is None:
         QHBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
-    on_change = partial(playground_on_change, app)
+    on_change = partial(playground_on_change, ctx)
 
     # ── Left: controls column ────────────────────────────────────────────────
     controls = QWidget(parent)
@@ -295,14 +295,14 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     )
 
     def _on_press(ev) -> None:
-        playground_pan_press(app, ev)
+        playground_pan_press(ctx, ev)
 
     def _on_move(ev) -> None:
         from PySide6.QtCore import Qt as _Qt
         if ev.buttons() & _Qt.LeftButton:
-            playground_pan_move(app, ev)
+            playground_pan_move(ctx, ev)
         else:
-            playground_hover(app, ev)
+            playground_hover(ctx, ev)
     label.mousePressEvent = _on_press
     label.mouseMoveEvent = _on_move
 

@@ -270,6 +270,18 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
   `test_architecture_contracts.py::test_core_does_not_import_features_at_module_scope`;
   tighten to catch the function-local ones this phase removes.
 
+> **⊘ Deferred (2026-07-11).** These are *function-local* core→feature imports —
+> the **sanctioned** escape hatch (`test_layering` / `test_architecture_contracts`
+> ban only *module-scope* core→feature, which is already green). Hoisting them
+> onto `on_dataset_loaded` is not a simple move: `load_directory` pins each call
+> to a specific point in a strictly-ordered sequence interleaved with
+> `persistence.load(...)` steps (cell_overrides → qc recompute → crop → …, each
+> with documented ordering constraints), whereas the `on_dataset_loaded` hook
+> fires at a *single* point. Doing this safely needs an **ordered post-load hook
+> phase** design — higher-risk-than-value versus the rest of the roadmap, and the
+> current function-local imports are already contract-compliant. Revisit after A3
+> makes the surrounding calls `ctx`-native.
+
 ### B2 · `WellRepository` facade over `DatasetState` + `get_rows` ✅ *(interface seam, no behavior change)*
 **Landed.** `data/well_repository.py` — Qt-free `WellRepository` exposing
 `rows(label)`, `rows_or_none(label)` (cache-only), `labels()`, `all_timepoints()`,
@@ -406,19 +418,19 @@ A5 `window` = terminal state ; B5 (image repo) optional/last
 ## Progress log (goal-mode status board)
 
 Single source of truth for "what's left." Statuses: ☐ not started · ◐ in progress ·
-☑ done (Def-of-Done guard green). Goal mode picks the lowest-ID ☐ phase whose
-ordering constraints are met.
+☑ done (Def-of-Done guard green) · ⊘ deferred (rationale in the phase section).
+Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 | Phase | Status | Def-of-Done guard | Landed (commit / date) |
 |---|---|---|---|
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ☐ | `RAW_SELF_DELEGATOR_BUDGET == 0` | — |
-| A3 · `app`→`ctx` clusters | ☐ | `APP_FIRST_FUNC_BUDGET == 0` | — |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 120, was 135) | playground cluster 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
-| B1b · load_controller decouple | ☐ | core-scope no-feature-imports green | — |
+| B1b · load_controller decouple | ⊘ | *deferred — see note* | — |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
 | B4 · load converge + persistence→ctx | ☐ | `PERSIST_APP_PARAM_BUDGET == 0` | — |
@@ -426,6 +438,15 @@ ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 (partial) — playground cluster:** migrated the 15 `app`-first
+  functions in `features/image_browser/playground/controller.py` to `ctx`-first
+  (widget-I/O helpers take `win=ctx.window`; frame-key/ref-bridge/pan-drag moved to
+  a new `ctx.runtime.playground` namespace in `AppRuntime`). Updated tab_view +
+  test call sites. `APP_FIRST_FUNC_BUDGET` 135→120. Playground tests + ctx guards green.
+- 2026-07-11 — **B1b deferred:** load-ordering constraints make the
+  `on_dataset_loaded` hoist higher-risk-than-value; the function-local core→feature
+  imports are the sanctioned escape hatch (module-scope ban already green). Rationale
+  in the B1b section.
 - 2026-07-11 — **B3 landed:** routed the last single-well cache read
   (`stats_compute._safe_rows`) through `repo.rows_or_none`; `REPO_BYPASS_BUDGET`
   1→0. Mock-path stats tests (112) + app_smoke green (real repo path).

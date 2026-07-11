@@ -334,6 +334,6 @@ def _save_figure(ctx) -> None:
     if fig is None:
         return
     try:
-        ctx.save_figure_dialog(fig, "multivariate.png")
+        ctx.figures.save(fig, "multivariate.png")
     except Exception:
         swallowed()

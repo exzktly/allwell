@@ -20,11 +20,10 @@ from well_viewer.viewer_context import ViewerContext
 # home yet — not a convenience wrapper for arbitrary god-object access.
 _ALLOWED = {
     # NOTE (A5): ``set_status`` / ``toast`` were extracted into
-    # ``NotificationService``, held as the ``ctx.notify`` collaborator — callers
-    # now use ``ctx.notify.set_status`` / ``ctx.notify.toast``, so they are no
-    # longer accessor methods on the context.
-    "save_figure_dialog",
-    "open_export_style_panel",
+    # ``NotificationService`` (``ctx.notify``); ``save_figure_dialog`` /
+    # ``open_export_style_panel`` into ``FigureService`` (``ctx.figures.save`` /
+    # ``ctx.figures.open_style_panel``). All are now held collaborators, not
+    # accessor methods on the context.
     # ``window`` exposes the WellViewerApp *qua QMainWindow* for the operations
     # that genuinely need the widget (dialog parenting, isinstance/findChildren)
     # and can never be god-object-free. Named so those needs don't count against

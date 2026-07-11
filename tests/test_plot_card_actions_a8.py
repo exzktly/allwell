@@ -36,10 +36,11 @@ class _FakeRegistry:
         return self._m.get(name)
 
 
-def _ctx(cards, app):
-    # A real ViewerContext so the named service accessors (set_status /
-    # save_figure_dialog) are exercised, delegating to the fake app.
-    return ViewerContext(_window=app, state=None, bus=None, widgets=_FakeRegistry(cards))
+def _ctx(cards, app, figures=None):
+    # A real ViewerContext so the named service accessors (notify) delegate to the
+    # fake app; ``figures`` can be injected to observe the FigureService seam (A5).
+    return ViewerContext(_window=app, state=None, bus=None,
+                         widgets=_FakeRegistry(cards), figures=figures)
 
 
 def test_active_card_picks_first_visible_in_priority_order():
@@ -58,8 +59,8 @@ def test_active_card_none_when_all_hidden():
 
 def test_save_routes_figure_to_app_save_dialog():
     calls = []
-    app = SimpleNamespace(_save_matplotlib_fig=lambda fig, name: calls.append((fig, name)))
-    ctx = _ctx({"_distribution_card": _FakeCard("theFig")}, app)
+    figures = SimpleNamespace(save=lambda fig, name: calls.append((fig, name)))
+    ctx = _ctx({"_distribution_card": _FakeCard("theFig")}, SimpleNamespace(), figures=figures)
     pca.save_active_card_figure(ctx)
     assert calls == [("theFig", "distribution.png")]
 

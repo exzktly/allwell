@@ -84,14 +84,22 @@ class ViewerContext:
     # former ``ctx.set_status`` / ``ctx.toast`` accessors reaching ``_window``.
     # Attached in ``__post_init__`` (it needs the assembled context).
     notify: object = None
+    # The figure-output service (Save-As dialog + Export-Style panel), held as a
+    # collaborator so ``ctx.figures.save`` / ``ctx.figures.open_style_panel`` name
+    # it instead of the former ``ctx.save_figure_dialog`` / ``ctx.open_export_
+    # style_panel`` accessors. Attached in ``__post_init__``.
+    figures: object = None
 
     def __post_init__(self) -> None:
-        # Attach the notification service (A5). Bound to this context so the
-        # status-bar / toast surfaces are reached as ``ctx.notify`` collaborators
-        # rather than god-object accessor methods.
+        # Attach the collaborator services (A5) bound to this context, so their
+        # surfaces are reached as ``ctx.<service>`` objects rather than
+        # god-object accessor methods.
         if self.notify is None:
             from well_viewer.core.notifications import NotificationService
             object.__setattr__(self, "notify", NotificationService(self))
+        if self.figures is None:
+            from well_viewer.core.figure_saver import FigureService
+            object.__setattr__(self, "figures", FigureService(self))
         # Attach the row-access facade (B2) onto the state so callers reach it
         # as ``ctx.state.repo``. Done here — the DI bundle is the natural wiring
         # point and it needs the assembled context. Mutates ``state`` (not the
@@ -144,11 +152,3 @@ class ViewerContext:
         if callable(fn):
             fn()
 
-    def save_figure_dialog(self, fig, default_name: str) -> None:
-        """Open the app's Save-As dialog for *fig*, honouring the shared file-type
-        filter and the active dataset directory."""
-        self._window._save_matplotlib_fig(fig, default_name)
-
-    def open_export_style_panel(self, plot_key: str) -> None:
-        """Open the figure-properties (export-style) side panel for *plot_key*."""
-        self._window._open_export_style_panel(plot_key)

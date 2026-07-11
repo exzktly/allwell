@@ -129,7 +129,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # right-align it, so wrap the row.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
     right_l.addWidget(wrap_ctrl_row_with_properties(
-        bar_ctrl, lambda: ctx.open_export_style_panel("bar")))
+        bar_ctrl, lambda: ctx.figures.open_style_panel("bar")))
 
     # ── plot-shape row (Timepoint / Beeswarm / Violin / Smooth) ──────────────
     # Split off the controls that change WHAT is plotted from the controls

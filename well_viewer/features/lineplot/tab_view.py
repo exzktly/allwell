@@ -121,7 +121,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # right-align it, so wrap the row via the shared helper.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
     layout.addWidget(wrap_ctrl_row_with_properties(
-        line_ctrl, lambda: ctx.open_export_style_panel("line")))
+        line_ctrl, lambda: ctx.figures.open_style_panel("line")))
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)

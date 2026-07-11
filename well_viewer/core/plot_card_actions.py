@@ -89,6 +89,6 @@ def save_active_card_figure(ctx) -> None:
         return
     # Save-As dialog is a genuine app/window-level service — via the named accessor.
     try:
-        ctx.save_figure_dialog(fig, default)
+        ctx.figures.save(fig, default)
     except Exception:
         swallowed()  # was: pass (silent except)

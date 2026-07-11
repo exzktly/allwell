@@ -174,7 +174,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # FlowLayout control row can't right-align it, so wrap the row.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
     layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl, lambda: ctx.open_export_style_panel("scatter_cells")))
+        ctrl, lambda: ctx.figures.open_style_panel("scatter_cells")))
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators

@@ -21,17 +21,19 @@ _logger = logging.getLogger("well_viewer")
 _SECTION = "crop_region"
 
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
     region = app._app_state.dataset.crop_region
-    _doc.set_section(app._ctx, _SECTION, list(region) if region else None)
+    _doc.set_section(ctx, _SECTION, list(region) if region else None)
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app._ctx, _SECTION)
+    data = _doc.get_section(ctx, _SECTION)
     if isinstance(data, (list, tuple)) and len(data) == 4:
         try:
             app._app_state.dataset.crop_region = tuple(int(v) for v in data)

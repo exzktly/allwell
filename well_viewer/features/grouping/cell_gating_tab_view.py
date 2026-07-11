@@ -1233,7 +1233,7 @@ def cell_gating_auto_threshold(ctx) -> None:
     out_dir = ctx.state.dataset.data_dir
     if not out_dir:
         try:
-            ctx.set_status(
+            ctx.notify.set_status(
                 "Auto-threshold: load a dataset first."
             )
         except Exception:
@@ -1242,7 +1242,7 @@ def cell_gating_auto_threshold(ctx) -> None:
     channels = [str(ch).strip().lower() for ch in (ctx.state.channel.fluor_channels or []) if str(ch).strip()]
     if not channels:
         try:
-            ctx.set_status(
+            ctx.notify.set_status(
                 "Auto-threshold: no fluorescence channels detected in the loaded dataset."
             )
         except Exception:
@@ -1262,7 +1262,7 @@ def cell_gating_auto_threshold(ctx) -> None:
 
     def _on_progress(msg: str) -> None:
         try:
-            ctx.set_status(msg)
+            ctx.notify.set_status(msg)
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -1272,7 +1272,7 @@ def cell_gating_auto_threshold(ctx) -> None:
             btn.setText("Auto-threshold all channels")
         if not isinstance(result, dict) or not result:
             try:
-                ctx.set_status(
+                ctx.notify.set_status(
                     "Auto-threshold finished — no thresholds were updated."
                 )
             except Exception:
@@ -1297,7 +1297,7 @@ def cell_gating_auto_threshold(ctx) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
         try:
-            ctx.set_status(
+            ctx.notify.set_status(
                 "Auto-threshold updated " + ", ".join(written) if written
                 else "Auto-threshold finished — no ThreshFracOn edits were touched."
             )
@@ -1310,7 +1310,7 @@ def cell_gating_auto_threshold(ctx) -> None:
             "Auto-threshold failed: %s", msg,
         )
         try:
-            ctx.set_status(f"Auto-threshold failed: {msg}")
+            ctx.notify.set_status(f"Auto-threshold failed: {msg}")
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -1404,7 +1404,7 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
         if label is not None:
             label.setText(msg)
         try:
-            ctx.set_status(msg)
+            ctx.notify.set_status(msg)
         except Exception:
             swallowed()
 
@@ -2335,7 +2335,7 @@ def _cell_gating_on_failed(ctx, msg: str) -> None:
         bar.hide()
     logger.error("Cell gating failed: %s", msg)
     try:
-        ctx.set_status(f"Cell gating failed: {msg}")
+        ctx.notify.set_status(f"Cell gating failed: {msg}")
     except Exception:
         logger.exception("failed to display gating-error status")
 

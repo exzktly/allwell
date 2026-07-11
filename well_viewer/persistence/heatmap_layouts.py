@@ -38,25 +38,27 @@ def _collect_settings(app) -> dict:
     }
 
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
-    layouts = list(app._ctx.runtime.heatmap.layouts or [])
+    layouts = list(ctx.runtime.heatmap.layouts or [])
     payload = {
         "layouts": [lay.to_dict() for lay in layouts],
         "settings": _collect_settings(app),
     }
-    _doc.set_section(app._ctx, "heatmap_layouts", payload)
+    _doc.set_section(ctx, "heatmap_layouts", payload)
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
-    data = _doc.get_section(app._ctx, "heatmap_layouts")
+    data = _doc.get_section(ctx, "heatmap_layouts")
     if not isinstance(data, dict):
         return
     from well_viewer.features.heatmap.models import layouts_from_dict
-    app._ctx.runtime.heatmap.layouts = layouts_from_dict(data.get("layouts", []) or [])
+    ctx.runtime.heatmap.layouts = layouts_from_dict(data.get("layouts", []) or [])
     settings = data.get("settings", {}) or {}
     hm = app._app_state.feature_slice("heatmap")
     if isinstance(settings, dict) and hm is not None:
@@ -68,10 +70,10 @@ def load_from_data_dir(app) -> None:
             from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
-            refresh_heatmap_layout_sidebar(app._ctx)
+            refresh_heatmap_layout_sidebar(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
-    apply_persisted_settings(app._ctx)
+    apply_persisted_settings(ctx)
 
 
 def apply_persisted_settings(ctx) -> None:

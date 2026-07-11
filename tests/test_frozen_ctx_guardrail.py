@@ -111,7 +111,7 @@ def test_no_ctx_function_called_with_raw_app_or_self():
             if isinstance(a0, ast.Name) and a0.id in {"app", "self"}:
                 violations.append(
                     f"{path.relative_to(_PKG.parent)}:{node.lineno}  "
-                    f"{name}({a0.id}) — pass {a0.id}._ctx")
+                    f"{fn.id}({a0.id}) — pass {a0.id}._ctx")
     assert not violations, (
         "ctx-native function(s) called with the raw app/self handle "
         "(thread the context, e.g. app._ctx / self._ctx):\n  "

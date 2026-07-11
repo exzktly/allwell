@@ -614,7 +614,7 @@ def redraw_line_plots(
                     ha="center", va="center", color=_muted_fg, fontsize=10)
             ax.set_axis_off()
         canvas.draw_idle()
-        ctx.set_status("No data loaded.")
+        ctx.notify.set_status("No data loaded.")
         return
     if not selected and not active_rsets:
         try:
@@ -627,7 +627,7 @@ def redraw_line_plots(
             ax.text(0.5, 0.5, NO_SELECTION_MSG, transform=ax.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
             ax.set_axis_off()
         canvas.draw_idle()
-        ctx.set_status("No wells selected.")
+        ctx.notify.set_status("No wells selected.")
         return
 
     any_ts = any_cdf = any_n = False
@@ -656,16 +656,16 @@ def redraw_line_plots(
         # missing control sample, so an unexpectedly empty plot isn't a
         # silent surprise.
         _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        ctx.set_status(
+        ctx.notify.set_status(
             f"Fold change: control missing at t={_tps} — those points dropped."
         )
     elif active_rsets:
         n_wells = sum(sum(1 for w in r.wells if w in ctx.state.dataset.well_paths) for r in active_rsets)
         # threshold + band now live in the always-visible status chips (F1).
-        ctx.set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)")
+        ctx.notify.set_status(f"{len(active_rsets)} replicate set(s)  ·  {n_wells} well(s)")
     else:
         n_total = sum(len(get_rows(ctx, l)) for l in selected)
-        ctx.set_status(f"{len(selected)} well(s)  |  {n_total:,} nuclei")
+        ctx.notify.set_status(f"{len(selected)} well(s)  |  {n_total:,} nuclei")
 
     # Re-apply the Export Style sidebar's prefs so font sizes, axis
     # limits, log scale, etc. survive a redraw (matches what the bar,
@@ -699,7 +699,7 @@ def on_fig_click(ctx, event) -> None:
         leg.set_visible(legend_visible[key])
         canvas.draw_idle()
     state = "shown" if legend_visible[key] else "hidden"
-    ctx.set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")
+    ctx.notify.set_status(f"Legend for '{key}' plot {state}  (right-click to toggle)")
 
 # ``toggle_sem`` moved to ``well_viewer.core.plot_toggles`` (A8 enabler E3) so
 # non-plot features (batch-export's inline Error-Band row) can drive the SEM/SD

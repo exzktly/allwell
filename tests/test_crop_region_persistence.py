@@ -15,6 +15,7 @@ from well_viewer.persistence import crop_region
 def _app(tmp_path):
     ds = SimpleNamespace(data_dir=tmp_path, persistence_doc=None, crop_region=None)
     app = SimpleNamespace(_app_state=SimpleNamespace(dataset=ds))
+    app.window = app; app.state = app._app_state  # mock is its own ctx (B4)
     # _doc.get_section/set_section read ``ctx.state`` (A8); a minimal ctx over the app.
     app._ctx = SimpleNamespace(app=app, state=app._app_state)
     return app

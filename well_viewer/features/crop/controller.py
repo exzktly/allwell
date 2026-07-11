@@ -97,7 +97,7 @@ def set_crop_region(ctx, region: Optional[CropRegion]) -> None:
     if region is not None:
         region = normalize_region(*region)
     if region is None:
-        ctx.set_status("Crop region: box too small — no crop applied.")
+        ctx.notify.set_status("Crop region: box too small — no crop applied.")
         return
     ctx.state.dataset.crop_region = region
     recompute_crop_all(ctx)
@@ -120,12 +120,12 @@ def set_crop_region(ctx, region: Optional[CropRegion]) -> None:
             "are unchanged. Re-run the pipeline with shape features enabled to "
             "use the crop.",
         )
-        ctx.set_status(
+        ctx.notify.set_status(
             f"Crop region set ({where}) — but this dataset has no centroid "
             "columns, so no cells were excluded."
         )
         return
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Crop region set ({where}): excluded {removed:,} of {total_incl:,} "
         f"otherwise-included cell(s) across {n_wells} loaded well(s)."
     )
@@ -158,12 +158,12 @@ def clear_crop_region(ctx) -> None:
     """Remove the crop (no warning): cropped-out cells return to included.
     Manual deletes are untouched."""
     if ctx.state.dataset.crop_region is None:
-        ctx.set_status("Crop region: nothing to clear.")
+        ctx.notify.set_status("Crop region: nothing to clear.")
         return
     ctx.state.dataset.crop_region = None
     recompute_crop_all(ctx)
     _save_redraw_refresh(ctx)
-    ctx.set_status("Crop region cleared.")
+    ctx.notify.set_status("Crop region cleared.")
 
 
 # ── draw-mode toggle ─────────────────────────────────────────────────────────
@@ -191,12 +191,12 @@ def set_crop_edit_mode(ctx, enabled: bool) -> None:
     if btn is not None:
         btn.setChecked(enabled)
     if enabled:
-        ctx.set_status(
+        ctx.notify.set_status(
             "Crop mode ON — drag a rectangle to keep only cells whose centroid "
             "is inside (applies to all FOVs/wells)."
         )
     else:
-        ctx.set_status("Crop mode OFF.")
+        ctx.notify.set_status("Crop mode OFF.")
 
 
 def toggle_crop_edit_mode(ctx) -> None:
@@ -255,4 +255,4 @@ def reset_crop_and_overrides(ctx) -> None:
         set_crop_edit_mode(ctx, False)
 
     _save_redraw_refresh(ctx)
-    ctx.set_status("Reset: all cells returned to Included and crop region removed.")
+    ctx.notify.set_status("Reset: all cells returned to Included and crop region removed.")

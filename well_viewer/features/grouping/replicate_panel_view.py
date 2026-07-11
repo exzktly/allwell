@@ -120,7 +120,7 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
         if new == old:
             return
         # sel_set_composition enforces well-exclusivity (the current group wins)
-        # and runs ctx.rebuild_all(), which re-pushes the plate via rep_refresh_map.
+        # and runs ctx.coordinator.rebuild_all(), which re-pushes the plate via rep_refresh_map.
         sel_set_composition(ctx, sid, new)
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_current)
@@ -386,7 +386,7 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
             if ctx.state.selection.current_selection_id is not None:
                 ctx.state.selection.current_selection_id = None
                 groups_centre_refresh(ctx)
-                ctx.refresh_sidebar_map()
+                ctx.coordinator.refresh_sidebar_map()
             if ctx.widgets.has("_rep_active_group_lbl"):
                 update_active_group_label(ctx)
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)

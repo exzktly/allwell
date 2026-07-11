@@ -30,7 +30,7 @@ def test_spatial_properties_panel_opens_and_toggles(loaded_app_shape):
     # it in the dock. (``isHidden``/``isVisible`` differ under the offscreen QPA:
     # the top-level window is never shown, so ``isVisible()`` is always False;
     # ``isHidden()`` still reflects the explicit show/hide state.)
-    app._ctx.open_export_style_panel("spatial")
+    app._ctx.figures.open_style_panel("spatial")
     fig = app._ctx.widgets.get_or_none("_sp_fig")
     sidebars = getattr(app, "_export_style_sidebars", {}) or {}
     sb = sidebars.get(id(fig))

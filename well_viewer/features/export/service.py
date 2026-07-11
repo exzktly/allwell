@@ -339,7 +339,7 @@ def export_plot_data(ctx) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        ctx.set_status(f"Exported {len(rows_out)} row(s) to {Path(out_path).name}")
+        ctx.notify.set_status(f"Exported {len(rows_out)} row(s) to {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 
@@ -439,7 +439,7 @@ def export_bar_plot_data(ctx) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        ctx.set_status(f"Exported {len(rows_out)} row(s) → {Path(out_path).name}")
+        ctx.notify.set_status(f"Exported {len(rows_out)} row(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 
@@ -533,7 +533,7 @@ def export_scatter_data(ctx) -> None:
             writer = csv.DictWriter(fh, fieldnames=["group_well", "well_name", f"{col_x}", f"{col_y}", "timepoint_h"])
             writer.writeheader()
             writer.writerows(rows_out)
-        ctx.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
+        ctx.notify.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 
@@ -618,7 +618,7 @@ def export_scatter_agg_data(ctx) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        ctx.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
+        ctx.notify.set_status(f"Exported {len(rows_out)} datapoint(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 
@@ -673,7 +673,7 @@ def export_heatmap_data(ctx) -> None:
             writer = csv.DictWriter(fh, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(rows_out)
-        ctx.set_status(f"Exported {len(rows_out)} heatmap cell(s) → {Path(out_path).name}")
+        ctx.notify.set_status(f"Exported {len(rows_out)} heatmap cell(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 
@@ -733,7 +733,7 @@ def export_distribution_data(ctx) -> None:
         return
     try:
         combined.to_csv(out_path, index=False)
-        ctx.set_status(f"Exported {len(combined)} cell(s) → {Path(out_path).name}")
+        ctx.notify.set_status(f"Exported {len(combined)} cell(s) → {Path(out_path).name}")
     except OSError as exc:
         _error(ctx.window, "Export failed", str(exc))
 

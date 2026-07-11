@@ -19,30 +19,26 @@ from well_viewer.viewer_context import ViewerContext
 # Keep this SMALL. Each entry is a genuine WellViewerApp service with no typed
 # home yet — not a convenience wrapper for arbitrary god-object access.
 _ALLOWED = {
-    "set_status",
-    # ``toast`` names the transient notification-popup service (import/export
-    # outcome banners), distinct from the status bar; a genuine window-shell
-    # service with no typed-state home, like ``set_status``.
-    "toast",
-    "save_figure_dialog",
-    "open_export_style_panel",
+    # NOTE (A5): ``set_status`` / ``toast`` were extracted into
+    # ``NotificationService`` (``ctx.notify``); ``save_figure_dialog`` /
+    # ``open_export_style_panel`` into ``FigureService`` (``ctx.figures.save`` /
+    # ``ctx.figures.open_style_panel``). All are now held collaborators, not
+    # accessor methods on the context.
     # ``window`` exposes the WellViewerApp *qua QMainWindow* for the operations
     # that genuinely need the widget (dialog parenting, isinstance/findChildren)
     # and can never be god-object-free. Named so those needs don't count against
     # the ctx.app burn-down while staying enumerable + frozen here.
+    #
+    # TERMINAL STATE (A5 complete): ``window`` is the *only* remaining accessor.
+    # Every other service that used to reach ``_window`` through a ctx method has
+    # been extracted into a held collaborator:
+    #   persistence -> ctx.persistence (registry)      features -> ctx.features
+    #   set_status/toast -> ctx.notify (NotificationService)
+    #   save_figure_dialog/open_export_style_panel -> ctx.figures (FigureService)
+    #   rebuild_all/refresh_sidebar_map -> ctx.coordinator (SelectionCoordinator)
+    # A new entry here now means the god-object teardown has regressed — decompose
+    # the service into a collaborator instead of re-adding an accessor.
     "window",
-    "persistence",
-    # ``features`` names the feature-descriptor registry — a genuine app-level
-    # catalogue (which tabs exist + their metadata) controllers read to reason
-    # about tab behaviour, not arbitrary god-object access.
-    "features",
-    # ``rebuild_all`` / ``refresh_sidebar_map`` name the two genuine app-level
-    # *orchestration* services (master redraw fan-out; debounced sidebar-map
-    # repaint) that the final ctx.app seams bottomed into. Each fans out into a
-    # dozen god-object methods with no ctx form, so they are named here as the
-    # teardown endgame — not convenience wrappers for arbitrary access.
-    "rebuild_all",
-    "refresh_sidebar_map",
 }
 
 

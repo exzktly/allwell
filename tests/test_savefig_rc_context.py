@@ -39,6 +39,7 @@ def test_save_restores_rcparams_when_savefig_raises(monkeypatch):
         _app_state=types.SimpleNamespace(
             dataset=types.SimpleNamespace(data_dir=None)),
     )
+    app.window = app
     po.save_matplotlib_fig(app, fig, "plot", plot_bg="#000000")
 
     # rc_context must have restored the pre-call value despite the raise.
@@ -60,6 +61,7 @@ def test_save_restores_rcparams_on_success(monkeypatch, tmp_path):
         _app_state=types.SimpleNamespace(
             dataset=types.SimpleNamespace(data_dir=None)),
     )
+    app.window = app
     po.save_matplotlib_fig(app, fig, "plot", plot_bg="#000000")
 
     assert out.exists()

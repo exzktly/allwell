@@ -103,7 +103,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # the export-style dock slides out); the FlowLayout row can't right-align it.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
     layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl1, lambda: ctx.open_export_style_panel("heatmap")))
+        ctrl1, lambda: ctx.figures.open_style_panel("heatmap")))
 
     # ── Control row 2: cmap / scale / log ───────────────────────────────────
     ctrl2 = QWidget(parent)

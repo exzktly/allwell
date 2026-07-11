@@ -56,14 +56,14 @@ EXPORT_PROFILES = {
 }
 
 
-def _ensure_custom_export_profiles(app) -> dict:
-    if app._ctx.runtime.export.custom_profiles is None:
-        app._ctx.runtime.export.custom_profiles = {}
-    return app._ctx.runtime.export.custom_profiles
+def _ensure_custom_export_profiles(win) -> dict:
+    if win._ctx.runtime.export.custom_profiles is None:
+        win._ctx.runtime.export.custom_profiles = {}
+    return win._ctx.runtime.export.custom_profiles
 
 
-def _get_all_profile_names(app) -> list[str]:
-    custom = _ensure_custom_export_profiles(app)
+def _get_all_profile_names(win) -> list[str]:
+    custom = _ensure_custom_export_profiles(win)
     return [*EXPORT_PROFILES.keys(), *custom.keys()]
 
 
@@ -93,7 +93,7 @@ class _ExportEditorSession:
         self.sidebar = sidebar
 
 
-def _resolve_export_dock(app, fig) -> QWidget | None:
+def _resolve_export_dock(win, fig) -> QWidget | None:
     """Return the pre-allocated right-side dock widget for a given figure, or None."""
     mapping = (
         ("_line_fig", "_line_export_dock"),
@@ -105,36 +105,36 @@ def _resolve_export_dock(app, fig) -> QWidget | None:
         ("_sp_fig", "_spatial_export_dock"),
     )
     for fig_attr, dock_attr in mapping:
-        if getattr(app, fig_attr, None) is fig:
-            return getattr(app, dock_attr, None)
+        if getattr(win, fig_attr, None) is fig:
+            return getattr(win, dock_attr, None)
     return None
 
 
-def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
+def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
                           canvas=None) -> _ExportEditorSession | None:
     try:
         # Lazy import: the view module imports symbols defined above, so a
         # top-level import would create a circular dependency.
         from well_viewer.features.export.sidebar_view import ExportStyleSidebar
 
-        dock = _resolve_export_dock(app, fig)
-        parent = dock if dock is not None else (canvas.parent() if canvas is not None else app)
-        if not hasattr(app, "_export_style_sidebars"):
+        dock = _resolve_export_dock(win, fig)
+        parent = dock if dock is not None else (canvas.parent() if canvas is not None else win)
+        if not hasattr(win, "_export_style_sidebars"):
             # Register the sidebar map in the widget registry (stamps
-            # ``app._export_style_sidebars`` too) so the ctx-native redraw
+            # ``win._export_style_sidebars`` too) so the ctx-native redraw
             # orchestrator reaches it via ``ctx.widgets`` instead of the
             # god-object. Fall back to a plain attribute if no ctx is wired
             # (bare test doubles).
-            reg = getattr(getattr(app, "_ctx", None), "widgets", None)
+            reg = getattr(getattr(win, "_ctx", None), "widgets", None)
             if reg is not None:
                 reg.register("_export_style_sidebars", {})
             else:
-                app._export_style_sidebars = {}
+                win._export_style_sidebars = {}
         key = id(fig)
-        sb = app._export_style_sidebars.get(key)
+        sb = win._export_style_sidebars.get(key)
         if sb is None:
-            sb = ExportStyleSidebar(app, parent, fig, canvas, default_name=default_name)
-            app._export_style_sidebars[key] = sb
+            sb = ExportStyleSidebar(win, parent, fig, canvas, default_name=default_name)
+            win._export_style_sidebars[key] = sb
 
             if dock is not None and dock.layout() is not None:
                 dock.layout().addWidget(sb)
@@ -176,7 +176,7 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
         # routing the open path through it risks extra restyle+redraw passes
         # on a heavy (tall, 3-panel) bar figure.
         try:
-            apply_export_style_to_current(app._ctx, fig, canvas)
+            apply_export_style_to_current(win._ctx, fig, canvas)
         except Exception:
             swallowed()  # was: pass (silent except)
         # Re-populate the line-order lists so they reflect the current rep-set
@@ -187,12 +187,12 @@ def launch_export_editor(app, fig, default_name: str, *, plot_bg: str = "",
             swallowed()  # was: pass (silent except)
         return _ExportEditorSession(sb)
     except Exception as exc:
-        QMessageBox.warning(app if isinstance(app, QWidget) else None,
+        QMessageBox.warning(win if isinstance(win, QWidget) else None,
                             "Export editor unavailable", str(exc))
         return None
 
 
-def open_export_style_panel(app, plot_key: str) -> None:
+def open_export_style_panel(win, plot_key: str) -> None:
     """Open the floating Export Style sidebar for ``plot_key``'s figure.
 
     Each plot tab (line / bar / scatter cells / scatter agg /
@@ -211,17 +211,17 @@ def open_export_style_panel(app, plot_key: str) -> None:
     }
     spec = mapping.get(plot_key)
     if spec is None:
-        app._set_status(f"Unknown export panel: {plot_key}")
+        win._set_status(f"Unknown export panel: {plot_key}")
         return
     fig_attr, canvas_attr, default_name = spec
-    fig = getattr(app, fig_attr, None)
-    canvas = getattr(app, canvas_attr, None)
+    fig = getattr(win, fig_attr, None)
+    canvas = getattr(win, canvas_attr, None)
     if fig is None:
-        app._set_status("Plot is not ready yet.")
+        win._set_status("Plot is not ready yet.")
         return
     # If a sidebar for this figure is already open, toggle it off so
     # the button behaves as an open/close affordance.
-    existing = (getattr(app, "_export_style_sidebars", {}) or {}).get(id(fig))
+    existing = (getattr(win, "_export_style_sidebars", {}) or {}).get(id(fig))
     if existing is not None and existing.isVisible():
         try:
             existing._close_dock()
@@ -230,5 +230,5 @@ def open_export_style_panel(app, plot_key: str) -> None:
         return
     from ui.theme import PLOT_BG
     from well_viewer.features.export.style import launch_export_editor
-    launch_export_editor(app, fig, default_name, plot_bg=PLOT_BG, canvas=canvas)
+    launch_export_editor(win, fig, default_name, plot_bg=PLOT_BG, canvas=canvas)
 

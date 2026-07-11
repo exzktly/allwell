@@ -16,6 +16,7 @@ from typing import Dict, Iterator, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
+from well_viewer.data.cache_projectors import iter_cache_projectors
 from well_viewer.domain.ratio_models import RatioMetric, is_ratio_key
 from well_viewer.domain.tp_match import tp_close_mask
 
@@ -247,22 +248,23 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     chokepoint (:func:`df_included_mask`) sees a consistent row.
 
     A8 residuals-ledger R1: the ctx-native row-fetch data service. Cache + paths
-    come from ``ctx.state.dataset``; the QC/Crop projection controllers are
-    imported function-locally (the sanctioned escape hatch for a data-layer
-    module reaching a feature — the projection is data-layer logic that happens
-    to live under ``features/qc`` and ``features/crop``). ``WellViewerApp._get_rows``
-    now delegates here, so every caller — this module's ``get_all_timepoints``,
+    come from ``ctx.state.dataset``. The QC/Crop projection is applied via the
+    **cache-projector registry** (``data/cache_projectors.py``) rather than a
+    function-local ``features/`` import — the data layer stays feature-free (the
+    inversion enforced by ``tests/test_data_layer_no_feature_imports.py``). The
+    default projectors (QC, then Crop) are registered at app construction by
+    ``core/projector_registry.register_default_projectors``. ``WellViewerApp._get_rows``
+    delegates here, so every caller — this module's ``get_all_timepoints``,
     ``stats_compute``, and the feature ``collect`` modules — can fetch rows from
     ``ctx`` without naming the god-object.
     """
     cache = ctx.state.dataset.cache
     if label not in cache:
         cache[label] = load_well_csv(ctx.state.dataset.well_paths[label])
-        # Project QC_Pass / Crop_Pass onto freshly-built frames (lazy wells).
-        from well_viewer.features.qc.controller import apply_qc_to_cache
-        from well_viewer.features.crop.controller import apply_crop_to_cache
-        apply_qc_to_cache(ctx, label)
-        apply_crop_to_cache(ctx, label)
+        # Project QC_Pass / Crop_Pass (etc.) onto freshly-built frames via the
+        # registered projectors — no features/ import in the data layer.
+        for _project in iter_cache_projectors():
+            _project(ctx, label)
     return cache[label]
 
 

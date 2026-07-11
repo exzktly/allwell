@@ -96,9 +96,6 @@ _stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf
 
 from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.core.ui_helpers import (
-    ask_name_dialog as _ui_ask_name_dialog,
-)
 from ui.theme import (
     ACCENT, ACCENT_DARK, PLOT_BG,
 )
@@ -184,7 +181,6 @@ from well_viewer.core.selection_controller import labels_apply_affix
 update_bar_tp_menu, bar_event_xdata, on_bar_drag_motion, toggle_swarm, toggle_violin, bar_well_display_label, rep_sets_active, collect_bar_items_for_app, refresh_bar_layout_btn_state, update_bar_tp_selection_display = _lazy_names("well_viewer.features.barplot.controller", "update_bar_tp_menu", "bar_event_xdata", "on_bar_drag_motion", "toggle_swarm", "toggle_violin", "bar_well_display_label", "rep_sets_active", "collect_bar_items_for_app", "refresh_bar_layout_btn_state", "update_bar_tp_selection_display")
 from well_viewer.core.channel_state_controller import get_fluor_gate, get_all_fluor_gates, get_thresh_frac_on, set_thresh_frac_on, refresh_thresh_frac_quick_edit, open_ratio_panel, ratio_label_for, channel_key_for_label, active_channel_label, rebuild_ratio_index, set_ratio_metrics, on_plot_channel_selected, on_preview_channel_selected, on_metric_selected, on_metric_selected_global
 from well_viewer.features.export.service import export_scatter_agg_data
-from well_viewer.features.export.style import open_export_style_panel
 rep_refresh_map, rep_add, rep_quick_pairs_from_dropdowns, rank_color_wells, rank_color_rset, rep_color_for, replicate_display_label, rep_sets_loaded, well_display_label = _lazy_names("well_viewer.features.grouping.controller", "rep_refresh_map", "rep_add", "rep_quick_pairs_from_dropdowns", "rank_color_wells", "rank_color_rset", "rep_color_for", "replicate_display_label", "rep_sets_loaded", "well_display_label")
 from well_viewer.core.load_controller import load_path_shim
 from well_viewer.core.plot_orchestrator import open_batch_export_shim, redraw_app, open_bar_batch_export_shim, open_scatter_cells_batch_export_shim, open_scatter_agg_batch_export_shim, save_scatter_figure as _plot_save_scatter_figure_orchestrator, save_scatter_agg_figure as _plot_save_scatter_agg_figure_orchestrator
@@ -231,7 +227,7 @@ def teardown_review_pane(app) -> None:
             _logger.debug("teardown: cell-browser loader cancel failed", exc_info=True)
     try:
         from well_viewer.core.split_view import _remove_split_focus_filter
-        _remove_split_focus_filter(app)
+        _remove_split_focus_filter(app._ctx)
     except Exception:
         _logger.debug("teardown: split-focus-filter removal failed", exc_info=True)
 
@@ -283,23 +279,23 @@ class WellViewerApp(QWidget):
             bus=self._event_bus,
             widgets=self._widget_registry,
             runtime=self._runtime,
+            features=self._features,
             _window=self,
         )
-        # A8 T6: the runtime store no longer forwards to the app via ``getattr``,
-        # so the residual god-object callbacks that other layers still invoke
-        # through the runtime namespace are wired here as explicit live handles
-        # (the namespace's documented purpose). These four are the last method
-        # reach-throughs pending the god-method decomposition roadmap: the stats
-        # results-panel Run / Property actions and the barplot key/label helpers.
+        # A8 T6: wire the residual god-object callbacks other layers invoke
+        # through the runtime namespace as explicit live handles. These four are
+        # the last method reach-throughs pending the god-method decomposition
+        # roadmap (A4): stats Run / Property actions + barplot key/label helpers.
         self._runtime.stats.run = self._stats_run
         self._runtime.stats.property_change = self._stats_property_change
         self._runtime.barplot.current_keys = self._bar_current_keys
         self._runtime.barplot.well_display_label = self._bar_well_display_label
         # Phase 3 teardown: subscribe the EventBus's redraw / refresh signals.
         wire_event_bus(self, self._event_bus)
-        # Phase 4 teardown: one debounce path + save/load dispatch for the
-        # data-dir JSON domains, replacing the per-domain wrapper methods.
-        self._persistence = build_persistence_registry(self)
+        # Phase 4 teardown: one debounce path + save/load dispatch for the data-dir JSON domains.
+        self._persistence = build_persistence_registry(self._ctx)
+        # Hold as a direct ctx collaborator (A5); post-construction — it takes ctx.
+        object.__setattr__(self._ctx, "persistence", self._persistence)
 
         # Dataset state — data dir, well paths, row cache, timepoint / FOV
         # caches, pipeline_info, persistence doc — lives in
@@ -338,13 +334,11 @@ class WellViewerApp(QWidget):
         self._runtime.fov.btns = []
         self._runtime.fov.btn = None
         self._runtime.fov.observers = []   # callables (use_fov: bool) -> None
-        # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
-        self._plot_chan_cb = None
-        self._review_image_chan_cb = None
-        self._bar_tp_cb = None
-        self._bar_swarm_cb = None
-        self._bar_violin_cb = None
-        self._violin_bw_edit = None
+        # Channel / timepoint / edit widget handles (_plot_chan_cb,
+        # _review_image_chan_cb, _bar_tp_cb, _bar_swarm_cb, _bar_violin_cb,
+        # _violin_bw_edit) are registered by the view builders via
+        # WidgetRegistry; readers use ctx.widgets.get_or_none / has, so no
+        # None-seed is needed here (A1).
         self._runtime.barplot.ylim_mean_lo_edit = None
         self._runtime.barplot.ylim_mean_hi_edit = None
         self._runtime.barplot.ylim_frac_lo_edit = None
@@ -355,9 +349,8 @@ class WellViewerApp(QWidget):
         # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
         # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
         # remain as @property shims further down.
-        self._entry_edit = None
-        self._cdf_xmin_edit = None
-        self._cdf_xmax_edit = None
+        # _entry_edit / _cdf_xmin_edit / _cdf_xmax_edit are registered by the
+        # Line-graph builder; readers use ctx.widgets.get_or_none (A1).
 
         # Plate-map well selection, the commit-coalescing flag, and the
         # plotting-tab solo-well overrides all live in
@@ -368,7 +361,8 @@ class WellViewerApp(QWidget):
         # lives in ``self._app_state.preview`` and ``self._app_state.review_image``
         # (well_viewer/state/review_image.py); see the @property shims below.
         # Widget handles and the lazily-built montage arrays stay here.
-        self._preview_fov_cb = None
+        # _preview_fov_cb is registered by the preview/image builders; readers
+        # use ctx.widgets.get_or_none / getattr(ctx.window, ..., None) (A1).
         self._runtime.review_image.tp_cb = None
         # Rubber-band rectangle for box-delete in include-edit mode; the
         # QRubberBand is parented to _review_image_label so it scrolls with
@@ -455,13 +449,13 @@ class WellViewerApp(QWidget):
             return "review"
         return "analyze" if stack.currentIndex() == 1 else "review"
 
-    def _on_central_pane_changed(self, idx: int) -> None: return on_central_pane_changed(self, idx)
+    def _on_central_pane_changed(self, idx: int) -> None: return on_central_pane_changed(self._ctx, idx)
 
-    def _apply_sidebar_visibility(self) -> None: return apply_sidebar_visibility(self)
+    def _apply_sidebar_visibility(self) -> None: return apply_sidebar_visibility(self._ctx)
 
-    def _toggle_sidebar(self) -> None: return toggle_sidebar(self)
+    def _toggle_sidebar(self) -> None: return toggle_sidebar(self._ctx)
 
-    def _build_centre(self, parent) -> None: return build_centre_shim(self, parent)
+    def _build_centre(self, parent) -> None: return build_centre_shim(self._ctx, parent)
 
     # ── Phase 10 (A1) section-nav <-> notebook bridge ─────────────────────
     _SECTION_ICONS = {
@@ -477,7 +471,7 @@ class WellViewerApp(QWidget):
         "Batch Export":       "boxes",
     }
 
-    def _sync_section_nav_from_notebook(self) -> None: return sync_section_nav_from_notebook(self)
+    def _sync_section_nav_from_notebook(self) -> None: return sync_section_nav_from_notebook(self._ctx)
 
     def _on_section_nav_changed(self, key: str) -> None:
         if self._section_nav_building:
@@ -490,9 +484,9 @@ class WellViewerApp(QWidget):
         self._notebook.setCurrentByName(key)
 
 
-    def _tab_history_back(self) -> None: return tab_history_back(self)
+    def _tab_history_back(self) -> None: return tab_history_back(self._ctx)
 
-    def _tab_history_forward(self) -> None: return tab_history_forward(self)
+    def _tab_history_forward(self) -> None: return tab_history_forward(self._ctx)
 
     # ── Statistics tab ────────────────────────────────────────────────────────
     # Tab / panel construction lives in ``views/stats_view.py`` — callers invoke
@@ -523,7 +517,7 @@ class WellViewerApp(QWidget):
 
 
     def _stats_collect_group_values(self, grp: BarGroup, target_t: float) -> List[float]:
-        return stats_collect_group_values_shim(self, grp, target_t)
+        return stats_collect_group_values_shim(self._ctx, grp, target_t)
 
     _STATS_STATISTIC_KEYS = {
         "Mean (above threshold)": "mean",
@@ -532,18 +526,18 @@ class WellViewerApp(QWidget):
         "Fraction above threshold": "fraction",
     }
 
-    def _stats_active_channel_entry(self) -> str: return stats_active_channel_entry(self)
+    def _stats_active_channel_entry(self) -> str: return stats_active_channel_entry(self._ctx)
 
-    def _stats_active_val_col(self) -> str: return stats_active_val_col(self)
+    def _stats_active_val_col(self) -> str: return stats_active_val_col(self._ctx)
 
-    def _stats_active_threshold(self) -> float: return stats_active_threshold(self)
+    def _stats_active_threshold(self) -> float: return stats_active_threshold(self._ctx)
 
-    def _stats_active_statistic(self) -> str: return stats_active_statistic(self)
+    def _stats_active_statistic(self) -> str: return stats_active_statistic(self._ctx)
 
-    def _stats_run(self) -> None: return stats_run_shim(self)
+    def _stats_run(self) -> None: return stats_run_shim(self._ctx)
 
     def _stats_draw_ks_cdf(self, group_vals: List[Tuple[str, List[float]]], tp_str: str) -> None:
-        return stats_draw_ks_cdf_shim(self, group_vals, tp_str)
+        return stats_draw_ks_cdf_shim(self._ctx, group_vals, tp_str)
 
     # ── Preview sidebar picker ────────────────────────────────────────────────
 
@@ -582,7 +576,7 @@ class WellViewerApp(QWidget):
     def _rep_refresh_map(self) -> None: return rep_refresh_map(self._ctx)
 
 
-    def _rep_select(self, idx: int) -> None: return rep_select(self, idx)
+    def _rep_select(self, idx: int) -> None: return rep_select(self._ctx, idx)
 
     def _rep_add(self) -> None: return rep_add(self._ctx)
 
@@ -590,10 +584,6 @@ class WellViewerApp(QWidget):
 
     # ─────────────────────────────────────────────────────────────────────────
     # ─────────────────────────────────────────────────────────────────────────
-
-    def _ask_name_dialog(self, default: str) -> Optional[str]:
-        return _ui_ask_name_dialog(self, title="Name", prompt="Name:",
-                                   default=default)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Well-label editor
@@ -658,7 +648,7 @@ class WellViewerApp(QWidget):
     def _groups_centre_refresh(self) -> None: return groups_centre_refresh(self._ctx)
 
 
-    def _rebuild_all(self) -> None: return rebuild_all(self)
+    def _rebuild_all(self) -> None: return rebuild_all(self._ctx)
 
     # ── Quick-group helpers (delegates to grouping_controller) ────────────────
 
@@ -681,7 +671,7 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import bar_groups as _bg_persist
         _bg_persist.load_via_dialog(self)
 
-    def _open_ratio_panel(self) -> None: return open_ratio_panel(self)
+    def _open_ratio_panel(self) -> None: return open_ratio_panel(self._ctx)
 
     # ── Persistence ──────────────────────────────────────────────────────────
     # The data-dir JSON domains (ratios / heatmap_layouts / cell_overrides /
@@ -690,7 +680,7 @@ class WellViewerApp(QWidget):
 
     def _view_state_reset(self) -> None:
         from well_viewer.persistence import view_state as _vs
-        _vs.reset(self)
+        _vs.reset(self._ctx)
 
     def _notes_schedule_save(self) -> None: return notes_schedule_save(self._ctx)
 
@@ -725,13 +715,13 @@ class WellViewerApp(QWidget):
     def _rank_color_well(self, tok) -> str:
         return color_for_well(tok)
 
-    def _rank_color_wells(self, wells) -> str: return rank_color_wells(self, wells)
+    def _rank_color_wells(self, wells) -> str: return rank_color_wells(self._ctx, wells)
 
     def _sel_color(self, s) -> str: return sel_color(self._ctx, s)
 
     def _rank_color_rset(self, rset) -> str: return rank_color_rset(self._ctx, rset)
 
-    def _rep_color_for(self, lbl: str) -> Optional[str]: return rep_color_for(self, lbl)
+    def _rep_color_for(self, lbl: str) -> Optional[str]: return rep_color_for(self._ctx, lbl)
 
 
 
@@ -746,9 +736,9 @@ class WellViewerApp(QWidget):
 
 
 
-    def _apply_theme(self) -> None: return apply_theme(self)
+    def _apply_theme(self) -> None: return apply_theme(self._ctx)
 
-    def _on_theme_change(self, theme_name: str = None) -> None: return on_theme_change(self, theme_name)
+    def _on_theme_change(self, theme_name: str = None) -> None: return on_theme_change(self._ctx, theme_name)
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -759,15 +749,15 @@ class WellViewerApp(QWidget):
             # Defer so the dialog closes and the window repaints before load
             QTimer.singleShot(50, lambda: self._load_path(Path(d)))
 
-    def _load_path(self, path): return load_path_shim(self, path)
+    def _load_path(self, path): return load_path_shim(self._ctx, path)
 
     def _load_directory(self, d: Path, label: Optional[str] = None) -> None:
         self._drain_pending_centre_builders()
-        _load_directory_controller(self, d, label=label)
+        _load_directory_controller(self._ctx, d, label=label)
         refresh_plot_empty_states(self)
 
 
-    def _drain_pending_centre_builders(self) -> None: return drain_pending_centre_builders(self)
+    def _drain_pending_centre_builders(self) -> None: return drain_pending_centre_builders(self._ctx)
 
     def _read_pipeline_info(self, path: Path):
         return _read_pipeline_info_shared(path, logger=_logger, check_parent=True)
@@ -802,7 +792,7 @@ class WellViewerApp(QWidget):
         self._app_state.dataset.rebuild_fovs()
 
     @staticmethod
-    def _mute_color(self, factor: float = 0.5) -> str: return mute_color(self, factor)
+    def _mute_color(color: str, factor: float = 0.5) -> str: return mute_color(color, factor)
 
     def _rep_visible_sets(self) -> "List[ReplicateSet]":
         """Alias for _rep_sets_active — visible (non-hidden) loaded rep-sets."""
@@ -815,7 +805,7 @@ class WellViewerApp(QWidget):
         self._sidebar_map_refresh_pending = True
         QTimer.singleShot(0, self._refresh_sidebar_map_now)
 
-    def _refresh_sidebar_map_now(self) -> None: refresh_sidebar_map_now(self)
+    def _refresh_sidebar_map_now(self) -> None: refresh_sidebar_map_now(self._ctx)
 
     # ── v2 plate-widget bridge (WellPlateSelector ↔ WellViewerApp state) ──────
     # The left-rail plate is now a single ``widgets.WellPlateSelector`` instead
@@ -824,7 +814,7 @@ class WellViewerApp(QWidget):
     # selection onto the widget, and the handlers below take user actions back.
 
 
-    def _plate_commit_deferred(self) -> None: return plate_commit_deferred(self)
+    def _plate_commit_deferred(self) -> None: return plate_commit_deferred(self._ctx)
 
     def _set_selected_wells(self, new_set, *, commit = True) -> None:
         return set_selected_wells(self._ctx, new_set, commit=commit)
@@ -855,7 +845,7 @@ class WellViewerApp(QWidget):
 
     def _active_channel_label(self) -> str: return active_channel_label(self._ctx)
 
-    def _rebuild_ratio_index(self) -> None: return rebuild_ratio_index(self)
+    def _rebuild_ratio_index(self) -> None: return rebuild_ratio_index(self._ctx)
 
     def _set_ratio_metrics(self, ratios: Iterable[RatioMetric]) -> None: return set_ratio_metrics(self._ctx, ratios)
 
@@ -866,17 +856,17 @@ class WellViewerApp(QWidget):
 
     def _on_plot_channel_selected(self, source = None) -> None: return on_plot_channel_selected(self._ctx, source)
 
-    def _on_preview_channel_selected(self, _e = None) -> None: return on_preview_channel_selected(self, _e)
+    def _on_preview_channel_selected(self, _e = None) -> None: return on_preview_channel_selected(self._ctx, _e)
 
     def _on_metric_selected(self) -> None: return on_metric_selected(self._ctx)
 
-    def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self)
+    def _on_metric_selected_global(self) -> None: return on_metric_selected_global(self._ctx)
 
     # Named ``_stats_property_change`` (not ``_on_stats_property_change``) so the
     # stats results-panel builder can wire the Property combo through the
     # ``ctx.runtime.stats`` namespace (prefix ``_stats_``) without naming the
     # god-object; the body stays fully app-side.
-    def _stats_property_change(self) -> None: return on_stats_property_change(self)
+    def _stats_property_change(self) -> None: return on_stats_property_change(self._ctx)
         # Stats display refreshes on its own when run; nothing to redraw here.
 
 
@@ -910,7 +900,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _select_invert(self) -> None: return select_invert(self)
+    def _select_invert(self) -> None: return select_invert(self._ctx)
 
     def _selected_labels(self) -> List[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""
@@ -931,13 +921,11 @@ class WellViewerApp(QWidget):
 
 
 
-    def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self, value)
+    def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self._ctx, value)
 
     def _review_row_keys(self, row: dict) -> Tuple[str, str, str]: return review_row_keys(self._ctx, row)
 
 
-    @staticmethod
-    def _review_norm_fov(self) -> str: return review_norm_fov(self)
 
     @staticmethod
     def _review_tp_sort_key(tp: str) -> Tuple[int, float, str]:
@@ -1172,7 +1160,7 @@ class WellViewerApp(QWidget):
     def _save_matplotlib_fig(self, fig: "Figure", default_name: str) -> None:
         """Show a save-file dialog and write *fig* to disk."""
         _plot_save_matplotlib_fig_orchestrator(
-            self,
+            self._ctx,
             fig,
             default_name,
             plot_bg=PLOT_BG,
@@ -1180,13 +1168,12 @@ class WellViewerApp(QWidget):
 
     def _save_line_figure(self) -> None:
         """Save the current Line Graphs figure at high resolution."""
-        _plot_save_line_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_line_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
     def _save_bar_figure(self) -> None:
         """Save the current Bar Plots figure at high resolution."""
-        _plot_save_bar_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_bar_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
-    def _open_export_style_panel(self, plot_key: str) -> None: return open_export_style_panel(self, plot_key)
 
     # ── Scatter Plot tab ───────────────────────────────────────────────────────
 
@@ -1235,7 +1222,7 @@ class WellViewerApp(QWidget):
     def _save_scatter_figure(self) -> None:
         """Save the current Scatter plot figure at high resolution."""
 
-        _plot_save_scatter_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_scatter_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
 
     def _export_scatter_agg_data(self) -> None: return export_scatter_agg_data(self._ctx)
@@ -1243,7 +1230,7 @@ class WellViewerApp(QWidget):
     def _save_scatter_agg_figure(self) -> None:
         """Save the current aggregate scatter plot figure at high resolution."""
 
-        _plot_save_scatter_agg_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_scatter_agg_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
 
     # ── Legend interaction ────────────────────────────────────────────────────
@@ -1254,18 +1241,18 @@ class WellViewerApp(QWidget):
     def _set_status(self, msg: str) -> None:
         self._status_lbl.setText(msg)
 
-    def _toast(self, msg: str, *, kind = 'info', msec = 3500) -> None: return toast(self, msg, kind=kind, msec=msec)
+    def _toast(self, msg: str, *, kind = 'info', msec = 3500) -> None: return toast(self._ctx, msg, kind=kind, msec=msec)
 
-    def _show_progress(self, maximum: int, msg: str = '') -> None: return show_progress(self, maximum, msg)
+    def _show_progress(self, maximum: int, msg: str = '') -> None: return show_progress(self._ctx, maximum, msg)
 
-    def _step_progress(self, value: int, msg: str = '') -> None: return step_progress(self, value, msg)
+    def _step_progress(self, value: int, msg: str = '') -> None: return step_progress(self._ctx, value, msg)
 
     def _hide_progress(self) -> None:
         """Remove the progress bar."""
         self._progress_bar.setVisible(False)
         self._progress_bar.setValue(0)
 
-    def _toggle_log(self) -> None: return toggle_log(self)
+    def _toggle_log(self) -> None: return toggle_log(self._ctx)
 
     def _clear_log(self) -> None:
         if hasattr(self, "_log_text") and self._log_text is not None:

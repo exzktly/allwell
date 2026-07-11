@@ -48,7 +48,7 @@ def _show_plotting_tab(app, leaf: str) -> None:
 def test_selection_change_always_refreshes_sidebar(loaded_app):
     _show_plotting_tab(loaded_app, "Line Graphs")
     counter = _CallCounter(loaded_app, ["_refresh_sidebar_map"])
-    select_all(loaded_app)
+    select_all(loaded_app._ctx)
     assert counter.counts["_refresh_sidebar_map"] == 1
 
 
@@ -74,7 +74,7 @@ def test_bar_plots_branch_redraws_bars(loaded_app, monkeypatch):
     _show_plotting_tab(loaded_app, "Bar Plots")
     calls["bars"] = 0  # drop the redraw the tab switch itself triggered
     counter = _CallCounter(loaded_app, ["_redraw"])
-    select_none(loaded_app)
+    select_none(loaded_app._ctx)
     assert calls["bars"] == 1
     assert counter.counts["_redraw"] == 0
 
@@ -85,7 +85,7 @@ def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
                         lambda app: calls.__setitem__("bars", calls["bars"] + 1))
     _show_plotting_tab(loaded_app, "Line Graphs")
     counter = _CallCounter(loaded_app, ["_redraw"])
-    select_all(loaded_app)
+    select_all(loaded_app._ctx)
     assert counter.counts["_redraw"] == 1
     assert calls["bars"] == 0
 
@@ -93,7 +93,7 @@ def test_line_graphs_branch_redraws_line(loaded_app, monkeypatch):
 def test_review_csv_branch_refreshes_csv(loaded_app):
     assert loaded_app._notebook.setCurrentByName("Review CSV")
     counter = _CallCounter(loaded_app, ["_refresh_review_csv", "_redraw"])
-    select_all(loaded_app)
+    select_all(loaded_app._ctx)
     assert counter.counts["_refresh_review_csv"] == 1
     assert counter.counts["_redraw"] == 0
 
@@ -106,7 +106,7 @@ def test_scatter_branch_redraws_scatter(loaded_app, monkeypatch):
     )
     _show_plotting_tab(loaded_app, "Scatter Plot")
     calls.clear()  # drop the redraw the tab switch itself triggered
-    select_all(loaded_app)
+    select_all(loaded_app._ctx)
     assert len(calls) == 1
 
 
@@ -119,5 +119,5 @@ def test_smfish_branch_syncs(loaded_app, monkeypatch):
     assert loaded_app._notebook.setCurrentByName("smFISH")
     assert loaded_app._current_centre_tab() == "smFISH"
     calls.clear()  # drop the sync the tab switch itself triggered
-    select_all(loaded_app)
+    select_all(loaded_app._ctx)
     assert len(calls) == 1

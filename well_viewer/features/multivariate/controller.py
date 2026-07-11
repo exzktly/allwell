@@ -174,7 +174,7 @@ def _begin_busy(ctx, message: str) -> None:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        ctx.set_status(message)
+        ctx.notify.set_status(message)
         QApplication.processEvents()  # paint the cursor + status before blocking
     except Exception:
         swallowed()
@@ -457,7 +457,7 @@ def mv_export_csv(ctx) -> None:
         prof_path = _write_cluster_profile_csv(ctx, st, res, path)
         if prof_path:
             msg += f"  ·  cluster profiles → {prof_path}"
-        ctx.set_status(msg)
+        ctx.notify.set_status(msg)
     except Exception as exc:
         QMessageBox.critical(ctx.window, "Export failed", f"Could not write CSV:\n{exc}")
 

@@ -35,7 +35,7 @@ def _fake_app(*, wells, channels, timepoints=None, fovs=None):
     from well_viewer.core.app_runtime import AppRuntime
     ctx = SimpleNamespace(app=app, state=app._app_state, runtime=AppRuntime(app),
                           _status=[])
-    ctx.set_status = lambda msg: ctx._status.append(msg)
+    ctx.notify = SimpleNamespace(set_status=lambda msg: ctx._status.append(msg))
     app._ctx = ctx
     return app
 

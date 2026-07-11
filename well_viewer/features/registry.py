@@ -196,20 +196,20 @@ def _activate_statistics(ctx) -> None:
 def _activate_multivariate(ctx) -> None:
     from well_viewer.features.multivariate.controller import mv_on_activate
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     mv_on_activate(ctx)
 
 
 def _activate_spatial(ctx) -> None:
     from well_viewer.features.spatial.controller import sp_on_activate
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     sp_on_activate(ctx)
 
 
 def _activate_batch_export(ctx) -> None:
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     state = ctx.runtime.batch_export.inline_state
     if state:
         from well_viewer.features.batch_export.tab_view import _show_batch_mode
@@ -218,7 +218,7 @@ def _activate_batch_export(ctx) -> None:
 
 def _activate_review_csv(ctx) -> None:
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     # ``refresh_review_csv`` lives in ``image_browser.review_image``. Review CSV is
     # its own feature but borrows that hydration logic, so guard the cross-feature
     # call: when Image Browser has been removed the table just isn't hydrated
@@ -248,7 +248,7 @@ def _activate_smfish(ctx) -> None:
         # properly -- bypassing it leaves the next selection diff
         # mis-attributing cross-tab additions / removals.
         set_selected_wells(ctx, {keep}, commit=False)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     smfish_sync_from_app(ctx)
 
 
@@ -257,7 +257,7 @@ def _activate_cell_gating(ctx) -> None:
         cell_gating_load_cell_areas, cell_gating_sync_scatter_gates,
     )
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         cell_gating_load_cell_areas(ctx)
         cell_gating_sync_scatter_gates(ctx)
@@ -268,7 +268,7 @@ def _activate_cell_browser(ctx) -> None:
     # filter sidebar — its gallery is scoped to the selected wells, so it
     # needs the same well picker every other tab has.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
     if frame is not None:
         frame.setVisible(True)
@@ -285,7 +285,7 @@ def _activate_playground(ctx) -> None:
     # the canonical plate selector for parity, then refresh its selectors for
     # any dataset loaded since it last built.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     try:
         playground_repopulate_dropdowns(ctx)
     except Exception:
@@ -297,7 +297,7 @@ def _activate_saved_plots(ctx) -> None:
     # Gallery of previously saved plots — no plate selection needed; just
     # repaint from the (per-dataset) store on each visit.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     try:
         from well_viewer.features.saved_plots.controller import (
             refresh_saved_plots_gallery,
@@ -311,7 +311,7 @@ def _activate_bar_plots(ctx) -> None:
     from well_viewer.features.barplot.controller import update_bar_tp_menu
     from well_viewer.features.barplot.renderer import redraw_bars
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     update_bar_tp_menu(ctx)
     redraw_bars(ctx)
 
@@ -320,7 +320,7 @@ def _activate_scatter(ctx) -> None:
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     update_scatter_menus(ctx)
     scatter_redraw_active(ctx)
 
@@ -328,7 +328,7 @@ def _activate_scatter(ctx) -> None:
 def _activate_heatmap(ctx) -> None:
     from well_viewer.core.plot_orchestrator import redraw_app
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     if ctx.widgets.has("_heatmap_sidebar_frame"):
         try:
             from well_viewer.features.heatmap.sidebar_view import (
@@ -344,8 +344,39 @@ def _activate_default_plot(ctx) -> None:
     # Line Graphs / Distribution — unified picker shown, generic redraw.
     from well_viewer.core.plot_orchestrator import redraw_app
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     redraw_app(ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# redraw hooks — a plot feature's figure-redraw callable, resolved by name from
+# the registry so plot orchestration (redraw_app / tab activation) never imports
+# the feature renderer (terminal-goal cond. 3). Lazy: ``() -> ((ctx) -> None)``.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _redraw_bar_plots():
+    from well_viewer.features.barplot.renderer import redraw_bars
+    return redraw_bars
+
+
+def _redraw_line_graphs():
+    from well_viewer.features.lineplot.controller import redraw_line_plots
+    return redraw_line_plots
+
+
+def _redraw_distribution():
+    from well_viewer.features.distribution.controller import redraw_distribution
+    return redraw_distribution
+
+
+def _redraw_heatmap():
+    from well_viewer.features.heatmap.controller import redraw_heatmap
+    return redraw_heatmap
+
+
+def _redraw_scatter():
+    from well_viewer.features.scatter.tab_view import scatter_redraw_active
+    return scatter_redraw_active
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -396,60 +427,65 @@ def _loaded_smfish(ctx) -> None:
 # ``app._redraw()`` in the controller.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _sel_bar_plots(app) -> None:
+def _sel_bar_plots(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.barplot.renderer import redraw_bars
     app._update_bar_tp_menu()
-    redraw_bars(app._ctx)
+    redraw_bars(ctx)
 
 
-def _sel_scatter(app) -> None:
+def _sel_scatter(ctx) -> None:
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
-    update_scatter_menus(app._ctx)
-    scatter_redraw_active(app._ctx)
+    update_scatter_menus(ctx)
+    scatter_redraw_active(ctx)
 
 
-def _sel_review_csv(app) -> None:
+def _sel_review_csv(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     app._refresh_review_csv()
 
 
-def _sel_multivariate(app) -> None:
+def _sel_multivariate(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.multivariate.controller import mv_recompute
     if hasattr(app, "_mv_canvas"):
-        mv_recompute(app._ctx)
+        mv_recompute(ctx)
 
 
-def _sel_spatial(app) -> None:
+def _sel_spatial(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.spatial.controller import sp_on_selection_changed
     if hasattr(app, "_sp_canvas"):
-        sp_on_selection_changed(app._ctx)
+        sp_on_selection_changed(ctx)
 
 
-def _sel_smfish(app) -> None:
+def _sel_smfish(ctx) -> None:
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
-    smfish_sync_from_app(app._ctx)
+    smfish_sync_from_app(ctx)
 
 
-def _sel_sample_definitions(app) -> None:
+def _sel_sample_definitions(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Cell Gating is a sub-tab here; refresh its CDF if the user has opened it.
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
         from well_viewer.features.grouping.cell_gating_tab_view import (
             cell_gating_load_cell_areas,
         )
-        cell_gating_load_cell_areas(app._ctx)
+        cell_gating_load_cell_areas(ctx)
 
 
-def _sel_cell_browser(app) -> None:
+def _sel_cell_browser(ctx) -> None:
     # Keep the gallery in sync with the live well selection when both panes are
     # live in Split View — the user expects the Scatter and Cell Browser to track
     # each other. Outside split the gallery stays Generate-gated (deferred) so a
     # selection change doesn't trigger a heavy re-composite unprompted.
-    if not app._ctx.runtime.split.active:
+    if not ctx.runtime.split.active:
         return
     from well_viewer.features.image_browser.cell_browser.controller import (
         apply_filters,
     )
-    apply_filters(app._ctx, live_sync=True)
+    apply_filters(ctx, live_sync=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -643,27 +679,32 @@ def _features() -> "list[FeatureDescriptor]":
             on_activate=_activate_bar_plots,
             on_selection_changed=_sel_bar_plots,
             on_channel_changed=_channel_bar,
+            redraw=_redraw_bar_plots,
             fold_change_scope_factory=_fold_change_scope_bar,
         ),
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
-                          on_activate=_activate_default_plot),
+                          on_activate=_activate_default_plot,
+                          redraw=_redraw_line_graphs),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
             on_channel_changed=_channel_scatter,
+            redraw=_redraw_scatter,
             states=(StateSpec("scatter", _state_scatter),),
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,
             on_activate=_activate_default_plot,
             on_channel_changed=_channel_distribution,
+            redraw=_redraw_distribution,
             states=(StateSpec("distribution", _state_distribution),),
         ),
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
+            redraw=_redraw_heatmap,
             states=(StateSpec("heatmap", _state_heatmap),),
         ),
 

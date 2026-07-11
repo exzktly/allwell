@@ -139,7 +139,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     # the export-style dock slides out); the FlowLayout row can't right-align it.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
     layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl, lambda: ctx.open_export_style_panel("distribution")))
+        ctrl, lambda: ctx.figures.open_style_panel("distribution")))
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators

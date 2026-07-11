@@ -42,13 +42,13 @@ except ImportError:
     _PIL_AVAILABLE = False
 
 
-def update_preview(app, well_label: Optional[str]) -> None:
-    """Legacy app-typed entry: bridge to the ctx-native preview pipeline.
+def update_preview(win, well_label: Optional[str]) -> None:
+    """Legacy win-typed entry: bridge to the ctx-native preview pipeline.
 
-    Kept so the still-app callers (registry ``_activate_segmentation``,
+    Kept so the still-win callers (registry ``_activate_segmentation``,
     ``preview_view``, ``channel_state_controller``) call it unchanged.
     """
-    update_preview_ctx(app._ctx, well_label)
+    update_preview_ctx(win._ctx, well_label)
 
 
 def update_preview_ctx(ctx, well_label: Optional[str]) -> None:
@@ -216,14 +216,14 @@ def refresh_review_image_ctx(ctx) -> None:
         ctx.runtime.review_image.refresh_in_progress = False
 
 
-def refresh_review_image(app) -> None:
+def refresh_review_image(win) -> None:
     """App-native compatibility entry — bridge to the ctx-native refresh.
 
-    Kept so the many still-app callers (renderer toggles, controller cell
+    Kept so the many still-win callers (renderer toggles, controller cell
     edits, crop / registry / preview-panel / channel-switch handlers) invoke it
-    unchanged; the body reaches the context via ``app._ctx`` (the app→ctx
-    direction), never the ``app``-escape-hatch field on the context."""
-    refresh_review_image_ctx(app._ctx)
+    unchanged; the body reaches the context via ``win._ctx`` (the win→ctx
+    direction), never the ``win``-escape-hatch field on the context."""
+    refresh_review_image_ctx(win._ctx)
 
 
 def _resolve_review_fov_tp(ctx, widgets, status, _set_combo_values, *, well, channel_switch_debug: bool):
@@ -880,11 +880,11 @@ def set_review_image_include_mode(ctx, enabled: bool) -> None:
     if btn is not None:
         btn.setChecked(enabled)
     if enabled:
-        ctx.set_status(
+        ctx.notify.set_status(
             "Delete mode ON — click a cell to exclude it, or drag a rectangle to bulk-exclude."
         )
     else:
-        ctx.set_status("Delete mode OFF.")
+        ctx.notify.set_status("Delete mode OFF.")
 
 
 

@@ -555,7 +555,7 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
         # Significance is on and a test has run, but no comparison lines up with
         # the current bars (e.g. per-well bars, or groups spanning several bars).
         # Say so rather than silently drawing nothing.
-        setter = ctx.set_status
+        setter = ctx.notify.set_status
         if callable(setter):
             setter("Significance: no comparison matches the current bars — "
                    "pool replicates so each compared group is a single bar.")
@@ -680,7 +680,7 @@ def draw_grouped_bar_mode(
                                target_ts=target_ts)
     if fc_misses:
         _tps = ", ".join(f"{t:g}" for t in sorted(fc_misses))
-        ctx.set_status(
+        ctx.notify.set_status(
             f"Fold change: control missing at t={_tps} — bars dropped."
         )
     ctx.runtime.barplot.canvas.draw_idle()

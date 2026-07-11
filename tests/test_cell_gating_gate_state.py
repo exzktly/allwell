@@ -56,7 +56,7 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
     app._ctx = SimpleNamespace(
         state=app._app_state, app=app, runtime=AppRuntime(app),
         widgets=WidgetRegistry(app),
-        bus=app._event_bus, set_status=lambda m: None,
+        bus=app._event_bus, notify=SimpleNamespace(set_status=lambda m: None),
     )
     return app
 

@@ -31,6 +31,7 @@ def test_autosave_noops_without_data_dir():
                                       v2_writes_disabled=False),
         )
     )
+    app.window = app; app.state = app._app_state  # mock is its own ctx (B4)
     sd.autosave_to_pipeline_info(app)  # must not raise
 
 
@@ -64,7 +65,7 @@ def test_label_edit_schedules_autosave(loaded_app):
         list(app._app_state.dataset.well_paths.keys())[:1]
     )
     from well_viewer.core.selection_controller import labels_apply_affix
-    labels_apply_affix(app, where="prefix")
+    labels_apply_affix(app._ctx, where="prefix")
     # Either it queued a save, or (no wells selected) it didn't crash; assert the
     # common case where a well was available.
     if app._app_state.dataset.well_paths:

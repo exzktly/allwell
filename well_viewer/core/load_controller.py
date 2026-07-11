@@ -21,7 +21,8 @@ from well_viewer.core.safe import swallowed
 # pump the event loop as each file is touched, so the window stays alive and the
 # user sees live progress instead of a frozen UI.
 
-def _make_opening_dialog(app, text: str):
+def _make_opening_dialog(ctx, text: str):
+    app = ctx.window  # transitional bridge (A3)
     try:
         from PySide6.QtCore import Qt
         from PySide6.QtWidgets import QApplication, QProgressDialog
@@ -43,7 +44,8 @@ def _make_opening_dialog(app, text: str):
         return None
 
 
-def _opening_set_phase(app, text: str, *, value=None, maximum=None) -> None:
+def _opening_set_phase(ctx, text: str, *, value=None, maximum=None) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Update the opening dialog's label / progress and pump the event loop so
     the window repaints (and Windows doesn't mark it 'Not Responding')."""
     dlg = getattr(app, "_opening_dialog", None)
@@ -61,7 +63,8 @@ def _opening_set_phase(app, text: str, *, value=None, maximum=None) -> None:
         swallowed()
 
 
-def _close_opening_dialog(app) -> None:
+def _close_opening_dialog(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     dlg = app.__dict__.pop("_opening_dialog", None)
     if dlg is not None:
         try:
@@ -87,13 +90,14 @@ def _resolve_fov_tp_extractor(extractor, pipeline_info: dict):
     return make_default_fov_tp_extractor(sep)
 
 
-def load_path(app, path: Path) -> None:
+def load_path(ctx, path: Path) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if not path.is_dir():
         QMessageBox.critical(app, "Not a directory", f"Expected a directory:\n{path}")
         return
     app._cleanup_tmp()
     # Visible "Opening dataset…" guard so a slow-network open never looks frozen.
-    _make_opening_dialog(app, "Opening dataset…")
+    _make_opening_dialog(ctx, "Opening dataset…")
     try:
         in_dir = path / "in"
         out_dir = path / "out"
@@ -102,23 +106,24 @@ def load_path(app, path: Path) -> None:
             logger.info("Detected in/out layout: in=%s  out=%s", in_dir, out_dir)
             logger.info("Fluor images from: %s  |  masks/overlays from: %s", in_dir, out_dir)
             app._app_state.dataset.in_dir = in_dir
-            _opening_set_phase(app, "Reading dataset info…")
+            _opening_set_phase(ctx, "Reading dataset info…")
             app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(out_dir)
             app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
             app._app_state.channel.smfish_channels = _smfish_tokens
             app._load_directory(out_dir, label=f"{path.name}/out")
         else:
             app._app_state.dataset.in_dir = None
-            _opening_set_phase(app, "Reading dataset info…")
+            _opening_set_phase(ctx, "Reading dataset info…")
             app._app_state.dataset.fov_tp_extractor, _fluor_tokens, _smfish_tokens, app._app_state.dataset.pipeline_info = app._read_pipeline_info(path)
             app._app_state.dataset.fov_tp_extractor = _resolve_fov_tp_extractor(app._app_state.dataset.fov_tp_extractor, app._app_state.dataset.pipeline_info)
             app._app_state.channel.smfish_channels = _smfish_tokens
             app._load_directory(path)
     finally:
-        _close_opening_dialog(app)
+        _close_opening_dialog(ctx)
 
 
-def _reset_gating_state(app) -> None:
+def _reset_gating_state(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Clear the previous dataset's scatter-gate / cell-gating / per-cell
     override state on a dataset swap.
 
@@ -139,23 +144,24 @@ def _reset_gating_state(app) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
-    app._ctx.runtime.review.included_overrides = {}
+    ctx.runtime.review.included_overrides = {}
     app._app_state.heatmap.active_layout_name = None
 
 
-def load_directory(app, d: Path, label=None) -> None:
-    _opening_set_phase(app, "Scanning folder…")
+def load_directory(ctx, d: Path, label=None) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    _opening_set_phase(ctx, "Scanning folder…")
     csvs_all = [p for p in sorted(d.glob("*.csv")) if not p.name.startswith(".")]
     # Sniffing opens every CSV header (a network read each) — drive it as a
     # progress loop that pumps the event loop so the window stays responsive
     # instead of silently hanging before the load even starts.
     csvs = []
     n_all = len(csvs_all)
-    _opening_set_phase(app, f"Scanning {n_all} file(s)…", value=0, maximum=n_all or 1)
+    _opening_set_phase(ctx, f"Scanning {n_all} file(s)…", value=0, maximum=n_all or 1)
     for i, p in enumerate(csvs_all, 1):
         if _looks_like_well_measurement_csv(p):
             csvs.append(p)
-        _opening_set_phase(app, f"Scanning {i}/{n_all}…", value=i)
+        _opening_set_phase(ctx, f"Scanning {i}/{n_all}…", value=i)
     skipped = [p for p in csvs_all if p not in csvs]
     if skipped:
         logging.getLogger("well_viewer").info(
@@ -164,7 +170,7 @@ def load_directory(app, d: Path, label=None) -> None:
             ", ".join(p.name for p in skipped[:8]) + ("…" if len(skipped) > 8 else ""),
         )
     if not csvs:
-        _close_opening_dialog(app)  # don't stack a warning behind the modal guard
+        _close_opening_dialog(ctx)  # don't stack a warning behind the modal guard
         if csvs_all:
             QMessageBox.warning(
                 app,
@@ -180,12 +186,12 @@ def load_directory(app, d: Path, label=None) -> None:
     # the normal single-notebook layout — the detached split panes break it.
     # Guarded so the feature stays one-line removable (``_split_active`` is never
     # set when split_view isn't installed).
-    if app._ctx.runtime.split.active:
+    if ctx.runtime.split.active:
         from well_viewer.core.split_view import (
             exit_split, sync_split_toggle_button,
         )
-        exit_split(app)
-        sync_split_toggle_button(app, False)
+        exit_split(ctx)
+        sync_split_toggle_button(ctx, False)
     # Save the outgoing dataset's view-state before swapping data dirs so
     # reopening it later restores tab / wells / channel selection.
     if app._app_state.dataset.data_dir is not None:
@@ -237,11 +243,11 @@ def load_directory(app, d: Path, label=None) -> None:
         swallowed()  # was: pass (silent except)
     # Clear the prior dataset's gate / override / cell-gating state before the
     # new dataset hydrates (audit X1 — stops cross-dataset gate leakage).
-    _reset_gating_state(app)
+    _reset_gating_state(ctx)
     # Signal any in-flight smFISH "Apply to All" worker to abort so
     # it doesn't overwrite the *new* dataset's CSVs with counts
     # computed against the previous dataset.
-    smfish_cancel = app._ctx.runtime.smfish.cancel_event
+    smfish_cancel = ctx.runtime.smfish.cancel_event
     if smfish_cancel is not None:
         try:
             smfish_cancel.set()
@@ -249,18 +255,18 @@ def load_directory(app, d: Path, label=None) -> None:
             swallowed()  # was: pass (silent except)
     n = len(csvs)
     app._show_progress(n, f"Loading {n} CSV file(s)…")
-    _opening_set_phase(app, f"Loading {n} well CSV(s)…", value=0, maximum=n)
+    _opening_set_phase(ctx, f"Loading {n} well CSV(s)…", value=0, maximum=n)
     for i, p in enumerate(csvs, 1):
         tok = app._extract_well_token(p.stem)
         key = tok if tok else p.stem
         app._app_state.dataset.well_paths[key] = p
         app._app_state.dataset.cache[key] = app._load_well_csv(p)
         app._step_progress(i, f"Loading {i}/{n}: {p.name}")
-        _opening_set_phase(app, f"Loading {i}/{n}: {p.name}", value=i)
+        _opening_set_phase(ctx, f"Loading {i}/{n}: {p.name}", value=i)
     app._hide_progress()
     app._rebuild_all_timepoints_cache()
     app._rebuild_all_fovs_cache()
-    build_tok_to_label(app)
+    build_tok_to_label(ctx)
     # Apply any sample_definitions persisted inside pipeline_info.json before
     # we prune groups against the loaded well set, so saved replicate-set and
     # group state is hydrated and then validated by the same pruning pass that
@@ -292,7 +298,7 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.features.image_browser.review_image.controller import (
             apply_review_overrides_to_cache,
         )
-        apply_review_overrides_to_cache(app._ctx)
+        apply_review_overrides_to_cache(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate QC-layer thresholds (qc_params.json, else seed from pipeline_info)
@@ -306,7 +312,7 @@ def load_directory(app, d: Path, label=None) -> None:
         # apply only wrote the column, leaving any cache built earlier in the
         # load sequence stale — the gate loaded into the fields but didn't take.
         from well_viewer.features.qc.controller import recompute_qc_all
-        recompute_qc_all(app._ctx)
+        recompute_qc_all(ctx)
         from well_viewer.features.qc.tab_view import qc_gate_refresh_widgets
         qc_gate_refresh_widgets(app)  # sync the Cell Gating QC gate row if built
     except Exception:
@@ -316,7 +322,7 @@ def load_directory(app, d: Path, label=None) -> None:
     try:
         app._persistence.load("crop_region")
         from well_viewer.features.crop.controller import apply_crop_to_cache
-        apply_crop_to_cache(app._ctx)
+        apply_crop_to_cache(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
     # Hydrate user-defined line-plot draw order (line_order.json).
@@ -331,7 +337,7 @@ def load_directory(app, d: Path, label=None) -> None:
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
     from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-    label_grid_refresh(app._ctx)
+    label_grid_refresh(ctx)
     # Refresh the Sample Definitions tab so any newly loaded labels / groups
     # appear without requiring a tab switch.
     if hasattr(app, "_groups_centre_refresh"):
@@ -378,18 +384,18 @@ def load_directory(app, d: Path, label=None) -> None:
             from well_viewer.features.heatmap.sidebar_view import (
                 refresh_heatmap_layout_sidebar,
             )
-            refresh_heatmap_layout_sidebar(app._ctx)
+            refresh_heatmap_layout_sidebar(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
     display = label or str(d)
     app._dir_label.setText(display)
     app._set_status(f"Loaded {n} well(s) — {display}")
-    recalculate_threshold(app._ctx)
+    recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from
     # _recalculate_threshold, which fires on every channel/metric switch)
     # keeps Included flags consistent with the loaded thresholds.
-    _kick_off_gating_after_load(app)
+    _kick_off_gating_after_load(ctx)
     # Re-sync the smFISH tab so its cached well→zip map, channel list, and
     # extractor reflect the freshly loaded dataset. Without this, a dataset
     # reload (e.g., after Analyze pipeline completes) leaves the tab pointing
@@ -401,7 +407,7 @@ def load_directory(app, d: Path, label=None) -> None:
     # feature's ``on_dataset_loaded`` hook owns its ordering + guards internally.
     for _descriptor in app._features.with_hook("on_dataset_loaded"):
         try:
-            _descriptor.on_dataset_loaded(app._ctx)
+            _descriptor.on_dataset_loaded(ctx)
         except Exception:
             logging.getLogger("well_viewer").exception(
                 "on_dataset_loaded hook for %r failed", _descriptor.name)
@@ -416,7 +422,8 @@ def load_directory(app, d: Path, label=None) -> None:
         refresh()
 
 
-def _kick_off_gating_after_load(app) -> None:
+def _kick_off_gating_after_load(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     if not hasattr(app, "_cell_gating_fluor_gate_edits"):
         return
     # Cell-area gating is retired (now QC-owned); only a non-default
@@ -433,7 +440,7 @@ def _kick_off_gating_after_load(app) -> None:
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
     if has_non_default_gate or use_scatter or use_thresh:
         from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
-        cell_gating_start_gating_worker(app._ctx)
+        cell_gating_start_gating_worker(ctx)
 
 
 def _looks_like_well_measurement_csv(path: Path) -> bool:
@@ -455,16 +462,18 @@ def _looks_like_well_measurement_csv(path: Path) -> bool:
     return has_timepoint and has_measure_col
 
 
-def build_tok_to_label(app) -> None:
+def build_tok_to_label(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     app._app_state.dataset.tok_to_label = {tok: p.stem for tok, p in app._app_state.dataset.well_paths.items()}
 
 
-def load_path_shim(app, path):
+def load_path_shim(ctx, path):
+    app = ctx.window  # transitional bridge (A3)
     # Drain any pending deferred tab builds so post-load redraw paths
     # (e.g., the bar redraw in _recalculate_threshold call sites) hit
     # fully-constructed tabs instead of unbuilt placeholders.
     app._drain_pending_centre_builders()
-    load_path(app, path)
+    load_path(ctx, path)
     refresh_plot_empty_states(app)
     # Surface the status-bar threshold / band chips now a dataset is loaded (F1).
     refresh_chips = getattr(app, "_refresh_status_chips", None)

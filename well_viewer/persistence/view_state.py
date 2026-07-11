@@ -337,7 +337,7 @@ def restore(ctx, state: dict) -> None:
             ctx.runtime.view_state.absent_solo = saved_solo - wp
             ctx.state.selection.active_solo_wells = saved_solo & wp
         try:
-            ctx.refresh_sidebar_map()
+            ctx.coordinator.refresh_sidebar_map()
         except Exception:
             swallowed()
 
@@ -734,21 +734,23 @@ def _apply_scatter(ctx, state: dict) -> None:
 
 # ── save / load entry points ───────────────────────────────────────────────
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
     try:
-        state = snapshot(app._ctx)
+        state = snapshot(ctx)
     except Exception:
         _logger.exception("view_state: snapshot failed; not saving")
         return
-    _doc.set_section(app._ctx, "view_state", state)
+    _doc.set_section(ctx, "view_state", state)
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     if not app._app_state.dataset.data_dir:
         return
-    state = _doc.get_section(app._ctx, "view_state")
+    state = _doc.get_section(ctx, "view_state")
     if not isinstance(state, dict):
         return
     sv = state.get("schema_version")
@@ -766,12 +768,13 @@ def load_from_data_dir(app) -> None:
             "view_state migrated from schema_version=%r to %d.", sv, SCHEMA_VERSION)
         state = migrated
     try:
-        restore(app._ctx, state)
+        restore(ctx, state)
     except Exception:
         _logger.exception("view_state: restore failed; continuing with defaults")
 
 
-def reset(app) -> None:
+def reset(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     """Wipe the live view-state (selections + fold-change + per-tab combos)
     and drop the ``view_state`` section from ``persistence.json``.
 
@@ -795,7 +798,7 @@ def reset(app) -> None:
     app._app_state.plot.fc_order = "ctrl_first"
     try:
         from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
-        _sync_widgets_to_state(app._ctx)
+        _sync_widgets_to_state(ctx)
     except Exception:
         _logger.debug("reset: fold-change sync failed", exc_info=True)
     # Per-tab combo defaults.
@@ -803,11 +806,11 @@ def reset(app) -> None:
     _reset_distribution(app)
     _reset_scatter(app)
     # Drop any pending state stashed from a previous restore.
-    app._ctx.runtime.view_state.pending = None
+    ctx.runtime.view_state.pending = None
     # Drop the view_state section so a fresh open doesn't repopulate.
     if app._app_state.dataset.data_dir:
         try:
-            _doc.set_section(app._ctx, "view_state", None)
+            _doc.set_section(ctx, "view_state", None)
         except Exception:
             _logger.debug("reset: persistence.json update failed", exc_info=True)
     # Force a redraw on whatever tab is active. The scope coalescer redraws

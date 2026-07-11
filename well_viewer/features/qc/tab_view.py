@@ -168,7 +168,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     return row
 
 
-def qc_gate_refresh_widgets(app) -> None:
+def qc_gate_refresh_widgets(win) -> None:
     """Re-fill the embedded gate row from the current params (after a load /
     external change). No-op when the Cell Gating tab hasn't been built.
 
@@ -179,10 +179,10 @@ def qc_gate_refresh_widgets(app) -> None:
     loaded bounds back to ``None`` — the bug where a reopened set's QC filter
     showed its values but didn't apply until a field was re-entered.
     """
-    w = getattr(app, "_qc_gate_widgets", None)
+    w = getattr(win, "_qc_gate_widgets", None)
     if not w:
         return
-    p = get_qc_params(app._ctx)
+    p = get_qc_params(win._ctx)
     edit_keys = ("min_area", "max_area", "min_solidity", "max_region_area",
                  "min_circularity", "max_circularity")
     fields = [w["enable"]] + [w[k] for k in edit_keys]

@@ -14,7 +14,7 @@ from well_viewer.core.lazy import lazy as _lazy
 update_preview = _lazy("well_viewer.features.image_browser.review_image.renderer", "update_preview")
 
 
-def build_preview_picker(app, parent: QWidget) -> None:
+def build_preview_picker(win, parent: QWidget) -> None:
     """Compact single-well plate-map preview picker in the sidebar."""
     from widgets.well_plate_selector import WellPlateSelector
 
@@ -39,25 +39,25 @@ def build_preview_picker(app, parent: QWidget) -> None:
     _sp.setHeightForWidth(True)
     plate.setSizePolicy(_sp)
     layout.addWidget(plate)
-    app._sidebar_preview_plate = app._ctx.widgets.register("_sidebar_preview_plate", plate)
+    win._sidebar_preview_plate = win._ctx.widgets.register("_sidebar_preview_plate", plate)
 
     def _on_plate_changed(ids) -> None:
-        _preview = app._app_state.feature_slice("preview")
+        _preview = win._app_state.feature_slice("preview")
         if _preview is None:
             return
-        tok = next((w for w in ids if w in app._app_state.dataset.well_paths), None)
+        tok = next((w for w in ids if w in win._app_state.dataset.well_paths), None)
         if tok == _preview.selected_well:
             return
         _preview.selected_well = tok
-        app._refresh_preview_picker()
-        update_preview(app, tok)
+        win._refresh_preview_picker()
+        update_preview(win, tok)
     plate.selectionChanged.connect(_on_plate_changed)
 
-    app._preview_sel_lbl = app._ctx.widgets.register(
+    win._preview_sel_lbl = win._ctx.widgets.register(
         "_preview_sel_lbl", QLabel("No well selected", parent))
-    app._preview_sel_lbl.setObjectName("Muted")
-    app._preview_sel_lbl.setAlignment(Qt.AlignLeft)
-    layout.addWidget(app._preview_sel_lbl)
+    win._preview_sel_lbl.setObjectName("Muted")
+    win._preview_sel_lbl.setAlignment(Qt.AlignLeft)
+    layout.addWidget(win._preview_sel_lbl)
 
     layout.addStretch(1)
 
@@ -66,7 +66,7 @@ def build_preview_picker(app, parent: QWidget) -> None:
     help_lbl.setWordWrap(True)
     layout.addWidget(help_lbl)
 
-    app._refresh_preview_picker()
+    win._refresh_preview_picker()
 
 
 def refresh_preview_picker(ctx, **_kw) -> None:

@@ -226,7 +226,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # the export-style dock slides out); the FlowLayout row can't right-align it.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
     layout.addWidget(wrap_ctrl_row_with_properties(
-        row1, lambda: ctx.open_export_style_panel("spatial")))
+        row1, lambda: ctx.figures.open_style_panel("spatial")))
 
     # ── row 2: parameters (colony detection + summary display + boundary) ────
     # Row 2 hosts every parameter control. Groups are shown / hidden based on
@@ -524,7 +524,7 @@ def _copy_spatial_figure(ctx) -> None:
         return
     try:
         status = copy_figure_to_clipboard(fig)
-        ctx.set_status(status)
+        ctx.notify.set_status(status)
     except Exception:
         swallowed()
 
@@ -535,6 +535,6 @@ def _save_spatial_figure(ctx) -> None:
     if fig is None:
         return
     try:
-        ctx.save_figure_dialog(fig, "spatial.png")
+        ctx.figures.save(fig, "spatial.png")
     except Exception:
         swallowed()

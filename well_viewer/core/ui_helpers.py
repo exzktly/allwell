@@ -57,11 +57,11 @@ def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
         return fallback
 
 
-def set_widget_text(app, attr_name: str, text: str) -> None:
+def set_widget_text(host, attr_name: str, text: str) -> None:
     """Set ``text`` on ``app.<attr_name>`` if that attribute exists and is a
     text widget — collapses the repeated ``lbl = getattr(...); if lbl: ...``
     status-setter pattern."""
-    w = getattr(app, attr_name, None)
+    w = getattr(host, attr_name, None)
     if hasattr(w, "setText"):
         w.setText(text)
 
@@ -144,7 +144,7 @@ def set_combo_values_sectioned(combo: object, sections: List[Tuple[str, List[str
 
 
 def wrap_with_empty_state(
-    app: Any,
+    win: Any,
     host: QWidget,
     *,
     text: str = "Load a directory.",
@@ -156,12 +156,12 @@ def wrap_with_empty_state(
     dataset is loaded.
 
     Page 0 is the EmptyState; page 1 is *host*. The stack starts on page 0
-    so the user sees the placeholder immediately on app launch (matplotlib's
+    so the user sees the placeholder immediately on win launch (matplotlib's
     default empty axes are otherwise visible as glaring white blocks).
 
-    The stack registers itself on ``app._plot_empty_stacks`` and
-    ``app._refresh_plot_empty_states()`` flips every registered stack based
-    on whether ``app._app_state.dataset.well_paths`` is non-empty. Tab redraws should call
+    The stack registers itself on ``win._plot_empty_stacks`` and
+    ``win._refresh_plot_empty_states()`` flips every registered stack based
+    on whether ``win._app_state.dataset.well_paths`` is non-empty. Tab redraws should call
     that helper before they paint.
     """
     from widgets.empty_state import EmptyState  # local — widget module is heavy
@@ -171,9 +171,9 @@ def wrap_with_empty_state(
     stack.addWidget(placeholder)  # index 0
     stack.addWidget(host)         # index 1
     stack.setCurrentIndex(0)
-    if not hasattr(app, "_plot_empty_stacks") or app._plot_empty_stacks is None:
-        app._plot_empty_stacks = []
-    app._plot_empty_stacks.append(stack)
+    if not hasattr(win, "_plot_empty_stacks") or win._plot_empty_stacks is None:
+        win._plot_empty_stacks = []
+    win._plot_empty_stacks.append(stack)
     return stack
 
 
@@ -185,12 +185,12 @@ def wrap_with_empty_state(
 _DATA_GATED_OBJECT_NAMES = ("TabCtrl", "PlottingActionRow")
 
 
-def refresh_plot_empty_states(app: Any) -> None:
+def refresh_plot_empty_states(win: Any) -> None:
     """Flip every registered plot-empty-state stack based on whether a
     dataset is currently loaded. Safe to call before any stacks have been
     registered (no-ops)."""
-    stacks = getattr(app, "_plot_empty_stacks", None) or []
-    has_data = bool(app._app_state.dataset.well_paths)
+    stacks = getattr(win, "_plot_empty_stacks", None) or []
+    has_data = bool(win._app_state.dataset.well_paths)
     target = 1 if has_data else 0
     for stack in stacks:
         try:
@@ -201,9 +201,9 @@ def refresh_plot_empty_states(app: Any) -> None:
     # Grey out the per-tab control bars until a dataset is loaded. Disabling the
     # container cascades to its children; re-enabling restores each child's own
     # enabled state (so tab-local logic like smFISH's combo gating still wins).
-    if isinstance(app, QWidget):
+    if isinstance(win, QWidget):
         for name in _DATA_GATED_OBJECT_NAMES:
-            for bar in app.findChildren(QWidget, name):
+            for bar in win.findChildren(QWidget, name):
                 try:
                     bar.setEnabled(has_data)
                 except Exception:
@@ -441,26 +441,26 @@ def hide_plot_dock(dock: QWidget) -> None:
         dock.setVisible(False)
 
 
-def send_plot_to_batch_export(app, mode: str) -> None:
+def send_plot_to_batch_export(win, mode: str) -> None:
     """S5: jump from a plot card to Batch Export with the matching chart-type.
 
     The batch panels read the live plot spec (channel / property / threshold /
-    SEM / fold-change) straight off ``app._app_state``, so "capturing the
+    SEM / fold-change) straight off ``win._app_state``, so "capturing the
     current plot" reduces to navigating to the Batch Export tab and selecting
     the matching mode. Navigating builds the tab (so ``_batch_export_set_mode``
     exists) before we set it. Lives in this core helper — not in the
     batch_export feature — so the plot tab views can import it at module scope
-    without a feature-to-feature cycle; it touches only ``app`` attributes.
+    without a feature-to-feature cycle; it touches only ``win`` attributes.
     """
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(win, "_notebook", None)
     if nb is not None:
         nb.setCurrentByName("Batch Export")
-    setter = app._ctx.runtime.batch_export.set_mode
+    setter = win._ctx.runtime.batch_export.set_mode
     if callable(setter):
         setter(mode)
     label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",
              "scatter_agg": "Scatter (aggregate)"}.get(mode, mode)
-    app._set_status(f"Batch Export → {label}: using the current plot settings.")
+    win._set_status(f"Batch Export → {label}: using the current plot settings.")
 
 
 def make_popover_button(text: str, parent: QWidget):
@@ -987,7 +987,8 @@ def mute_color(hex_color: str, factor: float = 0.5) -> str:
 
 
 
-def on_theme_change(app, theme_name: str = None) -> None:
+def on_theme_change(ctx, theme_name: str = None) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Re-apply QSS stylesheet when theme switches."""
     new_theme = theme_name or app._theme_name
     app._theme_name = new_theme
@@ -998,7 +999,7 @@ def on_theme_change(app, theme_name: str = None) -> None:
         rep_panel_refresh(app._ctx)
     if hasattr(app, '_stats_fig') and app._stats_fig:
         from well_viewer.features.stats.controller import stats_refresh_colors
-        stats_refresh_colors(app)
+        stats_refresh_colors(app._ctx)
     if hasattr(app, "_sidebar_btns"):
         app._sidebar_map_refresh_pending = False
         app._refresh_sidebar_map_now()
@@ -1010,7 +1011,8 @@ def on_theme_change(app, theme_name: str = None) -> None:
 
 
 
-def apply_theme(app) -> None:
+def apply_theme(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Apply the application-wide stylesheet.
 
     Single source of truth is the repo-root ``theme`` module. Previously
@@ -1028,7 +1030,8 @@ def apply_theme(app) -> None:
 
 
 
-def toast(app, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
+def toast(ctx, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Show a transient v2 Toast over the main window.
 
     ``kind`` matches widgets.toast.Toast: 'info' / 'success' / 'warn' /
@@ -1044,7 +1047,8 @@ def toast(app, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
 
 
 
-def show_progress(app, maximum: int, msg: str = "") -> None:
+def show_progress(ctx, maximum: int, msg: str = "") -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Display the progress bar and set its maximum value."""
     app._progress_bar.setValue(0)
     app._progress_bar.setMaximum(max(1, maximum))
@@ -1055,7 +1059,8 @@ def show_progress(app, maximum: int, msg: str = "") -> None:
 
 
 
-def step_progress(app, value: int, msg: str = "") -> None:
+def step_progress(ctx, value: int, msg: str = "") -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Advance the progress bar to *value* and repaint immediately."""
     app._progress_bar.setValue(value)
     if msg:
@@ -1064,7 +1069,8 @@ def step_progress(app, value: int, msg: str = "") -> None:
 
 
 
-def toggle_log(app) -> None:
+def toggle_log(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     app._log_visible = not app._log_visible
     if app._log_visible:
         app._log_frame.setVisible(True)
@@ -1088,7 +1094,7 @@ def notes_schedule_save(ctx) -> None:
 
 
 
-def norm_timepoint(app, value: object) -> str:
+def norm_timepoint(ctx, value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""

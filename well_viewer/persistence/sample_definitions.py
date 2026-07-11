@@ -15,7 +15,8 @@ from well_viewer.core.safe import swallowed
 _logger = logging.getLogger("well_viewer")
 
 
-def save_notes(app) -> None:
+def save_notes(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     """Debounced-autosave entry for the Notes sub-tab.
 
     Registered as the ``notes`` persistence domain. Tolerates a missing
@@ -30,7 +31,8 @@ def save_notes(app) -> None:
         _logger.exception("Notes auto-save failed")
 
 
-def autosave_to_pipeline_info(app) -> None:
+def autosave_to_pipeline_info(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
     """Debounced-autosave variant of :func:`save_to_pipeline_info`.
 
     Writes the sample-definitions block silently — no dialogs, no status toast —
@@ -146,7 +148,7 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
             "loss. v2 writes disabled for this session."
         )
         sel_state.v2_writes_disabled = True
-        ctx.set_status(
+        ctx.notify.set_status(
             "Saved sample definitions are in a mixed v1/v2 shape — using "
             "compatibility mode. Edit and Save to clean up (see log)."
         )
@@ -168,7 +170,7 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
         _logger.exception("Couldn't upgrade saved sample definitions — using "
                           "compatibility mode; the file was left untouched.")
         sel_state.v2_writes_disabled = True
-        ctx.set_status("Couldn't upgrade saved sample definitions — using "
+        ctx.notify.set_status("Couldn't upgrade saved sample definitions — using "
                        "them in compatibility mode (see log).")
         return False, {}
 
@@ -182,7 +184,7 @@ def _apply_unified_state(ctx, block, *, set_notes: bool = True) -> tuple[bool, d
         # which needed the god-object handle — the status line already served as
         # the code's own fallback, so this one-time migration notice keeps
         # surfacing without naming the app).
-        ctx.set_status(
+        ctx.notify.set_status(
             f"Migrated legacy v1 sample-definitions to v2 "
             f"({len(selections)} selection(s)). Save to persist."
         )

@@ -131,7 +131,7 @@ class NamedPageStack(QStackedWidget):
             self.currentNameChanged.emit(self._names[idx])
 
 
-def build_centre(app, parent: QWidget) -> None:
+def build_centre(win, parent: QWidget) -> None:
     layout = parent.layout()
     if layout is None:
         layout = QVBoxLayout(parent)
@@ -141,15 +141,15 @@ def build_centre(app, parent: QWidget) -> None:
     # Phase 15: the centre is a NamedPageStack (QStackedWidget subclass) —
     # the rail nav on the left drives the current page externally, and
     # callers reach pages via currentName() / setCurrentByName() / pageNames().
-    app._notebook = NamedPageStack(parent)
-    app._notebook.setObjectName("CentreTabs")
-    layout.addWidget(app._notebook, 1)
+    win._notebook = NamedPageStack(parent)
+    win._notebook.setObjectName("CentreTabs")
+    layout.addWidget(win._notebook, 1)
 
     # Map tab title -> deferred builder. Populated below; drained after the
     # window paints. The tab-change handler also calls into this map so a
     # user who clicks an un-built tab forces its builder to run inline.
     pending: Dict[str, Callable[[], None]] = {}
-    app._centre_pending_builders = pending
+    win._centre_pending_builders = pending
 
     # Defined early so builder functions (including _build_plotting, which is
     # called eagerly as the first tab) can call it before the groups loop ends.
@@ -162,7 +162,7 @@ def build_centre(app, parent: QWidget) -> None:
         except Exception:
             _logger.exception("Deferred build for %r failed", title)
 
-    app._ctx.runtime.centre.build_pending = _build_pending
+    win._ctx.runtime.centre.build_pending = _build_pending
 
     # Tabs whose construction we never want to run from the background
     # drain — they only build on first user access (tab click). The tabs
@@ -171,28 +171,28 @@ def build_centre(app, parent: QWidget) -> None:
     # Browser" is the unified image-review rail entry (Segmentation / Image
     # Table / Cell Browser / Playground sub-tabs) — its sub-tab bodies pull the
     # image-table loaders, so it (and each sub-tab inside it) builds on demand.
-    lazy_only: Set[str] = {d.name for d in app._features.top_level() if d.lazy_only}
-    app._centre_lazy_only_titles = frozenset(lazy_only)
+    lazy_only: Set[str] = {d.name for d in win._features.top_level() if d.lazy_only}
+    win._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
     # capture them. Sample Definitions in particular needs the QWidget to
     # be allocated up-front so the deferred ``_build_sample_definitions``
     # closure can see it; otherwise the variable would be shadowed by the
     # ``addTab`` call further down.
-    tab_groups = QWidget(app._notebook)
+    tab_groups = QWidget(win._notebook)
     QVBoxLayout(tab_groups).setContentsMargins(0, 0, 0, 0)
 
     # "Plotting" is a top-level tab whose body is a nested QTabWidget
     # containing the five plot sub-tabs.  We pre-allocate both the outer
     # container and the five sub-tab frames so builder closures (and the
     # drain) can reference them before the nested QTabWidget exists.
-    plotting_container = QWidget(app._notebook)
+    plotting_container = QWidget(win._notebook)
     QVBoxLayout(plotting_container).setContentsMargins(0, 0, 0, 0)
 
     # The plot sub-tabs come from the registry (descriptors whose parent is
     # "Plotting"), so a build profile that drops one drops its sub-tab with no
     # edit here. Falls back to the canonical order if none are declared.
-    _PLOT_SUBTABS = app._features.sub_leaves("Plotting") or [
+    _PLOT_SUBTABS = win._features.sub_leaves("Plotting") or [
         "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
     ]
 
@@ -201,14 +201,14 @@ def build_centre(app, parent: QWidget) -> None:
     # are deferred.
     from well_viewer.features.grouping.replicate_panel_view import build_replicate_panel
     from well_viewer.features.preview.preview_view import build_preview_picker
-    build_replicate_panel(app._ctx, app._sidebar_sample_frame)
-    build_preview_picker(app, app._sidebar_preview_frame)
+    build_replicate_panel(win._ctx, win._sidebar_sample_frame)
+    build_preview_picker(win, win._sidebar_preview_frame)
 
     # Stable name -> tab QWidget map for builder closures to reach into.
     # Populated in two phases: plot sub-tab frames are inserted here before
     # the groups loop so the builder closures can close over them, even
     # though those frames end up inside the nested "Plotting" QTabWidget
-    # rather than directly in app._notebook.
+    # rather than directly in win._notebook.
     tab_frames: Dict[str, QWidget] = {}
     for _t in _PLOT_SUBTABS:
         _f = QWidget()
@@ -225,10 +225,10 @@ def build_centre(app, parent: QWidget) -> None:
     # frame is resolved at call time from ``tab_frames`` (populated by the plot
     # sub-tab pre-allocation above / ``_new_tab`` for top-level tabs).
     def _registry_builder(title: str) -> Callable[[], None]:
-        return lambda: app._features.get(title).build(app._ctx, tab_frames[title])
+        return lambda: win._features.get(title).build(win._ctx, tab_frames[title])
 
     # Register plot sub-tab builders in pending now so the background drain can
-    # populate their frames while the app is starting up. _build_plotting
+    # populate their frames while the win is starting up. _build_plotting
     # (below) builds the first sub-tab eagerly and the drain handles the rest.
     for _sub in _PLOT_SUBTABS:
         pending[_sub] = _registry_builder(_sub)
@@ -295,7 +295,7 @@ def build_centre(app, parent: QWidget) -> None:
 
         # Phase 11b (A4): the channel selector is now a single global combo
         # in the ctxbar. The per-renderer combos still exist for back-compat
-        # but ``app._on_plot_channel_selected`` mirrors every change back to
+        # but ``win._on_plot_channel_selected`` mirrors every change back to
         # all of them, so editing here re-renders every renderer's view
         # against the new channel.
         from PySide6.QtWidgets import QComboBox as _QComboBox
@@ -306,11 +306,11 @@ def build_centre(app, parent: QWidget) -> None:
         )
         arl.addWidget(chan_lbl)
         # Expose the label so tab-switch logic can hide it on scatter tabs.
-        app._plotting_channel_lbl = chan_lbl
-        app._plotting_channel_cb = app._ctx.widgets.register(
+        win._plotting_channel_lbl = chan_lbl
+        win._plotting_channel_cb = win._ctx.widgets.register(
             "_plotting_channel_cb", _QComboBox())
-        app._plotting_channel_cb.setMinimumContentsLength(8)
-        app._plotting_channel_cb.setStyleSheet(
+        win._plotting_channel_cb.setMinimumContentsLength(8)
+        win._plotting_channel_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
@@ -321,23 +321,23 @@ def build_centre(app, parent: QWidget) -> None:
         )
 
         def _on_global_channel(_idx: int) -> None:
-            on_select = getattr(app, "_on_plot_channel_selected", None)
+            on_select = getattr(win, "_on_plot_channel_selected", None)
             if on_select is None:
                 return
             try:
-                on_select(app._plotting_channel_cb)
+                on_select(win._plotting_channel_cb)
             except Exception:
                 swallowed()  # was: pass (silent except)
 
-        app._plotting_channel_cb.currentIndexChanged.connect(_on_global_channel)
-        arl.addWidget(app._plotting_channel_cb)
+        win._plotting_channel_cb.currentIndexChanged.connect(_on_global_channel)
+        arl.addWidget(win._plotting_channel_cb)
         # Legacy display-only chip remains as an attribute for code that
         # still pokes at ``_plotting_channel_chip`` — point it at the new
         # combo so callers that read its text still work.
-        app._plotting_channel_chip = app._plotting_channel_cb
+        win._plotting_channel_chip = win._plotting_channel_cb
 
         # Global Property (intensity-column) combo — mirrors the channel
-        # combo styling. Drives ``app._app_state.channel.active_metric`` so every plot, stat,
+        # combo styling. Drives ``win._app_state.channel.active_metric`` so every plot, stat,
         # and CSV export tracks the user's chosen intensity property.
         from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
         prop_lbl = QLabel("Property")
@@ -346,11 +346,11 @@ def build_centre(app, parent: QWidget) -> None:
             f"letter-spacing: 0.08em;"
         )
         arl.addWidget(prop_lbl)
-        app._plotting_metric_lbl = prop_lbl
-        app._plotting_metric_cb = app._ctx.widgets.register(
+        win._plotting_metric_lbl = prop_lbl
+        win._plotting_metric_cb = win._ctx.widgets.register(
             "_plotting_metric_cb", _QComboBox())
-        app._plotting_metric_cb.setMinimumContentsLength(8)
-        app._plotting_metric_cb.setStyleSheet(
+        win._plotting_metric_cb.setMinimumContentsLength(8)
+        win._plotting_metric_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
@@ -359,10 +359,10 @@ def build_centre(app, parent: QWidget) -> None:
             f"min-width: 110px; }}"
             f"QComboBox:hover {{ color: {_C.text_primary}; }}"
         )
-        app._plotting_metric_cb.addItems(_METRIC_ORDER)
+        win._plotting_metric_cb.addItems(_METRIC_ORDER)
 
         def _on_global_metric(_idx: int) -> None:
-            handler = getattr(app, "_on_metric_selected_global", None)
+            handler = getattr(win, "_on_metric_selected_global", None)
             if handler is None:
                 return
             try:
@@ -370,8 +370,8 @@ def build_centre(app, parent: QWidget) -> None:
             except Exception:
                 swallowed()  # was: pass (silent except)
 
-        app._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
-        arl.addWidget(app._plotting_metric_cb)
+        win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
+        arl.addWidget(win._plotting_metric_cb)
 
         # Quick-edit for the active channel's ThreshFracOn (the per-channel
         # ON/OFF intensity threshold that drives the fraction-above- and
@@ -386,26 +386,26 @@ def build_centre(app, parent: QWidget) -> None:
             f"letter-spacing: 0.08em;"
         )
         arl.addWidget(thresh_lbl)
-        app._plotting_thresh_frac_lbl = thresh_lbl
-        app._plotting_thresh_frac_stepper = app._ctx.widgets.register(
+        win._plotting_thresh_frac_lbl = thresh_lbl
+        win._plotting_thresh_frac_stepper = win._ctx.widgets.register(
             "_plotting_thresh_frac_stepper",
             _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
-        app._plotting_thresh_frac_stepper.setFixedWidth(96)
+        win._plotting_thresh_frac_stepper.setFixedWidth(96)
         # Don't let the threshold box grab keyboard focus when the window first
         # shows (it auto-focused on load) — only take focus on click.
-        app._plotting_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
-        _thr_edit = getattr(app._plotting_thresh_frac_stepper, "_edit", None)
+        win._plotting_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
+        _thr_edit = getattr(win._plotting_thresh_frac_stepper, "_edit", None)
         if _thr_edit is not None:
             _thr_edit.setFocusPolicy(Qt.ClickFocus)
-        app._plotting_thresh_frac_stepper.setToolTip(
+        win._plotting_thresh_frac_stepper.setToolTip(
             "ON/OFF intensity threshold for the active channel — cells above it "
             "count toward the fraction-above- and mean-above-threshold series. "
             "Edits the same value as the Cell Gating tab's ThreshFracOn."
         )
-        app._plotting_thresh_frac_stepper.valueChanged.connect(
-            lambda v: app._set_thresh_frac_on(v)
+        win._plotting_thresh_frac_stepper.valueChanged.connect(
+            lambda v: win._set_thresh_frac_on(v)
         )
-        arl.addWidget(app._plotting_thresh_frac_stepper)
+        arl.addWidget(win._plotting_thresh_frac_stepper)
 
         # Caption shown only on the Scatter sub-tabs, where the global
         # Channel/Property/Threshold controls don't drive the plot (it has
@@ -419,7 +419,7 @@ def build_centre(app, parent: QWidget) -> None:
         )
         scatter_note.setVisible(False)
         arl.addWidget(scatter_note)
-        app._plotting_scatter_note = scatter_note
+        win._plotting_scatter_note = scatter_note
 
         arl.addStretch(1)
 
@@ -432,7 +432,7 @@ def build_centre(app, parent: QWidget) -> None:
         # only carries the canvas-wide actions (channel selector + copy).
         # The Copy-SVG button has moved next to each tab's "Export CSV"
         # primary action so the figure-output controls sit together.
-        # The handler is exposed on app below so per-tab buttons can
+        # The handler is exposed on win below so per-tab buttons can
         # invoke it without re-importing centre_view.
 
         plotting_container.layout().addWidget(action_row, 0)
@@ -441,7 +441,7 @@ def build_centre(app, parent: QWidget) -> None:
         plotting_nb = NamedPageStack(plotting_container)
         plotting_nb.setObjectName("PlottingSubTabs")
         plotting_container.layout().addWidget(plotting_nb, 1)
-        app._plotting_notebook = plotting_nb
+        win._plotting_notebook = plotting_nb
 
         # Register all pages BEFORE wiring currentChanged so the first emit
         # always sees a valid currentName().
@@ -455,7 +455,7 @@ def build_centre(app, parent: QWidget) -> None:
             sub_title = plotting_nb.currentName()
             if sub_title in pending:
                 _build_pending(sub_title)
-            on_tab_change(app._ctx, None)
+            on_tab_change(win._ctx, None)
             _refresh_channel_chip(sub_title)
             # Properties rail retired — its scope picker followed the
             # active sub-tab. Per-plot styling now happens through the
@@ -483,7 +483,7 @@ def build_centre(app, parent: QWidget) -> None:
         def _refresh_channel_chip(title: str) -> None:
             """Re-populate the global ctxbar channel combo on sub-tab switch.
 
-            Reads from the canonical channel list (``app._app_state.channel.fluor_channels`` +
+            Reads from the canonical channel list (``win._app_state.channel.fluor_channels`` +
             ratios) rather than mirroring a per-renderer combo's items.
             The per-renderer combos can lag the canonical list — they're
             seeded with a ``["GFP"]`` placeholder and are only refreshed
@@ -500,8 +500,8 @@ def build_centre(app, parent: QWidget) -> None:
             per-axis selectors so the global combos are hidden there to
             avoid confusion about which one drives the plot.
             """
-            global_cb = getattr(app, "_plotting_channel_cb", None)
-            metric_cb = getattr(app, "_plotting_metric_cb", None)
+            global_cb = getattr(win, "_plotting_channel_cb", None)
+            metric_cb = getattr(win, "_plotting_metric_cb", None)
             # On scatter sub-tabs the global Channel/Property/Threshold controls
             # don't drive the plot — those tabs own per-axis (channel, property)
             # selectors. Rather than HIDE the controls (a row that vanishes reads
@@ -509,25 +509,25 @@ def build_centre(app, parent: QWidget) -> None:
             # pointing at the per-axis selectors.
             is_scatter = title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")
             for w in (global_cb, metric_cb,
-                      getattr(app, "_plotting_thresh_frac_stepper", None)):
+                      getattr(win, "_plotting_thresh_frac_stepper", None)):
                 if w is not None:
                     w.setEnabled(not is_scatter)
             for lbl_attr in ("_plotting_channel_lbl", "_plotting_metric_lbl",
                              "_plotting_thresh_frac_lbl"):
-                lbl = getattr(app, lbl_attr, None)
+                lbl = getattr(win, lbl_attr, None)
                 if lbl is not None:
                     lbl.setEnabled(not is_scatter)
-            note = getattr(app, "_plotting_scatter_note", None)
+            note = getattr(win, "_plotting_scatter_note", None)
             if note is not None:
                 note.setVisible(is_scatter)
             # Keep the quick-edit showing the active channel's value on every
             # sub-tab switch (guarded; no-op before the stepper is built).
-            app._refresh_thresh_frac_quick_edit()
+            win._refresh_thresh_frac_quick_edit()
             if global_cb is None:
                 return
             real_labels = [str(ch).upper() for ch in
-                           (app._app_state.channel.fluor_channels or [])]
-            ratio_labels = list(getattr(app, "_ratio_dropdown_labels",
+                           (win._app_state.channel.fluor_channels or [])]
+            ratio_labels = list(getattr(win, "_ratio_dropdown_labels",
                                         lambda: [])() or [])
             # Shape features are channel-independent virtual channels shown
             # under their own section — mirror ``_update_channel_selector`` so a
@@ -541,14 +541,14 @@ def build_centre(app, parent: QWidget) -> None:
                 set_combo_values as _scv,
                 set_combo_values_sectioned as _scv_sectioned,
             )
-            shape_cols = list(app._app_state.channel.shape_features or [])
+            shape_cols = list(win._app_state.channel.shape_features or [])
             shape_labels = [_shape_label_for(c) or c for c in shape_cols]
             plot_sections = [("", real_labels + ratio_labels)]
             if shape_labels:
                 plot_sections.append(("Shape Features", shape_labels))
             inline_labels = real_labels + ratio_labels + shape_labels
             try:
-                active_label = app._active_channel_label()
+                active_label = win._active_channel_label()
             except Exception:
                 active_label = ""
             if inline_labels:
@@ -562,13 +562,13 @@ def build_centre(app, parent: QWidget) -> None:
                 finally:
                     global_cb.blockSignals(blocked)
 
-        # Configure-subplots / Edit-axes handlers live on ``app`` (kept here
+        # Configure-subplots / Edit-axes handlers live on ``win`` (kept here
         # as helpers for tab toolbars and the per-plot Export Style sidebar's
         # footer matplotlib helpers).
         def _config_subplots() -> None:
             for attr in ("_line_card", "_bar_card", "_scatter_card",
                          "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
-                card = getattr(app, attr, None)
+                card = getattr(win, attr, None)
                 if card is None or not card.isVisible():
                     continue
                 nav = getattr(card, "_nav", None)
@@ -582,7 +582,7 @@ def build_centre(app, parent: QWidget) -> None:
         def _edit_axes() -> None:
             for attr in ("_line_card", "_bar_card", "_scatter_card",
                          "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
-                card = getattr(app, attr, None)
+                card = getattr(win, attr, None)
                 if card is None or not card.isVisible():
                     continue
                 nav = getattr(card, "_nav", None)
@@ -593,18 +593,18 @@ def build_centre(app, parent: QWidget) -> None:
                         swallowed()  # was: pass (silent except)
                 return
 
-        app._plot_config_subplots = _config_subplots
-        app._plot_edit_axes = _edit_axes
+        win._plot_config_subplots = _config_subplots
+        win._plot_edit_axes = _edit_axes
 
         # The active-card Copy / Save actions now live in
         # ``core.plot_card_actions`` as ctx-based functions (A8 P3.3); the plot
         # builders wire their Copy/Save buttons to those directly, so no
-        # closures are stamped on the app here any more.
+        # closures are stamped on the win here any more.
 
         _refresh_channel_chip(_PLOT_SUBTABS[0])
 
     # Top-level rail entries are enumerated from the feature registry. Each
-    # group's tabs come from ``app._features.in_group(...)`` in declaration
+    # group's tabs come from ``win._features.in_group(...)`` in declaration
     # order; the builder is the descriptor's registry builder, except the
     # bespoke "Plotting" composite (built by ``_build_plotting`` above, which
     # owns the nested plot sub-tab notebook + ctxbar). Commenting a descriptor
@@ -617,7 +617,7 @@ def build_centre(app, parent: QWidget) -> None:
 
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         (group, [(d.name, _top_level_builder(d.name))
-                 for d in app._features.in_group(group)])
+                 for d in win._features.in_group(group)])
         for group in ("Analysis", "Images", "Data")
     ]
 
@@ -632,9 +632,9 @@ def build_centre(app, parent: QWidget) -> None:
             # QTabWidget can be inserted into it by _build_plotting.
             frame = plotting_container
         else:
-            frame = QWidget(app._notebook)
+            frame = QWidget(win._notebook)
             QVBoxLayout(frame).setContentsMargins(0, 0, 0, 0)
-        app._notebook.addPage(title, frame)
+        win._notebook.addPage(title, frame)
         tab_frames[title] = frame
         return frame
 
@@ -650,24 +650,24 @@ def build_centre(app, parent: QWidget) -> None:
             else:
                 pending[title] = builder
 
-    # Special pre-build hooks for tabs that wire app-level state at build
+    # Special pre-build hooks for tabs that wire win-level state at build
     # time even though their bodies are deferred (matches the original
     # eager attribute set so external references keep resolving). Guarded so
     # the tab being absent under a build profile is a no-op, not a KeyError.
     if "Batch Export" in tab_frames:
-        app._batch_export_tab_frame = tab_frames["Batch Export"]
+        win._batch_export_tab_frame = tab_frames["Batch Export"]
 
-    app._notebook.setCurrentIndex(0)
+    win._notebook.setCurrentIndex(0)
 
     def _on_tab_change(_i: int = 0) -> None:
         # Force-build the tab the user just switched to if it hasn't been
         # built yet, so click-before-build never shows a blank tab body.
-        title = app._notebook.currentName()
+        title = win._notebook.currentName()
         if title in pending:
             _build_pending(title)
-        on_tab_change(app._ctx, None)
+        on_tab_change(win._ctx, None)
 
-    app._notebook.currentChanged.connect(_on_tab_change)
+    win._notebook.currentChanged.connect(_on_tab_change)
 
     # Drain pending builders one-per-event-loop-tick so the UI stays
     # responsive while heavy tabs (matplotlib canvases, image grids) build
@@ -691,7 +691,7 @@ def build_centre(app, parent: QWidget) -> None:
     QTimer.singleShot(0, _drain)
 
 
-def drain_pending_centre_builders(app) -> None:
+def drain_pending_centre_builders(ctx) -> None:
     """Force-build any centre tab whose body was deferred at startup.
 
     Tabs marked lazy-only (Cell Gating, smFISH) are intentionally
@@ -699,11 +699,12 @@ def drain_pending_centre_builders(app) -> None:
     tab. The tab-switch handler in ``centre_view`` builds them inline
     on first access.
     """
-    pending = getattr(app, "_centre_pending_builders", None)
-    build = app._ctx.runtime.centre.build_pending
+    win = ctx.window  # widget host of the pending-builder bookkeeping
+    pending = getattr(win, "_centre_pending_builders", None)
+    build = ctx.runtime.centre.build_pending
     if not pending or build is None:
         return
-    lazy_only = getattr(app, "_centre_lazy_only_titles", frozenset())
+    lazy_only = getattr(win, "_centre_lazy_only_titles", frozenset())
     # Snapshot keys — _centre_build_pending mutates the dict.
     for title in list(pending.keys()):
         if title in lazy_only:

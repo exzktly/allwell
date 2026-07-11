@@ -149,7 +149,8 @@ class _LayoutTable(QTableWidget):
 
 # ── Builder ──────────────────────────────────────────────────────────────────
 
-def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
+def build_heatmap_layout_sidebar(ctx, parent: QWidget) -> QWidget:
+    app = ctx.window  # transitional: widget-building body still stamps app._heatmap_*
     """Build the inline configurator and attach it to *parent*'s layout.
 
     Returns the outer frame widget so the caller can toggle its visibility.
@@ -211,7 +212,7 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
         "Place the currently selected wells into this grid in plate order. "
         "Grid will grow if needed to fit all selected wells."
     )
-    autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(app))
+    autopop_btn.clicked.connect(lambda _=False: _on_autopopulate(ctx))
     body_layout.addWidget(autopop_btn)
 
     # Hint label
@@ -227,8 +228,8 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
 
     # Layout table
     table = _LayoutTable(
-        on_drop=lambda kind, rc, tok: _on_drop_event(app, kind, rc, tok),
-        on_clear_cell=lambda r, c: _clear_cell(app, r, c),
+        on_drop=lambda kind, rc, tok: _on_drop_event(ctx, kind, rc, tok),
+        on_clear_cell=lambda r, c: _clear_cell(ctx, r, c),
         parent=body,
     )
     # Tall enough that 8 rows (the default) are fully visible without
@@ -239,14 +240,14 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
 
     # Register widget refs (also stamps ``app._heatmap_sidebar_*`` so legacy
     # attribute readers keep resolving) so ``ctx.widgets`` can find them.
-    reg = app._ctx.widgets
+    reg = ctx.widgets
     app._heatmap_sidebar_frame = reg.register("_heatmap_sidebar_frame", outer)
     reg.register("_heatmap_sidebar_table", table)
     reg.register("_heatmap_sidebar_rows_spin", rows_spin)
     reg.register("_heatmap_sidebar_cols_spin", cols_spin)
 
-    rows_spin.valueChanged.connect(lambda _v: _on_size_changed(app))
-    cols_spin.valueChanged.connect(lambda _v: _on_size_changed(app))
+    rows_spin.valueChanged.connect(lambda _v: _on_size_changed(ctx))
+    cols_spin.valueChanged.connect(lambda _v: _on_size_changed(ctx))
 
     parent_layout = parent.layout()
     if parent_layout is None:
@@ -256,7 +257,7 @@ def build_heatmap_layout_sidebar(app, parent: QWidget) -> QWidget:
     # ``addStretch(1)`` would grab everything and the matrix gets squashed.
     parent_layout.addWidget(outer, 1)
 
-    refresh_heatmap_layout_sidebar(app._ctx)
+    refresh_heatmap_layout_sidebar(ctx)
     return outer
 
 
@@ -358,12 +359,12 @@ def refresh_heatmap_layout_sidebar(ctx) -> None:
         table.blockSignals(False)
 
 
-def _on_size_changed(app) -> None:
-    rows_spin: QSpinBox = getattr(app, "_heatmap_sidebar_rows_spin", None)
-    cols_spin: QSpinBox = getattr(app, "_heatmap_sidebar_cols_spin", None)
+def _on_size_changed(ctx) -> None:
+    rows_spin: QSpinBox = getattr(ctx.window, "_heatmap_sidebar_rows_spin", None)
+    cols_spin: QSpinBox = getattr(ctx.window, "_heatmap_sidebar_cols_spin", None)
     if rows_spin is None or cols_spin is None:
         return
-    layout = _ensure_sidebar_layout(app._ctx)
+    layout = _ensure_sidebar_layout(ctx)
     new_rows = int(rows_spin.value())
     new_cols = int(cols_spin.value())
     if new_rows == layout.rows and new_cols == layout.cols:
@@ -374,13 +375,13 @@ def _on_size_changed(app) -> None:
     if layout.col_labels and new_cols < len(layout.col_labels):
         layout.col_labels = layout.col_labels[:new_cols]
     layout.resize(new_rows, new_cols)
-    _persist_and_redraw(app._ctx)
-    refresh_heatmap_layout_sidebar(app._ctx)
+    _persist_and_redraw(ctx)
+    refresh_heatmap_layout_sidebar(ctx)
 
 
-def _on_drop_event(app, kind: str, rc: Optional[Tuple[int, int]], token: str) -> None:
+def _on_drop_event(ctx, kind: str, rc: Optional[Tuple[int, int]], token: str) -> None:
     """Handle a successful drop. Updates state and re-renders both widgets."""
-    layout = _ensure_sidebar_layout(app._ctx)
+    layout = _ensure_sidebar_layout(ctx)
     src = _find_cell_for_token(layout, token)
     if kind == "palette":
         if src is not None:
@@ -393,29 +394,29 @@ def _on_drop_event(app, kind: str, rc: Optional[Tuple[int, int]], token: str) ->
         if src is not None and src != (target_r, target_c):
             layout.assign(src[0], src[1], existing)  # tenant goes back to source
         layout.assign(target_r, target_c, [token])
-    _persist_and_redraw(app._ctx)
-    refresh_heatmap_layout_sidebar(app._ctx)
+    _persist_and_redraw(ctx)
+    refresh_heatmap_layout_sidebar(ctx)
 
 
-def _clear_cell(app, r: int, c: int) -> None:
-    layout = _ensure_sidebar_layout(app._ctx)
+def _clear_cell(ctx, r: int, c: int) -> None:
+    layout = _ensure_sidebar_layout(ctx)
     if (r, c) in layout.cells:
         layout.assign(r, c, [])
-        _persist_and_redraw(app._ctx)
-        refresh_heatmap_layout_sidebar(app._ctx)
+        _persist_and_redraw(ctx)
+        refresh_heatmap_layout_sidebar(ctx)
 
 
-def _on_autopopulate(app) -> None:
+def _on_autopopulate(ctx) -> None:
     """Lay the currently selected wells into the grid in plate order.
 
     Grows the grid (capped at 32×32, the spinbox limit) when the selection
     has more wells than the current grid can hold.
     """
-    layout = _ensure_sidebar_layout(app._ctx)
-    selected = list(app._app_state.selection.selected_wells or [])
+    layout = _ensure_sidebar_layout(ctx)
+    selected = list(ctx.state.selection.selected_wells or [])
     if not selected:
         return
-    parse_rc = getattr(app, "_parse_rc", None)
+    parse_rc = getattr(ctx.window, "_parse_rc", None)
     if callable(parse_rc):
         try:
             wells = sorted(selected, key=parse_rc)
@@ -444,8 +445,8 @@ def _on_autopopulate(app) -> None:
         c = i % cols
         layout.assign(r, c, [w])
 
-    _persist_and_redraw(app._ctx)
-    refresh_heatmap_layout_sidebar(app._ctx)
+    _persist_and_redraw(ctx)
+    refresh_heatmap_layout_sidebar(ctx)
 
 
 def _persist_and_redraw(ctx) -> None:

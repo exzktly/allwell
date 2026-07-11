@@ -60,12 +60,16 @@ _HARD_FAIL = True
 # Phase 10 deleted the legacy __getattr__ widget forwarder; WidgetRegistry now
 # stamps registered widgets directly onto the bound app, so plain attribute
 # lookup resolves them and the forwarder is no longer needed.
-RUNTIME_APP_LINE_BUDGET = 1298
+RUNTIME_APP_LINE_BUDGET = 1296
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,
 # _bar_quick_pair_dir, _bar_quick_iter_order) → 71 - 3 = 68.
-RUNTIME_APP_ATTR_BUDGET = 68
+# Roadmap A1: relocated 10 widget-handle placeholder None-seeds
+# (_plot_chan_cb, _review_image_chan_cb, _bar_tp_cb, _bar_swarm_cb,
+# _bar_violin_cb, _violin_bw_edit, _entry_edit, _cdf_xmin_edit, _cdf_xmax_edit,
+# _preview_fov_cb) — builders register them via WidgetRegistry. 23 → 13 actual.
+RUNTIME_APP_ATTR_BUDGET = 15
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only
@@ -73,6 +77,22 @@ RUNTIME_APP_ATTR_BUDGET = 68
 RUNTIME_APP_GETATTR_BUDGET = 206        # defensive getattr/hasattr probes
 RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 0   # save/load persistence wrappers
 TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phase 6+7 collapsed)
+
+# ── God-object burn-down ratchets (roadmap WS-A; see
+#    _Docs/Markdowns/GOD_OBJECT_REPOSITORY_ROADMAP.md) ─────────────────────────
+# Two remaining god-object dimensions the `ctx.app` burn-down never metered.
+# Seeded at the measured values on the main baseline (build-time-feature-profiles
+# merged via PR #639); they only ratchet down as WS-A migrates the raw-`self`
+# delegators (A2/A4) and the `app`-first free functions (A3). The `_not_slack`
+# twin forces the budget down once a phase legitimately shrinks the count.
+CORE_DIR = REPO_ROOT / "well_viewer" / "core"
+PERSIST_DIR = REPO_ROOT / "well_viewer" / "persistence"
+RAW_SELF_DELEGATOR_BUDGET = 0          # `def _m(self,...): return fn(self, ...)` in runtime_app.py — A2/A4 COMPLETE
+RAW_SELF_DELEGATOR_SLACK = 0
+# B4: every PersistenceRegistry-facing entry point takes `ctx`, not the god-object.
+PERSIST_APP_PARAM_BUDGET = 0
+APP_FIRST_FUNC_BUDGET = 0             # top-level funcs in core/+features/ whose first param is `app`
+APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107, heatmap-sidebar 107→102, ui_helpers-notify 102→94, plot_orch-save 94→88, tab_controller 88→80, split_view 80→68, selection_controller 68→43, load_controller 43→34, registry hooks 34→26, channel 26→22, ui_helpers 22→19, leaf 19→12, builder-chain 12→5, export/style 5→0 (A3 COMPLETE)
 
 
 def _enforce(ok: bool, message: str) -> None:
@@ -247,4 +267,119 @@ def test_tab_ctx_app_unwrap_budget():
         f"well_viewer/features/ has {count} 'app = ctx.app' unwraps, over the "
         f"{TAB_CTX_APP_UNWRAP_BUDGET} budget. DI narrowing (Phases 6-7) removes "
         "one per builder — the ratchet only moves down.",
+    )
+
+
+# ── God-object burn-down ratchets (roadmap WS-A) ─────────────────────────────
+
+
+def _raw_self_delegators(path: Path) -> list[str]:
+    """Names of methods in *path* whose sole body statement is
+    ``return fn(self, ...)`` — i.e. a one-line delegator that forwards the raw
+    god-object (``self``) rather than the narrowed ``self._ctx``. A ``self._ctx``
+    forwarder passes an ``ast.Attribute`` first arg and is correctly excluded."""
+    tree = ast.parse(path.read_text())
+    out: list[str] = []
+    for cls in tree.body:
+        if not isinstance(cls, ast.ClassDef):
+            continue
+        for m in cls.body:
+            if not isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = [s for s in m.body
+                    if not (isinstance(s, ast.Expr)
+                            and isinstance(s.value, ast.Constant))]  # drop docstring
+            if len(body) != 1 or not isinstance(body[0], ast.Return):
+                continue
+            val = body[0].value
+            if (isinstance(val, ast.Call) and val.args
+                    and isinstance(val.args[0], ast.Name)
+                    and val.args[0].id == "self"):
+                out.append(m.name)
+    return out
+
+
+def _app_first_free_funcs(*dirs: Path) -> list[str]:
+    """``<path>:<name>`` for every *top-level* (free) function under *dirs* whose
+    first parameter is named ``app`` — the un-migrated god-object-first call
+    contract WS-A A3 converts to ``ctx``-first."""
+    out: list[str] = []
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for py in sorted(d.rglob("*.py")):
+            if "__pycache__" in py.parts:
+                continue
+            tree = ast.parse(py.read_text(), filename=str(py))
+            for node in tree.body:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    a = node.args.args
+                    if a and a[0].arg == "app":
+                        out.append(f"{py.relative_to(REPO_ROOT)}:{node.name}")
+    return out
+
+
+def test_raw_self_delegator_budget():
+    count = len(_raw_self_delegators(RUNTIME_APP))
+    _enforce(
+        count <= RAW_SELF_DELEGATOR_BUDGET,
+        f"runtime_app.py has {count} raw-`self` delegators (`return fn(self, …)`), "
+        f"over the {RAW_SELF_DELEGATOR_BUDGET} budget. WS-A A2/A4 flip the callee "
+        "to `ctx` and forward `self._ctx` — the ratchet only moves down.",
+    )
+
+
+def test_raw_self_delegator_budget_not_slack():
+    count = len(_raw_self_delegators(RUNTIME_APP))
+    _enforce(
+        count >= RAW_SELF_DELEGATOR_BUDGET - RAW_SELF_DELEGATOR_SLACK,
+        f"runtime_app.py has only {count} raw-`self` delegators but the budget is "
+        f"{RAW_SELF_DELEGATOR_BUDGET}: lower RAW_SELF_DELEGATOR_BUDGET to {count} "
+        "so the ratchet keeps biting.",
+    )
+
+
+def test_app_first_func_budget():
+    count = len(_app_first_free_funcs(CORE_DIR, FEATURES_DIR))
+    _enforce(
+        count <= APP_FIRST_FUNC_BUDGET,
+        f"well_viewer/core+features have {count} `app`-first free functions, over "
+        f"the {APP_FIRST_FUNC_BUDGET} budget. WS-A A3 migrates them to `ctx`-first "
+        "cluster by cluster — the ratchet only moves down.",
+    )
+
+
+def test_app_first_func_budget_not_slack():
+    count = len(_app_first_free_funcs(CORE_DIR, FEATURES_DIR))
+    _enforce(
+        count >= APP_FIRST_FUNC_BUDGET - APP_FIRST_FUNC_SLACK,
+        f"only {count} `app`-first free functions remain but the budget is "
+        f"{APP_FIRST_FUNC_BUDGET}: lower APP_FIRST_FUNC_BUDGET to {count} so the "
+        "ratchet keeps biting.",
+    )
+
+
+def _persistence_app_entry_points() -> list[str]:
+    """`<file>:<name>` for every PersistenceRegistry-facing entry point
+    (`save_to_data_dir` / `load_from_data_dir` / `reset` / `save_notes` /
+    `autosave_to_pipeline_info`) whose first parameter is still `app`. B4 makes
+    the persistence layer ctx-native, so this ratchets to 0."""
+    names = {"save_to_data_dir", "load_from_data_dir", "reset",
+             "save_notes", "autosave_to_pipeline_info"}
+    out: list[str] = []
+    for py in sorted(PERSIST_DIR.glob("*.py")):
+        for node in ast.parse(py.read_text()).body:
+            if (isinstance(node, ast.FunctionDef) and node.name in names
+                    and node.args.args and node.args.args[0].arg == "app"):
+                out.append(f"{py.name}:{node.name}")
+    return out
+
+
+def test_persistence_is_ctx_native():
+    offenders = _persistence_app_entry_points()
+    _enforce(
+        len(offenders) <= PERSIST_APP_PARAM_BUDGET,
+        f"{len(offenders)} persistence entry points still take the god-object "
+        f"`app`, over the {PERSIST_APP_PARAM_BUDGET} budget (B4 — the registry "
+        f"passes `ctx`):\n  " + "\n  ".join(offenders),
     )

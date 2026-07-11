@@ -1315,7 +1315,7 @@ class BatchExportPanel(QWidget):
             return
         self._prog_lbl.setText(success_text)
         self._prog_lbl.setStyleSheet(f"color: {_CLR_SUCCESS_DARK};")
-        self._ctx.set_status(status_text)
+        self._ctx.notify.set_status(status_text)
 
     def _save_figure(self, fig, fig_path: Path, fmt: str) -> None:
         # The actual render-write is the Qt-free service (audit A14); the panel

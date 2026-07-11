@@ -28,7 +28,7 @@ class PersistenceRegistry:
     """Named save/load dispatch with a single shared debounced-save path."""
 
     def __init__(self, app) -> None:
-        self._app = app
+        self._ctx = app  # a ViewerContext (B4)
         self._save: dict[str, Callable] = {}
         self._load: dict[str, Callable] = {}
         self._pending: set[str] = set()
@@ -42,13 +42,13 @@ class PersistenceRegistry:
 
     def save(self, name: str) -> None:
         """Run *name*'s save immediately."""
-        self._save[name](self._app)
+        self._save[name](self._ctx)
 
     def load(self, name: str) -> None:
         """Run *name*'s load (a no-op when the domain registered none)."""
         load = self._load.get(name)
         if load is not None:
-            load(self._app)
+            load(self._ctx)
 
     def schedule_save(self, name: str) -> None:
         """Debounced save — coalesces a burst of edits into one disk write.
@@ -77,7 +77,7 @@ class PersistenceRegistry:
                 "not written to disk", name)
 
 
-def build_persistence_registry(app) -> PersistenceRegistry:
+def build_persistence_registry(ctx) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from well_viewer.persistence import (
         cell_overrides, crop_region, export_groups, heatmap_layouts, line_order,
@@ -85,7 +85,7 @@ def build_persistence_registry(app) -> PersistenceRegistry:
         view_state,
     )
 
-    registry = PersistenceRegistry(app)
+    registry = PersistenceRegistry(ctx)
     registry.register("ratios",
                       save=ratios.save_to_data_dir,
                       load=ratios.load_from_data_dir)

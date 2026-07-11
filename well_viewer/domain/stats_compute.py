@@ -87,10 +87,12 @@ def _norm_fov(df: "pd.DataFrame") -> np.ndarray:
 def _safe_rows(ctx, lbl):
     """The well's raw DataFrame from the loaded-row cache, or None when the
     backend exposes only pre-aggregated points (the pure-logic MockApp seeds no
-    cache). Ctx-native: reads the same ``dataset.cache`` the row service fills —
-    the well-branch aggregator populated it just above, and ``loaded_app`` fills
-    it at load, so a real app always has the frame here; a mock has None."""
-    return ctx.state.dataset.cache.get(lbl)
+    cache). Reads via the row repository (``rows_or_none`` = cache-only, no lazy
+    load) — the same cache the row service fills, so a real app has the frame
+    here. The MockApp builds ``AppState`` directly (no ``ViewerContext``), so its
+    ``repo`` is ``None`` → ``None``, matching the old empty-cache behaviour (B3)."""
+    repo = ctx.state.repo
+    return repo.rows_or_none(lbl) if repo is not None else None
 
 
 def _point_at(pts, target_t):

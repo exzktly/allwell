@@ -68,7 +68,7 @@ def test_add_current_prefers_the_triggering_drawers_name_field(qapp, monkeypatch
         ),
         widgets=SimpleNamespace(get_or_none=lambda _n: registry_edit),
         persistence=None,
-        set_status=lambda *_a, **_k: None,
+        notify=SimpleNamespace(set_status=lambda *_a, **_k: None),
     )
     monkeypatch.setattr(SV, "refresh_plot_groups_sidebar", lambda _c: None)
 
@@ -95,6 +95,7 @@ def test_plot_groups_persistence_round_trip(tmp_path):
             ),
         ),
     )
+    app.window = app; app.state = app._app_state  # mock is its own ctx (B4)
     app._app_state.dataset.well_paths = {"A01": tmp_path / "A01.csv", "A02": tmp_path / "A02.csv"}
     # ``_doc.set_section``/``get_section`` read ``ctx.state`` (the typed AppState);
     # the fake app is its own ctx's app and exposes its state slice.

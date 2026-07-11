@@ -107,7 +107,7 @@ def _restore_selections(ctx, sels, solo_wells=None) -> None:
         if changed:
             # Master redraw fan-out (sidebar map + groups + bars/lines/scatter),
             # named as a genuine app-orchestration service on the context.
-            ctx.rebuild_all()
+            ctx.coordinator.rebuild_all()
     except Exception:
         _logger.debug("saved_plots: selection restore failed", exc_info=True)
 
@@ -181,7 +181,7 @@ def export_report_pdf(ctx) -> None:
     store = get_store(ctx)
     store.ensure_loaded(ctx)
     if not store.records:
-        ctx.set_status("No saved plots to export.")
+        ctx.notify.set_status("No saved plots to export.")
         return
     try:
         from pathlib import Path
@@ -201,10 +201,10 @@ def export_report_pdf(ctx) -> None:
             dataset_name=(Path(data_dir).name if data_dir else ""),
             summary_for=lambda r: r.summary,
         )
-        ctx.set_status(f"Saved Plots report → {Path(dest).name} ({n} plots)")
+        ctx.notify.set_status(f"Saved Plots report → {Path(dest).name} ({n} plots)")
     except Exception as exc:  # noqa: BLE001 — surface to the user
         _logger.debug("saved_plots: report export failed", exc_info=True)
-        ctx.set_status(f"Report export failed: {exc}")
+        ctx.notify.set_status(f"Report export failed: {exc}")
 
 
 def refresh_saved_plots_gallery(ctx) -> None:

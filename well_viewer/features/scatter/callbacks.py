@@ -80,7 +80,7 @@ def on_scatter_click(ctx, event) -> None:
         from PySide6.QtWidgets import QMessageBox
         logging.getLogger(__name__).exception("Error handling scatter-plot cell click")
         tb = traceback.format_exc()
-        ctx.set_status(f"Could not open cell viewer: {e}")
+        ctx.notify.set_status(f"Could not open cell viewer: {e}")
         try:
             box = QMessageBox(ctx.window)
             box.setIcon(QMessageBox.Warning)
@@ -118,9 +118,9 @@ def on_scatter_motion(ctx, event) -> None:
         if min_dist < threshold and nearest_info:
             well_label, filename, nuclear_id, row_idx = nearest_info
             tooltip_text = f"File: {filename} | Nuclear ID: {nuclear_id}"
-            ctx.set_status(tooltip_text)
+            ctx.notify.set_status(tooltip_text)
         else:
-            ctx.set_status("")
+            ctx.notify.set_status("")
 
     except Exception:
         swallowed()  # was: pass (silent except)

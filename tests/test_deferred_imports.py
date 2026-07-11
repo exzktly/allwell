@@ -94,7 +94,7 @@ FEATURE_PREFIX = "well_viewer.features"
 # ``view_state_io`` registry hook). ``view_state`` now fans out over the registry
 # instead of deferring feature imports, netting fewer deferred feature imports
 # across the persistence layer.
-MAX_DEFERRED_FEATURE_IMPORTS = 118
+MAX_DEFERRED_FEATURE_IMPORTS = 111
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

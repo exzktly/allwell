@@ -73,21 +73,20 @@ def redraw(
     # exact ctx-native equivalent of the old ``hasattr(app, …)`` guard).
     if ctx.widgets.has("_distribution_canvas"):
         try:
-            from well_viewer.features.distribution.controller import redraw_distribution
-            redraw_distribution(ctx)
+            ctx.features.redraw(ctx, "Distribution")
         except Exception:
             _logger.exception("Distribution redraw failed")
 
     # 3. Heat Map — lazy-built; same guard.
     if ctx.widgets.has("_heatmap_canvas"):
         try:
-            from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(ctx)
+            ctx.features.redraw(ctx, "Heat Map")
         except Exception:
             _logger.exception("Heat map redraw failed")
 
 
-def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
+def save_matplotlib_fig(ctx, fig, default_name: str, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     import matplotlib as _mpl
 
     initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
@@ -123,31 +122,34 @@ def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
         QMessageBox.critical(app, "Save failed", str(exc))
 
 
-def _launch_editor_or_save(app, fig, default_name: str, *, plot_bg: str, canvas=None) -> None:
+def _launch_editor_or_save(ctx, fig, default_name: str, *, plot_bg: str, canvas=None) -> None:
     # Phase 15.2: the in-tab ExportStyleSidebar was retired in favour of the
     # v2 Properties rail (which live-binds the same _export_style_prefs).
     # Save-figure now goes straight to the file dialog; the rail handles
     # styling. ``canvas`` is unused but kept in the signature so callers
     # don't need to change.
     del canvas
-    save_matplotlib_fig(app, fig, default_name, plot_bg=plot_bg)
+    save_matplotlib_fig(ctx, fig, default_name, plot_bg=plot_bg)
 
 
-def save_line_figure(app, *, plot_bg: str) -> None:
-    _launch_editor_or_save(app, app._line_fig, "line_graphs.png", plot_bg=plot_bg, canvas=getattr(app, "_line_canvas", None))
+def save_line_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    _launch_editor_or_save(ctx, app._line_fig, "line_graphs.png", plot_bg=plot_bg, canvas=getattr(app, "_line_canvas", None))
 
 
-def save_bar_figure(app, *, plot_bg: str) -> None:
+def save_bar_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     tp = app._bar_tp_cb.currentText().replace(".", "_")
-    _launch_editor_or_save(app, app._bar_fig, f"bar_t{tp}.png", plot_bg=plot_bg, canvas=getattr(app, "_bar_canvas", None))
+    _launch_editor_or_save(ctx, app._bar_fig, f"bar_t{tp}.png", plot_bg=plot_bg, canvas=getattr(app, "_bar_canvas", None))
 
 
-def save_scatter_figure(app, *, plot_bg: str) -> None:
+def save_scatter_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     ch_x = app._scatter_ch_x_cb.currentText()
     ch_y = app._scatter_ch_y_cb.currentText()
     tp = app._scatter_tp_cb.currentText().replace(".", "_")
     _launch_editor_or_save(
-        app,
+        ctx,
         app._scatter_fig,
         f"scatter_{ch_x}_vs_{ch_y}_t{tp}.png",
         plot_bg=plot_bg,
@@ -155,7 +157,8 @@ def save_scatter_figure(app, *, plot_bg: str) -> None:
     )
 
 
-def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
+def save_scatter_agg_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     stat_x = app._scatter_agg_stat_x_cb.currentText()
     stat_y = app._scatter_agg_stat_y_cb.currentText()
 
@@ -179,7 +182,7 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
     stat_y_safe = stat_y.replace(" ", "_").lower()
 
     _launch_editor_or_save(
-        app,
+        ctx,
         app._scatter_agg_fig,
         f"scatter_agg_{stat_x_safe}_vs_{stat_y_safe}_{tp_range}.png",
         plot_bg=plot_bg,
@@ -199,16 +202,20 @@ def redraw_app(ctx) -> None:
     # is hidden behind the EmptyState page, so we can skip the actual
     # redraw — but ``redraw`` still tolerates the empty state via its
     # own no-data branch.
-    from well_viewer.features.lineplot.controller import redraw_line_plots
     from well_viewer.data.data_loading import _all_fluor_values, _all_fluor_values_filtered
 
     refresh_plot_empty_states(ctx.window)
     # ``redraw`` fans out across the default-scope tabs (line /
     # distribution / heat map). Bar / scatter / scatter-aggregate are
-    # scope-specific and re-render through their own per-tab shims.
+    # scope-specific and re-render through their own per-tab shims. The
+    # line renderer is resolved from the feature registry (not imported) so
+    # core never names the lineplot feature; ``redraw()`` calls it with its
+    # full keyword signature, so pass the raw callable (not the 1-arg shim).
+    _line = ctx.features.get("Line Graphs")
+    _line_redraw = _line.redraw() if (_line and _line.redraw) else (lambda *a, **k: None)
     redraw(
         ctx,
-        lineplot_redraw=redraw_line_plots,
+        lineplot_redraw=_line_redraw,
         apply_ax_style=apply_ax_style,
         all_fluor_values=_all_fluor_values,
         all_fluor_values_filtered=_all_fluor_values_filtered,

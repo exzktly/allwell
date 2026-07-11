@@ -378,7 +378,7 @@ layers:
 └──────────────────────────────────────────────────────────────────────┘
 
 runtime_app.WellViewerApp  ← composition root that wires it all together
-viewer_context.ViewerContext  ← DI bundle (state / bus / widgets / app)
+viewer_context.ViewerContext  ← DI bundle (state / bus / widgets / runtime / collaborators + ctx.window)
 ```
 
 ### 5.1 `runtime_app.WellViewerApp`
@@ -481,8 +481,10 @@ the stack and put back in its original slot — the reparenting primitive behind
 
 Each module exposes a single `build_<name>_tab(ctx, parent)` function —
 `ctx` is a `ViewerContext`. Each builder references `ctx.state` / `ctx.widgets` /
-`ctx.runtime` (and the frozen window-service accessors like `ctx.window`)
-directly — there is no `ctx.app` (the `CTX_APP_BUDGET = 0` ratchet hard-bans it).
+`ctx.runtime` (and the held collaborators `ctx.notify` / `ctx.figures` /
+`ctx.coordinator` / `ctx.persistence` / `ctx.features`, plus the lone window
+accessor `ctx.window`) directly — there is no `ctx.app` (the `CTX_APP_BUDGET = 0`
+ratchet hard-bans it).
 The function:
 
 1. Creates a `make_plot_with_right_dock(parent)` host (returns
@@ -523,6 +525,10 @@ everything core used to hard-code:
   `channel_state_controller.recalculate_threshold`'s fan-out, and
   `load_controller`'s per-feature post-load refresh). Core fans each out over
   `registry.with_hook("<name>")` in declaration order, so it names no feature;
+- `redraw` — a plot feature's figure-redraw callable; core plot orchestration
+  (`plot_orchestrator.redraw_app`, tab activation) triggers a redraw by name via
+  `registry.redraw(ctx, "<tab>")`, so it names no renderer (Bar Plots / Line
+  Graphs / Scatter Plot / Distribution / Heat Map register it);
 - `fold_change_scope_factory` — the feature's fold-change redraw scope
   (`core/scope_registry` registers these from the descriptors);
 - `plot_card_decorator` — a feature that decorates every plot card (Saved Plots'
@@ -920,20 +926,26 @@ getattr/setattr view over that app instead of a standalone dict.)
 **`ViewerContext` (`viewer_context.py`).** A frozen dataclass — the single typed
 handle tab builders and controllers receive **instead of** the `WellViewerApp`
 god-object. It bundles `state` (typed `AppState`), `bus` (`EventBus`), `widgets`
-(`WidgetRegistry`), and `runtime` (`AppRuntime`). **There is no `app` field**
-(A8 teardown, T6 — the `ctx.app` reference count was driven 293 → 0 for the v8.4
-release): the god-object instance is held *privately* as `_window` and
-reachable only through a small, closed set of **frozen named service accessors** —
-`ctx.window` (the god-object *qua* `QMainWindow`, for dialog parenting /
-`isinstance` guards / `findChildren` walks), plus `ctx.persistence`,
-`ctx.features`, `ctx.rebuild_all`, `ctx.refresh_sidebar_map`, `ctx.set_status`,
-`ctx.toast`, `ctx.save_figure_dialog`, `ctx.open_export_style_panel`. That
-enumerable accessor set is the *entire* intentional surface between features and
-the window shell — never a generic `ctx.app` escape hatch and never a
-`__getattr__` passthrough. `WellViewerApp.__init__` builds `self._ctx` and passes
-it to every tab builder and controller; feature code reads
-`ctx.state.<domain>.<field>` / `ctx.bus` / `ctx.widgets` / `ctx.runtime` and the
-frozen accessors, nothing else.
+(`WidgetRegistry`), and `runtime` (`AppRuntime`), plus a handful of **held
+collaborator objects** that own what used to be god-object methods: `ctx.persistence`
+(the persistence registry), `ctx.features` (the feature registry), `ctx.notify`
+(status-bar + toast notifications), `ctx.figures` (Save-As dialog + export-style
+panel), and `ctx.coordinator` (the master redraw + sidebar-map refresh). **There is
+no `app` field** (A8 teardown, T6 — the `ctx.app` reference count was driven 293 → 0
+for the v8.4 release), and after the A5 teardown there is **exactly one** frozen
+named accessor left onto the window shell: `ctx.window` (the god-object *qua*
+`QMainWindow`, for dialog parenting / `isinstance` guards / `findChildren` walks).
+Everything else features once reached as a `ctx.<verb>()` method — `set_status`,
+`toast`, `save_figure_dialog`, `open_export_style_panel`, `rebuild_all`,
+`refresh_sidebar_map` — is now a method **on one of the held collaborators above**
+(e.g. `ctx.notify.set_status(...)`, `ctx.figures.save(...)`,
+`ctx.coordinator.rebuild_all()`), so the window is no longer a behaviour dependency,
+only a widget. That single remaining accessor is the *entire* intentional surface
+between features and the window shell — never a generic `ctx.app` escape hatch and
+never a `__getattr__` passthrough. `WellViewerApp.__init__` builds `self._ctx` and
+passes it to every tab builder and controller; feature code reads
+`ctx.state.<domain>.<field>` / `ctx.bus` / `ctx.widgets` / `ctx.runtime`, the held
+collaborators, and `ctx.window`, nothing else.
 
 `tests/test_ctx_app_burndown.py` hard-bans any `ctx.app` (`CTX_APP_BUDGET = 0`);
 `tests/test_ctx_service_accessors.py` freezes the accessor set (adding one is a
@@ -1004,7 +1016,7 @@ per-tab controls live in the top-of-canvas rows; the only right-dock
 occupant is the shared **Properties (Export-Style) panel** (v8.5.3) — the
 `tab_view` pre-allocates the dock (`make_plot_with_right_dock`, registered
 `_spatial_export_dock`) and a Properties button toggles
-`ctx.open_export_style_panel("spatial")`, so the Spatial figure now styles
+`ctx.figures.open_style_panel("spatial")`, so the Spatial figure now styles
 identically to every other plotting tab (`render_spatial` re-applies the
 export-style prefs at the end of each recompute so edits survive it).
 
@@ -1128,8 +1140,8 @@ package is the first Review feature written with **zero
 `ctx.app` references** — every setter / lifecycle hook takes the
 `ViewerContext` directly, widget handles resolve via `ctx.widgets`,
 state via `ctx.state.feature_slice`, per-well DataFrames via the
-dataset-state cache, and Copy/Save through the named
-`ctx.set_status` / `ctx.save_figure_dialog` accessors. The registry
+dataset-state cache, and Copy/Save through the held collaborators
+`ctx.notify.set_status` / `ctx.figures.save`. The registry
 adapters in `features/registry.py` translate the legacy
 `_activate_spatial(app)` / `_sel_spatial(app)` / `_channel_spatial(app)`
 signatures into `sp_on_activate(app._ctx)` calls; that single
@@ -2249,7 +2261,7 @@ The map (each rule links to the test that holds it):
 | No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
 | `runtime_app` line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |
 | No `ctx.app` — features reach the window shell only through the frozen `ViewerContext` accessors (§5.9) | `tests/test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
-| The `ViewerContext` window-service accessor set is closed (adding one is a reviewed act, §5.9) | `tests/test_ctx_service_accessors.py` |
+| The `ViewerContext` window-service accessor set is closed — after the A5 teardown it is exactly `{"window"}`; every other window service is now a held collaborator (`ctx.notify` / `ctx.figures` / `ctx.coordinator` / `ctx.persistence` / `ctx.features`), and adding a new accessor is a reviewed act (§5.9) | `tests/test_ctx_service_accessors.py` |
 | `AppRuntime` is live-object-only — `persistence/` never imports `app_runtime` (§5.9) | `tests/test_app_runtime.py` |
 | `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |

@@ -38,7 +38,7 @@ def test_group_edit_recollects_cell_browser_in_split(loaded_app, monkeypatch):
     monkeypatch.setattr(app, "_is_tab_visible", lambda name: name == "Cell Browser")
     called = _spy_cell_browser_hook(app, monkeypatch)
 
-    sc.rebuild_all(app)
+    sc.rebuild_all(app._ctx)
     assert called["n"] == 1  # group edit propagated to the Cell Browser
 
 
@@ -50,5 +50,5 @@ def test_group_edit_skips_cell_browser_when_not_visible(loaded_app, monkeypatch)
     monkeypatch.setattr(app, "_is_tab_visible", lambda name: False)
     called = _spy_cell_browser_hook(app, monkeypatch)
 
-    sc.rebuild_all(app)
+    sc.rebuild_all(app._ctx)
     assert called["n"] == 0  # off-screen → no needless re-collect

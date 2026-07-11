@@ -22,17 +22,17 @@ _logger = logging.getLogger("well_viewer")
 SECTION = "export_groups"
 
 
-def save_to_data_dir(app) -> None:
+def save_to_data_dir(ctx) -> None:
     """Persist the batch-export groups to the consolidated persistence document."""
-    doc = app._ctx.runtime.batch_export.export_groups_doc or None
-    _doc.set_section(app._ctx, SECTION, doc)
+    doc = ctx.runtime.batch_export.export_groups_doc or None
+    _doc.set_section(ctx, SECTION, doc)
 
 
-def load_from_data_dir(app) -> None:
+def load_from_data_dir(ctx) -> None:
     """Load persisted batch-export groups and refresh any open Batch Export panels."""
-    raw = _doc.get_section(app._ctx, SECTION)
-    app._ctx.runtime.batch_export.export_groups_doc = raw if isinstance(raw, dict) else {}
-    state = app._ctx.runtime.batch_export.inline_state
+    raw = _doc.get_section(ctx, SECTION)
+    ctx.runtime.batch_export.export_groups_doc = raw if isinstance(raw, dict) else {}
+    state = ctx.runtime.batch_export.inline_state
     if not state:
         return
     for panel in (state.get("panels") or {}).values():

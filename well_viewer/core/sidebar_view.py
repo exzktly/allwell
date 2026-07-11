@@ -25,7 +25,7 @@ from well_viewer.domain.viewer_state import parse_rc
 _logger = logging.getLogger("well_viewer")
 
 
-def build_sidebar(app, parent: QWidget) -> None:
+def build_sidebar(win, parent: QWidget) -> None:
     """Build the 8x12 plate-map well selector in the sidebar.
 
     Creates:
@@ -65,8 +65,8 @@ def build_sidebar(app, parent: QWidget) -> None:
     _sp.setHeightForWidth(True)
     plate.setSizePolicy(_sp)
     layout.addWidget(plate)
-    app._sidebar_plate = app._ctx.widgets.register("_sidebar_plate", plate)
-    app._sidebar_map_outer = plate
+    win._sidebar_plate = win._ctx.widgets.register("_sidebar_plate", plate)
+    win._sidebar_map_outer = plate
 
     # Select all / Select none are now driven by the small toggle circle
     # the WellPlateSelector paints in the plate's top-left corner (it
@@ -76,21 +76,21 @@ def build_sidebar(app, parent: QWidget) -> None:
     # Tokens-only stub: a {tok: None} dict that doubles as the "sidebar built"
     # sentinel and the loaded-well token list for _refresh_sidebar_map and the
     # rep-colour map. (set_state calls land on the None values and are skipped.)
-    app._sidebar_btns = {f"{r}{c}": None for r in _PLATE_ROWS for c in _PLATE_COLS}
+    win._sidebar_btns = {f"{r}{c}": None for r in _PLATE_ROWS for c in _PLATE_COLS}
 
-    # Wire the plate to the app's selection / replicate-set / heat-map handlers.
-    plate.selectionChanged.connect(partial(on_sidebar_plate_selection_changed, app))
-    plate.selectionDragFinished.connect(partial(on_sidebar_plate_drag_finished, app))
-    plate.cornerToggled.connect(partial(on_sidebar_plate_corner_toggled, app))
-    plate.wellActivated.connect(partial(on_sidebar_plate_well_activated, app))
-    plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, app))
-    plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, app))
-    plate.wellDropped.connect(partial(on_sidebar_plate_well_dropped, app))
+    # Wire the plate to the win's selection / replicate-set / heat-map handlers.
+    plate.selectionChanged.connect(partial(on_sidebar_plate_selection_changed, win._ctx))
+    plate.selectionDragFinished.connect(partial(on_sidebar_plate_drag_finished, win._ctx))
+    plate.cornerToggled.connect(partial(on_sidebar_plate_corner_toggled, win._ctx))
+    plate.wellActivated.connect(partial(on_sidebar_plate_well_activated, win._ctx))
+    plate.rowHeaderActivated.connect(partial(on_sidebar_plate_row_activated, win._ctx))
+    plate.columnHeaderActivated.connect(partial(on_sidebar_plate_col_activated, win._ctx))
+    plate.wellDropped.connect(partial(on_sidebar_plate_well_dropped, win._ctx))
     # Hover tooltip surfaces the user's Sample-Definitions label when set,
     # alongside the well id, so the rail plate doubles as a quick label
     # readout — useful on tabs where the sidebar doesn't show the labels.
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
-    plate.setWellTooltipProvider(well_plate_tooltip_provider(app._ctx))
+    plate.setWellTooltipProvider(well_plate_tooltip_provider(win._ctx))
 
     # User request: All 96 / Invert / Clear quick-select buttons removed
     # from the sidebar — row and column header clicks on the plate cover
@@ -108,26 +108,26 @@ def build_sidebar(app, parent: QWidget) -> None:
     deselect_row_layout = QHBoxLayout(deselect_row)
     deselect_row_layout.setContentsMargins(0, 0, 0, 0)
     deselect_row_layout.setSpacing(8)
-    app._deselect_all_btn = QPushButton("Deselect all", deselect_row)
-    app._deselect_all_btn.setProperty("variant", "secondary")
-    app._deselect_all_btn.setToolTip("Clear the current well selection.")
-    app._deselect_all_btn.clicked.connect(lambda _=False: _select_none(app))
-    deselect_row_layout.addWidget(app._deselect_all_btn)
+    win._deselect_all_btn = QPushButton("Deselect all", deselect_row)
+    win._deselect_all_btn.setProperty("variant", "secondary")
+    win._deselect_all_btn.setToolTip("Clear the current well selection.")
+    win._deselect_all_btn.clicked.connect(lambda _=False: _select_none(win._ctx))
+    deselect_row_layout.addWidget(win._deselect_all_btn)
     deselect_row_layout.addStretch(1)
     layout.addWidget(deselect_row)
 
     # Group-mode hint
-    app._line_group_hint = QLabel("", parent)
-    app._line_group_hint.setObjectName("Accent")
-    app._line_group_hint.setWordWrap(True)
-    layout.addWidget(app._line_group_hint)
+    win._line_group_hint = QLabel("", parent)
+    win._line_group_hint.setObjectName("Accent")
+    win._line_group_hint.setWordWrap(True)
+    layout.addWidget(win._line_group_hint)
 
     # Heat-map layout configurator (sidebar variant). Hidden by default;
     # ``_on_tab_change`` reveals it when the Heat Map tab is active.
     from well_viewer.features.heatmap.sidebar_view import (
         build_heatmap_layout_sidebar,
     )
-    heatmap_frame = build_heatmap_layout_sidebar(app, parent)
+    heatmap_frame = build_heatmap_layout_sidebar(win._ctx, parent)
     heatmap_frame.setVisible(False)
 
     # Absorb leftover vertical space so the well picker stays pinned to the
@@ -143,11 +143,11 @@ def build_sidebar(app, parent: QWidget) -> None:
     # user opens it — so the name field + saved-group list never push up into
     # (and overlap) the selected-well count bar above the plate.
     plot_groups_section = build_plot_groups_drawer(
-        app._ctx, parent, include_add_controls=True,
+        win._ctx, parent, include_add_controls=True,
     )
     layout.addWidget(plot_groups_section)
-    app._plot_groups_sidebar_section = plot_groups_section
-    app._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(app._ctx)
+    win._plot_groups_sidebar_section = plot_groups_section
+    win._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(win._ctx)
 
 
 def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True):
@@ -275,7 +275,7 @@ def _wells_for_new_plot_group(ctx) -> "list[str]":
 def _plot_groups_add_current(ctx, name_edit=None) -> None:
     wells = _wells_for_new_plot_group(ctx)
     if not wells:
-        ctx.set_status("Select wells (or show a group) before adding a Plot Group.")
+        ctx.notify.set_status("Select wells (or show a group) before adding a Plot Group.")
         return
     # Prefer the drawer that triggered this (its own name field); fall back to the
     # shared registry key for any other caller.
@@ -295,7 +295,7 @@ def _plot_groups_add_current(ctx, name_edit=None) -> None:
         edit.clear()
     refresh_plot_groups_sidebar(ctx)
     _plot_groups_schedule_save(ctx)
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
     )
 
@@ -340,7 +340,7 @@ def _plot_groups_load(ctx, group_id: str) -> None:
                 image_table_state.active_wells = set(wells)
     except Exception:
         _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
         f"({len(wells)} wells)."
     )

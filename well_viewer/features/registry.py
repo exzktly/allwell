@@ -535,6 +535,17 @@ def _saved_plots_card_decorator():
     return wire_save_to_gallery
 
 
+def _image_table_view_state_io():
+    """Image Table's (snapshot, apply) view-state pair (lazy). ``view_state``
+    fans this out via the registry so it never names Image Table — a profiled-out
+    Image Table isn't in the registry, so its ``view_state_io.py`` is never
+    imported and the tab's serialization simply doesn't run."""
+    from well_viewer.features.image_browser.image_table.view_state_io import (
+        apply_image_table, snapshot_image_table,
+    )
+    return snapshot_image_table, apply_image_table
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The descriptor list — the single source of truth. Comment a line to remove
 # a feature.
@@ -652,7 +663,8 @@ def _features() -> "list[FeatureDescriptor]":
                           on_activate=_activate_segmentation),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
                           on_activate=_activate_image_table,
-                          on_dataset_loaded=_loaded_image_table),
+                          on_dataset_loaded=_loaded_image_table,
+                          view_state_io=_image_table_view_state_io),
         FeatureDescriptor(name="Cell Browser", parent="Image Browser",
                           on_activate=_activate_cell_browser,
                           on_selection_changed=_sel_cell_browser,

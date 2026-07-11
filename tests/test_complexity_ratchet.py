@@ -103,7 +103,10 @@ ALLOWLIST = {
     # _merge_scan / _discover_from_layouts / _scan_raw_disk_files /
     # _raw_file_well_passes / _log_find_result — main orchestrator now CC 13,
     # every helper < 40. Removed from the allowlist.
-    "well_viewer/persistence/view_state.py::_apply_image_table",
+    # Moved verbatim out of view_state.py to the Image Table feature (the
+    # feature now owns its own view-state serialization via the ``view_state_io``
+    # registry hook); CC unchanged, so it stays allowlisted at the new path.
+    "well_viewer/features/image_browser/image_table/view_state_io.py::apply_image_table",
     "well_viewer/core/plot_style.py::apply_export_style_prefs",
     "well_viewer/core/centre_view.py::build_centre",
     "well_viewer/features/export/sidebar_view.py::ExportStyleSidebar._build_ui",

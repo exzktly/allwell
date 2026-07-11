@@ -88,7 +88,13 @@ FEATURE_PREFIX = "well_viewer.features"
 # _cell_override_menu`` lazily imports ``grid_ops.image_table_cell_override_menu``
 # — the same controller↔grid_ops cycle break the two grid_ops imports above use
 # (grid_ops imports controller at module scope, so controller must defer).
-MAX_DEFERRED_FEATURE_IMPORTS = 126
+#
+# −8 (126 → 118): the Image Table view-state serialization moved out of
+# ``persistence/view_state.py`` into the feature's own ``view_state_io.py`` (the
+# ``view_state_io`` registry hook). ``view_state`` now fans out over the registry
+# instead of deferring feature imports, netting fewer deferred feature imports
+# across the persistence layer.
+MAX_DEFERRED_FEATURE_IMPORTS = 118
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

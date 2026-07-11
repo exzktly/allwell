@@ -93,6 +93,11 @@ class FeatureDescriptor:
     # gallery" hover button). Lazy: ``() -> ((ctx, card, tab_name) -> None)``.
     # Plot tabs apply all registered decorators, so they never name the feature.
     plot_card_decorator: Optional[Callable] = None
+    # A feature that owns its own view-state (per-tab) serialization, so
+    # ``persistence/view_state.py`` never names it. Lazy factory returning a
+    # ``(snapshot, apply)`` pair: ``snapshot(ctx) -> dict`` (stored under the
+    # descriptor name in the ``tabs`` block) and ``apply(ctx, state) -> None``.
+    view_state_io: Optional[Callable] = None
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check

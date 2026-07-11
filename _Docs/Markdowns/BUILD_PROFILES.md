@@ -61,6 +61,25 @@ This composes with the existing `ALLWELL_WITH_TRACKING` lever (torch/tracking
 stack). The de-coupling guards (§6) are what let the excluded modules be
 physically absent without the surviving code crashing.
 
+## 2a. Gate the pip install to the profile
+
+The binary bundle already drops a profiled-out feature's heavy deps (`excludes`
+above). For a **dev / remote install**, generate a flat requirements file that
+removes the same packages so `pip install` never pulls what the profile can't use:
+
+```bash
+python scripts/gen_requirements.py --profile thin -o requirements-thin.txt
+pip install --no-build-isolation -r requirements-thin.txt
+```
+
+It reads each excluded catalog feature's `pip` list (PyPI distribution names —
+distinct from the import-name `deps` PyInstaller wants), inlines the base file's
+`-r` includes into one self-contained file, and comments out every matching line
+(kept as an auditable `# [profile:…] dropped —` marker, not silently deleted).
+A StarDist-only `thin` install drops `torch` / `torchvision` / `cellpose` (with
+Cellpose) and `scikit-learn` / `umap-learn` (with Multivariate); TensorFlow and
+StarDist stay. Guarded by `tests/test_gen_requirements.py`.
+
 ## 3. Produce a physically stripped tree (source, not binary)
 
 When you want the excluded code actually gone, `scripts/derive_profile.py` diffs
@@ -108,27 +127,36 @@ state. This already holds and is guarded by
 ## 6. De-coupling: what's done, what's optional
 
 **Done on this branch** — the kept→excluded references that would break a subset
-binary are now guarded on the active registry, so a profiled-out feature's module
-can be physically absent:
+binary are now guarded on the active registry (or replaced by a registry hook),
+so a profiled-out feature's module can be physically absent:
 
 - centre_view's Batch Export frame stash;
-- the six plot tabs' Saved Plots wiring;
-- load_controller's Image Table / smFISH refresh on dataset load;
-- view_state's Image Table snapshot + restore;
+- the six plot tabs' Saved Plots wiring — now a **`plot_card_decorator`** hook
+  Saved Plots registers; the plot tabs apply all registered decorators and never
+  name the feature;
+- plot sub-tabs enumerated from the registry (`sub_leaves("Plotting")`), not a
+  hard-coded `_PLOT_SUBTABS` — dropping a plot type is a manifest edit;
+- load_controller's post-load refresh — now an **`on_dataset_loaded`** registry
+  fan-out; Image Table / smFISH register their own refresh, core names neither;
+- view_state's Image Table snapshot + restore — now a **`view_state_io`** hook
+  the feature owns (`image_table/view_state_io.py`); `view_state` fans out over
+  the registry and never names Image Table;
+- the **Cellpose** segmenter — `process_microscopy` imports `pipeline/cellpose.py`
+  lazily (PEP 562 module `__getattr__` + a dispatch-branch import), so a
+  StarDist-only build omits it and the spec drops `torch` / `torchvision` /
+  `cellpose` (catalog `deps` → `excludes`, ML `collect_all` skipped);
 - Image Browser sub-tabs (profile-filtered; each imports its module only when
   built).
 
-**Optional polish** (not required for a working subset binary — nice-to-haves
-that make the *source* generator fully hands-free / shrink the binary further):
+**Pip parity** — `scripts/gen_requirements.py` (§2a) drops the same excluded-feature
+deps from a dev/remote install, so pip gating tracks the bundle.
+
+**Optional polish** (not required for a working subset binary):
 
 | Item | Benefit |
 |---|---|
-| plot sub-tabs enumerated from the registry (`parent == "Plotting"`) instead of the hard-coded `_PLOT_SUBTABS` | drop an individual plot type by manifest |
-| a "card decorator" hook Saved Plots *registers* (vs plot tabs importing it) | removes the per-tab guard entirely |
-| `on_dataset_loaded` registry hook replacing load_controller's per-feature blocks | fully declarative post-load refresh |
-| per-tab snapshot/restore registered by each feature (vs view_state's `_snapshot_*`) | view_state stops naming Image Table |
-| segmentation-method **strategy registry** (name → segmenter + CLI args + UI panel), + Cellpose as a `profiles` dep like tracking | a StarDist-only binary drops torch/cellpose |
 | `runtime_app` per-feature proxy methods finish their `ctx` migration | the dead proxies vanish |
 
-None of these block build-time feature selection today; they reduce the residual
-per-feature code and let `derive_profile.py --apply` run with zero manual follow-up.
+The remaining item does not block build-time feature selection; the proxies are
+already lazy, so an excluded feature's proxy is inert. `derive_profile.py --apply`
+now runs with only the ratchet-guard re-tightening as manual follow-up.

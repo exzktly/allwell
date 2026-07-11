@@ -27,10 +27,14 @@ paths = [
   "well_viewer/persistence/multivariate.py",
 ]
 tests = ["tests/test_multivariate_*.py"]
-# Heavy third-party deps ONLY this feature pulls in — the PyInstaller build adds
-# them to `excludes` (and skips their collect_submodules) when Multivariate is
-# profiled out, so a subset binary drops them from the bundle.
+# Heavy third-party deps ONLY this feature pulls in. `deps` are import names —
+# the PyInstaller build adds them to `excludes` (and skips their
+# collect_submodules) when Multivariate is profiled out. `pip` are the PyPI
+# distribution names `scripts/gen_requirements.py` drops from a per-profile
+# install file (pynndescent arrives transitively via umap-learn, so it needs no
+# line of its own).
 deps = ["sklearn", "umap", "pynndescent"]
+pip  = ["scikit-learn", "umap-learn"]
 
 [[feature]]
 name = "Spatial"
@@ -93,4 +97,8 @@ paths = ["pipeline/cellpose.py"]
 # label-free CLI-arg mapping — so they must NOT be auto-deleted with Cellpose.
 # The `test_segment_cellpose_guarded` case skips when cellpose is installed and
 # otherwise asserts the clean "not installed" error, so it stays green either way.
+# `deps` = PyInstaller import names (added to `excludes`); `pip` = the PyPI
+# distribution lines gen_requirements.py drops (torch/torchvision/cellpose share
+# both names). typing-extensions is NOT dropped — TF also needs it.
 deps = ["cellpose", "torch", "torchvision"]
+pip  = ["cellpose", "torch", "torchvision"]

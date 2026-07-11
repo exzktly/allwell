@@ -87,7 +87,7 @@ def on_tab_change(ctx, _e=None) -> None:
         desc.on_activate(ctx)
     else:
         ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-        ctx.refresh_sidebar_map()
+        ctx.coordinator.refresh_sidebar_map()
         redraw_app(ctx)
 
     run_tab_switch_smoke_checks(ctx, prev_tab, tab, prev_selected)

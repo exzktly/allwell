@@ -107,7 +107,7 @@ def _restore_selections(ctx, sels, solo_wells=None) -> None:
         if changed:
             # Master redraw fan-out (sidebar map + groups + bars/lines/scatter),
             # named as a genuine app-orchestration service on the context.
-            ctx.rebuild_all()
+            ctx.coordinator.rebuild_all()
     except Exception:
         _logger.debug("saved_plots: selection restore failed", exc_info=True)
 

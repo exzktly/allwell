@@ -28,19 +28,17 @@ _ALLOWED = {
     # that genuinely need the widget (dialog parenting, isinstance/findChildren)
     # and can never be god-object-free. Named so those needs don't count against
     # the ctx.app burn-down while staying enumerable + frozen here.
+    #
+    # TERMINAL STATE (A5 complete): ``window`` is the *only* remaining accessor.
+    # Every other service that used to reach ``_window`` through a ctx method has
+    # been extracted into a held collaborator:
+    #   persistence -> ctx.persistence (registry)      features -> ctx.features
+    #   set_status/toast -> ctx.notify (NotificationService)
+    #   save_figure_dialog/open_export_style_panel -> ctx.figures (FigureService)
+    #   rebuild_all/refresh_sidebar_map -> ctx.coordinator (SelectionCoordinator)
+    # A new entry here now means the god-object teardown has regressed — decompose
+    # the service into a collaborator instead of re-adding an accessor.
     "window",
-    # NOTE (A5): ``persistence`` and ``features`` were extracted from this frozen
-    # accessor set — they are now direct ctx-held collaborators (dataclass fields /
-    # post-construction attributes), not properties that reach into ``_window``.
-    # ``ctx.persistence`` / ``ctx.features`` still resolve, but as owned objects, so
-    # they no longer count as god-object service accessors here.
-    # ``rebuild_all`` / ``refresh_sidebar_map`` name the two genuine app-level
-    # *orchestration* services (master redraw fan-out; debounced sidebar-map
-    # repaint) that the final ctx.app seams bottomed into. Each fans out into a
-    # dozen god-object methods with no ctx form, so they are named here as the
-    # teardown endgame — not convenience wrappers for arbitrary access.
-    "rebuild_all",
-    "refresh_sidebar_map",
 }
 
 

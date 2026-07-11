@@ -89,6 +89,12 @@ class ViewerContext:
     # it instead of the former ``ctx.save_figure_dialog`` / ``ctx.open_export_
     # style_panel`` accessors. Attached in ``__post_init__``.
     figures: object = None
+    # The redraw / selection-refresh orchestrator (master ``rebuild_all`` fan-out
+    # + debounced sidebar-map repaint), held as a collaborator so
+    # ``ctx.coordinator.rebuild_all`` / ``ctx.coordinator.refresh_sidebar_map``
+    # name it instead of the former ``ctx.rebuild_all`` / ``ctx.refresh_sidebar_
+    # map`` accessors. Attached in ``__post_init__``.
+    coordinator: object = None
 
     def __post_init__(self) -> None:
         # Attach the collaborator services (A5) bound to this context, so their
@@ -100,6 +106,9 @@ class ViewerContext:
         if self.figures is None:
             from well_viewer.core.figure_saver import FigureService
             object.__setattr__(self, "figures", FigureService(self))
+        if self.coordinator is None:
+            from well_viewer.core.selection_coordinator import SelectionCoordinator
+            object.__setattr__(self, "coordinator", SelectionCoordinator(self))
         # Attach the row-access facade (B2) onto the state so callers reach it
         # as ``ctx.state.repo``. Done here — the DI bundle is the natural wiring
         # point and it needs the assembled context. Mutates ``state`` (not the
@@ -131,24 +140,4 @@ class ViewerContext:
         ``ctx.window`` call is a widget-parenting need, not behaviour coupling."""
         return self._window
 
-    def rebuild_all(self) -> None:
-        """Run the app's master redraw fan-out after a data/selection change.
-
-        A genuine app-level *orchestration service* (invalidate stats cache →
-        refresh sidebar map + Sample-Definitions groups → redraw bars/lines/
-        scatter → per-tab follow-ups). It has no ctx form — it fans out into a
-        dozen god-object methods — so callers name it here. Kept in the frozen
-        accessor set; one of the irreducible teardown-endgame services."""
-        self._window._rebuild_all()
-
-    def refresh_sidebar_map(self) -> None:
-        """Repaint the line-graph well-picker's rep-colour map (debounced).
-
-        A genuine app-level *orchestration service* — the debounced sidebar-map
-        refresh every selection/group edit triggers. No ctx form (it schedules a
-        QTimer that repaints registered plate widgets), so callers name it here.
-        Kept in the frozen accessor set."""
-        fn = getattr(self._window, "_refresh_sidebar_map", None)
-        if callable(fn):
-            fn()
 

@@ -804,7 +804,7 @@ def sel_set_color(ctx, sid, color) -> None:
         s["color"] = new
     else:
         s.pop("color", None)
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
 
 
 
@@ -859,7 +859,7 @@ def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
     sel.selected_wells = new_set
     # The sidebar-map debounce and the plate-change commit are named on the
     # context (genuine app-orchestration service + ctx-native commit).
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     if commit:
         on_plate_sel_change(ctx)
 
@@ -955,7 +955,7 @@ def sel_add(ctx, name=None, wells=None, replicates=None, source="user",
     sel_state.selections.append(sel)
     if make_current:
         sel_state.current_selection_id = sel["id"]
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
     return sel["id"]
 
 
@@ -968,10 +968,10 @@ def sel_set_hidden(ctx, sid, hidden, *, light=False) -> None:
         return
     s["hidden"] = bool(hidden)
     if light:
-        ctx.refresh_sidebar_map()
+        ctx.coordinator.refresh_sidebar_map()
         _schedule_sample_def_autosave(ctx)
     else:
-        ctx.rebuild_all()
+        ctx.coordinator.rebuild_all()
 
 
 
@@ -985,7 +985,7 @@ def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
         sel_strip_wells(ctx, s["wells"], keep_id=sid)
     src = replicates if replicates is not None else s.get("replicates")
     s["replicates"] = _deoverlap_replicates(src, allowed=set(s.get("wells") or []))
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
 
 
 
@@ -1026,7 +1026,7 @@ def sel_clear_all(ctx) -> None:
     sel_state = ctx.state.selection
     sel_state.selections = []
     sel_state.current_selection_id = None
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
 
 
 def rep_clear_all(ctx) -> None:
@@ -1053,7 +1053,7 @@ def sel_rename(ctx, sid, name) -> None:
     if new == s.get("name"):
         return
     s["name"] = new
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
 
 
 
@@ -1067,7 +1067,7 @@ def sel_delete(ctx, sid) -> None:
         sel_state.current_selection_id = (
             sel_state.selections[min(i, len(sel_state.selections) - 1)].get("id")
             if sel_state.selections else None)
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
 
 
 
@@ -1079,7 +1079,7 @@ def sel_select(ctx, sid) -> None:
         return
     sel_state.current_selection_id = sid
     groups_centre_refresh(ctx)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
 
 
 
@@ -1092,7 +1092,7 @@ def sel_reorder(ctx, ids) -> None:
             new.append(s)
     if new != sel_state.selections:
         sel_state.selections = new
-        ctx.rebuild_all()
+        ctx.coordinator.rebuild_all()
 
 
 

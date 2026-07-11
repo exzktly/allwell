@@ -337,7 +337,7 @@ def restore(ctx, state: dict) -> None:
             ctx.runtime.view_state.absent_solo = saved_solo - wp
             ctx.state.selection.active_solo_wells = saved_solo & wp
         try:
-            ctx.refresh_sidebar_map()
+            ctx.coordinator.refresh_sidebar_map()
         except Exception:
             swallowed()
 

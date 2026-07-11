@@ -108,7 +108,7 @@ def rep_quick_pairs(ctx) -> None:
             for i, s in enumerate(new_sets)]
     sel_state.selections = sels
     sel_state.current_selection_id = sels[0]["id"] if sels else None
-    ctx.rebuild_all()
+    ctx.coordinator.rebuild_all()
 
 
 def rep_add(ctx) -> None:

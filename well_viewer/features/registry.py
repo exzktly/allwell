@@ -196,20 +196,20 @@ def _activate_statistics(ctx) -> None:
 def _activate_multivariate(ctx) -> None:
     from well_viewer.features.multivariate.controller import mv_on_activate
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     mv_on_activate(ctx)
 
 
 def _activate_spatial(ctx) -> None:
     from well_viewer.features.spatial.controller import sp_on_activate
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     sp_on_activate(ctx)
 
 
 def _activate_batch_export(ctx) -> None:
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     state = ctx.runtime.batch_export.inline_state
     if state:
         from well_viewer.features.batch_export.tab_view import _show_batch_mode
@@ -218,7 +218,7 @@ def _activate_batch_export(ctx) -> None:
 
 def _activate_review_csv(ctx) -> None:
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     # ``refresh_review_csv`` lives in ``image_browser.review_image``. Review CSV is
     # its own feature but borrows that hydration logic, so guard the cross-feature
     # call: when Image Browser has been removed the table just isn't hydrated
@@ -248,7 +248,7 @@ def _activate_smfish(ctx) -> None:
         # properly -- bypassing it leaves the next selection diff
         # mis-attributing cross-tab additions / removals.
         set_selected_wells(ctx, {keep}, commit=False)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     smfish_sync_from_app(ctx)
 
 
@@ -257,7 +257,7 @@ def _activate_cell_gating(ctx) -> None:
         cell_gating_load_cell_areas, cell_gating_sync_scatter_gates,
     )
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         cell_gating_load_cell_areas(ctx)
         cell_gating_sync_scatter_gates(ctx)
@@ -268,7 +268,7 @@ def _activate_cell_browser(ctx) -> None:
     # filter sidebar — its gallery is scoped to the selected wells, so it
     # needs the same well picker every other tab has.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     frame = ctx.widgets.get_or_none("_sidebar_cell_browser_frame")
     if frame is not None:
         frame.setVisible(True)
@@ -285,7 +285,7 @@ def _activate_playground(ctx) -> None:
     # the canonical plate selector for parity, then refresh its selectors for
     # any dataset loaded since it last built.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     try:
         playground_repopulate_dropdowns(ctx)
     except Exception:
@@ -297,7 +297,7 @@ def _activate_saved_plots(ctx) -> None:
     # Gallery of previously saved plots — no plate selection needed; just
     # repaint from the (per-dataset) store on each visit.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     try:
         from well_viewer.features.saved_plots.controller import (
             refresh_saved_plots_gallery,
@@ -311,7 +311,7 @@ def _activate_bar_plots(ctx) -> None:
     from well_viewer.features.barplot.controller import update_bar_tp_menu
     from well_viewer.features.barplot.renderer import redraw_bars
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     update_bar_tp_menu(ctx)
     redraw_bars(ctx)
 
@@ -320,7 +320,7 @@ def _activate_scatter(ctx) -> None:
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     update_scatter_menus(ctx)
     scatter_redraw_active(ctx)
 
@@ -328,7 +328,7 @@ def _activate_scatter(ctx) -> None:
 def _activate_heatmap(ctx) -> None:
     from well_viewer.core.plot_orchestrator import redraw_app
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     if ctx.widgets.has("_heatmap_sidebar_frame"):
         try:
             from well_viewer.features.heatmap.sidebar_view import (
@@ -344,7 +344,7 @@ def _activate_default_plot(ctx) -> None:
     # Line Graphs / Distribution — unified picker shown, generic redraw.
     from well_viewer.core.plot_orchestrator import redraw_app
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.refresh_sidebar_map()
+    ctx.coordinator.refresh_sidebar_map()
     redraw_app(ctx)
 
 

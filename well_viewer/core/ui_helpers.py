@@ -234,8 +234,14 @@ def build_section_header(
     if hint:
         hint_lbl = QLabel(hint, hdr)
         hint_lbl.setObjectName("Muted")
-        hl.addWidget(hint_lbl)
-    hl.addStretch(1)
+        # Word-wrap so a long inline hint doesn't report its full text width as
+        # the header's minimum — which forced the whole (non-h-scrolling) Cell
+        # Gating pane wider than a narrow window and clipped its controls. Given
+        # a stretch factor so it takes the row's leftover width and wraps into it.
+        hint_lbl.setWordWrap(True)
+        hl.addWidget(hint_lbl, 1)
+    else:
+        hl.addStretch(1)
     for btn in buttons:
         hl.addWidget(btn)
     return hdr

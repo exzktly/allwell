@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from ui.theme import get_color
+from widgets.flow_layout import FlowLayout, flow_group
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.ui_helpers import (
     build_hline_separator,
@@ -461,48 +462,43 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         opt_panel, "Optimize ThreshFracOn between two wells",
     ))
     opt_row = QWidget(opt_panel)
-    opt_row_layout = QHBoxLayout(opt_row)
+    # FlowLayout + flow_group: each label stays glued to its control, and the row
+    # wraps onto extra lines at narrow width instead of clipping controls off-edge.
+    opt_row_layout = FlowLayout(opt_row, h_spacing=6, v_spacing=4)
     opt_row_layout.setContentsMargins(0, 0, 0, 0)
-    opt_row_layout.addWidget(QLabel("Channel:", opt_row))
-    reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
-    ctx.widgets.get("_cell_gating_opt_channel_combo").setMinimumWidth(140)
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_channel_combo"))
-    opt_row_layout.addWidget(QLabel("Well A:", opt_row))
-    reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
-    ctx.widgets.get("_cell_gating_opt_well_a_combo").setMinimumWidth(90)
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_well_a_combo"))
-    opt_row_layout.addWidget(QLabel("Well B:", opt_row))
-    reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
-    ctx.widgets.get("_cell_gating_opt_well_b_combo").setMinimumWidth(90)
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_well_b_combo"))
-    opt_row_layout.addWidget(QLabel("Timepoint:", opt_row))
-    reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
-    ctx.widgets.get("_cell_gating_opt_timepoint_combo").setMinimumWidth(110)
-    ctx.widgets.get("_cell_gating_opt_timepoint_combo").setToolTip(
+    opt_channel = reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
+    opt_channel.setMinimumWidth(140)
+    opt_row_layout.addWidget(flow_group(opt_row, "Channel:", opt_channel))
+    opt_well_a = reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
+    opt_well_a.setMinimumWidth(90)
+    opt_row_layout.addWidget(flow_group(opt_row, "Well A:", opt_well_a))
+    opt_well_b = reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
+    opt_well_b.setMinimumWidth(90)
+    opt_row_layout.addWidget(flow_group(opt_row, "Well B:", opt_well_b))
+    opt_tp = reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
+    opt_tp.setMinimumWidth(110)
+    opt_tp.setToolTip(
         "Restrict the fraction-on comparison to one timepoint, or pool all "
         "timepoints. Pooling across timepoints where the wells are both 'off' "
         "early dilutes the difference, so picking the relevant timepoint gives a "
         "sharper threshold."
     )
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_timepoint_combo"))
-    opt_row_layout.addWidget(QLabel("Min:", opt_row))
-    reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
-    ctx.widgets.get("_cell_gating_opt_min_edit").setFixedWidth(80)
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_min_edit"))
-    opt_row_layout.addWidget(QLabel("Max:", opt_row))
-    reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
-    ctx.widgets.get("_cell_gating_opt_max_edit").setFixedWidth(80)
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_max_edit"))
-    opt_row_layout.addWidget(QLabel("# Points:", opt_row))
-    reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
-    ctx.widgets.get("_cell_gating_opt_steps_edit").setFixedWidth(64)
-    ctx.widgets.get("_cell_gating_opt_steps_edit").setToolTip(
+    opt_row_layout.addWidget(flow_group(opt_row, "Timepoint:", opt_tp))
+    opt_min = reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
+    opt_min.setFixedWidth(80)
+    opt_row_layout.addWidget(flow_group(opt_row, "Min:", opt_min))
+    opt_max = reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
+    opt_max.setFixedWidth(80)
+    opt_row_layout.addWidget(flow_group(opt_row, "Max:", opt_max))
+    opt_steps = reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
+    opt_steps.setFixedWidth(64)
+    opt_steps.setToolTip(
         "Number of thresholds scanned across the Min–Max range, evenly "
         "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
         "thresholds (every 1 unit across a 0–100 range). Higher values "
         "give a finer scan at the cost of a little compute."
     )
-    opt_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_steps_edit"))
+    opt_row_layout.addWidget(flow_group(opt_row, "# Points:", opt_steps))
     from PySide6.QtWidgets import QPushButton as _QPushButton
     opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
     opt_btn.setProperty("variant", "secondary")
@@ -525,12 +521,11 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # they live only here and are read at optimise time, so configuring them
     # never disturbs the Bar / Line plots.
     fc_row = QWidget(opt_panel)
-    fc_row_layout = QHBoxLayout(fc_row)
+    fc_row_layout = FlowLayout(fc_row, h_spacing=6, v_spacing=4)
     fc_row_layout.setContentsMargins(0, 0, 0, 0)
-    fc_row_layout.addWidget(QLabel("Fold change —  Control:", fc_row))
-    reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
-    ctx.widgets.get("_cell_gating_opt_fc_control_combo").setMinimumWidth(120)
-    ctx.widgets.get("_cell_gating_opt_fc_control_combo").setToolTip(
+    fc_control = reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
+    fc_control.setMinimumWidth(120)
+    fc_control.setToolTip(
         "Divide (or subtract) each well's fraction-on by a control well / "
         "replicate set's fraction-on at the same scanned threshold. \"—\" "
         "optimises over the raw fraction-on (the original behaviour).\n\n"
@@ -539,28 +534,24 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "has signal — use Subtract, or a Baseline, to actually reshape the "
         "A-vs-B separation."
     )
-    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_control_combo"))
-    reg.register("_cell_gating_opt_fc_ctrl_op_combo", QComboBox(fc_row))
-    ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo").addItem("Ratio", "ratio")
-    ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo").addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_ctrl_op_combo"))
-    fc_row_layout.addWidget(QLabel("Baseline:", fc_row))
-    reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
-    ctx.widgets.get("_cell_gating_opt_fc_baseline_combo").setMinimumWidth(110)
-    ctx.widgets.get("_cell_gating_opt_fc_baseline_combo").setToolTip(
+    fc_ctrl_op = reg.register("_cell_gating_opt_fc_ctrl_op_combo", QComboBox(fc_row))
+    fc_ctrl_op.addItem("Ratio", "ratio")
+    fc_ctrl_op.addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(flow_group(fc_row, "Fold change —  Control:", fc_control, fc_ctrl_op))
+    fc_baseline = reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
+    fc_baseline.setMinimumWidth(110)
+    fc_baseline.setToolTip(
         "Divide (or subtract) each well's fraction-on by its own fraction-on at "
         "a baseline timepoint. \"t0\" uses each well's earliest timepoint."
     )
-    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_baseline_combo"))
-    reg.register("_cell_gating_opt_fc_t0_op_combo", QComboBox(fc_row))
-    ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo").addItem("Ratio", "ratio")
-    ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo").addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_t0_op_combo"))
-    fc_row_layout.addWidget(QLabel("Order:", fc_row))
-    reg.register("_cell_gating_opt_fc_order_combo", QComboBox(fc_row))
-    ctx.widgets.get("_cell_gating_opt_fc_order_combo").addItem("Control first", "ctrl_first")
-    ctx.widgets.get("_cell_gating_opt_fc_order_combo").addItem("Baseline first", "t0_first")
-    fc_row_layout.addWidget(ctx.widgets.get("_cell_gating_opt_fc_order_combo"))
+    fc_t0_op = reg.register("_cell_gating_opt_fc_t0_op_combo", QComboBox(fc_row))
+    fc_t0_op.addItem("Ratio", "ratio")
+    fc_t0_op.addItem("Subtract", "subtract")
+    fc_row_layout.addWidget(flow_group(fc_row, "Baseline:", fc_baseline, fc_t0_op))
+    fc_order = reg.register("_cell_gating_opt_fc_order_combo", QComboBox(fc_row))
+    fc_order.addItem("Control first", "ctrl_first")
+    fc_order.addItem("Baseline first", "t0_first")
+    fc_row_layout.addWidget(flow_group(fc_row, "Order:", fc_order))
     fc_row_layout.addStretch(1)
     opt_layout.addWidget(fc_row)
 

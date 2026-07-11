@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from well_viewer.core.ui_helpers import (
     add_menu_action, make_action_menu_button, make_plot_with_right_dock,
     make_popover_button, make_plot_view_switcher)
-from widgets.flow_layout import FlowLayout
+from widgets.flow_layout import FlowLayout, flow_group
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.scatter.controller import on_scatter_axis_change
 from well_viewer.features.scatter.controller import update_scatter_tp_selection_display
@@ -60,44 +60,36 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # Scatter Plot is the active plotting subtab) because each axis
     # needs to render an independent column.
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
-    cl.addWidget(QLabel("X-axis:", ctrl))
-    cl.addWidget(QLabel("Channel:", ctrl))
     ch_x_cb = reg.register("_scatter_ch_x_cb", QComboBox(ctrl))
     ch_x_cb.addItems(["GFP"])
     ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "x"))
-    cl.addWidget(ch_x_cb)
+    cl.addWidget(flow_group(ctrl, "X-axis:", "Channel:", ch_x_cb))
     reg.register("_scatter_ch_x_var", ch_x_cb)
 
-    cl.addWidget(QLabel("Property:", ctrl))
     metric_x_cb = reg.register("_scatter_metric_x_cb", QComboBox(ctrl))
     metric_x_cb.addItems(_METRIC_ORDER)
     metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
-    cl.addWidget(metric_x_cb)
+    cl.addWidget(flow_group(ctrl, "Property:", metric_x_cb))
     reg.register("_scatter_metric_x_var", metric_x_cb)
 
-    cl.addWidget(QLabel("Y-axis:", ctrl))
-    cl.addWidget(QLabel("Channel:", ctrl))
     ch_y_cb = reg.register("_scatter_ch_y_cb", QComboBox(ctrl))
     ch_y_cb.addItems(["GFP"])
     ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "y"))
-    cl.addWidget(ch_y_cb)
+    cl.addWidget(flow_group(ctrl, "Y-axis:", "Channel:", ch_y_cb))
     reg.register("_scatter_ch_y_var", ch_y_cb)
 
-    cl.addWidget(QLabel("Property:", ctrl))
     metric_y_cb = reg.register("_scatter_metric_y_cb", QComboBox(ctrl))
     metric_y_cb.addItems(_METRIC_ORDER)
     metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
-    cl.addWidget(metric_y_cb)
+    cl.addWidget(flow_group(ctrl, "Property:", metric_y_cb))
     reg.register("_scatter_metric_y_var", metric_y_cb)
 
-    cl.addWidget(QLabel("Timepoints:", ctrl))
     tp_button = reg.register("_scatter_tp_button", QPushButton("Select Timepoints", ctrl))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
-    cl.addWidget(tp_button)
     tp_label = reg.register("_scatter_tp_label", QLabel("(0 selected)", ctrl))
     tp_label.setObjectName("Muted")
-    cl.addWidget(tp_label)
+    cl.addWidget(flow_group(ctrl, "Timepoints:", tp_button, tp_label))
     # Hidden legacy single-tp combo — kept so export / save-figure paths that
     # still read ``_scatter_tp_var.currentText()`` see a valid timepoint string
     # (the first selected one).

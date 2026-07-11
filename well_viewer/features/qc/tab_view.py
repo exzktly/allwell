@@ -19,12 +19,13 @@ from typing import Optional
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QLineEdit, QWidget,
+    QCheckBox, QLabel, QLineEdit, QWidget,
 )
 
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
 from well_viewer.core.safe import swallowed
+from widgets.flow_layout import FlowLayout, flow_group
 
 
 def _num(text: str) -> float:
@@ -50,9 +51,8 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     Segmentation refresh through their ctx-native entry points.
     """
     row = QWidget(parent)
-    hl = QHBoxLayout(row)
+    hl = FlowLayout(row, h_spacing=6, v_spacing=4)
     hl.setContentsMargins(8, 2, 8, 2)
-    hl.setSpacing(6)
 
     params = get_qc_params(ctx)
 
@@ -64,23 +64,20 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "here and drop out of every plot/stat. Composes with manual deletes.")
     hl.addWidget(enable_cb)
 
-    hl.addWidget(QLabel("min area", row))
+    # Each label+edit is grouped into one FlowLayout item so a wrap at narrow
+    # width never splits a field from its label (and no control clips off-edge).
     min_area_edit = QLineEdit(_fmt(params.min_area), row)
-    hl.addWidget(min_area_edit)
-    hl.addWidget(QLabel("max area", row))
+    hl.addWidget(flow_group(row, "min area", min_area_edit))
     max_area_edit = QLineEdit(_fmt(params.max_area), row)
-    hl.addWidget(max_area_edit)
-    hl.addWidget(QLabel("min solidity", row))
+    hl.addWidget(flow_group(row, "max area", max_area_edit))
     min_sol_edit = QLineEdit(_fmt(params.min_solidity), row)
-    hl.addWidget(min_sol_edit)
-    hl.addWidget(QLabel("max region", row))
+    hl.addWidget(flow_group(row, "min solidity", min_sol_edit))
     max_region_edit = QLineEdit(_fmt(params.max_region_area), row)
     max_region_edit.setToolTip(
         "Reject cells sitting in an over-large bright region (px²) — catches "
         "debris StarDist shattered into many small cells that per-cell size "
         "can't, since each fragment is individually small.")
-    hl.addWidget(max_region_edit)
-    hl.addWidget(QLabel("min circ", row))
+    hl.addWidget(flow_group(row, "max region", max_region_edit))
     min_circ_edit = QLineEdit(_fmt(params.min_circularity), row)
     _circ_tip = (
         "Circularity = 4π·area/perimeter² (1.0 = perfect circle). Min rejects "
@@ -89,11 +86,10 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         "must be reprocessed (or have shape perimeter present so it can be "
         "derived on load).")
     min_circ_edit.setToolTip(_circ_tip)
-    hl.addWidget(min_circ_edit)
-    hl.addWidget(QLabel("max circ", row))
+    hl.addWidget(flow_group(row, "min circ", min_circ_edit))
     max_circ_edit = QLineEdit(_fmt(params.max_circularity), row)
     max_circ_edit.setToolTip(_circ_tip)
-    hl.addWidget(max_circ_edit)
+    hl.addWidget(flow_group(row, "max circ", max_circ_edit))
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)
     for w in _edits:

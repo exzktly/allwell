@@ -157,7 +157,8 @@ def build_sample_definitions_app_bridge(ctx, frame) -> None:
     _build_sample_definitions_centre(ctx, frame)
 
 
-def on_notebook_current_changed(app, _idx) -> None:
+def on_notebook_current_changed(ctx, _idx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     nb = app._notebook
     nav = getattr(app, "_section_nav", None)
     if nav is None or nb is None:
@@ -344,7 +345,8 @@ def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
 
 
 
-def sync_section_nav_from_notebook(app) -> None:
+def sync_section_nav_from_notebook(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     nav = getattr(app, "_section_nav", None)
     nb = getattr(app, "_notebook", None)
     if nav is None or nb is None:
@@ -365,7 +367,8 @@ def sync_section_nav_from_notebook(app) -> None:
 
 
 
-def tab_history_back(app) -> None:
+def tab_history_back(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     hist = getattr(app, "_tab_history", None)
     if not hist:
         return
@@ -381,7 +384,8 @@ def tab_history_back(app) -> None:
 
 
 
-def tab_history_forward(app) -> None:
+def tab_history_forward(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     hist = getattr(app, "_tab_history", None)
     if not hist:
         return
@@ -397,7 +401,8 @@ def tab_history_forward(app) -> None:
 
 
 
-def apply_sidebar_visibility(app) -> None:
+def apply_sidebar_visibility(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Apply the effective left-rail visibility for the active mode.
 
     The collapse toggle (``Ctrl+B`` / top-bar button) drives whichever left
@@ -424,14 +429,15 @@ def apply_sidebar_visibility(app) -> None:
         analyze_sb.setVisible(not collapsed)
 
 
-def toggle_sidebar(app) -> None:
+def toggle_sidebar(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """User-driven collapse/expand of the left rail.
 
     Flips the persistent collapse flag, re-applies the effective visibility,
     and syncs the top-bar toggle button's checked state / glyph.
     """
     app._sidebar_collapsed = not getattr(app, "_sidebar_collapsed", False)
-    apply_sidebar_visibility(app)
+    apply_sidebar_visibility(ctx)
     btn = getattr(app, "_sidebar_toggle_btn", None)
     if btn is not None:
         collapsed = app._sidebar_collapsed
@@ -444,7 +450,8 @@ def toggle_sidebar(app) -> None:
         btn.setToolTip("Show sidebar" if collapsed else "Hide sidebar")
 
 
-def on_central_pane_changed(app, idx: int) -> None:
+def on_central_pane_changed(ctx, idx: int) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Mode-seg lives in allwell's titlebar; emit modeChanged so the
     # shell can re-sync its own seg without poking widgets here. (Split View
     # listens to modeChanged to tear itself down — see split_view.install.)
@@ -452,12 +459,13 @@ def on_central_pane_changed(app, idx: int) -> None:
     # Hide the section / well-picker sidebar when Analyze is active —
     # it carries Review-only affordances. Show it again on Review (unless
     # the user has collapsed it). Both rules live in apply_sidebar_visibility.
-    apply_sidebar_visibility(app)
+    apply_sidebar_visibility(ctx)
     app.modeChanged.emit(mode)
 
 
 
-def build_centre_shim(app, parent) -> None:
+def build_centre_shim(ctx, parent) -> None:
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.core.centre_view import build_centre as _build_centre_view
     _build_centre_view(app, parent)
     # Phase 10 (A1): mirror the notebook's tab list into the rail nav.
@@ -466,5 +474,5 @@ def build_centre_shim(app, parent) -> None:
     # changes the index (deferred builders, programmatic select_by_text).
     app._sync_section_nav_from_notebook()
     app._section_nav.currentChanged.connect(app._on_section_nav_changed)
-    app._notebook.currentChanged.connect(partial(on_notebook_current_changed, app))
+    app._notebook.currentChanged.connect(partial(on_notebook_current_changed, ctx))
 

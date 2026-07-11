@@ -453,13 +453,13 @@ class WellViewerApp(QWidget):
             return "review"
         return "analyze" if stack.currentIndex() == 1 else "review"
 
-    def _on_central_pane_changed(self, idx: int) -> None: return on_central_pane_changed(self, idx)
+    def _on_central_pane_changed(self, idx: int) -> None: return on_central_pane_changed(self._ctx, idx)
 
-    def _apply_sidebar_visibility(self) -> None: return apply_sidebar_visibility(self)
+    def _apply_sidebar_visibility(self) -> None: return apply_sidebar_visibility(self._ctx)
 
-    def _toggle_sidebar(self) -> None: return toggle_sidebar(self)
+    def _toggle_sidebar(self) -> None: return toggle_sidebar(self._ctx)
 
-    def _build_centre(self, parent) -> None: return build_centre_shim(self, parent)
+    def _build_centre(self, parent) -> None: return build_centre_shim(self._ctx, parent)
 
     # ── Phase 10 (A1) section-nav <-> notebook bridge ─────────────────────
     _SECTION_ICONS = {
@@ -475,7 +475,7 @@ class WellViewerApp(QWidget):
         "Batch Export":       "boxes",
     }
 
-    def _sync_section_nav_from_notebook(self) -> None: return sync_section_nav_from_notebook(self)
+    def _sync_section_nav_from_notebook(self) -> None: return sync_section_nav_from_notebook(self._ctx)
 
     def _on_section_nav_changed(self, key: str) -> None:
         if self._section_nav_building:
@@ -488,9 +488,9 @@ class WellViewerApp(QWidget):
         self._notebook.setCurrentByName(key)
 
 
-    def _tab_history_back(self) -> None: return tab_history_back(self)
+    def _tab_history_back(self) -> None: return tab_history_back(self._ctx)
 
-    def _tab_history_forward(self) -> None: return tab_history_forward(self)
+    def _tab_history_forward(self) -> None: return tab_history_forward(self._ctx)
 
     # ── Statistics tab ────────────────────────────────────────────────────────
     # Tab / panel construction lives in ``views/stats_view.py`` — callers invoke

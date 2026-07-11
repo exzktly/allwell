@@ -420,12 +420,15 @@ ordering constraints are met.
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
 | B1b · load_controller decouple | ☐ | core-scope no-feature-imports green | — |
 | B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
-| B3 · route cache readers | ☐ | `REPO_BYPASS_BUDGET == 0` (−spatial) | — |
+| B3 · route cache readers | ☑ | `REPO_BYPASS_BUDGET == 0` (−spatial) | 2026-07-11 |
 | B4 · load converge + persistence→ctx | ☐ | `PERSIST_APP_PARAM_BUDGET == 0` | — |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **B3 landed:** routed the last single-well cache read
+  (`stats_compute._safe_rows`) through `repo.rows_or_none`; `REPO_BYPASS_BUDGET`
+  1→0. Mock-path stats tests (112) + app_smoke green (real repo path).
 - 2026-07-11 — **B2 landed:** `WellRepository` read facade
   (`data/well_repository.py`) over `get_rows` + `DatasetState`, attached as
   `ctx.state.repo` via `ViewerContext.__post_init__` (+ `AppState.repo` field).

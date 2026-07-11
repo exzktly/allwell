@@ -33,8 +33,9 @@ _ALLOWLIST = {
     ROOT / "features" / "spatial" / "tab_view.py",
 }
 
-# Seeded at the measured value on the B2 baseline; ratchet DOWN only (B3 → 0).
-REPO_BYPASS_BUDGET = 1
+# B3 routed the last single-well cache read (stats_compute._safe_rows) through
+# WellRepository.rows_or_none, so the budget is now 0; ratchet DOWN only.
+REPO_BYPASS_BUDGET = 0
 
 
 def _is_dataset_cache(node: ast.AST) -> bool:

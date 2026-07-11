@@ -73,16 +73,14 @@ def redraw(
     # exact ctx-native equivalent of the old ``hasattr(app, …)`` guard).
     if ctx.widgets.has("_distribution_canvas"):
         try:
-            from well_viewer.features.distribution.controller import redraw_distribution
-            redraw_distribution(ctx)
+            ctx.features.redraw(ctx, "Distribution")
         except Exception:
             _logger.exception("Distribution redraw failed")
 
     # 3. Heat Map — lazy-built; same guard.
     if ctx.widgets.has("_heatmap_canvas"):
         try:
-            from well_viewer.features.heatmap.controller import redraw_heatmap
-            redraw_heatmap(ctx)
+            ctx.features.redraw(ctx, "Heat Map")
         except Exception:
             _logger.exception("Heat map redraw failed")
 
@@ -205,16 +203,20 @@ def redraw_app(ctx) -> None:
     # is hidden behind the EmptyState page, so we can skip the actual
     # redraw — but ``redraw`` still tolerates the empty state via its
     # own no-data branch.
-    from well_viewer.features.lineplot.controller import redraw_line_plots
     from well_viewer.data.data_loading import _all_fluor_values, _all_fluor_values_filtered
 
     refresh_plot_empty_states(ctx.window)
     # ``redraw`` fans out across the default-scope tabs (line /
     # distribution / heat map). Bar / scatter / scatter-aggregate are
-    # scope-specific and re-render through their own per-tab shims.
+    # scope-specific and re-render through their own per-tab shims. The
+    # line renderer is resolved from the feature registry (not imported) so
+    # core never names the lineplot feature; ``redraw()`` calls it with its
+    # full keyword signature, so pass the raw callable (not the 1-arg shim).
+    _line = ctx.features.get("Line Graphs")
+    _line_redraw = _line.redraw() if (_line and _line.redraw) else (lambda *a, **k: None)
     redraw(
         ctx,
-        lineplot_redraw=redraw_line_plots,
+        lineplot_redraw=_line_redraw,
         apply_ax_style=apply_ax_style,
         all_fluor_values=_all_fluor_values,
         all_fluor_values_filtered=_all_fluor_values_filtered,

@@ -607,8 +607,7 @@ def set_active_metric(ctx, metric: str) -> None:
     invalidate_stats_cache(ctx)
     redraw_app(ctx)
     if ctx.widgets.get_or_none("_bar_tp_cb") is not None:
-        from well_viewer.features.barplot.renderer import redraw_bars
-        redraw_bars(ctx)
+        ctx.features.redraw(ctx, "Bar Plots")
 
 
 

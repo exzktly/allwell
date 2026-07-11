@@ -107,11 +107,9 @@ def on_tab_change(ctx, _e=None) -> None:
             # reflect the restored state. (Image Table deliberately does not
             # auto-regenerate, so it is intentionally excluded.)
             if tab == "Bar Plots":
-                from well_viewer.features.barplot.renderer import redraw_bars
-                redraw_bars(ctx)
+                ctx.features.redraw(ctx, "Bar Plots")
             elif tab == "Scatter Plot":
-                from well_viewer.features.scatter.tab_view import scatter_redraw_active
-                scatter_redraw_active(ctx)
+                ctx.features.redraw(ctx, "Scatter Plot")
             elif tab == "Distribution":
                 redraw_app(ctx)
 

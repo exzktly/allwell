@@ -349,6 +349,37 @@ def _activate_default_plot(ctx) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# redraw hooks — a plot feature's figure-redraw callable, resolved by name from
+# the registry so plot orchestration (redraw_app / tab activation) never imports
+# the feature renderer (terminal-goal cond. 3). Lazy: ``() -> ((ctx) -> None)``.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _redraw_bar_plots():
+    from well_viewer.features.barplot.renderer import redraw_bars
+    return redraw_bars
+
+
+def _redraw_line_graphs():
+    from well_viewer.features.lineplot.controller import redraw_line_plots
+    return redraw_line_plots
+
+
+def _redraw_distribution():
+    from well_viewer.features.distribution.controller import redraw_distribution
+    return redraw_distribution
+
+
+def _redraw_heatmap():
+    from well_viewer.features.heatmap.controller import redraw_heatmap
+    return redraw_heatmap
+
+
+def _redraw_scatter():
+    from well_viewer.features.scatter.tab_view import scatter_redraw_active
+    return scatter_redraw_active
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # on_dataset_loaded hooks — a feature's post-load refresh, fanned out by
 # ``load_controller`` from the registry so core never names the feature (nor
 # imports its module when the feature is profiled out).
@@ -651,27 +682,32 @@ def _features() -> "list[FeatureDescriptor]":
             on_activate=_activate_bar_plots,
             on_selection_changed=_sel_bar_plots,
             on_channel_changed=_channel_bar,
+            redraw=_redraw_bar_plots,
             fold_change_scope_factory=_fold_change_scope_bar,
         ),
         FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
-                          on_activate=_activate_default_plot),
+                          on_activate=_activate_default_plot,
+                          redraw=_redraw_line_graphs),
         FeatureDescriptor(
             name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
             on_channel_changed=_channel_scatter,
+            redraw=_redraw_scatter,
             states=(StateSpec("scatter", _state_scatter),),
         ),
         FeatureDescriptor(
             name="Distribution", parent="Plotting", build=_build_distribution,
             on_activate=_activate_default_plot,
             on_channel_changed=_channel_distribution,
+            redraw=_redraw_distribution,
             states=(StateSpec("distribution", _state_distribution),),
         ),
         FeatureDescriptor(
             name="Heat Map", parent="Plotting", build=_build_heatmap,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
+            redraw=_redraw_heatmap,
             states=(StateSpec("heatmap", _state_heatmap),),
         ),
 

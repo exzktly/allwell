@@ -894,15 +894,13 @@ def rebuild_all(ctx) -> None:
     Always synchronous — no debounce — because it is only called on
     explicit user actions (button clicks / dialog OK), never during drag.
     """
-    from well_viewer.features.barplot.renderer import redraw_bars
     app._invalidate_stats_cache()
     app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
-    redraw_bars(ctx)
+    ctx.features.redraw(ctx, "Bar Plots")
     app._redraw()
     try:
-        from well_viewer.features.scatter.tab_view import scatter_redraw_active
-        scatter_redraw_active(ctx)
+        ctx.features.redraw(ctx, "Scatter Plot")
     except Exception:
         __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
     # Group edits change which wells the plots draw from, and several per-well

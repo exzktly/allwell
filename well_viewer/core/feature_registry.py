@@ -86,6 +86,11 @@ class FeatureDescriptor:
     on_selection_changed: Optional[Callable] = None
     on_channel_changed: Optional[Callable] = None
     on_dataset_loaded: Optional[Callable] = None
+    # Feature-owned figure redraw. Lazy factory returning the redraw callable:
+    # ``() -> ((ctx) -> None)``. Plot orchestration (redraw_app, tab activation)
+    # looks the feature up by name and calls its ``redraw`` so ``core/`` never
+    # imports the feature renderer (B1b / terminal-goal cond. 3).
+    redraw: Optional[Callable] = None
     # Persistence + fold-change contributions.
     persistence: Tuple[PersistenceSpec, ...] = ()
     fold_change_scope_factory: Optional[Callable] = None   # () -> FoldChangeScope
@@ -143,6 +148,19 @@ class FeatureRegistry:
     def with_hook(self, attr: str) -> "list[FeatureDescriptor]":
         """Descriptors whose *attr* hook is set, in declaration order."""
         return [d for d in self._ordered if getattr(d, attr, None) is not None]
+
+    def redraw(self, ctx, name: str) -> bool:
+        """Invoke feature *name*'s registered ``redraw`` callable, if any.
+
+        Lets ``core/`` orchestration (``redraw_app`` / tab activation) trigger a
+        plot feature's figure redraw by name without importing its renderer.
+        Returns ``True`` when a redraw ran, ``False`` when the feature is absent
+        (e.g. profiled out) or has no redraw hook."""
+        d = self._by_name.get(name)
+        if d is None or d.redraw is None:
+            return False
+        d.redraw()(ctx)
+        return True
 
     def sub_leaves(self, parent: str) -> "list[str]":
         """Names of the sub-leaf descriptors under composite *parent*

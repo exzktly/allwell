@@ -1021,20 +1021,29 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
     # and every threshold edit, the same triggers as the ctxbar stepper.
     from well_viewer.core.status_view import refresh_status_chips
     refresh_status_chips(ctx)
-    value = float(get_thresh_frac_on(ctx))
-    for attr in (
-        "_plotting_thresh_frac_stepper",
-        "_review_thresh_frac_stepper",
-        "_image_table_thresh_frac_stepper",
-    ):
+    def _sync(attr: str, val: float) -> None:
         stepper = ctx.widgets.get_or_none(attr)
         if stepper is None:
-            continue
+            return
         blocked = stepper.blockSignals(True)
         try:
-            stepper.setValue(value)
+            stepper.setValue(float(val))
         finally:
             stepper.blockSignals(blocked)
+
+    # Plotting + Segmentation quick-edits have no channel picker of their own —
+    # they edit the app's ACTIVE channel, so they follow it.
+    active_value = float(get_thresh_frac_on(ctx))
+    _sync("_plotting_thresh_frac_stepper", active_value)
+    _sync("_review_thresh_frac_stepper", active_value)
+
+    # The Image Table quick-edit has its OWN channel dropdown, so it must follow
+    # THAT channel — not the active one. Syncing it to the active channel here was
+    # clobbering the user's per-channel value with the active channel's (often 0),
+    # so a threshold set on the Image Table appeared to reset to zero.
+    it_cb = ctx.widgets.get_or_none("_image_table_thresh_chan_cb")
+    it_chan = (it_cb.currentText().strip().lower() or None) if it_cb is not None else None
+    _sync("_image_table_thresh_frac_stepper", get_thresh_frac_on(ctx, it_chan))
 
 
 def get_fluor_gate(ctx, channel: str) -> float:

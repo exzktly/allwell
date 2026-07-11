@@ -138,3 +138,12 @@ class FeatureRegistry:
     def with_hook(self, attr: str) -> "list[FeatureDescriptor]":
         """Descriptors whose *attr* hook is set, in declaration order."""
         return [d for d in self._ordered if getattr(d, attr, None) is not None]
+
+    def sub_leaves(self, parent: str) -> "list[str]":
+        """Names of the sub-leaf descriptors under composite *parent*
+        (e.g. ``"Plotting"`` → the plot sub-tab names), in declaration order.
+
+        Lets composite containers enumerate their sub-tabs from the registry
+        instead of a hard-coded list, so a profile that drops one sub-leaf drops
+        its sub-tab automatically."""
+        return [d.name for d in self._ordered if d.parent == parent]

@@ -189,7 +189,10 @@ def build_centre(app, parent: QWidget) -> None:
     plotting_container = QWidget(app._notebook)
     QVBoxLayout(plotting_container).setContentsMargins(0, 0, 0, 0)
 
-    _PLOT_SUBTABS = [
+    # The plot sub-tabs come from the registry (descriptors whose parent is
+    # "Plotting"), so a build profile that drops one drops its sub-tab with no
+    # edit here. Falls back to the canonical order if none are declared.
+    _PLOT_SUBTABS = app._features.sub_leaves("Plotting") or [
         "Bar Plots", "Line Graphs", "Scatter Plot", "Distribution", "Heat Map",
     ]
 

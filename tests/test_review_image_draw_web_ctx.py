@@ -74,7 +74,8 @@ def _ctx(
     runtime = SimpleNamespace(
         review=SimpleNamespace(included_overrides=dict(overrides or {})),
     )
-    return SimpleNamespace(state=state, runtime=runtime, set_status=lambda *_a: None)
+    return SimpleNamespace(state=state, runtime=runtime,
+                           notify=SimpleNamespace(set_status=lambda *_a: None))
 
 
 def _df(rows):

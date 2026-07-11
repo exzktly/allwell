@@ -157,7 +157,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     # error band lives on the controls row above; Mean/Median is unsupported).
     card.plotThemeChanged.connect(lambda _m: redraw_app(ctx))
     # Per-panel copy (hover a subplot → small copy icon) echoes to the status bar.
-    card.panelCopied.connect(ctx.set_status)
+    card.panelCopied.connect(ctx.notify.set_status)
     card.setStatsChipVisible(False)
 
     scroll = reg.register("_line_scroll_canvas", QScrollArea(parent))

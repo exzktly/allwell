@@ -524,7 +524,7 @@ def _copy_spatial_figure(ctx) -> None:
         return
     try:
         status = copy_figure_to_clipboard(fig)
-        ctx.set_status(status)
+        ctx.notify.set_status(status)
     except Exception:
         swallowed()
 

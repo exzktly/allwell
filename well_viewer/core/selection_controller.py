@@ -496,7 +496,7 @@ def import_selections_from_json(ctx) -> None:
         groups_centre_refresh(ctx)
     except Exception:
         swallowed()  # was: pass (silent except)
-    ctx.toast(f"Imported {added} selection(s) from {path}.", kind="success")
+    ctx.notify.toast(f"Imported {added} selection(s) from {path}.", kind="success")
 
 
 
@@ -524,7 +524,7 @@ def labels_apply_affix(ctx, *, where: str) -> None:
     else:
         selected = sorted(ctx.state.selection.selected_wells, key=parse_rc)
     if not selected:
-        ctx.set_status(
+        ctx.notify.set_status(
             f"Add {where.title()}: no wells selected — click a row/column "
             "header on the Well Labels grid or select wells on the sidebar plate."
         )
@@ -551,7 +551,7 @@ def labels_apply_affix(ctx, *, where: str) -> None:
     invalidate_stats_cache(ctx)
     label_grid_refresh(ctx)
     _schedule_sample_def_autosave(ctx)
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Added {where} '{text}' to {len(selected)} well label{plural}."
     )
 
@@ -755,9 +755,9 @@ def sel_export_one(ctx, sid) -> None:
         block = to_block([s], current_id=s.get("id"))
         with open(path, "w", encoding="utf-8") as f:
             _json.dump(block, f, indent=2)
-        ctx.toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
+        ctx.notify.toast(f"Exported '{s.get('name')}' to {path}.", kind="success")
     except Exception as exc:
-        ctx.toast(f"Export failed: {exc}", kind="danger", msec=6000)
+        ctx.notify.toast(f"Export failed: {exc}", kind="danger", msec=6000)
 
 
 

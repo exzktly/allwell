@@ -503,7 +503,7 @@ def image_table_generate(ctx) -> None:
         grid.setColumnMinimumWidth(_c, 0)
     grid.setSpacing(max(0, int(getattr(ctx.state.image_table, "cell_gap", 2))))
     if not cells:
-        ctx.set_status("Image Table: build a grid first (set rows/cols and click Apply).")
+        ctx.notify.set_status("Image Table: build a grid first (set rows/cols and click Apply).")
         return
 
     # Once the user has triggered a Generate, hide the EmptyState placeholder.
@@ -633,7 +633,7 @@ def image_table_generate(ctx) -> None:
     # Fill the per-channel LUT min/max boxes with the actual pooled numbers so
     # the user sees real values instead of "auto" (skips manually-edited rows).
     n = sum(1 for v in rendered.values() if v is not None)
-    ctx.set_status(f"Image Table: generated {n} of {len(rendered)} cell(s).")
+    ctx.notify.set_status(f"Image Table: generated {n} of {len(rendered)} cell(s).")
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log
         # both the (tp, fov) values the user picked and a sample of the

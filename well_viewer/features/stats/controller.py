@@ -720,7 +720,7 @@ def stats_resync_from_sample_defs(ctx) -> None:
 
     rsets = _stats_groups_from_rep_sets(ctx)
     if not rsets:
-        ctx.set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
+        ctx.notify.set_status("No Sample-Definition groups to load — define them on the Sample Definitions tab.")
         return
     existing = [g for g in ctx.state.stats.groups if g.wells]
     if existing:
@@ -737,7 +737,7 @@ def stats_resync_from_sample_defs(ctx) -> None:
     # Explicit "load all from Sample Definitions" — never filter to the
     # split-visible subset (the dialog above promised all rsets groups).
     stats_sync_from_app(ctx, visible_only_in_split=False)
-    ctx.set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
+    ctx.notify.set_status(f"Loaded {len(rsets)} comparison group(s) from Sample Definitions.")
 
 
 def stats_on_test_change(ctx) -> None:

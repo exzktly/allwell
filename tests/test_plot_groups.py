@@ -68,7 +68,7 @@ def test_add_current_prefers_the_triggering_drawers_name_field(qapp, monkeypatch
         ),
         widgets=SimpleNamespace(get_or_none=lambda _n: registry_edit),
         persistence=None,
-        set_status=lambda *_a, **_k: None,
+        notify=SimpleNamespace(set_status=lambda *_a, **_k: None),
     )
     monkeypatch.setattr(SV, "refresh_plot_groups_sidebar", lambda _c: None)
 

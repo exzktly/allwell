@@ -275,7 +275,7 @@ def _wells_for_new_plot_group(ctx) -> "list[str]":
 def _plot_groups_add_current(ctx, name_edit=None) -> None:
     wells = _wells_for_new_plot_group(ctx)
     if not wells:
-        ctx.set_status("Select wells (or show a group) before adding a Plot Group.")
+        ctx.notify.set_status("Select wells (or show a group) before adding a Plot Group.")
         return
     # Prefer the drawer that triggered this (its own name field); fall back to the
     # shared registry key for any other caller.
@@ -295,7 +295,7 @@ def _plot_groups_add_current(ctx, name_edit=None) -> None:
         edit.clear()
     refresh_plot_groups_sidebar(ctx)
     _plot_groups_schedule_save(ctx)
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Added Plot Group “{group['name']}” ({len(group['wells'])} wells)."
     )
 
@@ -340,7 +340,7 @@ def _plot_groups_load(ctx, group_id: str) -> None:
                 image_table_state.active_wells = set(wells)
     except Exception:
         _logger.debug("plot_groups: image table active_wells sync failed", exc_info=True)
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Loaded Plot Group “{group.get('name', 'Plot Group')}” "
         f"({len(wells)} wells)."
     )

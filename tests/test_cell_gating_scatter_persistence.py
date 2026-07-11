@@ -59,7 +59,7 @@ def _ctx(tmp_path, cg):
         widgets=SimpleNamespace(get_or_none=lambda _n: None,
                                 register=lambda n, w: w),
         bus=SimpleNamespace(),
-        set_status=lambda _m: None,
+        notify=SimpleNamespace(set_status=lambda _m: None),
     )
     return ctx
 

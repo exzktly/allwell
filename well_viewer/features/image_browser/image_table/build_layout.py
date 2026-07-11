@@ -69,17 +69,17 @@ def _build_nested_layout(ctx, row_dims: List[str], col_dims: List[str]) -> None:
     (``image_table_build_layout``) handles the len==1 case on both axes."""
     overlap = set(row_dims) & set(col_dims)
     if overlap:
-        ctx.set_status("Image Table: a dimension can't be on both the rows and "
+        ctx.notify.set_status("Image Table: a dimension can't be on both the rows and "
                        "columns axes.")
         return
     row_prod = _product_values(ctx, row_dims)
     col_prod = _product_values(ctx, col_dims)
     if not row_prod:
-        ctx.set_status("Image Table: nothing on the rows axis "
+        ctx.notify.set_status("Image Table: nothing on the rows axis "
                        f"({' › '.join(_AXIS_LABEL[d] for d in row_dims)}).")
         return
     if not col_prod:
-        ctx.set_status("Image Table: nothing on the columns axis "
+        ctx.notify.set_status("Image Table: nothing on the columns axis "
                        f"({' › '.join(_AXIS_LABEL[d] for d in col_dims)}).")
         return
 
@@ -112,7 +112,7 @@ def _build_nested_layout(ctx, row_dims: List[str], col_dims: List[str]) -> None:
     if clamped:
         status += (f" (Clamped to the {_ROW_MAX}-row / {_AXIS_MAX}-col limit — "
                    "filter the selection to see the rest.)")
-    ctx.set_status(status)
+    ctx.notify.set_status(status)
 
 
 def image_table_build_layout(ctx) -> None:
@@ -128,17 +128,17 @@ def image_table_build_layout(ctx) -> None:
     row_axis = _current_axis(ctx, "row")
     col_axis = _current_axis(ctx, "col")
     if row_axis == col_axis:
-        ctx.set_status("Image Table: choose two different axes for rows and columns.")
+        ctx.notify.set_status("Image Table: choose two different axes for rows and columns.")
         return
 
     row_vals = _axis_values(ctx, row_axis)
     col_vals = _axis_values(ctx, col_axis)
     if not row_vals:
-        ctx.set_status(f"Image Table: nothing on the {_AXIS_LABEL[row_axis]} axis "
+        ctx.notify.set_status(f"Image Table: nothing on the {_AXIS_LABEL[row_axis]} axis "
                         f"(select some in the sidebar).")
         return
     if not col_vals:
-        ctx.set_status(f"Image Table: nothing on the {_AXIS_LABEL[col_axis]} axis "
+        ctx.notify.set_status(f"Image Table: nothing on the {_AXIS_LABEL[col_axis]} axis "
                         f"(select some in the sidebar).")
         return
 
@@ -201,7 +201,7 @@ def image_table_build_layout(ctx) -> None:
         status += (
             f" (Clamped {clamped_bands} band(s) that exceed the {_ROW_MAX}-row grid limit.)"
         )
-    ctx.set_status(status)
+    ctx.notify.set_status(status)
 
 
 def image_table_apply_preset(ctx, row_axis: str, col_axis: str) -> None:
@@ -372,7 +372,7 @@ def image_table_reset_layout(ctx) -> None:
     C = _ctrl()
     C.image_table_refresh_picker(ctx)
     C.image_table_rebuild_grid(ctx)
-    ctx.set_status("Image Table: layout reset to defaults.")
+    ctx.notify.set_status("Image Table: layout reset to defaults.")
 
 
 def image_table_reset_on_dataset_load(ctx) -> None:
@@ -404,4 +404,4 @@ def image_table_clear_render(ctx) -> None:
     the selector layout and the decoded-image cache intact so a re-Generate is one
     click away (and cheap — no zip re-read). Independent of ``Reset table``."""
     _clear_rendered_grid(ctx)
-    ctx.set_status("Image Table: cleared rendered images. Press Generate to re-render.")
+    ctx.notify.set_status("Image Table: cleared rendered images. Press Generate to re-render.")

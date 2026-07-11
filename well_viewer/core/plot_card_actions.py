@@ -71,7 +71,7 @@ def copy_active_card_as_svg(ctx) -> None:
             except Exception:
                 swallowed()  # was: pass (silent except)
     # Status bar is a genuine app/window-level service — via the named accessor.
-    ctx.set_status(status)
+    ctx.notify.set_status(status)
 
 
 def save_active_card_figure(ctx) -> None:

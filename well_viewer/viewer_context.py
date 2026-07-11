@@ -16,13 +16,15 @@ this field was deleted. The god-object instance is now held privately
 - ``ctx.window`` — the ``WellViewerApp`` **qua QMainWindow**, for the handful of
   operations that genuinely need the widget (dialog parenting, ``isinstance``
   guards, ``findChildren`` walks). A widget need, not behaviour coupling.
-- A small set of **named app/window-service accessors** (``ctx.set_status`` /
-  ``ctx.persistence`` / ``ctx.rebuild_all`` / …) — each wraps one genuine
-  ``WellViewerApp`` service that has no typed home *yet*. The method list below
-  *is* the enumerable spec for the remaining god-object teardown: extracting each
-  of these services into a standalone object (the epic's separate
-  "decompose the god-methods" roadmap) is what finally lets ``_window`` itself
-  narrow to a pure ``QMainWindow``.
+- A shrinking set of **named app/window-service accessors** (``ctx.save_figure_
+  dialog`` / ``ctx.rebuild_all`` / ``ctx.refresh_sidebar_map`` / …) — each wraps
+  one genuine ``WellViewerApp`` service that has no typed home *yet*. The method
+  list below *is* the enumerable spec for the remaining god-object teardown:
+  extracting each of these services into a standalone collaborator (A5) is what
+  finally lets ``_window`` itself narrow to a pure ``QMainWindow``. Several are
+  already extracted — ``persistence`` / ``features`` are now direct ctx-held
+  registries and the status-bar / toast surfaces live on the ``ctx.notify``
+  (``NotificationService``) collaborator — so they no longer appear here.
 
 Anti-gaming rule: these are a *minimal, closed* set — never a ``__getattr__``
 passthrough, and never a public ``app`` alias back onto the god-object. Every
@@ -77,8 +79,19 @@ class ViewerContext:
     # held collaborator (A5), never a reach into ``_window``. Defaults to ``None``
     # until wired; the freeze test (which inspects the *class*) does not count it.
     persistence: object = None
+    # The notification service (status bar + toast), held as a collaborator so
+    # ``ctx.notify.set_status`` / ``ctx.notify.toast`` name it instead of the
+    # former ``ctx.set_status`` / ``ctx.toast`` accessors reaching ``_window``.
+    # Attached in ``__post_init__`` (it needs the assembled context).
+    notify: object = None
 
     def __post_init__(self) -> None:
+        # Attach the notification service (A5). Bound to this context so the
+        # status-bar / toast surfaces are reached as ``ctx.notify`` collaborators
+        # rather than god-object accessor methods.
+        if self.notify is None:
+            from well_viewer.core.notifications import NotificationService
+            object.__setattr__(self, "notify", NotificationService(self))
         # Attach the row-access facade (B2) onto the state so callers reach it
         # as ``ctx.state.repo``. Done here — the DI bundle is the natural wiring
         # point and it needs the assembled context. Mutates ``state`` (not the
@@ -130,24 +143,6 @@ class ViewerContext:
         fn = getattr(self._window, "_refresh_sidebar_map", None)
         if callable(fn):
             fn()
-
-    def set_status(self, message: str) -> None:
-        """Show *message* in the main-window status bar (no-op if unavailable)."""
-        fn = getattr(self._window, "_set_status", None)
-        if callable(fn):
-            fn(message)
-
-    def toast(self, message: str, *, kind: str = "info", msec: int = 3500) -> None:
-        """Show a transient notification toast (no-op if unavailable).
-
-        A genuine window-shell *notification service*, distinct from the status
-        bar (``set_status``): a self-dismissing popup announcing an action's
-        outcome (import/export success, a failure). It has no typed-state home —
-        it's a Qt overlay on the main window — so callers name it here. Kept in
-        the frozen accessor set."""
-        fn = getattr(self._window, "_toast", None)
-        if callable(fn):
-            fn(message, kind=kind, msec=msec)
 
     def save_figure_dialog(self, fig, default_name: str) -> None:
         """Open the app's Save-As dialog for *fig*, honouring the shared file-type

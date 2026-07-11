@@ -323,7 +323,7 @@ def _copy_figure(ctx) -> None:
     if fig is None:
         return
     try:
-        ctx.set_status(copy_figure_to_clipboard(fig))
+        ctx.notify.set_status(copy_figure_to_clipboard(fig))
     except Exception:
         swallowed()
 

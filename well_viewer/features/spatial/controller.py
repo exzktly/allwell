@@ -401,11 +401,11 @@ def sp_export_summary_csv(ctx) -> None:
         return
     payload = st.last_result or {}
     if payload.get("kind") != "summary_matrix":
-        ctx.set_status("Switch to Level = Summary before exporting.")
+        ctx.notify.set_status("Switch to Level = Summary before exporting.")
         return
     rows = summary_matrix_to_csv_rows(payload)
     if not rows:
-        ctx.set_status("Summary matrix is empty — nothing to export.")
+        ctx.notify.set_status("Summary matrix is empty — nothing to export.")
         return
     _write_summary_csv(ctx, rows)
 
@@ -433,6 +433,6 @@ def _write_summary_csv(ctx, rows) -> None:
                 writer.writerow(r)
     except Exception as exc:  # pragma: no cover - defensive
         _logger.exception("Summary CSV write failed")
-        ctx.set_status(f"CSV write failed: {exc}")
+        ctx.notify.set_status(f"CSV write failed: {exc}")
         return
-    ctx.set_status(f"Wrote {len(rows)} rows → {path}")
+    ctx.notify.set_status(f"Wrote {len(rows)} rows → {path}")

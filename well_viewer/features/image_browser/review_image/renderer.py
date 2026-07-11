@@ -880,11 +880,11 @@ def set_review_image_include_mode(ctx, enabled: bool) -> None:
     if btn is not None:
         btn.setChecked(enabled)
     if enabled:
-        ctx.set_status(
+        ctx.notify.set_status(
             "Delete mode ON — click a cell to exclude it, or drag a rectangle to bulk-exclude."
         )
     else:
-        ctx.set_status("Delete mode OFF.")
+        ctx.notify.set_status("Delete mode OFF.")
 
 
 

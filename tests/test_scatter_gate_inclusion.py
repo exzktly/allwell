@@ -65,7 +65,7 @@ def _mk_ctx(app):
             get_or_none=lambda n: getattr(app, n, None),
             register=lambda n, w: (setattr(app, n, w), w)[1],
         ),
-        set_status=lambda _m: None,
+        notify=SimpleNamespace(set_status=lambda _m: None),
     )
 
 

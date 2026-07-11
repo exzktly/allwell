@@ -125,7 +125,7 @@ def on_review_image_click(ctx, event, logger) -> None:
     tp = tp_cb.currentText().strip() if tp_cb is not None else ""
     if ctx.state.review_image.include_edit_mode:
         set_review_cell_included(ctx, fov, tp, str(nid), "0")
-        ctx.set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
+        ctx.notify.set_status(f"Set Included=0 for nucleus {nid} at FOV {fov}, TP {tp}.")
         return
     ctx.state.review_image.selected_nucleus = nid
     ctx.state.review_image.preserve_view_on_refresh = True
@@ -152,7 +152,7 @@ def select_review_csv_row_for_cell(ctx, fov: str, tp: str, nucleus_id: str, logg
             "nucleus_id": str(nucleus_n),
         }
         ctx.runtime.review.csv_lookup_context = lookup
-        ctx.set_status(
+        ctx.notify.set_status(
             "Review CSV lookup request: "
             f"well={lookup['well']}  "
             f"fov={lookup['fov']}  "
@@ -203,7 +203,7 @@ def select_review_csv_row_for_cell(ctx, fov: str, tp: str, nucleus_id: str, logg
         review_fov_cb = ctx.widgets.get_or_none("_review_fov_cb")
         review_tp_cb = ctx.widgets.get_or_none("_review_tp_cb")
         if review_csv_table is None or review_fov_cb is None:
-            ctx.set_status("Review CSV tab is not available yet.")
+            ctx.notify.set_status("Review CSV tab is not available yet.")
             return
         # Block the per-combo currentIndexChanged signals so we rebuild the
         # table once here instead of once per setCurrentText.
@@ -241,19 +241,19 @@ def select_review_csv_row_for_cell(ctx, fov: str, tp: str, nucleus_id: str, logg
             item = table.item(row_idx, 0)
             if item:
                 table.scrollToItem(item)
-            ctx.set_status(f"Matched Review CSV row for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}.")
+            ctx.notify.set_status(f"Matched Review CSV row for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}.")
             return
         logger.warning(
             "Review CSV exact row match not found. target=(%s,%s,%s) rows=%d",
             fov_n, tp_n, nucleus_n, table.rowCount(),
         )
-        ctx.set_status(
+        ctx.notify.set_status(
             f"No exact Review CSV row match for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}; showing fallback rows."
         )
     except Exception:  # noqa: BLE001
         logger.exception("Review-image -> Review CSV navigation failed")
         try:
-            ctx.set_status("Could not navigate to the Review CSV row (see log for details).")
+            ctx.notify.set_status("Could not navigate to the Review CSV row (see log for details).")
         except Exception:
             swallowed()  # was: pass (silent except)
 
@@ -277,7 +277,7 @@ def on_review_csv_row_double_click(ctx, item) -> None:
             "Review-CSV row double-click failed",
         )
         try:
-            ctx.set_status(
+            ctx.notify.set_status(
                 f"Could not navigate to Segmentation: {exc} (see log for details).",
             )
         except Exception:
@@ -666,7 +666,7 @@ def apply_box_delete(ctx, x0: int, y0: int, x1: int, y1: int) -> None:
     sub = mask[ya:yb, xa:xb]
     nids = [int(n) for n in _np.unique(sub) if int(n) > 0]
     if not nids:
-        ctx.set_status("Box selection: no cells inside rectangle.")
+        ctx.notify.set_status("Box selection: no cells inside rectangle.")
         return
     fov_cb = ctx.runtime.review_image.fov_menu or ctx.widgets.get_or_none("_preview_fov_cb")
     if fov_cb is None:
@@ -677,7 +677,7 @@ def apply_box_delete(ctx, x0: int, y0: int, x1: int, y1: int) -> None:
     set_review_cells_included_batch(ctx,
         [(fov, tp, str(nid), "0") for nid in nids]
     )
-    ctx.set_status(
+    ctx.notify.set_status(
         f"Box delete: marked {len(nids)} cell(s) Included=0."
     )
 
@@ -908,7 +908,7 @@ def _refresh_review_csv_rows_impl(ctx, rows: Optional[List[dict]] = None) -> Non
             f" well={lookup.get('well','')} fov={lookup.get('fov','')} tp={lookup.get('tp','')} nucleus_id={lookup.get('nucleus_id','')}"
             if lookup else ""
         )
-        ctx.set_status(
+        ctx.notify.set_status(
             f"Review CSV fallback active: no exact match for FOV={fov_sel}, TP={tp_sel}; showing {len(filtered)} row(s).{ctx_txt}"
         )
 

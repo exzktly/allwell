@@ -51,7 +51,8 @@ def _app(pairwise, *, rsets=(), active_val_col="gfp_mean_intensity"):
     from well_viewer.core.app_runtime import AppRuntime
     app._ctx = SimpleNamespace(app=app, state=app._app_state, widgets=_W(app),
                                runtime=AppRuntime(app),
-                               set_status=lambda m, *a, **k: app._set_status(m))
+                               notify=SimpleNamespace(
+                                   set_status=lambda m, *a, **k: app._set_status(m)))
     return app
 
 

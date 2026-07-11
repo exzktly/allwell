@@ -167,14 +167,14 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None):
     field = None
     try:
         if mode == "basic":
-            ctx.set_status("Computing flat-field (basic) for preview…")
+            ctx.notify.set_status("Computing flat-field (basic) for preview…")
             arrs = _load_arrays_from_refs(
                 ctx.state.preview.fluor, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES)
             field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
         elif mode == "empty_well":
             wells = _split_background_wells(_flatfield_qc(ctx, "background_well", ""))
             if wells:
-                ctx.set_status("Computing flat-field (empty well) for preview…")
+                ctx.notify.set_status("Computing flat-field (empty well) for preview…")
                 from well_viewer.data.image_discovery import find_well_images_and_masks
                 ds = ctx.state.dataset
                 refs_by_well = []

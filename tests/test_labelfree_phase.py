@@ -1,20 +1,16 @@
-"""Label-free segmentation + phase ingestion (§A) — the Cellpose label-free preset.
-
-Role.PHASE classification, the classical/cellpose segmenter guards, and the
-label-free preset's phase requirement + arg mapping. The *general* Cellpose
-method, the dropdown set, and the per-method parameter panel are covered in
-``test_segmentation_methods.py``. Runs headless (offscreen Qt)."""
+"""Phase-channel ingestion (§A): Role.PHASE classification, the per-channel Phase
+checkbox (mutual exclusion + smFISH exclusion), and that a phase token is passed
+through to the pipeline. The Cellpose/classical/label-free segmenters were
+removed with the StarDist-only strip; the surviving Phase behaviour (a channel
+that skips background correction) is covered here. Runs headless (offscreen Qt).
+"""
 
 from __future__ import annotations
 
-import importlib.util
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from pathlib import Path
-
-import numpy as np
 import pytest
 
 from PySide6.QtWidgets import QApplication
@@ -28,30 +24,19 @@ def qapp():
 def test_analyze_form_fits_narrow_sidebar(qapp):
     """Regression: long-label checkboxes (a QCheckBox reports its full text as
     its minimum width) used to pin the form ~822 px wide, so the scroll area
-    could never shrink to its 438 px viewport — every word-wrap hint was laid
-    out wide and then clipped instead of wrapping. The offending checkboxes are
-    now WrapCheckBox, so the form's minimum width fits the sidebar."""
+    could never shrink to its 438 px viewport. The offending checkboxes are now
+    WrapCheckBox, so the form's minimum width fits the sidebar."""
     from PySide6.QtWidgets import QScrollArea
     from analyze_tab import AnalyzeTab
     from widgets.wrap_checkbox import WrapCheckBox
 
     tab = AnalyzeTab()
     form = next(sa.widget() for sa in tab.findChildren(QScrollArea))
-    # The form must be able to shrink to (≤) the scroll area's 438 px minimum.
     assert form.minimumSizeHint().width() <= 440, form.minimumSizeHint().width()
-    # the long-label checkboxes wrap rather than pinning the panel wide
-    for cb in (tab._qc_remove_debris_cb,
-               tab._dry_run_cleanup_cb):
+    for cb in (tab._qc_remove_debris_cb, tab._dry_run_cleanup_cb):
         assert isinstance(cb, WrapCheckBox)
-        # API still behaves like a checkbox
         cb.setChecked(True); assert cb.isChecked()
         cb.setChecked(False); assert not cb.isChecked()
-
-
-def _set_method(tab, value: str) -> None:
-    idx = tab._seg_method_cb.findData(value)
-    assert idx >= 0, f"method {value!r} not in combo"
-    tab._seg_method_cb.setCurrentIndex(idx)
 
 
 # ── image_identity: Role.PHASE ───────────────────────────────────────────────
@@ -66,64 +51,25 @@ def test_role_phase_catalog():
     assert role_for_kind("smfish") is Role.SMFISH
 
 
-# ── segmenters ───────────────────────────────────────────────────────────────
+# ── phase token → CLI ────────────────────────────────────────────────────────
 
-def test_segment_classical_splits_objects():
-    pytest.importorskip("scipy")
-    pytest.importorskip("skimage")
-    from process_microscopy import _segment_classical
-    img = np.zeros((80, 80), np.float32)
-    yy, xx = np.ogrid[:80, :80]
-    img[(yy - 25) ** 2 + (xx - 25) ** 2 <= 100] = 200.0
-    img[(yy - 55) ** 2 + (xx - 55) ** 2 <= 100] = 200.0
-    labels = _segment_classical(img)
-    assert len(set(np.unique(labels)) - {0}) == 2
-    assert _segment_classical(np.zeros((10, 10), np.float32)).max() == 0
-
-
-def test_segment_cellpose_guarded():
-    if importlib.util.find_spec("cellpose") is not None:
-        pytest.skip("cellpose installed in this env")
-    from process_microscopy import _segment_cellpose
-    with pytest.raises(RuntimeError, match="[Cc]ellpose"):
-        _segment_cellpose(np.zeros((16, 16), np.float32))
-
-
-# ── Analyze → CLI arg mapping (the label-free preset) ────────────────────────
-
-def _base(**over):
+def test_phase_token_passed_through(qapp):
+    from pathlib import Path
+    from services.pipeline_service import build_pipeline_args
     opts = dict(nuclear_token="NIR", fluor_tokens=["BF", "GFP"], csv_prefix="m",
                 filename_schema="experiment:channel:well:fov:timepoint", filename_sep="_",
                 min_nucleus_area_px=50, tf_threads="0", workers="0",
+                segmentation_method="stardist_nuclei", phase_token="BF",
                 compress_input_well_folders=True, compress_output_well_folders=True)
-    opts.update(over)
-    return opts
-
-
-def test_build_pipeline_args_labelfree_preset():
-    from services.pipeline_service import build_pipeline_args
-    P = Path("/x/process_microscopy.py")
-
-    a = build_pipeline_args(P, Path("/in"), Path("/out"),
-                            _base(segmentation_method="cellpose_labelfree", phase_token="BF"))
-    assert a[a.index("--segmentation_method") + 1] == "cellpose_labelfree"
+    a = build_pipeline_args(Path("/x/process_microscopy.py"), Path("/in"), Path("/out"), opts)
     assert a[a.index("--phase_token") + 1] == "BF"
-    # The brightfield preset is applied in main(); the GUI doesn't push tuning flags.
-    assert "--cellpose_model" not in a
-
-    # stardist ignores phase entirely
-    a2 = build_pipeline_args(P, Path("/in"), Path("/out"),
-                             _base(segmentation_method="stardist_nuclei"))
-    assert "--phase_token" not in a2
 
 
-# ── per-channel Phase checkbox + label-free validation ───────────────────────
+# ── per-channel Phase checkbox ───────────────────────────────────────────────
 
 def test_analyze_phase_checkbox(qapp):
     from analyze_tab import AnalyzeTab
     tab = AnalyzeTab()
-    values = [tab._seg_method_cb.itemData(i) for i in range(tab._seg_method_cb.count())]
-    assert "cellpose_labelfree" in values
 
     while len(tab._fluor_rows) < 2:
         tab._fluor_add_row("BF")
@@ -147,12 +93,3 @@ def test_analyze_phase_checkbox(qapp):
     s1.setChecked(True)
     assert not p1.isChecked()
     assert tab._phase_token() == ""
-
-    # The label-free preset requires a Phase channel; general Cellpose does not.
-    _set_method(tab, "cellpose_labelfree")
-    assert any("Phase" in e for e in tab._segmentation_validation_errors())
-    _set_method(tab, "cellpose")
-    assert tab._segmentation_validation_errors() == []
-    _set_method(tab, "cellpose_labelfree")
-    p0.setChecked(True)
-    assert tab._segmentation_validation_errors() == []

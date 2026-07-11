@@ -80,10 +80,10 @@ def test_phase_token_emitted_for_any_method():
     assert _flag_value(args, "--phase_token") == "BF"
 
 
-def test_phase_token_still_emitted_for_labelfree():
+def test_phase_token_emitted_for_stardist():
     args = build_pipeline_args(
         _P, _IN, _OUT,
-        _opts(segmentation_method="cellpose_labelfree", phase_token="BF"),
+        _opts(segmentation_method="stardist_nuclei", phase_token="BF"),
     )
     assert _flag_value(args, "--phase_token") == "BF"
 

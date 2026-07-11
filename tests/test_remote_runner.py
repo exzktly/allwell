@@ -1612,7 +1612,6 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/__init__.py",
         "pipeline/auto_threshold.py",
         "pipeline/background.py",
-        "pipeline/cellpose.py",
         "pipeline/flatfield.py",
         "pipeline/io.py",
         "pipeline/shape_features.py",

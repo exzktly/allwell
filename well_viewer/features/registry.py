@@ -349,6 +349,38 @@ def _activate_default_plot(ctx) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# on_dataset_loaded hooks — a feature's post-load refresh, fanned out by
+# ``load_controller`` from the registry so core never names the feature (nor
+# imports its module when the feature is profiled out).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _loaded_image_table(ctx) -> None:
+    # Only when the Image Table tab has actually been built (its picker widget
+    # exists); on a lazy/unopened tab this is a no-op, matching the old guard.
+    if not ctx.widgets.has("_image_table_refresh_picker") and not hasattr(
+        ctx.window, "_image_table_refresh_picker"
+    ):
+        return
+    from well_viewer.features.image_browser.image_table.controller import (
+        image_table_refresh_picker, image_table_repopulate_dropdowns,
+    )
+    image_table_repopulate_dropdowns(ctx)
+    image_table_refresh_picker(ctx)
+
+
+def _loaded_smfish(ctx) -> None:
+    # Hydrate saved smFISH thresholds, then resync the tab's well→zip map /
+    # channel list / extractor against the freshly loaded dataset.
+    try:
+        from well_viewer.persistence import smfish as _smfish_persist
+        _smfish_persist.load_from_pipeline_info(ctx)
+    except Exception:
+        _logger.exception("Eager smFISH threshold load from pipeline_info failed")
+    from well_viewer.features.smfish.tab_view import smfish_sync_from_app
+    smfish_sync_from_app(ctx)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # on_selection_changed hooks — relocated from
 # ``selection_controller._refresh_tab_view`` (the branches that ``return redrew``
 # without a generic ``_redraw``). Tabs with no hook fall through to the generic
@@ -555,6 +587,7 @@ def _features() -> "list[FeatureDescriptor]":
             name="smFISH", group="Images", build=_build_smfish, lazy_only=True,
             on_activate=_activate_smfish,
             on_selection_changed=_sel_smfish,
+            on_dataset_loaded=_loaded_smfish,
             single_well_selection=True,
             states=(StateSpec("smfish", _state_smfish),),
         ),
@@ -618,7 +651,8 @@ def _features() -> "list[FeatureDescriptor]":
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
                           on_activate=_activate_segmentation),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
-                          on_activate=_activate_image_table),
+                          on_activate=_activate_image_table,
+                          on_dataset_loaded=_loaded_image_table),
         FeatureDescriptor(name="Cell Browser", parent="Image Browser",
                           on_activate=_activate_cell_browser,
                           on_selection_changed=_sel_cell_browser,

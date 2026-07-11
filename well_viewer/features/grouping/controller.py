@@ -232,22 +232,22 @@ def rep_sets_loaded(ctx) -> "List[ReplicateSet]":
 
 
 
-def rep_color_for(app, lbl: str) -> Optional[str]:
+def rep_color_for(ctx, lbl: str) -> Optional[str]:
     """Return the colour for the selection that owns *lbl*, or None if the
     well is not in any selection."""
-    for s in app._app_state.selection.selections:
+    for s in ctx.state.selection.selections:
         if lbl in (s.get("wells") or []):
-            return app._sel_color(s)
+            return ctx.window._sel_color(s)
     return None
 
 
 
-def rank_color_wells(app, wells) -> str:
+def rank_color_wells(ctx, wells) -> str:
     """Colour for a set of wells — the rank colour of its lowest well, so all
     of its wells (and its line/bar trace) share one colour.
 
     A8 teardown: the pure implementation now lives in ``domain.selections_model``
-    (``color_for_wells``); this thin app-signature wrapper stays for the legacy
-    ``WellViewerApp._rank_color_wells`` god-method delegate."""
+    (``color_for_wells``); this thin ctx-signature wrapper stays for the legacy
+    ``WellViewerApp._rank_color_wells`` god-method delegate (the arg is unused)."""
     return color_for_wells(wells)
 

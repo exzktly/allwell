@@ -521,7 +521,7 @@ class WellViewerApp(QWidget):
 
 
     def _stats_collect_group_values(self, grp: BarGroup, target_t: float) -> List[float]:
-        return stats_collect_group_values_shim(self, grp, target_t)
+        return stats_collect_group_values_shim(self._ctx, grp, target_t)
 
     _STATS_STATISTIC_KEYS = {
         "Mean (above threshold)": "mean",
@@ -530,18 +530,18 @@ class WellViewerApp(QWidget):
         "Fraction above threshold": "fraction",
     }
 
-    def _stats_active_channel_entry(self) -> str: return stats_active_channel_entry(self)
+    def _stats_active_channel_entry(self) -> str: return stats_active_channel_entry(self._ctx)
 
-    def _stats_active_val_col(self) -> str: return stats_active_val_col(self)
+    def _stats_active_val_col(self) -> str: return stats_active_val_col(self._ctx)
 
-    def _stats_active_threshold(self) -> float: return stats_active_threshold(self)
+    def _stats_active_threshold(self) -> float: return stats_active_threshold(self._ctx)
 
-    def _stats_active_statistic(self) -> str: return stats_active_statistic(self)
+    def _stats_active_statistic(self) -> str: return stats_active_statistic(self._ctx)
 
-    def _stats_run(self) -> None: return stats_run_shim(self)
+    def _stats_run(self) -> None: return stats_run_shim(self._ctx)
 
     def _stats_draw_ks_cdf(self, group_vals: List[Tuple[str, List[float]]], tp_str: str) -> None:
-        return stats_draw_ks_cdf_shim(self, group_vals, tp_str)
+        return stats_draw_ks_cdf_shim(self._ctx, group_vals, tp_str)
 
     # ── Preview sidebar picker ────────────────────────────────────────────────
 
@@ -723,13 +723,13 @@ class WellViewerApp(QWidget):
     def _rank_color_well(self, tok) -> str:
         return color_for_well(tok)
 
-    def _rank_color_wells(self, wells) -> str: return rank_color_wells(self, wells)
+    def _rank_color_wells(self, wells) -> str: return rank_color_wells(self._ctx, wells)
 
     def _sel_color(self, s) -> str: return sel_color(self._ctx, s)
 
     def _rank_color_rset(self, rset) -> str: return rank_color_rset(self._ctx, rset)
 
-    def _rep_color_for(self, lbl: str) -> Optional[str]: return rep_color_for(self, lbl)
+    def _rep_color_for(self, lbl: str) -> Optional[str]: return rep_color_for(self._ctx, lbl)
 
 
 
@@ -874,7 +874,7 @@ class WellViewerApp(QWidget):
     # stats results-panel builder can wire the Property combo through the
     # ``ctx.runtime.stats`` namespace (prefix ``_stats_``) without naming the
     # god-object; the body stays fully app-side.
-    def _stats_property_change(self) -> None: return on_stats_property_change(self)
+    def _stats_property_change(self) -> None: return on_stats_property_change(self._ctx)
         # Stats display refreshes on its own when run; nothing to redraw here.
 
 

@@ -134,8 +134,9 @@ def _channel_label_for_val_col(val_col: str) -> str:
     return label
 
 
-def draw_ks_cdf(app, group_vals: List[Tuple[str, List[float]]], tp_str: str, well_colors: list[str]) -> None:
+def draw_ks_cdf(ctx, group_vals: List[Tuple[str, List[float]]], tp_str: str, well_colors: list[str]) -> None:
     """Draw empirical CDFs for the two KS-test groups."""
+    app = ctx.window  # transitional: widget-heavy body still reads app._stats_*
     ax = app._stats_ax
     ax.cla()
     colors = [well_colors[0], well_colors[1]]
@@ -367,8 +368,9 @@ def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) ->
     return lines
 
 
-def run_stats(app, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
+def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     """Run the selected statistical test across all group pairs."""
+    app = ctx.window  # transitional: widget-heavy body still reads app._stats_*
     tp_str = app._stats_tp_cb.currentText()
     if tp_str in ("—", ""):
         app._stats_write_result("No timepoint selected.")
@@ -824,13 +826,14 @@ def stats_update_tp_menu(ctx) -> None:
         swallowed()  # was: pass (silent except)
 
 
-def stats_refresh_colors(app) -> None:
+def stats_refresh_colors(ctx) -> None:
     """Refresh matplotlib figure facecolor on theme change.
 
     Widget colours are driven by the app-level QSS stylesheet; only the
     embedded matplotlib figure needs an explicit repaint.
     """
     from ui.theme import get_color
+    app = ctx.window  # transitional: figure handles still on app._stats_*
 
     if hasattr(app, "_stats_fig"):
         app._stats_fig.set_facecolor(get_color("BG_APP"))
@@ -853,9 +856,9 @@ def threshold_for_val_col(ctx, val_col: str) -> float:
     return float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
 
 
-def stats_active_threshold(app) -> float:
+def stats_active_threshold(ctx) -> float:
     """The per-channel ThreshFracOn for the currently-selected stats value column."""
-    return threshold_for_val_col(app._ctx, app._stats_active_val_col())
+    return threshold_for_val_col(ctx, stats_active_val_col(ctx))
 
 
 def serialize_stats_groups(groups) -> list:
@@ -939,50 +942,51 @@ def stats_refresh_fov_indicator(ctx) -> None:
 
 
 def stats_collect_group_values_shim(
-    app, grp: BarGroup, target_t: float
+    ctx, grp: BarGroup, target_t: float
 ) -> List[float]:
     return collect_group_values(
-        app._ctx, grp, target_t,
-        val_col=app._stats_active_val_col(),
-        threshold=app._stats_active_threshold(),
-        statistic=app._stats_active_statistic(),
-        use_fov=app._use_fov_spread_active(),
+        ctx, grp, target_t,
+        val_col=stats_active_val_col(ctx),
+        threshold=stats_active_threshold(ctx),
+        statistic=stats_active_statistic(ctx),
+        use_fov=ctx.window._use_fov_spread_active(),
     )
 
 
 
-def stats_active_val_col(app) -> str:
+def stats_active_val_col(ctx) -> str:
     """Resolve the selected channel-dropdown entry to a value-column key."""
-    entry = app._stats_active_channel_entry()
+    entry = stats_active_channel_entry(ctx)
     if not entry:
-        return app._app_state.channel.active_val_col
+        return ctx.state.channel.active_val_col
     try:
-        return app._col_for_scatter_entry(entry)
+        return ctx.window._col_for_scatter_entry(entry)
     except Exception:
-        return app._app_state.channel.active_val_col
+        return ctx.state.channel.active_val_col
 
 
 
-def stats_active_channel_entry(app) -> str:
-    cb = getattr(app, "_stats_channel_cb", None)
+def stats_active_channel_entry(ctx) -> str:
+    cb = getattr(ctx.window, "_stats_channel_cb", None)
     if cb is None:
-        return app._app_state.channel.active_channel or ""
+        return ctx.state.channel.active_channel or ""
     text = cb.currentText().strip()
-    return text if text and text != "—" else (app._app_state.channel.active_channel or "")
+    return text if text and text != "—" else (ctx.state.channel.active_channel or "")
 
 
 
-def stats_active_statistic(app) -> str:
-    cb = getattr(app, "_stats_statistic_cb", None)
+def stats_active_statistic(ctx) -> str:
+    cb = getattr(ctx.window, "_stats_statistic_cb", None)
     if cb is None:
         return "mean"
-    return app._STATS_STATISTIC_KEYS.get(cb.currentText(), "mean")
+    return ctx.window._STATS_STATISTIC_KEYS.get(cb.currentText(), "mean")
 
 
 
-def stats_run_shim(app) -> None:
+def stats_run_shim(ctx) -> None:
+    app = ctx.window
     run_stats(
-        app,
+        ctx,
         collect_group_values_fn=app._stats_collect_group_values,
         draw_ks_cdf_fn=app._stats_draw_ks_cdf,
     )
@@ -990,22 +994,22 @@ def stats_run_shim(app) -> None:
 
 
 def stats_draw_ks_cdf_shim(
-    app,
+    ctx,
     group_vals: List[Tuple[str, List[float]]],
     tp_str: str,
 ) -> None:
-    draw_ks_cdf(app, group_vals, tp_str, WELL_COLORS)
+    draw_ks_cdf(ctx, group_vals, tp_str, WELL_COLORS)
 
 
 
-def on_stats_property_change(app) -> None:
+def on_stats_property_change(ctx) -> None:
     """Stats tab's per-tab Property combo → propagate to global state."""
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
-    cb = getattr(app, "_stats_property_cb", None)
+    cb = getattr(ctx.window, "_stats_property_cb", None)
     if cb is None:
         return
     metric = METRIC_LABEL_TO_KEY.get(str(cb.currentText() or ""), "mean_intensity")
-    if metric == "smfish_count" and app._app_state.channel.active_channel not in app._app_state.channel.smfish_channels:
+    if metric == "smfish_count" and ctx.state.channel.active_channel not in ctx.state.channel.smfish_channels:
         metric = "mean_intensity"
-    set_active_metric(app._ctx, metric)
+    set_active_metric(ctx, metric)
 

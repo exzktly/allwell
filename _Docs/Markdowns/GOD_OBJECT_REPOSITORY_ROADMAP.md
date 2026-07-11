@@ -425,8 +425,8 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 |---|---|---|---|
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
-| A2 · retire raw-`self` delegators | ☐ | `RAW_SELF_DELEGATOR_BUDGET == 0` | — |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 120, was 135) | playground cluster 2026-07-11 |
+| A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 28, was 38) | via A3 clusters 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 107, was 135) | playground, stats, grouping 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,13 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3+A2 — stats & grouping clusters:** migrated the 11 `app`-first
+  funcs in `features/stats/controller.py` and the 2 in `features/grouping/controller.py`
+  to `ctx`-first (clean ctx for state readers; `app = ctx.window` bridge for
+  widget/figure-heavy `run_stats`/`draw_ks_cdf`/`stats_refresh_colors`), and flipped
+  their `runtime_app` delegators to forward `self._ctx` — which also drops them from
+  the raw-`self` count. `APP_FIRST_FUNC_BUDGET` 120→107, `RAW_SELF_DELEGATOR_BUDGET`
+  38→28. Stats tests (46) + grouping colors + guards green.
 - 2026-07-11 — **A3 (partial) — playground cluster:** migrated the 15 `app`-first
   functions in `features/image_browser/playground/controller.py` to `ctx`-first
   (widget-I/O helpers take `win=ctx.window`; frame-key/ref-bridge/pan-drag moved to

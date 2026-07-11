@@ -998,7 +998,7 @@ def on_theme_change(app, theme_name: str = None) -> None:
         rep_panel_refresh(app._ctx)
     if hasattr(app, '_stats_fig') and app._stats_fig:
         from well_viewer.features.stats.controller import stats_refresh_colors
-        stats_refresh_colors(app)
+        stats_refresh_colors(app._ctx)
     if hasattr(app, "_sidebar_btns"):
         app._sidebar_map_refresh_pending = False
         app._refresh_sidebar_map_now()

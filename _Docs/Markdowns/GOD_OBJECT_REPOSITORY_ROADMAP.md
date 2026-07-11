@@ -425,9 +425,9 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 |---|---|---|---|
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
-| A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 5, was 38) | via A3 clusters 2026-07-11 |
+| A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now **5**, was 38) | via A3 clusters; residue = window-forwarders removed by A5 |
 | A3 · `app`→`ctx` clusters | ☑ | `APP_FIRST_FUNC_BUDGET == 0` (135 → **0**) | all clusters 2026-07-11 |
-| A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
+| A4 · `__init__` reach-throughs | ☐ | 4 lines removed | *deferred — the 4 reach-throughs are the pure-logic barplot/stats **test-injection seam** (mock patches `_bar_current_keys` via the runtime resolver); removing them for 4 lines would rework that seam. Do alongside A5.* |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
 | B1b · load_controller decouple | ⊘ | *deferred — see note* | — |

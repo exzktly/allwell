@@ -91,8 +91,10 @@ if _profile_active:
         if _profile_admits(_e):
             continue
         _excluded_features.append(_e["name"])
-        _excluded_repo_dirs += [p for p in (_e.get("paths") or [])
-                                if p.startswith("well_viewer/")]
+        # All first-party paths the feature owns (well_viewer/ tabs AND non-Qt
+        # units like pipeline/cellpose.py); the bundling loop filters every
+        # first-party package against this list so a stripped path never ships.
+        _excluded_repo_dirs += list(_e.get("paths") or [])
         _excluded_deps += _e.get("deps") or []
     print(f"[all_well.spec] ALLWELL_PROFILE={_PROFILE!r} — excluding "
           f"{len(_excluded_features)} feature(s): {_excluded_features}")
@@ -128,13 +130,15 @@ sibling_scripts = [
 ]
 
 # Bundle every first-party package so module imports resolve at runtime inside
-# the PyInstaller _MEIPASS root. ``well_viewer`` is filtered per the build
-# profile (excluded feature dirs dropped); the others ship whole.
+# the PyInstaller _MEIPASS root. Under an active profile every package is
+# filtered per-file against ``_excluded_repo_dirs`` (excluded feature dirs +
+# non-Qt units like pipeline/cellpose.py dropped); the full build ships them
+# whole.
 for _pkg in ("well_viewer", "widgets", "ui", "services", "pipeline", "util"):
     _pkg_path = _parent / _pkg
     if not _pkg_path.is_dir():
         continue
-    if _pkg == "well_viewer" and _profile_active:
+    if _profile_active:
         sibling_scripts += _pkg_datas(_pkg_path, _pkg, _excluded_repo_dirs)
     else:
         sibling_scripts.append((str(_pkg_path), _pkg))
@@ -562,12 +566,13 @@ _icd_datas, _icd_binaries, _icd_hidden = collect_all("imagecodecs")
 datas         += _icd_datas
 hiddenimports += _icd_hidden
 
-# Label-free segmentation (cellpose) is ALWAYS bundled; multi-frame cell
-# tracking (btrack / trackastra) + its training stack (lightning / kornia /
-# torchmetrics) is OPTIONAL and OFF by default. The app ships for StarDist +
-# Cellpose *inference* only, so the default bundle omits the tracking/training
-# packages (the single biggest install-size lever after Qt). Opt back in at
-# build time with ALLWELL_WITH_TRACKING=1 — and install the extras first:
+# Cellpose (Torch-backed segmenter) is bundled unless profiled out (see
+# _CELLPOSE_ON below); multi-frame cell tracking (btrack / trackastra) + its
+# training stack (lightning / kornia / torchmetrics) is OPTIONAL and OFF by
+# default. The full bundle ships StarDist + Cellpose *inference* only, so it
+# omits the tracking/training packages (the single biggest install-size lever
+# after Qt). Opt tracking back in at build time with ALLWELL_WITH_TRACKING=1
+# — and install the extras first:
 #   pip install --no-build-isolation -r _Docs/requirements-tracking.txt
 #
 # torch / torchvision carry large compiled extensions; cellpose (and, when
@@ -579,7 +584,14 @@ hiddenimports += _icd_hidden
 _WITH_TRACKING = os.environ.get("ALLWELL_WITH_TRACKING", "").strip().lower() \
     not in ("", "0", "false", "no", "off")
 
-_ml_packages = ["torch", "torchvision", "cellpose"]
+# Cellpose is the only Torch-backed segmenter; StarDist (TF) is the kept default.
+# When the Cellpose feature is profiled out of THIS build, torch / torchvision /
+# cellpose are dropped from the graph — the single biggest size lever after Qt.
+# Tracking (opt-in) also needs torch, so it forces Cellpose's ML stack back in.
+_CELLPOSE_ON = "Cellpose" not in _excluded_features
+_ml_packages = []
+if _CELLPOSE_ON or _WITH_TRACKING:
+    _ml_packages += ["torch", "torchvision", "cellpose"]
 if _WITH_TRACKING:
     _ml_packages += ["btrack", "trackastra", "kornia", "lightning",
                      "pytorch_lightning", "torchmetrics"]

@@ -81,13 +81,27 @@ from skimage.segmentation import watershed
 
 # Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
 # ``pipeline.cellpose`` module (Torch is imported lazily there, so importing it
-# does not load Torch). Re-exported below so ``_CELLPOSE_MODELS`` /
-# ``_segment_cellpose`` / ``_cellpose_model`` resolve under this module too.
-from pipeline.cellpose import (  # noqa: E402,F401
-    _CELLPOSE_MODELS,
-    _cellpose_model,
-    _segment_cellpose,
-)
+# does not load Torch). The import is DEFERRED — see the module-level
+# ``__getattr__`` below — so ``pipeline/cellpose.py`` can be physically absent in
+# a StarDist-only build (Cellpose profiled out) without breaking this module's
+# import. ``pm._CELLPOSE_MODELS`` / ``pm._cellpose_model`` / ``pm._segment_cellpose``
+# still resolve on first access (attribute or ``from process_microscopy import``),
+# so nothing that actually runs Cellpose changes.
+_CELLPOSE_REEXPORTS = ("_CELLPOSE_MODELS", "_cellpose_model", "_segment_cellpose")
+
+
+def __getattr__(name: str):
+    """Lazily resolve the Cellpose re-exports from ``pipeline.cellpose``.
+
+    PEP 562 module ``__getattr__``: only fires for names not already in this
+    module's globals, so it costs nothing on the StarDist path and defers the
+    ``pipeline.cellpose`` import until a Cellpose symbol is first touched. A
+    profiled-out build with ``pipeline/cellpose.py`` removed raises a clear
+    ``ImportError`` here only if Cellpose is actually selected."""
+    if name in _CELLPOSE_REEXPORTS:
+        import pipeline.cellpose as _cp
+        return getattr(_cp, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 # The StarDist segmenters + their per-worker model/FOV state live in the Qt-free
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
@@ -1914,6 +1928,10 @@ def _segment_image_group(
             lowered = [t.lower() for t in fluor_tokens]
             if nuc_tok in lowered:
                 nucleus_image = fluor_raws[lowered.index(nuc_tok)]
+        # Deferred import so a StarDist-only build (Cellpose profiled out) can
+        # omit pipeline/cellpose.py entirely; the error only surfaces here, when
+        # a Cellpose method is actually selected.
+        from pipeline.cellpose import _segment_cellpose
         labels = _segment_cellpose(
             nir_corr, model_type=cellpose_model, diameter=cellpose_diameter,
             flow_threshold=cellpose_flow_threshold,

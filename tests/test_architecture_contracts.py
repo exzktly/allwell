@@ -289,6 +289,11 @@ FEATURE_NAME_EXCEPTIONS = {
     # the sole sanctioned importer of well_viewer.features.* (the import-inversion
     # seam) — not a per-feature module, so it sits outside the naming scheme.
     "registry.py",
+    # image_table's feature-owned view-state (de)serialization — the snapshot /
+    # apply pair persistence/view_state.py fans out via the ``view_state_io``
+    # FeatureDescriptor hook, so a profiled-out Image Table takes its own
+    # persistence with it. A persistence-IO module, not a view/compute one.
+    "view_state_io.py",
 }
 
 

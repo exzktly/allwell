@@ -76,3 +76,21 @@ name = "Playground"
 parent = "Image Browser"
 paths = ["well_viewer/features/image_browser/playground"]
 tests = ["tests/test_playground*.py"]
+
+[[feature]]
+# Pipeline-side removable unit (NOT a Qt tab): the Cellpose segmenter. StarDist
+# is the kept-forever default segmenter; Cellpose is the only method that pulls
+# in Torch. Profiling it out yields a StarDist-only build that drops torch /
+# torchvision / cellpose — the single biggest size lever after Qt. A profile
+# that wants Cellpose lists "Cellpose" in its `features`; every subset that
+# doesn't (thin, plotting_only) excludes it, and the full build keeps it.
+# process_microscopy imports pipeline/cellpose.py lazily, so deleting the path
+# is safe; the spec adds `deps` to `excludes` and skips their collect_all.
+name = "Cellpose"
+paths = ["pipeline/cellpose.py"]
+# No `tests` glob: the Cellpose-touching tests (test_labelfree_phase.py) also
+# cover kept routines — classical_threshold segmentation, Role.PHASE, and the
+# label-free CLI-arg mapping — so they must NOT be auto-deleted with Cellpose.
+# The `test_segment_cellpose_guarded` case skips when cellpose is installed and
+# otherwise asserts the clean "not installed" error, so it stays green either way.
+deps = ["cellpose", "torch", "torchvision"]

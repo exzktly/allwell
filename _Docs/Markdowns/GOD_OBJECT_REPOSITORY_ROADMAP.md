@@ -141,11 +141,15 @@ warn-then-hard-fail, ratchet-down-only (mirror `test_ctx_app_burndown.py:862`'s
 `test_budget_is_not_slack` twin for each):
 - `RAW_SELF_DELEGATOR_BUDGET` — methods in `runtime_app.py` whose body is a single
   `return fn(self, ...)` with a **bare `self`** first arg (exclude `self._ctx`
-  forwarders). Seed = **44**. Discriminator: match `Name id == "self"` as the
-  call's first positional — the same check `test_frozen_ctx_guardrail.py` uses.
+  forwarders). **Seed = 38** (measured on main). Discriminator: `Name id == "self"`
+  as the call's first positional.
 - `APP_FIRST_FUNC_BUDGET` — top-level funcs in `core/` + `features/` whose first
-  param is `app`. Reuse `_collect_free_func_first_params` from
-  `test_frozen_ctx_guardrail.py`. Seed ≈ **131**.
+  param is `app`. **Seed = 135** (measured: core 83 + features 52). Both ratchets
+  carry a `_not_slack` twin that forces the budget down as the count drops.
+
+**Landed** (`test_guardrails.py`): `RAW_SELF_DELEGATOR_BUDGET`,
+`APP_FIRST_FUNC_BUDGET` + `_not_slack` twins + `_raw_self_delegators` /
+`_app_first_free_funcs` AST helpers. ✅
 
 *Ship alone, green. This converts both remaining god dimensions into metrics.*
 
@@ -400,7 +404,7 @@ ordering constraints are met.
 
 | Phase | Status | Def-of-Done guard | Landed (commit / date) |
 |---|---|---|---|
-| A0 · burn-down ratchets | ☐ | ratchets present + seeded | — |
+| A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☐ | `RUNTIME_APP_ATTR_BUDGET` lowered | — |
 | A2 · retire raw-`self` delegators | ☐ | `RAW_SELF_DELEGATOR_BUDGET == 0` | — |
 | A3 · `app`→`ctx` clusters | ☐ | `APP_FIRST_FUNC_BUDGET == 0` | — |

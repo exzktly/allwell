@@ -57,11 +57,11 @@ def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
         return fallback
 
 
-def set_widget_text(app, attr_name: str, text: str) -> None:
+def set_widget_text(host, attr_name: str, text: str) -> None:
     """Set ``text`` on ``app.<attr_name>`` if that attribute exists and is a
     text widget — collapses the repeated ``lbl = getattr(...); if lbl: ...``
     status-setter pattern."""
-    w = getattr(app, attr_name, None)
+    w = getattr(host, attr_name, None)
     if hasattr(w, "setText"):
         w.setText(text)
 
@@ -987,7 +987,8 @@ def mute_color(hex_color: str, factor: float = 0.5) -> str:
 
 
 
-def on_theme_change(app, theme_name: str = None) -> None:
+def on_theme_change(ctx, theme_name: str = None) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Re-apply QSS stylesheet when theme switches."""
     new_theme = theme_name or app._theme_name
     app._theme_name = new_theme
@@ -1010,7 +1011,8 @@ def on_theme_change(app, theme_name: str = None) -> None:
 
 
 
-def apply_theme(app) -> None:
+def apply_theme(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Apply the application-wide stylesheet.
 
     Single source of truth is the repo-root ``theme`` module. Previously
@@ -1028,7 +1030,8 @@ def apply_theme(app) -> None:
 
 
 
-def toast(app, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
+def toast(ctx, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Show a transient v2 Toast over the main window.
 
     ``kind`` matches widgets.toast.Toast: 'info' / 'success' / 'warn' /
@@ -1044,7 +1047,8 @@ def toast(app, msg: str, *, kind: str = "info", msec: int = 3500) -> None:
 
 
 
-def show_progress(app, maximum: int, msg: str = "") -> None:
+def show_progress(ctx, maximum: int, msg: str = "") -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Display the progress bar and set its maximum value."""
     app._progress_bar.setValue(0)
     app._progress_bar.setMaximum(max(1, maximum))
@@ -1055,7 +1059,8 @@ def show_progress(app, maximum: int, msg: str = "") -> None:
 
 
 
-def step_progress(app, value: int, msg: str = "") -> None:
+def step_progress(ctx, value: int, msg: str = "") -> None:
+    app = ctx.window  # transitional bridge (A3)
     """Advance the progress bar to *value* and repaint immediately."""
     app._progress_bar.setValue(value)
     if msg:
@@ -1064,7 +1069,8 @@ def step_progress(app, value: int, msg: str = "") -> None:
 
 
 
-def toggle_log(app) -> None:
+def toggle_log(ctx) -> None:
+    app = ctx.window  # transitional bridge (A3)
     app._log_visible = not app._log_visible
     if app._log_visible:
         app._log_frame.setVisible(True)
@@ -1088,7 +1094,7 @@ def notes_schedule_save(ctx) -> None:
 
 
 
-def norm_timepoint(app, value: object) -> str:
+def norm_timepoint(ctx, value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""

@@ -744,9 +744,9 @@ class WellViewerApp(QWidget):
 
 
 
-    def _apply_theme(self) -> None: return apply_theme(self)
+    def _apply_theme(self) -> None: return apply_theme(self._ctx)
 
-    def _on_theme_change(self, theme_name: str = None) -> None: return on_theme_change(self, theme_name)
+    def _on_theme_change(self, theme_name: str = None) -> None: return on_theme_change(self._ctx, theme_name)
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -929,7 +929,7 @@ class WellViewerApp(QWidget):
 
 
 
-    def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self, value)
+    def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self._ctx, value)
 
     def _review_row_keys(self, row: dict) -> Tuple[str, str, str]: return review_row_keys(self._ctx, row)
 
@@ -1252,18 +1252,18 @@ class WellViewerApp(QWidget):
     def _set_status(self, msg: str) -> None:
         self._status_lbl.setText(msg)
 
-    def _toast(self, msg: str, *, kind = 'info', msec = 3500) -> None: return toast(self, msg, kind=kind, msec=msec)
+    def _toast(self, msg: str, *, kind = 'info', msec = 3500) -> None: return toast(self._ctx, msg, kind=kind, msec=msec)
 
-    def _show_progress(self, maximum: int, msg: str = '') -> None: return show_progress(self, maximum, msg)
+    def _show_progress(self, maximum: int, msg: str = '') -> None: return show_progress(self._ctx, maximum, msg)
 
-    def _step_progress(self, value: int, msg: str = '') -> None: return step_progress(self, value, msg)
+    def _step_progress(self, value: int, msg: str = '') -> None: return step_progress(self._ctx, value, msg)
 
     def _hide_progress(self) -> None:
         """Remove the progress bar."""
         self._progress_bar.setVisible(False)
         self._progress_bar.setValue(0)
 
-    def _toggle_log(self) -> None: return toggle_log(self)
+    def _toggle_log(self) -> None: return toggle_log(self._ctx)
 
     def _clear_log(self) -> None:
         if hasattr(self, "_log_text") and self._log_text is not None:

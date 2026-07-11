@@ -426,7 +426,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 5, was 38) | via A3 clusters 2026-07-11 |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 19, was 135) | +ui_helpers hosts (~86% done) 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ☑ | `APP_FIRST_FUNC_BUDGET == 0` (135 → **0**) | all clusters 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,16 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 COMPLETE — `APP_FIRST_FUNC_BUDGET` = 0.** Final clusters:
+  channel_state_controller (bridge), ui_helpers empty-state/batch-export hosts +
+  leaf renderers (playground/review-image/qc/image-browser/status) + the
+  construction builder chain (build_ui/sidebar/centre/preview + wire_event_bus/
+  register_default_scopes) + export/style — the genuine window/widget helpers were
+  renamed `app`→`win` (the QMainWindow is their legitimate endpoint), the logic
+  functions bridged to `ctx`. **Every free function in `core/`+`features/` is now
+  either `ctx`-first or takes a typed `win`/`host` — zero god-object-first
+  signatures.** `RAW_SELF_DELEGATOR_BUDGET` 38→5 along the way (A2 substantially
+  done; the residue are window-forwarding delegators that A5 removes).
 - 2026-07-11 — **A3 — registry `on_selection_changed` hooks (the "last app-first hook"):**
   migrated the 8 `_sel_*` hooks in `features/registry.py` to `ctx`-first (bridge),
   flipped the 2 `desc.on_selection_changed(app)` dispatch sites in

@@ -203,21 +203,22 @@ _PLOT_LEAVES = {"Line Graphs", "Bar Plots", "Scatter Plot", "Distribution",
 
 
 def test_real_app_enter_exit_split(loaded_app):
-    """On a real app (install ran in build_ui): splitting Plotting | Statistics
-    force-builds Statistics, detaches both top-level pages (Plotting's nested
-    notebook moves whole), reports both leaves visible; exiting restores order."""
+    """On a real app (install ran in build_ui): splitting Plotting | Sample
+    Definitions force-builds Sample Definitions, detaches both top-level pages
+    (Plotting's nested notebook moves whole), reports both leaves visible;
+    exiting restores order."""
     from well_viewer.core import split_view as sv
     from well_viewer.core import tab_controller as tc
 
     app = loaded_app
     assert tc.split_visible_provider is not None  # install_split_view ran
     app._notebook.setCurrentByName("Plotting")
-    sv.enter_split(app, "Plotting", "Statistics")
+    sv.enter_split(app, "Plotting", "Sample Definitions")
 
     assert app._ctx.runtime.split.active is True
     assert app._ctx.runtime.split.pane.count() == 2
     visible = tc.visible_centre_tabs(app._ctx)
-    assert "Statistics" in visible
+    assert "Sample Definitions" in visible
     assert visible & _PLOT_LEAVES               # Plotting resolved to a plot leaf
     assert app._current_centre_tab() in _PLOT_LEAVES  # pane A focused
 
@@ -225,7 +226,7 @@ def test_real_app_enter_exit_split(loaded_app):
     assert app._ctx.runtime.split.active is False
     assert app._ctx.runtime.split.pane.count() == 0
     assert "Plotting" in app._notebook.pageNames()
-    assert "Statistics" in app._notebook.pageNames()
+    assert "Sample Definitions" in app._notebook.pageNames()
 
 
 def test_dataset_reload_exits_split(loaded_app, mini_dataset):

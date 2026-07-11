@@ -1,4 +1,4 @@
-"""Threshold quick-edit on Segmentation + Image Table tabs edits ThreshFracOn."""
+"""Threshold quick-edit on the Segmentation tab edits ThreshFracOn."""
 from __future__ import annotations
 import pytest
 pytest.importorskip("PySide6")
@@ -15,22 +15,11 @@ def test_segmentation_threshold_stepper_edits_thresh_frac(loaded_app):
     assert abs(app._get_thresh_frac_on(ch) - 123.0) < 1e-6
 
 
-def test_image_table_threshold_stepper_edits_thresh_frac(loaded_app):
-    app = loaded_app
-    assert show_image_browser_subtab(app._ctx, "Image Table")
-    st = getattr(app, "_image_table_thresh_frac_stepper", None)
-    assert st is not None, "Image Table tab should host an ON-threshold stepper"
-    ch = app._app_state.channel.active_channel
-    st.setValue(77.0)
-    assert abs(app._get_thresh_frac_on(ch) - 77.0) < 1e-6
-
-
-def test_quick_edit_steppers_sync_on_refresh(loaded_app):
+def test_quick_edit_stepper_syncs_on_refresh(loaded_app):
     app = loaded_app
     show_image_browser_subtab(app._ctx, "Segmentation")
-    show_image_browser_subtab(app._ctx, "Image Table")
-    # Set via the canonical setter, then the shared refresh should sync both.
+    # Set via the canonical setter, then the shared refresh should sync the
+    # Segmentation stepper (and the Plotting ctxbar stepper).
     app._set_thresh_frac_on(55.0)
     app._refresh_thresh_frac_quick_edit()
     assert abs(app._review_thresh_frac_stepper.value() - 55.0) < 1e-6
-    assert abs(app._image_table_thresh_frac_stepper.value() - 55.0) < 1e-6

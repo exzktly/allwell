@@ -15,8 +15,15 @@ from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 from well_viewer.features.image_browser import controller as ctl
 
 #: Sub-tab order. Leaf names must match the dispatch branches in
-#: ``core.tab_controller.on_tab_change``.
+#: ``core.tab_controller.on_tab_change``. The active build profile filters this
+#: (a profile may drop a sub-tab), so producing a subset is a manifest edit.
 SUBTABS = ("Segmentation",)
+
+
+def _active_subtabs() -> tuple:
+    from well_viewer.core.profile import active_profile
+    prof = active_profile()
+    return tuple(s for s in SUBTABS if prof.includes_subtab("Image Browser", s))
 
 
 def build_image_browser_tab(ctx, parent: QWidget) -> None:
@@ -40,7 +47,7 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
 
     # One empty frame per sub-tab; bodies build lazily (the build function sets
     # each sub-tab's own layout).
-    for name in SUBTABS:
+    for name in _active_subtabs():
         sub_tabs.addTab(QWidget(sub_tabs), name)
 
     sub_tabs.currentChanged.connect(

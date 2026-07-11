@@ -677,6 +677,24 @@ _PLOT_VIEWS = [
 ]
 
 
+def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
+    """Apply every feature-registered plot-card decorator to *card*.
+
+    Decouples plot tabs from feature-specific card add-ons (e.g. Saved Plots'
+    "save to gallery" hover button): a feature declares a ``plot_card_decorator``
+    on its ``FeatureDescriptor`` and this fans it out. A profiled-out feature
+    isn't in the registry, so its decorator never runs — and its module is never
+    imported here, which is what lets a subset binary omit it entirely.
+    """
+    for descriptor in ctx.features.with_hook("plot_card_decorator"):
+        try:
+            descriptor.plot_card_decorator()(ctx, card, tab_name)
+        except Exception:
+            import logging
+            logging.getLogger("well_viewer").exception(
+                "plot-card decorator from %r failed", descriptor.name)
+
+
 def make_plot_view_switcher(ctx, current_name: str):
     """The 5-segment per-card view-switcher (Line / Bar / Scatter / Dist / Heat).
 

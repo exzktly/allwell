@@ -129,9 +129,8 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
         ctrl, lambda: ctx.open_export_style_panel("scatter_agg")))
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False)
-    if ctx.features.get("Saved Plots") is not None:
-        from well_viewer.features.saved_plots.controller import wire_save_to_gallery
-        wire_save_to_gallery(ctx, card, "Scatter Plot")
+    from well_viewer.core.ui_helpers import apply_plot_card_decorators
+    apply_plot_card_decorators(ctx, card, "Scatter Plot")
     _sw = make_plot_view_switcher(ctx, 'Scatter Plot')
     if _sw is not None:
         card.setLeftHeaderWidget(_sw)

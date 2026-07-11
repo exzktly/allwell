@@ -495,6 +495,14 @@ def _fold_change_scope_bar():
     )
 
 
+def _saved_plots_card_decorator():
+    """The Saved Plots plot-card decorator (lazy). Plot tabs apply this via
+    ``ui_helpers.apply_plot_card_decorators`` so they never import saved_plots —
+    a profiled-out Saved Plots simply isn't in the registry, so nothing runs."""
+    from well_viewer.features.saved_plots.controller import wire_save_to_gallery
+    return wire_save_to_gallery
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # The descriptor list — the single source of truth. Comment a line to remove
 # a feature.
@@ -568,6 +576,7 @@ def _features() -> "list[FeatureDescriptor]":
             name="Saved Plots", group="Data", build=_build_saved_plots,
             lazy_only=True,
             on_activate=_activate_saved_plots,
+            plot_card_decorator=_saved_plots_card_decorator,
         ),
         FeatureDescriptor(
             name="Batch Export", group="Data", build=_build_batch_export,

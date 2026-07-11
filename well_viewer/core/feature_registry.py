@@ -89,6 +89,10 @@ class FeatureDescriptor:
     # Persistence + fold-change contributions.
     persistence: Tuple[PersistenceSpec, ...] = ()
     fold_change_scope_factory: Optional[Callable] = None   # () -> FoldChangeScope
+    # A feature that decorates every plot card (e.g. Saved Plots' "save to
+    # gallery" hover button). Lazy: ``() -> ((ctx, card, tab_name) -> None)``.
+    # Plot tabs apply all registered decorators, so they never name the feature.
+    plot_card_decorator: Optional[Callable] = None
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check

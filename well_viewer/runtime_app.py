@@ -338,13 +338,11 @@ class WellViewerApp(QWidget):
         self._runtime.fov.btns = []
         self._runtime.fov.btn = None
         self._runtime.fov.observers = []   # callables (use_fov: bool) -> None
-        # Channel / timepoint comboboxes are assigned to these attrs in the view builders.
-        self._plot_chan_cb = None
-        self._review_image_chan_cb = None
-        self._bar_tp_cb = None
-        self._bar_swarm_cb = None
-        self._bar_violin_cb = None
-        self._violin_bw_edit = None
+        # Channel / timepoint / edit widget handles (_plot_chan_cb,
+        # _review_image_chan_cb, _bar_tp_cb, _bar_swarm_cb, _bar_violin_cb,
+        # _violin_bw_edit) are registered by the view builders via
+        # WidgetRegistry; readers use ctx.widgets.get_or_none / has, so no
+        # None-seed is needed here (A1).
         self._runtime.barplot.ylim_mean_lo_edit = None
         self._runtime.barplot.ylim_mean_hi_edit = None
         self._runtime.barplot.ylim_frac_lo_edit = None
@@ -355,9 +353,8 @@ class WellViewerApp(QWidget):
         # live in ``self._app_state.selection`` (well_viewer/state/selection.py).
         # ``_selections`` / ``_selected_wells`` / ``_active_solo_wells`` etc.
         # remain as @property shims further down.
-        self._entry_edit = None
-        self._cdf_xmin_edit = None
-        self._cdf_xmax_edit = None
+        # _entry_edit / _cdf_xmin_edit / _cdf_xmax_edit are registered by the
+        # Line-graph builder; readers use ctx.widgets.get_or_none (A1).
 
         # Plate-map well selection, the commit-coalescing flag, and the
         # plotting-tab solo-well overrides all live in
@@ -368,7 +365,8 @@ class WellViewerApp(QWidget):
         # lives in ``self._app_state.preview`` and ``self._app_state.review_image``
         # (well_viewer/state/review_image.py); see the @property shims below.
         # Widget handles and the lazily-built montage arrays stay here.
-        self._preview_fov_cb = None
+        # _preview_fov_cb is registered by the preview/image builders; readers
+        # use ctx.widgets.get_or_none / getattr(ctx.window, ..., None) (A1).
         self._runtime.review_image.tp_cb = None
         # Rubber-band rectangle for box-delete in include-edit mode; the
         # QRubberBand is parented to _review_image_label so it scrolls with

@@ -405,7 +405,7 @@ ordering constraints are met.
 | Phase | Status | Def-of-Done guard | Landed (commit / date) |
 |---|---|---|---|
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
-| A1 · widget attrs → registry | ☐ | `RUNTIME_APP_ATTR_BUDGET` lowered | — |
+| A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ☐ | `RAW_SELF_DELEGATOR_BUDGET == 0` | — |
 | A3 · `app`→`ctx` clusters | ☐ | `APP_FIRST_FUNC_BUDGET == 0` | — |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
@@ -419,6 +419,12 @@ ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A1 landed:** removed 10 widget-handle `None`-seeds from
+  `runtime_app.__init__` (builders register them via `WidgetRegistry`; readers
+  already use `get_or_none`/`has`/`getattr(...,None)`). Attrs 23→13,
+  `RUNTIME_APP_ATTR_BUDGET` 68→15, line budget 1298→1296. app_smoke + widget/registry
+  tests green.
+- 2026-07-11 — **A0 landed:** burn-down ratchets added (test-only).
 - 2026-07-11 — Rebased onto `main` after build-time-feature-profiles merged (PR #639);
   baseline references updated branch → `main`.
 - 2026-07-11 — Roadmap authored + goal-mode framing added; both workstreams scoped;

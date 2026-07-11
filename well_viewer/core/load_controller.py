@@ -184,8 +184,8 @@ def load_directory(app, d: Path, label=None) -> None:
         from well_viewer.core.split_view import (
             exit_split, sync_split_toggle_button,
         )
-        exit_split(app)
-        sync_split_toggle_button(app, False)
+        exit_split(app._ctx)
+        sync_split_toggle_button(app._ctx, False)
     # Save the outgoing dataset's view-state before swapping data dirs so
     # reopening it later restores tab / wells / channel selection.
     if app._app_state.dataset.data_dir is not None:

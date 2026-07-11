@@ -161,7 +161,7 @@ def build_ui(app) -> None:
     # to remove the feature entirely — the app falls back to single-tab with no
     # other changes needed.
     from well_viewer.core.split_view import install_split_view
-    install_split_view(app)
+    install_split_view(app._ctx)
 
     # Phase 11 (A6 / B23): Properties rail as an OVERLAY on the centre
     # column. The rail floats over the right edge of the centre pane;

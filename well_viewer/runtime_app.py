@@ -231,7 +231,7 @@ def teardown_review_pane(app) -> None:
             _logger.debug("teardown: cell-browser loader cancel failed", exc_info=True)
     try:
         from well_viewer.core.split_view import _remove_split_focus_filter
-        _remove_split_focus_filter(app)
+        _remove_split_focus_filter(app._ctx)
     except Exception:
         _logger.debug("teardown: split-focus-filter removal failed", exc_info=True)
 

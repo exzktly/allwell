@@ -426,7 +426,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 14, was 38) | via A3 clusters 2026-07-11 |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 80, was 135) | playground, stats, grouping, heatmap, ui_helpers, plot_orch, tab_controller 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 68, was 135) | +split_view (7 core/feature clusters + split) 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,13 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 — split_view cluster:** migrated the 12 `app`-first funcs in
+  `core/split_view.py` (enter/exit/focus split, focus-filter install, toggle/combo
+  handlers, nav-intercept, install_split_view) to `ctx`-first via the
+  `app = ctx.window` bridge; threaded internal cross-calls, the `_SplitFocusFilter`
+  class's `self._app._ctx` calls, the install-time closures, and the two external
+  callers (`app_shell_view`, `load_controller`) through ctx. Updated 3 split test
+  files to pass `app._ctx`. `APP_FIRST_FUNC_BUDGET` 80→68.
 - 2026-07-11 — **A3+A2 — tab_controller cluster:** migrated the 8 `app`-first
   dispatch/nav funcs in `core/tab_controller.py` (notebook/section-nav/tab-history/
   sidebar-visibility/central-pane/build-centre) via the `app = ctx.window` bridge,

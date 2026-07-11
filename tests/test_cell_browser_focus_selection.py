@@ -29,14 +29,14 @@ def _enter_scatter_cellbrowser_split(app):
     # Make Scatter Plot the active Plotting leaf.
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
     app._notebook.setCurrentByName("Plotting")
-    enter_split(app, "Plotting", "Image Browser")
+    enter_split(app._ctx, "Plotting", "Image Browser")
     assert app._is_tab_visible("Cell Browser")
     assert "Scatter Plot" in app._visible_centre_tabs()
 
 
 def _focus(app, top):
     from well_viewer.core.split_view import focus_split
-    focus_split(app, top)
+    focus_split(app._ctx, top)
     app._refresh_sidebar_map_now()  # drain the deferred sidebar repaint synchronously
 
 

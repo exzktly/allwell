@@ -120,7 +120,7 @@ def _split_app(*, install=True):
     app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app),
                                widgets=WidgetRegistry(app))
     if install:
-        sv.install_split_view(app)
+        sv.install_split_view(app._ctx)
     return app, st, widgets
 
 
@@ -153,7 +153,7 @@ def test_enter_split_reparents_and_reports_both_panes():
     from well_viewer.core import tab_controller as tc
 
     app, st, _ = _split_app()
-    sv.enter_split(app, "Plotting", "Saved Plots")
+    sv.enter_split(app._ctx, "Plotting", "Saved Plots")
 
     assert app._ctx.runtime.split.active is True
     assert app._ctx.runtime.split.pane.count() == 2
@@ -167,8 +167,8 @@ def test_exit_split_restores_notebook_order():
     from well_viewer.core import split_view as sv
 
     app, st, _ = _split_app()
-    sv.enter_split(app, "Plotting", "Saved Plots")
-    sv.exit_split(app)
+    sv.enter_split(app._ctx, "Plotting", "Saved Plots")
+    sv.exit_split(app._ctx)
 
     assert app._ctx.runtime.split.active is False
     assert app._ctx.runtime.split.pane.count() == 0
@@ -180,7 +180,7 @@ def test_enter_split_same_tab_is_noop():
     from well_viewer.core import split_view as sv
 
     app, st, _ = _split_app()
-    sv.enter_split(app, "Plotting", "Plotting")
+    sv.enter_split(app._ctx, "Plotting", "Plotting")
     assert app._ctx.runtime.split.active is False
     assert st.pageNames() == ["Plotting", "Statistics", "Saved Plots"]
 
@@ -190,9 +190,9 @@ def test_focus_split_switches_focused_pane():
     from well_viewer.core import tab_controller as tc
 
     app, _, _ = _split_app()
-    sv.enter_split(app, "Plotting", "Saved Plots")
+    sv.enter_split(app._ctx, "Plotting", "Saved Plots")
     assert tc.current_centre_tab(app._ctx) == "Plotting"
-    sv.focus_split(app, "Saved Plots")
+    sv.focus_split(app._ctx, "Saved Plots")
     assert app._ctx.runtime.split.focused == "Saved Plots"
     assert tc.current_centre_tab(app._ctx) == "Saved Plots"
 
@@ -212,7 +212,7 @@ def test_real_app_enter_exit_split(loaded_app):
     app = loaded_app
     assert tc.split_visible_provider is not None  # install_split_view ran
     app._notebook.setCurrentByName("Plotting")
-    sv.enter_split(app, "Plotting", "Statistics")
+    sv.enter_split(app._ctx, "Plotting", "Statistics")
 
     assert app._ctx.runtime.split.active is True
     assert app._ctx.runtime.split.pane.count() == 2
@@ -221,7 +221,7 @@ def test_real_app_enter_exit_split(loaded_app):
     assert visible & _PLOT_LEAVES               # Plotting resolved to a plot leaf
     assert app._current_centre_tab() in _PLOT_LEAVES  # pane A focused
 
-    sv.exit_split(app)
+    sv.exit_split(app._ctx)
     assert app._ctx.runtime.split.active is False
     assert app._ctx.runtime.split.pane.count() == 0
     assert "Plotting" in app._notebook.pageNames()
@@ -236,7 +236,7 @@ def test_dataset_reload_exits_split(loaded_app, mini_dataset):
 
     app = loaded_app
     app._notebook.setCurrentByName("Plotting")
-    sv.enter_split(app, "Plotting", "Image Browser")
+    sv.enter_split(app._ctx, "Plotting", "Image Browser")
     assert app._ctx.runtime.split.active is True
 
     app._load_path(mini_dataset)  # reopen the same dataset

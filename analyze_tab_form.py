@@ -614,8 +614,11 @@ class AnalyzeTabFormMixin:
         # The size / solidity bounds only apply when debris removal is on, so
         # hide them entirely until it's checked (rather than showing greyed-out
         # orphan fields) — the cleaning-step options then read as one coherent
-        # group that appears only when relevant.
-        self._qc_debris_rows = (ra, rs)
+        # group that appears only when relevant. Toggle the *parent* rows, not the
+        # ``_row()`` right-hand cells: hiding only the cell strands the "Min / Max
+        # area (px)" / "Min solidity (0-1)" labels (they live in the cell's parent),
+        # exactly as the _bg_radius_rows / _fft_small_rows / _mesh_param_rows fixes above.
+        self._qc_debris_rows = (ra.parentWidget(), rs.parentWidget())
 
         def _sync_debris(_=None) -> None:
             on = self._qc_remove_debris_cb.isChecked()

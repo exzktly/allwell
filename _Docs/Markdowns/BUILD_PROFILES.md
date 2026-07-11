@@ -68,31 +68,8 @@ scripts/build_executable.sh                          # full app (unset = full)
    binary has no `ALLWELL_PROFILE` env at run time, so `active_profile()` reads
    this marker and the runtime registry filters to match the bundled code.
 
-This composes with the existing `ALLWELL_WITH_TRACKING` lever: tracking needs
-Torch, so it forces the Torch stack back in even when Cellpose is profiled out,
-and `graph_excludes` makes sure a force-collected package is never also pruned
-from the module graph (which would ship a broken bundle). The de-coupling guards
-(§6) are what let the excluded modules be physically absent without the surviving
-code crashing.
-
-## 2a. Gate the pip install to the profile
-
-The binary bundle already drops a profiled-out feature's heavy deps (`excludes`
-above). For a **dev / remote install**, generate a flat requirements file that
-removes the same packages so `pip install` never pulls what the profile can't use:
-
-```bash
-python scripts/gen_requirements.py --profile thin -o requirements-thin.txt
-pip install --no-build-isolation -r requirements-thin.txt
-```
-
-It reads each excluded catalog feature's `pip` list (PyPI distribution names —
-distinct from the import-name `deps` PyInstaller wants), inlines the base file's
-`-r` includes into one self-contained file, and comments out every matching line
-(kept as an auditable `# [profile:…] dropped —` marker, not silently deleted).
-A StarDist-only `thin` install drops `torch` / `torchvision` / `cellpose` (with
-Cellpose) and `scikit-learn` / `umap-learn` (with Multivariate); TensorFlow and
-StarDist stay. Guarded by `tests/test_gen_requirements.py`.
+The de-coupling guards (§6) are what let the excluded modules be physically
+absent without the surviving code crashing.
 
 ## 3. Produce a physically stripped tree (source, not binary)
 
@@ -161,9 +138,6 @@ so a profiled-out feature's module can be physically absent:
   `cellpose` (catalog `deps` → `excludes`, ML `collect_all` skipped);
 - Image Browser sub-tabs (profile-filtered; each imports its module only when
   built).
-
-**Pip parity** — `scripts/gen_requirements.py` (§2a) drops the same excluded-feature
-deps from a dev/remote install, so pip gating tracks the bundle.
 
 **`runtime_app` proxies — verified inert.** Every removable-feature reference in
 `runtime_app.py` is a lazy `_lazy(...)` proxy (imports its module only when

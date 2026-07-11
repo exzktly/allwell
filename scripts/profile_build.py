@@ -9,10 +9,9 @@ third-party deps that get gated OUT of the binary.
 
 The contract this makes verifiable: **a feature's heavy deps are dropped from
 the binary automatically from its catalog ``deps``** — no per-feature edit in the
-spec. The one subtlety is that opt-in tracking (``ALLWELL_WITH_TRACKING``) needs
-Torch even when Cellpose is profiled out, so a package can be both "a profiled-out
-feature's dep" and "force-collected"; :func:`plan_ml` and :func:`graph_excludes`
-reconcile that so we never exclude from the module graph something we bundled.
+spec. Both the module-graph ``excludes`` and the ``collect_all`` skip derive from
+the same computed set, because ``excludes`` alone does not drop a ``collect_all``'d
+package (see :func:`plan_ml`).
 
 Stdlib-only (``tomllib``); safe to import from the spec at build time.
 """
@@ -64,28 +63,19 @@ def compute_exclusions(catalog: list, features, subtabs=None) -> Exclusions:
     return ex
 
 
-# The Cellpose feature's Torch stack — bundled unless BOTH Cellpose is profiled
-# out AND tracking is off. Tracking additionally pulls its own training stack.
+# The Cellpose feature's Torch stack — the only ``collect_all``'d ML packages.
+# Bundled unless Cellpose is profiled out (its deps in ``excluded_deps``).
 _CELLPOSE_ML = ["torch", "torchvision", "cellpose"]
-_TRACKING_ML = ["btrack", "trackastra", "kornia", "lightning",
-                "pytorch_lightning", "torchmetrics"]
 
 
-def plan_ml(excluded_deps, with_tracking: bool) -> list:
-    """ML packages to ``collect_all`` into the binary.
+def plan_ml(excluded_deps) -> list:
+    """Torch-stack packages to ``collect_all`` into the binary.
 
-    Cellpose's Torch stack ships unless its deps were profiled out; tracking
-    (opt-in) forces the Torch stack back in and adds its own training packages."""
-    pkgs: list = []
-    if not any(d in excluded_deps for d in _CELLPOSE_ML) or with_tracking:
-        pkgs += list(_CELLPOSE_ML)
-    if with_tracking:
-        pkgs += list(_TRACKING_ML)
-    return pkgs
-
-
-def graph_excludes(excluded_deps, collected_ml) -> list:
-    """The deps to add to PyInstaller ``excludes`` — the profiled-out deps minus
-    anything we actually collected (never prune the module graph of a package
-    whose .so payload we bundled, or it ships broken)."""
-    return [d for d in excluded_deps if d not in collected_ml]
+    Cellpose's Torch stack ships unless its deps were profiled out. This is
+    separate from the module-graph ``excludes`` on purpose: adding a package to
+    ``excludes`` prunes the import graph but does NOT drop the ``datas`` /
+    ``binaries`` that ``collect_all`` emits, so *skipping the collect* is what
+    keeps the .so/.dylib payload out of the bundle."""
+    if any(d in excluded_deps for d in _CELLPOSE_ML):
+        return []
+    return list(_CELLPOSE_ML)

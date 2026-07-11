@@ -569,32 +569,16 @@ _icd_datas, _icd_binaries, _icd_hidden = collect_all("imagecodecs")
 datas         += _icd_datas
 hiddenimports += _icd_hidden
 
-# Cellpose (Torch-backed segmenter) is bundled unless profiled out (see the
-# plan_ml() call below); multi-frame cell tracking (btrack / trackastra) + its
-# training stack (lightning / kornia / torchmetrics) is OPTIONAL and OFF by
-# default. The full bundle ships StarDist + Cellpose *inference* only, so it
-# omits the tracking/training packages (the single biggest install-size lever
-# after Qt). Opt tracking back in at build time with ALLWELL_WITH_TRACKING=1
-# — and install the extras first:
-#   pip install --no-build-isolation -r _Docs/requirements-tracking.txt
-#
-# torch / torchvision carry large compiled extensions; cellpose (and, when
-# enabled, btrack / trackastra / kornia / lightning) have submodules and
-# (trackastra) bundled data. collect_all grabs the Python shims, the .so/.dylib
-# binaries, and data files so the frozen app runs without a Python toolchain.
-# The macOS/Windows build wheels are CPU/MPS (no CUDA). cellpose/trackastra
-# download model weights at runtime; those are not bundled.
-_WITH_TRACKING = os.environ.get("ALLWELL_WITH_TRACKING", "").strip().lower() \
-    not in ("", "0", "false", "no", "off")
-
 # Cellpose is the only Torch-backed segmenter; StarDist (TF) is the kept default.
 # torch / torchvision / cellpose are the Cellpose feature's catalog ``deps``, so
-# profiling Cellpose out drops them from the bundle automatically. Tracking
-# (opt-in) also needs Torch, so it forces the ML stack back in even if Cellpose's
-# deps were profiled out. ``plan_ml`` encodes that (unit-tested in
-# tests/test_profile_build.py). The single biggest size lever after Qt.
-from scripts.profile_build import graph_excludes, plan_ml  # noqa: E402
-_ml_packages = plan_ml(_excluded_deps, _WITH_TRACKING)
+# profiling Cellpose out drops them from the bundle automatically — ``plan_ml``
+# returns them only when they're NOT in ``_excluded_deps`` (unit-tested in
+# tests/test_profile_build.py). collect_all grabs the Python shims, the .so/.dylib
+# binaries, and data files so the frozen app runs without a Python toolchain. The
+# macOS/Windows wheels are CPU/MPS (no CUDA); cellpose downloads model weights at
+# runtime, so those are not bundled. The single biggest size lever after Qt.
+from scripts.profile_build import plan_ml  # noqa: E402
+_ml_packages = plan_ml(_excluded_deps)
 
 _ml_binaries = []
 for _pkg in _ml_packages:
@@ -602,11 +586,6 @@ for _pkg in _ml_packages:
     datas         += _ml_d
     _ml_binaries  += _ml_b
     hiddenimports += _ml_h
-
-# Reconcile the module-graph excludes with what we actually collected: never
-# exclude something we bundled (tracking-on + Cellpose-out still ships Torch), or
-# the collected .so payload would ship with a pruned, broken module graph.
-_excluded_deps = graph_excludes(_excluded_deps, _ml_packages)
 
 # torch subsystems unused by Cellpose *inference*. collect_all("torch") pulls
 # the whole package, including torch.distributed (multi-node / multi-GPU
@@ -621,12 +600,12 @@ _torch_excludes = [
     "torch.utils.tensorboard", "torch.utils.benchmark",
 ]
 
-# When tracking is off, keep its packages — and the training-only deps they
-# pull in — out of the bundle even if they happen to be importable in the build
-# env. The app's tracking entry points import these lazily behind a guard, so a
-# tracking action invoked in a slim build raises a clean "not installed" error
-# rather than crashing at startup.
-_tracking_excludes = [] if _WITH_TRACKING else [
+# Heavy training/serving packages the app never imports — kept out of the bundle
+# even if a polluted build env has them installed or something pulls them in
+# transitively. (These were the old multi-frame-tracking training stack, which no
+# longer exists in the app; the static exclude is cheap hygiene against a large,
+# unused payload.)
+_dead_ml_excludes = [
     "btrack", "trackastra", "kornia",
     "lightning", "lightning_fabric", "lightning_cloud", "pytorch_lightning",
     "torchmetrics", "wandb", "tensorboard", "tensorboard_data_server",
@@ -703,7 +682,7 @@ a = Analysis(
         "keras.src.benchmarks",
         # NOTE: ssl intentionally NOT excluded — process_microscopy patches
         # ssl._create_default_https_context for StarDist model download
-    ] + _qt_excludes + _tracking_excludes + _torch_excludes + _excluded_deps,
+    ] + _qt_excludes + _dead_ml_excludes + _torch_excludes + _excluded_deps,
     noarchive=False,
     optimize=1,
 )

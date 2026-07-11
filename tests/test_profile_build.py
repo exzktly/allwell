@@ -13,7 +13,6 @@ from pathlib import Path
 from scripts.profile_build import (
     admits,
     compute_exclusions,
-    graph_excludes,
     load_catalog,
     plan_ml,
 )
@@ -70,34 +69,25 @@ def test_full_profile_excludes_nothing():
     assert ex.deps == [] and ex.features == [] and ex.repo_paths == []
 
 
-# ── plan_ml + graph_excludes: the tracking ↔ Cellpose reconciliation ─────────
+# ── plan_ml: the Torch stack is collected only when Cellpose is present ───────
 
 def test_full_build_collects_the_torch_stack():
-    assert plan_ml([], with_tracking=False) == ["torch", "torchvision", "cellpose"]
+    assert plan_ml([]) == ["torch", "torchvision", "cellpose"]
 
 
-def test_cellpose_out_drops_torch_when_tracking_off():
-    excluded = ["cellpose", "torch", "torchvision"]
-    assert plan_ml(excluded, with_tracking=False) == []
-    # …and those deps are excluded from the module graph (nothing collected).
-    assert set(graph_excludes(excluded, [])) == set(excluded)
+def test_cellpose_out_drops_the_torch_stack():
+    assert plan_ml(["cellpose", "torch", "torchvision"]) == []
 
 
-def test_tracking_forces_torch_back_in_even_with_cellpose_out():
-    excluded = ["cellpose", "torch", "torchvision"]
-    ml = plan_ml(excluded, with_tracking=True)
-    assert {"torch", "torchvision", "cellpose"} <= set(ml)
-    assert "lightning" in ml and "trackastra" in ml
-    # Critical: never exclude from the module graph what we bundled, or the
-    # collected .so payload ships with a broken graph. Torch must NOT be excluded.
-    assert graph_excludes(excluded, ml) == []
+def test_any_one_cellpose_dep_excluded_drops_the_collect():
+    # Defensive: even a partial exclusion means Cellpose is out, so skip collect.
+    assert plan_ml(["torch"]) == []
 
 
 def test_multivariate_out_still_collects_torch():
-    excluded = ["sklearn", "umap", "pynndescent"]
-    ml = plan_ml(excluded, with_tracking=False)
-    assert ml == ["torch", "torchvision", "cellpose"]
-    assert set(graph_excludes(excluded, ml)) == set(excluded)  # sklearn/umap pruned
+    # Multivariate's deps don't touch the Torch stack, so it still ships.
+    assert plan_ml(["sklearn", "umap", "pynndescent"]) == \
+        ["torch", "torchvision", "cellpose"]
 
 
 # ── the real catalog agrees with the shipped thin profile ────────────────────
@@ -110,4 +100,4 @@ def test_real_thin_profile_drops_torch_and_sklearn():
                             prof.get("subtabs") or {})
     assert {"torch", "torchvision", "cellpose"} <= set(ex.deps)
     assert {"sklearn", "umap"} <= set(ex.deps)
-    assert plan_ml(ex.deps, with_tracking=False) == []  # StarDist-only binary
+    assert plan_ml(ex.deps) == []  # StarDist-only binary

@@ -48,18 +48,32 @@ scripts/build_executable.sh                          # full app (unset = full)
 
 `all_well.spec` reads `ALLWELL_PROFILE` and, for a subset:
 
-1. **Omits excluded features' source** from the bundled `well_viewer` tree
-   (`_pkg_datas` drops each catalog `paths` dir).
-2. **Drops their unique heavy deps** — e.g. excluding Multivariate removes
-   `sklearn` / `umap` / `pynndescent` from the module graph (its catalog `deps`
-   go to PyInstaller `excludes`, and their `collect_submodules` is skipped).
+1. **Omits excluded features' source** from every bundled first-party package
+   (`_pkg_datas` drops each catalog `paths` entry — `well_viewer/` tabs *and*
+   non-Qt units like `pipeline/cellpose.py`).
+2. **Drops their heavy deps from the binary — automatically, by feature.** Each
+   catalog feature declares its unique heavy deps once (`full.toml`'s `deps`).
+   Excluding the feature adds those to `_excluded_deps`, which does two things:
+   (a) they go to PyInstaller `excludes` (pruned from the module graph), and
+   (b) their `collect_all` / `collect_submodules` is **skipped**. Both matter —
+   `excludes` alone does *not* drop a `collect_all`'d package, because
+   `collect_all` emits `datas`/`binaries` tuples that `excludes` never filters;
+   skipping the collect is what actually keeps the `.so`/`.dylib` payload out.
+   So a StarDist-only (`thin`) binary drops `torch` / `torchvision` / `cellpose`
+   (Cellpose) and `sklearn` / `umap` / `pynndescent` (Multivariate) with **no
+   per-feature edit in the spec** — add a new dep-bearing feature to the catalog
+   and its deps gate themselves. The pure decision math is
+   `scripts/profile_build.py` (unit-tested in `tests/test_profile_build.py`).
 3. **Bakes the profile** as `active_profile.txt` at the bundle root. A frozen
    binary has no `ALLWELL_PROFILE` env at run time, so `active_profile()` reads
    this marker and the runtime registry filters to match the bundled code.
 
-This composes with the existing `ALLWELL_WITH_TRACKING` lever (torch/tracking
-stack). The de-coupling guards (§6) are what let the excluded modules be
-physically absent without the surviving code crashing.
+This composes with the existing `ALLWELL_WITH_TRACKING` lever: tracking needs
+Torch, so it forces the Torch stack back in even when Cellpose is profiled out,
+and `graph_excludes` makes sure a force-collected package is never also pruned
+from the module graph (which would ship a broken bundle). The de-coupling guards
+(§6) are what let the excluded modules be physically absent without the surviving
+code crashing.
 
 ## 2a. Gate the pip install to the profile
 

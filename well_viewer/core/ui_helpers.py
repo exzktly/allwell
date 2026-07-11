@@ -144,7 +144,7 @@ def set_combo_values_sectioned(combo: object, sections: List[Tuple[str, List[str
 
 
 def wrap_with_empty_state(
-    app: Any,
+    win: Any,
     host: QWidget,
     *,
     text: str = "Load a directory.",
@@ -156,12 +156,12 @@ def wrap_with_empty_state(
     dataset is loaded.
 
     Page 0 is the EmptyState; page 1 is *host*. The stack starts on page 0
-    so the user sees the placeholder immediately on app launch (matplotlib's
+    so the user sees the placeholder immediately on win launch (matplotlib's
     default empty axes are otherwise visible as glaring white blocks).
 
-    The stack registers itself on ``app._plot_empty_stacks`` and
-    ``app._refresh_plot_empty_states()`` flips every registered stack based
-    on whether ``app._app_state.dataset.well_paths`` is non-empty. Tab redraws should call
+    The stack registers itself on ``win._plot_empty_stacks`` and
+    ``win._refresh_plot_empty_states()`` flips every registered stack based
+    on whether ``win._app_state.dataset.well_paths`` is non-empty. Tab redraws should call
     that helper before they paint.
     """
     from widgets.empty_state import EmptyState  # local — widget module is heavy
@@ -171,9 +171,9 @@ def wrap_with_empty_state(
     stack.addWidget(placeholder)  # index 0
     stack.addWidget(host)         # index 1
     stack.setCurrentIndex(0)
-    if not hasattr(app, "_plot_empty_stacks") or app._plot_empty_stacks is None:
-        app._plot_empty_stacks = []
-    app._plot_empty_stacks.append(stack)
+    if not hasattr(win, "_plot_empty_stacks") or win._plot_empty_stacks is None:
+        win._plot_empty_stacks = []
+    win._plot_empty_stacks.append(stack)
     return stack
 
 
@@ -185,12 +185,12 @@ def wrap_with_empty_state(
 _DATA_GATED_OBJECT_NAMES = ("TabCtrl", "PlottingActionRow")
 
 
-def refresh_plot_empty_states(app: Any) -> None:
+def refresh_plot_empty_states(win: Any) -> None:
     """Flip every registered plot-empty-state stack based on whether a
     dataset is currently loaded. Safe to call before any stacks have been
     registered (no-ops)."""
-    stacks = getattr(app, "_plot_empty_stacks", None) or []
-    has_data = bool(app._app_state.dataset.well_paths)
+    stacks = getattr(win, "_plot_empty_stacks", None) or []
+    has_data = bool(win._app_state.dataset.well_paths)
     target = 1 if has_data else 0
     for stack in stacks:
         try:
@@ -201,9 +201,9 @@ def refresh_plot_empty_states(app: Any) -> None:
     # Grey out the per-tab control bars until a dataset is loaded. Disabling the
     # container cascades to its children; re-enabling restores each child's own
     # enabled state (so tab-local logic like smFISH's combo gating still wins).
-    if isinstance(app, QWidget):
+    if isinstance(win, QWidget):
         for name in _DATA_GATED_OBJECT_NAMES:
-            for bar in app.findChildren(QWidget, name):
+            for bar in win.findChildren(QWidget, name):
                 try:
                     bar.setEnabled(has_data)
                 except Exception:
@@ -441,26 +441,26 @@ def hide_plot_dock(dock: QWidget) -> None:
         dock.setVisible(False)
 
 
-def send_plot_to_batch_export(app, mode: str) -> None:
+def send_plot_to_batch_export(win, mode: str) -> None:
     """S5: jump from a plot card to Batch Export with the matching chart-type.
 
     The batch panels read the live plot spec (channel / property / threshold /
-    SEM / fold-change) straight off ``app._app_state``, so "capturing the
+    SEM / fold-change) straight off ``win._app_state``, so "capturing the
     current plot" reduces to navigating to the Batch Export tab and selecting
     the matching mode. Navigating builds the tab (so ``_batch_export_set_mode``
     exists) before we set it. Lives in this core helper — not in the
     batch_export feature — so the plot tab views can import it at module scope
-    without a feature-to-feature cycle; it touches only ``app`` attributes.
+    without a feature-to-feature cycle; it touches only ``win`` attributes.
     """
-    nb = getattr(app, "_notebook", None)
+    nb = getattr(win, "_notebook", None)
     if nb is not None:
         nb.setCurrentByName("Batch Export")
-    setter = app._ctx.runtime.batch_export.set_mode
+    setter = win._ctx.runtime.batch_export.set_mode
     if callable(setter):
         setter(mode)
     label = {"line": "Line", "bar": "Bar", "scatter_cells": "Scatter (cells)",
              "scatter_agg": "Scatter (aggregate)"}.get(mode, mode)
-    app._set_status(f"Batch Export → {label}: using the current plot settings.")
+    win._set_status(f"Batch Export → {label}: using the current plot settings.")
 
 
 def make_popover_button(text: str, parent: QWidget):

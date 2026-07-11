@@ -649,8 +649,10 @@ def build_centre(app, parent: QWidget) -> None:
 
     # Special pre-build hooks for tabs that wire app-level state at build
     # time even though their bodies are deferred (matches the original
-    # eager attribute set so external references keep resolving).
-    app._batch_export_tab_frame = tab_frames["Batch Export"]
+    # eager attribute set so external references keep resolving). Guarded so
+    # the tab being absent under a build profile is a no-op, not a KeyError.
+    if "Batch Export" in tab_frames:
+        app._batch_export_tab_frame = tab_frames["Batch Export"]
 
     app._notebook.setCurrentIndex(0)
 

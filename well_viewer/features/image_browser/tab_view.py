@@ -19,7 +19,15 @@ from well_viewer.features.image_browser import controller as ctl
 
 #: Sub-tab order (Image Table first — the primary image-review surface). Leaf
 #: names must match the dispatch branches in ``core.tab_controller.on_tab_change``.
+#: The active build profile filters this, so producing a subset (e.g. the thin
+#: build's Segmentation-only Image Browser) is a manifest edit, not a code edit.
 SUBTABS = ("Image Table", "Segmentation", "Cell Browser", "Playground")
+
+
+def _active_subtabs() -> tuple:
+    from well_viewer.core.profile import active_profile
+    prof = active_profile()
+    return tuple(s for s in SUBTABS if prof.includes_subtab("Image Browser", s))
 
 
 def build_image_browser_tab(ctx, parent: QWidget) -> None:
@@ -44,16 +52,16 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     # One empty frame per sub-tab; bodies build lazily (the build function sets
     # each sub-tab's own layout, so the frames stay layout-less here — Playground
     # in particular needs a QHBoxLayout, not the QVBoxLayout the others use).
-    for name in SUBTABS:
+    for name in _active_subtabs():
         sub_tabs.addTab(QWidget(sub_tabs), name)
 
     sub_tabs.currentChanged.connect(
         lambda idx: ctl.on_image_browser_subtab_changed(ctx, idx))
 
-    # Eagerly build the initial (now first) Image Table sub-tab so it's ready on
-    # open, plus the Segmentation review-image canvas (kept ready for the CSV /
-    # cell-review push flows). Cell Browser / Playground stay lazy — built on
-    # first sub-tab click.
+    # Eagerly build the initial sub-tab so it's ready on open, plus the
+    # Segmentation review-image canvas (kept ready for the CSV / cell-review push
+    # flows) when present. Cell Browser / Playground stay lazy — built on first
+    # sub-tab click.
     ctl.build_image_browser_subtab(ctx, sub_tabs.currentIndex())
     for i in range(sub_tabs.count()):
         if sub_tabs.tabText(i) == "Segmentation":

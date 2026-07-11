@@ -576,59 +576,75 @@ def _features() -> "list[FeatureDescriptor]":
 
         # ── Plotting sub-leaves (no rail entry; dispatch hooks only) ───────
         FeatureDescriptor(
-            name="Bar Plots", build=_build_barplot,
+            name="Bar Plots", parent="Plotting", build=_build_barplot,
             states=(StateSpec("bar", _state_bar),),
             on_activate=_activate_bar_plots,
             on_selection_changed=_sel_bar_plots,
             on_channel_changed=_channel_bar,
             fold_change_scope_factory=_fold_change_scope_bar,
         ),
-        FeatureDescriptor(name="Line Graphs", build=_build_lineplot,
+        FeatureDescriptor(name="Line Graphs", parent="Plotting", build=_build_lineplot,
                           on_activate=_activate_default_plot),
         FeatureDescriptor(
-            name="Scatter Plot", build=_build_scatter,
+            name="Scatter Plot", parent="Plotting", build=_build_scatter,
             on_activate=_activate_scatter,
             on_selection_changed=_sel_scatter,
             on_channel_changed=_channel_scatter,
             states=(StateSpec("scatter", _state_scatter),),
         ),
         FeatureDescriptor(
-            name="Distribution", build=_build_distribution,
+            name="Distribution", parent="Plotting", build=_build_distribution,
             on_activate=_activate_default_plot,
             on_channel_changed=_channel_distribution,
             states=(StateSpec("distribution", _state_distribution),),
         ),
         FeatureDescriptor(
-            name="Heat Map", build=_build_heatmap,
+            name="Heat Map", parent="Plotting", build=_build_heatmap,
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
             states=(StateSpec("heatmap", _state_heatmap),),
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────
-        FeatureDescriptor(name="Segmentation", on_activate=_activate_segmentation),
-        FeatureDescriptor(name="Image Table", on_activate=_activate_image_table),
-        FeatureDescriptor(name="Cell Browser", on_activate=_activate_cell_browser,
+        FeatureDescriptor(name="Segmentation", parent="Image Browser",
+                          on_activate=_activate_segmentation),
+        FeatureDescriptor(name="Image Table", parent="Image Browser",
+                          on_activate=_activate_image_table),
+        FeatureDescriptor(name="Cell Browser", parent="Image Browser",
+                          on_activate=_activate_cell_browser,
                           on_selection_changed=_sel_cell_browser,
                           per_well_selection=True),
-        FeatureDescriptor(name="Playground", on_activate=_activate_playground),
+        FeatureDescriptor(name="Playground", parent="Image Browser",
+                          on_activate=_activate_playground),
 
         # ── Sample Definitions sub-leaf ────────────────────────────────────
-        FeatureDescriptor(name="Cell Gating", on_activate=_activate_cell_gating),
+        FeatureDescriptor(name="Cell Gating", parent="Sample Definitions",
+                          on_activate=_activate_cell_gating),
     ]
 
 
-def build_feature_registry() -> FeatureRegistry:
-    """Assemble the registry. Called once from ``WellViewerApp.__init__``."""
-    return FeatureRegistry(_features())
+def build_feature_registry(profile=None) -> FeatureRegistry:
+    """Assemble the registry, filtered to *profile*.
+
+    ``profile`` is a :class:`well_viewer.core.profile.Profile`; ``None`` resolves
+    the active profile from the ``ALLWELL_PROFILE`` env var (default = the full
+    feature set). This is the single seam that lets one codebase run as any
+    declared subset — the thin build is a profile, not a fork. A descriptor is
+    kept when the profile admits it (a sub-leaf follows its ``parent``); the
+    removability contract drops everything else for free.
+    """
+    from well_viewer.core.profile import active_profile
+    if profile is None:
+        profile = active_profile()
+    return FeatureRegistry(d for d in _features() if profile.includes(d))
 
 
 def attach_feature_state(state, registry: "FeatureRegistry | None" = None) -> None:
     """Attach every feature-owned slice onto *state* (an ``AppState``).
 
     Called at app construction (and by test fixtures that build an ``AppState``
-    directly). Idempotent. With a feature removed from ``FEATURES`` its slice is
-    simply never attached.
+    directly). Idempotent. With a feature removed from ``FEATURES`` — or excluded
+    by the active profile — its slice is simply never attached.
     """
     if registry is None:
         registry = build_feature_registry()

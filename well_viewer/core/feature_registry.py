@@ -75,6 +75,8 @@ class FeatureDescriptor:
 
     name: str
     group: str = ""                      # "Analysis" | "Images" | "Data"; "" = sub-leaf
+    parent: str = ""                     # composite container a sub-leaf lives in
+                                         # (e.g. "Plotting"); "" for top-level entries
     build: Optional[Callable] = None     # build(ctx, frame) -> None
     lazy_only: bool = False              # skip the background drain; build on first click
     # State contribution (AppState import-inversion).

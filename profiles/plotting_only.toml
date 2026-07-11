@@ -1,0 +1,5 @@
+# A minimal demonstration profile: Plotting alone. Used by the profile-boot
+# guardrail to prove the registry filter drops whole features and the app still
+# boots + loads a dataset with only the surviving surface.
+name = "plotting_only"
+features = ["Plotting"]

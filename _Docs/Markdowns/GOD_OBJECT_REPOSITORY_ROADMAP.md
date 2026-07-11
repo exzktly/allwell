@@ -463,6 +463,36 @@ design, per B1b's deferral). This is the remaining frontier for full vertical-sl
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **WORKSTREAM A COMPLETE + cond. 3 advanced (42 → 33 core→feature imports).**
+  - **A5 (service-accessor extraction) COMPLETE — `_ALLOWED == {"window"}`.** Extracted
+    the 8 remaining accessors into held collaborators: `persistence`/`features` →
+    direct ctx fields (`3f0aa01`); `set_status`/`toast` → `NotificationService`
+    (`ctx.notify`, `65ccb42`); `save_figure_dialog`/`open_export_style_panel` →
+    `FigureService` (`ctx.figures`, `135fc14`); `rebuild_all`/`refresh_sidebar_map` →
+    `SelectionCoordinator` (`ctx.coordinator`, `8904663`). `_window` is now reachable
+    only as the `QMainWindow`-qua-widget — the terminal teardown state. Also hardened
+    `__post_init__` to tolerate lightweight state stubs (fixes latent B2 test breaks).
+  - **A2/A4 COMPLETE — `RAW_SELF_DELEGATOR_BUDGET == 0`** (`b20c100`). Deleted three
+    now-dead delegators (`_ask_name_dialog`, `_review_norm_fov`, `_open_export_style_panel`
+    — the last orphaned by A5c), renamed `_mute_color`'s misnamed `self` param (a
+    `@staticmethod` false-positive), and flipped `drain_pending_centre_builders` to
+    `ctx`. The four `__init__` runtime wirings stay (barplot/stats test-injection seam)
+    but are not raw-`self` forwarders, so `== 0` holds.
+  - **Terminal conditions 1, 2, 4, 5 now all hold and are guard-proven.**
+  - **Cond. 3 (full `core/` feature-import decouple) started — redraw hook (`6c42f8a`).**
+    Added a `redraw` descriptor hook + `FeatureRegistry.redraw(ctx, name)`; routed 8
+    plot-render dispatches (plot_orchestrator / tab_controller / selection_controller /
+    channel_state_controller) through it. **42 → 33** function-local core→feature imports.
+    *Remaining 33 are heterogeneous and need per-category mechanisms (a genuine ordered-
+    hook / decoupling design epic, exactly B1b's deferral rationale):* cell_gating
+    handlers (7), grouping label-grid/tab/controller refreshes (7), heatmap sidebar_view
+    **builder + `WELL_MIME` constant + drop-handler + refresh** (5), review_image renderer
+    (2) + controller (1), heatmap.controller (2), export.style window-panel (2 — incl. the
+    A5c `FigureService`), qc/crop/review post-load **ordered** cache projections in
+    `load_controller` (interleaved with `persistence.load`, ordering-critical — needs the
+    ordered post-load hook phase), `projector_registry` B1-wiring (2), preview builder (1),
+    stats (1). Each is the sanctioned function-local escape hatch today
+    (`test_layering`/`test_architecture_contracts` ban only module-scope, already green).
 - 2026-07-11 — **B4 (persistence half) COMPLETE — `PERSIST_APP_PARAM_BUDGET` = 0.**
   Redid the reverted attempt surgically: migrated exactly the 23
   registry-facing entry points (`save_to_data_dir`/`load_from_data_dir`/`reset`/

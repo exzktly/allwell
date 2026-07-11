@@ -123,7 +123,6 @@ def save_matplotlib_fig(ctx, fig, default_name: str, *, plot_bg: str) -> None:
 
 
 def _launch_editor_or_save(ctx, fig, default_name: str, *, plot_bg: str, canvas=None) -> None:
-    app = ctx.window  # transitional bridge (A3)
     # Phase 15.2: the in-tab ExportStyleSidebar was retired in favour of the
     # v2 Properties rail (which live-binds the same _export_style_prefs).
     # Save-figure now goes straight to the file dialog; the rail handles

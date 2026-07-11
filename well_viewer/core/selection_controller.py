@@ -46,7 +46,6 @@ _WELL_EDITING_TAB_NAMES = ("Sample Definitions", "Review CSV")
 
 
 def _is_well_editing_tab(ctx, tab_name: str) -> bool:
-    app = ctx.window  # transitional bridge (A3)
     return tab_name in _WELL_EDITING_TAB_NAMES
 
 
@@ -435,7 +434,6 @@ def on_sidebar_plate_col_activated(ctx, col: str) -> None:
 
 
 def on_sidebar_plate_well_dropped(ctx, well_id: str, token: str) -> None:
-    app = ctx.window  # transitional bridge (A3)
     if not token:
         return
     try:

@@ -23,14 +23,12 @@ SECTION = "export_groups"
 
 
 def save_to_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
     """Persist the batch-export groups to the consolidated persistence document."""
     doc = ctx.runtime.batch_export.export_groups_doc or None
     _doc.set_section(ctx, SECTION, doc)
 
 
 def load_from_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
     """Load persisted batch-export groups and refresh any open Batch Export panels."""
     raw = _doc.get_section(ctx, SECTION)
     ctx.runtime.batch_export.export_groups_doc = raw if isinstance(raw, dict) else {}

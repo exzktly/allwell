@@ -151,7 +151,6 @@ def exit_split(ctx) -> None:
 
 
 def focus_split(ctx, top: str) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Make pane *top* the focused one (drives the sidebar). No-op off split."""
     if not ctx.runtime.split.active or not top:
         return
@@ -164,7 +163,6 @@ def focus_split(ctx, top: str) -> None:
 # ── Focused-pane click watcher ───────────────────────────────────────────────
 
 def _resolve_focused_pane(ctx, obj):
-    app = ctx.window  # transitional bridge (A3)
     """Map a clicked widget to the top-level name of the pane that contains it."""
     widgets = ctx.runtime.split.pane_widgets or {}
     if not widgets:
@@ -246,7 +244,6 @@ def _install_split_focus_filter(ctx) -> None:
 
 
 def _remove_split_focus_filter(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     watcher = ctx.runtime.split.focus_filter
     if watcher is None:
         return
@@ -262,7 +259,6 @@ def _remove_split_focus_filter(ctx) -> None:
 # ── Entry-UI handlers ────────────────────────────────────────────────────────
 
 def sync_split_toggle_button(ctx, checked: bool) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Reflect *checked* on the top-bar split toggle without re-firing it."""
     btn = ctx.runtime.split.toggle_btn
     if btn is None:
@@ -304,7 +300,6 @@ def on_split_toggle_clicked(ctx) -> None:
 
 
 def on_split_pane_combo_changed(ctx, _idx: int) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Re-pair pane A with a newly chosen pane B from the dropdown."""
     if not ctx.runtime.split.active:
         return
@@ -342,7 +337,6 @@ def _visible_leaves(ctx):
 
 
 def _nav_intercept(ctx, _key) -> bool:
-    app = ctx.window  # transitional bridge (A3)
     """Rail navigation while split: exit split first, then let the normal
     ``setCurrentByName`` proceed (returns False = not consumed)."""
     if ctx.runtime.split.active:
@@ -352,7 +346,6 @@ def _nav_intercept(ctx, _key) -> bool:
 
 
 def _exit_on_mode(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Leave Split View when the Review/Analyze mode switches."""
     if ctx.runtime.split.active:
         exit_split(ctx)

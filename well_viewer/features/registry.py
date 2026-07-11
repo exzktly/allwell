@@ -435,7 +435,6 @@ def _sel_bar_plots(ctx) -> None:
 
 
 def _sel_scatter(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.scatter.controller import update_scatter_menus
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
     update_scatter_menus(ctx)
@@ -462,7 +461,6 @@ def _sel_spatial(ctx) -> None:
 
 
 def _sel_smfish(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
     smfish_sync_from_app(ctx)
 
@@ -478,7 +476,6 @@ def _sel_sample_definitions(ctx) -> None:
 
 
 def _sel_cell_browser(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     # Keep the gallery in sync with the live well selection when both panes are
     # live in Split View — the user expects the Scatter and Cell Browser to track
     # each other. Outside split the gallery stays Generate-gated (deferred) so a

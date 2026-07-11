@@ -232,31 +232,31 @@ reaching `_window`. Ordered trivial → hard:
 
 ## Workstream B — Repository introduction
 
-### B1 · Invert the `get_rows`→features layer violation via a `cache_projector` descriptor hook *(foundational, low-risk, unblocks everything)*
-`data/data_loading.py:262-265` does function-local
+### B1 · Invert the `get_rows`→features layer violation via a cache-projector registry ✅ *(foundational, low-risk, unblocks everything)*
+**Landed.** `get_rows` did function-local
 `from well_viewer.features.qc.controller import apply_qc_to_cache` /
-`...crop.controller import apply_crop_to_cache`. Both projectors are **already
-`ctx`-native**, so inverting is a pure registration move (no signature churn).
-**Reuse the baseline's `with_hook` seam — do not add a new module-level registry.**
-- Add a `cache_projector` field to `FeatureDescriptor` (`core/feature_registry.py`),
-  a lazy `() -> ((ctx, label) -> None)` exactly like `view_state_io` /
-  `plot_card_decorator`. Register it on the QC and Crop descriptors
-  (`features/registry.py`) via small `_cache_projector_qc` / `_crop` factories that
-  import the controller function lazily (same shape as `_loaded_image_table`).
-- `get_rows(ctx, label)` replaces its two feature imports with
-  `for d in ctx.features.with_hook("cache_projector"): d.cache_projector()(ctx, label)`.
-  Removing QC/Crop from a profile then drops its projection automatically (the
-  removability contract already covers it) — strictly better than today's
-  escape-hatch comment, and no new registry module.
-- Guard: new `tests/test_data_layer_no_feature_imports.py` — AST assert that no
-  `well_viewer/data/**` module imports `well_viewer.features.*` (mirror of the
-  core-imports-features ban in `test_architecture_contracts.py`). This *proves* the
-  inversion. Extend the subset-profile boot test so a QC/Crop-excluded profile still
-  loads rows cleanly.
-- Files: `core/feature_registry.py` (new field), `features/registry.py` (factories on
-  QC/Crop descriptors), `data/data_loading.py` (call `with_hook`).
-- **Note:** `get_rows` needs `ctx.features`, which it already has via `ctx` — no new
-  plumbing. This same hook is the vehicle for B1b below.
+`...crop.controller import apply_crop_to_cache`.
+
+**Design note (differs from the original sketch):** QC and Crop are *support libs*
+with **no `FeatureDescriptor`** (and must not be profile-removable — QC is the
+fundamental always-applied inclusion layer), so the `with_hook` descriptor seam
+doesn't apply. Instead this uses a dedicated **projector registry** mirroring
+`core/scope_registry.register_default_scopes` — the proven "core wires the feature
+callback at startup so the lower layer imports no feature" pattern.
+
+- New `data/cache_projectors.py` — module-level list + `register_cache_projector(fn)`
+  / `clear_cache_projectors()` / `iter_cache_projectors()`; `fn` is `(ctx, label)`.
+- New `core/projector_registry.register_default_projectors()` — imports the QC/Crop
+  controllers function-locally and registers them (QC then Crop; idempotent via
+  clear-first). Wired once from `core/bus_wiring.wire_event_bus`.
+- `get_rows` now runs `for _project in iter_cache_projectors(): _project(ctx, label)`
+  — **zero `features/` imports in the data layer.**
+- Guard: `tests/test_data_layer_no_feature_imports.py` — AST assert that no
+  `well_viewer/data/**` module imports `well_viewer.features.*` at **any** nesting.
+  Green. (No subset-profile extension: QC/Crop are always present, not
+  profile-gated, so their projectors register regardless of profile.)
+- Verified: `test_qc_integration` / `test_crop_integration` (projection through
+  `get_rows` on `loaded_app`) + qc/crop/aggregate layer tests + app_smoke — 46 green.
 
 ### B1b · Move `load_controller`'s residual direct feature imports onto hooks *(extends B1, medium)*
 `load_controller.py` still imports qc/crop/review_image/grouping/heatmap directly
@@ -410,7 +410,7 @@ ordering constraints are met.
 | A3 · `app`→`ctx` clusters | ☐ | `APP_FIRST_FUNC_BUDGET == 0` | — |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
-| B1 · `cache_projector` inversion | ☐ | data-layer no-feature-imports green | — |
+| B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
 | B1b · load_controller decouple | ☐ | core-scope no-feature-imports green | — |
 | B2 · `WellRepository` facade | ☐ | facade test + `REPO_BYPASS_BUDGET` seeded | — |
 | B3 · route cache readers | ☐ | `REPO_BYPASS_BUDGET == 0` (−spatial) | — |
@@ -419,6 +419,13 @@ ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **B1 landed:** cache-projector registry inverts the
+  `get_rows`→`features/qc`+`crop` layer violation. New `data/cache_projectors.py`
+  + `core/projector_registry.py` (wired in `bus_wiring`); `get_rows` iterates
+  registered projectors, no `features/` import. New guard
+  `test_data_layer_no_feature_imports` green; 46 QC/Crop/aggregate/smoke tests green.
+  (Used a projector registry, not a `with_hook` descriptor hook — QC/Crop are
+  support libs without descriptors.)
 - 2026-07-11 — **A1 landed:** removed 10 widget-handle `None`-seeds from
   `runtime_app.__init__` (builders register them via `WidgetRegistry`; readers
   already use `get_or_none`/`has`/`getattr(...,None)`). Attrs 23→13,

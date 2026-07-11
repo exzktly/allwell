@@ -68,6 +68,11 @@ class AppState:
     # Cell-gating threshold values (FluorGating / ThreshFracOn per channel) —
     # core, like qc: they feed the channel layer every plot reads (R6).
     cell_gating: CellGatingState = field(default_factory=CellGatingState)
+    # Row-access facade over the dataset (WellRepository), attached at app
+    # construction (needs the ViewerContext). Qt-free; typed as ``object`` to
+    # keep core/app_state free of a data-layer import at runtime. None until the
+    # app wires it (pure-logic tests that never open a dataset leave it None).
+    repo: object = None
 
     def feature_slice(self, name: str):
         """Return the feature-owned slice *name*, or ``None`` when its feature is

@@ -65,6 +65,15 @@ class ViewerContext:
     # window widget.
     _window: object = None
 
+    def __post_init__(self) -> None:
+        # Attach the row-access facade (B2) onto the state so callers reach it
+        # as ``ctx.state.repo``. Done here — the DI bundle is the natural wiring
+        # point and it needs the assembled context. Mutates ``state`` (not the
+        # frozen ctx), and only when unset so a caller-provided repo is kept.
+        if getattr(self.state, "repo", None) is None:
+            from well_viewer.data.well_repository import WellRepository
+            self.state.repo = WellRepository(self)
+
     # ── Named app/window-service accessors (A8, design "C") ──────────────────
     # Minimal, closed set — see the module docstring and the freeze test. Each
     # wraps one genuine WellViewerApp service so feature code names it instead of

@@ -270,16 +270,23 @@ smFISH), so `load_controller` names **no** feature and imports none a profile ex
   `test_architecture_contracts.py::test_core_does_not_import_features_at_module_scope`;
   tighten to catch the function-local ones this phase removes.
 
-### B2 · `WellRepository` facade over `DatasetState` + `get_rows` *(interface seam, no behavior change)*
-New `data/well_repository.py` — Qt-free class holding `DatasetState` (the aggregate
-root) and exposing the read API the app uses: `rows(label)`, `all_timepoints()`,
-`all_fovs()`, `labels()`, `has_data`. No logic moves — it wraps
-`data_loading.get_rows` / `get_all_timepoints` / `DatasetState.rebuild_*`.
-- Reached via `AppState.repo` (built from `dataset`), **not** a new `ViewerContext`
-  accessor (avoids tripping the frozen-accessor freeze).
-- Guard: facade unit test (like `DatasetState` tests) + new `REPO_BYPASS_BUDGET`
-  counting direct `dataset.cache[...]` / `.cache.get(...)` reads across
-  `well_viewer/` (seed at current, incl. `stats_compute.py:93`, `spatial/collect.py`).
+### B2 · `WellRepository` facade over `DatasetState` + `get_rows` ✅ *(interface seam, no behavior change)*
+**Landed.** `data/well_repository.py` — Qt-free `WellRepository` exposing
+`rows(label)`, `rows_or_none(label)` (cache-only), `labels()`, `all_timepoints()`,
+`all_fovs()`, `has_data`, `dataset`. No logic moves — delegates to
+`data_loading.get_rows` / `get_all_timepoints` and the `DatasetState` root.
+- **Holds `ctx`, not the bare `DatasetState`:** `get_rows` runs the cache
+  projectors, which read the wider `ctx.state` (QC params, crop) — so the facade
+  threads the context.
+- **Reached as `ctx.state.repo`**, attached in `ViewerContext.__post_init__`
+  (the DI bundle is the natural wiring point; keeps `runtime_app.py` untouched so
+  the line ratchet holds). Added `AppState.repo` field (default `None`). **Not** a
+  new `ViewerContext` accessor (frozen-accessor freeze untouched — verified).
+- Guard: `tests/test_well_repository.py` (facade unit tests) + new
+  `tests/test_repo_bypass.py::REPO_BYPASS_BUDGET = 1` counting single-well
+  `dataset.cache.get(...)` / `dataset.cache[...]` reads outside the owner modules,
+  with `spatial` allowlisted. Seed 1 = `stats_compute.py:93` (B3 → 0). `_not_slack`
+  twin included.
 
 ### B3 · Route direct-cache readers through the repository *(burn-down, medium)*
 - `domain/stats_compute.py:93` `_safe_rows` — currently `cache.get(lbl)` (non-lazy,
@@ -412,13 +419,18 @@ ordering constraints are met.
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
 | B1b · load_controller decouple | ☐ | core-scope no-feature-imports green | — |
-| B2 · `WellRepository` facade | ☐ | facade test + `REPO_BYPASS_BUDGET` seeded | — |
+| B2 · `WellRepository` facade | ☑ | facade test + `REPO_BYPASS_BUDGET`=1 seeded | 2026-07-11 |
 | B3 · route cache readers | ☐ | `REPO_BYPASS_BUDGET == 0` (−spatial) | — |
 | B4 · load converge + persistence→ctx | ☐ | `PERSIST_APP_PARAM_BUDGET == 0` | — |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **B2 landed:** `WellRepository` read facade
+  (`data/well_repository.py`) over `get_rows` + `DatasetState`, attached as
+  `ctx.state.repo` via `ViewerContext.__post_init__` (+ `AppState.repo` field).
+  Guards: `test_well_repository` + `test_repo_bypass` (`REPO_BYPASS_BUDGET=1`,
+  spatial allowlisted). app_smoke + ctx-freeze + line budget green.
 - 2026-07-11 — **B1 landed:** cache-projector registry inverts the
   `get_rows`→`features/qc`+`crop` layer violation. New `data/cache_projectors.py`
   + `core/projector_registry.py` (wired in `bus_wiring`); `get_rows` iterates

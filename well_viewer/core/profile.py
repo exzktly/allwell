@@ -24,16 +24,23 @@ Manifest shape (TOML)::
     [subtabs]                 # optional; omit a parent to keep all its sub-tabs
     "Image Browser" = ["Segmentation"]
 
-Stdlib-only (``tomllib``); no Qt / feature imports, so importing this is cheap and
-safe from the pipeline side too.
+Stdlib-only (``tomllib`` on 3.11+, ``tomli`` on 3.10 — the project's pin);
+no Qt / feature imports, so importing this is cheap and safe from the pipeline
+side too. This module is imported at app startup (the registry reads the active
+profile), so the TOML backend must resolve on Python 3.10 — a bare
+``import tomllib`` would raise ModuleNotFoundError before the app can load.
 """
 from __future__ import annotations
 
 import os
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
+
+try:  # tomllib is stdlib on Python 3.11+; fall back to tomli on 3.10 (project pin).
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - depends on interpreter version
+    import tomli as tomllib  # type: ignore[no-redef]
 
 _ENV_VAR = "ALLWELL_PROFILE"
 

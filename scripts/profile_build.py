@@ -17,9 +17,13 @@ Stdlib-only (``tomllib``); safe to import from the spec at build time.
 """
 from __future__ import annotations
 
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:  # tomllib is stdlib on 3.11+; fall back to tomli on 3.10 (build env pin).
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - depends on interpreter version
+    import tomli as tomllib  # type: ignore[no-redef]
 
 
 @dataclass

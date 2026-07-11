@@ -30,10 +30,14 @@ import glob
 import os
 import shutil
 import sys
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
+
+try:  # tomllib is stdlib on 3.11+; fall back to tomli on 3.10 (project pin).
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - depends on interpreter version
+    import tomli as tomllib  # type: ignore[no-redef]
 
 
 @dataclass

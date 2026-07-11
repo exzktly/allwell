@@ -61,7 +61,10 @@ APP_VERSION = _ver_ns["__version__"]
 # tree, their unique heavy deps are excluded from the module graph, and the
 # chosen profile is baked as `active_profile.txt` so the frozen app's registry
 # filters to match the bundled code (a frozen binary has no env at run time).
-import tomllib   # noqa: E402  (Python 3.11+)
+try:  # noqa: E402  tomllib is stdlib on 3.11+; fall back to tomli on the 3.10 build env.
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    import tomli as tomllib   # type: ignore[no-redef]
 
 # The pure profile→exclusions math lives in scripts/profile_build.py (stdlib-only,
 # unit-tested), so this spec stays declarative and the "deps are gated into the

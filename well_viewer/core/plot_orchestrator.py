@@ -87,7 +87,8 @@ def redraw(
             _logger.exception("Heat map redraw failed")
 
 
-def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
+def save_matplotlib_fig(ctx, fig, default_name: str, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     import matplotlib as _mpl
 
     initial_dir = str(app._app_state.dataset.data_dir) if app._app_state.dataset.data_dir else ""
@@ -123,31 +124,35 @@ def save_matplotlib_fig(app, fig, default_name: str, *, plot_bg: str) -> None:
         QMessageBox.critical(app, "Save failed", str(exc))
 
 
-def _launch_editor_or_save(app, fig, default_name: str, *, plot_bg: str, canvas=None) -> None:
+def _launch_editor_or_save(ctx, fig, default_name: str, *, plot_bg: str, canvas=None) -> None:
+    app = ctx.window  # transitional bridge (A3)
     # Phase 15.2: the in-tab ExportStyleSidebar was retired in favour of the
     # v2 Properties rail (which live-binds the same _export_style_prefs).
     # Save-figure now goes straight to the file dialog; the rail handles
     # styling. ``canvas`` is unused but kept in the signature so callers
     # don't need to change.
     del canvas
-    save_matplotlib_fig(app, fig, default_name, plot_bg=plot_bg)
+    save_matplotlib_fig(ctx, fig, default_name, plot_bg=plot_bg)
 
 
-def save_line_figure(app, *, plot_bg: str) -> None:
-    _launch_editor_or_save(app, app._line_fig, "line_graphs.png", plot_bg=plot_bg, canvas=getattr(app, "_line_canvas", None))
+def save_line_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
+    _launch_editor_or_save(ctx, app._line_fig, "line_graphs.png", plot_bg=plot_bg, canvas=getattr(app, "_line_canvas", None))
 
 
-def save_bar_figure(app, *, plot_bg: str) -> None:
+def save_bar_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     tp = app._bar_tp_cb.currentText().replace(".", "_")
-    _launch_editor_or_save(app, app._bar_fig, f"bar_t{tp}.png", plot_bg=plot_bg, canvas=getattr(app, "_bar_canvas", None))
+    _launch_editor_or_save(ctx, app._bar_fig, f"bar_t{tp}.png", plot_bg=plot_bg, canvas=getattr(app, "_bar_canvas", None))
 
 
-def save_scatter_figure(app, *, plot_bg: str) -> None:
+def save_scatter_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     ch_x = app._scatter_ch_x_cb.currentText()
     ch_y = app._scatter_ch_y_cb.currentText()
     tp = app._scatter_tp_cb.currentText().replace(".", "_")
     _launch_editor_or_save(
-        app,
+        ctx,
         app._scatter_fig,
         f"scatter_{ch_x}_vs_{ch_y}_t{tp}.png",
         plot_bg=plot_bg,
@@ -155,7 +160,8 @@ def save_scatter_figure(app, *, plot_bg: str) -> None:
     )
 
 
-def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
+def save_scatter_agg_figure(ctx, *, plot_bg: str) -> None:
+    app = ctx.window  # transitional bridge (A3)
     stat_x = app._scatter_agg_stat_x_cb.currentText()
     stat_y = app._scatter_agg_stat_y_cb.currentText()
 
@@ -179,7 +185,7 @@ def save_scatter_agg_figure(app, *, plot_bg: str) -> None:
     stat_y_safe = stat_y.replace(" ", "_").lower()
 
     _launch_editor_or_save(
-        app,
+        ctx,
         app._scatter_agg_fig,
         f"scatter_agg_{stat_x_safe}_vs_{stat_y_safe}_{tp_range}.png",
         plot_bg=plot_bg,

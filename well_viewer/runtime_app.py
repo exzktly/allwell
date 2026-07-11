@@ -1170,7 +1170,7 @@ class WellViewerApp(QWidget):
     def _save_matplotlib_fig(self, fig: "Figure", default_name: str) -> None:
         """Show a save-file dialog and write *fig* to disk."""
         _plot_save_matplotlib_fig_orchestrator(
-            self,
+            self._ctx,
             fig,
             default_name,
             plot_bg=PLOT_BG,
@@ -1178,11 +1178,11 @@ class WellViewerApp(QWidget):
 
     def _save_line_figure(self) -> None:
         """Save the current Line Graphs figure at high resolution."""
-        _plot_save_line_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_line_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
     def _save_bar_figure(self) -> None:
         """Save the current Bar Plots figure at high resolution."""
-        _plot_save_bar_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_bar_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
     def _open_export_style_panel(self, plot_key: str) -> None: return open_export_style_panel(self, plot_key)
 
@@ -1233,7 +1233,7 @@ class WellViewerApp(QWidget):
     def _save_scatter_figure(self) -> None:
         """Save the current Scatter plot figure at high resolution."""
 
-        _plot_save_scatter_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_scatter_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
 
     def _export_scatter_agg_data(self) -> None: return export_scatter_agg_data(self._ctx)
@@ -1241,7 +1241,7 @@ class WellViewerApp(QWidget):
     def _save_scatter_agg_figure(self) -> None:
         """Save the current aggregate scatter plot figure at high resolution."""
 
-        _plot_save_scatter_agg_figure_orchestrator(self, plot_bg=PLOT_BG)
+        _plot_save_scatter_agg_figure_orchestrator(self._ctx, plot_bg=PLOT_BG)
 
 
     # ── Legend interaction ────────────────────────────────────────────────────

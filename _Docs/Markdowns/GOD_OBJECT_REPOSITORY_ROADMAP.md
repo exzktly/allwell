@@ -426,7 +426,7 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | A0 · burn-down ratchets | ☑ | ratchets present + seeded (38 / 135) | 2026-07-11 |
 | A1 · widget attrs → registry | ☑ | `RUNTIME_APP_ATTR_BUDGET` 68→15 (actual 13) | 2026-07-11 |
 | A2 · retire raw-`self` delegators | ◐ | `RAW_SELF_DELEGATOR_BUDGET == 0` (now 21, was 38) | via A3 clusters 2026-07-11 |
-| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 94, was 135) | playground, stats, grouping, heatmap-sidebar, ui_helpers-notify 2026-07-11 |
+| A3 · `app`→`ctx` clusters | ◐ | `APP_FIRST_FUNC_BUDGET == 0` (now 88, was 135) | playground, stats, grouping, heatmap-sidebar, ui_helpers-notify, plot_orch-save 2026-07-11 |
 | A4 · `__init__` reach-throughs | ☐ | 4 lines removed | — |
 | A5 · service-accessor extraction | ☐ | `_ALLOWED == {"window"}` | — |
 | B1 · cache-projector inversion | ☑ | `test_data_layer_no_feature_imports` green | 2026-07-11 |
@@ -438,6 +438,10 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 
 **Changelog** (newest first):
 
+- 2026-07-11 — **A3 — plot_orchestrator save-figure cluster:** migrated the 6
+  `app`-first save-figure funcs in `core/plot_orchestrator.py` to `ctx`-first
+  (`app = ctx.window` bridge; cross-calls threaded through ctx) and flipped the 5
+  runtime_app save delegators to `self._ctx`. `APP_FIRST_FUNC_BUDGET` 94→88.
 - 2026-07-11 — **A3+A2 — ui_helpers notification/theme cluster:** migrated 8
   `app`-first funcs in `core/ui_helpers.py` (`toast`, `show_progress`,
   `step_progress`, `toggle_log`, `apply_theme`, `on_theme_change` via the

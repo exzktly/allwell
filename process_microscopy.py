@@ -79,25 +79,16 @@ from skimage.segmentation import watershed
 # Per-worker StarDist model (loaded once at worker startup, not per image)
 # ---------------------------------------------------------------------------
 
-# Per-worker Cellpose model cache + the Cellpose segmenters live in the Qt-free
-# ``pipeline.cellpose`` module (Torch is imported lazily there, so importing it
-# does not load Torch). The import is DEFERRED — see the module-level
-# ``__getattr__`` below — so ``pipeline/cellpose.py`` can be physically absent in
-# a StarDist-only build (Cellpose profiled out) without breaking this module's
-# import. ``pm._CELLPOSE_MODELS`` / ``pm._cellpose_model`` / ``pm._segment_cellpose``
-# still resolve on first access (attribute or ``from process_microscopy import``),
-# so nothing that actually runs Cellpose changes.
+# The Cellpose model cache + segmenters live in Qt-free ``pipeline.cellpose``
+# (Torch is imported lazily there). Their re-exports resolve via a PEP 562 module
+# ``__getattr__`` — a DEFERRED import — so ``pipeline/cellpose.py`` can be
+# physically absent in a StarDist-only build (Cellpose profiled out) without
+# breaking this module's import; ``pm._segment_cellpose`` etc. still resolve on
+# first access.
 _CELLPOSE_REEXPORTS = ("_CELLPOSE_MODELS", "_cellpose_model", "_segment_cellpose")
 
 
-def __getattr__(name: str):
-    """Lazily resolve the Cellpose re-exports from ``pipeline.cellpose``.
-
-    PEP 562 module ``__getattr__``: only fires for names not already in this
-    module's globals, so it costs nothing on the StarDist path and defers the
-    ``pipeline.cellpose`` import until a Cellpose symbol is first touched. A
-    profiled-out build with ``pipeline/cellpose.py`` removed raises a clear
-    ``ImportError`` here only if Cellpose is actually selected."""
+def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
     if name in _CELLPOSE_REEXPORTS:
         import pipeline.cellpose as _cp
         return getattr(_cp, name)

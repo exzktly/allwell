@@ -151,12 +151,16 @@ so a profiled-out feature's module can be physically absent:
 **Pip parity** — `scripts/gen_requirements.py` (§2a) drops the same excluded-feature
 deps from a dev/remote install, so pip gating tracks the bundle.
 
-**Optional polish** (not required for a working subset binary):
+**`runtime_app` proxies — verified inert.** Every removable-feature reference in
+`runtime_app.py` is a lazy `_lazy(...)` proxy (imports its module only when
+called) or a function-scoped import; the sole module-scope eager `features.*`
+imports are of *kept-forever* support libs (`registry`, `export`, `preview`).
+Confirmed by booting a subset with seven removable feature packages **and**
+`pipeline/cellpose.py` physically removed — `runtime_app` imports and the app
+builds its registry cleanly. So an excluded feature's proxy is dead weight, never
+a broken import; nothing here blocks a subset binary.
 
-| Item | Benefit |
-|---|---|
-| `runtime_app` per-feature proxy methods finish their `ctx` migration | the dead proxies vanish |
-
-The remaining item does not block build-time feature selection; the proxies are
-already lazy, so an excluded feature's proxy is inert. `derive_profile.py --apply`
-now runs with only the ratchet-guard re-tightening as manual follow-up.
+**Optional polish** (pure cleanup, no decoupling value): migrating the residual
+`runtime_app` proxy *methods* to their `ctx`-native call sites would let the dead
+proxies vanish. `derive_profile.py --apply` runs today with only the ratchet-guard
+re-tightening as manual follow-up.

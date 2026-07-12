@@ -748,7 +748,7 @@ The relevant modules:
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
 | `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 48-colour well palette. |
-| `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract lives in `Markdowns/SELECTIONS_MODEL_CONTRACT.md`. |
+| `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract is documented in the module's own docstring. |
 | `domain/sample_definitions.py` | Read / write the `sample_definitions` block inside `pipeline_info.json`. |
 | `domain/batch_models.py` | `BarGroup` + `ReplicateSet` — plain dataclasses used by every plot tab + batch export. |
 | `domain/ratio_models.py` | Channel-ratio definitions (`gfp/mcherry`-style virtual channels). |

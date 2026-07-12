@@ -239,6 +239,12 @@ def on_page_finished(ctx, payload: dict) -> None:
     if payload.get("gen") != (ctx.runtime.cell_browser.gen or 0):
         return
     _update_count(ctx)
+    # Clear the "Loading cells…" status the busy-flag set — a finished page must
+    # not leave the status bar stuck mid-load. (``_set_apply_busy(False)`` only
+    # re-enables the buttons; it deliberately doesn't touch the status so it can't
+    # clobber the empty-gallery hint on the no-cells path, which never gets here.)
+    st = ctx.runtime.cell_browser.state
+    _set_status(ctx, f"Showing {st.loaded} / {len(st.cells)} cell(s).")
     btn = getattr(ctx.runtime.cell_browser, "load_more_btn", None)
     if btn is not None:
         btn.setEnabled(ctx.runtime.cell_browser.state.remaining > 0)

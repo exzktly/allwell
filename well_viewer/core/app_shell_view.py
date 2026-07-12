@@ -22,60 +22,6 @@ from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
 
 
-class _VScrollArea(QScrollArea):
-    """Sidebar scroll area: scrolls **vertically only**, and drives its host
-    sidebar's width so the horizontal axis never scrolls or clips.
-
-    ``setWidgetResizable(True)`` locks the content to the viewport width, so a
-    row wider than the viewport (e.g. a section header + its buttons on the
-    Statistics tab) would be clipped when the horizontal scrollbar is off.
-    Merely overriding the size *hints* does not help: the enclosing splitter
-    sizes each pane from the widget's ``minimumSize`` (the sidebar's explicit
-    ``setMinimumWidth``), not from a layout ``minimumSizeHint``, so it happily
-    leaves the rail too narrow. The reliable lever is ``setMinimumWidth`` on the
-    sidebar itself — that the splitter DOES honour, growing the rail.
-
-    So on every content layout change this widget recomputes the content's
-    needed width and sets the sidebar's minimum width to it, clamped to the
-    sidebar's [floor, ceil] range. The rail grows to fit a wide tab (up to the
-    ceiling) instead of clipping; narrower tabs keep whatever width they have.
-    Set ``_width_floor`` / ``_width_ceil`` after construction.
-    """
-
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-        self._width_floor = 0
-        self._width_ceil = 1 << 24
-
-    def setWidget(self, w) -> None:  # noqa: N802 — Qt naming
-        super().setWidget(w)
-        if w is not None:
-            # A frame show/hide changes the content's minimum width; catch it
-            # via the content's LayoutRequest and resync the sidebar width.
-            w.installEventFilter(self)
-        self._sync_sidebar_width()
-
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt naming
-        from PySide6.QtCore import QEvent
-        if isinstance(event, QEvent) and event.type() in (
-            QEvent.LayoutRequest, QEvent.Resize,
-        ):
-            self._sync_sidebar_width()
-        return super().eventFilter(obj, event)
-
-    def _sync_sidebar_width(self) -> None:
-        sidebar = self.parentWidget()
-        wdg = self.widget()
-        if sidebar is None or wdg is None:
-            return
-        # Content min + the vertical scrollbar (so content still fits once the
-        # scrollbar shows), clamped to the sidebar's allowed width range.
-        need = wdg.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width()
-        target = max(self._width_floor, min(need, self._width_ceil))
-        if sidebar.minimumWidth() != target:
-            sidebar.setMinimumWidth(target)
-
-
 def build_ui(win) -> None:
     outer = QVBoxLayout(win)
     outer.setContentsMargins(0, 0, 0, 0)
@@ -112,24 +58,21 @@ def build_ui(win) -> None:
     outer.addWidget(win._h_pane, 1)
 
     sidebar = QWidget()
-    # Review sidebar width reduced 25% (400→300 min, 600→450 max) per
-    # redesign-bug-batch-2: the plate map needs less breathing room than
-    # the original 400-px reservation; freed pixels go to the canvas.
-    sidebar.setMinimumWidth(300)
-    sidebar.setMaximumWidth(450)
+    # The sidebar rail is a FIXED width — it must never change with the active
+    # tab or its content (a wide row wraps/scales to fit instead of stretching
+    # the rail). A single fixed value (min == max) keeps every tab's rail
+    # identical.
+    _SIDEBAR_W = 340
+    sidebar.setFixedWidth(_SIDEBAR_W)
     # A tab can stack more content than the rail is tall — the Cell Browser, for
     # instance, shows the well plate AND its filter frame together, which used to
     # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so
-    # the overflow scrolls instead of the widgets crushing into each other.
-    # ``_VScrollArea`` scrolls vertically only and drives the sidebar's minimum
-    # width to fit the active tab's content (within [floor, ceil]), so a wide row
-    # (e.g. the Statistics comparison-groups header) widens the rail instead of
-    # clipping — the horizontal axis never scrolls. ``sidebar_layout`` stays the
-    # content's layout, so every ``sidebar_layout.addWidget(...)`` below is
-    # unchanged.
-    _sidebar_scroll = _VScrollArea(sidebar)
-    _sidebar_scroll._width_floor = 300   # keep in sync with setMinimumWidth above
-    _sidebar_scroll._width_ceil = 450    # keep in sync with setMaximumWidth above
+    # the overflow scrolls instead of the widgets crushing into each other. The
+    # horizontal axis never scrolls: at the fixed rail width, content must fit
+    # (section headers word-wrap, the plate scales to the rail). ``sidebar_layout``
+    # stays the content's layout, so every ``sidebar_layout.addWidget(...)`` below
+    # is unchanged.
+    _sidebar_scroll = QScrollArea(sidebar)
     _sidebar_scroll.setWidgetResizable(True)
     _sidebar_scroll.setFrameShape(QFrame.NoFrame)
     _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

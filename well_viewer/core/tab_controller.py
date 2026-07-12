@@ -36,7 +36,7 @@ _build_sample_definitions_centre = _lazy(
 # the feature is fully absent until (and unless) it is installed.
 split_focus_provider = None     # fn(ctx) -> focused leaf name | None
 split_visible_provider = None   # fn(ctx) -> set[str] of visible leaves | None
-split_nav_intercept = None      # fn(app, key) -> bool (True = consume nav)
+split_nav_intercept = None      # fn(ctx, key) -> bool (True = consume nav)
 
 
 def on_tab_change(ctx, _e=None) -> None:

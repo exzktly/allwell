@@ -148,6 +148,46 @@ def test_install_registers_hooks_and_widgets():
     assert app._ctx.runtime.split.pane is not None
 
 
+def test_section_nav_hands_ctx_not_app_to_intercept():
+    """Regression: ``_on_section_nav_changed`` must pass the ViewerContext to the
+    split nav-intercept, not the raw app.
+
+    ``_nav_intercept`` reads ``ctx.runtime.split`` — a ctx-native hook — but it is
+    registered *indirectly* (``tab_controller.split_nav_intercept`` module global),
+    so the frozen-ctx guard can't resolve the call site and verify the argument.
+    Passing the app instead of ``self._ctx`` crashed on every rail tab change
+    (``'WellViewerApp' object has no attribute 'runtime'``). This locks the
+    contract without needing a full app.
+    """
+    from types import SimpleNamespace
+
+    from well_viewer.core import tab_controller as tc
+    from well_viewer.runtime_app import WellViewerApp
+
+    seen = {}
+
+    def _spy(ctx, _key):
+        seen["arg"] = ctx
+        return False
+
+    saved = tc.split_nav_intercept
+    tc.split_nav_intercept = _spy
+    try:
+        sentinel_ctx = object()
+        stub = SimpleNamespace(
+            _section_nav_building=False,
+            _ctx=sentinel_ctx,
+            _notebook=SimpleNamespace(setCurrentByName=lambda _k: None),
+        )
+        # Call the unbound method against the stub — exercises the real caller body.
+        WellViewerApp._on_section_nav_changed(stub, "Line Graphs")
+        assert seen["arg"] is sentinel_ctx, (
+            "the nav-intercept hook must receive ctx (ctx.runtime.split), not the app"
+        )
+    finally:
+        tc.split_nav_intercept = saved
+
+
 def test_enter_split_reparents_and_reports_both_panes():
     from well_viewer.core import split_view as sv
     from well_viewer.core import tab_controller as tc

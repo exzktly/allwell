@@ -74,27 +74,9 @@ def build_bottom(win) -> None:
     win._status_lbl.setObjectName("Muted")
     sr_l.addWidget(win._status_lbl, 1)
 
-    # Actionable context chips (F1): the ON/OFF threshold and the error-band
-    # mode, fed live from state. Clicking jumps to / toggles their editor, so
-    # the always-visible readout doubles as a control. They replace the
-    # duplicate "threshold=… | band=…" text the line plot used to append.
-    # Register both chips through the WidgetRegistry so the ctx-native
-    # ``refresh_status_chips(ctx)`` resolves them via ``ctx.widgets`` (register
-    # also stamps ``win._status_threshold_chip`` for legacy readers).
-    win._widget_registry.register("_status_threshold_chip", QPushButton("", status_row))
-    win._status_threshold_chip.setProperty("variant", "secondary")
-    win._status_threshold_chip.setCursor(Qt.PointingHandCursor)
-    win._status_threshold_chip.setToolTip(
-        "ON/OFF intensity threshold for the active channel — click to edit it in Cell Gating")
-    win._status_threshold_chip.clicked.connect(lambda _=False: _go_to_threshold_editor(win))
-    sr_l.addWidget(win._status_threshold_chip)
-
-    win._widget_registry.register("_status_band_chip", QPushButton("", status_row))
-    win._status_band_chip.setProperty("variant", "secondary")
-    win._status_band_chip.setCursor(Qt.PointingHandCursor)
-    win._status_band_chip.setToolTip("Error band: SEM or SD — click to toggle")
-    win._status_band_chip.clicked.connect(lambda _=False: win._toggle_sem())
-    sr_l.addWidget(win._status_band_chip)
+    # (The bottom-bar Threshold / Error-band chips were removed — those controls
+    # now live in their own tab contexts, so the footer keeps only the status
+    # readout, the progress bar, and the Log toggle.)
 
     # Register the shared status-bar progress bar through the WidgetRegistry so
     # features reach it via ``ctx.widgets.get_or_none("_progress_bar")`` (A8);
@@ -148,47 +130,3 @@ def build_bottom(win) -> None:
     rt._logger.addHandler(handler)
     rt._logger.setLevel(logging.DEBUG)
     rt._logger.propagate = False
-
-    # Keep the band chip in lock-step with every SEM/SD toggle (from any
-    # toolbar), and seed both chips for the current state.
-    if not win._ctx.runtime.sem.observers:
-        win._ctx.runtime.sem.observers = []
-    win._ctx.runtime.sem.observers.append(lambda _is_sem: refresh_status_chips(win._ctx))
-    refresh_status_chips(win._ctx)
-
-
-def refresh_status_chips(ctx) -> None:
-    """Update the status-bar threshold / error-band chips from current state.
-
-    Hidden until a dataset is loaded (the values are meaningless otherwise).
-    Safe to call before the chips are built (no-op).
-
-    A8/D-thresh: ctx-native — both chips resolve through ``ctx.widgets``, the
-    dataset / SEM state comes off ``ctx.state``, and the ThreshFracOn read uses
-    the ctx-native ``get_thresh_frac_on`` leaf."""
-    thr_chip = ctx.widgets.get_or_none("_status_threshold_chip")
-    band_chip = ctx.widgets.get_or_none("_status_band_chip")
-    if thr_chip is None or band_chip is None:
-        return
-    has_data = bool(getattr(ctx.state.dataset, "well_paths", None))
-    thr_chip.setVisible(has_data)
-    band_chip.setVisible(has_data)
-    if not has_data:
-        return
-    try:
-        from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        thr = float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
-        thr_chip.setText(f"Threshold {thr:g}")
-    except Exception:
-        thr_chip.setText("Threshold —")
-    use_sem = bool(ctx.state.plot.use_sem)
-    band_chip.setText(f"Band {'SEM' if use_sem else 'SD'}")
-
-
-def _go_to_threshold_editor(win) -> None:
-    """Jump to the Cell Gating editor (under Sample Definitions) for the
-    threshold chip."""
-    nb = getattr(win, "_notebook", None)
-    if nb is not None:
-        nb.setCurrentByName("Sample Definitions")
-    win._set_status("Edit the ON/OFF intensity threshold under Cell Gating.")

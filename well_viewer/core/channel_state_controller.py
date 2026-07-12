@@ -1019,10 +1019,6 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
     both take ``ctx``, and each quick-edit stepper resolves through
     ``ctx.widgets``.
     """
-    # Keep the status-bar threshold chip (F1) in sync — runs on channel switch
-    # and every threshold edit, the same triggers as the ctxbar stepper.
-    from well_viewer.core.status_view import refresh_status_chips
-    refresh_status_chips(ctx)
     def _sync(attr: str, val: float) -> None:
         stepper = ctx.widgets.get_or_none(attr)
         if stepper is None:

@@ -44,7 +44,7 @@ from well_viewer.core.safe import swallowed
 
 
 SIDEBAR_LAYOUT_NAME = "Sidebar"
-WELL_MIME = "application/x-well-token"
+from well_viewer.core.dnd import WELL_MIME  # shared drag/drop token
 
 
 # ── Drag-aware widgets ───────────────────────────────────────────────────────

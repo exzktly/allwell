@@ -451,17 +451,33 @@ Goal mode picks the lowest-ID ☐ phase whose ordering constraints are met.
 | B4 · persistence → ctx | ☑ | `PERSIST_APP_PARAM_BUDGET == 0` | 2026-07-11 (load-converge sub-item still open) |
 | B5 · image repo facade *(optional)* | ☐ | image-facade ratchet == 0 | — |
 
-**Terminal-goal status (2026-07-11):** conditions **1, 2, 4, 5 hold** and are guard-proven
+**Terminal-goal status (2026-07-12):** conditions **1, 2, 4, 5 hold** and are guard-proven
 green; **Workstream A (god-object teardown) is COMPLETE** — `_ALLOWED == {"window"}`,
 `RAW_SELF_DELEGATOR_BUDGET == 0`, `APP_FIRST_FUNC_BUDGET == 0`. Condition **3** (zero
 `features.*` imports across **all of `core/`**, module *and* function-local) is the sole
-open item: 42 function-local core→feature imports remain across 12 files — the sanctioned
-escape hatch under `test_layering`/`test_architecture_contracts` (which ban only
-module-scope), and a genuinely larger effort than any single phase (the interleaved
-post-load projections + render/event dispatches need an ordered post-load / redraw hook
-design, per B1b's deferral). This is the remaining frontier for full vertical-slice purity.
+open item — now **metered and ratcheted**: `CORE_FEATURE_IMPORT_BUDGET == 33` in
+`tests/test_guardrails.py` (down-only, with the `_not_slack` twin). Module-scope
+core→feature imports are already banned at 0 (`test_architecture_contracts`); the 33 are
+**function-local** — the interleaved post-load projections + render/event dispatches that
+need an ordered post-load / redraw hook design to invert (roadmap phase B1b, a deferred
+epic). Two subclasses resist the void fan-out hook and need a service-lookup registry
+first: **query-style** cross-feature calls that return a value (`cell_gating_get_fluor_gate`,
+`_cell_gating_resolve_key`) and the **documented decoupling seams** (`projector_registry`
+QC/Crop, `scope_registry` registry-construction) which are themselves the sanctioned
+data/domain→feature bridges. This is the remaining frontier for full vertical-slice purity;
+the ratchet ensures it only shrinks.
 
 **Changelog** (newest first):
+
+- 2026-07-12 — **Cond. 3 metered + first conversion (34 → 33 core→feature imports).**
+  - Added the **`CORE_FEATURE_IMPORT_BUDGET`** ratchet (seed **33**, down-only + `_not_slack`
+    twin) in `tests/test_guardrails.py` — the function-local core→feature residual is now a
+    metered budget that can only shrink, locking in progress on terminal condition #3.
+  - Moved the shared `WELL_MIME` drag/drop token to a neutral `core/dnd` module so
+    `tab_controller` no longer imports `features/heatmap` for a protocol constant (34 → 33).
+  - Documented the two subclasses that need a service-lookup registry before they can be
+    inverted (query-style feature calls; the `projector_registry`/`scope_registry` seams),
+    so the ordered-hook epic (B1b) has a clear remaining scope.
 
 - 2026-07-11 — **WORKSTREAM A COMPLETE + cond. 3 advanced (42 → 33 core→feature imports).**
   - **A5 (service-accessor extraction) COMPLETE — `_ALLOWED == {"window"}`.** Extracted

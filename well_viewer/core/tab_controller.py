@@ -333,7 +333,7 @@ def sync_heatmap_well_drag_mode(ctx, enable: bool) -> None:
     plate = ctx.widgets.get_or_none("_sidebar_plate")
     if plate is None:
         return
-    from well_viewer.features.heatmap.sidebar_view import WELL_MIME
+    from well_viewer.core.dnd import WELL_MIME
     if enable:
         plate.setDragMime(WELL_MIME)
         plate.setAcceptDropMime(WELL_MIME)

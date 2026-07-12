@@ -17,6 +17,7 @@ Stdlib-only (``tomllib``); safe to import from the spec at build time.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -83,3 +84,57 @@ def plan_ml(excluded_deps) -> list:
     if any(d in excluded_deps for d in _CELLPOSE_ML):
         return []
     return list(_CELLPOSE_ML)
+
+
+# README_WellViewer.md ``###`` section heading → the feature it documents. A thin
+# build ships a README trimmed to the profile's features (the in-app help drawer
+# then documents only what the binary contains). Headings NOT listed here are
+# always kept — the safe default is to keep a section we can't classify, so a new
+# doc section never silently vanishes from a thin build.
+README_SECTION_FEATURES = {
+    "Bar Plots": "Plotting",
+    "Line Graphs": "Plotting",
+    "Scatter Plot": "Plotting",
+    "Distribution": "Plotting",
+    "Heat Map": "Plotting",
+    "Statistics": "Statistics",
+    "Multivariate analysis": "Multivariate",
+    "Spatial analysis": "Spatial",
+    "Image Browser": "Image Browser",
+    "smFISH": "smFISH",
+    "Review CSV": "Review CSV",
+    "Sample Definitions": "Sample Definitions",
+    "Saved Plots": "Saved Plots",
+    "Batch export": "Batch Export",
+}
+
+_H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section
+_H3 = re.compile(r"^### (.+?)\s*$")  # a ``### <title>`` feature section heading
+
+
+def trim_readme_for_profile(readme_text: str, features) -> str:
+    """Return *readme_text* with the ``###`` feature sections a profile excludes
+    removed, so a thin binary ships help for only the features it contains.
+
+    *features* is the profile's kept-feature-name set (``None`` = full app → the
+    text is returned unchanged). A ``### <title>`` section whose title maps (via
+    :data:`README_SECTION_FEATURES`) to a feature not in *features* is dropped
+    from its heading up to the next h1/h2/h3 heading; deeper ``####`` sub-sections
+    inside it go with it. Unmapped headings are always kept."""
+    if features is None:
+        return readme_text
+    kept = set(features)
+    lines = readme_text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        m = _H3.match(lines[i])
+        feat = README_SECTION_FEATURES.get(m.group(1).strip()) if m else None
+        if feat is not None and feat not in kept:
+            i += 1
+            while i < len(lines) and not _H1_3.match(lines[i]):
+                i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return "".join(out)

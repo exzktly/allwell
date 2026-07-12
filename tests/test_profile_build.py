@@ -15,6 +15,7 @@ from scripts.profile_build import (
     compute_exclusions,
     load_catalog,
     plan_ml,
+    trim_readme_for_profile,
 )
 
 _REPO = Path(__file__).resolve().parents[1]
@@ -101,3 +102,68 @@ def test_real_thin_profile_drops_torch_and_sklearn():
     assert {"torch", "torchvision", "cellpose"} <= set(ex.deps)
     assert {"sklearn", "umap"} <= set(ex.deps)
     assert plan_ml(ex.deps) == []  # StarDist-only binary
+
+
+# ── README trimming: a thin binary ships help for only its features ──────────
+
+_SAMPLE_README = """\
+# All-Well
+
+## Review mode
+
+### Bar Plots
+Bars docs.
+
+#### A bar sub-heading
+More bar docs.
+
+### Multivariate analysis
+Multivariate docs.
+
+### Spatial analysis
+Spatial docs.
+
+### Sample Definitions
+Sample def docs.
+
+## Building
+Build docs (unmapped ## heading — always kept).
+"""
+
+
+def test_trim_readme_full_app_is_unchanged():
+    # features=None → the full app → return the text verbatim.
+    assert trim_readme_for_profile(_SAMPLE_README, None) == _SAMPLE_README
+
+
+def test_trim_readme_drops_excluded_feature_sections():
+    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Sample Definitions"})
+    # Kept: Plotting (Bar Plots + its #### sub-heading), Sample Definitions.
+    assert "### Bar Plots" in out
+    assert "A bar sub-heading" in out       # the #### sub-section rode along
+    assert "### Sample Definitions" in out
+    # Dropped: Multivariate / Spatial (not in the kept set).
+    assert "Multivariate analysis" not in out
+    assert "Spatial analysis" not in out
+    assert "Multivariate docs." not in out
+    # Unmapped headings (title h1, the ## Building section) are always kept.
+    assert "## Building" in out
+    assert "# All-Well" in out
+
+
+def test_trim_readme_matches_real_thin_profile():
+    import tomllib
+    readme = (_REPO / "_Docs" / "Markdowns" / "README_WellViewer.md").read_text(
+        encoding="utf-8")
+    prof = tomllib.loads(
+        (_REPO / "profiles" / "thin.toml").read_text(encoding="utf-8"))
+    out = trim_readme_for_profile(readme, prof["features"])
+    # thin = Plotting + Sample Definitions + Image Browser.
+    assert "### Bar Plots" in out
+    assert "### Image Browser" in out
+    assert "### Sample Definitions" in out
+    # Everything the thin profile excludes is gone from the shipped help.
+    for dropped in ("### Multivariate analysis", "### Spatial analysis",
+                    "### smFISH", "### Review CSV", "### Saved Plots",
+                    "### Batch export", "### Statistics"):
+        assert dropped not in out, dropped

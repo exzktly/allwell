@@ -76,9 +76,12 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
     plate.setEnabledWells([])
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # The plate is the only widget in this sidebar now — give it room to
-    # expand vertically with the column. heightForWidth keeps the aspect.
-    plate.setMinimumHeight(280)
+    # The plate is the only widget in this sidebar. Like the main sidebar plate,
+    # rely on the WellPlateSelector's own minimumSizeHint rather than a fixed
+    # 280px floor: inside the sidebar scroll area that floor exceeds the plate's
+    # natural heightForWidth, so the grid rendered centred in a too-tall box (a
+    # vertically "stretched" plate). No floor → natural aspect-correct height;
+    # the trailing addStretch below still pins it to the top of the column.
     # Preferred (not MinimumExpanding) so the plate hugs its hint size and a
     # trailing addStretch absorbs leftover vertical space. Matches the main
     # sidebar plate's policy — without this the plate drifts down with the

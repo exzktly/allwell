@@ -15,10 +15,45 @@ No All-Well coupling — a plain reusable widget (belongs in ``widgets/``).
 
 from __future__ import annotations
 
-from PySide6.QtCore import QMargins, QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QMargins, QObject, QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLayout, QSizePolicy, QStyle, QWidget,
 )
+
+
+class _FlowHeightSync(QObject):
+    """Keeps a FlowLayout host's ``minimumHeight`` equal to the height its rows
+    actually need at the current width.
+
+    A ``FlowLayout`` reports ``heightForWidth`` so a box layout can grow the row
+    when it wraps — but that only works if the enclosing context *applies* it.
+    Nested inside a ``QStackedWidget`` page (as every centre tab is), some
+    platforms size the row from its one-line ``minimumSize`` instead, so a
+    wrapped second line has no reserved height and is clipped behind the widget
+    below (the reported "row of buttons hidden by the output panel"). Pinning the
+    minimum height on every resize makes the row keep its wrapped content
+    regardless of whether the parent honours ``heightForWidth``.
+    """
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt naming
+        if isinstance(event, QEvent) and event.type() in (
+            QEvent.Resize, QEvent.LayoutRequest,
+        ):
+            lay = obj.layout()
+            if lay is not None and lay.hasHeightForWidth():
+                need = lay.heightForWidth(obj.width())
+                if need > 0 and obj.minimumHeight() != need:
+                    obj.setMinimumHeight(need)
+        return False
+
+
+def sync_flow_height(widget: QWidget) -> None:
+    """Make *widget* (a host of a :class:`FlowLayout`) always reserve the height
+    its wrapped rows need. See :class:`_FlowHeightSync` for why the layout's own
+    ``heightForWidth`` isn't enough inside a stacked page."""
+    watcher = _FlowHeightSync(widget)
+    widget.installEventFilter(watcher)
+    widget._flow_height_sync = watcher  # keep a reference alive
 
 
 def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:

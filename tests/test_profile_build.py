@@ -109,10 +109,18 @@ def test_real_thin_profile_drops_torch_and_sklearn():
 _SAMPLE_README = """\
 # All-Well
 
+## Contents
+
+1. [Install](#install)
+   - Plotting: [Bar Plots](#bar-plots) · [Distribution](#distribution)
+   - [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
+   - [Sample Definitions](#sample-definitions) · [Batch export](#batch-export)
+2. [Building](#building)
+
 ## Review mode
 
 ### Bar Plots
-Bars docs.
+Bars docs. See [Multivariate analysis](#multivariate-analysis) for more.
 
 #### A bar sub-heading
 More bar docs.
@@ -142,13 +150,36 @@ def test_trim_readme_drops_excluded_feature_sections():
     assert "### Bar Plots" in out
     assert "A bar sub-heading" in out       # the #### sub-section rode along
     assert "### Sample Definitions" in out
-    # Dropped: Multivariate / Spatial (not in the kept set).
-    assert "Multivariate analysis" not in out
-    assert "Spatial analysis" not in out
+    # Dropped: the Multivariate / Spatial section headings + bodies.
+    assert "### Multivariate analysis" not in out
+    assert "### Spatial analysis" not in out
     assert "Multivariate docs." not in out
+    assert "Spatial docs." not in out
     # Unmapped headings (title h1, the ## Building section) are always kept.
     assert "## Building" in out
     assert "# All-Well" in out
+
+
+def test_trim_readme_prunes_the_contents_index():
+    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Sample Definitions"})
+    toc = out.split("## Review mode")[0]   # the Contents section only
+    # Kept features' index links survive.
+    assert "[Bar Plots](#bar-plots)" in toc
+    assert "[Sample Definitions](#sample-definitions)" in toc
+    # Excluded features' index links are pruned (no broken anchors advertised).
+    assert "multivariate-analysis" not in toc
+    assert "spatial-analysis" not in toc
+    assert "batch-export" not in toc
+    # The sub-bullet that listed ONLY excluded sections is gone entirely.
+    assert "Multivariate analysis" not in toc
+
+
+def test_trim_readme_leaves_inline_prose_links_intact():
+    # A [Title](#anchor) cross-reference inside a KEPT section's prose is not the
+    # Contents index and must survive verbatim (the pruning is TOC-scoped).
+    out = trim_readme_for_profile(_SAMPLE_README, {"Plotting", "Sample Definitions"})
+    body = out.split("## Review mode")[1]
+    assert "See [Multivariate analysis](#multivariate-analysis) for more." in body
 
 
 def test_trim_readme_matches_real_thin_profile():

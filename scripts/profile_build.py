@@ -110,6 +110,26 @@ README_SECTION_FEATURES = {
 
 _H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section
 _H3 = re.compile(r"^### (.+?)\s*$")  # a ``### <title>`` feature section heading
+_H2 = re.compile(r"^## ")            # an h2 heading ends the Contents section
+_TOC_HEAD = re.compile(r"^## Contents\s*$", re.IGNORECASE)
+_TOC_SUBBULLET = re.compile(r"^\s+- ")           # a Contents sub-bullet line
+_MD_LINK = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")  # a [Title](#anchor) link
+
+
+def _trim_toc_line(line: str, excluded_titles: set) -> str | None:
+    """Strip ``[Title](#anchor)`` links to excluded features from one Contents
+    sub-bullet, tidying the ``·`` separators left behind. Returns the cleaned
+    line, or ``None`` if it no longer lists any section (drop it)."""
+    def _drop(m):
+        return "" if m.group(1).strip() in excluded_titles else m.group(0)
+    body = _MD_LINK.sub(_drop, line.rstrip("\n"))
+    body = re.sub(r"·(?:\s*·)+", "·", body)   # collapse doubled separators
+    body = re.sub(r"·\s*$", "", body)          # trailing separator
+    body = re.sub(r"(-\s+)·\s*", r"\1", body)  # leading separator after the bullet
+    body = body.rstrip()
+    if "](#" not in body:                       # no sections left → drop the bullet
+        return None
+    return body + ("\n" if line.endswith("\n") else "")
 
 
 def trim_readme_for_profile(readme_text: str, features) -> str:
@@ -120,21 +140,45 @@ def trim_readme_for_profile(readme_text: str, features) -> str:
     text is returned unchanged). A ``### <title>`` section whose title maps (via
     :data:`README_SECTION_FEATURES`) to a feature not in *features* is dropped
     from its heading up to the next h1/h2/h3 heading; deeper ``####`` sub-sections
-    inside it go with it. Unmapped headings are always kept."""
+    inside it go with it. Unmapped headings are always kept.
+
+    The ``## Contents`` table of contents is pruned in step: link entries pointing
+    at a dropped section are removed (and a sub-bullet that lists only dropped
+    sections is deleted), so the help index doesn't advertise — with now-broken
+    anchors — features the profile omits. The pruning is scoped to the Contents
+    section so the same ``[Title](#anchor)`` links used inline in prose are left
+    intact."""
     if features is None:
         return readme_text
     kept = set(features)
+    excluded_titles = {t for t, f in README_SECTION_FEATURES.items() if f not in kept}
     lines = readme_text.splitlines(keepends=True)
     out: list[str] = []
     i = 0
+    in_contents = False
     while i < len(lines):
-        m = _H3.match(lines[i])
+        line = lines[i]
+        if _TOC_HEAD.match(line):
+            in_contents = True
+        elif in_contents and _H2.match(line):
+            in_contents = False
+        # Drop an excluded ``### <feature>`` section wholesale.
+        m = _H3.match(line)
         feat = README_SECTION_FEATURES.get(m.group(1).strip()) if m else None
         if feat is not None and feat not in kept:
             i += 1
             while i < len(lines) and not _H1_3.match(lines[i]):
                 i += 1
             continue
-        out.append(lines[i])
+        # Prune excluded links from a Contents sub-bullet.
+        if in_contents and _TOC_SUBBULLET.match(line) and "](#" in line:
+            cleaned = _trim_toc_line(line, excluded_titles)
+            if cleaned is None:
+                i += 1
+                continue
+            out.append(cleaned)
+            i += 1
+            continue
+        out.append(line)
         i += 1
     return "".join(out)

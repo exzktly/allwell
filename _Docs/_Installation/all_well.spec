@@ -167,7 +167,8 @@ if _markdowns_dir.is_dir():
             from scripts.profile_build import trim_readme_for_profile
             _readme.write_text(
                 trim_readme_for_profile(
-                    _readme.read_text(encoding="utf-8"), _prof.get("features")),
+                    _readme.read_text(encoding="utf-8"),
+                    _prof.get("features"), _prof.get("subtabs")),
                 encoding="utf-8")
         extra_data.append((str(_tmp_md), "Markdowns"))
     else:

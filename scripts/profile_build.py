@@ -108,21 +108,46 @@ README_SECTION_FEATURES = {
     "Batch export": "Batch Export",
 }
 
+#: The ``#### <title>`` sub-headings under a feature's ``### `` section that are
+#: sub-TABS (so trimming a profile's excluded sub-tabs never touches an ordinary
+#: prose sub-section). Titles match both the README heading and the profile's
+#: sub-tab names.
+README_SUBTAB_TITLES = {
+    "Image Browser": {"Segmentation", "Image Table", "Cell Browser", "Playground"},
+}
+
 _H1_3 = re.compile(r"^#{1,3} ")     # an h1/h2/h3 heading ends a ``###`` section
+_H1_4 = re.compile(r"^#{1,4} ")     # an h1..h4 heading ends a ``####`` sub-section
+_H1 = re.compile(r"^# ")
 _H3 = re.compile(r"^### (.+?)\s*$")  # a ``### <title>`` feature section heading
+_H4 = re.compile(r"^#### (.+?)\s*$")  # a ``#### <title>`` sub-tab heading
 _H2 = re.compile(r"^## ")            # an h2 heading ends the Contents section
 _TOC_HEAD = re.compile(r"^## Contents\s*$", re.IGNORECASE)
 _TOC_SUBBULLET = re.compile(r"^\s+- ")           # a Contents sub-bullet line
 _MD_LINK = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")  # a [Title](#anchor) link
+# A ``(a · b · c)`` sub-tab list — REQUIRES a ``·`` so it never matches a link's
+# ``(#anchor)`` URL (which would break the ``](#`` and drop the whole link).
+_PARENS = re.compile(r"\(([^)]*·[^)]*)\)")
 
 
-def _trim_toc_line(line: str, excluded_titles: set) -> str | None:
+def _trim_toc_line(line: str, excluded_titles: set,
+                   excluded_subtabs: set = frozenset()) -> str | None:
     """Strip ``[Title](#anchor)`` links to excluded features from one Contents
-    sub-bullet, tidying the ``·`` separators left behind. Returns the cleaned
-    line, or ``None`` if it no longer lists any section (drop it)."""
+    sub-bullet — and excluded sub-tab names from a ``(a · b · c)`` parenthetical
+    — tidying the ``·`` separators left behind. Returns the cleaned line, or
+    ``None`` if it no longer lists any section (drop it)."""
     def _drop(m):
         return "" if m.group(1).strip() in excluded_titles else m.group(0)
     body = _MD_LINK.sub(_drop, line.rstrip("\n"))
+
+    def _filter_parens(m):
+        parts = [p.strip() for p in m.group(1).split("·")]
+        keep = [p for p in parts if p and p not in excluded_subtabs]
+        return f" ({' · '.join(keep)})" if keep else ""
+    if excluded_subtabs:
+        # ``(Segmentation · Image Table · …)`` → ``(Segmentation)`` (or gone).
+        body = re.sub(r"\s*" + _PARENS.pattern, _filter_parens, body)
+
     body = re.sub(r"·(?:\s*·)+", "·", body)   # collapse doubled separators
     body = re.sub(r"·\s*$", "", body)          # trailing separator
     body = re.sub(r"(-\s+)·\s*", r"\1", body)  # leading separator after the bullet
@@ -132,7 +157,7 @@ def _trim_toc_line(line: str, excluded_titles: set) -> str | None:
     return body + ("\n" if line.endswith("\n") else "")
 
 
-def trim_readme_for_profile(readme_text: str, features) -> str:
+def trim_readme_for_profile(readme_text: str, features, subtabs=None) -> str:
     """Return *readme_text* with the ``###`` feature sections a profile excludes
     removed, so a thin binary ships help for only the features it contains.
 
@@ -142,37 +167,66 @@ def trim_readme_for_profile(readme_text: str, features) -> str:
     from its heading up to the next h1/h2/h3 heading; deeper ``####`` sub-sections
     inside it go with it. Unmapped headings are always kept.
 
+    *subtabs* is the profile's ``{feature: allowed-sub-tab-set}`` map: for a KEPT
+    feature that restricts its sub-tabs (e.g. thin's ``Image Browser`` = only
+    ``Segmentation``), the ``#### <sub-tab>`` sections it does NOT include are
+    dropped too — so the help gets tab-level, not just feature-level, accuracy.
+    Only ``####`` headings that are known sub-tabs (:data:`README_SUBTAB_TITLES`)
+    are eligible; ordinary prose sub-sections are always kept.
+
     The ``## Contents`` table of contents is pruned in step: link entries pointing
     at a dropped section are removed (and a sub-bullet that lists only dropped
-    sections is deleted), so the help index doesn't advertise — with now-broken
-    anchors — features the profile omits. The pruning is scoped to the Contents
+    sections is deleted), and a feature's ``(sub · tab · list)`` parenthetical is
+    filtered to its included sub-tabs. The pruning is scoped to the Contents
     section so the same ``[Title](#anchor)`` links used inline in prose are left
     intact."""
     if features is None:
         return readme_text
     kept = set(features)
+    subtabs = subtabs or {}
     excluded_titles = {t for t, f in README_SECTION_FEATURES.items() if f not in kept}
+    # Sub-tabs to drop: a kept feature's known sub-tab titles minus the ones its
+    # profile actually includes. A feature with no ``subtabs`` entry keeps all.
+    allowed_by_feat = {feat: set(subtabs[feat])
+                       for feat in README_SUBTAB_TITLES if feat in kept and feat in subtabs}
+    excluded_subtabs = {t for feat, allowed in allowed_by_feat.items()
+                        for t in README_SUBTAB_TITLES[feat] if t not in allowed}
     lines = readme_text.splitlines(keepends=True)
     out: list[str] = []
     i = 0
     in_contents = False
+    cur_feat = None
     while i < len(lines):
         line = lines[i]
         if _TOC_HEAD.match(line):
             in_contents = True
         elif in_contents and _H2.match(line):
             in_contents = False
-        # Drop an excluded ``### <feature>`` section wholesale.
-        m = _H3.match(line)
-        feat = README_SECTION_FEATURES.get(m.group(1).strip()) if m else None
-        if feat is not None and feat not in kept:
-            i += 1
-            while i < len(lines) and not _H1_3.match(lines[i]):
+        # Track the current ``### <feature>`` scope; drop excluded features whole.
+        m3 = _H3.match(line)
+        if m3:
+            feat = README_SECTION_FEATURES.get(m3.group(1).strip())
+            if feat is not None and feat not in kept:
                 i += 1
-            continue
-        # Prune excluded links from a Contents sub-bullet.
+                while i < len(lines) and not _H1_3.match(lines[i]):
+                    i += 1
+                continue
+            cur_feat = feat
+        elif _H2.match(line) or _H1.match(line):
+            cur_feat = None
+        # Drop an excluded ``#### <sub-tab>`` within a sub-tab-restricted feature.
+        m4 = _H4.match(line)
+        if m4 and cur_feat in allowed_by_feat:
+            title = m4.group(1).strip()
+            if (title in README_SUBTAB_TITLES[cur_feat]
+                    and title not in allowed_by_feat[cur_feat]):
+                i += 1
+                while i < len(lines) and not _H1_4.match(lines[i]):
+                    i += 1
+                continue
+        # Prune excluded links / sub-tabs from a Contents sub-bullet.
         if in_contents and _TOC_SUBBULLET.match(line) and "](#" in line:
-            cleaned = _trim_toc_line(line, excluded_titles)
+            cleaned = _trim_toc_line(line, excluded_titles, excluded_subtabs)
             if cleaned is None:
                 i += 1
                 continue

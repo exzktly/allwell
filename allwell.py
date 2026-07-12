@@ -713,8 +713,9 @@ class AllWellApp(QMainWindow):
                 try:
                     from scripts.profile_build import trim_readme_for_profile
                     from well_viewer.core.profile import active_profile
+                    _prof = active_profile()
                     readme_text = trim_readme_for_profile(
-                        readme_text, active_profile().features)
+                        readme_text, _prof.features, _prof.subtabs)
                 except Exception:
                     pass
                 # A running app is already installed — drop install/build help.

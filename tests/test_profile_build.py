@@ -182,6 +182,63 @@ def test_trim_readme_leaves_inline_prose_links_intact():
     assert "See [Multivariate analysis](#multivariate-analysis) for more." in body
 
 
+_SUBTAB_README = """\
+# All-Well
+
+## Contents
+
+1. [Review mode](#review-mode)
+   - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground)
+
+## Review mode
+
+### Image Browser
+Intro to the browser.
+
+#### Segmentation
+Seg docs.
+
+#### Image Table
+Table docs.
+
+#### Cell Browser
+Cell docs.
+
+#### Playground
+Playground docs.
+
+### Sample Definitions
+Sample docs.
+"""
+
+
+def test_trim_readme_drops_excluded_subtab_sections():
+    # Image Browser kept, but only its Segmentation sub-tab is included.
+    out = trim_readme_for_profile(
+        _SUBTAB_README, {"Image Browser", "Sample Definitions"},
+        {"Image Browser": {"Segmentation"}})
+    assert "### Image Browser" in out          # the feature stays
+    assert "#### Segmentation" in out          # the included sub-tab stays
+    assert "Seg docs." in out
+    # The excluded sub-tabs (and their bodies) are gone.
+    for gone in ("#### Image Table", "Table docs.", "#### Cell Browser",
+                 "Cell docs.", "#### Playground", "Playground docs."):
+        assert gone not in out, gone
+    # The Contents parenthetical is filtered to the included sub-tab.
+    assert "(Segmentation)" in out
+    assert "Image Table" not in out
+    # A feature with no sub-tab restriction keeps everything.
+    assert "### Sample Definitions" in out
+
+
+def test_trim_readme_no_subtab_restriction_keeps_all_subtabs():
+    # Image Browser in `features` but absent from `subtabs` → all sub-tabs kept.
+    out = trim_readme_for_profile(_SUBTAB_README, {"Image Browser"}, {})
+    for kept in ("#### Segmentation", "#### Image Table", "#### Cell Browser",
+                 "#### Playground"):
+        assert kept in out, kept
+
+
 def test_trim_readme_matches_real_thin_profile():
     import tomllib
     readme = (_REPO / "_Docs" / "Markdowns" / "README_WellViewer.md").read_text(

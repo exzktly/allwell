@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -62,9 +63,31 @@ def build_ui(win) -> None:
     # the original 400-px reservation; freed pixels go to the canvas.
     sidebar.setMinimumWidth(300)
     sidebar.setMaximumWidth(450)
-    sidebar_layout = QVBoxLayout(sidebar)
+    # A tab can stack more content than the rail is tall — the Cell Browser, for
+    # instance, shows the well plate AND its filter frame together, which used to
+    # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so
+    # the overflow scrolls instead of the widgets crushing into each other.
+    # Horizontal scrolling is deliberately OFF: ``setWidgetResizable(True)`` keeps
+    # the content locked to the viewport width, and the only sidebar widget that
+    # is wider than the narrow rail — the well plate — now has a small
+    # ``minimumSizeHint`` (widgets/well_plate_selector) so it SCALES DOWN to fit
+    # rather than forcing a horizontal scrollbar. ``sidebar_layout`` stays the
+    # content's layout, so every ``sidebar_layout.addWidget(...)`` below is
+    # unchanged.
+    _sidebar_scroll = QScrollArea(sidebar)
+    _sidebar_scroll.setWidgetResizable(True)
+    _sidebar_scroll.setFrameShape(QFrame.NoFrame)
+    _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    _sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    _sidebar_content = QWidget()
+    sidebar_layout = QVBoxLayout(_sidebar_content)
     sidebar_layout.setContentsMargins(0, 0, 0, 0)
     sidebar_layout.setSpacing(0)
+    _sidebar_scroll.setWidget(_sidebar_content)
+    _sidebar_outer = QVBoxLayout(sidebar)
+    _sidebar_outer.setContentsMargins(0, 0, 0, 0)
+    _sidebar_outer.setSpacing(0)
+    _sidebar_outer.addWidget(_sidebar_scroll)
 
     # Phase 10 (A1): vertical section nav above the per-section frames.
     # Replaces the horizontal QTabWidget tab bar in centre_view.py; the

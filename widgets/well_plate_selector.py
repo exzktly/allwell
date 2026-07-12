@@ -214,8 +214,18 @@ class _PlateGrid(QWidget):
         return QSize(lab + u * _N_COLS, lab + u * _N_ROWS)
 
     def minimumSizeHint(self) -> QSize:
-        u = max(18, round(self.fontMetrics().height() * 1.6))
-        lab = round(self.fontMetrics().height() * 1.4)
+        # A small floor so the plate can shrink to fit a narrow container (e.g.
+        # the ~300px review rail) instead of forcing horizontal overflow. The
+        # grid paints fully responsively — ``_metrics`` scales the cell size to
+        # whatever width/height it is given — so the minimum only needs to keep
+        # the 12x8 grid minimally legible, NOT reserve the preferred size.
+        # ``sizeHint`` carries the (larger) preferred size and the Expanding
+        # size policy fills the available width when there is room; this floor
+        # is what the layout squeezes toward when space is tight. The cell edge
+        # is a fixed 12px (not font-scaled) so the minimum stays well under the
+        # rail width on HiDPI too, where a font-derived floor would balloon.
+        u = 12
+        lab = round(self.fontMetrics().height() * 1.2)
         return QSize(lab + u * _N_COLS, lab + u * _N_ROWS)
 
     # Lock the plate's aspect ratio: at any given width the layout knows the

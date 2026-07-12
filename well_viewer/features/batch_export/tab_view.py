@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from well_viewer.features.batch_export import (
     BatchExportPanel,
@@ -11,11 +11,6 @@ from well_viewer.features.batch_export import (
 )
 # Shared plot toggles now live in core (A8 enabler E3), so this feature can drive
 # the SEM/SD + per-FOV controls through ctx without a cross-feature import.
-from well_viewer.core.plot_toggles import (
-    toggle_sem,
-    toggle_fov_replicates,
-    refresh_fov_btn_state,
-)
 
 from PySide6.QtWidgets import QScrollArea
 
@@ -50,59 +45,6 @@ def _refresh_mode_buttons(ctx, mode: str) -> None:
         sc.setCurrentByData(mode)
     finally:
         sc.blockSignals(blocked)
-
-
-def _build_spread_row(ctx, parent: QWidget) -> QWidget:
-    """Build the Error Band (SEM/SD) + per-FOV-spread toggle row.
-
-    The buttons register into the same ``ctx.runtime.sem.btns`` /
-    ``ctx.runtime.fov.btns`` banks used by the matplotlib toolbars, so toggling
-    here propagates everywhere and the visuals stay in sync. The line/bar batch
-    panels read ``ctx.state.plot.use_sem`` / the per-FOV flag directly, so
-    toggling these immediately changes what the next "Generate" produces.
-    """
-    row = QWidget(parent)
-    rl = QHBoxLayout(row)
-    rl.setContentsMargins(0, 0, 0, 8)
-    rl.setSpacing(6)
-
-    eb_lbl = QLabel("Error Band:", row)
-    eb_lbl.setObjectName("Muted")
-    rl.addWidget(eb_lbl)
-
-    initial_sem = bool(ctx.state.plot.use_sem)
-    sem_btn = QPushButton("SEM" if initial_sem else "SD", row)
-    sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
-    sem_btn.setToolTip(
-        "Switch the spread used by line/bar batch exports between\n"
-        "SEM (Standard Error of the Mean) and SD (Standard Deviation).\n"
-        "Mirrors the SEM/SD toggle in the plot toolbars."
-    )
-    sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
-    rl.addWidget(sem_btn)
-    if ctx.runtime.sem.btns is None:
-        ctx.runtime.sem.btns = []
-    ctx.runtime.sem.btns.append(sem_btn)
-    if not ctx.runtime.sem.btn:
-        ctx.runtime.sem.btn = sem_btn
-
-    spread_lbl = QLabel("  Per-FOV points:", row)
-    spread_lbl.setObjectName("Muted")
-    rl.addWidget(spread_lbl)
-
-    fov_btn = QPushButton("FOV", row)
-    fov_btn.setProperty("variant", "toggle")
-    fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
-    rl.addWidget(fov_btn)
-    if ctx.runtime.fov.btns is None:
-        ctx.runtime.fov.btns = []
-    ctx.runtime.fov.btns.append(fov_btn)
-    if not ctx.runtime.fov.btn:
-        ctx.runtime.fov.btn = fov_btn
-    refresh_fov_btn_state(ctx)
-
-    rl.addStretch(1)
-    return row
 
 
 def _show_batch_mode(ctx, mode: str) -> None:
@@ -143,12 +85,6 @@ def _show_batch_mode(ctx, mode: str) -> None:
     # groups with the replicate sets on each visit. Users pull in the replicate
     # groups explicitly via the panel's "Sync from app" button or Quick Setup.
 
-    # The Error-Band / per-FOV row only affects line & bar exports — hide it on
-    # the scatter modes so it doesn't read as an applicable (but inert) control.
-    band_row = state.get("band_row")
-    if band_row is not None:
-        band_row.setVisible(mode in ("line", "bar"))
-
     state["mode"] = mode
     _refresh_mode_buttons(ctx, mode)
 
@@ -162,8 +98,8 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
 
     # v2: pick-one mode via SegmentedControl instead of a row of toggle
     # QPushButtons. Each segment carries the mode key in data; currentChanged
-    # routes to the appropriate _open_*_batch_export entrypoint. The chart-type
-    # selector leads; the (line/bar-only) Error-Band row sits beneath it.
+    # routes to the appropriate _open_*_batch_export entrypoint. The Error-band /
+    # per-FOV spread controls now live in each line/bar panel's OUTPUT SETTINGS.
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
     switch_row = _SegmentedControl(parent)
     switch_row.addSegment("Line", data="line")
@@ -193,11 +129,9 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     switch_row.currentChanged.connect(_on_mode_changed)
     layout.addWidget(switch_row)
 
-    # Error-Band / per-FOV row — beneath the chart-type selector, and only
-    # shown for the line/bar modes it actually affects (toggled in
-    # ``_show_batch_mode``).
-    band_row = _build_spread_row(ctx, parent)
-    layout.addWidget(band_row)
+    # The Error-band (SEM/SD) + per-FOV-points toggles used to sit in a separate
+    # row here; they now live inside each line/bar panel's OUTPUT SETTINGS (see
+    # BatchExportPanel._build_spread_settings_rows), with the rest of the config.
 
     # Host the mode panels inside a vertical-scroll area: when the window is
     # narrow the panel stacks its plate-map / OUTPUT-SETTINGS vertically (see
@@ -224,7 +158,6 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "panels": {},
         "mode": "line",
         "mode_segmented": switch_row,
-        "band_row": band_row,
     }
     ctx.runtime.batch_export.set_mode = lambda mode="line": _show_batch_mode(ctx, mode)
     ctx.runtime.batch_export.set_mode("line")

@@ -243,7 +243,10 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # per-FOV toggle) so the tab is explicit about the unit of replication.
     fov_indicator = reg.register("_stats_fov_indicator", QLabel("", run_row))
     fov_indicator.setObjectName("MutedCaption")
-    fov_indicator.setWordWrap(True)
+    # No word-wrap: inside a FlowLayout a wrapped label reports its longest-word
+    # width as its minimum, so the flow allocates it narrow and the single-line
+    # "Replicates: …" caption wraps into a tall stack even with the whole row
+    # free. Left un-wrapped it keeps one line and the flow places it whole.
     rrl.addWidget(fov_indicator)
     stats_refresh_fov_indicator(ctx)
     layout.addWidget(run_row)

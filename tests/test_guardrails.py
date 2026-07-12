@@ -93,6 +93,15 @@ RAW_SELF_DELEGATOR_SLACK = 0
 PERSIST_APP_PARAM_BUDGET = 0
 APP_FIRST_FUNC_BUDGET = 0             # top-level funcs in core/+features/ whose first param is `app`
 APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→109, grouping 109→107, heatmap-sidebar 107→102, ui_helpers-notify 102→94, plot_orch-save 94→88, tab_controller 88→80, split_view 80→68, selection_controller 68→43, load_controller 43→34, registry hooks 34→26, channel 26→22, ui_helpers 22→19, leaf 19→12, builder-chain 12→5, export/style 5→0 (A3 COMPLETE)
+# Terminal condition #3 (vertical-slice purity): core/ must eventually carry ZERO
+# feature imports. Module-scope core→feature imports are already banned at 0 by
+# ``test_architecture_contracts``; the residual is FUNCTION-LOCAL imports — the
+# interleaved post-load / redraw / event dispatch that needs an ordered-hook
+# design to invert (roadmap phase B1b, a deferred epic). This ratchet meters that
+# residual so it can only shrink. Seeded at today's count; WELL_MIME moved to
+# ``core/dnd`` took it 34→33.
+CORE_FEATURE_IMPORT_BUDGET = 33
+CORE_FEATURE_IMPORT_SLACK = 0
 
 
 def _enforce(ok: bool, message: str) -> None:
@@ -356,6 +365,44 @@ def test_app_first_func_budget_not_slack():
         f"only {count} `app`-first free functions remain but the budget is "
         f"{APP_FIRST_FUNC_BUDGET}: lower APP_FIRST_FUNC_BUDGET to {count} so the "
         "ratchet keeps biting.",
+    )
+
+
+def _core_feature_imports() -> list[str]:
+    """``<file>:<line>`` for every ``well_viewer.features.*`` import under
+    ``core/``. Module-scope ones are already 0 (``test_architecture_contracts``),
+    so this is the function-local residual — terminal condition #3's frontier."""
+    out: list[str] = []
+    for py in sorted(CORE_DIR.rglob("*.py")):
+        for node in ast.walk(ast.parse(py.read_text())):
+            mod = None
+            if isinstance(node, ast.ImportFrom):
+                mod = node.module
+            elif isinstance(node, ast.Import):
+                mod = node.names[0].name if node.names else None
+            if mod and mod.startswith("well_viewer.features"):
+                out.append(f"{py.name}:{node.lineno}")
+    return out
+
+
+def test_core_feature_import_budget():
+    count = len(_core_feature_imports())
+    _enforce(
+        count <= CORE_FEATURE_IMPORT_BUDGET,
+        f"well_viewer/core carries {count} feature imports, over the "
+        f"{CORE_FEATURE_IMPORT_BUDGET} budget. Route a new core→feature call "
+        "through a FeatureRegistry hook (with_hook) instead of importing the "
+        "feature — the ratchet only moves down.",
+    )
+
+
+def test_core_feature_import_budget_not_slack():
+    count = len(_core_feature_imports())
+    _enforce(
+        count >= CORE_FEATURE_IMPORT_BUDGET - CORE_FEATURE_IMPORT_SLACK,
+        f"only {count} core→feature imports remain but the budget is "
+        f"{CORE_FEATURE_IMPORT_BUDGET}: lower CORE_FEATURE_IMPORT_BUDGET to "
+        f"{count} so the ratchet keeps biting.",
     )
 
 

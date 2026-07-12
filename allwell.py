@@ -102,8 +102,9 @@ def _render_manual_html(md_text: str) -> str:
 
 
 #: ``## <title>`` sections dropped from the *in-app* help manual — a running app
-#: is already installed, so install/build instructions are noise in the drawer.
-_HELP_DROP_H2 = ("Install", "Building the macOS bundle")
+#: is already installed, so install/build instructions are noise in the drawer;
+#: "Where to read next" points at repo docs that aren't shipped to the drawer.
+_HELP_DROP_H2 = ("Install", "Building the macOS bundle", "Where to read next")
 #: Contents-index link texts that belong to those dropped sections.
 _HELP_DROP_TOC = set(_HELP_DROP_H2) | {
     "macOS pre-built app", "Running from source", "Windows (from source)"}

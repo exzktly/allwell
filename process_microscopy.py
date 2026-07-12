@@ -4233,8 +4233,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tf_threads", type=int, default=0,
                    help=(
                        "CPU threads per worker for TensorFlow/BLAS inference. "
-                       "0 (default) = auto-select based on cpu_count (always 4). "
-                       "Common values: "
+                       "0 (default) = 4 (non-Mac) or 2 (macOS/Metal); smaller yields "
+                       "more workers (cpu_count // tf_threads). Common values: "
                        "4  = default, suits most x86 CPUs (≤32 cores); "
                        "8  = for CPUs with large L3 caches (e.g. EPYC, Xeon Scalable) "
                        "     where inference scales beyond 4 threads; "
@@ -4440,11 +4440,11 @@ def main() -> None:
         # Explicit override: CPU regardless of platform
         pass
     elif _on_mac:
-        # macOS: tensorflow-metal handles GPU scheduling internally.
-        # Use fewer workers (Metal serialises GPU calls anyway) and don't
-        # pin as many CPU threads — Metal does its own thread management.
-        workers            = max(1, args.tf_threads if args.tf_threads > 0 else 2)
-        threads_per_worker = tf_threads
+        # macOS/Metal: inference runs on the GPU, so scale the worker COUNT with
+        # cores on a small per-worker CPU budget (8→3, 12→5, 16→7; was a flat 2).
+        mac_threads = min(args.tf_threads, available) if args.tf_threads > 0 else 2
+        tf_threads = threads_per_worker = mac_threads
+        workers = max(2, available // mac_threads)
     # else: non-Mac CPU-only default already set above (workers = available //
     # tf_threads), so no branch needed.
 

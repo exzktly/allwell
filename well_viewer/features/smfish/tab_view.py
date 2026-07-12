@@ -70,7 +70,7 @@ _NO_SMFISH_MESSAGE = (
 )
 
 
-from widgets.flow_layout import FlowLayout, flow_group
+from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
@@ -165,6 +165,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     cl.addWidget(flow_group(ctrl, "LUT Max:", lut_max_edit))
     cl.addStretch(1)
+    sync_flow_height(ctrl)   # reserve the wrapped height (see sync_flow_height)
     root.addWidget(ctrl)
 
     # Row 2: action buttons
@@ -193,6 +194,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     bl.addWidget(cdf_btn)
     bl.addStretch(1)
+    sync_flow_height(btn_row)   # reserve the wrapped height so no row hides
     root.addWidget(btn_row)
 
     # Status row

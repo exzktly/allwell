@@ -4233,8 +4233,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--tf_threads", type=int, default=0,
                    help=(
                        "CPU threads per worker for TensorFlow/BLAS inference. "
-                       "0 (default) = auto-select based on cpu_count (always 4). "
-                       "Common values: "
+                       "0 (default) = auto-select: 4 on non-Mac (CPU inference "
+                       "sweet spot), 2 on macOS (Metal runs inference on the GPU, "
+                       "so a smaller CPU budget frees cores for more workers). "
+                       "The worker count is cpu_count // tf_threads either way, so "
+                       "a smaller value yields MORE parallel workers. Common "
+                       "values: "
                        "4  = default, suits most x86 CPUs (≤32 cores); "
                        "8  = for CPUs with large L3 caches (e.g. EPYC, Xeon Scalable) "
                        "     where inference scales beyond 4 threads; "
@@ -4440,11 +4444,24 @@ def main() -> None:
         # Explicit override: CPU regardless of platform
         pass
     elif _on_mac:
-        # macOS: tensorflow-metal handles GPU scheduling internally.
-        # Use fewer workers (Metal serialises GPU calls anyway) and don't
-        # pin as many CPU threads — Metal does its own thread management.
-        workers            = max(1, args.tf_threads if args.tf_threads > 0 else 2)
-        threads_per_worker = tf_threads
+        # macOS / Apple Silicon. StarDist inference runs on the Metal GPU, which
+        # serialises submissions — so the x86 default of 4 CPU threads per worker
+        # (tuned for CPU *inference*) is wasted here, and the old flat default of
+        # just 2 workers left most cores idle on the 8-16-core Macs this runs on.
+        #
+        # Instead give each worker a SMALL CPU-thread budget (Metal does its own
+        # GPU thread management) and scale the WORKER COUNT with cores, so the
+        # heavy CPU-bound per-FOV work — image decode, top-hat/background
+        # correction, quantification, CSV — runs in parallel across FOVs. This is
+        # the same "one core per worker slot" logic the non-Mac path uses, just
+        # with a 2-thread budget so more workers fit.
+        #   8 cores → 3 workers · 10 → 4 · 12 → 5 · 16 → 7   (was 2 in every case)
+        # ``--workers`` still overrides; ``--tf_threads`` sets the per-worker CPU
+        # budget (and thus how many workers fit).
+        mac_threads        = min(args.tf_threads, available) if args.tf_threads > 0 else 2
+        tf_threads         = mac_threads
+        threads_per_worker = mac_threads
+        workers            = max(2, available // mac_threads)
     # else: non-Mac CPU-only default already set above (workers = available //
     # tf_threads), so no branch needed.
 

@@ -59,14 +59,13 @@ def build_sidebar(win, parent: QWidget) -> None:
     # size policy + 280-px min height + heightForWidth, with a trailing
     # ``layout.addStretch(1)`` absorbing the remaining vertical space —
     # the plate stays anchored to the top of the sidebar across tabs).
-    plate.setMinimumHeight(280)
-    # Let the plate SCALE DOWN to the sidebar's inner width instead of forcing a
-    # minimum (its minimumSizeHint width is ~18px x 12 cols ≈ 285px+, bigger on
-    # HiDPI). The sidebar now scrolls vertically (app_shell_view), which decouples
-    # the plate's min width from the rail width — without this floor override the
-    # plate stays too wide for the scroll viewport and overflows horizontally
-    # (columns clipped). heightForWidth keeps the wells circular as it narrows.
-    plate.setMinimumWidth(160)
+    # Let the plate SCALE DOWN vertically when a tab stacks tall content beneath
+    # it (the Cell Browser shows the plate AND its filter frame): a large fixed
+    # floor (was 280) forced the plate to keep its full height and pushed the
+    # controls below into an overlap ("crushed sidebar"). A smaller floor lets the
+    # layout shrink the plate toward its natural size instead; tabs with room
+    # still render it at its (larger) preferred height via heightForWidth.
+    plate.setMinimumHeight(150)
     from PySide6.QtWidgets import QSizePolicy as _SizePolicy
     _sp = _SizePolicy(_SizePolicy.Preferred, _SizePolicy.Preferred)
     _sp.setHeightForWidth(True)

@@ -59,6 +59,12 @@ def build_bottom(win) -> None:
     if app_layout is not None:
         app_layout.addWidget(bottom)
 
+    # Expose the footer strip so an embedding shell (allwell) can hide it and
+    # adopt the live status label + progress bar into a single bottom bar,
+    # instead of stacking two "Ready." strips. Standalone WellViewerApp keeps
+    # its own footer visible.
+    win._status_footer = bottom
+
     top_sep = QFrame(bottom)
     top_sep.setFrameShape(QFrame.HLine)
     top_sep.setFixedHeight(1)

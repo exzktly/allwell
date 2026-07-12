@@ -302,13 +302,25 @@ class AllWellApp(QMainWindow):
         sb_layout.setContentsMargins(theme_v2.Spacing.md, 4,
                                      theme_v2.Spacing.md, 4)
         sb_layout.setSpacing(theme_v2.Spacing.sm)
-        self._status_lbl_app = QLabel("Ready.")
+        # The embedded Review widget builds its own status strip
+        # (status_view.build_bottom) with a "Ready." label + progress bar. That
+        # duplicates this shell's bar — two stacked "Ready." lines. Adopt the
+        # Review's live label + progress bar into this single bottom bar and hide
+        # the inner strip, so status/progress show here and appear only once.
+        self._status_lbl_app = getattr(self._review, "_status_lbl", None) \
+            or QLabel("Ready.")
         self._status_lbl_app.setStyleSheet(
             f"color: {theme_v2.Colors.text_secondary}; "
             f"font-size: {theme_v2.Typography.caption_size}px;"
         )
         sb_layout.addWidget(self._status_lbl_app)
         sb_layout.addStretch(1)
+        _review_progress = getattr(self._review, "_progress_bar", None)
+        if _review_progress is not None:
+            sb_layout.addWidget(_review_progress)
+        _inner_footer = getattr(self._review, "_status_footer", None)
+        if _inner_footer is not None:
+            _inner_footer.hide()
         # Kbd hints — each one is a real shortcut wired in _install_shortcuts.
         # ("Search ⌘K" used to sit here but no global search exists; replaced
         #  with the help-drawer toggle, which is a real binding.)

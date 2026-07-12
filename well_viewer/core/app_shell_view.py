@@ -22,6 +22,39 @@ from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
 
 
+class _VScrollArea(QScrollArea):
+    """A scroll area that scrolls **vertically only** and reserves its content's
+    full width so the horizontal axis never scrolls or clips.
+
+    ``setWidgetResizable(True)`` alone locks the content to the viewport width,
+    so a row wider than the viewport (e.g. a section header + its buttons) gets
+    clipped when the horizontal scrollbar is off. Overriding the width side of
+    the size hints makes the scroll area demand the content's minimum width,
+    which propagates up so the sidebar widens to fit (up to its own maxWidth) —
+    the same "grow to fit content" behaviour the sidebar had before it was
+    wrapped in a scroll area. Only vertical overflow scrolls.
+    """
+
+    def _content_width(self) -> int:
+        wdg = self.widget()
+        if wdg is None:
+            return 0
+        # Reserve the content's minimum width plus the vertical scrollbar, so
+        # the content still fits when the scrollbar appears.
+        sb = self.verticalScrollBar().sizeHint().width()
+        return wdg.minimumSizeHint().width() + sb
+
+    def minimumSizeHint(self):  # noqa: N802 — Qt naming
+        hint = super().minimumSizeHint()
+        hint.setWidth(max(hint.width(), self._content_width()))
+        return hint
+
+    def sizeHint(self):  # noqa: N802 — Qt naming
+        hint = super().sizeHint()
+        hint.setWidth(max(hint.width(), self._content_width()))
+        return hint
+
+
 def build_ui(win) -> None:
     outer = QVBoxLayout(win)
     outer.setContentsMargins(0, 0, 0, 0)
@@ -67,14 +100,12 @@ def build_ui(win) -> None:
     # instance, shows the well plate AND its filter frame together, which used to
     # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so
     # the overflow scrolls instead of the widgets crushing into each other.
-    # Horizontal scrolling is deliberately OFF: ``setWidgetResizable(True)`` keeps
-    # the content locked to the viewport width, and the only sidebar widget that
-    # is wider than the narrow rail — the well plate — now has a small
-    # ``minimumSizeHint`` (widgets/well_plate_selector) so it SCALES DOWN to fit
-    # rather than forcing a horizontal scrollbar. ``sidebar_layout`` stays the
-    # content's layout, so every ``sidebar_layout.addWidget(...)`` below is
+    # ``_VScrollArea`` scrolls vertically only and reserves the content's width,
+    # so the sidebar still widens to fit a wide row (up to its maxWidth) instead
+    # of clipping it — the horizontal axis never scrolls. ``sidebar_layout`` stays
+    # the content's layout, so every ``sidebar_layout.addWidget(...)`` below is
     # unchanged.
-    _sidebar_scroll = QScrollArea(sidebar)
+    _sidebar_scroll = _VScrollArea(sidebar)
     _sidebar_scroll.setWidgetResizable(True)
     _sidebar_scroll.setFrameShape(QFrame.NoFrame)
     _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

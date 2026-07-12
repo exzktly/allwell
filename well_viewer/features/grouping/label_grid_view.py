@@ -312,6 +312,10 @@ class LabelGrid(QWidget):
         # Toggle selection on Shift+click anywhere on the cell, or on a
         # plain click on the cell's frame edge (outside the text area).
         from PySide6.QtCore import QEvent
+        # PySide6 can dispatch a non-QEvent here (e.g. a QStandardItem from a
+        # QCompleter popup); bail before ``event.type()`` / ``super()``.
+        if not isinstance(event, QEvent):
+            return False
         if event.type() == QEvent.MouseButtonPress and isinstance(obj, _LabelCell):
             if event.button() == Qt.LeftButton and (event.modifiers() & Qt.ShiftModifier):
                 self._toggle_cell(obj.token())

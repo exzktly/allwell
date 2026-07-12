@@ -371,6 +371,10 @@ if _HAVE_MPL:
                 pass
 
         def eventFilter(self, obj, event):
+            # PySide6 can dispatch a non-QEvent here (e.g. a QStandardItem from
+            # a QCompleter popup); bail before ``event.type()`` / ``super()``.
+            if not isinstance(event, QEvent):
+                return False
             if obj is getattr(self, "_copy_btn", None):
                 if event.type() == QEvent.Enter:
                     self._copy_btn_hovered = True

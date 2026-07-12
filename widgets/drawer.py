@@ -151,6 +151,13 @@ class Drawer(QWidget):
             self._backdrop.setVisible(False)
 
     def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        # PySide6 occasionally dispatches a non-QEvent through eventFilter
+        # (observed: a QStandardItem from a QCompleter popup routed in place of
+        # the QEvent). Bail before any ``event.type()`` access — and before
+        # ``super().eventFilter`` rejects the non-QObject — so the whole window
+        # survives those edge cases instead of TypeError-ing.
+        if not isinstance(event, QEvent):
+            return False
         if obj is self._host:
             if event.type() == QEvent.Resize and self.isVisible():
                 w = self._drawer_width()

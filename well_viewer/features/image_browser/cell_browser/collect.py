@@ -32,6 +32,9 @@ from well_viewer.data.metric_labels import split_metric_col
 from well_viewer.domain.metric_registry import intensity_keys
 from well_viewer.core.lazy import lazy as _lazy
 
+import logging as _logging
+_logger = _logging.getLogger("well_viewer")
+
 # Scatter is a removable feature, so reach its gate-inclusion helper through the
 # lazy proxy (a call, not a module-scope import) — keeps cell_browser importable
 # when scatter is disabled, satisfying the removability contract. Resolves on
@@ -374,6 +377,18 @@ def collect_cells(
     # the gate at draw time; that decoupled the panes, which is the opposite of
     # what's wanted.)
     selected = cell_browser_source_wells(ctx)
+    # ── TEMP DIAGNOSTIC (scatter-gate count) — remove after debugging ─────────
+    if gate_mode:
+        _logger.info("[gate-diag] source wells=%s target_tps=%s fovs=%s",
+                     list(selected),
+                     (None if target is None else [float(t) for t in target]),
+                     (None if fov_set is None else sorted(fov_set)))
+        for _g in gates:
+            _logger.info("[gate-diag] gate name=%r x_col=%r y_col=%r "
+                         "x0=%.4g x1=%.4g y0=%.4g y1=%.4g",
+                         _g.get("name"), _g.get("x_col"), _g.get("y_col"),
+                         _g.get("x0"), _g.get("x1"), _g.get("y0"), _g.get("y1"))
+    # ─────────────────────────────────────────────────────────────────────────
     for well in selected:
         df = get_rows(ctx, well)
         if df is None or df.empty:
@@ -410,6 +425,26 @@ def collect_cells(
             continue
         sel = df.loc[mask]
         cols = sel.columns
+        # ── TEMP DIAGNOSTIC (scatter-gate count) — remove after debugging ─────
+        if gate_mode and gates:
+            _g0 = gates[0]
+            try:
+                gx = resolve_value_series(sel, _g0.get("x_col"), ratios).to_numpy()
+                gy = resolve_value_series(sel, _g0.get("y_col"), ratios).to_numpy()
+            except Exception:
+                gx = gy = [float("nan")] * len(sel)
+            _nid = (sel["nucleus_id"].astype(str).to_numpy() if "nucleus_id" in cols
+                    else ["?"] * len(sel))
+            _tpt = (sel["timepoint"].astype(str).to_numpy() if "timepoint" in cols
+                    else ["?"] * len(sel))
+            _fv = (sel["fov"].astype(str).to_numpy() if "fov" in cols
+                   else ["?"] * len(sel))
+            for _i in range(len(sel)):
+                _logger.info("[gate-diag]   cell well=%s nucleus=%s tp=%s fov=%s "
+                             "x=%.4g y=%.4g", well, _nid[_i], _tpt[_i], _fv[_i],
+                             gx[_i], gy[_i])
+            _logger.info("[gate-diag] well=%s matched %d cell(s)", well, len(sel))
+        # ─────────────────────────────────────────────────────────────────────
 
         def _col(name, default=""):
             return (sel[name].astype(str).to_numpy() if name in cols

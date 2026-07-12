@@ -23,36 +23,57 @@ from well_viewer.core.status_view import build_bottom
 
 
 class _VScrollArea(QScrollArea):
-    """A scroll area that scrolls **vertically only** and reserves its content's
-    full width so the horizontal axis never scrolls or clips.
+    """Sidebar scroll area: scrolls **vertically only**, and drives its host
+    sidebar's width so the horizontal axis never scrolls or clips.
 
-    ``setWidgetResizable(True)`` alone locks the content to the viewport width,
-    so a row wider than the viewport (e.g. a section header + its buttons) gets
-    clipped when the horizontal scrollbar is off. Overriding the width side of
-    the size hints makes the scroll area demand the content's minimum width,
-    which propagates up so the sidebar widens to fit (up to its own maxWidth) —
-    the same "grow to fit content" behaviour the sidebar had before it was
-    wrapped in a scroll area. Only vertical overflow scrolls.
+    ``setWidgetResizable(True)`` locks the content to the viewport width, so a
+    row wider than the viewport (e.g. a section header + its buttons on the
+    Statistics tab) would be clipped when the horizontal scrollbar is off.
+    Merely overriding the size *hints* does not help: the enclosing splitter
+    sizes each pane from the widget's ``minimumSize`` (the sidebar's explicit
+    ``setMinimumWidth``), not from a layout ``minimumSizeHint``, so it happily
+    leaves the rail too narrow. The reliable lever is ``setMinimumWidth`` on the
+    sidebar itself — that the splitter DOES honour, growing the rail.
+
+    So on every content layout change this widget recomputes the content's
+    needed width and sets the sidebar's minimum width to it, clamped to the
+    sidebar's [floor, ceil] range. The rail grows to fit a wide tab (up to the
+    ceiling) instead of clipping; narrower tabs keep whatever width they have.
+    Set ``_width_floor`` / ``_width_ceil`` after construction.
     """
 
-    def _content_width(self) -> int:
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._width_floor = 0
+        self._width_ceil = 1 << 24
+
+    def setWidget(self, w) -> None:  # noqa: N802 — Qt naming
+        super().setWidget(w)
+        if w is not None:
+            # A frame show/hide changes the content's minimum width; catch it
+            # via the content's LayoutRequest and resync the sidebar width.
+            w.installEventFilter(self)
+        self._sync_sidebar_width()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt naming
+        from PySide6.QtCore import QEvent
+        if isinstance(event, QEvent) and event.type() in (
+            QEvent.LayoutRequest, QEvent.Resize,
+        ):
+            self._sync_sidebar_width()
+        return super().eventFilter(obj, event)
+
+    def _sync_sidebar_width(self) -> None:
+        sidebar = self.parentWidget()
         wdg = self.widget()
-        if wdg is None:
-            return 0
-        # Reserve the content's minimum width plus the vertical scrollbar, so
-        # the content still fits when the scrollbar appears.
-        sb = self.verticalScrollBar().sizeHint().width()
-        return wdg.minimumSizeHint().width() + sb
-
-    def minimumSizeHint(self):  # noqa: N802 — Qt naming
-        hint = super().minimumSizeHint()
-        hint.setWidth(max(hint.width(), self._content_width()))
-        return hint
-
-    def sizeHint(self):  # noqa: N802 — Qt naming
-        hint = super().sizeHint()
-        hint.setWidth(max(hint.width(), self._content_width()))
-        return hint
+        if sidebar is None or wdg is None:
+            return
+        # Content min + the vertical scrollbar (so content still fits once the
+        # scrollbar shows), clamped to the sidebar's allowed width range.
+        need = wdg.minimumSizeHint().width() + self.verticalScrollBar().sizeHint().width()
+        target = max(self._width_floor, min(need, self._width_ceil))
+        if sidebar.minimumWidth() != target:
+            sidebar.setMinimumWidth(target)
 
 
 def build_ui(win) -> None:
@@ -100,12 +121,15 @@ def build_ui(win) -> None:
     # instance, shows the well plate AND its filter frame together, which used to
     # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so
     # the overflow scrolls instead of the widgets crushing into each other.
-    # ``_VScrollArea`` scrolls vertically only and reserves the content's width,
-    # so the sidebar still widens to fit a wide row (up to its maxWidth) instead
-    # of clipping it — the horizontal axis never scrolls. ``sidebar_layout`` stays
-    # the content's layout, so every ``sidebar_layout.addWidget(...)`` below is
+    # ``_VScrollArea`` scrolls vertically only and drives the sidebar's minimum
+    # width to fit the active tab's content (within [floor, ceil]), so a wide row
+    # (e.g. the Statistics comparison-groups header) widens the rail instead of
+    # clipping — the horizontal axis never scrolls. ``sidebar_layout`` stays the
+    # content's layout, so every ``sidebar_layout.addWidget(...)`` below is
     # unchanged.
     _sidebar_scroll = _VScrollArea(sidebar)
+    _sidebar_scroll._width_floor = 300   # keep in sync with setMinimumWidth above
+    _sidebar_scroll._width_ceil = 450    # keep in sync with setMaximumWidth above
     _sidebar_scroll.setWidgetResizable(True)
     _sidebar_scroll.setFrameShape(QFrame.NoFrame)
     _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)

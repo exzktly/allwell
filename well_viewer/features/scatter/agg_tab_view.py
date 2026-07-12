@@ -140,7 +140,10 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_agg_card", card)
     fig = reg.register("_scatter_agg_fig", card.figure)
     reg.register("_ax_scatter_agg", fig.add_subplot(1, 1, 1))
-    fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.12, right=0.97)
+    # top/bottom leave room for the (single-line) axes title and the x-axis
+    # label — at top=0.95 / bottom=0.12 the large title clipped at the figure's
+    # top edge and the x-label clipped at the bottom.
+    fig.subplots_adjust(hspace=0.3, top=0.90, bottom=0.15, left=0.12, right=0.97)
     reg.register("_scatter_agg_canvas", card.canvas)
     # Error band now lives in the "Display ▾" popover on the control row above.
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_agg_orchestrate(ctx))

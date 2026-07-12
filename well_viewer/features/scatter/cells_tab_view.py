@@ -188,7 +188,10 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_card", card)
     fig = reg.register("_scatter_fig", card.figure)
     reg.register("_ax_scatter", fig.add_subplot(1, 1, 1))
-    fig.subplots_adjust(hspace=0.3, top=0.95, bottom=0.12, left=0.16, right=0.97)
+    # top/bottom leave room for the (single-line) axes title and the x-axis
+    # label — at top=0.95 / bottom=0.12 the large title clipped at the figure's
+    # top edge and the x-label clipped at the bottom.
+    fig.subplots_adjust(hspace=0.3, top=0.90, bottom=0.15, left=0.16, right=0.97)
     canvas = reg.register("_scatter_canvas", card.canvas)
     # No error-band controls here: the per-cell scatter draws individual points,
     # so SEM/SD has no meaning (it belongs only on the aggregate scatter).

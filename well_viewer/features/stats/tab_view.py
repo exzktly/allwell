@@ -61,13 +61,10 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     plate.setEnabledWells([])
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # Match the main sidebar plate's geometry so the picker stays in the
-    # same screen position when the user switches tabs.
-    plate.setMinimumHeight(280)
-    from PySide6.QtWidgets import QSizePolicy as _SizePolicy
-    _sp = _SizePolicy(_SizePolicy.Preferred, _SizePolicy.Preferred)
-    _sp.setHeightForWidth(True)
-    plate.setSizePolicy(_sp)
+    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
+    # scales to the rail width, keeps aspect, no fixed min-height floor.
+    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
+    apply_sidebar_plate_geometry(plate)
     layout.addWidget(plate)
     ctx.widgets.register("_stats_map_plate", plate)
 

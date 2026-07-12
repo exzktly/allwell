@@ -31,13 +31,10 @@ def build_preview_picker(win, parent: QWidget) -> None:
     plate.setSingleSelectionMode(True)
     plate.setRowColumnSelectable(False)
     plate.setEnabledWells([])
-    # Match the main sidebar plate's geometry so the picker stays in the
-    # same screen position when the user switches tabs.
-    plate.setMinimumHeight(280)
-    from PySide6.QtWidgets import QSizePolicy as _SizePolicy
-    _sp = _SizePolicy(_SizePolicy.Preferred, _SizePolicy.Preferred)
-    _sp.setHeightForWidth(True)
-    plate.setSizePolicy(_sp)
+    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
+    # scales to the rail width, keeps aspect, no fixed min-height floor.
+    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
+    apply_sidebar_plate_geometry(plate)
     layout.addWidget(plate)
     win._sidebar_preview_plate = win._ctx.widgets.register("_sidebar_preview_plate", plate)
 

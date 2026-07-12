@@ -25,6 +25,7 @@ from well_viewer.data.data_loading import (
     detect_fluor_channels,
     detect_shape_features,
     detect_smfish_channels,
+    df_included_mask,
     resolve_value_series,
 )
 from well_viewer.data.metric_labels import split_metric_col
@@ -301,7 +302,10 @@ def collect_cells(
     order. Cells with no measurable value for a key sort **last** for that key.
 
     Criteria-only filtering per the feature spec (the ctx-wide Included/QC/Crop
-    inclusion is intentionally NOT applied here).
+    inclusion is intentionally NOT applied to the *criteria* path). In **scatter-
+    gate mode**, though, the gate must mirror the scatter cloud, which is drawn
+    only over ``df_included_mask``-passing cells — so that path additionally
+    intersects the gate with QC/crop/cell-gating inclusion.
     """
     ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
     target = (None if timepoints is None
@@ -377,6 +381,15 @@ def collect_cells(
         if gate_mode:
             mask = (compute_gate_inclusion(df, gates, ratios) if gates
                     else np.zeros(len(df), dtype=bool))
+            # Mirror the scatter cloud exactly: the per-cell scatter pre-filters
+            # by df_included_mask (QC / crop / cell-gating "Included") before
+            # drawing the gate, so a cell that fails those layers is invisible on
+            # the plot even when it sits inside the rectangle. The gate gallery
+            # must apply the same base inclusion or it shows cells the user can't
+            # see on the scatter they gated from (include_gate=False: we apply our
+            # own gate above, so don't also require Gate_Pass).
+            if gates:
+                mask &= df_included_mask(df, include_gate=False).to_numpy()
         else:
             mask = _passes_criteria(df, criteria, ratios)
         if target is not None and "timepoint_hours" in df.columns:

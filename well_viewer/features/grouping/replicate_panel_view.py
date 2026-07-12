@@ -67,25 +67,20 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
         layout.setSpacing(0)
 
     from widgets.well_plate_selector import WellPlateSelector
-    from PySide6.QtWidgets import QSizePolicy as _SizePolicy
     plate = WellPlateSelector(parent)
     plate.setActionsVisible(False)
     plate.setSelectionMode("select")
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
-    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
+    from well_viewer.core.ui_helpers import (
+        apply_sidebar_plate_geometry, well_plate_tooltip_provider,
+    )
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # The plate is the only widget in this sidebar now — give it room to
-    # expand vertically with the column. heightForWidth keeps the aspect.
-    plate.setMinimumHeight(280)
-    # Preferred (not MinimumExpanding) so the plate hugs its hint size and a
-    # trailing addStretch absorbs leftover vertical space. Matches the main
-    # sidebar plate's policy — without this the plate drifts down with the
-    # sidebar's available height instead of staying pinned to the top.
-    sp = _SizePolicy(_SizePolicy.Preferred, _SizePolicy.Preferred)
-    sp.setHeightForWidth(True)
-    plate.setSizePolicy(sp)
+    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
+    # scales to the rail width, keeps aspect, no fixed min-height floor. The
+    # trailing addStretch below pins the plate to the top of the column.
+    apply_sidebar_plate_geometry(plate)
     layout.addWidget(plate, 0)
     layout.addStretch(1)
     ctx.widgets.register("_rep_map_plate", plate)

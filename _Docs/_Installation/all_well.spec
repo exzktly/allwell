@@ -149,10 +149,30 @@ csbdeep_data = (str(pkg_dir("csbdeep")), "csbdeep")
 # ``Markdowns/`` directory ships so relative image links inside the
 # README resolve correctly at runtime; missing folder silently hides the
 # section in the help drawer (trimmed builds), which is fine.
+#
+# Under an active (thin) profile, ship a README trimmed to the profile's
+# features so the in-app help documents only what this binary contains — the
+# pure trimming math lives in scripts/profile_build.trim_readme_for_profile and
+# is unit-tested. We copy Markdowns/ to a temp dir (so image links still
+# resolve) and overwrite the README there with the trimmed text.
 _markdowns_dir = _parent / "_Docs" / "Markdowns"
 extra_data: list = []
 if _markdowns_dir.is_dir():
-    extra_data.append((str(_markdowns_dir), "Markdowns"))
+    if _profile_active:
+        import shutil as _shutil
+        _tmp_md = Path(_tempfile.mkdtemp()) / "Markdowns"
+        _shutil.copytree(str(_markdowns_dir), str(_tmp_md))
+        _readme = _tmp_md / "README_WellViewer.md"
+        if _readme.exists():
+            from scripts.profile_build import trim_readme_for_profile
+            _readme.write_text(
+                trim_readme_for_profile(
+                    _readme.read_text(encoding="utf-8"),
+                    _prof.get("features"), _prof.get("subtabs")),
+                encoding="utf-8")
+        extra_data.append((str(_tmp_md), "Markdowns"))
+    else:
+        extra_data.append((str(_markdowns_dir), "Markdowns"))
 
 # Bundled UI fonts (Inter + JetBrains Mono). Loaded at startup by
 # well_viewer.core.app_fonts, which resolves ``_MEIPASS/assets/fonts`` in a

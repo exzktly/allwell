@@ -117,6 +117,41 @@ def test_descriptor_carries_image_locators():
     assert c.centroid_row == 30.0 and c.centroid_col == 31.0
 
 
+def test_gate_mode_excludes_qc_failed_cells_inside_the_rectangle():
+    """Gate mode must mirror the scatter cloud exactly.
+
+    The per-cell scatter pre-filters by ``df_included_mask`` (QC / crop /
+    cell-gating "Included") before drawing the gate, so a cell that fails those
+    layers is invisible on the plot even when it sits inside the rectangle. The
+    gate gallery must apply the same base inclusion — otherwise a QC-excluded
+    cell inside the gate shows as a phantom extra tile the user can't see on the
+    scatter they gated from (regression: the gate mask ignored ``Included``, so a
+    2-cell gate produced a 3-cell gallery)."""
+    df = pd.DataFrame({
+        "Included": [1, 1, 0],                       # 3rd cell fails inclusion
+        "w1_mean_intensity": [30.0, 43.0, 33.0],     # all inside x ∈ [28, 44]
+        "w2_mean_intensity": [10.0, 18.0, 14.0],     # all inside y ∈ [5, 26]
+        "timepoint_hours": [0.0, 0.0, 0.0],
+        "timepoint": ["0", "0", "0"],
+        "fov": ["1", "1", "1"],
+        "filename": ["a.tif", "b.tif", "c.tif"],
+        "nucleus_id": ["1", "2", "3"],
+    })
+    app = _app(df)
+    app._ctx.runtime.cell_browser.state = SimpleNamespace(
+        scatter_gate_mode=True, label_spot_count=False)
+    app._ctx.runtime.cell_browser.gate_choices = None
+    app._app_state.cell_gating.scatter_gates = [{
+        "name": "Gate 1",
+        "x_col": "w1_mean_intensity", "y_col": "w2_mean_intensity",
+        "x0": 28.0, "x1": 44.0, "y0": 5.0, "y1": 26.0,
+    }]
+    cells = collect_cells(app._ctx, [])
+    # Only the two Included cells inside the gate — the QC-failed one is dropped,
+    # matching what the scatter actually plots.
+    assert {c.nucleus_id for c in cells} == {"1", "2"}
+
+
 def test_nan_fails_active_bound():
     app = _app(_df())
     # row 3 (nid 13) has NaN circularity → excluded by any circularity bound.

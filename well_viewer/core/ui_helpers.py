@@ -34,6 +34,32 @@ def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
         return well_id
     return _tooltip
 
+def apply_sidebar_plate_geometry(plate) -> None:
+    """The single home for the sidebar well-plate's sizing.
+
+    Every sidebar tab builds its own ``WellPlateSelector`` (they differ in
+    selection mode and signal wiring — see ``sidebar_view`` / ``preview_view`` /
+    ``picker_view`` / ``stats`` / ``replicate_panel``), but they must all size
+    identically. This geometry used to be copy-pasted into each builder, so a
+    change (e.g. dropping the old fixed 280px min-height that stretched the plate
+    inside the sidebar scroll area) had to be made five times or the tabs drifted
+    apart. Centralise it here so it changes in ONE place:
+
+    - a ``Preferred`` size policy with ``heightForWidth`` so the plate scales to
+      the rail width and keeps its aspect;
+    - NO fixed min-height floor — the ``WellPlateSelector``'s own
+      ``minimumSizeHint`` is the (small) floor, and the sidebar scroll area
+      (``app_shell_view``) handles vertical overflow.
+
+    Non-sidebar plate consumers (run dashboard, saved-selections mini-plate)
+    deliberately do not call this — they size the plate for their own context.
+    """
+    from PySide6.QtWidgets import QSizePolicy
+    sp = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+    sp.setHeightForWidth(True)
+    plate.setSizePolicy(sp)
+
+
 def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
     """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,
     non-numeric, or (when *allow_auto*) the literal ``"auto"``.
@@ -230,8 +256,15 @@ def build_section_header(
     hl.setContentsMargins(*margins)
     lbl = QLabel(title, hdr)
     lbl.setProperty("role", "section")
-    hl.addWidget(lbl)
+    # Word-wrap the title so a long one (e.g. "COMPARISON GROUPS" with two action
+    # buttons) does NOT report its full one-line width as the header's minimum —
+    # that made the row wider than a narrow rail, which then either clipped the
+    # buttons or forced the whole sidebar wider than its peers. With wrap on, the
+    # title's minimum is its longest word, so the row fits the rail and the title
+    # wraps to a second line only when there isn't room for one line.
+    lbl.setWordWrap(True)
     if hint:
+        hl.addWidget(lbl)
         hint_lbl = QLabel(hint, hdr)
         hint_lbl.setObjectName("Muted")
         # Word-wrap so a long inline hint doesn't report its full text width as
@@ -241,7 +274,9 @@ def build_section_header(
         hint_lbl.setWordWrap(True)
         hl.addWidget(hint_lbl, 1)
     else:
-        hl.addStretch(1)
+        # The title takes the stretch so the buttons sit at the right edge; being
+        # the stretchy item, it also absorbs the shrink and wraps when narrow.
+        hl.addWidget(lbl, 1)
     for btn in buttons:
         hl.addWidget(btn)
     return hdr

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -57,14 +58,34 @@ def build_ui(win) -> None:
     outer.addWidget(win._h_pane, 1)
 
     sidebar = QWidget()
-    # Review sidebar width reduced 25% (400→300 min, 600→450 max) per
-    # redesign-bug-batch-2: the plate map needs less breathing room than
-    # the original 400-px reservation; freed pixels go to the canvas.
-    sidebar.setMinimumWidth(300)
-    sidebar.setMaximumWidth(450)
-    sidebar_layout = QVBoxLayout(sidebar)
+    # The sidebar rail is a FIXED width — it must never change with the active
+    # tab or its content (a wide row wraps/scales to fit instead of stretching
+    # the rail). A single fixed value (min == max) keeps every tab's rail
+    # identical.
+    _SIDEBAR_W = 340
+    sidebar.setFixedWidth(_SIDEBAR_W)
+    # A tab can stack more content than the rail is tall — the Cell Browser, for
+    # instance, shows the well plate AND its filter frame together, which used to
+    # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so
+    # the overflow scrolls instead of the widgets crushing into each other. The
+    # horizontal axis never scrolls: at the fixed rail width, content must fit
+    # (section headers word-wrap, the plate scales to the rail). ``sidebar_layout``
+    # stays the content's layout, so every ``sidebar_layout.addWidget(...)`` below
+    # is unchanged.
+    _sidebar_scroll = QScrollArea(sidebar)
+    _sidebar_scroll.setWidgetResizable(True)
+    _sidebar_scroll.setFrameShape(QFrame.NoFrame)
+    _sidebar_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    _sidebar_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+    _sidebar_content = QWidget()
+    sidebar_layout = QVBoxLayout(_sidebar_content)
     sidebar_layout.setContentsMargins(0, 0, 0, 0)
     sidebar_layout.setSpacing(0)
+    _sidebar_scroll.setWidget(_sidebar_content)
+    _sidebar_outer = QVBoxLayout(sidebar)
+    _sidebar_outer.setContentsMargins(0, 0, 0, 0)
+    _sidebar_outer.setSpacing(0)
+    _sidebar_outer.addWidget(_sidebar_scroll)
 
     # Phase 10 (A1): vertical section nav above the per-section frames.
     # Replaces the horizontal QTabWidget tab bar in centre_view.py; the

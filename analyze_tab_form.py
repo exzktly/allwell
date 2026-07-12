@@ -205,7 +205,16 @@ class AnalyzeTabFormMixin:
 
         seg_row = self._row(sec, "Segmentation")
         self._seg_method_cb = QComboBox(seg_row)
+        # Cellpose is a removable, torch-backed segmenter (profiles/full.toml). A
+        # profile that doesn't list "Cellpose" (e.g. the StarDist-only thin build)
+        # ships no torch/cellpose, so its methods can't run — drop them from the
+        # picker instead of offering a choice that would fail at pipeline start.
+        from well_viewer.core.profile import active_profile
+        _prof = active_profile()
+        _cellpose_ok = _prof.features is None or "Cellpose" in _prof.features
         for _value, _label in self._SEG_METHODS:
+            if not _cellpose_ok and _value.startswith("cellpose"):
+                continue
             self._seg_method_cb.addItem(_label, userData=_value)
         self._seg_method_cb.setFixedWidth(230)
         seg_row.layout().addWidget(self._seg_method_cb)

@@ -59,17 +59,26 @@ class EmptyState(QWidget):
         self._hint.setVisible(bool(hint))
 
         outer.addSpacing(theme.Spacing.lg)
-        for w, sp in ((self._glyph, theme.Spacing.md),
-                      (self._text, theme.Spacing.xs),
-                      (self._hint, 0)):
-            outer.addWidget(w, 0, Qt.AlignHCenter)
-            if sp:
-                outer.addSpacing(sp)
+        # Only the fixed-size glyph is horizontally centered. The two word-wrap
+        # labels take the FULL width (their text is centered internally): a
+        # ``Qt.AlignHCenter`` here would size each label to its one-line sizeHint
+        # width, defeating the layout's ``heightForWidth`` so a wrapped second
+        # line has no height reserved and overlaps the first (the reported
+        # collision on the Multivariate empty state).
+        outer.addWidget(self._glyph, 0, Qt.AlignHCenter)
+        outer.addSpacing(theme.Spacing.md)
+        outer.addWidget(self._text, 0)
+        outer.addSpacing(theme.Spacing.xs)
+        outer.addWidget(self._hint, 0)
         outer.addStretch(1)
-        # Heightful hint: word-wrapped labels report a 1-line sizeHint until
-        # the layout has computed the actual width, which makes the bottom
-        # stretch oversize and the second wrapped line slip off the card.
-        # Reserve two-line minimum height up-front.
+        # Belt-and-suspenders against the same 1-line-sizeHint quirk: reserve a
+        # two-line minimum for each wrap label, sized to that label's OWN font
+        # (the title renders at the larger h3 size, so the widget's default
+        # font metrics would under-reserve it).
+        from PySide6.QtGui import QFont, QFontMetrics
+        _title_f = QFont(self.font())
+        _title_f.setPixelSize(theme.Typography.h3_size)
+        self._text.setMinimumHeight(QFontMetrics(_title_f).height() * 2)
         self._hint.setMinimumHeight(self.fontMetrics().height() * 2)
 
         self.setStyleSheet(self._build_qss())

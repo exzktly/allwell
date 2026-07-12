@@ -101,6 +101,50 @@ def _render_manual_html(md_text: str) -> str:
     return re.sub(r"(<h[1-6][^>]*>)(.*?)(</h[1-6]>)", _inject, html_text, flags=re.S)
 
 
+#: ``## <title>`` sections dropped from the *in-app* help manual — a running app
+#: is already installed, so install/build instructions are noise in the drawer.
+_HELP_DROP_H2 = ("Install", "Building the macOS bundle")
+#: Contents-index link texts that belong to those dropped sections.
+_HELP_DROP_TOC = set(_HELP_DROP_H2) | {
+    "macOS pre-built app", "Running from source", "Windows (from source)"}
+
+
+def _strip_install_help(md_text: str) -> str:
+    """Remove the installation / build sections (and their Contents entries) from
+    the in-app help manual. If the app launched it's already installed, so those
+    instructions don't belong in the running app's help drawer."""
+    import re
+    h1_2 = re.compile(r"^#{1,2} ")
+    h2 = re.compile(r"^## (.+?)\s*$")
+    toc_head = re.compile(r"^## Contents\s*$", re.IGNORECASE)
+    link = re.compile(r"\[([^\]]+)\]\(#[^)]*\)")
+    lines = md_text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    in_contents = False
+    while i < len(lines):
+        line = lines[i]
+        if toc_head.match(line):
+            in_contents = True
+        elif in_contents and h2.match(line):
+            in_contents = False
+        m = h2.match(line)
+        if m and m.group(1).strip() in _HELP_DROP_H2:
+            i += 1
+            while i < len(lines) and not h1_2.match(lines[i]):
+                i += 1
+            continue
+        # Drop Contents entries that link only to the dropped sections.
+        if in_contents:
+            texts = [t.strip() for t in link.findall(line)]
+            if texts and all(t in _HELP_DROP_TOC for t in texts):
+                i += 1
+                continue
+        out.append(line)
+        i += 1
+    return "".join(out)
+
+
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
@@ -581,7 +625,7 @@ class AllWellApp(QMainWindow):
         """Show / hide a v2 Drawer with quick help. Lazy-built on first call."""
         if self._help_drawer is None:
             from widgets.drawer import Drawer
-            drawer = Drawer(self, width_hint=420)
+            drawer = Drawer(self, width_hint=700)
             # The drawer hosts a single content widget: a short fixed quick-help
             # section at the top, and (when bundled) the reference manual in a
             # self-scrolling QTextBrowser that fills the rest. The manual owns its
@@ -673,8 +717,15 @@ class AllWellApp(QMainWindow):
                         readme_text, active_profile().features)
                 except Exception:
                     pass
+                # A running app is already installed — drop install/build help.
+                readme_text = _strip_install_help(readme_text)
 
             manual_view = QTextBrowser(content)
+            # Render code / ASCII-diagram blocks at a smaller monospace size so
+            # the wide box-art (the ~80-col window + pipeline diagrams) fits the
+            # drawer width without wrapping — wrapping shears the box-drawing
+            # characters into unreadable garbage. Prose keeps its default size.
+            manual_view.document().setDefaultStyleSheet("pre, code { font-size: 9pt; }")
             if readme_text:
                 manual_view.setSearchPaths([str(readme_path.parent)])
                 # Render markdown -> HTML with injected heading anchors so the

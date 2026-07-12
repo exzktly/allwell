@@ -485,12 +485,12 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 │              │  Channel: [GFP ▾]                  ── ctxbar ──  │
 │ SECTION      │  ┌────────────────────────────────────────────┐  │
 │  ⊙ Plotting  │  │                                            │  │
-│   Statistics │  │            (plot canvas)                   │  │
-│   Image …    │  │                                            │  │
-│   Segment …  │  └────────────────────────────────────────────┘  │
-│   Review CSV │         Export CSV  Copy SVG  Save  Properties   │
-│   Sample …   │                                                  │
-│   Batch …    │                                                  │
+│   …          │  │            (plot canvas)                   │  │
+│   …          │  │                                            │  │
+│   …          │  └────────────────────────────────────────────┘  │
+│              │         Export CSV  Copy SVG  Save  Properties   │
+│              │                                                  │
+│              │                                                  │
 │              │                                                  │
 │ ┌──────────┐ │                                                  │
 │ │  Plate   │ │                                                  │
@@ -509,11 +509,9 @@ the viewer always tracks the schema + channel tokens the dataset was built with
   the icons to its right are Refresh (re-read the folder), presentation
   toggle (flip every plot Screen ↔ Publication), Open, and the **`i`** Help
   drawer.
-- **Section rail** — the left "SECTION" navigator lists every centre tab in
-  three groups: **Analysis** (Plotting, Statistics, Multivariate, Spatial),
-  **Images** (Image Browser, smFISH), and **Data** (Review CSV, Sample
-  Definitions, Saved Plots, Batch Export). Tabs that own sub-tabs — Plotting,
-  Image Browser, Sample Definitions — show a sub-tab bar across the top of the
+- **Section rail** — the left "SECTION" navigator lists every centre tab
+  (Plotting, etc.), grouped into **Analysis**, **Images**, and **Data**. Tabs
+  that own sub-tabs (e.g. Plotting) show a sub-tab bar across the top of the
   centre pane. `Ctrl+B` collapses the rail.
 - **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
   well selection they drive is what every tab plots (see below).

@@ -256,8 +256,15 @@ def build_section_header(
     hl.setContentsMargins(*margins)
     lbl = QLabel(title, hdr)
     lbl.setProperty("role", "section")
-    hl.addWidget(lbl)
+    # Word-wrap the title so a long one (e.g. "COMPARISON GROUPS" with two action
+    # buttons) does NOT report its full one-line width as the header's minimum —
+    # that made the row wider than a narrow rail, which then either clipped the
+    # buttons or forced the whole sidebar wider than its peers. With wrap on, the
+    # title's minimum is its longest word, so the row fits the rail and the title
+    # wraps to a second line only when there isn't room for one line.
+    lbl.setWordWrap(True)
     if hint:
+        hl.addWidget(lbl)
         hint_lbl = QLabel(hint, hdr)
         hint_lbl.setObjectName("Muted")
         # Word-wrap so a long inline hint doesn't report its full text width as
@@ -267,7 +274,9 @@ def build_section_header(
         hint_lbl.setWordWrap(True)
         hl.addWidget(hint_lbl, 1)
     else:
-        hl.addStretch(1)
+        # The title takes the stretch so the buttons sit at the right edge; being
+        # the stretchy item, it also absorbs the shrink and wraps when narrow.
+        hl.addWidget(lbl, 1)
     for btn in buttons:
         hl.addWidget(btn)
     return hdr

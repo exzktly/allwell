@@ -42,6 +42,15 @@ _logger = logging.getLogger("well_viewer.split_view")
 #: call site) disables the feature with zero side effects.
 ENABLED = True
 
+#: While split, each pane's minimum width is capped to this so the divider is
+#: freely draggable. A reparented centre tab (e.g. the Plotting plot area) carries
+#: a large content-driven ``minimumSizeHint`` (~585px); with two such panes the
+#: minimums consume the whole centre and QSplitter has no slack to move the
+#: handle — the divider "sticks". An explicit ``setMinimumWidth`` overrides that
+#: content minimum for the splitter, so a pane can be dragged small (its content
+#: just narrows/clips). Restored to 0 on exit so single-tab view is unaffected.
+_SPLIT_PANE_MIN_W = 160
+
 
 # ── Reparenting (enter / exit / focus) ───────────────────────────────────────
 
@@ -97,6 +106,10 @@ def enter_split(ctx, tab_a: str, tab_b: str) -> None:
     ctx.runtime.split.pane_widgets = {tab_a: wa, tab_b: wb}
     split.addWidget(wa)
     split.addWidget(wb)
+    # Cap each pane's minimum width so the divider has slack to move — otherwise
+    # the panes' large content minimums fill the centre and the handle sticks.
+    wa.setMinimumWidth(_SPLIT_PANE_MIN_W)
+    wb.setMinimumWidth(_SPLIT_PANE_MIN_W)
     wa.show()
     wb.show()
     split.setVisible(True)
@@ -128,6 +141,9 @@ def exit_split(ctx) -> None:
     wb = widgets.get(b)
     for w in (wa, wb):
         if w is not None:
+            # Undo the split-time min-width cap so the reattached single-tab page
+            # sizes from its own content again.
+            w.setMinimumWidth(0)
             w.setParent(None)
     ctx.runtime.split.active = False
     ctx.runtime.split.tab_a = ctx.runtime.split.tab_b = ctx.runtime.split.focused = None

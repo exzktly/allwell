@@ -294,6 +294,21 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         # Standardization does not apply to correlation (scale-invariant).
         std_cb.setEnabled(mode != mv_state.MODE_CORRELATION)
         mode_seg.setCurrentByData(mode)
+        # Reflect the authoritative state onto the persisted input widgets. Without
+        # this, a programmatic state change (view-state restore on dataset load, or
+        # any non-combo mutation) recomputes the figure with the new value while the
+        # control keeps showing its build-time one — e.g. the method combo reading
+        # "PCA" while the axes render t-SNE. Signals are blocked so re-selecting a
+        # control here doesn't re-enter ``_apply`` / trigger a redundant recompute.
+        for combo, value in ((method_cb, st.dimred_method),
+                             (color_cb, st.color_by),
+                             (cmethod_cb, st.cluster_method)):
+            combo.blockSignals(True)
+            _select_combo_by_data(combo, value)
+            combo.blockSignals(False)
+        std_cb.blockSignals(True)
+        std_cb.setChecked(bool(st.standardize))
+        std_cb.blockSignals(False)
 
     ctx.runtime.multivariate.refresh_timepoints = _refresh_timepoints
     ctx.runtime.multivariate.refresh_facet_values = _refresh_facet_values

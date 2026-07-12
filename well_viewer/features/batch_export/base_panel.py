@@ -111,6 +111,10 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
 class BatchExportPanel(QWidget):
     """Batch export panel — defines export groups and runs the export."""
 
+    #: Line & bar exports carry the Error-band (SEM/SD) + per-FOV-points spread
+    #: controls in their OUTPUT SETTINGS; scatter panels turn this off.
+    _INCLUDES_SPREAD = True
+
     def __init__(
         self,
         ctx,
@@ -749,6 +753,57 @@ class BatchExportPanel(QWidget):
         layout.addLayout(fmt_row)
 
         self._build_export_profile_row(layout)
+        if self._INCLUDES_SPREAD:
+            self._build_spread_settings_rows(layout)
+
+    def _build_spread_settings_rows(self, layout: QVBoxLayout) -> None:
+        """Error-band (SEM/SD) + per-FOV-points toggles as OUTPUT SETTINGS rows.
+
+        Line & bar only. Previously a separate top button row above the panels;
+        moved here so the spread controls sit with the rest of the export config,
+        aligned like Folder / Format. The buttons still register into the shared
+        ``ctx.runtime.sem.btns`` / ``fov.btns`` banks so they stay in sync with
+        the plot toolbars."""
+        from well_viewer.core.plot_toggles import (
+            refresh_fov_btn_state, toggle_fov_replicates, toggle_sem,
+        )
+        ctx = self._ctx
+
+        eb_row = QHBoxLayout()
+        eb_row.setContentsMargins(12, 2, 12, 2)
+        self._add_bold_label(eb_row, "Error band:", min_width=_FIELD_LABEL_W)
+        initial_sem = bool(ctx.state.plot.use_sem)
+        sem_btn = QPushButton("SEM" if initial_sem else "SD")
+        sem_btn.setProperty("variant", "sem" if initial_sem else "sem_warn")
+        sem_btn.setToolTip(
+            "Switch the spread used by line/bar batch exports between\n"
+            "SEM (Standard Error of the Mean) and SD (Standard Deviation).\n"
+            "Mirrors the SEM/SD toggle in the plot toolbars.")
+        sem_btn.clicked.connect(lambda _=False: toggle_sem(ctx))
+        eb_row.addWidget(sem_btn)
+        eb_row.addStretch(1)
+        layout.addLayout(eb_row)
+        if ctx.runtime.sem.btns is None:
+            ctx.runtime.sem.btns = []
+        ctx.runtime.sem.btns.append(sem_btn)
+        if not ctx.runtime.sem.btn:
+            ctx.runtime.sem.btn = sem_btn
+
+        fov_row = QHBoxLayout()
+        fov_row.setContentsMargins(12, 2, 12, 6)
+        self._add_bold_label(fov_row, "Per-FOV points:", min_width=_FIELD_LABEL_W)
+        fov_btn = QPushButton("FOV")
+        fov_btn.setProperty("variant", "toggle")
+        fov_btn.clicked.connect(lambda _=False: toggle_fov_replicates(ctx))
+        fov_row.addWidget(fov_btn)
+        fov_row.addStretch(1)
+        layout.addLayout(fov_row)
+        if ctx.runtime.fov.btns is None:
+            ctx.runtime.fov.btns = []
+        ctx.runtime.fov.btns.append(fov_btn)
+        if not ctx.runtime.fov.btn:
+            ctx.runtime.fov.btn = fov_btn
+        refresh_fov_btn_state(ctx)
 
     def _build_run_row(
         self, layout: QVBoxLayout, *, button_text: str = "▶  Run Batch Export",

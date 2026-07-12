@@ -42,6 +42,9 @@ _compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "co
 class ScatterBatchExportPanel(BatchExportPanel):
     """Batch exporter for Scatter Plot (cells/aggregate)."""
 
+    # Scatter exports have no error-band / per-FOV spread controls.
+    _INCLUDES_SPREAD = False
+
     def __init__(
         self,
         ctx,

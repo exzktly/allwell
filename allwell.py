@@ -648,6 +648,19 @@ class AllWellApp(QMainWindow):
                     break
                 except OSError:
                     continue
+            # Under an active (thin) profile, trim the manual to the profile's
+            # features so running from source (ALLWELL_PROFILE=thin) shows the
+            # same feature help a thin *binary* ships. Idempotent — a binary's
+            # README is already trimmed at build time. Best-effort: never let a
+            # missing build-tooling import break the help drawer.
+            if readme_text:
+                try:
+                    from scripts.profile_build import trim_readme_for_profile
+                    from well_viewer.core.profile import active_profile
+                    readme_text = trim_readme_for_profile(
+                        readme_text, active_profile().features)
+                except Exception:
+                    pass
 
             manual_view = QTextBrowser(content)
             if readme_text:

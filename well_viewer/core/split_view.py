@@ -205,7 +205,7 @@ class _SplitFocusWatcher(QObject):
 
     def on_focus_changed(self, _old, new) -> None:  # noqa: N802 (Qt slot)
         try:
-            active = bool(self._ctx.runtime.split.active)
+            active = bool(self._app._ctx.runtime.split.active)
         except RuntimeError:
             return  # underlying C++ app already deleted — nothing to do
         if not active or new is None:

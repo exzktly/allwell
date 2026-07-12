@@ -148,6 +148,24 @@ def test_install_registers_hooks_and_widgets():
     assert app._ctx.runtime.split.pane is not None
 
 
+def test_focus_watcher_reads_split_state_without_crashing():
+    """Regression: ``_SplitFocusWatcher`` stores ``self._app`` (the window), so its
+    focus slot must reach split state via ``self._app._ctx`` — not a bare
+    ``self._ctx``, which the object doesn't have.
+
+    Qt's ``focusChanged`` doesn't fire in the headless suite, so the slot was
+    never exercised and a stale ``self._ctx`` reference (left by the ctx-migration)
+    slipped through, crashing every real focus change while Split View was
+    installed (``'_SplitFocusWatcher' object has no attribute '_ctx'``)."""
+    from well_viewer.core.split_view import _SplitFocusWatcher
+
+    app, _, _ = _split_app(install=False)
+    watcher = _SplitFocusWatcher(app)
+    # Split inactive → the slot reads ``self._app._ctx.runtime.split.active`` and
+    # returns early. This must not raise AttributeError.
+    watcher.on_focus_changed(None, None)
+
+
 def test_section_nav_hands_ctx_not_app_to_intercept():
     """Regression: ``_on_section_nav_changed`` must pass the ViewerContext to the
     split nav-intercept, not the raw app.

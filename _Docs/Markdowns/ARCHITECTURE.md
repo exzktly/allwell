@@ -2278,6 +2278,129 @@ an allowlist before a guard could be clean.
 
 ---
 
+## 17. Troubleshooting (build, environment, runtime)
+
+Moved here from the user manual (`README_WellViewer.md`): a *running* app is
+already past install and build, so these recipes belong with the developer docs
+rather than the in-app help drawer.
+
+### Packaging / launch (macOS)
+
+**`AllWell.app is damaged and can't be opened.`** — macOS quarantine on an
+unsigned bundle. Fix:
+```sh
+xattr -cr /Applications/AllWell.app
+codesign --force --deep --sign - /Applications/AllWell.app
+```
+
+**The app opens and immediately closes.** — Run the bundle from a terminal to
+see the actual error:
+```sh
+dist/AllWell.app/Contents/MacOS/AllWell 2>&1 | head -100
+```
+
+**`No module named 'pkg_resources'`.** — `setuptools` was upgraded past v70 in
+the mamba environment. Recreate the environment from scratch. Don't
+`pip install setuptools` and don't `mamba update --all`.
+
+### Environment (Windows)
+
+**`Cannot uninstall Shiboken6 6.x.y, RECORD file not found` during
+`pip install`.** — A conda-installed `shiboken6` (or `pyside6`) is sitting in
+the env, and pip cannot uninstall it to satisfy the `PySide6==6.7.3` pin (conda
+packages have no `RECORD` manifest pip can read). Two common sources:
+
+1. An older `mamba create` line listed `pyside6` explicitly.
+2. The conda-forge `matplotlib` meta-package pulled `pyside6` in as a
+   transitive dep. **This is the gotcha.** The fix is to use `matplotlib-base`
+   instead — same matplotlib, no Qt binding.
+
+Bulletproof recovery (one block, paste into Miniforge Prompt at repo root):
+
+```powershell
+mamba deactivate
+mamba env remove -n allwell -y
+mamba create -n allwell python=3.10.14 setuptools=69.5.1 "numpy>=1.24,<1.25" scipy scikit-image matplotlib-base pillow imageio h5py vs2015_runtime -c conda-forge -y
+mamba activate allwell
+pip install --no-build-isolation -r _Docs\requirements.txt
+```
+
+Do NOT include `pyside6` or `matplotlib` in the mamba step — both pull
+shiboken6 in via conda where pip can't remove it. PySide6 is installed by pip
+from the requirements file; `vs2015_runtime` from conda supplies the MSVC DLLs
+PySide6 needs.
+
+**`VCRUNTIME140_1.dll` was not found / PySide6 import crashes.** — The
+conda-forge MSVC redistributable isn't visible to PySide6. Verify
+`vs2015_runtime` is in the env (`mamba list vs2015_runtime`) and re-activate the
+env so the conda `DLLs` directory is on PATH:
+```powershell
+mamba deactivate
+mamba activate allwell
+python -c "from PySide6 import QtWidgets; print('OK')"
+```
+
+**`pip install` fails on tensorflow with "no matching distribution".** —
+TensorFlow 2.13.0 ships Windows wheels for Python 3.10 and 3.11 only. Confirm
+with `python --version`. If you're on 3.12+, recreate the env pinning
+`python=3.10.14`.
+
+**`scripts\build_executable.ps1` reports "PyInstaller is not importable".** —
+The active env doesn't have the deps installed. Activate the env first and
+re-run pip:
+```powershell
+mamba activate allwell
+pip install --no-build-isolation -r _Docs\requirements.txt
+```
+
+### GPU / models / build output
+
+**`No GPU device found` / TensorFlow not using Metal.** — Install
+`tensorflow-metal`:
+```sh
+pip install tensorflow-metal==1.1.0
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+
+**StarDist model download fails (SSL error).** — Pre-download the model on an
+unrestricted machine and copy `~/.keras/models/` across.
+
+**`No module named 'stardist'` in the built app.** — The build forgot the
+PyInstaller hooks. Make sure `_Docs/_Installation/hooks/` (notably
+`hook-stardist.py`) was on the spec path.
+
+**The built bundle is > 900 MB.** — Normal. TensorFlow + Numba + LLVMLite +
+SciPy + Matplotlib account for the bulk.
+
+### Runtime / data
+
+**Segmentation / smFISH / Image Table show "No images found".** — Check that
+your results directory contains `<well>_out.zip` files. The viewer reads
+top-hat-filtered fluorescence (`*_tophat.tif`), masks (`*_labels.tif`), overlays
+(`*_overlay.png`), and smFISH-processed channels (`*_smfish.tif`) from inside
+those ZIPs. If channel tokens differ from what the viewer expected, re-open the
+directory — `pipeline_info.json` is re-read on every open.
+
+**Auto-threshold reports `timepoint unknown`.** — `pipeline_info.json` doesn't
+have a schema that names a `tp` or `timepoint` field. Re-run the pipeline with
+the correct `--filename_schema` so the JSON sidecar carries the right field map.
+
+**Bar-plot timepoint dropdown is empty.** — Either no wells are selected, or the
+CSVs don't have a `timepoint_hours` column. Confirm the schema you ran the
+pipeline with included a `timepoint` field. Single-timepoint experiments show
+one entry (e.g. `0`).
+
+**`WellPlateZipper` produces no zip files.** — Schema or separator does not
+match the filenames. Make sure `well` points at the right token, the separator
+is right, and the token is a valid plate position (`A01`–`H12` or `A1`–`H12`).
+The schema used is logged at the start of every run.
+
+**Channel dropdown shows a different channel than the plot.** — Should be fixed;
+if you ever see it again it means the active channel state and the combo got out
+of sync. Refresh the dataset (Open the same folder again). File a bug.
+
+---
+
 ## Change history
 
 This document is a map for **making changes**, not a changelog — it describes how

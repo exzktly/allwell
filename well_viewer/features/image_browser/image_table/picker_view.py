@@ -35,16 +35,10 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     plate.setEnabledWells([])               # nothing selectable until a dataset loads
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # Match the main sidebar plate's geometry so the picker stays in the same
-    # screen position across tabs. Like the main plate, rely on the
-    # WellPlateSelector's own minimumSizeHint rather than a fixed 280px floor:
-    # inside the sidebar scroll area that floor exceeds the plate's natural
-    # heightForWidth, so the grid rendered centred in a too-tall box (a
-    # vertically "stretched" plate). No floor → natural aspect-correct height.
-    from PySide6.QtWidgets import QSizePolicy as _SizePolicy
-    _sp = _SizePolicy(_SizePolicy.Preferred, _SizePolicy.Preferred)
-    _sp.setHeightForWidth(True)
-    plate.setSizePolicy(_sp)
+    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
+    # scales to the rail width, keeps aspect, no fixed min-height floor.
+    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
+    apply_sidebar_plate_geometry(plate)
     layout.addWidget(plate)
     ctx.runtime.image_table.sidebar_plate = plate
 

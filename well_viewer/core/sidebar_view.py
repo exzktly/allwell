@@ -54,18 +54,11 @@ def build_sidebar(win, parent: QWidget) -> None:
     plate = WellPlateSelector(parent)
     plate.setActionsVisible(False)        # the rail keeps its own All / None below
     plate.setEnabledWells([])             # nothing selectable until a dataset loads
-    # Placement: Preferred/Preferred + heightForWidth, with a trailing
-    # ``layout.addStretch(1)`` absorbing the remaining vertical space so the plate
-    # stays anchored to the top of the sidebar across tabs. No explicit min-size
-    # override here — the WellPlateSelector's own ``minimumSizeHint`` is now a
-    # small floor (widgets/well_plate_selector), so the plate scales down to fit
-    # a narrow rail (no horizontal overflow) and the sidebar scroll area
-    # (app_shell_view) handles any vertical overflow when a tab stacks tall
-    # content beneath the plate.
-    from PySide6.QtWidgets import QSizePolicy as _SizePolicy
-    _sp = _SizePolicy(_SizePolicy.Preferred, _SizePolicy.Preferred)
-    _sp.setHeightForWidth(True)
-    plate.setSizePolicy(_sp)
+    # Shared sidebar-plate sizing (the single home for it) — scales to the rail
+    # width, keeps aspect, no fixed min-height floor. A trailing addStretch below
+    # keeps the plate anchored to the top of the sidebar across tabs.
+    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
+    apply_sidebar_plate_geometry(plate)
     layout.addWidget(plate)
     win._sidebar_plate = win._ctx.widgets.register("_sidebar_plate", plate)
     win._sidebar_map_outer = plate

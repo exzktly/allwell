@@ -50,10 +50,17 @@ class StateSpec:
     ``AppState`` itself never imports a feature state class. A feature may own
     several slices (Image Browser owns ``review_image`` / ``preview`` /
     ``image_table`` / ``playground``).
+
+    ``subtab``, when set, marks a slice that belongs to a composite parent's
+    sub-tab (Image Browser's ``image_table`` / ``playground``). ``build_feature_registry``
+    attaches it only when the active profile admits that sub-tab — so a subset
+    build that narrows the parent's sub-tabs drops the slice (and never imports
+    its physically-stripped state module) instead of crashing at startup.
     """
 
     attr: str
     factory: Callable
+    subtab: str = ""
 
 
 @dataclass(frozen=True)

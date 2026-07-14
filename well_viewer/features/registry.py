@@ -158,6 +158,9 @@ def _activate_segmentation(ctx) -> None:
 
 
 def _activate_image_table(ctx) -> None:
+    from well_viewer.features.image_browser.image_table.builder_view import (
+        builder_refresh,
+    )
     from well_viewer.features.image_browser.image_table.controller import (
         image_table_refresh_picker, image_table_repopulate_dropdowns,
     )
@@ -166,6 +169,12 @@ def _activate_image_table(ctx) -> None:
         frame.setVisible(True)
     image_table_repopulate_dropdowns(ctx)
     image_table_refresh_picker(ctx)
+    # Redraw the builder shelf (trees + channel tray) from current state so the
+    # channel chips reflect the loaded dataset. builder_refresh reads
+    # ctx.state.channel and no-ops before the shelf is built, so this is a safe
+    # idempotent refresh on every activation — without it the channel chips only
+    # appeared after the first drag onto a Rows/Cols zone.
+    builder_refresh(ctx)
 
 
 def _activate_sample_definitions(ctx) -> None:

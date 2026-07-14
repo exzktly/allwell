@@ -1,0 +1,6 @@
+# Shell scripts must always check out with LF endings. Without this, a clone on
+# Windows with core.autocrlf=true rewrites them to CRLF, and the CRLF shebang
+# then fails at runtime with "env: bash\r: no such file or directory" (the \r is
+# read as part of the interpreter name). Pinning eol=lf makes the checkout LF
+# regardless of the user's autocrlf setting.
+*.sh text eol=lf

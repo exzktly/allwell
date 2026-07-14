@@ -13,6 +13,7 @@
 
 import sys
 import os
+import tempfile as _tempfile
 from pathlib import Path
 import importlib.util
 
@@ -196,7 +197,6 @@ _profiles_dir = _parent / "profiles"
 if _profiles_dir.is_dir():
     extra_data.append((str(_profiles_dir), "profiles"))
 if _profile_active:
-    import tempfile as _tempfile
     _marker_path = Path(_tempfile.mkdtemp()) / "active_profile.txt"
     _marker_path.write_text(_PROFILE, encoding="utf-8")
     extra_data.append((str(_marker_path), "."))

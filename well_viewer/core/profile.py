@@ -33,6 +33,7 @@ profile), so the TOML backend must resolve on Python 3.10 — a bare
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -46,8 +47,18 @@ _ENV_VAR = "ALLWELL_PROFILE"
 
 
 def _repo_root() -> Path:
-    # well_viewer/core/profile.py -> repo root is two parents up from the package.
-    return Path(__file__).resolve().parents[2]
+    # In a PyInstaller bundle the baked ``active_profile.txt`` marker and the
+    # ``profiles/`` dir live at the bundle root (``sys._MEIPASS``), which is NOT
+    # ``parents[2]`` of this module's ``__file__`` on every layout — a macOS
+    # ``.app`` splits code from data, so the marker written to the bundle root
+    # would be missed and ``active_profile()`` would silently fall back to the
+    # full app over a thin (stripped) bundle, crashing at startup. Prefer
+    # ``_MEIPASS`` when frozen (as ``core/app_fonts.py`` and
+    # ``all_well_launcher.py`` do); fall back to the source tree in a dev
+    # checkout, where ``well_viewer/core/profile.py`` -> repo root is two
+    # parents up from the package.
+    base = getattr(sys, "_MEIPASS", None)
+    return Path(base) if base else Path(__file__).resolve().parents[2]
 
 
 def profiles_dir() -> Path:

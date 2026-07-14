@@ -80,8 +80,8 @@ class PersistenceRegistry:
 def build_persistence_registry(ctx) -> PersistenceRegistry:
     """Create the registry and register every data-dir persistence domain."""
     from well_viewer.persistence import (
-        cell_overrides, crop_region, export_groups, heatmap_layouts, line_order,
-        multivariate, qc_params, plot_groups, ratios, sample_definitions,
+        cell_overrides, crop_region, heatmap_layouts, line_order,
+        qc_params, plot_groups, ratios, sample_definitions,
         view_state,
     )
 
@@ -113,10 +113,29 @@ def build_persistence_registry(ctx) -> PersistenceRegistry:
     registry.register("crop_region",
                       save=crop_region.save_to_data_dir,
                       load=crop_region.load_from_data_dir)
-    registry.register("export_groups",
-                      save=export_groups.save_to_data_dir,
-                      load=export_groups.load_from_data_dir)
-    registry.register("multivariate",
-                      save=multivariate.save_to_data_dir,
-                      load=multivariate.load_from_data_dir)
+
+    # Feature-owned removable domains. Their modules (persistence/export_groups.py
+    # → Batch Export, persistence/multivariate.py → Multivariate) are physically
+    # stripped from a subset bundle, so importing them unconditionally crashes a
+    # frozen thin build at startup. Gate on the active profile — the same
+    # removability contract every other startup site follows. (This registration
+    # ultimately belongs on each feature's descriptor via the PersistenceSpec
+    # machinery scaffolded in core/feature_registry.py, which this function is
+    # meant to "fold in"; until that lands, gate here.)
+    from well_viewer.core.profile import active_profile
+    prof = active_profile()
+
+    def _admits(feature: str) -> bool:
+        return prof.features is None or feature in prof.features
+
+    if _admits("Batch Export"):
+        from well_viewer.persistence import export_groups
+        registry.register("export_groups",
+                          save=export_groups.save_to_data_dir,
+                          load=export_groups.load_from_data_dir)
+    if _admits("Multivariate"):
+        from well_viewer.persistence import multivariate
+        registry.register("multivariate",
+                          save=multivariate.save_to_data_dir,
+                          load=multivariate.load_from_data_dir)
     return registry

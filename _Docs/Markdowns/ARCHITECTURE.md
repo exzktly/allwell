@@ -616,6 +616,69 @@ StarDist-only build can omit that file entirely. Guarded by
 `tests/test_feature_profile.py` (subset boots + loads), `test_derive_profile.py`
 (the strip plan), and `test_profile_build.py` (binary dep-gating).
 
+**Defining a profile.** A named build *is* a file: `profiles/<name>.toml`. The
+`<name>` is the filename (minus `.toml`), and the same `ALLWELL_PROFILE=<name>`
+env var selects it for both running and building — there is nothing else to
+register. To author one, write the manifest and list the features you want:
+
+```toml
+# profiles/myapp.toml  →  select with  ALLWELL_PROFILE=myapp
+name = "myapp"                                    # must match the filename
+
+# STRICT ALLOWLIST of top-level tabs: list EVERY tab to keep.
+# Anything omitted is dropped from the build.
+features = ["Plotting", "Image Browser", "Sample Definitions"]
+
+# OPTIONAL. Only NARROWS a parent already listed in `features` — keep just
+# these sub-tabs of it. Omit a parent here and ALL its sub-tabs are kept.
+[subtabs]
+"Image Browser" = ["Segmentation", "Image Table"]
+```
+
+The two rules that decide what ends up in the build:
+
+- **`features` is a strict allowlist** of top-level tabs — list *every* tab you
+  want; anything not listed is removed. (An empty/missing `features` means the
+  full app — that is what the absence of a profile gives you.)
+- **`[subtabs]` only narrows**, never adds. A parent that appears there keeps
+  *only* the sub-tabs you list; a parent you leave out of `[subtabs]` keeps all
+  of its sub-tabs. Listing a sub-tab under a parent that isn't in `features` has
+  no effect (the whole parent is already gone).
+
+**Valid names** — the source of truth is `well_viewer/features/registry.py`
+`_features()` (entries with a `group=` are top-level; entries with a `parent=`
+are that parent's sub-leaves), so this list can't silently drift from the code:
+
+| Put in `features` (top-level tabs) | Put in `[subtabs]` (parent → sub-leaves) |
+| --- | --- |
+| `Plotting` | `Plotting` → `Bar Plots`, `Line Graphs`, `Scatter Plot`, `Distribution`, `Heat Map` |
+| `Statistics` | |
+| `Multivariate` | |
+| `Spatial` | |
+| `Image Browser` | `Image Browser` → `Segmentation`, `Image Table`, `Cell Browser`, `Playground` |
+| `smFISH` | |
+| `Review CSV` | |
+| `Sample Definitions` | `Sample Definitions` → `Cell Gating` |
+| `Saved Plots` | |
+| `Batch Export` | |
+
+**The one non-tab name: `Cellpose`.** It's a pipeline unit, not a Qt tab, so it
+lives only in `features` (never `[subtabs]`). List `"Cellpose"` to keep the
+Torch-backed segmenter; omit it and a subset *binary* drops
+`torch`/`torchvision`/`cellpose` (StarDist stays the default segmenter). This is
+why `thin` and `plotting_only`, which don't list it, are StarDist-only.
+
+**End to end.** Write `profiles/myapp.toml` as above, then:
+
+```bash
+ALLWELL_PROFILE=myapp python allwell.py            # run the subset off the full tree
+ALLWELL_PROFILE=myapp scripts/build_executable.sh  # build a subset binary
+```
+
+For a physically stripped source tree (not just a runtime/binary filter), feed
+the same profile to `scripts/derive_profile.py --apply`, which deletes the
+excluded features' `paths`/`tests` per `profiles/full.toml`.
+
 One module sits in `domain/` rather than under a feature package:
 `domain/fold_change_controls.py` exposes
 `install_fold_change_controls(app, parent, layout, scope=…)` — the

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+from dataclasses import replace
 
 from well_viewer.core.feature_registry import (
     FeatureDescriptor,
@@ -635,8 +636,12 @@ def _features() -> "list[FeatureDescriptor]":
             states=(
                 StateSpec("review_image", _state_review_image),
                 StateSpec("preview", _state_preview),
-                StateSpec("image_table", _state_image_table),
-                StateSpec("playground", _state_playground),
+                # These two belong to the Image Table / Playground sub-tabs, whose
+                # state modules are physically stripped from a subset bundle that
+                # narrows Image Browser's sub-tabs. Tag them so build_feature_registry
+                # skips the slice (and its import) when the sub-tab is profiled out.
+                StateSpec("image_table", _state_image_table, subtab="Image Table"),
+                StateSpec("playground", _state_playground, subtab="Playground"),
             ),
         ),
         FeatureDescriptor(
@@ -741,7 +746,22 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
     from well_viewer.core.profile import active_profile
     if profile is None:
         profile = active_profile()
-    return FeatureRegistry(d for d in _features() if profile.includes(d))
+
+    def _admit_states(d):
+        # Drop a surviving composite parent's sub-tab-tagged state slices whose
+        # sub-tab the profile excludes. Descriptor-level ``includes`` keeps the
+        # parent (e.g. Image Browser) while the sub-tab narrowing only removes the
+        # separate sub-leaf descriptors — which carry no state — so without this
+        # the parent's ``image_table`` / ``playground`` slices would still attach
+        # and eagerly import their physically-stripped state modules.
+        if not any(s.subtab for s in d.states):
+            return d
+        kept = tuple(s for s in d.states
+                     if not s.subtab or profile.includes_subtab(d.name, s.subtab))
+        return d if kept == d.states else replace(d, states=kept)
+
+    return FeatureRegistry(_admit_states(d) for d in _features()
+                           if profile.includes(d))
 
 
 def attach_feature_state(state, registry: "FeatureRegistry | None" = None) -> None:

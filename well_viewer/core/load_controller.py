@@ -420,6 +420,21 @@ def load_directory(ctx, d: Path, label=None) -> None:
     refresh = getattr(app, "_refresh_thresh_frac_quick_edit", None)
     if callable(refresh):
         refresh()
+    # Re-run the active tab's activation. Sidebar visibility + per-tab population
+    # is owned by on_tab_change -> the active leaf's on_activate; but a same-tab
+    # (re)load emits no notebook currentChanged (setCurrentByName is a no-op on
+    # the current page), so the active tab would otherwise keep its pre-load,
+    # empty sidebar until the user switched tabs — the reported Image Table
+    # "wells/channels don't load until I switch tabs / drag" bug. on_tab_change
+    # reads the current leaf itself and every on_activate is idempotent, so this
+    # cleanly repopulates whichever tab is active. Guarded so a refresh failure
+    # never breaks the (critical) load path.
+    try:
+        from well_viewer.core.tab_controller import on_tab_change
+        on_tab_change(ctx)
+    except Exception:
+        logging.getLogger("well_viewer").exception(
+            "post-load active-tab refresh failed")
 
 
 def _kick_off_gating_after_load(ctx) -> None:

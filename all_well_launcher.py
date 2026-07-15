@@ -151,6 +151,27 @@ def _dispatch() -> None:
         import WellPlateZipper
         WellPlateZipper.main()
         return
+    if len(sys.argv) > 1 and sys.argv[1] == "--run-bootstrap":
+        # Same frozen-dispatch trick again: the Analyze → Remotes dialog spawns
+        # ``scripts/_bootstrap_lib.py`` as a subprocess to provision a remote
+        # host, but in a frozen bundle ``sys.executable`` is the .app binary,
+        # not a Python interpreter, so ``[sys.executable, "scripts/_bootstrap_lib.py",
+        # ...]`` would just relaunch the GUI. Load the bundled module by file path
+        # (it lives at ``_MEIPASS/scripts/_bootstrap_lib.py`` so its
+        # ``REPO_ROOT = __file__.parent.parent`` resolves to _MEIPASS, where the
+        # required-files manifest is bundled) and route argv past the sentinel
+        # into its ``main()`` (which parse_args() the rest: alias [--force]).
+        sys.argv = [sys.argv[0]] + sys.argv[2:]
+        import importlib.util
+        _bpath = _BUNDLE_DIR / "scripts" / "_bootstrap_lib.py"
+        _spec = importlib.util.spec_from_file_location("_bootstrap_lib", _bpath)
+        _mod = importlib.util.module_from_spec(_spec)
+        # Register before exec_module: the module defines @dataclass classes,
+        # and dataclasses resolves annotations via sys.modules[cls.__module__]
+        # — absent that entry it raises AttributeError on 'NoneType'.
+        sys.modules["_bootstrap_lib"] = _mod
+        _spec.loader.exec_module(_mod)
+        sys.exit(_mod.main())
     from allwell import main
     main()
 

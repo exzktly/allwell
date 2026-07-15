@@ -1057,13 +1057,18 @@ class BootstrapLogDialog(QDialog):
     # ── lifecycle ────────────────────────────────────────────────────────
 
     def _spawn(self) -> None:
+        from services.input_resolution_service import build_bootstrap_cmd
+
         repo_root = Path(__file__).resolve().parent
         bootstrap = repo_root / "scripts" / "_bootstrap_lib.py"
-        if not bootstrap.is_file():
+        # Source runs invoke the interpreter on the ``.py`` path, so it must
+        # exist; the frozen build re-execs the .app binary via the
+        # ``--run-bootstrap`` sentinel and never touches this path.
+        if not getattr(sys, "frozen", False) and not bootstrap.is_file():
             self._append(f"[error] bootstrap script not found at {bootstrap}\n")
             self._mark_finished(2)
             return
-        cmd = [sys.executable, str(bootstrap), self._alias]
+        cmd = build_bootstrap_cmd(bootstrap, self._alias)
         self._append(f"$ {' '.join(cmd)}\n")
         self._started_at = time.monotonic()
         kwargs: dict = {

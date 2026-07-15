@@ -128,6 +128,15 @@ sibling_scripts = [
     # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
     # only the remote install manifest is needed at runtime.)
     (str(_parent / "_Docs" / "requirements-remote.txt"), "_Docs"),
+    # The Analyze → Remotes dialog provisions a remote host by spawning this
+    # bootstrap module as a subprocess (re-exec'd via the ``--run-bootstrap``
+    # launcher sentinel — sys.executable is the .app binary, not python). It's
+    # loaded by file path at _MEIPASS/scripts/_bootstrap_lib.py and its
+    # ``REPO_ROOT = __file__.parent.parent`` resolves to _MEIPASS, where the
+    # files it syncs to the remote (process_microscopy.py, pipeline/, util/,
+    # _Docs/requirements-remote.txt) are already bundled. Keep the ``scripts/``
+    # dest so that .parent.parent lands on the bundle root, not above it.
+    (str(_parent / "scripts" / "_bootstrap_lib.py"), "scripts"),
 ]
 
 # Bundle every first-party package so module imports resolve at runtime inside

@@ -120,6 +120,14 @@ sibling_scripts = [
     # allwell.py is exec'd (not statically imported), so its `from version
     # import __version__` isn't followed by PyInstaller — bundle version.py too.
     (str(_parent / "version.py"),               "."),
+    # Remote (SLURM/SSH) execution uploads the files in
+    # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list
+    # includes _Docs/requirements-remote.txt (the headless pip install). The
+    # frozen app resolves those paths under _MEIPASS, so the file must ship at
+    # _MEIPASS/_Docs/requirements-remote.txt or remote runs abort with
+    # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
+    # only the remote install manifest is needed at runtime.)
+    (str(_parent / "_Docs" / "requirements-remote.txt"), "_Docs"),
 ]
 
 # Bundle every first-party package so module imports resolve at runtime inside

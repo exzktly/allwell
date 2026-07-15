@@ -80,3 +80,29 @@ def test_manifest_includes_all_pipeline_and_util_files():
         "imports them crashes with ModuleNotFoundError. Add them:\n  "
         + "\n  ".join(missing)
     )
+
+
+def test_frozen_bundle_ships_the_remote_manifest():
+    """Every manifest file must be bundled into the frozen PyInstaller app.
+
+    A built app resolves the remote-manifest paths under ``_MEIPASS`` (the runner
+    uploads them to the SLURM/SSH worker), so each entry has to ship in the
+    bundle. ``all_well.spec`` bundles the first-party package dirs whole plus a
+    list of top-level scripts / data files; a manifest entry outside those — e.g.
+    ``_Docs/requirements-remote.txt`` — must be added to the spec explicitly or a
+    built-app remote run aborts with ``missing local file``. (Source runs are
+    unaffected — this guards the frozen build specifically.)"""
+    from services.remote_runner import _REQUIRED_REMOTE_FILES
+
+    spec = (REPO_ROOT / "_Docs" / "_Installation" / "all_well.spec").read_text()
+    bundled_pkgs = ("well_viewer", "widgets", "ui", "services", "pipeline", "util")
+    missing = [
+        f for f in _REQUIRED_REMOTE_FILES
+        if f.split("/")[0] not in bundled_pkgs          # not in a bundled package
+        and f not in spec and Path(f).name not in spec  # nor named in the spec
+    ]
+    assert not missing, (
+        "remote-manifest file(s) not bundled by all_well.spec — a built-app "
+        "remote run aborts with 'missing local file'. Add them to the spec's "
+        "data list:\n  " + "\n  ".join(missing)
+    )

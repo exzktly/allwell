@@ -71,7 +71,18 @@ except ModuleNotFoundError:  # pragma: no cover
 # unit-tested), so this spec stays declarative and the "deps are gated into the
 # binary by feature, automatically" contract is verifiable outside a real build.
 sys.path.insert(0, str(_parent))
-from scripts.profile_build import compute_exclusions, load_catalog  # noqa: E402
+from scripts.profile_build import (  # noqa: E402
+    compute_exclusions, load_catalog, path_is_excluded,
+)
+# Remote (SLURM/SSH) execution uploads exactly these files to the worker; the
+# frozen app resolves them under _MEIPASS, so every one MUST ship regardless of
+# which GUI features a profile bundles (a remote run may use any segmenter). This
+# list is the bundling FLOOR applied to the per-file profile filter below, so a
+# profile that excludes a feature owning a manifest file (e.g. Cellpose owns
+# pipeline/cellpose.py) can never drop it and break remote runs. remote_runner
+# only pulls stdlib + the Qt-free services.remote_config, so importing it here is
+# build-safe.
+from services.remote_runner import _REQUIRED_REMOTE_FILES  # noqa: E402
 
 _PROFILE = os.environ.get("ALLWELL_PROFILE", "").strip()
 _excluded_features: list = []
@@ -87,7 +98,12 @@ if _profile_active:
     # repo_paths spans well_viewer/ tabs AND non-Qt units (pipeline/cellpose.py);
     # the bundling loop filters every first-party package against this list.
     _excluded_features = _ex.features
-    _excluded_repo_dirs = _ex.repo_paths
+    # Apply the remote-manifest bundling floor: never exclude a file the remote
+    # pipeline needs, even if the feature that "owns" it is profiled out. Without
+    # this, a Cellpose-excluded profile drops pipeline/cellpose.py and every
+    # remote run aborts at RemoteRunner.sync_required_files' existence check.
+    _floor = set(_REQUIRED_REMOTE_FILES)
+    _excluded_repo_dirs = [d for d in _ex.repo_paths if d not in _floor]
     _excluded_deps = _ex.deps
     print(f"[all_well.spec] ALLWELL_PROFILE={_PROFILE!r} — excluding "
           f"{len(_excluded_features)} feature(s): {_excluded_features}")
@@ -100,12 +116,11 @@ def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
     under one is dropped, so a profiled-out feature's source never lands in the
     bundle. __pycache__ is always skipped."""
     out: list = []
-    ex = [d.rstrip("/") for d in exclude_repo_dirs]
     for f in pkg_root.rglob("*"):
         if not f.is_file() or "__pycache__" in f.parts:
             continue
         repo_rel = f"{dest}/{f.relative_to(pkg_root).as_posix()}"
-        if any(repo_rel == d or repo_rel.startswith(d + "/") for d in ex):
+        if path_is_excluded(repo_rel, exclude_repo_dirs):
             continue
         out.append((str(f), str(Path(dest) / f.relative_to(pkg_root).parent)))
     return out
@@ -120,6 +135,23 @@ sibling_scripts = [
     # allwell.py is exec'd (not statically imported), so its `from version
     # import __version__` isn't followed by PyInstaller — bundle version.py too.
     (str(_parent / "version.py"),               "."),
+    # Remote (SLURM/SSH) execution uploads the files in
+    # services.remote_runner._REQUIRED_REMOTE_FILES to the worker; that list
+    # includes _Docs/requirements-remote.txt (the headless pip install). The
+    # frozen app resolves those paths under _MEIPASS, so the file must ship at
+    # _MEIPASS/_Docs/requirements-remote.txt or remote runs abort with
+    # "missing local file". (The GUI-superset requirements.txt is NOT bundled —
+    # only the remote install manifest is needed at runtime.)
+    (str(_parent / "_Docs" / "requirements-remote.txt"), "_Docs"),
+    # The Analyze → Remotes dialog provisions a remote host by spawning this
+    # bootstrap module as a subprocess (re-exec'd via the ``--run-bootstrap``
+    # launcher sentinel — sys.executable is the .app binary, not python). It's
+    # loaded by file path at _MEIPASS/scripts/_bootstrap_lib.py and its
+    # ``REPO_ROOT = __file__.parent.parent`` resolves to _MEIPASS, where the
+    # files it syncs to the remote (process_microscopy.py, pipeline/, util/,
+    # _Docs/requirements-remote.txt) are already bundled. Keep the ``scripts/``
+    # dest so that .parent.parent lands on the bundle root, not above it.
+    (str(_parent / "scripts" / "_bootstrap_lib.py"), "scripts"),
 ]
 
 # Bundle every first-party package so module imports resolve at runtime inside

@@ -57,6 +57,21 @@ def build_zipper_cmd(
     return cmd
 
 
+def build_bootstrap_cmd(bootstrap: Path, alias: str) -> list[str]:
+    """Build the argv for the remote-provisioning bootstrap subprocess.
+
+    Frozen bundle: re-invoke the launcher with the ``--run-bootstrap`` sentinel,
+    which routes argv into ``scripts/_bootstrap_lib.main()`` (mirrors the
+    ``--run-zipper`` / ``--run-pipeline`` paths). Passing the ``.py`` path there
+    would make ``sys.executable`` (the .app binary) relaunch the GUI instead of
+    running the bootstrap — the frozen-only failure this guards. From source,
+    invoke the interpreter on the script path as before.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--run-bootstrap", alias]
+    return [sys.executable, str(bootstrap), alias]
+
+
 def tif_files_in(folder: Path) -> list[Path]:
     files: list[Path] = []
     for pat in TIF_GLOB:

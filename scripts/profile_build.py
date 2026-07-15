@@ -68,6 +68,21 @@ def compute_exclusions(catalog: list, features, subtabs=None) -> Exclusions:
     return ex
 
 
+def path_is_excluded(repo_rel: str, exclude_repo_dirs) -> bool:
+    """Whether a repo-relative path is dropped by a profile's exclusion list.
+
+    A path is excluded if it *is* an excluded entry or lives under one (so an
+    excluded feature dir like ``well_viewer/features/stats`` drops every file
+    beneath it). This is the single match rule shared by ``all_well.spec``'s
+    per-file bundler (``_pkg_datas``) and the guard tests, so the binary and the
+    tests can never disagree about what a profile ships."""
+    for d in exclude_repo_dirs:
+        d = d.rstrip("/")
+        if repo_rel == d or repo_rel.startswith(d + "/"):
+            return True
+    return False
+
+
 # The Cellpose feature's Torch stack — the only ``collect_all``'d ML packages.
 # Bundled unless Cellpose is profiled out (its deps in ``excluded_deps``).
 _CELLPOSE_ML = ["torch", "torchvision", "cellpose"]

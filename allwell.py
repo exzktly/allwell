@@ -17,12 +17,23 @@ import argparse
 import sys
 from pathlib import Path
 
+# Startup diagnostics FIRST — before PySide6 — so a silent launch failure (a
+# native crash in the Qt DLL import, a Qt platform-plugin abort, or a cold-cache
+# matplotlib font-scan hang) leaves a trail on disk instead of an empty terminal.
+# See boot_diag: it truncates a per-launch log and arms faulthandler onto it.
+import boot_diag as _boot_diag
+_boot_diag.arm_faulthandler()
+_boot_diag.install_excepthook()
+_boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
+
+_boot_diag.boot("importing PySide6 (Qt DLLs) …")
 from PySide6.QtCore import Qt, QTimer, Signal, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
     QMessageBox, QTextBrowser, QVBoxLayout, QWidget,
 )
+_boot_diag.boot("PySide6 imported OK")
 
 import theme as theme_v2
 from version import __version__ as _APP_VERSION
@@ -1253,23 +1264,19 @@ def main() -> None:
     # Restrict matplotlib to the bundled fonts BEFORE anything imports it (the
     # first plot pulls matplotlib.figure -> font_manager). Skips matplotlib's
     # full system-font enumeration, which can cost minutes on first launch on a
-    # Windows 365 Cloud PC. Defensive: never blocks startup.
+    # Windows 365 Cloud PC. Defensive: never blocks startup. (This is the #1
+    # suspect for a silent "hangs on launch" — the boot log brackets it so a
+    # stall here is visible as the last-reached milestone.)
+    _boot_diag.boot("mpl_bootstrap.configure() — limiting matplotlib font scan …")
     try:
         import mpl_bootstrap
         mpl_bootstrap.configure()
     except Exception:
         swallowed()
+    _boot_diag.boot("mpl_bootstrap done")
 
-    # Dump a Python stack trace to stderr on a hard crash (segfault / fatal Qt
-    # error) so otherwise output-less native crashes are diagnosable from the
-    # terminal without a special launch flag. Guarded: a windowed PyInstaller
-    # build has no stderr, where faulthandler.enable() would raise.
-    try:
-        import faulthandler
-        if sys.stderr is not None and getattr(sys.stderr, "fileno", None) is not None:
-            faulthandler.enable()
-    except Exception:
-        swallowed()  # diagnostics-only; never block startup
+    # faulthandler is already armed onto the boot log by boot_diag at import
+    # time; nothing more to do here.
 
     # Surface any misconfigured ALLWELL_* overrides once at startup (audit
     # X12) instead of letting a mistyped scratch/remotes path fall back
@@ -1295,7 +1302,9 @@ def main() -> None:
                     help="Pre-load a results directory into the Review tab on startup.")
     args = ap.parse_args()
 
+    _boot_diag.boot("creating QApplication (loads Qt platform plugin) …")
     app = QApplication.instance() or QApplication(sys.argv)
+    _boot_diag.boot("QApplication created OK")
     _install_combobox_popup_widener()
     # Collapse both font-family tokens to single resolvable names so Qt's
     # QSS parser doesn't walk alias tables and warn at startup
@@ -1328,8 +1337,11 @@ def main() -> None:
     except Exception:
         theme_v2.Typography.family_mono = _mono_family or ""
     app.setStyleSheet(theme_v2.qss())
+    _boot_diag.boot("building main window (AllWellApp) …")
     win = AllWellApp(data_path=args.data_dir)
+    _boot_diag.boot("main window built; showing")
     win.show()
+    _boot_diag.boot("entering Qt event loop (startup complete)")
     sys.exit(app.exec())
 
 

@@ -30,21 +30,28 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-# Repo root resolved from this file's location. Used to locate the four
-# required pipeline files to sync to the remote.
+# Repo root resolved from this file's location. Used to locate the
+# required pipeline files to sync to the remote (and, when frozen, resolves
+# to _MEIPASS since this module ships at _MEIPASS/scripts/_bootstrap_lib.py).
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# The minimum set of files the remote needs in order to run the
-# pipeline. Kept in lockstep with services.remote_runner's contract — if
-# that constant moves, this list must follow.
-REQUIRED_FILES: tuple[str, ...] = (
-    "process_microscopy.py",
-    "pipeline/auto_threshold.py",
-    "util/well_token.py",
-    # v5.2.1: headless-only requirements file (no PySide6/pyobjc/
-    # pyinstaller). See _Docs/requirements.txt for the GUI superset.
-    "_Docs/requirements-remote.txt",
-)
+
+def _required_files() -> tuple[str, ...]:
+    """The files the remote needs, from the ONE source of truth:
+    ``services.remote_runner._REQUIRED_REMOTE_FILES``.
+
+    Previously this module carried its own ``REQUIRED_FILES`` tuple that was
+    supposed to stay "in lockstep" with the runner's — it silently drifted to a
+    stale 4-of-14 subset. The actual provisioning sync delegates to
+    ``RemoteRunner.sync_required_files`` (which uses the runner's list), so this
+    accessor makes the bootstrap's preflight check and log count read from that
+    same list — they can no longer disagree. Imported lazily, with REPO_ROOT on
+    ``sys.path`` (the bash/PowerShell wrappers add it; the frozen launcher adds
+    _MEIPASS), matching :func:`sync_required_files`."""
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from services.remote_runner import _REQUIRED_REMOTE_FILES
+    return _REQUIRED_REMOTE_FILES
 
 ENV_NAME = "allwell"
 REMOTE_HOME_REPO = "~/allwell"
@@ -631,12 +638,13 @@ fi
 
 
 def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
-    """Rsync the four pipeline files to ``~/allwell/`` on the remote.
+    """Rsync the required pipeline files to ``~/allwell/`` on the remote.
 
     Delegates to :class:`services.remote_runner.RemoteRunner` so the
     runner's per-run sync helper and this one-shot bootstrap call use
-    exactly the same code path — no duplicate rsync logic, no Windows-
-    path-translation bug that affects one but not the other.
+    exactly the same code path AND the same file list
+    (``_REQUIRED_REMOTE_FILES``) — no duplicate rsync logic, no manifest
+    drift, no Windows-path-translation bug that affects one but not the other.
     """
     # Import locally so the script works even if services/ isn't on
     # sys.path (the bash/PowerShell wrappers add it).
@@ -644,7 +652,7 @@ def sync_required_files(alias: str, *, ssh_key_path: str = "") -> None:
     from services.remote_config import RemoteHost
     from services.remote_runner import RemoteRunner
 
-    say(f"Syncing {len(REQUIRED_FILES)} required pipeline files → {alias}:~/allwell/")
+    say(f"Syncing {len(_required_files())} required pipeline files → {alias}:~/allwell/")
     # v5.2.2: include ssh_key_path so rsync's underlying ssh transport
     # picks up the wizard-generated key. Without this, sync would
     # bare-ssh and fail with "Permission denied" on hosts that only
@@ -961,9 +969,9 @@ def main(argv: list[str] | None = None) -> int:
             f"alias={args.alias!r} force={args.force} ==="
         )
 
-    # Sanity: make sure the four required files actually exist locally
-    # before we go through the trouble of probing the remote.
-    missing = [f for f in REQUIRED_FILES if not (REPO_ROOT / f).is_file()]
+    # Sanity: make sure the required files actually exist locally before we go
+    # through the trouble of probing the remote.
+    missing = [f for f in _required_files() if not (REPO_ROOT / f).is_file()]
     if missing:
         print(
             f"ERROR: required pipeline files missing locally: {missing}",

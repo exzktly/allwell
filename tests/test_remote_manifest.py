@@ -55,3 +55,28 @@ def test_remote_manifest_covers_pipeline_root_imports():
         "remote run will crash with ModuleNotFoundError. Add them:\n  "
         + "\n  ".join(missing)
     )
+
+
+def test_manifest_includes_all_pipeline_and_util_files():
+    """Every ``.py`` in the ``pipeline/`` and ``util/`` packages must be in the
+    manifest. Those packages are synced file-by-file, not as whole directories,
+    so a submodule that another *uploaded* module imports — e.g. ``pipeline.io``
+    importing ``pipeline.incremental_keys`` — is absent on the remote and crashes
+    with ModuleNotFoundError unless it is listed. The top-level-import scan above
+    can't see it (it only registers the ``pipeline`` package name), so this pins
+    the whole uploaded package."""
+    from services.remote_runner import _REQUIRED_REMOTE_FILES
+
+    manifest = set(_REQUIRED_REMOTE_FILES)
+    on_disk = {
+        str(p.relative_to(REPO_ROOT))
+        for pkg in ("pipeline", "util")
+        for p in (REPO_ROOT / pkg).glob("*.py")
+    }
+    missing = sorted(on_disk - manifest)
+    assert not missing, (
+        "pipeline/ or util/ file(s) not in the remote upload manifest "
+        "(services.remote_runner._REQUIRED_REMOTE_FILES) — a remote run that "
+        "imports them crashes with ModuleNotFoundError. Add them:\n  "
+        + "\n  ".join(missing)
+    )

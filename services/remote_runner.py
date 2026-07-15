@@ -187,6 +187,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/background.py",
     "pipeline/cellpose.py",
     "pipeline/flatfield.py",
+    "pipeline/incremental_keys.py",
     "pipeline/io.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",

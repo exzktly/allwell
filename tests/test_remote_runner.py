@@ -1614,6 +1614,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/background.py",
         "pipeline/cellpose.py",
         "pipeline/flatfield.py",
+        "pipeline/incremental_keys.py",
         "pipeline/io.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",

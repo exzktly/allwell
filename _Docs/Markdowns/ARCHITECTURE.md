@@ -10,10 +10,10 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.5.3.** This map tracks the current release; the version
+**Reflects All-Well v8.8.9.** This map tracks the current release; the version
 string itself is centralized in the repo-root `version.py` (§3) and surfaced on
 the title-bar version pill. Feature areas that changed materially in the
-v8.4 → v8.5.3 line carry inline `(vX.Y.Z)` markers so you can tell recent
+v8.4 → v8.8.9 line carry inline `(vX.Y.Z)` markers so you can tell recent
 structure from long-standing structure. Bump `version.py` on a release —
 nothing else carries the app version.
 
@@ -603,7 +603,14 @@ the pipeline side too). It applies at three levels, all sharing the one
   graph, so the spec *also* skips that package's `collect_all` (which is what
   keeps its `.so`/`.dylib` payload out). A StarDist-only `thin` binary thus drops
   `torch`/`torchvision`/`cellpose` (Cellpose) and `sklearn`/`umap`/`pynndescent`
-  (Multivariate). The pure decision math is `scripts/profile_build.py`.
+  (Multivariate). The pure decision math is `scripts/profile_build.py`, which
+  also owns `bundle_name(version, profile)` — the unit-tested helper that names
+  the output `AllWell-{version}` for the full app or `AllWell-{version}-{profile}`
+  for a subset (e.g. `AllWell-8.8.9-thin`), so a full build and a thin build are
+  distinguishable by name (v8.8.8). `all_well.spec` uses it for the
+  COLLECT/BUNDLE output name and the macOS `CFBundleDisplayName`, while keeping
+  the internal executable name `AllWell` so `CFBundleExecutable` and the
+  re-exec/launcher paths are unaffected.
 - **Source** — `scripts/derive_profile.py --apply` physically deletes the
   excluded features' paths/tests for a shippable stripped tree.
 
@@ -906,7 +913,14 @@ Properties widget → app._export_style_prefs
 redraw path ends with a call to
 `features.export.style.apply_export_style_to_current(app, fig, canvas)` so
 the sidebar's toggles (grid on/off, axis label size, log-scale, …) survive
-a re-render.
+a re-render. The low-level pass that flattens each figure's x-tick labels to
+the `x_tick_angle` preference lives in `core/plot_style.apply_export_style_prefs`;
+it is the single chokepoint every plot tab routes through, so it **syncs
+horizontal alignment with the applied angle** — `ha="center"` at 0°,
+`ha="right"` at any non-zero angle (v8.8.8). Without this, the bar renderer's
+own `ha="right"` (drawn alongside its 45° rotation for many-bar axes) survived
+the flatten-to-0° and left horizontal category labels right-anchored under
+their bar instead of centered.
 
 ### 5.9 Typed state, the event bus, and the DI context
 
@@ -1048,7 +1062,12 @@ test_not_installed_is_single_tab`.)
   already key off these (`fold_change_scopes.visible_scope_names`,
   `selection_controller._visible_tabs`, the barplot/lineplot `_is_tab_visible`
   self-guards), which is why both panes stay live — and why, uninstalled, they
-  fan out to exactly one tab.
+  fan out to exactly one tab. `selection_controller.rebuild_all` likewise guards
+  **each** plot redraw (Bar / Line / Distribution / Heat Map / Scatter) behind
+  `_is_tab_visible` (v8.8.7): a group edit on the Sample Definitions tab no longer
+  tears down and redraws 3–5 off-screen figures — plus the from-scratch stats
+  recompute that fed them — on every well click; an off-screen plot is re-rendered
+  from current state by its `on_activate` hook the moment the user switches to it.
 - **Focus + lifecycle.** A `_SplitFocusFilter` (installed on the QApplication on
   enter, removed on exit) makes a click in either pane the focused one. It
   **defers** the actual focus switch with `QTimer.singleShot(0, …)`: `focus_split`

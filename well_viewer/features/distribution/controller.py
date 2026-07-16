@@ -325,18 +325,19 @@ def redraw_distribution(ctx) -> None:
         canvas.draw_idle()
         return
 
-    # Faceted layout only makes sense for histogram modes — KDE-only
-    # curves are thin and read fine overlaid, CDF curves are monotone
-    # so overlap isn't an issue, and Violin already groups visually by
-    # its own design. Other modes silently ignore the layout combo.
+    # Faceted layout applies to the histogram modes and CDF — one panel per
+    # group so overlapping curves don't obscure each other (CDF steps in
+    # particular pile up illegibly once several groups share an axis). KDE-only
+    # curves are thin and read fine overlaid, and Violin already groups
+    # visually by its own design, so those two silently ignore the layout combo.
     is_faceted = (
         layout_choice.startswith("Faceted")
-        and mode in ("Histogram", "Histogram + KDE")
+        and mode in ("Histogram", "Histogram + KDE", "CDF")
         and len(groups) > 1
     )
 
     if is_faceted:
-        _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, log_y=log_y)
+        _render_faceted(ctx, groups, mode, bins, log_x, tp_h, log_y=log_y)
     else:
         axes = _setup_axes(ctx, 1)
         ax = axes[0]
@@ -520,17 +521,23 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
     ax.set_title(title, fontsize=9)
 
 
-def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=False) -> None:
+def _render_faceted(ctx, groups, mode, bins, log_x, tp_h, *, log_y=False) -> None:
     """One axis per group, stacked vertically with minimal padding.
 
-    Shared x-axis (``sharex=True`` via ``_setup_axes``) + shared bin
-    edges means every panel reads on the same grid; the user can scan
-    vertically to compare distributions without per-axis re-binning
-    differences swamping the comparison.
+    Covers the histogram modes (Histogram / Histogram + KDE) and CDF — every
+    mode whose curves benefit from a per-group panel. Shared x-axis
+    (``sharex=True`` via ``_setup_axes``) + shared bin edges means every panel
+    reads on the same grid; the user can scan vertically to compare
+    distributions without per-axis re-binning differences swamping the
+    comparison.
     """
     axes = _setup_axes(ctx, len(groups))
-    edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
-    grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
+    is_cdf = mode == "CDF"
+    # Bin edges / KDE grid are only meaningful for the histogram modes; skip the
+    # pooling work entirely for CDF (which needs neither).
+    if not is_cdf:
+        edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
+        grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
 
     # Shapes have no ON cutoff → no threshold line. smFISH counts now draw
     # the ThreshFracOn line like intensities.
@@ -547,17 +554,28 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
     last_idx = len(groups) - 1
     for i, ((name, color, vals), ax) in enumerate(zip(groups, axes)):
         ax.set_axis_on()
-        if mode in ("Histogram", "Histogram + KDE"):
-            # ``log=log_y`` — see the overlay renderer note: drawing density bars
-            # from a 0 baseline then setting log-Y afterward renders wrong heights.
-            ax.hist(
-                vals, bins=edges, density=True, alpha=0.55, log=log_y,
-                color=color,
-            )
-        if mode == "Histogram + KDE":
-            kde = _gaussian_kde(vals, grid)
-            if np.any(kde > 0):
-                ax.plot(grid, kde, color=color, lw=1.4)
+        if is_cdf:
+            # Empirical CDF per panel — mirrors the overlay CDF branch, one
+            # monotone step curve per group so stacked comparison is legible.
+            arr = np.asarray(vals, dtype=float)
+            arr = arr[np.isfinite(arr)]
+            if arr.size:
+                xs = np.sort(arr)
+                ys = np.arange(1, arr.size + 1, dtype=float) / float(arr.size)
+                ax.step(xs, ys, where="post", color=color, lw=1.6)
+        else:
+            if mode in ("Histogram", "Histogram + KDE"):
+                # ``log=log_y`` — see the overlay renderer note: drawing density
+                # bars from a 0 baseline then setting log-Y afterward renders
+                # wrong heights.
+                ax.hist(
+                    vals, bins=edges, density=True, alpha=0.55, log=log_y,
+                    color=color,
+                )
+            if mode == "Histogram + KDE":
+                kde = _gaussian_kde(vals, grid)
+                if np.any(kde > 0):
+                    ax.plot(grid, kde, color=color, lw=1.4)
         if show_threshold:
             ax.axvline(threshold, color="orange", linestyle="--", linewidth=1.0, alpha=0.8)
         if log_x:
@@ -570,6 +588,11 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
                 ax.set_yscale("log")
             except Exception:
                 swallowed()
+        elif is_cdf:
+            # Fixed 0..1 window (with a hair of padding) so every CDF panel
+            # shares the same cumulative-fraction axis; the linear overlay CDF
+            # uses the same limits.
+            ax.set_ylim(-0.02, 1.05)
         # Annotate group name on the right edge of each panel so the
         # vertical stack reads top-to-bottom without consuming a slot
         # in a legend or stretching the layout horizontally.
@@ -587,9 +610,10 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
             ax.tick_params(axis="x", labelbottom=False)
     # Shared x-label on the bottom axis only.
     axes[last_idx].set_xlabel(_xlabel_for(ctx))
-    # Single shared y-label across the middle axis; "Density" is the
-    # same unit for every panel because each hist uses density=True.
-    axes[len(axes) // 2].set_ylabel("Density")
+    # Single shared y-label across the middle axis. "Density" for the histogram
+    # modes (each hist uses density=True); "Cumulative fraction" for CDF.
+    axes[len(axes) // 2].set_ylabel(
+        "Cumulative fraction" if is_cdf else "Density")
     # Use a figure-level suptitle so the title isn't duplicated per axis.
     fig = ctx.widgets.get("_distribution_fig")
     title = _title_for(

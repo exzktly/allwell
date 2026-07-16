@@ -105,74 +105,42 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="bar")
     cl.addWidget(_fc_btn)
 
-    cl.addStretch(1)
-
-    reset_order_btn = reg.register("_bar_reset_order_btn", QPushButton("Reset Order", bar_ctrl))
-    reset_order_btn.setProperty("variant", "toggle_muted")
-    reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
-    cl.addWidget(reset_order_btn)
-
-    # IconButton — matches Sample Definitions top toolbar style; see
-    # equivalent block in features/lineplot/tab_view.py for rationale.
-    from widgets.icon_button import IconButton as _IconButton
-    _export_btn = _IconButton("download", bar_ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx))
-    cl.addWidget(_export_btn)
-    _copy_btn = _IconButton("copy", bar_ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
-    cl.addWidget(_copy_btn)
-    _save_btn = _IconButton("save", bar_ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
-    cl.addWidget(_save_btn)
-    # Pin the figure-properties button to the right edge of the plot area (where
-    # the export-style dock slides out) — the FlowLayout control row can't
-    # right-align it, so wrap the row.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    right_l.addWidget(wrap_ctrl_row_with_properties(
-        bar_ctrl, lambda: ctx.figures.open_style_panel("bar")))
-
-    # ── plot-shape row (Timepoint / Beeswarm / Violin / Smooth) ──────────────
-    # Split off the controls that change WHAT is plotted from the controls
-    # that change HOW it's exported — keeps the main row uncluttered.
-    shape_ctrl = QWidget(bar_right)
-    shape_ctrl.setObjectName("TabCtrl")
-    sl = FlowLayout(shape_ctrl)
-    sl.setContentsMargins(10, 2, 10, 6)
-
     # Multi-timepoint picker — mirrors the scatter plot's
     # ``_open_timepoint_selector`` popup so the bar plot can show bars/
-    # violins/beeswarms over multiple timepoints simultaneously.
-    sl.addWidget(QLabel("Timepoints:", shape_ctrl))
-    tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints", shape_ctrl))
+    # violins/beeswarms over multiple timepoints simultaneously. Shares the
+    # main control row with the other buttons (previously its own second row);
+    # the FlowLayout wraps them onto a new line only when the pane is too narrow.
+    cl.addWidget(QLabel("Timepoints:", bar_ctrl))
+    tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints", bar_ctrl))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(
         lambda _=False: open_bar_timepoint_selector(ctx)
     )
-    sl.addWidget(tp_button)
-    tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)", shape_ctrl))
+    cl.addWidget(tp_button)
+    tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)", bar_ctrl))
     tp_label.setObjectName("Muted")
-    sl.addWidget(tp_label)
+    cl.addWidget(tp_label)
     # Hidden legacy single-tp combo — kept so export / save-figure code that
     # reads ``_bar_tp_cb.currentText()`` (export/service.py, view_state.py,
     # batch_export/bar_panel.py, plot_orchestrator.py) sees the first
     # selected tp string. Same shim the scatter tab uses for
     # ``_scatter_tp_cb``. The authoritative multi-select state lives on
     # ``BarPlotState.tp_selections`` (well_viewer/features/barplot/state.py).
-    bar_tp_cb = reg.register("_bar_tp_cb", QComboBox(shape_ctrl))
+    bar_tp_cb = reg.register("_bar_tp_cb", QComboBox(bar_ctrl))
     bar_tp_cb.addItems(["—"])
     bar_tp_cb.hide()
     reg.register("_bar_tp_var", bar_tp_cb)   # legacy alias → same widget
 
     # C1: the display toggles + error band collapse into a "Display ▾" popover so
-    # the bar control area is two compact rows. ``_disp_lay`` is the popover body;
-    # the widgets are added there instead of inline (addWidget reparents them).
+    # the bar control area stays a single compact row. ``_disp_lay`` is the popover
+    # body; the widgets are added there instead of inline (addWidget reparents them).
     from well_viewer.core.ui_helpers import make_popover_button as _make_popover_button
-    _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", shape_ctrl)
+    _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", bar_ctrl)
     _disp_btn.setToolTip("Bar/point display options: grouping, pooling, beeswarm, violin, error band")
-    sl.addWidget(_disp_btn)
+    cl.addWidget(_disp_btn)
 
     # Layout toggle: cluster bars by well or by timepoint.
-    group_mode_btn = reg.register("_bar_group_mode_btn", QPushButton("Grouping: Well", shape_ctrl))
+    group_mode_btn = reg.register("_bar_group_mode_btn", QPushButton("Grouping: Well", bar_ctrl))
     group_mode_btn.setProperty("variant", "toggle")
     group_mode_btn.setCheckable(True)
     group_mode_btn.setToolTip(
@@ -184,7 +152,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Replicate-pool toggle: collapse rset wells into one column or
     # expand them. Hidden when no replicate sets are active.
-    pool_reps_btn = reg.register("_bar_pool_reps_btn", QPushButton("Pooled: Off", shape_ctrl))
+    pool_reps_btn = reg.register("_bar_pool_reps_btn", QPushButton("Pooled: Off", bar_ctrl))
     pool_reps_btn.setProperty("variant", "toggle")
     pool_reps_btn.setCheckable(True)
     pool_reps_btn.setToolTip(
@@ -199,7 +167,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # visible and gate usability with setEnabled instead.
     _disp_lay.addWidget(pool_reps_btn)
 
-    pool_rset_cells_btn = reg.register("_bar_pool_rset_cells_btn", QPushButton("Pool cells: Off", shape_ctrl))
+    pool_rset_cells_btn = reg.register("_bar_pool_rset_cells_btn", QPushButton("Pool cells: Off", bar_ctrl))
     pool_rset_cells_btn.setProperty("variant", "toggle")
     pool_rset_cells_btn.setCheckable(True)
     pool_rset_cells_btn.setToolTip(
@@ -211,7 +179,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # Always present; enable-gated on (violin/beeswarm AND active rsets).
     _disp_lay.addWidget(pool_rset_cells_btn)
 
-    swarm_btn = reg.register("_swarm_btn", QPushButton("Beeswarm: Off", shape_ctrl))
+    swarm_btn = reg.register("_swarm_btn", QPushButton("Beeswarm: Off", bar_ctrl))
     swarm_btn.setProperty("variant", "toggle")
     swarm_btn.setCheckable(True)
     swarm_btn.setToolTip(
@@ -220,7 +188,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _disp_lay.addWidget(swarm_btn)
     # swarm/violin state lives on the typed BarPlotState slice (defaults False).
 
-    violin_btn = reg.register("_violin_btn", QPushButton("Violin: Off", shape_ctrl))
+    violin_btn = reg.register("_violin_btn", QPushButton("Violin: Off", bar_ctrl))
     violin_btn.setProperty("variant", "toggle")
     violin_btn.setCheckable(True)
     violin_btn.setToolTip(
@@ -229,9 +197,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     violin_btn.clicked.connect(lambda _=False: toggle_violin(ctx))
     _disp_lay.addWidget(violin_btn)
 
-    _disp_lay.addWidget(QLabel("Smooth:", shape_ctrl))
+    _disp_lay.addWidget(QLabel("Smooth:", bar_ctrl))
     from widgets.styled_slider import StyledSlider as _StyledSlider
-    violin_slider = reg.register("_violin_slider", _StyledSlider(Qt.Horizontal, shape_ctrl))
+    violin_slider = reg.register("_violin_slider", _StyledSlider(Qt.Horizontal, bar_ctrl))
     violin_slider.setRange(5, 200)
     violin_slider.setValue(100)
     violin_slider.setFixedWidth(80)
@@ -246,7 +214,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Significance brackets (N7): draw the Statistics tab's pairwise results onto
     # the Mean panel. Toggle stages PlotState.show_significance and redraws.
-    sig_btn = reg.register("_bar_significance_btn", QPushButton("Significance: Off", shape_ctrl))
+    sig_btn = reg.register("_bar_significance_btn", QPushButton("Significance: Off", bar_ctrl))
     sig_btn.setProperty("variant", "toggle")
     sig_btn.setCheckable(True)
     sig_btn.setChecked(bool(ctx.state.plot.show_significance))
@@ -272,8 +240,32 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _disp_lay.addWidget(_band_sep)
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
 
-    sl.addStretch(1)
-    right_l.addWidget(shape_ctrl)
+    # ── action buttons, pushed to the right edge of the single control row ────
+    cl.addStretch(1)
+
+    reset_order_btn = reg.register("_bar_reset_order_btn", QPushButton("Reset Order", bar_ctrl))
+    reset_order_btn.setProperty("variant", "toggle_muted")
+    reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
+    cl.addWidget(reset_order_btn)
+
+    # IconButton — matches Sample Definitions top toolbar style; see
+    # equivalent block in features/lineplot/tab_view.py for rationale.
+    from widgets.icon_button import IconButton as _IconButton
+    _export_btn = _IconButton("download", bar_ctrl, tooltip="Export CSV")
+    _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx))
+    cl.addWidget(_export_btn)
+    _copy_btn = _IconButton("copy", bar_ctrl, tooltip="Copy SVG")
+    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
+    cl.addWidget(_copy_btn)
+    _save_btn = _IconButton("save", bar_ctrl, tooltip="Save figure")
+    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
+    cl.addWidget(_save_btn)
+    # Pin the figure-properties button to the right edge of the plot area (where
+    # the export-style dock slides out) — the FlowLayout control row can't
+    # right-align it, so wrap the row.
+    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
+    right_l.addWidget(wrap_ctrl_row_with_properties(
+        bar_ctrl, lambda: ctx.figures.open_style_panel("bar")))
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False)

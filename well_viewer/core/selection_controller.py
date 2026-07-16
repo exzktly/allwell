@@ -893,12 +893,25 @@ def rebuild_all(ctx) -> None:
     app._invalidate_stats_cache()
     app._groups_centre_refresh()          # Sample Definitions: GROUPS panel + map
     app._refresh_sidebar_map()            # line-graph picker: rep colours
-    ctx.features.redraw(ctx, "Bar Plots")
-    app._redraw()
-    try:
-        ctx.features.redraw(ctx, "Scatter Plot")
-    except Exception:
-        __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
+    # Only redraw plots that are actually on screen. An off-screen plot is fully
+    # re-rendered from current state by its on_activate hook the moment the user
+    # switches to it, so redrawing it here — a synchronous matplotlib cla()+draw
+    # — is pure waste. This mirrors the visibility guard the Cell Browser /
+    # Spatial / Multivariate block below already uses. Without it, editing a
+    # sample group (done on the Sample Definitions tab, where NO plot is visible)
+    # paid 3–5 off-screen figure re-renders — and a full stats recompute to feed
+    # them — on every single well click: the "group edits are ridiculously slow"
+    # bug. ``_is_tab_visible`` is true in either split-view pane, so a plot shown
+    # side-by-side still updates live.
+    if app._is_tab_visible("Bar Plots"):
+        ctx.features.redraw(ctx, "Bar Plots")
+    if any(app._is_tab_visible(_n) for _n in ("Line Graphs", "Distribution", "Heat Map")):
+        app._redraw()
+    if app._is_tab_visible("Scatter Plot"):
+        try:
+            ctx.features.redraw(ctx, "Scatter Plot")
+        except Exception:
+            __import__("logging").getLogger("well_viewer.runtime_app").exception("Scatter redraw failed")
     # Group edits change which wells the plots draw from, and several per-well
     # features follow the same active set (rep_sets_active): the Cell Browser
     # gallery, the Spatial facets, and the Multivariate projection. Selection-

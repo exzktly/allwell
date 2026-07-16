@@ -14,10 +14,7 @@ from PySide6.QtWidgets import (
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.domain.viewer_state import extract_well_token as _extract_well_token
 from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS
-from well_viewer.core.ui_helpers import (
-    wells_multiselect_listbox as _wells_multiselect_listbox,
-    selected_list_values as _selected_list_values,
-)
+from well_viewer.core.safe import swallowed
 from well_viewer.domain.selections_model import color_for_wells
 
 
@@ -116,22 +113,39 @@ def rep_quick_pairs(ctx) -> None:
 
 
 def rep_add(ctx) -> None:
-    """Open dialog to create a new named ReplicateSet."""
+    """Open a dialog to create a new named ReplicateSet, picking its wells on the
+    same graphical plate the "+ wells…" popover uses to edit an existing group's
+    membership — not a text list of well names. Configured identically to
+    ``SavedSelectionsList._open_compose_popover`` so the two flows look and feel
+    the same (rubber-band rectangle select, row/column headers, multi-select)."""
     from well_viewer.core.selection_controller import sel_add
     from well_viewer.domain.viewer_state import parse_rc
+    from widgets.well_plate_selector import WellPlateSelector
     sel_state = ctx.state.selection
+    well_paths = ctx.state.dataset.well_paths
     dlg = QDialog(ctx.window)
     dlg.setWindowTitle("New Replicate Set")
     dlg.setModal(True)
+    dlg.setMinimumSize(420, 480)
     v = QVBoxLayout(dlg)
     v.addWidget(QLabel("Name:"))
     name_edit = QLineEdit(f"Rep {len(sel_state.selections)+1}")
     v.addWidget(name_edit)
-    v.addWidget(QLabel("Select wells:"))
-    available = sorted(ctx.state.dataset.well_paths.keys(),
-                       key=lambda l: parse_rc(l))
-    lb = _wells_multiselect_listbox(dlg, available)
-    v.addWidget(lb, 1)
+    v.addWidget(QLabel("Choose wells for this group:"))
+
+    enabled = sorted(well_paths.keys(), key=lambda l: parse_rc(l))
+    plate = WellPlateSelector()
+    try:
+        plate.setActionsVisible(False)
+        plate.setEnabledWells(enabled)
+        plate.setSelectionMode("select")
+        plate.setRowColumnSelectable(True)
+        plate.setSingleSelectionMode(False)
+        plate.setDragMode("rect")   # rubber-band rectangle, not freeform paint
+    except Exception:
+        swallowed()
+    v.addWidget(plate, 1)
+
     btn_row = QHBoxLayout()
     v.addLayout(btn_row)
     ok_btn = QPushButton("Create")
@@ -142,15 +156,16 @@ def rep_add(ctx) -> None:
     btn_row.addStretch(1)
 
     def _ok():
-        sel = _selected_list_values(lb)
-        if not sel:
+        picked = sorted((w for w in plate.selectedWellIds() if w in well_paths),
+                        key=parse_rc)
+        if not picked:
             QMessageBox.warning(dlg, "No wells", "Select at least one well.")
             return
         name = name_edit.text().strip() or f"Rep {len(sel_state.selections) + 1}"
         dlg.accept()
         # sel_add enforces well-exclusivity (the new group takes the wells).
         # A group is one condition; its wells are implicitly its replicate set.
-        sel_add(ctx, name, list(sel), replicates=None, source="rep_set")
+        sel_add(ctx, name, list(picked), replicates=None, source="rep_set")
 
     ok_btn.clicked.connect(_ok)
     cancel_btn.clicked.connect(dlg.reject)

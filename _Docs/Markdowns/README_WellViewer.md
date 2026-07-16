@@ -1022,6 +1022,9 @@ channel for every well).
   shared with Cell Gating and the plot tabs) · **Export** (to file · Copy PNG / SVG ·
   Save to Saved Plots) · **Zoom** · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**.
+- **Pixel readout** — hover a rendered cell to see that pixel's intensity (prefixed
+  with the cell's combo identity); the readout now stays put when the cursor comes
+  to rest instead of reverting to the plain cell tooltip.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
@@ -1121,7 +1124,15 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
 #### Groups, Well Labels & Ratios
 
 - **Groups (replicate sets)** — name a set of wells as replicates; every plot,
-  the Statistics tab, and Batch Export can then treat them as one condition.
+  the Statistics tab, and Batch Export can then treat them as one condition. A
+  group **is** exactly one condition — its wells are its replicate set (no mixed
+  sub-sets or solo wells inside a group). Build one with **+ Add** (a graphical
+  plate picker — rubber-band select, row/column headers), or let **Quick
+  Replicates** chunk the current selection into groups of a chosen size via the
+  **Replicates per group** spinbox (default 2), walking the wells along the
+  Rows / Columns direction. On the Groups plate every well is tinted by its
+  **group's** colour, so all wells in a group read as one condition and match
+  the group's row swatch.
 - **Well Labels** — give wells / groups human-readable names; these show in
   every plot legend instead of the raw well token.
 - **Ratios** — define a ratio channel (e.g. `GFP/MCHERRY`); it appears as a
@@ -1228,10 +1239,14 @@ chmod +x _Docs/_Installation/build_all_well.sh
 _Docs/_Installation/build_all_well.sh
 ```
 
-The finished bundle lands at `dist/AllWell.app`. To distribute it:
+The finished bundle is named for its version, so a full build and a thin
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.9.app`
+for the full app, or `dist/AllWell-8.8.9-<profile>.app` for a subset (e.g.
+`AllWell-8.8.9-thin.app`). The internal executable stays `AllWell`, so
+launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.8.9.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

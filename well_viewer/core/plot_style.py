@@ -409,8 +409,17 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         ax.yaxis.label.set_fontfamily(_fam)
         ax.title.set_fontfamily(_fam)
 
+        # Keep horizontal alignment in step with the applied angle: a
+        # horizontal label (0°) reads centered under its bar/tick, while an
+        # angled label anchors its right edge at the tick (the conventional
+        # slanted look). Without this the bar renderer's ``ha="right"`` (drawn
+        # alongside its own 45° rotation) survives even after this pass flattens
+        # the rotation back to 0°, leaving labels right-aligned under their bar.
+        _x_angle = int(prefs.get("x_tick_angle", 0))
+        _x_ha = "center" if _x_angle == 0 else "right"
         for tick in ax.get_xticklabels():
-            tick.set_rotation(int(prefs.get("x_tick_angle", 0)))
+            tick.set_rotation(_x_angle)
+            tick.set_horizontalalignment(_x_ha)
 
         line_style = str(prefs.get("line_style", "-"))
         marker_style = str(prefs.get("marker_style", "o"))

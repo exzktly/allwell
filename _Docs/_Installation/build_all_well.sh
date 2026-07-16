@@ -140,6 +140,21 @@ REPO_ROOT="$( dirname "$( dirname "$SCRIPT_DIR" )" )"
 # Operate from the actual repo root so all relative paths below resolve.
 cd "$REPO_ROOT" || exit 1
 
+# Versioned + profile-tagged bundle name — must match all_well.spec's output
+# (COLLECT / BUNDLE name) so the post-build codesign / xattr / zip steps below
+# find the produced app. Derived from the same pure helper the spec uses, so the
+# two can never drift. Overrides the "AllWell" default set above.
+APP_NAME=$(python - << 'PYNAME'
+import os, sys
+sys.path.insert(0, "scripts")
+from profile_build import bundle_name
+ns = {}
+exec(open("version.py").read(), ns)
+print(bundle_name(ns["__version__"], os.environ.get("ALLWELL_PROFILE", "")))
+PYNAME
+)
+echo "Bundle name: $APP_NAME"
+
 REQUIRED=(
     "allwell.py"
     "all_well_launcher.py"

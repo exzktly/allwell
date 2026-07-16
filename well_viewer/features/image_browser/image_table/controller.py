@@ -315,19 +315,11 @@ def _install_cell_events(
     if crop_tool is not None:
         label.setCursor(_Qt.CrossCursor)
 
-    def _show_tip(_lbl, ev, text: str) -> None:
-        if not text:
+    def _show_tip(_lbl, global_pt, text: str) -> None:
+        if not text or global_pt is None:
             QToolTip.hideText()
             return
-        try:
-            gp = ev.globalPosition().toPoint()
-        except Exception:
-            try:
-                gp = _lbl.mapToGlobal(ev.position().toPoint())
-            except Exception:
-                QToolTip.hideText()
-                return
-        QToolTip.showText(gp, text, _lbl)
+        QToolTip.showText(global_pt, text, _lbl)
 
     def _label_to_image_xy(_lbl, lx: int, ly: int):
         """Map label-local coords to source-image (x, y). Returns None when
@@ -368,27 +360,34 @@ def _install_cell_events(
         img_y = max(0, min(full_h - 1, img_y))
         return (img_x, img_y)
 
+    def _hover_text(_lbl, lx: int, ly: int) -> str:
+        """Pixel readout for label-local ``(lx, ly)``; '' when the cursor is off
+        the rendered image or the label carries no array. Includes the combo
+        identity as a prefix, so it's a superset of the static cell tooltip."""
+        arr = getattr(_lbl, "_raw_arr", None)
+        if arr is None:
+            return ""
+        xy = _label_to_image_xy(_lbl, lx, ly)
+        if xy is None:
+            return ""
+        x, y = xy
+        intensity = _format_pixel_intensity(arr, y, x)
+        if not intensity:
+            return ""
+        from well_viewer.domain.selections_model import well_display_label
+        prefix = f"{well_display_label(ctx, well)} {chan.upper()} T:{tp}"
+        if fov:
+            prefix += f" FOV:{fov}"
+        return f"{prefix}  ({x}, {y}) = {intensity}"
+
     def _update_hover(_lbl, ev) -> None:
         try:
-            arr = getattr(_lbl, "_raw_arr", None)
-            if arr is None:
-                _show_tip(_lbl, ev, "")
-                return
             pos = ev.position()
-            xy = _label_to_image_xy(_lbl, int(pos.x()), int(pos.y()))
-            if xy is None:
-                _show_tip(_lbl, ev, "")
-                return
-            x, y = xy
-            intensity = _format_pixel_intensity(arr, y, x)
-            if not intensity:
-                _show_tip(_lbl, ev, "")
-                return
-            from well_viewer.domain.selections_model import well_display_label
-            prefix = f"{well_display_label(ctx, well)} {chan.upper()} T:{tp}"
-            if fov:
-                prefix += f" FOV:{fov}"
-            _show_tip(_lbl, ev, f"{prefix}  ({x}, {y}) = {intensity}")
+            try:
+                gp = ev.globalPosition().toPoint()
+            except Exception:
+                gp = _lbl.mapToGlobal(pos.toPoint())
+            _show_tip(_lbl, gp, _hover_text(_lbl, int(pos.x()), int(pos.y())))
         except Exception:
             QToolTip.hideText()
 
@@ -399,6 +398,27 @@ def _install_cell_events(
                 _update_hover(obj, ev)
                 if crop_tool is not None:
                     crop_tool.update_drag(ev)
+            elif t == QEvent.ToolTip:
+                # The label carries a static combo-title tooltip (setToolTip).
+                # Without this branch, Qt shows *that* when the cursor rests,
+                # replacing the live pixel readout — so the intensity value
+                # appears only while the mouse moves and vanishes the moment it
+                # stops. Re-show the readout (a superset of the combo title) at
+                # the hover point and swallow the event so the static tooltip
+                # never fires; the value now stays put while the cursor is still.
+                try:
+                    lp = ev.pos()
+                    text = _hover_text(obj, int(lp.x()), int(lp.y()))
+                except Exception:
+                    text = ""
+                if text:
+                    try:
+                        gp = ev.globalPos()
+                    except Exception:
+                        gp = None
+                    _show_tip(obj, gp, text)
+                    return True
+                return False
             elif t == QEvent.MouseButtonPress:
                 if crop_tool is not None:
                     crop_tool.begin_drag(obj, ev)

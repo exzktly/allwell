@@ -6,7 +6,8 @@
 #   pyinstaller all_well.spec
 #
 # Output:
-#   dist/AllWell.app   — double-clickable macOS application bundle
+#   dist/AllWell-<version>[-<profile>].app   — double-clickable macOS app bundle
+#   (e.g. dist/AllWell-8.8.8.app, or dist/AllWell-8.8.8-thin.app for a subset)
 #
 # Requires: pyinstaller >= 6.0, all packages in _Docs/requirements.txt
 # installed in the active Python environment.
@@ -107,6 +108,20 @@ if _profile_active:
     _excluded_deps = _ex.deps
     print(f"[all_well.spec] ALLWELL_PROFILE={_PROFILE!r} — excluding "
           f"{len(_excluded_features)} feature(s): {_excluded_features}")
+
+# ---------------------------------------------------------------------------
+# Output bundle name — carry the version and (for a feature subset) the profile
+# so the produced artifact self-documents which build it is, e.g.
+#   AllWell-8.8.8        (full app)
+#   AllWell-8.8.8-thin   (ALLWELL_PROFILE=thin)
+# The pure name math lives in scripts/profile_build.bundle_name (unit-tested) so
+# the build scripts derive the identical path for their post-build steps. The
+# executable INSIDE the bundle stays "AllWell" (CFBundleExecutable), so the
+# re-exec / launcher paths that spawn sys.executable are unaffected.
+# ---------------------------------------------------------------------------
+from scripts.profile_build import bundle_name  # noqa: E402
+_BUNDLE_BASENAME = bundle_name(APP_VERSION, _PROFILE)
+_DISPLAY_NAME = f"All Well {APP_VERSION}" + (f" ({_PROFILE})" if _profile_active else "")
 
 
 def _pkg_datas(pkg_root: Path, dest: str, exclude_repo_dirs: list) -> list:
@@ -788,7 +803,7 @@ coll = COLLECT(   # noqa: F821
     strip=_STRIP,        # match EXE — strip the collected binaries too
     upx=False,
     upx_exclude=[],
-    name="AllWell",
+    name=_BUNDLE_BASENAME,   # dist/AllWell-<ver>[-<profile>]/ (the onedir bundle)
 )
 
 
@@ -798,7 +813,7 @@ coll = COLLECT(   # noqa: F821
 
 app = BUNDLE(   # noqa: F821
     coll,
-    name="AllWell.app",
+    name=f"{_BUNDLE_BASENAME}.app",   # dist/AllWell-<ver>[-<profile>].app
     icon=None,           # replace with "all_well_icon.icns" if you have one
     bundle_identifier="com.allwell.app",
     version=APP_VERSION,
@@ -809,7 +824,9 @@ app = BUNDLE(   # noqa: F821
         "CFBundleShortVersionString": APP_VERSION,
         "CFBundleVersion": APP_VERSION,
         "CFBundleName": "AllWell",
-        "CFBundleDisplayName": "All Well",
+        # Finder / Get Info display name carries the version and (thin) profile so
+        # the build is identifiable even though CFBundleName stays short.
+        "CFBundleDisplayName": _DISPLAY_NAME,
         "CFBundleExecutable": "AllWell",
         # PySide6 / Qt6 requires macOS 10.15+.
         "LSMinimumSystemVersion": "10.15",

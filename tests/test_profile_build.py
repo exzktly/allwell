@@ -12,6 +12,7 @@ from pathlib import Path
 
 from scripts.profile_build import (
     admits,
+    bundle_name,
     compute_exclusions,
     load_catalog,
     plan_ml,
@@ -137,6 +138,23 @@ Sample def docs.
 ## Building
 Build docs (unmapped ## heading — always kept).
 """
+
+
+# ── bundle_name — versioned + profile-tagged artifact name ───────────────────
+def test_bundle_name_full_app_is_version_only():
+    assert bundle_name("8.8.8") == "AllWell-8.8.8"
+
+
+def test_bundle_name_appends_profile():
+    assert bundle_name("8.8.8", "thin") == "AllWell-8.8.8-thin"
+
+
+def test_bundle_name_full_and_empty_profiles_add_no_suffix():
+    # Mirrors all_well.spec's _profile_active rule: "" / "full" = the full app.
+    assert bundle_name("8.8.8", "") == "AllWell-8.8.8"
+    assert bundle_name("8.8.8", "full") == "AllWell-8.8.8"
+    assert bundle_name("8.8.8", "FULL") == "AllWell-8.8.8"
+    assert bundle_name("8.8.8", "  full  ") == "AllWell-8.8.8"
 
 
 def test_trim_readme_full_app_is_unchanged():

@@ -101,6 +101,24 @@ def plan_ml(excluded_deps) -> list:
     return list(_CELLPOSE_ML)
 
 
+def bundle_name(version: str, profile: str | None = None, base: str = "AllWell") -> str:
+    """Output-bundle basename carrying the app version and (for a feature subset)
+    the profile, so the produced artifact self-documents which build it is::
+
+        bundle_name("8.8.8")           -> "AllWell-8.8.8"          (full app)
+        bundle_name("8.8.8", "thin")   -> "AllWell-8.8.8-thin"     (ALLWELL_PROFILE=thin)
+
+    An empty / ``"full"`` profile is the full app and adds no suffix (matching
+    ``all_well.spec``'s ``_profile_active`` rule). Shared by the spec (COLLECT /
+    BUNDLE name) and the build scripts so the artifact path and the post-build
+    steps that look for it can never disagree."""
+    name = f"{base}-{version}"
+    prof = (profile or "").strip()
+    if prof and prof.lower() != "full":
+        name += f"-{prof}"
+    return name
+
+
 # README_WellViewer.md ``###`` section heading → the feature it documents. A thin
 # build ships a README trimmed to the profile's features (the in-app help drawer
 # then documents only what the binary contains). Headings NOT listed here are

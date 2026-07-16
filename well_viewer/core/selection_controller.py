@@ -766,7 +766,6 @@ def sel_strip_wells(ctx, wells, *, keep_id=None) -> None:
     keep treating them as solo wells once they've joined a group (the
     sidebar plate becomes passive in rep_mode and the user can't update
     the set themselves)."""
-    from well_viewer.domain.selections_model import _deoverlap_replicates
     sel_state = ctx.state.selection
     wset = set(wells or [])
     if not wset:
@@ -777,7 +776,7 @@ def sel_strip_wells(ctx, wells, *, keep_id=None) -> None:
         nw = [w for w in (s.get("wells") or []) if w not in wset]
         if nw != s.get("wells"):
             s["wells"] = nw
-            s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(nw))
+            s["replicates"] = None  # a group's wells are its implicit replicate set
     if wset & sel_state.selected_wells:
         sel_state.selected_wells = sel_state.selected_wells - wset
 
@@ -879,9 +878,8 @@ def enforce_well_exclusivity(ctx) -> None:
             seen.add(w)
             kept.append(w)
         if kept != s.get("wells"):
-            from well_viewer.domain.selections_model import _deoverlap_replicates
             s["wells"] = kept
-            s["replicates"] = _deoverlap_replicates(s.get("replicates"), allowed=set(kept))
+            s["replicates"] = None  # a group's wells are its implicit replicate set
 
 
 
@@ -972,15 +970,17 @@ def sel_set_hidden(ctx, sid, hidden, *, light=False) -> None:
 
 
 def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
-    from well_viewer.domain.selections_model import _clean_wells, _deoverlap_replicates
+    from well_viewer.domain.selections_model import _clean_wells
     s = sel_by_id(ctx, sid)
     if s is None:
         return
     if wells is not None:
         s["wells"] = _clean_wells(wells)
         sel_strip_wells(ctx, s["wells"], keep_id=sid)
-    src = replicates if replicates is not None else s.get("replicates")
-    s["replicates"] = _deoverlap_replicates(src, allowed=set(s.get("wells") or []))
+    # A group is one condition; its wells are implicitly its replicate set, so
+    # no sub-partition is stored (the ``replicates`` arg is accepted for
+    # signature compatibility but the field is always ``None``).
+    s["replicates"] = None
     ctx.coordinator.rebuild_all()
 
 

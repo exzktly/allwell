@@ -26,21 +26,6 @@ def _grp_on_composition(ctx, sel_id) -> None:
             return
 
 
-def _grp_on_replicates(ctx, sel_id) -> None:
-    """Replicates-only edit (chip moves / un-group / group-solo) — push the
-    list's current ``replicates`` for ``sel_id`` into the model without touching
-    ``wells`` (so the de-overlap pass in ``sel_set_composition`` runs against the
-    unchanged membership)."""
-    from well_viewer.core.selection_controller import sel_set_composition
-    lst = ctx.widgets.get_or_none("_rep_list")
-    if lst is None:
-        return
-    for s in lst.selections():
-        if s.get("id") == sel_id:
-            sel_set_composition(ctx, sel_id, None, s.get("replicates"))
-            return
-
-
 def wire_selections_list(ctx, lst) -> None:
     """Connect a SavedSelectionsList's signals to the ctx-native `sel_*` mutators."""
     from well_viewer.core.selection_controller import (
@@ -56,7 +41,8 @@ def wire_selections_list(ctx, lst) -> None:
     lst.entryExportRequested.connect(lambda sid: sel_export_one(ctx, sid))
     lst.orderChanged.connect(lambda ids: sel_reorder(ctx, ids))
     lst.wellsChanged.connect(lambda sid, _w: _grp_on_composition(ctx, sid))
-    lst.replicatesChanged.connect(lambda sid, _r: _grp_on_replicates(ctx, sid))
+    # A group is one condition (its wells are its implicit replicate set), so
+    # there is no separate replicate-partition edit to wire.
     lst.addFromSelectionRequested.connect(lambda *_a: rep_add(ctx))
     # Bar-group import is a bar-persistence feature action; connect its bound
     # method off the window (signal wiring, not a behaviour reach-through).

@@ -21,19 +21,20 @@ from well_viewer.core.ui_helpers import (
 from well_viewer.domain.selections_model import color_for_wells
 
 
-def make_replicate_pairs(toks):
-    """Pair adjacent tokens into ReplicateSets; singletons become solo sets."""
+def make_replicate_pairs(toks, size=2):
+    """Chunk adjacent tokens into ReplicateSets of ``size`` wells each.
+
+    Consecutive wells are grouped ``size`` at a time; a trailing remainder
+    smaller than ``size`` becomes its own (smaller) set. Each set holds one
+    condition's replicate wells — a group of N wells, not just pairs. ``size=1``
+    yields one solo set per well; ``size=2`` reproduces the historical pairing.
+    """
+    size = max(1, int(size))
     sets = []
-    i = 0
-    while i < len(toks):
-        if i + 1 < len(toks):
-            t1, t2 = toks[i], toks[i + 1]
-            sets.append(ReplicateSet(f"{t1}/{t2}", [t1, t2]))
-            i += 2
-        else:
-            t = toks[i]
-            sets.append(ReplicateSet(t, [t]))
-            i += 1
+    for i in range(0, len(toks), size):
+        chunk = list(toks[i:i + size])
+        if chunk:
+            sets.append(ReplicateSet("/".join(chunk), chunk))
     return sets
 
 
@@ -41,6 +42,7 @@ def rep_quick_pairs(ctx) -> None:
     """Generate quick replicate pairs using current dropdown selections."""
     pair_dir = ctx.runtime.grouping.pair_dir or "row"
     iter_order = ctx.runtime.grouping.iter_order or "row"
+    size = ctx.runtime.grouping.rep_size or 2
     well_paths = ctx.state.dataset.well_paths
     sel_state = ctx.state.selection
     new_sets = []
@@ -50,13 +52,13 @@ def rep_quick_pairs(ctx) -> None:
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
                           if f"{row_ltr}{col}" in well_paths]
-                new_sets.extend(make_replicate_pairs(loaded))
+                new_sets.extend(make_replicate_pairs(loaded, size))
         else:
             by_col = {}
             for row_ltr in PLATE_ROWS:
                 loaded = [f"{row_ltr}{col}" for col in PLATE_COLS
                           if f"{row_ltr}{col}" in well_paths]
-                row_sets = make_replicate_pairs(loaded)
+                row_sets = make_replicate_pairs(loaded, size)
                 for s in row_sets:
                     if s.wells:
                         col = _extract_well_token(s.wells[0])
@@ -71,13 +73,13 @@ def rep_quick_pairs(ctx) -> None:
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
                           if f"{row_ltr}{col}" in well_paths]
-                new_sets.extend(make_replicate_pairs(loaded))
+                new_sets.extend(make_replicate_pairs(loaded, size))
         else:
             by_row = {}
             for col in PLATE_COLS:
                 loaded = [f"{row_ltr}{col}" for row_ltr in PLATE_ROWS
                           if f"{row_ltr}{col}" in well_paths]
-                col_sets = make_replicate_pairs(loaded)
+                col_sets = make_replicate_pairs(loaded, size)
                 for s in col_sets:
                     if s.wells:
                         tok = _extract_well_token(s.wells[0])
@@ -101,8 +103,10 @@ def rep_quick_pairs(ctx) -> None:
     from well_viewer.domain.selections_model import make_selection
     used_names: set = set()
     used_ids: set = set()
+    # A group is one condition; its wells are implicitly its replicate set, so
+    # no explicit ``replicates`` partition is stored (see selections_model).
     sels = [make_selection(name=s.name, wells=list(s.wells),
-                           replicates=[list(s.wells)] if s.wells else None,
+                           replicates=None,
                            source="rep_set", used_names=used_names, used_ids=used_ids,
                            fallback_color_idx=i)
             for i, s in enumerate(new_sets)]
@@ -145,7 +149,8 @@ def rep_add(ctx) -> None:
         name = name_edit.text().strip() or f"Rep {len(sel_state.selections) + 1}"
         dlg.accept()
         # sel_add enforces well-exclusivity (the new group takes the wells).
-        sel_add(ctx, name, list(sel), replicates=[list(sel)], source="rep_set")
+        # A group is one condition; its wells are implicitly its replicate set.
+        sel_add(ctx, name, list(sel), replicates=None, source="rep_set")
 
     ok_btn.clicked.connect(_ok)
     cancel_btn.clicked.connect(dlg.reject)
@@ -165,11 +170,12 @@ from well_viewer.domain.selections_model import (  # noqa: E402,F401
 
 def rep_refresh_map(ctx) -> None:
     """Push selection state onto the GROUPS-panel plate (a WellPlateSelector):
-    every well takes its canonical plate-rank colour (so a well is the same
-    colour here as on the main sidebar and the plots — "the plate is the
-    legend"); the *current* selection's wells are shown as the plate's selection
-    (sunken/accent), which is also what a drag on the plate edits."""
-    from well_viewer.domain.selections_model import color_for_well
+    every well takes its **group's** colour (so all wells in a group read as one
+    condition and an explicit recolour is honoured — matching the group row's
+    swatch and the main sidebar's group mode); the *current* selection's wells
+    are shown as the plate's selection (sunken/accent), which is also what a drag
+    on the plate edits."""
+    from well_viewer.domain.selections_model import color_for_selection
     plate = ctx.widgets.get_or_none("_rep_map_plate")
     if plate is None:
         return
@@ -178,9 +184,10 @@ def rep_refresh_map(ctx) -> None:
     plate.setEnabledWells(list(well_paths.keys()))
     colors: Dict[str, str] = {}
     for s in sel_state.selections:
+        group_color = color_for_selection(s)
         for tok in (s.get("wells") or []):
             if tok in well_paths:
-                colors[tok] = color_for_well(tok)
+                colors[tok] = group_color
     plate.clearWellColors()
     plate.setWellColors(colors)
     cur_id = sel_state.current_selection_id
@@ -208,11 +215,13 @@ def rep_quick_pairs_from_dropdowns(ctx) -> None:
     grp = ctx.runtime.grouping
     pair_cb = ctx.widgets.get_or_none("_rep_quick_pair_dir_var")
     iter_cb = ctx.widgets.get_or_none("_rep_quick_iter_order_var")
+    size_sb = ctx.widgets.get_or_none("_rep_quick_size_var")
     if pair_cb is None or iter_cb is None:
         return
     # Map dropdown display values to internal values
     grp.pair_dir = "row" if "Rows" in pair_cb.currentText() else "col"
     grp.iter_order = "row" if "Across" in iter_cb.currentText() else "col"
+    grp.rep_size = size_sb.value() if size_sb is not None else 2
     rep_quick_pairs(ctx)
 
 

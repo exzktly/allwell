@@ -16,9 +16,11 @@ Sample Definitions tab is split between three places:
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QSpinBox,
+    QVBoxLayout, QWidget,
 )
 
+from well_viewer.domain.plate_layout import PLATE_COLS
 from well_viewer.core.ui_helpers import btn_primary, btn_secondary
 from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
@@ -152,13 +154,25 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hdr2r_l.setContentsMargins(0, 4, 0, 4)
     layout.addWidget(hdr2r)
 
-    pair_lbl = QLabel("Pair:", hdr2r)
+    pair_lbl = QLabel("Group along:", hdr2r)
     hdr2r_l.addWidget(pair_lbl)
     pair_cb = QComboBox(hdr2r)
     pair_cb.addItems(["Rows (A01+A02)", "Columns (A01+B01)"])
     pair_cb.setCurrentText("Rows (A01+A02)")
     hdr2r_l.addWidget(pair_cb)
     ctx.widgets.register("_rep_quick_pair_dir_var", pair_cb)
+
+    size_lbl = QLabel("Replicates per group:", hdr2r)
+    hdr2r_l.addWidget(size_lbl)
+    size_sb = QSpinBox(hdr2r)
+    size_sb.setRange(1, len(PLATE_COLS))
+    size_sb.setValue(2)
+    size_sb.setToolTip(
+        "How many consecutive wells form one replicate group "
+        "(2 = pairs, 3 = triplicates, …). A partial trailing run becomes a "
+        "smaller group.")
+    hdr2r_l.addWidget(size_sb)
+    ctx.widgets.register("_rep_quick_size_var", size_sb)
 
     order_lbl = QLabel("Order:", hdr2r)
     hdr2r_l.addWidget(order_lbl)

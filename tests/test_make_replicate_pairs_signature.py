@@ -1,5 +1,6 @@
-"""Audit G8 — ``make_replicate_pairs`` drops the dead ``prefix`` parameter
-(never used in the body) and the module gains its ``typing`` import.
+"""``make_replicate_pairs`` chunks adjacent tokens into replicate groups of a
+configurable size N (default 2). Extended from the historical always-pairs
+behaviour so a group can hold N replicate wells, not just 2.
 """
 from __future__ import annotations
 
@@ -9,13 +10,25 @@ from well_viewer.features.grouping import controller
 from well_viewer.features.grouping.controller import make_replicate_pairs
 
 
-def test_signature_has_no_prefix():
-    assert list(inspect.signature(make_replicate_pairs).parameters) == ["toks"]
+def test_signature_takes_toks_and_size():
+    params = inspect.signature(make_replicate_pairs).parameters
+    assert list(params) == ["toks", "size"]
+    assert params["size"].default == 2
 
 
-def test_pairs_adjacent_tokens_and_solo_tail():
+def test_default_size_pairs_adjacent_tokens_and_solo_tail():
     sets = make_replicate_pairs(["A1", "A2", "A3"])
     assert [s.wells for s in sets] == [["A1", "A2"], ["A3"]]
+
+
+def test_size_three_chunks_triplicates_with_remainder():
+    sets = make_replicate_pairs(["A1", "A2", "A3", "A4"], 3)
+    assert [s.wells for s in sets] == [["A1", "A2", "A3"], ["A4"]]
+
+
+def test_size_one_makes_solo_sets():
+    sets = make_replicate_pairs(["A1", "A2"], 1)
+    assert [s.wells for s in sets] == [["A1"], ["A2"]]
 
 
 def test_typing_names_importable():

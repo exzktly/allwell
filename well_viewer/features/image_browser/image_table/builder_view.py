@@ -322,9 +322,20 @@ def _set_wrap(ctx, n: int) -> None:
     _edit(ctx)
 
 
+def _set_plate(ctx, on: bool) -> None:
+    spec = builder_spec(ctx)
+    spec.plate = bool(on)
+    if spec.plate:
+        spec.wrap = 0            # plate and wrap are mutually exclusive arrangements
+    _edit(ctx)
+
+
 def _wrap_applicable(spec) -> bool:
     """Wrap only applies when neither axis nests a root *and* channels (the
-    grouped/banding layout path is single-dimension per axis)."""
+    grouped/banding layout path is single-dimension per axis), and never in plate
+    mode (the plate fixes both axes to well row/col)."""
+    if getattr(spec, "plate", False):
+        return False
     return not (spec.rows.root and spec.rows.channels) \
         and not (spec.cols.root and spec.cols.channels)
 
@@ -338,6 +349,16 @@ def _refresh_wrap(ctx, spec) -> None:
         w.blockSignals(True)
         w.setValue(float(spec.wrap or 0))
         w.blockSignals(False)
+
+
+def _refresh_plate(ctx, spec) -> None:
+    btn = getattr(_rt(ctx), "plate_btn", None)
+    if btn is None:
+        return
+    with swallow("image table builder: plate sync"):
+        btn.blockSignals(True)
+        btn.setChecked(bool(getattr(spec, "plate", False)))
+        btn.blockSignals(False)
 
 
 def builder_clear(ctx) -> None:
@@ -542,6 +563,23 @@ def build_shelf(ctx, parent: QWidget) -> None:
     header.addWidget(shape, 1)
     _rt(ctx).shape_label = shape
 
+    # Plate: arrange each well's image in true 96-well-plate positions — rows label
+    # A–H, columns 1–12 — using the builder's first channel as the (fixed) image.
+    # Correctly labels every plate row, unlike the Wrap-N band trick (which only
+    # labels the first band). Wells come from the sidebar plate selection.
+    plate_btn = QToolButton(parent)
+    plate_btn.setObjectName("ITBClear")
+    plate_btn.setText("Plate A–H × 1–12")
+    plate_btn.setCheckable(True)
+    plate_btn.setCursor(Qt.PointingHandCursor)
+    plate_btn.setToolTip("Lay each selected well's image out in its 96-well-plate "
+                         "position (rows A–H, columns 1–12), using the first channel "
+                         "in the builder. Wells come from the plate selection.")
+    plate_btn.toggled.connect(lambda on: _set_plate(ctx, bool(on)))
+    reg.register("_image_table_plate_btn", plate_btn)
+    _rt(ctx).plate_btn = plate_btn
+    header.addWidget(plate_btn)
+
     # Wrap cols: fold the columns into vertically-stacked bands of N — e.g. the
     # first N wells across all channels, then the next N below. Writes the spec's
     # wrap; enabled only when each axis carries a single dimension (the banding
@@ -720,11 +758,22 @@ def builder_refresh(ctx) -> None:
     _build_tray(ctx, spec)
     _refresh_shape(ctx, spec)
     _refresh_wrap(ctx, spec)
+    _refresh_plate(ctx, spec)
 
 
 def _refresh_shape(ctx, spec) -> None:
     lbl = getattr(_rt(ctx), "shape_label", None)
     if lbl is None:
+        return
+
+    if getattr(spec, "plate", False):
+        chans = spec.rows.channels or spec.cols.channels
+        chan = str(chans[0].channel).upper() if chans else "—"
+        bits = [f"<b>Plate</b> · rows <b>A–H</b> ↓ · cols <b>1–12</b> → · {chan}"]
+        if getattr(_rt(ctx), "builder_dirty", False):
+            bits.append("<span style='color:#F5A524;font-weight:640'>"
+                        "edited — press Generate</span>")
+        lbl.setText("  ·  ".join(bits))
         return
 
     def axis_txt(ax):

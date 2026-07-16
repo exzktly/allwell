@@ -208,6 +208,12 @@ class TableSpec:
     cols: Axis = field(default_factory=Axis)
     fixed: Dict[str, str] = field(default_factory=dict)
     wrap: int = 0
+    # Plate (96-well) mode: lay each well's image out in true plate positions —
+    # rows = plate row (A–H), cols = plate column (1–12) — using the builder's first
+    # channel as the (fixed) image. Mutually exclusive with wrap. When set,
+    # ``spec_to_state_fields`` overrides the axes with the virtual well_row/well_col
+    # dims regardless of what roots/channels sit in the zones.
+    plate: bool = False
     filters: Dict[str, set] = field(default_factory=dict)
 
     def channel_axis(self) -> Optional[str]:
@@ -231,6 +237,23 @@ def spec_to_state_fields(spec: TableSpec) -> dict:
         tokens.append(tok)
         channel_opts[tok] = cs.to_dict()
     filt = spec.filters or {}
+    fixed_vals = dict(spec.fixed or {})
+    if getattr(spec, "plate", False):
+        # Plate mode: force the well_row × well_col axes and hold the (first) channel
+        # fixed, so each cell is that channel's image for the well at (row, col).
+        if tokens:
+            fixed_vals["channel"] = tokens[0]
+        return {
+            "row_dims": ["well_row"],
+            "col_dims": ["well_col"],
+            "active_channels": set(tokens),
+            "active_timepoints": set(filt.get("timepoint", set()) or set()),
+            "active_fovs": set(filt.get("fov", set()) or set()),
+            "composite": False,
+            "group_size": 0,
+            "channel_opts": channel_opts,
+            "fixed_vals": fixed_vals,
+        }
     return {
         "row_dims": spec.rows.dims(),
         "col_dims": spec.cols.dims(),
@@ -240,7 +263,7 @@ def spec_to_state_fields(spec: TableSpec) -> dict:
         "composite": bool(spec.rows.overlay or spec.cols.overlay),
         "group_size": int(spec.wrap or 0),
         "channel_opts": channel_opts,
-        "fixed_vals": dict(spec.fixed or {}),
+        "fixed_vals": fixed_vals,
     }
 
 
@@ -249,6 +272,25 @@ def spec_from_state(state: "ImageTableState") -> TableSpec:
     ``spec_to_state_fields``, for restore + round-trip tests. Pure — no Qt."""
     opts = dict(getattr(state, "channel_opts", None) or {})
     overlay = bool(getattr(state, "composite", False))
+    row_dims = list(getattr(state, "row_dims", None) or [])
+    col_dims = list(getattr(state, "col_dims", None) or [])
+    filters = {
+        "timepoint": set(getattr(state, "active_timepoints", None) or set()),
+        "fov": set(getattr(state, "active_fovs", None) or set()),
+    }
+    fixed = dict(getattr(state, "fixed_vals", None) or {})
+
+    if row_dims == ["well_row"] and col_dims == ["well_col"]:
+        # Plate mode — carry the fixed channel back onto the rows axis so the shelf's
+        # channel picker (and the next apply) stay consistent.
+        channels = [ChannelSpec.from_dict(opts[tok]) for tok in opts]
+        return TableSpec(
+            rows=Axis(root=None, channels=channels, overlay=False),
+            cols=Axis(root=None, channels=[], overlay=False),
+            fixed=fixed,
+            plate=True,
+            filters=filters,
+        )
 
     def axis_from(dims) -> Axis:
         dims = list(dims or [])
@@ -259,12 +301,9 @@ def spec_from_state(state: "ImageTableState") -> TableSpec:
         return Axis(root=root, channels=channels, overlay=overlay if channels else False)
 
     return TableSpec(
-        rows=axis_from(getattr(state, "row_dims", None)),
-        cols=axis_from(getattr(state, "col_dims", None)),
-        fixed=dict(getattr(state, "fixed_vals", None) or {}),
+        rows=axis_from(row_dims),
+        cols=axis_from(col_dims),
+        fixed=fixed,
         wrap=int(getattr(state, "group_size", 0) or 0),
-        filters={
-            "timepoint": set(getattr(state, "active_timepoints", None) or set()),
-            "fov": set(getattr(state, "active_fovs", None) or set()),
-        },
+        filters=filters,
     )

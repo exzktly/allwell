@@ -60,6 +60,31 @@ def test_validate_drops_stale_current_id():
     assert sel.current_selection_id == sel.selections[0]["id"]
 
 
+# ── one-condition group invariant: no replicate sub-partitions ──────────────
+
+def test_make_selection_collapses_replicate_partition_to_none():
+    """A group is one condition — its wells are its implicit replicate set, so
+    any incoming ``replicates`` sub-partition (multiple sub-sets / solo wells)
+    is collapsed to ``None`` while the flat ``wells`` are preserved."""
+    from well_viewer.domain.selections_model import make_selection
+    s = make_selection(name="G", wells=["A01", "A02", "A03"],
+                       replicates=[["A01"], ["A02", "A03"]])
+    assert s["replicates"] is None
+    assert s["wells"] == ["A01", "A02", "A03"]
+
+
+def test_validate_repair_drops_stored_partition():
+    """A legacy on-disk block carrying a multi-sublist partition loads with the
+    partition dropped (behaviour-inert — nothing downstream reads it)."""
+    from well_viewer.domain.selections_model import validate_repair
+    out = validate_repair([
+        {"id": "g1", "name": "G", "wells": ["A01", "B01"],
+         "replicates": [["A01"], ["B01"]]},
+    ])
+    assert out[0]["replicates"] is None
+    assert out[0]["wells"] == ["A01", "B01"]
+
+
 # ── plate selection ──────────────────────────────────────────────────────────
 
 def test_select_wells_snapshots():

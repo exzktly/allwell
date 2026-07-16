@@ -14,12 +14,12 @@ Move up / Move down / Export / Delete). Clicking the row body activates it;
 clicking the chevron expands it to the selection's well chips.
 
 **Composition (opt-in via ``setComposable(True)``):** the expanded
-row becomes editable — replicate sub-lists (``R1:/R2:/solo:``) with *ungroup*
-(``⊟``) / *group-solo* (``⊞``) buttons, each chip a click-menu (Remove · Move to
-new replicate · Move to R*k* · Make solo), and a ``+ wells…`` button that opens
-a ``Popover`` hosting a ``WellPlateSelector`` (multi-select). The widget does
-*not* enforce cross-selection well exclusivity (a well may live in many
-selections — that's how bar-plot conditions overlap).
+row becomes editable — a single flat strip of the group's well chips (each a
+click-menu: *Remove*) plus a ``+ wells…`` button that opens a ``Popover``
+hosting a ``WellPlateSelector`` (multi-select). A group is one condition: its
+wells are implicitly its replicate set, so there are no replicate sub-lists /
+solo strips. The widget does *not* enforce cross-selection well exclusivity (a
+well may live in many selections — that's how bar-plot conditions overlap).
 
 API
 ---
@@ -354,8 +354,7 @@ class _SelectionRow(QFrame):
             lbl.setWordWrap(True)
             bv.addWidget(lbl)
 
-    def _chip_strip(self, label: str, wells, *, in_sub: int | None,
-                    parent: QWidget, trailing: QWidget | None = None) -> QWidget:
+    def _chip_strip(self, label: str, wells, *, parent: QWidget) -> QWidget:
         w = QWidget(parent)
         h = QHBoxLayout(w)
         h.setContentsMargins(0, 0, 0, 0)
@@ -365,46 +364,21 @@ class _SelectionRow(QFrame):
             lab.setObjectName("RepLabel")
             h.addWidget(lab)
         for tok in wells:
-            h.addWidget(self._make_chip(tok, in_sub=in_sub, parent=w))
+            h.addWidget(self._make_chip(tok, parent=w))
         h.addStretch(1)
-        if trailing is not None:
-            h.addWidget(trailing)
         return w
 
     def _build_composable(self, bv: QVBoxLayout, parent: QWidget) -> None:
-        reps = self._replicates if isinstance(self._replicates, list) else None
+        # A group is one condition: all its wells are its replicate set, so the
+        # editor is a single flat strip of well chips (each chip → Remove) plus
+        # the "+ wells…" picker. No replicate sub-lists / solo strips.
         if not self._wells:
             lbl = QLabel("(no wells — use “+ wells…”)", parent)
             lbl.setObjectName("Caption")
             bv.addWidget(lbl)
-        elif reps is not None:
-            assigned: set = set()
-            for k, sub in enumerate(reps):
-                ung = QToolButton(parent)
-                ung.setObjectName("RepBtn")
-                ung.setText("⊟")
-                ung.setToolTip("Ungroup this replicate (its wells become solo)")
-                ung.clicked.connect(lambda _=False, kk=k: self._ungroup_sublist(kk))
-                bv.addWidget(self._chip_strip(f"R{k + 1}:", sub, in_sub=k,
-                                              parent=parent, trailing=ung))
-                assigned |= set(sub)
-            solo = [w for w in self._wells if w not in assigned]
-            if solo:
-                grp = QToolButton(parent)
-                grp.setObjectName("RepBtn")
-                grp.setText("⊞")
-                grp.setToolTip("Bundle the solo wells into a new replicate")
-                grp.clicked.connect(lambda _=False: self._group_solo())
-                bv.addWidget(self._chip_strip("solo:", solo, in_sub=None,
-                                              parent=parent, trailing=grp))
         else:
-            mk = QToolButton(parent)
-            mk.setObjectName("RepBtn")
-            mk.setText("⊞")
-            mk.setToolTip("Treat all of these wells as one condition's replicates")
-            mk.clicked.connect(lambda _=False: self._make_replicate_all())
-            bv.addWidget(self._chip_strip("wells:", self._wells, in_sub=None,
-                                          parent=parent, trailing=mk))
+            bv.addWidget(self._chip_strip("wells:", self._wells,
+                                          parent=parent))
         # + wells…
         addw = QToolButton(parent)
         addw.setObjectName("RepBtn")
@@ -419,7 +393,7 @@ class _SelectionRow(QFrame):
         hl.addStretch(1)
         bv.addWidget(roww)
 
-    def _make_chip(self, token: str, *, in_sub: int | None, parent: QWidget) -> QToolButton:
+    def _make_chip(self, token: str, *, parent: QWidget) -> QToolButton:
         b = QToolButton(parent)
         b.setObjectName("RowChip")
         b.setText(token)
@@ -429,93 +403,18 @@ class _SelectionRow(QFrame):
             m = QMenu(b)
             m.addAction("✕ Remove").triggered.connect(
                 lambda _=False, t=token: self._remove_well(t))
-            reps = self._replicates if isinstance(self._replicates, list) else []
-            m.addSeparator()
-            m.addAction("→ Move to new replicate").triggered.connect(
-                lambda _=False, t=token: self._move_well_to_new(t))
-            for j in range(len(reps)):
-                if j == in_sub:
-                    continue
-                m.addAction(f"→ Move to R{j + 1}").triggered.connect(
-                    lambda _=False, t=token, jj=j: self._move_well_to_sub(t, jj))
-            if in_sub is not None:
-                m.addAction("→ Make solo").triggered.connect(
-                    lambda _=False, t=token: self._make_well_solo(t))
             m.exec(b.mapToGlobal(QPoint(0, b.height())))
         b.clicked.connect(_menu)
         return b
 
-    # ── composition mutations (mutate _wells/_replicates, then emit) ─────
+    # ── composition mutations (mutate _wells, then emit) ─────────────────
     def _emit_composition(self) -> None:
-        self.compositionEdited.emit(self._id, list(self._wells),
-                                    [list(s) for s in self._replicates]
-                                    if isinstance(self._replicates, list) else None)
-
-    def _normalised_reps(self):
-        reps = self._replicates if isinstance(self._replicates, list) else None
-        if reps is None:
-            return None
-        out = [list(s) for s in reps if s]
-        return out or None
+        # A group's wells are its implicit replicate set — no sub-partition is
+        # tracked, so the replicates payload is always ``None``.
+        self.compositionEdited.emit(self._id, list(self._wells), None)
 
     def _remove_well(self, token: str) -> None:
         self._wells = [w for w in self._wells if w != token]
-        if isinstance(self._replicates, list):
-            self._replicates = [[w for w in s if w != token] for s in self._replicates]
-        self._replicates = self._normalised_reps()
-        self._fill_chips()
-        self._emit_composition()
-
-    def _move_well_to_new(self, token: str) -> None:
-        if token not in self._wells:
-            return
-        reps = [[w for w in s if w != token] for s in (self._replicates or [])]
-        reps.append([token])
-        self._replicates = [s for s in reps if s] or None
-        self._fill_chips()
-        self._emit_composition()
-
-    def _move_well_to_sub(self, token: str, k: int) -> None:
-        if token not in self._wells or not isinstance(self._replicates, list):
-            return
-        new = []
-        for i, s in enumerate(self._replicates):
-            s2 = [w for w in s if w != token]
-            if i == k and token not in s2:
-                s2.append(token)
-            new.append(s2)
-        self._replicates = [s for s in new if s] or None
-        self._fill_chips()
-        self._emit_composition()
-
-    def _make_well_solo(self, token: str) -> None:
-        if not isinstance(self._replicates, list):
-            return
-        self._replicates = [[w for w in s if w != token] for s in self._replicates]
-        self._replicates = self._normalised_reps()
-        self._fill_chips()
-        self._emit_composition()
-
-    def _ungroup_sublist(self, k: int) -> None:
-        if not isinstance(self._replicates, list) or not (0 <= k < len(self._replicates)):
-            return
-        self._replicates = [s for i, s in enumerate(self._replicates) if i != k] or None
-        self._fill_chips()
-        self._emit_composition()
-
-    def _group_solo(self) -> None:
-        assigned = {w for s in (self._replicates or []) for w in s}
-        solo = [w for w in self._wells if w not in assigned]
-        if not solo:
-            return
-        self._replicates = (self._replicates or []) + [solo]
-        self._fill_chips()
-        self._emit_composition()
-
-    def _make_replicate_all(self) -> None:
-        if isinstance(self._replicates, list) or not self._wells:
-            return
-        self._replicates = [list(self._wells)]
         self._fill_chips()
         self._emit_composition()
 
@@ -574,9 +473,6 @@ class _SelectionRow(QFrame):
         def _commit():
             picked = sorted({w for w in state["ids"] if w in enabled_set}, key=_well_rank)
             self._wells = picked
-            if isinstance(self._replicates, list):
-                pset = set(picked)
-                self._replicates = self._normalised_reps_pruned(pset)
             pop.close()
             self._fill_chips()
             self._emit_composition()
@@ -585,14 +481,6 @@ class _SelectionRow(QFrame):
         cancel.clicked.connect(pop.close)
         anchor = self._compose_btn or self._chev
         pop.popup(anchor, side="bottom", align="start")
-
-    def _normalised_reps_pruned(self, allowed: set):
-        reps = self._replicates if isinstance(self._replicates, list) else None
-        if reps is None:
-            return None
-        out = [[w for w in s if w in allowed] for s in reps]
-        out = [s for s in out if s]
-        return out or None
 
     # ── interactions ─────────────────────────────────────────────────────
     def _on_body_press(self, event) -> None:

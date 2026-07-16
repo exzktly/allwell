@@ -345,7 +345,14 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
     used_ids = used_ids if used_ids is not None else set()
 
     wl = _clean_wells(wells)
-    reps = _deoverlap_replicates(replicates, allowed=set(wl))
+    # A group is exactly one condition: its wells are implicitly its replicate
+    # set. We no longer store a ``replicates`` sub-partition (multiple sub-sets /
+    # solo wells mixed with replicates) — the field is reserved and always
+    # ``None``. Any incoming partition (e.g. from a legacy on-disk block) is
+    # collapsed here; the group's flat ``wells`` are preserved. Nothing
+    # downstream reads the partition (every plot/stat/export flattens a group to
+    # its ``wells`` via ``ReplicateSet``), so this is behaviour-preserving.
+    reps = None
 
     sid = sel_id if (isinstance(sel_id, str) and sel_id and sel_id not in used_ids) \
         else _mint_id(used_ids, id_factory)
@@ -487,10 +494,11 @@ def migrate_v1(block: Any, *, rep_hidden: Optional[Iterable[int]] = None,
         gw = _dedup_keep_order(
             [w for m in g["members"] for w in m["wells"]] + list(g["solo_wells"])
         )
-        reps = [list(m["wells"]) for m in g["members"] if m["wells"]] \
-            + [[w] for w in g["solo_wells"]]
+        # A migrated group flattens to one condition — its wells are its
+        # replicate set; the legacy member/solo sub-partition is not carried
+        # over (it was never read downstream).
         selections.append(make_selection(
-            name=g["name"], wells=gw, replicates=(reps or None), hidden=g["hidden"],
+            name=g["name"], wells=gw, replicates=None, hidden=g["hidden"],
             color=None, source="bar_group", used_names=used_names, used_ids=used_ids,
             used_colors=used_colors,
             fallback_color_idx=gi, palette=palette, id_factory=id_factory,

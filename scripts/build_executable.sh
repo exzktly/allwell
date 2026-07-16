@@ -7,8 +7,11 @@
 #   pip install --no-build-isolation -r _Docs/requirements.txt
 #   scripts/build_executable.sh
 #
-# The output lands in ./dist/. On macOS the result is ``dist/AllWell.app``;
-# on Linux / Windows it's a folder bundle ``dist/AllWell/``.
+# The output lands in ./dist/ and carries the app version (and profile name for a
+# feature subset), e.g. ``dist/AllWell-8.8.8.app`` on macOS or the folder bundle
+# ``dist/AllWell-8.8.8/`` on Linux / Windows; a thin build is
+# ``dist/AllWell-8.8.8-thin[.app]``. The name is computed by the .spec from
+# version.py + ALLWELL_PROFILE (scripts/profile_build.bundle_name).
 #
 # Pass ``--clean`` as the first argument to wipe build/ and dist/ before
 # starting, e.g.
@@ -50,11 +53,15 @@ fi
 echo "Running PyInstaller against $SPEC_FILE ..."
 pyinstaller "$SPEC_FILE" --noconfirm --log-level "${ALLWELL_LOG_LEVEL:-INFO}"
 
-if [[ -d "dist/AllWell.app" ]]; then
-    echo "✓ Build complete: dist/AllWell.app"
-elif [[ -d "dist/AllWell" ]]; then
-    echo "✓ Build complete: dist/AllWell/"
+# The bundle name is versioned (+ profile), so discover it rather than hardcode.
+# Prefer the macOS .app; fall back to the Linux/Windows onedir folder.
+_app_bundle="$(ls -d dist/AllWell-*.app 2>/dev/null | head -n1 || true)"
+_dir_bundle="$(ls -d dist/AllWell-*/ 2>/dev/null | grep -v '\.app/$' | head -n1 || true)"
+if [[ -n "$_app_bundle" && -d "$_app_bundle" ]]; then
+    echo "✓ Build complete: $_app_bundle"
+elif [[ -n "$_dir_bundle" && -d "$_dir_bundle" ]]; then
+    echo "✓ Build complete: $_dir_bundle"
 else
-    echo "ERROR: build finished but neither dist/AllWell.app nor dist/AllWell/ was produced." >&2
+    echo "ERROR: build finished but no dist/AllWell-*.app or dist/AllWell-*/ bundle was produced." >&2
     exit 1
 fi

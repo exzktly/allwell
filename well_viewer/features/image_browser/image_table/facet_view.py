@@ -23,14 +23,22 @@ from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from well_viewer.core.ui_helpers import make_overlay_thumb
+from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.features.image_browser.image_table.image_compose import (
     composite_column_rgb,
 )
 
+# ``well_row`` / ``well_col`` are the plate (96-well) virtual dims. They carry no
+# render-model cell key of their own — the plate layout composes them into ``well``
+# — so they map here to ``well`` and :func:`_cv` derives their per-cell value back
+# from that well. Being in this dict is what keeps ``plan_facets`` from filtering
+# them out, so the A–H / 1–12 axis headers get laid down.
 _DIM_CB = {"well": "well", "channel": "chan",
-           "timepoint": "tp", "fov": "fov"}
+           "timepoint": "tp", "fov": "fov",
+           "well_row": "well", "well_col": "well"}
 _DIM_LABEL = {"well": "Well", "channel": "Channel",
-              "timepoint": "Timepoint", "fov": "FOV"}
+              "timepoint": "Timepoint", "fov": "FOV",
+              "well_row": "Row", "well_col": "Column"}
 _GROUP_GAP = 18          # px gap between facet groups (the non-uniform spacing)
 
 # Scoped label styling — muted per-value labels, a subtle strip behind the
@@ -54,6 +62,13 @@ def _corner_qss(pt: int) -> str:
 
 
 def _cv(cell, dim: str) -> str:
+    if dim in ("well_row", "well_col"):
+        # Derived from the composed well token, so the plate axes label as A–H / 1–12
+        # even though the cell only stores the resolved ``well`` (e.g. "B05").
+        r, c = parse_rc((cell.get("well") or "").strip())
+        if dim == "well_row":
+            return r or ""
+        return str(int(c)) if c else ""
     return (cell.get(_DIM_CB.get(dim, "")) or "").strip()
 
 
@@ -195,9 +210,14 @@ def plan_facets(ctx, cells) -> Optional[FacetPlan]:
             plan.left.append((_fmt(ctx, row_dims[0], prefix[0]),
                               gs, 0, ge - gs + 1, 1, True))
 
-    # Corner: the dimensions pinned off both axes (constant for every cell).
+    # Corner: the dimensions pinned off both axes (constant for every cell). In
+    # plate mode ``well`` varies per cell (composed from the row/col axes), so it's
+    # not a fixed corner value even though the literal "well" dim isn't on an axis.
+    plate = bool({"well_row", "well_col"} & (set(row_dims) | set(col_dims)))
     fixed = []
     for dim in ("well", "timepoint", "fov"):
+        if plate and dim == "well":
+            continue
         if dim not in row_dims and dim not in col_dims:
             v = _cv(cells[0][0], dim)
             if v:

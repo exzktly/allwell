@@ -21,6 +21,7 @@ from typing import List
 
 from well_viewer.features.image_browser.image_table.state import spec_to_state_fields
 from well_viewer.features.image_browser.image_table.grid_layout import (
+    PLATE_DIMS,
     _axis_values,
     _current_axis,
     _current_dims,
@@ -28,10 +29,13 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _layout_cell_values,
     _layout_cell_values_nested,
     _product_values,
+    compose_plate_well,
+    plate_well_index,
 )
 
 _AXIS_LABEL = {"channel": "Channels", "well": "Wells",
-               "timepoint": "Timepoints", "fov": "FOVs"}
+               "timepoint": "Timepoints", "fov": "FOVs",
+               "well_row": "Plate rows", "well_col": "Plate cols"}
 _AXIS_MAX = 12  # non-grouped grid is capped at 12×12; longer axes are truncated
 _ROW_MAX = 60   # grouped/tiled grids may stack many bands — cap total rows here
 
@@ -97,11 +101,15 @@ def _build_nested_layout(ctx, row_dims: List[str], col_dims: List[str]) -> None:
     _ctrl().image_table_rebuild_grid(ctx)
 
     fixed = _fixed_off_axis(ctx, set(row_dims) | set(col_dims))
+    plate = bool((set(row_dims) | set(col_dims)) & set(PLATE_DIMS))
+    rc_index = plate_well_index(ctx) if plate else {}
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             vals = _layout_cell_values_nested(
                 row_dims, col_dims, row_prod[r], col_prod[c], fixed)
+            if plate:
+                compose_plate_well(vals, rc_index)
             _fill_cell(cell, vals)
 
     clamped = (n_rows_wanted - rows) + (n_cols_wanted - cols)
@@ -183,11 +191,15 @@ def image_table_build_layout(ctx) -> None:
 
     fixed = _fixed_off_axis(ctx, {row_axis, col_axis})
     tiled = {"n_row_vals": n_row_vals, "group_size": cols} if grouped else {}
+    plate = bool({row_axis, col_axis} & set(PLATE_DIMS))
+    rc_index = plate_well_index(ctx) if plate else {}
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             vals = _layout_cell_values(row_axis, col_axis, row_vals, col_vals,
                                        fixed, r, c, **tiled)
+            if plate:
+                compose_plate_well(vals, rc_index)
             _fill_cell(cell, vals)
 
     status = (

@@ -1016,6 +1016,13 @@ channel for every well).
 - **Wrap cols** folds the columns into vertically-stacked bands of *N* (handy for a
   long single-dimension column axis). **Clear builder** empties the shelf and starts
   fresh (it leaves the rendered images — use **Clear images** for those).
+- **Plate A–H × 1–12** lays each selected well's image out in its true 96-well-plate
+  position — rows labelled **A–H**, columns **1–12** — using the first channel in the
+  builder as the image. Toggle it on in the shelf header; wells come from the plate
+  selection (a partial selection renders a correctly-labelled partial plate), and it's
+  mutually exclusive with **Wrap cols**. Prefer this over well-on-columns + Wrap when
+  you want a plate view: Wrap only labels the first band, whereas Plate labels every
+  row and column correctly.
 - **Action strip** — **Generate** · **Reset table** (back to defaults) · **Clear
   images** · **Crop** (drag a region on any image) · an **ON threshold** value with
   a **channel** dropdown choosing which channel it applies to (the same ThreshFracOn
@@ -1034,7 +1041,9 @@ channel for every well).
   **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
   for a treatment's full time-course at a glance. Flip a root to **Overlay** for a
   merged view; if the grid gets large, narrow the well/timepoint selection, then
-  save the composed grid to Saved Plots.
+  save the composed grid to Saved Plots. To read a single channel across the whole
+  plate at a glance — e.g. a GFP reporter — select all wells, drag that channel into
+  the builder, and toggle **Plate A–H × 1–12**.
 
 #### Cell Browser
 

@@ -148,6 +148,80 @@ def _well_options(ctx) -> List[str]:
     return sorted(ctx.state.dataset.well_paths.keys(), key=parse_rc)
 
 
+# ── Plate (96-well) virtual dimensions ───────────────────────────────────────
+# Split the single ``well`` dim into its plate-row letter (A–H) and plate-column
+# number (1–12) so the Image Table can lay images out in true plate positions
+# with correct A–H / 1–12 axis labels. These are *virtual* layout dims: they never
+# get their own render-model cell key — the layout composes them back into the real
+# ``well`` token (:func:`compose_plate_well`), and the facet labeller derives them
+# back from that well for the axis headers. Using two real axes (instead of the old
+# "well on one axis + Wrap N" band trick) is what makes every band label correctly,
+# not just the first.
+PLATE_ROW_DIM = "well_row"
+PLATE_COL_DIM = "well_col"
+PLATE_DIMS = (PLATE_ROW_DIM, PLATE_COL_DIM)
+
+
+def _selected_wells(ctx) -> List[str]:
+    """Wells the plate draws from — the sidebar plate selection, else every well.
+
+    Sorted by ``parse_rc`` so rows/cols come out in plate order (A1, A2, … B1, …)."""
+    sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
+                 key=parse_rc)
+    return sel if sel else _well_options(ctx)
+
+
+def _well_row_options(ctx) -> List[str]:
+    """Distinct plate-row letters (A–H) among the selected wells, top→bottom."""
+    seen: List[str] = []
+    for w in _selected_wells(ctx):
+        r, _c = parse_rc(w)
+        if r and r not in seen:
+            seen.append(r)
+    return sorted(seen)
+
+
+def _well_col_options(ctx) -> List[str]:
+    """Distinct plate-column numbers ("1".."12") among the selected wells, ordered."""
+    nums = set()
+    for w in _selected_wells(ctx):
+        _r, c = parse_rc(w)
+        if c:
+            nums.add(int(c))
+    return [str(n) for n in sorted(nums)]
+
+
+def plate_well_index(ctx) -> Dict[tuple, str]:
+    """Map ``(row_letter, col_int)`` → the real well token, for well composition.
+
+    Built from every dataset well (not just the selection) so a partial plate still
+    resolves the positions it does cover."""
+    idx: Dict[tuple, str] = {}
+    for w in _well_options(ctx):
+        r, c = parse_rc(w)
+        if r and c:
+            idx[(r.upper(), int(c))] = w
+    return idx
+
+
+def compose_plate_well(vals: Dict[str, str], rc_index: Dict[tuple, str]) -> None:
+    """Resolve a cell's plate row/col dims to the real ``well`` token, in place.
+
+    Sets ``vals['well']`` to the matching well, or ``""`` when that plate position
+    isn't in the dataset (so the cell renders blank rather than falling back to a
+    held well). No-op when the cell carries no plate dims."""
+    r = vals.get(PLATE_ROW_DIM)
+    c = vals.get(PLATE_COL_DIM)
+    if not (r and c):
+        return
+    try:
+        key = (str(r).upper(), int(c))
+    except (TypeError, ValueError):
+        vals["well"] = ""
+        return
+    vals["well"] = rc_index.get(key, "")
+
+
 def _axis_dim_values(ctx, dim: str) -> List[str]:
     """Ordered value list a single dimension expands into, from live selections.
 
@@ -175,6 +249,10 @@ def _axis_dim_values(ctx, dim: str) -> List[str]:
         opts = _fov_options(ctx)
         sel = getattr(ctx.state.image_table, "active_fovs", None) or set()
         return [f for f in opts if f in sel] if sel else list(opts)
+    if dim == PLATE_ROW_DIM:
+        return _well_row_options(ctx)
+    if dim == PLATE_COL_DIM:
+        return _well_col_options(ctx)
     return []
 
 
@@ -206,8 +284,12 @@ def _fixed_off_axis(ctx, on_axis: set) -> Dict[str, str]:
     def _first(seq) -> str:
         return seq[0] if seq else ""
 
+    # When the plate row/col dims drive the axes, ``well`` is composed per cell from
+    # them — don't also pin a fixed well, or missing plate positions would fall back
+    # to it instead of rendering blank.
+    plate_on = bool(set(on_axis) & set(PLATE_DIMS))
     fixed = {"well": "", "channel": "", "timepoint": "", "fov": ""}
-    if "well" not in on_axis:
+    if "well" not in on_axis and not plate_on:
         sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
                      key=parse_rc)
         fixed["well"] = held.get("well") or (sel[0] if sel else _first(_well_options(ctx)))
@@ -290,6 +372,10 @@ def _all_dim_options(ctx, dim: str) -> List[str]:
         return _timepoint_options(ctx)
     if dim == "fov":
         return _fov_options(ctx)
+    if dim == PLATE_ROW_DIM:
+        return _well_row_options(ctx)
+    if dim == PLATE_COL_DIM:
+        return _well_col_options(ctx)
     return []
 
 

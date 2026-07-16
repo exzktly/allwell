@@ -881,20 +881,21 @@ def draw_per_cell_bar_mode(
     plot = ctx.state.plot
     group_mode = getattr(plot, "bar_group_mode", "well")
     pool_reps = bool(getattr(plot, "bar_pool_replicates", True))
-    pool_rset_cells = bool(getattr(plot, "bar_pool_rset_cells", False)) and bool(active_rsets)
 
     # Build a base (well, color, well_label, cluster_label) sequence for
-    # one timepoint. When rsets are active and pool_replicates is False,
-    # expand wells inside each rset (keeping the rset rank colour). The
-    # cluster_label is used as the cluster header (well-grouped layout)
-    # so it carries the full disambiguating identity (e.g. "A01 [CTRL]"),
-    # while the per-bar tick label stays short.
+    # one timepoint. When rsets are active and "Pooled" is on, collapse each
+    # replicate set into ONE column with its cells pooled across the set's
+    # wells (see ``pool_groups`` below); when off, expand wells inside each
+    # rset (keeping the rset rank colour). The cluster_label is used as the
+    # cluster header (well-grouped layout) so it carries the full
+    # disambiguating identity (e.g. "A01 [CTRL]"), while the per-bar tick
+    # label stays short.
     base_wells: List[str] = []
     base_colors: List[str] = []
     base_short: List[str] = []      # short well/rset label used per-bar
     base_full: List[str] = []       # disambiguating label used in cluster headers
     pool_groups: Optional[Dict[str, List[str]]] = None
-    if pool_rset_cells:
+    if active_rsets and pool_reps:
         # One column per rset; cells pooled across the rset's wells. The
         # rset *name* becomes the "well" key passed downstream — draw_violin /
         # draw_beeswarm route the row-fetch through ``pool_groups``, and
@@ -914,20 +915,6 @@ def draw_per_cell_bar_mode(
             base_short.append(rset.name)
             base_full.append(rset.name)
             pool_groups[rset.name] = valid
-    elif active_rsets and pool_reps:
-        rset_by_name = {r.name: r for r in active_rsets}
-        for key in ordered_keys:
-            rset = rset_by_name.get(key)
-            if rset is None:
-                continue
-            color = color_for_replicate_set(rset, ctx.state.selection.selections)
-            valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
-            for w in valid:
-                base_wells.append(w)
-                base_colors.append(color)
-                short = well_display_label(ctx, w)
-                base_short.append(short)
-                base_full.append(f"{short} [{rset.name}]")
     elif active_rsets:
         seen: set = set()
         for rset in active_rsets:

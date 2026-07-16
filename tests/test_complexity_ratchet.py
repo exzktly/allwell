@@ -131,7 +131,9 @@ ALLOWLIST = {
     "well_viewer/features/barplot/controller.py::render_bar_items",
     "well_viewer/core/load_controller.py::load_directory",
     "well_viewer/features/lineplot/controller.py::collect_line_series",
-    "well_viewer/features/barplot/renderer.py::draw_per_cell_bar_mode",
+    # DONE: draw_per_cell_bar_mode dropped below the threshold once the "Pooled"
+    # toggle unified the two rset base-column branches (the old pool_rset_cells
+    # and pool_reps branches merged into one). Removed from the allowlist.
     "well_viewer/features/barplot/renderer.py::draw_significance_brackets",
     "well_viewer/features/batch_export/bar_panel.py::BarBatchExportPanel._run_batch",
     "well_viewer/domain/fold_change.py::normalize_pts",

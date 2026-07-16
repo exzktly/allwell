@@ -6,7 +6,7 @@ from well_viewer.core.channel_state_controller import on_metric_selected
 
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
-from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_bar_pool_rset_cells, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
+from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
 
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
@@ -26,7 +26,6 @@ from well_viewer.features.barplot.controller import (
     open_bar_timepoint_selector,
     toggle_bar_group_mode,
     toggle_bar_pool_replicates,
-    toggle_bar_pool_rset_cells,
 )
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
@@ -166,18 +165,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # a closed QMenu widget-action does not surface reliably, so we keep it
     # visible and gate usability with setEnabled instead.
     _disp_lay.addWidget(pool_reps_btn)
-
-    pool_rset_cells_btn = reg.register("_bar_pool_rset_cells_btn", QPushButton("Pool cells: Off", bar_ctrl))
-    pool_rset_cells_btn.setProperty("variant", "toggle")
-    pool_rset_cells_btn.setCheckable(True)
-    pool_rset_cells_btn.setToolTip(
-        "Pool every cell across a replicate set before drawing its beeswarm / "
-        "violin distribution (off = keep per-well distributions).")
-    pool_rset_cells_btn.clicked.connect(
-        lambda _=False: toggle_bar_pool_rset_cells(ctx)
-    )
-    # Always present; enable-gated on (violin/beeswarm AND active rsets).
-    _disp_lay.addWidget(pool_rset_cells_btn)
 
     swarm_btn = reg.register("_swarm_btn", QPushButton("Beeswarm: Off", bar_ctrl))
     swarm_btn.setProperty("variant", "toggle")

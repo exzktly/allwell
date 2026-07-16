@@ -663,8 +663,10 @@ of individual cells. This is the default Plotting sub-tab.
 - **Controls** (the **Display ▾** menu gathers the view options):
   - **Grouping** — how bars are grouped (default *Well*; a replicate set groups
     its members).
-  - **Pool cells** — pool every selected well's cells before summarising,
-    rather than averaging per-well means.
+  - **Pooled** — collapse each replicate set's wells into one column (off = one
+    column per well). For **bars** this averages the per-well means; for
+    **violin** / **beeswarm** it pools every cell across the set into a single
+    distribution. Enabled once ≥1 replicate set is active.
   - **Violin** / **Beeswarm** — swap the bars for a per-cell distribution
     (violin) or every individual cell (beeswarm). **Smooth** is active only
     when Violin is on and tunes the KDE bandwidth.

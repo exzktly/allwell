@@ -56,6 +56,11 @@ def _snapshot_builder(ctx) -> dict:
     fvals = dict(getattr(ctx.state.image_table, "fixed_vals", None) or {})
     if fvals:
         out["fixed_vals"] = fvals
+    # The Separate↔Overlay switch. The persisted cells carry the OVERLAY_CHAN
+    # sentinel when it's on, so this flag must round-trip for the blend path to
+    # re-engage on restore (else the sentinel cells render as "(no image)").
+    if bool(getattr(ctx.state.image_table, "composite", False)):
+        out["composite"] = True
     return out
 
 
@@ -129,9 +134,16 @@ def apply_image_table(ctx, state: dict) -> None:
             swallowed()
 
     try:
-        ctx.state.image_table.channel_opts = dict(state.get("channel_opts") or {})
+        copts = dict(state.get("channel_opts") or {})
+        ctx.state.image_table.channel_opts = copts
         ctx.state.image_table.fixed_vals = dict(state.get("fixed_vals") or {})
         ctx.runtime.image_table.builder_spec = None
+        # Overlay: restore the switch + the selected-channel set the blend
+        # iterates. active_channels == the channel_opts keys (spec_to_state_fields
+        # keys each channel's opts by its axis token), so recover it from there.
+        ctx.state.image_table.composite = bool(state.get("composite", False))
+        if copts:
+            ctx.state.image_table.active_channels = set(copts)
     except Exception:
         swallowed()
 

@@ -83,10 +83,13 @@ class ImageTableState:
     label_font_pt: int = 11
     group_font_pt: int = 11
 
-    # composite: when True, image_table_generate appends one extra row at the
-    # bottom whose cells additively merge (LUT-colored RGB summed, clipped to
-    # white) every row above them in the same column. A transient display
-    # toggle driven by the Composite checkbox in the action strip.
+    # composite: the shelf's per-root Separate↔Overlay switch. When True the
+    # channel axis collapses to a single entry (the OVERLAY_CHAN sentinel value)
+    # and each cell additively blends (LUT-colored RGB summed, clipped to white)
+    # every selected channel into one image — "blend this root's channels into one
+    # cell". The layout emits the sentinel (grid_layout._axis_dim_values) and the
+    # renderers (controller.image_table_generate + export) blend it via
+    # image_compose.overlay_cell_rgb.
     composite: bool = False
 
     # export-dialog settings (pad/cell-gap/titles/dpi/transparent-bg)

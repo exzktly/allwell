@@ -1,9 +1,11 @@
-"""Image Table: composite row.
+"""Image Table: channel overlay (Separate ↔ Overlay switch).
 
-The composite feature appends one extra bottom row whose cells additively merge
-(LUT-colored RGB summed, clipped to white) every row above them in the same
-column. The pure blend math (``composite_additive_rgb``) is tested directly; the
-end-to-end row append is exercised through the Image Table controller.
+The shelf's per-root Separate↔Overlay switch (``state.composite``) collapses the
+channel axis to a single entry and blends every selected channel into each cell —
+"blend this root's channels into one cell". The pure additive blend math
+(``composite_additive_rgb``) is tested directly; ``overlay_cell_rgb`` wires it to
+the per-channel render path; and the collapse + blend are exercised end-to-end
+through the Image Table controller / export.
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import numpy as np
 import pytest
 
 from well_viewer.features.image_browser.image_table.image_compose import (
+    OVERLAY_CHAN,
     composite_additive_rgb,
 )
 
@@ -49,60 +52,96 @@ def test_none_and_empty_inputs_return_none():
     assert composite_additive_rgb([None, None]) is None
 
 
+def test_overlay_cell_rgb_blends_every_channel(monkeypatch):
+    """overlay_cell_rgb loads + renders each channel through the per-channel path
+    and additively merges them — so a red + green channel merge to yellow."""
+    from well_viewer.features.image_browser.image_table import image_compose as IC
+
+    colors = {"R": _solid((255, 0, 0)), "G": _solid((0, 255, 0))}
+    # Stub the two leaf calls so the test needs no real dataset: _load_array
+    # returns a marker per channel, cell_display_rgb turns it into that channel's
+    # solid RGB (mirroring how the real per-channel LUT/colormap would tint it).
+    monkeypatch.setattr(IC, "_load_array", lambda ctx, cache, well, ch, tp, fov, **k: ch)
+    monkeypatch.setattr(IC, "_row_display_opts", lambda ctx, r, ch=None: (False, False, "raw"))
+    monkeypatch.setattr(IC, "cell_display_rgb",
+                        lambda ctx, cache, cell, r, crop, arr: colors.get(arr))
+
+    class _Chan:
+        ratio_metrics = []
+
+    class _State:
+        channel = _Chan()
+
+    class _Ctx:
+        state = _State()
+
+    cell = {"well": "A01", "chan": OVERLAY_CHAN, "tp": "0h", "fov": "1"}
+    out = IC.overlay_cell_rgb(_Ctx(), {}, cell, 0, None, ["R", "G"])
+    assert out is not None
+    assert np.array_equal(out, _solid((255, 255, 0)))
+
+
 @pytest.mark.qt
-def test_generate_appends_composite_row(image_table_app):
+def test_overlay_collapses_channel_axis_and_marks_cells(image_table_app):
     from well_viewer.features.image_browser.image_table import controller as C
+    from well_viewer.features.image_browser.image_table import builder_view as B
 
     app = image_table_app
     ctx = app._ctx
     C.image_table_repopulate_dropdowns(ctx)
-    C.image_table_apply_preset(ctx, "channel", "timepoint")
-    cells = ctx.runtime.image_table.cells
-    assert cells, "build should assemble the selector grid"
-    grid = ctx.runtime.image_table.render_grid
 
-    # The composite cells carry a "Composite" tooltip; the faceted layout places
-    # them below the labelled grid rather than at a fixed row index.
-    from PySide6.QtWidgets import QLabel
+    spec = B.builder_spec(ctx)
+    ax_name = spec.channel_axis() or "rows"
+    ax = getattr(spec, ax_name)
+    n_channels = len(ax.channels)
+    assert n_channels >= 2, "need multiple channels to exercise the overlay"
 
-    def _composite_present():
-        host = grid.parentWidget()
-        return any(lbl.toolTip() == "Composite" for lbl in host.findChildren(QLabel))
+    # Separate: one row per channel, no sentinel cells.
+    ax.overlay = False
+    B._apply_now(ctx)
+    sep = ctx.runtime.image_table.cells
+    assert len(sep) == n_channels
+    assert all(cell["chan"] != OVERLAY_CHAN for row in sep for cell in row)
+    assert ctx.state.image_table.composite is False
 
-    # Composite off: no composite cells.
-    ctx.state.image_table.composite = False
+    # Overlay: the channel axis collapses to ONE blended row of sentinel cells.
+    ax.overlay = True
+    B._apply_now(ctx)
+    ovl = ctx.runtime.image_table.cells
+    assert len(ovl) == 1
+    assert all(cell["chan"] == OVERLAY_CHAN for row in ovl for cell in row)
+    assert ctx.state.image_table.composite is True
+
+    # Generate must not raise on the collapsed grid.
     C.image_table_generate(ctx)
-    assert not _composite_present()
-
-    # Composite on: an extra bottom row of composite cells appears (no raise).
-    ctx.state.image_table.composite = True
-    C.image_table_generate(ctx)
-    assert _composite_present()
 
 
 @pytest.mark.qt
-def test_export_figure_includes_composite_row(image_table_app):
+def test_export_figure_reflects_collapsed_overlay(image_table_app):
     from well_viewer.features.image_browser.image_table import controller as C
+    from well_viewer.features.image_browser.image_table import builder_view as B
     from well_viewer.features.image_browser.image_table.export import _build_export_figure
 
     app = image_table_app
     ctx = app._ctx
     C.image_table_repopulate_dropdowns(ctx)
-    C.image_table_apply_preset(ctx, "channel", "timepoint")
-    cells = ctx.runtime.image_table.cells
-    n_rows, n_cols = len(cells), len(cells[0])
-    C.image_table_generate(ctx)
 
-    ctx.state.image_table.composite = False
+    spec = B.builder_spec(ctx)
+    ax_name = spec.channel_axis() or "rows"
+    ax = getattr(spec, ax_name)
+
+    # Separate: N channel rows × M timepoint columns.
+    ax.overlay = False
+    B._apply_now(ctx)
+    C.image_table_generate(ctx)
+    sep_cells = ctx.runtime.image_table.cells
+    n_rows, n_cols = len(sep_cells), len(sep_cells[0])
     fig, _ = _build_export_figure(ctx)
     assert len(fig.axes) == n_rows * n_cols
 
-    ctx.state.image_table.composite = True
+    # Overlay: the channel axis collapses to a single blended row.
+    ax.overlay = True
+    B._apply_now(ctx)
+    C.image_table_generate(ctx)
     fig, _ = _build_export_figure(ctx)
-    assert len(fig.axes) == (n_rows + 1) * n_cols
-
-
-# The composite flag is authored by the shelf's per-root Separate↔Overlay switch
-# now (the old Advanced "Composite" toggle button was retired); the state flag
-# ``ctx.state.image_table.composite`` still drives the merged bottom row, which
-# ``test_generate_appends_composite_row`` above exercises end-to-end.
+    assert len(fig.axes) == 1 * n_cols

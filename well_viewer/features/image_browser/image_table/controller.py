@@ -41,6 +41,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     LUT_COLORS,
     LUT_COLOR_NAMES,
     NUC_SEG_TOKEN,
+    OVERLAY_CHAN,
     _compose_image_table_rgb,
     _export_binary_mask,
     _format_pixel_intensity,
@@ -63,6 +64,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     cell_display_rgb,
     composite_additive_rgb,
     composite_column_rgb,
+    overlay_cell_rgb,
 )
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
@@ -124,6 +126,7 @@ def image_table_clear_active(ctx) -> None:
 from well_viewer.features.image_browser.image_table.grid_layout import (  # noqa: E402,F401
     _DIM_KEY,
     _all_dim_options,
+    _axis_dim_values,
     _axis_values,
     _cache_column_tokens,
     _channel_options,
@@ -507,6 +510,72 @@ def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
     image_table_cell_override_menu(ctx, r, c, global_pos)
 
 
+def _cell_title(ctx, cell, overlay_chans) -> str:
+    """Tooltip for one image-table cell (identity lives on the axes, not per cell).
+
+    An OVERLAY_CHAN cell names the merged channel set (e.g. "GFP+DAPI"); a normal
+    cell names its single channel; anything without a well+timepoint is "(unset)"."""
+    from well_viewer.domain.selections_model import well_display_label
+    well, chan, tp, fov = cell["well"], cell["chan"], cell["tp"], cell["fov"]
+    if not (well and tp):
+        return "(unset)"
+    if chan == OVERLAY_CHAN:
+        label = "+".join(c2.upper() for c2 in overlay_chans) or "overlay"
+    elif chan:
+        label = chan.upper()
+    else:
+        return "(unset)"
+    title = f"{well_display_label(ctx, well)}  {label}  T:{tp}"
+    return title + (f"  FOV:{fov}" if fov else "")
+
+
+def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb):
+    """Load + render one cell → ``(pixmap, representative_array, ok)``.
+
+    ``ok`` gates whether the cell shows an image and installs interaction. For an
+    OVERLAY_CHAN cell the pixmap is the additive blend of every channel in
+    *overlay_chans* (``overlay_cell_rgb``) and ``ok`` follows that blend; otherwise
+    it's the single channel's display (``cell_display_rgb`` / the pre-rendered
+    overlay thumbnailer) and ``ok`` follows the loaded array. The representative
+    array is the first overlay channel's (or the cell's own) so crop-drag
+    coordinate conversion still has a source."""
+    well, chan, tp, fov = cell["well"], cell["chan"], cell["tp"], cell["fov"]
+    if chan == OVERLAY_CHAN:
+        if not (well and tp and overlay_chans):
+            return None, None, False
+        # A representative single-channel array so crop-drag coordinate conversion
+        # has a source; the DISPLAY is the blend of every channel.
+        arr = _load_array(ctx, cache, well, overlay_chans[0], tp, fov,
+                          use_tophat=_row_display_opts(ctx, r, overlay_chans[0])[0])
+        rgb = overlay_cell_rgb(ctx, cache, cell, r, crop_tool, overlay_chans)
+        pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
+        return pix, arr, rgb is not None
+
+    # Which base image to load (raw vs corrected) is a per-channel render option.
+    use_tophat = _row_display_opts(ctx, r, chan)[0]
+    arr = None
+    if well and chan and tp:
+        ratio = _find_ratio_for_channel(ctx, chan)
+        if ratio is not None:
+            arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
+        else:
+            arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+    if arr is None:
+        return None, None, False
+    # cell_display_rgb resolves render / boundary / LUT / colormap so live and
+    # exported thumbnails always agree. A pre-rendered RGB that isn't NUC+SEG goes
+    # straight to the overlay thumbnailer (cell_display_rgb only treats NUC+SEG as
+    # overlay).
+    if getattr(arr, "ndim", 2) >= 3 and not _is_nuc_seg(chan):
+        cropped = crop_tool.apply_to_array(arr) if crop_tool else arr
+        lo, hi = _parse_lut(ctx, r, chan)
+        pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
+    else:
+        rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
+        pix = make_overlay_thumb(rgb, sz, sz) if rgb is not None else None
+    return pix, arr, True
+
+
 def image_table_generate(ctx) -> None:
     """Load images for every cell and lay out the rendered image table."""
     from well_viewer.core.ui_helpers import make_overlay_thumb
@@ -556,64 +625,42 @@ def image_table_generate(ctx) -> None:
             return r, c
         return plan.grid_row_of[r], plan.grid_col_of[c]
 
+    # When Overlay is on, the channel axis has collapsed to the OVERLAY_CHAN
+    # sentinel and each cell blends the whole selected-channel set (resolved once,
+    # off the collapse). Empty until a channel-overlay cell is actually hit.
+    overlay_chans: List[str] = []
+
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
-            well = cell["well"]
-            chan = cell["chan"]
-            tp = cell["tp"]
-            fov = cell["fov"]
+            is_overlay = cell["chan"] == OVERLAY_CHAN
+            # Overlay collapses the channel axis to a single sentinel cell that
+            # blends the whole selected-channel set; resolve it once (off the
+            # collapse) on first sight.
+            if is_overlay and not overlay_chans:
+                overlay_chans = _axis_dim_values(ctx, "channel", collapse_overlay=False)
 
-            # Which base image to load (raw vs corrected) is resolved PER CHANNEL
-            # (its render option), so raw/corrected can differ per cell — e.g.
-            # channels nested on the columns axis. Falls back to the per-row
-            # widget for legacy states via _row_display_opts.
-            use_tophat = _row_display_opts(ctx, r, chan)[0]
-            arr = None
-            ratio = _find_ratio_for_channel(ctx, chan) if chan else None
-            if well and chan and tp:
-                if ratio is not None:
-                    arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
-                else:
-                    arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
-            rendered[(r, c)] = arr
+            pix, arr, ok = _render_cell(
+                ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb)
+            # Overlay cells recompute their blend from the live channel set, so
+            # don't cache a single array under them (export re-blends too).
+            rendered[(r, c)] = None if is_overlay else arr
 
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
             cl.setContentsMargins(2, 2, 2, 2)
             cl.setSpacing(2)
 
-            # Identity now lives on the row/col axes (see facet_view), so the
-            # cell carries no repeated title — just a tooltip for the exact combo.
-            if well and chan and tp:
-                from well_viewer.domain.selections_model import well_display_label
-                title = f"{well_display_label(ctx, well)}  {chan.upper()}  T:{tp}" + (
-                    f"  FOV:{fov}" if fov else "")
-            else:
-                title = "(unset)"
-
             img_label = QLabel(cell_widget)
-            img_label.setToolTip(title)
+            img_label.setToolTip(_cell_title(ctx, cell, overlay_chans))
             img_label.setAlignment(Qt.AlignCenter)
-            if arr is not None:
-                # One composer for the live grid, the composite row and export:
-                # cell_display_rgb resolves the channel's render / boundary / LUT
-                # / colormap (from channel_opts, or the per-row widgets for legacy
-                # states) so live and exported thumbnails always agree. A
-                # pre-rendered RGB that isn't NUC+SEG goes straight to the overlay
-                # thumbnailer (cell_display_rgb only treats NUC+SEG as overlay).
-                if getattr(arr, "ndim", 2) >= 3 and not _is_nuc_seg(chan):
-                    cropped = crop_tool.apply_to_array(arr) if crop_tool else arr
-                    lo, hi = _parse_lut(ctx, r, chan)
-                    pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
-                else:
-                    rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
-                    pix = make_overlay_thumb(rgb, sz, sz) if rgb is not None else None
-                # CropTool needs the FULL source array + the active crop on
-                # the label so label-pixel → image-pixel coord conversion
-                # works correctly even when the label already shows a crop.
+            if ok:
+                # CropTool needs the FULL source array + the active crop on the
+                # label so label-pixel → image-pixel coord conversion works even
+                # when the label already shows a crop.
                 img_label._raw_arr = arr  # type: ignore[attr-defined]
                 img_label._crop = crop_tool.crop if crop_tool else None  # type: ignore[attr-defined]
-                _install_cell_events(ctx, img_label, crop_tool, well, chan, tp, fov)
+                _install_cell_events(ctx, img_label, crop_tool,
+                                     cell["well"], cell["chan"], cell["tp"], cell["fov"])
                 # Right-click a rendered cell → one-off per-cell override popover
                 # (writes the cell combos the renderer reads, then re-renders).
                 img_label.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -642,11 +689,6 @@ def image_table_generate(ctx) -> None:
     # Axis labels + inter-group spacing that mirror the builder's nesting.
     if plan is not None:
         _facet.render_facet_chrome(grid, plan)
-
-    # Composite row: append one extra bottom row whose cells additively merge
-    # the LUT-colored RGB of every row above them in the same column.
-    if getattr(ctx.state.image_table, "composite", False) and cells:
-        _facet.append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered, plan)
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache

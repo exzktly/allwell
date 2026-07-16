@@ -17,11 +17,13 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: F401
 from well_viewer.core.safe import swallowed
 
 from well_viewer.features.image_browser.image_table.image_compose import (
+    OVERLAY_CHAN,
     _load_array,
     _row_display_opts,
     cell_display_rgb,
-    composite_column_rgb,
+    overlay_cell_rgb,
 )
+from well_viewer.features.image_browser.image_table.grid_layout import _axis_dim_values
 
 
 def _export_opts(ctx) -> Dict[str, Any]:
@@ -185,11 +187,11 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
 
     rows = int(getattr(ctx.state.image_table, "rows", len(cells)) or len(cells))
     cols = int(getattr(ctx.state.image_table, "cols", len(cells[0])) or len(cells[0]))
-    # Composite adds one extra row at the bottom (additive merge of the rows
-    # above, per column). Reserve a subplot row for it up front.
-    composite = bool(getattr(ctx.state.image_table, "composite", False)) and bool(cells)
-    if composite:
-        rows += 1
+    # Overlay: the channel axis has collapsed to the OVERLAY_CHAN sentinel and each
+    # such cell blends every selected channel (matching the live grid). Resolve the
+    # channel set once, off the collapse.
+    overlay_on = bool(getattr(ctx.state.image_table, "composite", False))
+    overlay_chans = _axis_dim_values(ctx, "channel", collapse_overlay=False) if overlay_on else []
 
     cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
     rendered = getattr(ctx.state.image_table, "last_render", None) or {}
@@ -251,29 +253,31 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
             chan = cell["chan"]
             tp = cell["tp"]
             fov = cell["fov"]
+            is_overlay = chan == OVERLAY_CHAN
 
-            arr = rendered.get((r, c))
-            if arr is None and well and chan and tp:
-                use_tophat = _row_display_opts(ctx, r, chan)[0]
-                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
-
-            if arr is not None:
+            if is_overlay:
+                # Blend every selected channel into one image — the same path the
+                # live grid uses (overlay_cell_rgb), so export matches the screen.
+                rgb = overlay_cell_rgb(ctx, cache, cell, r, crop_tool, overlay_chans) \
+                    if (well and tp) else None
+            else:
+                arr = rendered.get((r, c))
+                if arr is None and well and chan and tp:
+                    use_tophat = _row_display_opts(ctx, r, chan)[0]
+                    arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
                 # Render exactly the same RGB the live thumbnail shows —
                 # full mpl colormap + show_binary / show_boundaries toggles +
                 # crop — via the shared single-source helper, so anything that
                 # changes the live look auto-propagates to the export.
-                rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
-                if rgb is not None:
-                    if cell_max_px:
-                        rgb = _max_pool_rgb(rgb, cell_max_px)
-                        ax.imshow(rgb, aspect="equal", interpolation="nearest")
-                    else:
-                        ax.imshow(rgb, aspect="equal")
+                rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr) \
+                    if arr is not None else None
+
+            if rgb is not None:
+                if cell_max_px:
+                    rgb = _max_pool_rgb(rgb, cell_max_px)
+                    ax.imshow(rgb, aspect="equal", interpolation="nearest")
                 else:
-                    ax.text(
-                        0.5, 0.5, "(unrenderable)",
-                        ha="center", va="center", transform=ax.transAxes, fontsize=7,
-                    )
+                    ax.imshow(rgb, aspect="equal")
             else:
                 ax.text(
                     0.5, 0.5, "(no image)",
@@ -281,7 +285,13 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
                 )
 
             if show_titles:
-                if well and chan and tp:
+                if is_overlay and well and tp:
+                    from well_viewer.domain.selections_model import well_display_label
+                    chan_lbl = "+".join(c2.upper() for c2 in overlay_chans) or "overlay"
+                    title = f"{well_display_label(ctx, well)}  {chan_lbl}  T:{tp}"
+                    if fov:
+                        title += f"  FOV:{fov}"
+                elif well and chan and tp:
                     from well_viewer.domain.selections_model import well_display_label
                     title = f"{well_display_label(ctx, well)}  {chan.upper()}  T:{tp}"
                     if fov:
@@ -294,29 +304,6 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
-    if composite:
-        comp_row = len(cells)
-        for c in range(cols):
-            ax = fig.add_subplot(rows, cols, comp_row * cols + c + 1)
-            ax.set_facecolor("none" if transparent_bg else "white")
-            comp = composite_column_rgb(ctx, cache, cells, crop_tool, c, rendered)
-            if comp is not None:
-                if cell_max_px:
-                    comp = _max_pool_rgb(comp, cell_max_px)
-                    ax.imshow(comp, aspect="equal", interpolation="nearest")
-                else:
-                    ax.imshow(comp, aspect="equal")
-            else:
-                ax.text(
-                    0.5, 0.5, "(no image)",
-                    ha="center", va="center", transform=ax.transAxes, fontsize=7,
-                )
-            if show_titles:
-                ax.set_title("Composite", fontsize=title_fontsize)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)
     try:
         fig.tight_layout(w_pad=cell_pad, h_pad=cell_pad)
     except Exception:

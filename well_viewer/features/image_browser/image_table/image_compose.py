@@ -62,6 +62,14 @@ def _tint_from_colormap(name: str) -> Optional[Tuple[float, float, float]]:
 
 NUC_SEG_TOKEN = "NUC+SEG"
 
+# The virtual channel token a cell carries when the Separate↔Overlay switch is on
+# (``state.composite``): the channel axis collapses to a single entry and each such
+# cell additively blends *every* selected channel (``overlay_cell_rgb``) instead of
+# showing one channel. It is a sentinel — never a real channel — so the layout
+# (``grid_layout._axis_dim_values``) emits it as the sole channel value and the
+# renderers (live grid + export) detect it to switch to the blend path.
+OVERLAY_CHAN = "⊕ OVERLAY"
+
 # A "binary" channel variant — e.g. ``"GFP (binary)"`` — is a virtual channel that
 # renders its base channel as the ThreshFracOn threshold-binary (positive cells
 # white). It flows through the axis picker / product / per-cell combo like any
@@ -823,6 +831,48 @@ def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
                 use_tophat = _row_display_opts(ctx, r)[0]
                 arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
         rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
+        if rgb is not None:
+            rgbs.append(rgb)
+    return composite_additive_rgb(rgbs)
+
+
+def _ratio_for_overlay(ctx, chan):
+    """The RatioMetric whose display label matches *chan* (case-insensitive), else
+    None. Inlined so this render layer stays free of a ``grid_layout`` import
+    (which would cycle: grid_layout imports this module)."""
+    for r in (ctx.state.channel.ratio_metrics or []):
+        if r.display_label().upper() == str(chan or "").strip().upper():
+            return r
+    return None
+
+
+def overlay_cell_rgb(ctx, cache, cell, r: int, crop_tool, channels):
+    """Additively blend every channel in *channels* for one cell (well/tp/fov).
+
+    The Separate↔Overlay switch collapses the channel axis: instead of one row /
+    column per channel, each cell shows all selected channels merged into one
+    image. Each channel renders through the SAME per-channel path
+    (:func:`cell_display_rgb`), so its LUT / colormap / boundary / binary options
+    travel with it, then the results are summed and clipped to white by
+    :func:`composite_additive_rgb`. Returns a uint8 (H, W, 3) RGB, or ``None``.
+    """
+    well = cell.get("well")
+    tp = cell.get("tp")
+    fov = cell.get("fov")
+    if not (well and tp):
+        return None
+    rgbs = []
+    for ch in channels:
+        if not ch or ch == OVERLAY_CHAN:
+            continue
+        use_tophat = _row_display_opts(ctx, r, ch)[0]
+        ratio = _ratio_for_overlay(ctx, ch)
+        if ratio is not None:
+            arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
+        else:
+            arr = _load_array(ctx, cache, well, ch, tp, fov, use_tophat=use_tophat)
+        sub = {"well": well, "chan": ch, "tp": tp, "fov": fov}
+        rgb = cell_display_rgb(ctx, cache, sub, r, crop_tool, arr)
         if rgb is not None:
             rgbs.append(rgb)
     return composite_additive_rgb(rgbs)

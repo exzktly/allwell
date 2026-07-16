@@ -16,6 +16,7 @@ from typing import Dict, List, Optional  # noqa: F401
 
 from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: F401
     NUC_SEG_TOKEN,
+    OVERLAY_CHAN,
     _binary_variant,
     _is_binary_variant,
     _norm_token,
@@ -222,13 +223,27 @@ def compose_plate_well(vals: Dict[str, str], rc_index: Dict[tuple, str]) -> None
     vals["well"] = rc_index.get(key, "")
 
 
-def _axis_dim_values(ctx, dim: str) -> List[str]:
+def _overlay_active(ctx) -> bool:
+    """The Separate↔Overlay switch is on (``state.composite``) — the channel axis
+    collapses to a single blended entry instead of one value per channel."""
+    return bool(getattr(ctx.state.image_table, "composite", False))
+
+
+def _axis_dim_values(ctx, dim: str, *, collapse_overlay: bool = True) -> List[str]:
     """Ordered value list a single dimension expands into, from live selections.
 
     Channel/well filter by ``active_channels``/``active_wells``; timepoint/fov
     filter by ``active_timepoints``/``active_fovs`` (empty set = all, so this is a
-    no-op until those filters are populated)."""
+    no-op until those filters are populated).
+
+    When Overlay is on, the *channel* dimension collapses to the single
+    :data:`OVERLAY_CHAN` sentinel so the axis stops expanding one row/column per
+    channel — each cell then blends every channel (see ``overlay_cell_rgb``). Pass
+    ``collapse_overlay=False`` to recover the real channel list (what the blend
+    path iterates)."""
     if dim == "channel":
+        if collapse_overlay and _overlay_active(ctx):
+            return [OVERLAY_CHAN]
         opts = _channel_options(ctx)
         sel = getattr(ctx.state.image_table, "active_channels", None) or set()
         if sel:

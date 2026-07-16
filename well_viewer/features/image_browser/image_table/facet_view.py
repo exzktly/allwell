@@ -20,13 +20,10 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel
 
-from well_viewer.core.ui_helpers import make_overlay_thumb
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.features.image_browser.image_table.image_compose import (
-    composite_column_rgb,
-)
+from well_viewer.features.image_browser.image_table.image_compose import OVERLAY_CHAN
 
 # ``well_row`` / ``well_col`` are the plate (96-well) virtual dims. They carry no
 # render-model cell key of their own — the plate layout composes them into ``well``
@@ -80,6 +77,16 @@ def _fmt(ctx, dim: str, val: str) -> str:
     if dim == "fov":
         return f"FOV:{val}"
     if dim == "channel":
+        if val == OVERLAY_CHAN:
+            # Overlay collapses the channel axis to one blended entry — label it
+            # with the merged channel set (e.g. "GFP+DAPI overlay") instead of the
+            # sentinel token.
+            from well_viewer.features.image_browser.image_table.grid_layout import (
+                _axis_dim_values,
+            )
+            chans = _axis_dim_values(ctx, "channel", collapse_overlay=False)
+            joined = "+".join(str(c).upper() for c in chans)
+            return f"{joined} overlay" if joined else "overlay"
         return str(val).upper()
     if dim == "well":
         # Show the well's custom label (Sample Definitions → Well Labels) instead
@@ -259,37 +266,3 @@ def render_facet_chrome(grid, plan: FacetPlan) -> None:
         grid.setRowMinimumHeight(sr, plan.row_gap)
     for sc in plan.spacer_cols:
         grid.setColumnMinimumWidth(sc, plan.col_gap)
-
-
-def append_composite_row(ctx, cells, grid, cache, crop_tool, sz, rendered,
-                         plan: Optional[FacetPlan] = None) -> None:
-    """Append a bottom row that additively merges the LUT-colored RGB of every
-    row above it in each column. Sits below the faceted grid, aligned to the
-    facet columns, labelled once on the left axis."""
-    comp_row = (plan.bottom_row + 1) if plan is not None else len(cells)
-    if plan is not None:
-        grid.setRowMinimumHeight(plan.bottom_row, plan.row_gap)
-        if plan.first_col:
-            lbl = QLabel("Composite")
-            lbl.setStyleSheet(_inner_qss(plan.label_pt))
-            lbl.setAlignment(Qt.AlignCenter)
-            grid.addWidget(lbl, comp_row, 0, 1, plan.first_col)
-    n_cols = max(len(row) for row in cells)
-    for c in range(n_cols):
-        comp = composite_column_rgb(ctx, cache, cells, crop_tool, c, rendered)
-        cell_widget = QWidget()
-        cl = QVBoxLayout(cell_widget)
-        cl.setContentsMargins(2, 2, 2, 2)
-        cl.setSpacing(2)
-        img_label = QLabel(cell_widget)
-        img_label.setToolTip("Composite")
-        img_label.setAlignment(Qt.AlignCenter)
-        img_label.setFixedSize(sz, sz)
-        pix = make_overlay_thumb(comp, sz, sz, 0.0, 255.0) if comp is not None else None
-        if pix is not None:
-            img_label.setPixmap(pix)
-        else:
-            img_label.setText("(no image)")
-        cl.addWidget(img_label)
-        gc = plan.grid_col_of[c] if plan is not None else c
-        grid.addWidget(cell_widget, comp_row, gc)

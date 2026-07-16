@@ -21,7 +21,7 @@ from well_viewer.features.barplot.tab_view import build_bar_plots_tab
 _HANDLES = (
     "_bar_export_dock", "_chan_cb_bar", "_metric_selector_frame_bar", "_metric_cb_bar",
     "_bar_reset_order_btn", "_bar_tp_button", "_bar_tp_label", "_bar_tp_cb", "_bar_tp_var",
-    "_bar_group_mode_btn", "_bar_pool_reps_btn", "_bar_pool_rset_cells_btn",
+    "_bar_group_mode_btn", "_bar_pool_reps_btn",
     "_swarm_btn", "_violin_btn", "_violin_slider", "_bar_significance_btn",
     "_bar_card", "_bar_fig", "_ax_bar_mean", "_ax_bar_frac", "_ax_bar_n",
     "_bar_canvas", "_bar_scroll_canvas",

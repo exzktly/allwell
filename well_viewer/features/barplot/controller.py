@@ -571,14 +571,6 @@ def toggle_bar_pool_replicates(ctx) -> None:
     redraw_bars(ctx)
 
 
-def toggle_bar_pool_rset_cells(ctx) -> None:
-    """Flip whether violin/beeswarm pool an rset's wells into one column."""
-    from well_viewer.features.barplot.renderer import redraw_bars
-    ctx.state.plot.toggle_bar_pool_rset_cells()
-    refresh_bar_layout_btn_state(ctx)
-    redraw_bars(ctx)
-
-
 def update_bar_tp_selection_display(ctx) -> None:
     """Refresh the bar tab's "(X selected)" label below the picker."""
     sels = ctx.state.bar.tp_selections
@@ -676,20 +668,18 @@ def refresh_bar_layout_btn_state(ctx) -> None:
     """Sync the bar-tab layout toggle buttons with PlotState.
 
     Updates the *Grouping* and *Pooled* button labels / checked states using the
-    "State: On/Off" convention (label and accent highlight always agree). Both
-    replicate buttons stay visible in the Display ▾ popover and are
-    enable-gated instead of visibility-toggled (toggling a child's visibility
-    inside a closed QMenu widget-action does not surface reliably). The
-    pool-replicates button is enabled only when ≥1 replicate set is active; the
-    *Pool rset cells* button only when violin / beeswarm is on AND ≥1 rset is
-    active.
+    "State: On/Off" convention (label and accent highlight always agree). The
+    *Pooled* button stays visible in the Display ▾ popover and is enable-gated
+    instead of visibility-toggled (toggling a child's visibility inside a closed
+    QMenu widget-action does not surface reliably); it is enabled only when ≥1
+    replicate set is active. It governs pooling for bars *and* violin/beeswarm:
+    on collapses each set into one column (its cells pooled for the per-cell
+    views), off keeps one column per well.
     """
     plot = ctx.state.plot
     group_btn = getattr(ctx.runtime.barplot, "group_mode_btn", None)
     pool_btn = getattr(ctx.runtime.barplot, "pool_reps_btn", None)
-    pool_cells_btn = getattr(ctx.runtime.barplot, "pool_rset_cells_btn", None)
     has_rsets = bool(active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths))
-    use_per_cell = bool(ctx.state.bar.violin or ctx.state.bar.swarm)
     if group_btn is not None:
         # Two-way mode selector: label names the current mode, highlight tracks
         # the non-default "timepoint" mode so label and highlight never conflict.
@@ -710,10 +700,4 @@ def refresh_bar_layout_btn_state(ctx) -> None:
             "(off = one column per well)." if has_rsets
             else "Define replicate groups (Sample Definitions → Groups) to "
             "pool them.")
-    if pool_cells_btn is not None:
-        pool_cells_btn.setVisible(True)
-        pool_cells_btn.setEnabled(use_per_cell and has_rsets)
-        pool_cells_btn.setText(
-            "Pool cells: On" if plot.bar_pool_rset_cells else "Pool cells: Off")
-        pool_cells_btn.setChecked(bool(plot.bar_pool_rset_cells))
 

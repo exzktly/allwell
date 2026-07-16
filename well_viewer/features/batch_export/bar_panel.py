@@ -552,17 +552,25 @@ class BarBatchExportPanel(BatchExportPanel):
         from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
 
         # Build the per-column "base" (well + colour + cluster + per-bar label).
+        # When pooling, each rset becomes ONE column whose cells are pooled
+        # across its wells via ``pool_groups`` (the rset *name* is the column
+        # key; ``draw_violin`` / ``draw_beeswarm`` route the row-fetch through
+        # it), matching the on-tab behaviour. Solo wells stay their own columns.
         base_wells: List[str] = []
         base_colors: List[str] = []
         base_full: List[str] = []  # disambiguating identity (cluster header)
+        pool_groups: Optional[Dict[str, List[str]]] = None
         if pool_replicates:
+            pool_groups = {}
             for ri, rset in enumerate(grp.members):
                 color = _WELL_COLORS[ri % len(_WELL_COLORS)]
                 valid = [w for w in rset.wells if w in self._ctx.state.dataset.well_paths]
-                for w in valid:
-                    base_wells.append(w)
-                    base_colors.append(color)
-                    base_full.append(f"{_well_display_label(self._ctx, w)} [{rset.name}]")
+                if not valid:
+                    continue
+                base_wells.append(rset.name)
+                base_colors.append(color)
+                base_full.append(_replicate_display_label(self._ctx, rset))
+                pool_groups[rset.name] = valid
             for w in grp.solo_wells:
                 if w not in self._ctx.state.dataset.well_paths:
                     continue
@@ -627,6 +635,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 plot_tps, tp_str_combined, threshold,
                 xs=xs, group_keys=group_keys,
                 bw=violin_bw,
+                pool_groups=pool_groups,
             )
         else:
             draw_beeswarm(
@@ -634,6 +643,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 plot_wells, plot_colors, plot_labels,
                 plot_tps, tp_str_combined, threshold,
                 xs=xs, group_keys=group_keys,
+                pool_groups=pool_groups,
             )
         if ax_n is not None:
             draw_per_well_n_bars(
@@ -641,5 +651,6 @@ class BarBatchExportPanel(BatchExportPanel):
                 plot_wells, plot_colors, plot_labels,
                 plot_tps, threshold,
                 xs=xs, group_keys=group_keys,
+                pool_groups=pool_groups,
             )
 

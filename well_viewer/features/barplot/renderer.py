@@ -30,7 +30,6 @@ from ui.theme import (
 )
 
 from well_viewer.features.barplot.controller import (
-    apply_bar_ylims as _apply_bar_ylims,
     cluster_centers as _cluster_centers,
     cluster_x_for_group_keys,
     clustered_x_positions as _clustered_x_positions,
@@ -69,7 +68,8 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
     fold-change the frac becomes a ratio (can exceed 1) or subtract result
     (can go negative); the clamp would silently clip the bars and hide the
     FC effect, so we let matplotlib auto-scale instead. User-entered y-lim
-    overrides still apply in either case via ``apply_bar_ylims``.
+    overrides still apply in either case via the export-style pass
+    (``apply_export_style_to_current`` at the end of ``redraw_bars``).
     """
     from well_viewer.domain import fold_change as _fc
     fc_on, _, fc_t0 = _fc.fold_change_state(ctx)
@@ -673,9 +673,9 @@ def draw_grouped_bar_mode(
             n_title, color=tokens_for(ax_n)[1], fontsize=9, fontweight="bold", pad=6,
         )
         ax_n.set_ylabel(n_ylabel, fontsize=8, labelpad=5)
-    _apply_bar_ylims(ctx, ax_mean, ax_frac, ax_n=ax_n)
-    # Significance brackets (N7) — after ylims so the bracket headroom isn't
-    # clipped; the helper extends the Mean panel's top to fit.
+    # Significance brackets (N7) — the helper extends the Mean panel's top to fit
+    # the brackets. User y-limits (if any) are applied last by
+    # ``apply_export_style_to_current`` at the end of ``redraw_bars``.
     draw_significance_brackets(ctx, items, ax_mean=ax_mean, ax_frac=ax_frac,
                                target_ts=target_ts)
     if fc_misses:
@@ -1018,7 +1018,6 @@ def draw_per_cell_bar_mode(
             cell_scale=cell_scale,
             pool_groups=pool_groups,
         )
-    _apply_bar_ylims(ctx, ax_mean, ax_frac, ax_n=ax_n)
     # Even in violin/beeswarm mode the user wants to see the events
     # above threshold count alongside the distribution.
     if ax_n is not None:

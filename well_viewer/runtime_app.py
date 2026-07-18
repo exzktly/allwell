@@ -73,7 +73,6 @@ from well_viewer.core.widget_registry import WidgetRegistry
 from well_viewer.core.lazy import lazy as _lazy, lazy_names as _lazy_names
 
 
-_bar_apply_ylims = _lazy("well_viewer.features.barplot.controller", "apply_bar_ylims")
 _bar_ordered_keys = _lazy("well_viewer.features.barplot.controller", "ordered_bar_keys")
 
 
@@ -339,10 +338,6 @@ class WellViewerApp(QWidget):
         # _violin_bw_edit) are registered by the view builders via
         # WidgetRegistry; readers use ctx.widgets.get_or_none / has, so no
         # None-seed is needed here (A1).
-        self._runtime.barplot.ylim_mean_lo_edit = None
-        self._runtime.barplot.ylim_mean_hi_edit = None
-        self._runtime.barplot.ylim_frac_lo_edit = None
-        self._runtime.barplot.ylim_frac_hi_edit = None
         # Draw order and fold-change normalization state live in
         # ``self._app_state.plot`` (well_viewer/state/plot.py) — see the shims.
         # Plate selection and the unified saved-selections ("v2") model now
@@ -1082,15 +1077,6 @@ class WellViewerApp(QWidget):
 
     def _on_bar_drag_motion(self, event) -> None: on_bar_drag_motion(self._ctx, event, accent_color=ACCENT)
 
-
-    def _apply_bar_ylims(
-        self,
-        ax_mean: "Axes",
-        ax_frac: "Axes",
-        ax_n=None,
-    ) -> None:
-        """Apply user-specified y-axis limits to the bar panels."""
-        _bar_apply_ylims(self._ctx, ax_mean, ax_frac, ax_n=ax_n)
 
     def _toggle_swarm(self) -> None: return toggle_swarm(self._ctx)
 

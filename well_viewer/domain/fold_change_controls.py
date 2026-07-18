@@ -270,29 +270,34 @@ def _sync_widgets_to_state(ctx, *, skip_scope: str = "") -> None:
             _repopulate_order_combo(ctx, order_combo)
 
 
+_BAR_LIMIT_KEYS = ("x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max")
+
+
 def _reset_bar_ylim_edits(ctx) -> None:
-    """Clear the bar plot's user-entered y-lim edits so the autofit reclaims
-    the panels. Idempotent and no-op when the edits aren't built yet."""
-    bar_rt = ctx.runtime.barplot
-    for attr in (
-        "ylim_mean_lo_edit", "ylim_mean_hi_edit",
-        "ylim_frac_lo_edit", "ylim_frac_hi_edit",
-    ):
-        edit = getattr(bar_rt, attr, None)
-        if edit is None:
-            continue
-        setter = getattr(edit, "setText", None)
-        if not callable(setter):
-            continue
-        blocked = False
-        blocker = getattr(edit, "blockSignals", None)
-        if callable(blocker):
-            blocked = blocker(True)
-        try:
-            setter("")
-        finally:
-            if callable(blocker):
-                blocker(blocked)
+    """Drop the bar plot's user-entered axis limits so the autofit reclaims the
+    panels after a fold-change change.
+
+    A fold-change mutation moves the bar values onto a different scale (raw
+    100-1500 vs ratio 0-10 vs subtract -100..300), so previously pinned limits no
+    longer make sense. The limits live in the per-figure export-axis store
+    (``ctx.state.export_prefs.axis_prefs['bar']``) — both the flat keys and the
+    per-panel ``axis_buckets``; log scale / font sizes / axis target are kept.
+    Idempotent and a no-op when nothing is stored yet."""
+    export_prefs = getattr(getattr(ctx, "state", None), "export_prefs", None)
+    axis_prefs = getattr(export_prefs, "axis_prefs", None)
+    if not isinstance(axis_prefs, dict):
+        return
+    bar = axis_prefs.get("bar")
+    if not isinstance(bar, dict):
+        return
+    for _k in _BAR_LIMIT_KEYS:
+        bar.pop(_k, None)
+    buckets = bar.get("axis_buckets")
+    if isinstance(buckets, dict):
+        for _b in buckets.values():
+            if isinstance(_b, dict):
+                for _k in _BAR_LIMIT_KEYS:
+                    _b.pop(_k, None)
 
 
 def set_fold_change_state(
@@ -336,8 +341,7 @@ def set_fold_change_state(
     # Any FC mutation invalidates the user's previous y-axis range —
     # under different FC settings the bar values live on a different
     # scale (raw 100-1500 vs ratio 0-10 vs subtract -100 to 300). Clear
-    # the user-entered y-lim edits so apply_bar_ylims falls through and
-    # the autofit takes over.
+    # the stored bar axis limits so the renderer's autofit takes over.
     _reset_bar_ylim_edits(ctx)
 
     _sync_widgets_to_state(ctx, skip_scope=initiating_scope)

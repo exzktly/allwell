@@ -255,6 +255,15 @@ def _ensure_export_style_prefs(ctx) -> dict:
     ep = ctx.state.export_prefs
     if ep.style_prefs is None:
         ep.style_prefs = dict(DEFAULT_EXPORT_STYLE_PREFS)
+    else:
+        # Backfill any missing default keys. ``view_state`` persists only the
+        # non-default diff, so a restored dict (or one built from a partial saved
+        # blob) can be missing default-valued keys. Every sidebar/redraw read
+        # routes through here (via ``figure_prefs``), and the Properties panel
+        # reads keys like ``axis_label_size`` with bracket access — a missing key
+        # would raise ``KeyError`` and stop the panel from opening.
+        for _k, _v in DEFAULT_EXPORT_STYLE_PREFS.items():
+            ep.style_prefs.setdefault(_k, _v)
     return ep.style_prefs
 
 
@@ -380,6 +389,20 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         if v in (None, ""):
             v = prefs.get(key, default)
         return int(float(v))
+
+    def _axis_limit(_idx, key):
+        # Per-axis limit: a panel's own bucket entry wins so every subplot of a
+        # multi-panel figure (e.g. the bar Value/Fraction/Events stack) keeps its
+        # own x/y limits set via the "Axis #" picker. Fall back to the flat pref
+        # only for the targeted axis (or an "All"/single-panel target, and the
+        # plain-dict batch-export callers with no buckets), which preserves the
+        # prior single-axis behaviour when no bucket entry exists.
+        raw = (_axis_buckets.get(str(_idx)) or {}).get(key)
+        if raw not in (None, ""):
+            return _to_float_or_none(raw)
+        if target_idx is None or _idx == target_idx:
+            return _to_float_or_none(prefs.get(key, ""))
+        return None
 
     for idx, ax in enumerate(fig.axes, start=1):
         _tick_sz = _axis_font_size(idx, "tick_label_size", 10)
@@ -596,17 +619,22 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         show_grid = bool(prefs.get("grid_show", True))
         ax.grid(show_grid, alpha=float(prefs.get("grid_alpha", 0.25)), linestyle=str(prefs.get("grid_style", "--")))
 
+        # Axis limits are applied per-panel (each axis reads its own bucketed
+        # limit), not just to the targeted axis — so a limit set on any panel of a
+        # multi-panel figure sticks and renders on every redraw. (Log scaling
+        # below stays scoped to the targeted axis.)
+        xlo = _axis_limit(idx, "x_lim_min")
+        xhi = _axis_limit(idx, "x_lim_max")
+        ylo = _axis_limit(idx, "y_lim_min")
+        yhi = _axis_limit(idx, "y_lim_max")
+        if xlo is not None or xhi is not None:
+            cur = ax.get_xlim()
+            ax.set_xlim(xlo if xlo is not None else cur[0], xhi if xhi is not None else cur[1])
+        if ylo is not None or yhi is not None:
+            cur = ax.get_ylim()
+            ax.set_ylim(ylo if ylo is not None else cur[0], yhi if yhi is not None else cur[1])
+
         if target_idx is None or idx == target_idx:
-            xlo = _to_float_or_none(prefs.get("x_lim_min", ""))
-            xhi = _to_float_or_none(prefs.get("x_lim_max", ""))
-            ylo = _to_float_or_none(prefs.get("y_lim_min", ""))
-            yhi = _to_float_or_none(prefs.get("y_lim_max", ""))
-            if xlo is not None or xhi is not None:
-                cur = ax.get_xlim()
-                ax.set_xlim(xlo if xlo is not None else cur[0], xhi if xhi is not None else cur[1])
-            if ylo is not None or yhi is not None:
-                cur = ax.get_ylim()
-                ax.set_ylim(ylo if ylo is not None else cur[0], yhi if yhi is not None else cur[1])
             # ``_aw_force_xlog``/``_aw_force_ylog`` let an axis pin its own log
             # state (the scatter plot defaults to log/log via a scatter-specific
             # pref) so the shared x_log/y_log — which other plot types reset —

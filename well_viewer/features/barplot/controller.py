@@ -13,7 +13,6 @@ from typing import List, Optional
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
-from well_viewer.core.ui_helpers import parse_float_edit as _parse_float_edit
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 
 _logger = logging.getLogger(__name__)
@@ -235,7 +234,8 @@ def render_bar_items(
     # ── Auto-fit y-limits ────────────────────────────────────────────────────
     # Honest 0 baseline; trim top to tallest bar + error + ~8% headroom so the
     # error caps aren't clipped. Frac panel is capped at 1.05 when FC is off.
-    # apply_bar_ylims runs AFTER this and applies user-entered overrides.
+    # User-entered y-limits (Properties sidebar) are applied last, per-panel, by
+    # ``apply_export_style_to_current`` at the end of ``redraw_bars``.
     _HEADROOM = 1.08
 
     def _tops_lows(get_val, get_spread):
@@ -284,30 +284,6 @@ def render_bar_items(
             ax_n.yaxis.set_major_locator(MaxNLocator(integer=False))
         except ImportError:
             pass
-
-
-def apply_bar_ylims(ctx, ax_mean, ax_frac, *, ax_n=None) -> None:
-    """Apply user-entered y-limits to the bar panels (linear scale only)."""
-    def _parse(edit) -> Optional[float]:
-        return _parse_float_edit(edit)
-
-    mean_lo = _parse(ctx.runtime.barplot.ylim_mean_lo_edit)
-    mean_hi = _parse(ctx.runtime.barplot.ylim_mean_hi_edit)
-    if mean_lo is not None or mean_hi is not None:
-        cur_lo, cur_hi = ax_mean.get_ylim()
-        lo = mean_lo if mean_lo is not None else cur_lo
-        hi = mean_hi if mean_hi is not None else cur_hi
-        if hi > lo:
-            ax_mean.set_ylim(lo, hi)
-
-    frac_lo = _parse(ctx.runtime.barplot.ylim_frac_lo_edit)
-    frac_hi = _parse(ctx.runtime.barplot.ylim_frac_hi_edit)
-    if frac_lo is not None or frac_hi is not None:
-        cur_lo, cur_hi = ax_frac.get_ylim()
-        lo = frac_lo if frac_lo is not None else cur_lo
-        hi = frac_hi if frac_hi is not None else cur_hi
-        if hi > lo:
-            ax_frac.set_ylim(lo, hi)
 
 
 # ── Drag-and-drop reordering ─────────────────────────────────────────────────

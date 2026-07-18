@@ -411,13 +411,20 @@ def restore(ctx, state: dict) -> None:
         # Axis-scoped keys are persisted per-figure (below); strip any that
         # linger in a pre-split saved global dict so they can't leak into every
         # tab (or the batch-export path) on load.
-        from well_viewer.core.plot_style import AXIS_SCOPED_PREF_KEYS
+        from well_viewer.core.plot_style import (
+            AXIS_SCOPED_PREF_KEYS,
+            DEFAULT_EXPORT_STYLE_PREFS,
+        )
         clean_in = {k: v for k, v in prefs_in.items() if k not in AXIS_SCOPED_PREF_KEYS}
         existing = ctx.state.export_prefs.style_prefs
-        if isinstance(existing, dict):
-            existing.update(clean_in)
-        else:
-            ctx.state.export_prefs.style_prefs = dict(clean_in)
+        if not isinstance(existing, dict):
+            # Seed the full default set before layering the saved (non-default)
+            # diff on top. ``export_style_prefs`` is persisted as a diff only, so
+            # a bare ``dict(clean_in)`` would leave the prefs missing default keys
+            # (crashing the Properties sidebar's bracket reads on restore).
+            existing = dict(DEFAULT_EXPORT_STYLE_PREFS)
+            ctx.state.export_prefs.style_prefs = existing
+        existing.update(clean_in)
 
     axis_in = state.get("export_axis_prefs")
     if isinstance(axis_in, dict):

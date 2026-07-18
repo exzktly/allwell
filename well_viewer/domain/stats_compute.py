@@ -39,16 +39,18 @@ def replicate_unit(n_wells: int, use_fov: bool) -> str:
     the per-FOV toggle. The ONE rule shared by the Statistics test and the bar/
     line error bars so the test's ``n`` and the plotted spread never disagree.
 
-    - ``>=2`` wells -> ``"well"``: each well is a replicate (its FOVs pooled).
-    - ``1`` well + FOV mode on -> ``"fov"``: each FOV within the well is a replicate.
-    - ``1`` well + FOV mode off -> ``"well"`` (a single replicate; no spread, and
-      the stats test — needing ``n>=2`` — will decline it).
+    - FOV mode ON -> ``"fov"``: every FOV (across *all* the group's loaded wells)
+      is an independent replicate — the FOVs are pooled across wells, so a
+      multi-well group gets ``n`` = total FOVs, not the well count.
+    - FOV mode OFF, ``>=1`` well -> ``"well"``: each well is a replicate (its FOVs
+      pooled). A single well then yields ``n=1`` (no spread; the stats test, needing
+      ``n>=2``, declines it).
     - ``0`` wells -> ``"none"``.
     """
     if n_wells <= 0:
         return "none"
-    if n_wells == 1:
-        return "fov" if use_fov else "well"
+    if use_fov:
+        return "fov"
     return "well"
 
 
@@ -157,12 +159,12 @@ def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
 def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                           fluor_gates=None) -> "List[ReplicateStat]":
     """THE canonical producer of per-replicate summaries for a group at a
-    timepoint. One record per replicate (per well, or per FOV of the single well
-    when ``replicate_unit`` is ``"fov"``); ``[]`` when there are no loaded wells.
-    Statistics and both plot error-bar paths reduce this same list, so they can
-    never describe different units of replication. Mean / fraction / n come from
-    :func:`aggregate_well` (the same aggregator the plots use, honoring the
-    MockApp delegate)."""
+    timepoint. One record per replicate — per well, or per FOV (pooled across all
+    of the group's wells) when ``replicate_unit`` is ``"fov"``; ``[]`` when there
+    are no loaded wells. Statistics and both plot error-bar paths reduce this same
+    list, so they can never describe different units of replication. Mean /
+    fraction / n come from :func:`aggregate_well` (the same aggregator the plots
+    use, honoring the MockApp delegate)."""
     loaded = [w for w in wells if w in ctx.state.dataset.well_paths]
     unit = replicate_unit(len(loaded), use_fov)
     if unit == "none":
@@ -180,20 +182,21 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
                            val_col, fluor_gates, ratios, on_col)
             if rs is not None:
                 reps.append(rs)
-    else:  # "fov": exactly one loaded well; each of its FOVs is a replicate
-        lbl = loaded[0]
-        df = _safe_rows(ctx, lbl)
-        if df is None or len(df) == 0:
-            # Pre-aggregated backends (MockApp) have no raw rows to split — the
-            # well is its own single replicate.
-            rs = _rep_from(None,
-                           aggregate_well(ctx, lbl, threshold=threshold,
-                                          use_sem=False, val_col=val_col,
-                                          fluor_gates=fluor_gates),
-                           target_t, threshold, val_col, fluor_gates, ratios, on_col)
-            if rs is not None:
-                reps.append(rs)
-        else:
+    else:  # "fov": every FOV across all loaded wells is one replicate (pooled)
+        for lbl in loaded:
+            df = _safe_rows(ctx, lbl)
+            if df is None or len(df) == 0:
+                # Pre-aggregated backends (MockApp) have no raw rows to split —
+                # the well contributes a single replicate.
+                rs = _rep_from(None,
+                               aggregate_well(ctx, lbl, threshold=threshold,
+                                              use_sem=False, val_col=val_col,
+                                              fluor_gates=fluor_gates),
+                               target_t, threshold, val_col, fluor_gates, ratios,
+                               on_col)
+                if rs is not None:
+                    reps.append(rs)
+                continue
             fov = _norm_fov(df)
             for fov_id in pd.unique(fov):
                 sub = df[fov == fov_id]
@@ -408,9 +411,9 @@ def compute_rep_per_fov_stats(
 
     Returns ``(mean, mean_err, frac, frac_err, n_above_pf_mean,
     n_above_pf_spread)`` where the error fields are the SD/SEM across the
-    pooled per-FOV means/fractions/counts. FOV identifiers are
-    disambiguated by prefixing with the source well label so identical FOV
-    numbers in different wells stay distinct.
+    pooled per-FOV means/fractions/counts. Each FOV of each well is one
+    replicate (``group_replicate_stats`` processes the wells' frames
+    separately, so identical FOV numbers in different wells stay distinct).
     """
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_pf", rset.name, tuple(rset.wells), target_t, threshold,
@@ -421,8 +424,8 @@ def compute_rep_per_fov_stats(
 
     # Per-FOV replicates come from the shared producer (``use_fov=True``), so the
     # spread here is taken across the exact same FOV replicate values the Stats
-    # tab tests. For a single-well set that's the well's FOVs; the call site only
-    # routes here when ``replicate_unit`` is "fov".
+    # tab tests: every FOV across all of the set's loaded wells. The call site
+    # only routes here when ``replicate_unit`` is "fov" (i.e. FOV mode on).
     reps = group_replicate_stats(
         ctx, rset.wells, target_t, use_fov=True,
         val_col=ctx.state.channel.active_val_col,

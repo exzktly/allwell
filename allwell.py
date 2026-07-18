@@ -258,7 +258,9 @@ class AllWellApp(QMainWindow):
         self._present_mode = "screen"
         self._present_btn = IconButton("image")
         self._present_btn.setCheckable(True)
-        self._present_btn.setChecked(True)
+        # Presentation mode is opt-in: unchecked (inactive) is the default Screen
+        # (dark) look; checking it flips all plots to the Publication export look.
+        self._present_btn.setChecked(False)
         self._present_btn.setToolTip("Presentation mode: toggle all plots screen ↔ publication")
         self._present_btn.toggled.connect(self._on_present_toggled)
         hl.addWidget(self._present_btn)
@@ -614,7 +616,8 @@ class AllWellApp(QMainWindow):
 
     def _on_present_toggled(self, on: bool) -> None:
         """Flip every known PlotCard's plotTheme together."""
-        self._present_mode = "screen" if on else "publication"
+        # Checked (active) = Publication (presentation); unchecked = Screen (dark).
+        self._present_mode = "publication" if on else "screen"
         self._present_btn.setToolTip(
             f"Presentation mode: currently {self._present_mode} — click to toggle"
         )

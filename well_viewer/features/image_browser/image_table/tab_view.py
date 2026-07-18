@@ -91,7 +91,10 @@ def _build_properties_dock(ctx, dock) -> None:
     label font sizes, as Label:[Stepper] rows that live-re-render. A header with a
     close button matches the figure-properties panel other tabs slide out."""
     from widgets.icon_button import IconButton
-    dock.setFixedWidth(248)
+    # Wide enough that the two-column rows fit a label + a full-text dropdown
+    # ("Bottom-right") without truncating, even with the scrollbar shown. Still far
+    # narrower than the plotting Export panel (440), so it's a modest footprint.
+    dock.setFixedWidth(288)
     panel = QFrame(dock)
     panel.setObjectName("Panel")
     pl = QVBoxLayout(panel)
@@ -130,8 +133,11 @@ def _build_properties_dock(ctx, dock) -> None:
         st = Stepper(panel, value=float(getattr(its, key, default)),
                      minimum=float(lo), maximum=float(hi), single_step=1.0, decimals=0)
         st.setToolTip(tip)
+        # A 1–4 digit value doesn't need the full column; cap + left-align it so
+        # the ▴/▾ column isn't shoved against (and clipped by) the panel edge.
+        st.setMaximumWidth(66)
         st.valueChanged.connect(lambda v, k=key: image_table_set_spacing(ctx, k, v))
-        grid.addWidget(st, r[0], 1)
+        grid.addWidget(st, r[0], 1, Qt.AlignLeft)
         r[0] += 1
 
     def _propf(label: str, key: str, default: float, lo: float, hi: float,
@@ -143,8 +149,10 @@ def _build_properties_dock(ctx, dock) -> None:
                      minimum=float(lo), maximum=float(hi), single_step=step,
                      decimals=decimals)
         st.setToolTip(tip)
+        # µm/px shows up to 3 decimals ("0.000"); still far narrower than the column.
+        st.setMaximumWidth(92)
         st.valueChanged.connect(lambda v, k=key: image_table_set_display(ctx, k, v))
-        grid.addWidget(st, r[0], 1)
+        grid.addWidget(st, r[0], 1, Qt.AlignLeft)
         r[0] += 1
 
     def _combo(label: str, key: str, choices, tip: str) -> None:
@@ -153,6 +161,9 @@ def _build_properties_dock(ctx, dock) -> None:
         grid.addWidget(lab, r[0], 0)
         cb = QComboBox(panel)
         cb.setToolTip(tip)
+        # Fit the longest option ("Bottom-right") plus the dropdown arrow without
+        # truncating the current text.
+        cb.setMinimumWidth(132)
         for disp, val in choices:
             cb.addItem(disp, val)
         ix = cb.findData(getattr(its, key, None))
@@ -197,10 +208,10 @@ def _build_properties_dock(ctx, dock) -> None:
           "Font size of the facet-group band labels (nested axes only).")
 
     _cap("Scale bar")
-    _propf("Pixel size (µm/px)", "pixel_size_um", 0.0, 0.0, 100.0, 0.05, 3,
+    _propf("Pixel µm/px", "pixel_size_um", 0.0, 0.0, 100.0, 0.05, 3,
            "Physical size of one pixel in microns. Not stored by the pipeline — "
            "enter it to enable the scale bar. 0 = off.")
-    _propf("Bar length (µm)", "scale_bar_um", 0.0, 0.0, 5000.0, 1.0, 1,
+    _propf("Bar length µm", "scale_bar_um", 0.0, 0.0, 5000.0, 1.0, 1,
            "Scale-bar length in microns. 0 = off. Bar pixels = length ÷ pixel size.")
     _combo("Show on", "scale_bar_cells", _CELLS,
            "Which cell(s) show the scale bar: every cell, or one grid corner.")

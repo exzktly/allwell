@@ -220,8 +220,21 @@ def _build_properties_dock(ctx, dock) -> None:
     _combo("Colour", "label_color", _COLORS, "Label text colour.")
     _check("Background box", "label_bg",
            "Draw a translucent dark box behind the label for legibility.")
-    pl.addLayout(grid)
-    pl.addStretch(1)
+
+    # The panel grew several sections (spacing + fonts + scale bar + labels), so it
+    # can be taller than a short / Split-View pane. Scroll the controls (header +
+    # close stay pinned) instead of clipping the bottom rows.
+    content = QWidget()
+    cl = QVBoxLayout(content)
+    cl.setContentsMargins(0, 0, 0, 0)
+    cl.addLayout(grid)
+    cl.addStretch(1)
+    scroll = QScrollArea(panel)
+    scroll.setWidgetResizable(True)
+    scroll.setFrameShape(QFrame.NoFrame)
+    scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    scroll.setWidget(content)
+    pl.addWidget(scroll, 1)
     dock.layout().addWidget(panel)
 
 

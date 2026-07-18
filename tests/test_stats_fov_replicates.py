@@ -4,9 +4,9 @@ same values the bar/line error bars reduce, so the test's ``n`` and the plotted
 spread can't disagree.
 
 Rule:
-- >=2 loaded wells -> per-well (n = #wells), FOV toggle irrelevant.
-- 1 well + FOV mode on -> per-FOV (n = #FOVs).
-- 1 well + FOV mode off -> a single value (n=1); the test is declined.
+- FOV mode on -> per-FOV (n = total FOVs, pooled across all of the group's wells).
+- FOV mode off, >=2 wells -> per-well (n = #wells).
+- FOV mode off, 1 well -> a single value (n=1); the test is declined.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ _VAL = "gfp_mean_intensity"
 
 def test_replicate_unit_rule():
     assert replicate_unit(2, False) == "well"
-    assert replicate_unit(2, True) == "well"      # replicate set ignores the toggle
+    assert replicate_unit(2, True) == "fov"       # FOV mode pools FOVs across wells
     assert replicate_unit(1, True) == "fov"
     assert replicate_unit(1, False) == "well"     # single well, no FOV replicates
     assert replicate_unit(0, True) == "none"
@@ -37,14 +37,17 @@ def _grp(name, wells):
     return BarGroup(name, solo_wells=list(wells))
 
 
-def test_multi_well_is_per_well_both_toggle_states(loaded_app_multifov):
-    """A replicate set tests across wells (n = #wells) regardless of FOV mode."""
+def test_multi_well_pools_fovs_when_fov_on(loaded_app_multifov):
+    """A multi-well group tests per-well with FOV off (n = #wells) and per-FOV,
+    pooled across wells, with FOV on (n = total FOVs)."""
     app = loaded_app_multifov
     grp = _grp("G", ["A01", "A02"])
-    for use_fov in (True, False):
-        vals = collect_group_values(app._ctx, grp, 0.0, val_col=_VAL, threshold=0.0,
-                                    statistic="mean", use_fov=use_fov)
-        assert len(vals) == 2, use_fov  # two wells → two replicates
+    vals_off = collect_group_values(app._ctx, grp, 0.0, val_col=_VAL, threshold=0.0,
+                                    statistic="mean", use_fov=False)
+    assert len(vals_off) == 2  # two wells → two replicates
+    vals_on = collect_group_values(app._ctx, grp, 0.0, val_col=_VAL, threshold=0.0,
+                                   statistic="mean", use_fov=True)
+    assert len(vals_on) == 6   # 2 wells × 3 FOVs → six replicates
 
 
 def test_single_well_fov_on_is_per_fov(loaded_app_multifov):
@@ -109,15 +112,25 @@ def test_unity_plot_spread_reduces_same_replicates_as_stats(loaded_app_multifov)
     import numpy as np
     app = loaded_app_multifov
 
-    # Multi-well: plot per-well spread == SD of the stats' per-well values.
+    # Multi-well, FOV off: plot per-well spread == SD of the stats' per-well values.
     rset = ReplicateSet("R", ["A01", "A02"])
-    reps = group_replicate_stats(app._ctx, rset.wells, 0.0, use_fov=True,
+    reps = group_replicate_stats(app._ctx, rset.wells, 0.0, use_fov=False,
                                  val_col=_VAL, threshold=0.0)
     assert len(reps) == 2
     gm, gerr, _gf, _fe = compute_rep_stats(app._ctx, rset, 0.0, 0.0, use_sem=False)
     means = np.array([r.mean for r in reps])
     assert np.isclose(gm, means.mean())
     assert np.isclose(gerr, means.std(ddof=1))
+
+    # Multi-well, FOV on: plot per-FOV spread == SD of the stats' pooled per-FOV
+    # values (FOVs pooled across both wells).
+    fov_reps_multi = group_replicate_stats(app._ctx, rset.wells, 0.0, use_fov=True,
+                                           val_col=_VAL, threshold=0.0)
+    assert len(fov_reps_multi) == 6
+    fm_m, ferr_m, *_ = compute_rep_per_fov_stats(app._ctx, rset, 0.0, 0.0, use_sem=False)
+    fmeans_m = np.array([r.mean for r in fov_reps_multi])
+    assert np.isclose(fm_m, fmeans_m.mean())
+    assert np.isclose(ferr_m, fmeans_m.std(ddof=1))
 
     # Single well: plot per-FOV spread == SD of the stats' per-FOV values.
     solo = ReplicateSet("S", ["A01"])

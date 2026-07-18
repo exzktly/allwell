@@ -82,3 +82,43 @@ def test_apply_uses_per_figure_axis_state():
     ax2.plot([1, 2, 3], [1, 10, 100])
     PS.apply_export_style_to_current(app._ctx, app._bar_fig)
     assert app._bar_fig.axes[0].get_yscale() == "linear"
+
+
+def test_ensure_style_prefs_backfills_missing_defaults():
+    """A partial/empty persisted ``style_prefs`` (view_state stores only the
+    non-default diff) must be backfilled with every default key, so the
+    Properties sidebar's bracket reads (e.g. ``axis_label_size``) never KeyError.
+    Regression: the sidebar failed to open on a restored dataset."""
+    app = _app()
+    # Simulate a restore that left a diff-only (partial) dict.
+    app._app_state.export_prefs.style_prefs = {"x_tick_angle": 45}
+    prefs = PS.figure_prefs(app._ctx, app._bar_fig)
+    # Bracket-reading every global default key must not raise.
+    for k in PS.DEFAULT_EXPORT_STYLE_PREFS:
+        _ = prefs[k]
+    assert prefs["axis_label_size"] == PS.DEFAULT_EXPORT_STYLE_PREFS["axis_label_size"]
+    assert prefs["x_tick_angle"] == 45  # the saved non-default value survives
+
+
+def test_per_axis_limits_apply_to_each_panel():
+    """Each panel of a multi-panel figure keeps its own y-limit (the bar
+    Value/Fraction/Events stack): a limit stored in one axis's bucket applies to
+    that axis and not the others. Regression: bar y-limits were read from a flat
+    value + single-axis gate, so per-panel limits were ignored."""
+    app = _app()
+    fig = app._bar_fig
+    fig.add_subplot(3, 1, 1).plot([0, 1], [0, 100])
+    fig.add_subplot(3, 1, 2).plot([0, 1], [0, 1])
+    fig.add_subplot(3, 1, 3).plot([0, 1], [0, 50])
+    prefs = PS.figure_prefs(app._ctx, fig)
+    # Store per-axis limits the way the sidebar's _persist does.
+    prefs["axis_target"] = "1"
+    prefs["axis_buckets"] = {
+        "1": {"y_lim_min": "0", "y_lim_max": "10"},
+        "2": {"y_lim_min": "0.2", "y_lim_max": "0.8"},
+    }
+    PS.apply_export_style_to_current(app._ctx, fig)
+    assert fig.axes[0].get_ylim() == (0.0, 10.0)   # Value panel keeps its own limit
+    assert fig.axes[1].get_ylim() == (0.2, 0.8)    # Fraction panel keeps its own limit
+    # Panel 3 has no stored limit and is not the target → not pinned to panel 1's.
+    assert fig.axes[2].get_ylim() != (0.0, 10.0)

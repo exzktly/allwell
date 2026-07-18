@@ -27,10 +27,10 @@ def test_sig_marker_thresholds():
 
 
 def test_resolve_sample_units():
-    assert _resolve_sample_units(True, []) == "per-cell values"
-    assert _resolve_sample_units(True, ["G1"]) == "per-cell values"
-    assert "per-well samples" == _resolve_sample_units(False, [])
-    assert "single-well" in _resolve_sample_units(False, ["G1"])
+    assert _resolve_sample_units(True, False) == "per-cell values"
+    assert _resolve_sample_units(True, True) == "per-cell values"   # KS ignores FOV
+    assert "per-well samples" == _resolve_sample_units(False, False)
+    assert "per-FOV" in _resolve_sample_units(False, True)
 
 
 def test_group_summary_skips_empty_and_computes_stats():
@@ -55,7 +55,7 @@ def test_group_summary_single_value_sd_zero():
 def test_header_lines_ks_variant():
     lines = _build_header_lines(
         test="KS test", channel_lbl="GFP", stat_lbl="mean", threshold=1.5,
-        tp_str="24", is_ks=True, solo_groups=[],
+        tp_str="24", is_ks=True, use_fov=False,
     )
     joined = "\n".join(lines)
     assert "Statistic:  per-cell distribution" in joined
@@ -63,14 +63,25 @@ def test_header_lines_ks_variant():
     assert "Threshold:  1.50" in joined
 
 
-def test_header_lines_solo_note_inserted():
+def test_header_lines_fov_note_inserted():
     lines = _build_header_lines(
         test="Mann-Whitney U", channel_lbl="GFP", stat_lbl="mean", threshold=1.0,
-        tp_str="24", is_ks=False, solo_groups=["G1", "G2"],
+        tp_str="24", is_ks=False, use_fov=True,
     )
     joined = "\n".join(lines)
-    assert "Note:       single-well group(s) G1, G2" in joined
+    assert "Note:       FOV mode is ON" in joined
+    assert "per-FOV (FOVs pooled across each group's wells)" in joined
     assert "Statistic:  mean" in joined
+
+
+def test_header_lines_no_fov_note_when_off():
+    lines = _build_header_lines(
+        test="Mann-Whitney U", channel_lbl="GFP", stat_lbl="mean", threshold=1.0,
+        tp_str="24", is_ks=False, use_fov=False,
+    )
+    joined = "\n".join(lines)
+    assert "Note:" not in joined
+    assert "Samples:    per-well samples" in joined
 
 
 def test_pairwise_lines_significant_error_and_adjusted():

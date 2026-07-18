@@ -288,23 +288,22 @@ def _sig_marker(p: float) -> str:
     return "***" if p < 0.001 else "**" if p < 0.01 else "*" if p < 0.05 else "ns"
 
 
-def _resolve_sample_units(is_ks: bool, solo_groups: List[str]) -> str:
+def _resolve_sample_units(is_ks: bool, use_fov: bool) -> str:
     """The 'Samples:' descriptor for the report header (audit A5)."""
     if is_ks:
         return "per-cell values"
-    if solo_groups:
-        return ("per-well (replicate sets) · per-FOV (single-well "
-                "groups, FOV mode on)")
+    if use_fov:
+        return "per-FOV (FOVs pooled across each group's wells)"
     return "per-well samples"
 
 
 def _build_header_lines(
     *, test: str, channel_lbl: str, stat_lbl: str, threshold: float,
-    tp_str: str, is_ks: bool, solo_groups: List[str],
+    tp_str: str, is_ks: bool, use_fov: bool,
 ) -> List[str]:
     """Assemble the report header block (audit A5). Pure — takes resolved
-    labels and returns the lines, including the single-well FOV note."""
-    sample_units = _resolve_sample_units(is_ks, solo_groups)
+    labels and returns the lines, including the FOV-mode note."""
+    sample_units = _resolve_sample_units(is_ks, use_fov)
     header_lines: List[str] = [
         f"Test:       {test}",
         f"Channel:    {channel_lbl}",
@@ -314,11 +313,10 @@ def _build_header_lines(
         f"Samples:    {sample_units}",
         "",
     ]
-    if solo_groups and not is_ks:
+    if use_fov and not is_ks:
         header_lines.insert(-1,
-            "Note:       single-well group(s) " + ", ".join(solo_groups)
-            + " — tested across FOVs (one sample per FOV) because FOV mode is "
-            "ON and no replicate wells are defined for them.")
+            "Note:       FOV mode is ON — each field of view is one replicate, "
+            "pooled across all of a group's wells (n = total FOVs per group).")
         header_lines.insert(-1, "")
     return header_lines
 
@@ -432,19 +430,20 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         else:
             vals = collect_group_values_fn(g, target_t)
             n_wells = len([w for w in g.wells if w in app._app_state.dataset.well_paths])
-            # A test needs >=2 replicate values. The replicate unit is per-well
-            # (replicate sets) or per-FOV (single-well + FOV mode on).
+            # A test needs >=2 replicate values. The replicate unit is per-FOV
+            # (FOVs pooled across the group's wells) when FOV mode is on, else
+            # per-well.
             if len(vals) < 2:
-                if n_wells <= 1 and not use_fov:
+                if use_fov:
+                    app._stats_write_result(
+                        f"Group '{g.name}' (per-FOV) has fewer than 2 FOV samples "
+                        f"across its well(s) at t={tp_str} h (threshold {threshold:.2f})."
+                    )
+                elif n_wells <= 1:
                     app._stats_write_result(
                         f"Group '{g.name}' is a single well and FOV mode is off "
                         f"— enable FOV mode (FOVs become replicates) or add "
                         f"replicate wells to run a test."
-                    )
-                elif n_wells <= 1:
-                    app._stats_write_result(
-                        f"Group '{g.name}' (single well, per-FOV) has fewer than "
-                        f"2 FOV samples at t={tp_str} h (threshold {threshold:.2f})."
                     )
                 else:
                     app._stats_write_result(
@@ -460,15 +459,11 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
         app._stats_write_result("scipy is required.\nInstall with: pip install scipy")
         return
 
-    # Single-well groups test across FOVs (FOV mode is on, else they'd have been
-    # declined above); replicate sets test across wells. Note the replicate unit.
-    solo_groups = [
-        g.name for g in groups
-        if len([w for w in g.wells if w in app._app_state.dataset.well_paths]) == 1
-    ]
+    # Replicate unit is per-FOV (FOVs pooled across each group's wells) when FOV
+    # mode is on, else per-well. Note it in the header.
     lines: List[str] = _build_header_lines(
         test=test, channel_lbl=channel_lbl, stat_lbl=stat_lbl,
-        threshold=threshold, tp_str=tp_str, is_ks=is_ks, solo_groups=solo_groups,
+        threshold=threshold, tp_str=tp_str, is_ks=is_ks, use_fov=use_fov,
     )
     lines += _format_group_summary_lines(group_vals)
 
@@ -935,9 +930,9 @@ def stats_refresh_fov_indicator(ctx) -> None:
     except Exception:
         return
     lbl.setText(
-        "Replicates: per-well · single-well groups use FOVs (FOV mode ON)"
+        "Replicates: per-FOV — FOVs pooled across each group's wells (FOV mode ON)"
         if on else
-        "Replicates: per-well · single-well groups need FOV mode (OFF)"
+        "Replicates: per-well (enable FOV mode to use FOVs as replicates)"
     )
 
 

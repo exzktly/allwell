@@ -255,8 +255,8 @@ def collect_line_series(
         for rset in ordered_rsets:
             color = color_for_replicate_set(rset, ctx.state.selection.selections)
             valid_wells = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
-            # Unified replicate rule: per-FOV only for a single-well set with FOV
-            # mode on; a replicate set (>=2 wells) is per-well, matching the stats n.
+            # Unified replicate rule: per-FOV (FOVs pooled across the set's wells)
+            # when FOV mode is on, else per-well — matching the stats n.
             rset_per_fov = replicate_unit(len(valid_wells), rep_per_fov) == "fov"
             all_tps: set = set()
             cdf_vals: list = []

@@ -250,10 +250,10 @@ def collect_bar_items(
                     display = f"t={tp_str}"
                 else:
                     display = rset_disp
-                # Unified replicate rule (shared with the Statistics tab): FOVs are
-                # replicates ONLY for a single-well set with FOV mode on; a
-                # replicate set (>=2 wells) is always per-well, so its spread
-                # matches the stats test's n.
+                # Unified replicate rule (shared with the Statistics tab): with FOV
+                # mode on, FOVs are the replicates (pooled across the set's wells);
+                # otherwise each well is a replicate. Either way the spread matches
+                # the stats test's n.
                 n_loaded = sum(1 for w in rset.wells
                                if w in ctx.state.dataset.well_paths)
                 rset_per_fov = replicate_unit(n_loaded, per_fov_spread) == "fov"

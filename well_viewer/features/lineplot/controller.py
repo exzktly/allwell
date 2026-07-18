@@ -544,9 +544,10 @@ def redraw_line_plots(
     canvas = ctx.widgets.get_or_none("_line_canvas")
     for ax in (ax_mean, ax_frac, ax_n, ax_cdf):
         ax.cla()
-    # Re-suppress shared-x tick labels reset by cla()
-    ax_mean.tick_params(labelbottom=False)
-    ax_frac.tick_params(labelbottom=False)
+    # Each of the three time panels (mean / fraction / N) shows its own timepoint
+    # tick labels — cla() restores them and matplotlib does not auto-hide labels
+    # on manually-added sharex subplots, so no re-suppression here. The matching
+    # "Time (hours)" x-labels are set below alongside ax_n's.
 
     use_sem = ctx.state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
@@ -591,6 +592,10 @@ def redraw_line_plots(
     active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
     cdf_lbl = (f"{_ch} {metric_label} CDF (all wells per replicate set)" if active_rsets else f"{_ch} {metric_label} CDF (all selected wells)")
     apply_ax_style(ax_cdf, cdf_lbl, "Cumulative fraction")
+    # Every time panel carries its own timepoints + x-label (the panels are
+    # well-separated by hspace, so each reads as its own graph).
+    ax_mean.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
+    ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
     ax_n.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
     ax_frac.set_ylim(-0.05, 1.05)
     ax_cdf.set_xlabel(f"{_ch} {metric_label}", fontsize=8, labelpad=5)

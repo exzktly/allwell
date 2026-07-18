@@ -1042,7 +1042,21 @@ channel for every well).
   a **channel** dropdown choosing which channel it applies to (the same ThreshFracOn
   shared with Cell Gating and the plot tabs) · **Export** (to file · Copy PNG / SVG ·
   Save to Saved Plots) · **Zoom** · a **Properties** button that slides out a
-  right-side panel for the grouped view's **spacing gaps** and **label font sizes**.
+  right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
+  plus the **Scale bar** and **Cell labels** options below.
+- **Scale bar** — enter the **pixel size (µm/px)** and a **bar length (µm)** in the
+  Properties panel to burn a scale bar into the images (pixel size isn't stored by
+  the pipeline, so you supply it). Choose which cell(s) show it (**every cell**, or a
+  single grid corner), where in the image it sits, and its colour. The bar is drawn
+  into the pixels, so the live grid and the exported figure match exactly.
+- **Cell labels** — set **Mode → Identity** to burn each cell's *well · channel ·
+  timepoint* label into the image (respecting custom Well Labels), with the same
+  which-cell / in-image-corner / colour / background-box controls as the scale bar —
+  handy for a single-panel figure where the axis strips don't apply.
+- **Matched brightness** — a channel left on **Auto** LUT now shares **one** intensity
+  window across every cell of that channel (pooled over the grid), so the same channel
+  is directly comparable cell-to-cell; set an explicit LUT min/max on the channel to
+  override.
 - **Pixel readout** — hover a rendered cell to see that pixel's intensity (prefixed
   with the cell's combo identity); the readout now stays put when the cursor comes
   to rest instead of reverting to the plain cell tooltip.

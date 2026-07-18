@@ -153,8 +153,11 @@ class AnalyzeTabFormMixin:
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
         self._refresh_schema_preview()
-        self._build_shape_features_section(parent)
+        # Quality Control leads the optional sections (above Shape Metrics) and
+        # stays open — the correction stages it configures are the common tuning
+        # knobs, not an advanced afterthought.
         self._build_qc_section(parent)
+        self._build_shape_features_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
         self._build_scratch_section(parent)
@@ -434,7 +437,7 @@ class AnalyzeTabFormMixin:
     def _build_qc_section(self, parent: QWidget) -> None:
         sec = self._section(
             parent, "Quality Control",
-            collapsible=True, collapsed=True,
+            collapsible=False, collapsed=False,
             info="Optional pre-measurement clean-up, applied per channel at "
                  "quantification time. Two independent correction stages — "
                  "flat-field (divide out uneven illumination) then background "
@@ -674,7 +677,9 @@ class AnalyzeTabFormMixin:
         # clips mid-word and leaves a stray "=" hanging at the edge. The px/side
         # meaning is spelled out in the info-icon tooltip below.
         tile_row = self._row(sec, "Max tile size (0=off)")
-        self._stardist_tile_px_edit = self._entry(tile_row, "0", width=56)
+        # Same width as the TF threads / Workers entries above it — these three
+        # small integer fields read as one uniform column.
+        self._stardist_tile_px_edit = self._entry(tile_row, "0", width=40)
         tile_row.layout().addWidget(self._info_icon(
             tile_row,
             "Max pixels per tile SIDE for StarDist prediction — NOT the number "

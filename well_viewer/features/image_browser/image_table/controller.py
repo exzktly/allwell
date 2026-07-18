@@ -42,6 +42,8 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     LUT_COLOR_NAMES,
     NUC_SEG_TOKEN,
     OVERLAY_CHAN,
+    _binary_base,
+    _is_binary_variant,
     _compose_image_table_rgb,
     _export_binary_mask,
     _format_pixel_intensity,
@@ -62,9 +64,13 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     _row_log_scale,
     _tint_from_colormap,
     cell_display_rgb,
+    cell_identity_label,
+    cell_chrome_kwargs,
     composite_additive_rgb,
     composite_column_rgb,
+    draw_cell_chrome,
     overlay_cell_rgb,
+    resolve_chrome_plan,
 )
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
@@ -275,6 +281,32 @@ def image_table_set_spacing(ctx, key: str, value) -> None:
     setattr(ctx.state.image_table, key, max(lo, int(round(float(value)))))
     # Re-render whenever a table has been built (cells assembled) — not only after
     # a first Generate — so the very first Properties tweak takes effect live.
+    if getattr(ctx.runtime.image_table, "cells", None):
+        image_table_generate(ctx)
+
+
+_DISPLAY_FLOAT_KEYS = ("pixel_size_um", "scale_bar_um")
+_DISPLAY_INT_KEYS = ("label_font_px",)
+_DISPLAY_STR_KEYS = ("scale_bar_cells", "scale_bar_img_corner", "scale_bar_color",
+                     "label_mode", "label_cells", "label_img_corner", "label_color")
+_DISPLAY_BOOL_KEYS = ("label_bg",)
+
+
+def image_table_set_display(ctx, key: str, value) -> None:
+    """Set a scale-bar / cell-label display property and re-render if a table
+    exists. Mirrors :func:`image_table_set_spacing`, but for the burned-in-chrome
+    options (pixel size, bar length/placement/colour, label mode/placement/style)."""
+    if key in _DISPLAY_FLOAT_KEYS:
+        setattr(ctx.state.image_table, key, max(0.0, float(value)))
+    elif key in _DISPLAY_INT_KEYS:
+        setattr(ctx.state.image_table, key, max(6, int(round(float(value)))))
+    elif key in _DISPLAY_STR_KEYS:
+        setattr(ctx.state.image_table, key, str(value))
+    elif key in _DISPLAY_BOOL_KEYS:
+        setattr(ctx.state.image_table, key, bool(value))
+    else:
+        return
+    # Re-render whenever cells are assembled so the first tweak takes effect live.
     if getattr(ctx.runtime.image_table, "cells", None):
         image_table_generate(ctx)
 
@@ -514,22 +546,14 @@ def _cell_title(ctx, cell, overlay_chans) -> str:
     """Tooltip for one image-table cell (identity lives on the axes, not per cell).
 
     An OVERLAY_CHAN cell names the merged channel set (e.g. "GFP+DAPI"); a normal
-    cell names its single channel; anything without a well+timepoint is "(unset)"."""
-    from well_viewer.domain.selections_model import well_display_label
-    well, chan, tp, fov = cell["well"], cell["chan"], cell["tp"], cell["fov"]
-    if not (well and tp):
-        return "(unset)"
-    if chan == OVERLAY_CHAN:
-        label = "+".join(c2.upper() for c2 in overlay_chans) or "overlay"
-    elif chan:
-        label = chan.upper()
-    else:
-        return "(unset)"
-    title = f"{well_display_label(ctx, well)}  {label}  T:{tp}"
-    return title + (f"  FOV:{fov}" if fov else "")
+    cell names its single channel; anything without a well+timepoint is "(unset)".
+    Delegates to the shared :func:`cell_identity_label` (also the burned-in label
+    source) so tooltip / burned label / export title all read identically."""
+    return cell_identity_label(ctx, cell, overlay_chans) or "(unset)"
 
 
-def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb):
+def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb,
+                 chrome_kwargs=None):
     """Load + render one cell → ``(pixmap, representative_array, ok)``.
 
     ``ok`` gates whether the cell shows an image and installs interaction. For an
@@ -538,7 +562,11 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     it's the single channel's display (``cell_display_rgb`` / the pre-rendered
     overlay thumbnailer) and ``ok`` follows the loaded array. The representative
     array is the first overlay channel's (or the cell's own) so crop-drag
-    coordinate conversion still has a source."""
+    coordinate conversion still has a source.
+
+    ``chrome_kwargs`` (when given) burns the scale bar / identity label into the
+    composed RGB before it's thumbnailed, so the live thumbnail matches the export
+    figure (which burns the same chrome into its own RGB)."""
     well, chan, tp, fov = cell["well"], cell["chan"], cell["tp"], cell["fov"]
     if chan == OVERLAY_CHAN:
         if not (well and tp and overlay_chans):
@@ -548,6 +576,8 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         arr = _load_array(ctx, cache, well, overlay_chans[0], tp, fov,
                           use_tophat=_row_display_opts(ctx, r, overlay_chans[0])[0])
         rgb = overlay_cell_rgb(ctx, cache, cell, r, crop_tool, overlay_chans)
+        if rgb is not None and chrome_kwargs:
+            rgb = draw_cell_chrome(rgb, **chrome_kwargs)
         pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
         return pix, arr, rgb is not None
 
@@ -572,8 +602,62 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         pix = make_overlay_thumb(cropped, sz, sz, lo, hi)
     else:
         rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
+        if rgb is not None and chrome_kwargs:
+            rgb = draw_cell_chrome(rgb, **chrome_kwargs)
         pix = make_overlay_thumb(rgb, sz, sz) if rgb is not None else None
     return pix, arr, True
+
+
+def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
+    """Pool ONE Auto-LUT window per channel across the whole grid.
+
+    A channel left on Auto otherwise auto-fits each cell to its own min/max, so the
+    same channel's brightness isn't comparable cell-to-cell. Here we compute a single
+    (min, max) per base channel over every Auto cell of that channel and stash it on
+    ``auto_lut_by_channel``; ``_parse_lut`` then returns it for those cells (live +
+    export). The map is cleared first, so ``_parse_lut`` still reports the
+    pre-pooling (Auto) state while we decide which cells qualify. Binary / mask /
+    NUC+SEG / overlay / pre-rendered-RGB cells carry no LUT and are skipped."""
+    import numpy as _np
+
+    st = ctx.state.image_table
+    st.auto_lut_by_channel = {}
+    pooled: Dict[str, list] = {}  # base_chan_lower -> [min, max]
+    for r, row in enumerate(cells):
+        for cell in row:
+            chan = cell["chan"]
+            well, tp, fov = cell["well"], cell["tp"], cell["fov"]
+            if not (well and chan and tp):
+                continue
+            if chan == OVERLAY_CHAN or _is_nuc_seg(chan) or _is_binary_variant(chan):
+                continue
+            use_tophat, _bnd, binary_mode = _row_display_opts(ctx, r, chan)
+            if binary_mode in ("mask", "threshold"):
+                continue
+            # Only pool channels actually on Auto (no explicit / shared window). The
+            # map is empty here, so _parse_lut gives the pre-pooling answer.
+            if _parse_lut(ctx, r, chan) != (None, None):
+                continue
+            ratio = _find_ratio_for_channel(ctx, chan)
+            if ratio is not None:
+                arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
+            else:
+                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+            if arr is None or getattr(arr, "ndim", 2) >= 3:
+                continue
+            a = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
+            a = _np.asarray(a, dtype=_np.float32)
+            if a.size == 0:
+                continue
+            lo, hi = float(a.min()), float(a.max())
+            base = _binary_base(chan).strip().lower()
+            cur = pooled.get(base)
+            if cur is None:
+                pooled[base] = [lo, hi]
+            else:
+                cur[0] = min(cur[0], lo)
+                cur[1] = max(cur[1], hi)
+    st.auto_lut_by_channel = {k: (v[0], v[1]) for k, v in pooled.items()}
 
 
 def image_table_generate(ctx) -> None:
@@ -616,6 +700,14 @@ def image_table_generate(ctx) -> None:
 
     _prefetch_cell_arrays(ctx, cells, cache)
 
+    # Pool one Auto-LUT window per channel across the grid so Auto cells of the same
+    # channel are brightness-comparable (must run before any cell renders, since
+    # _parse_lut reads the pooled map).
+    _compute_auto_luts(ctx, cells, cache, crop_tool)
+
+    # Scale-bar length + which cells carry the bar / identity label, resolved once.
+    chrome_plan = resolve_chrome_plan(ctx, cells)
+
     # Faceted placement: group cells by the builder's nesting, label the row/col
     # axes once, and space groups apart (falls back to a plain grid when absent).
     plan = _facet.plan_facets(ctx, cells)
@@ -639,8 +731,10 @@ def image_table_generate(ctx) -> None:
             if is_overlay and not overlay_chans:
                 overlay_chans = _axis_dim_values(ctx, "channel", collapse_overlay=False)
 
+            chrome_kwargs = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
             pix, arr, ok = _render_cell(
-                ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb)
+                ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb,
+                chrome_kwargs)
             # Overlay cells recompute their blend from the live channel set, so
             # don't cache a single array under them (export re-blends too).
             rendered[(r, c)] = None if is_overlay else arr

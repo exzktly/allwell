@@ -10,10 +10,10 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.11.** This map tracks the current release; the version
+**Reflects All-Well v8.8.13.** This map tracks the current release; the version
 string itself is centralized in the repo-root `version.py` (§3) and surfaced on
 the title-bar version pill. Feature areas that changed materially in the
-v8.4 → v8.8.11 line carry inline `(vX.Y.Z)` markers so you can tell recent
+v8.4 → v8.8.13 line carry inline `(vX.Y.Z)` markers so you can tell recent
 structure from long-standing structure. Bump `version.py` on a release —
 nothing else carries the app version.
 
@@ -198,7 +198,7 @@ well_viewer/
 │   │   │              / Playground sub-tabs; descends like the Plotting stack)
 │   │   ├── review_image/ controller.py, renderer.py, state.py, collect.py,
 │   │   │                 box_select.py
-│   │   ├── image_table/  controller.py, tab_view.py, builder_view.py, panel_view.py,
+│   │   ├── image_table/  controller.py, tab_view.py, builder_view.py,
 │   │   │                 state.py, grid_layout.py, grid_ops.py,
 │   │   │                 picker_view.py, image_compose.py, facet_view.py,
 │   │   │                 build_layout.py, export.py
@@ -207,7 +207,9 @@ well_viewer/
 │   │   │                  builder_view = the root+nested-channels drag-and-drop shelf,
 │   │   │                  the sole authoring surface; the render model is headless
 │   │   │                  plain data — see §5.5. grid_ops = the right-click per-cell
-│   │   │                  override popover)
+│   │   │                  override popover. image_compose also burns the optional
+│   │   │                  scale bar + per-cell identity label into the source RGB
+│   │   │                  (draw_cell_chrome) so live grid and export match — v8.8.12)
 │   │   ├── cell_browser/ controller.py, collect.py, state.py, tab_view.py,
 │   │   │                 criteria_view.py, sort_view.py, worker.py
 │   │   └── playground/   controller.py, renderer.py, state.py, tab_view.py,

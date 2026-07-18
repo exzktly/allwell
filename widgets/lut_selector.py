@@ -159,10 +159,14 @@ class LutSelector(QWidget):
         tl.setSpacing(theme.Spacing.sm)
         self._trigger_strip = GradientStrip(_cmap_stops(self._lut), reversed=self._reversed)
         self._trigger_strip.setFixedHeight(max(12, round(self.fontMetrics().height() * 0.85)))
-        self._trigger_strip.setMinimumWidth(48)
+        # The strip yields space first so the name label is never squeezed to zero
+        # (which let the gradient cover the name at narrow widths).
+        self._trigger_strip.setMinimumWidth(16)
         self._trigger_strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._trigger_name = QLabel(self._lut, self._trigger)
         self._trigger_name.setObjectName("Mono")
+        # Protect the name from shrinking below its text so it's always readable.
+        self._trigger_name.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
         tl.addWidget(self._trigger_strip, 1)
         tl.addWidget(self._trigger_name, 0)
         self._trigger.clicked.connect(self._open_popover)

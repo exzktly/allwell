@@ -166,7 +166,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     lmin.editingFinished.connect(_on_lut_edit)
     lmax.editingFinished.connect(_on_lut_edit)
     lut_auto = QPushButton("Auto", lut_row)
-    lut_auto.setFixedWidth(46)
+    lut_auto.setFixedWidth(54)   # 46 clipped "Auto" to "Autc" under the button padding
     lut_auto.setToolTip("Reset the LUT min/max to the displayed frame's range.")
 
     def _on_lut_auto() -> None:

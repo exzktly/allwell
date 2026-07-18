@@ -117,7 +117,7 @@ QLabel#ITBNote { color: #5F6B7C; font-size: 10px; }
 
 QToolButton#ITBOpt {
     color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
-    border-radius: 5px; padding: 1px 7px; font-size: 11px;
+    border-radius: 5px; padding: 3px 8px; font-size: 12px;
 }
 QToolButton#ITBOpt:hover { color: #E6E9EF; border-color: #6B8AFD; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
@@ -297,6 +297,21 @@ def _apply_now(ctx) -> None:
     # render — the table only draws when the user presses Generate.
     with swallow("image table builder: apply spec"):
         image_table_apply_spec(ctx, builder_spec(ctx), render=False)
+
+
+def builder_flush_pending(ctx) -> None:
+    """Force any debounced shelf edit to land NOW (called from the Generate action).
+
+    Shelf edits schedule ``_apply_now`` on a 120 ms single-shot timer
+    (``_schedule_apply``). A Generate click inside that window would otherwise
+    render the *stale* cell model — the apply fires just after — so the grid takes
+    two clicks to catch up. Flushing the pending timer synchronously here makes the
+    first Generate reflect the latest edit."""
+    rt = _rt(ctx)
+    t = getattr(rt, "builder_timer", None)
+    if t is not None and t.isActive():
+        t.stop()
+        _apply_now(ctx)
 
 
 def _edit(ctx) -> None:

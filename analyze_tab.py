@@ -359,7 +359,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         rl.addWidget(edit)
 
         remove_btn = QPushButton("✕", row)
-        remove_btn.setFixedWidth(24)
+        remove_btn.setFixedWidth(36)   # wide enough that the button padding doesn't clip ✕
         remove_btn.setProperty("variant", "secondary")
         rl.addWidget(remove_btn)
 

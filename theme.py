@@ -232,6 +232,7 @@ def qss() -> str:
     c, t, r, s = Colors, Typography, Radii, Spacing
     _chev = _icon_path("chevron-down.svg")
     _chev_up = _icon_path("chevron-up.svg")
+    _check = _icon_path("check.svg")
     return f"""
 * {{
     font-family: {t.family};
@@ -415,6 +416,10 @@ QPushButton#Danger:hover {{
 QPushButton#Ghost, QToolButton#Ghost {{
     background-color: transparent;
     border-color: transparent;
+    /* Ghost buttons are icon-like (✕ close, ▲/▾ reorder). The default 10px
+       horizontal button padding ate a compact fixed width and clipped the glyph,
+       so keep their padding tight. */
+    padding: {s.xs}px {s.xs}px;
 }}
 QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
     background-color: {c.panel};
@@ -546,14 +551,21 @@ QComboBox QAbstractItemView {{
 }}
 
 /* ── Check / radio ───────────────────────────────────────────────────── */
+/* ``spacing`` is the indicator↔label gap; the vertical ``padding`` gives each
+   row breathing room so stacked checkboxes aren't cramped and inline rows don't
+   collide with neighbours. */
 QCheckBox, QRadioButton {{
     background: transparent;
     color: {c.text_primary};
     spacing: {s.sm}px;
+    /* Vertical only — horizontal padding would insert dead space before a
+       text-less indicator (e.g. the WrapCheckBox composite), pushing its label
+       away from the box. */
+    padding: {s.xs}px 0;
 }}
 QCheckBox::indicator, QRadioButton::indicator {{
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
 }}
@@ -561,7 +573,7 @@ QCheckBox::indicator {{
     border-radius: {r.xs}px;
 }}
 QRadioButton::indicator {{
-    border-radius: 7px;
+    border-radius: 8px;
 }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
     border-color: {c.border_strong};
@@ -569,6 +581,11 @@ QCheckBox::indicator:hover, QRadioButton::indicator:hover {{
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
     background-color: {c.accent};
     border-color: {c.accent};
+}}
+/* A checkmark glyph on the accent fill — a bare filled square reads ambiguously
+   (is it on or off?); the tick makes the checked state unmistakable. */
+QCheckBox::indicator:checked {{
+    image: url({_check});
 }}
 QCheckBox:disabled, QRadioButton:disabled {{
     color: {c.text_muted};

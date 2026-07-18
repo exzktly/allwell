@@ -83,6 +83,27 @@ class ImageTableState:
     label_font_pt: int = 11
     group_font_pt: int = 11
 
+    # Scale bar (burned into the rendered pixels so live grid == export). The bar is
+    # ``round(scale_bar_um / pixel_size_um)`` px long, drawn in ``scale_bar_img_corner``
+    # of the image, on the cell(s) selected by ``scale_bar_cells`` ("all", or a grid
+    # corner "tl"/"tr"/"bl"/"br"). ``scale_bar_um`` = 0 (or ``pixel_size_um`` = 0)
+    # turns it off. Pixel size isn't in pipeline_info, so it's a user-entered value.
+    pixel_size_um: float = 0.0
+    scale_bar_um: float = 0.0
+    scale_bar_cells: str = "br"
+    scale_bar_img_corner: str = "br"
+    scale_bar_color: str = "white"
+
+    # Burned-in cell labels (identity text drawn into the pixels). ``label_mode``
+    # "none"/"identity"; ``label_cells`` picks which cell(s) ("all" or a grid corner);
+    # ``label_img_corner`` is the in-image position; the rest are type styling.
+    label_mode: str = "none"
+    label_cells: str = "all"
+    label_img_corner: str = "tl"
+    label_font_px: int = 12
+    label_color: str = "white"
+    label_bg: bool = True
+
     # composite: the shelf's per-root Separate↔Overlay switch. When True the
     # channel axis collapses to a single entry (the OVERLAY_CHAN sentinel value)
     # and each cell additively blends (LUT-colored RGB summed, clipped to white)
@@ -110,11 +131,16 @@ class ImageTableState:
     # per-generate caches (rebuilt each render; never persisted)
     last_render: dict = field(default_factory=dict)
     image_cache: dict = field(default_factory=dict)
+    # Pooled Auto-LUT window per base channel, {chan_lower: (lo, hi)}, computed each
+    # Generate so a channel left on Auto uses ONE brightness window across every cell
+    # (comparable) instead of each cell auto-fitting independently. Not persisted.
+    auto_lut_by_channel: dict = field(default_factory=dict)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
         self.last_render.clear()
         self.image_cache.clear()
+        self.auto_lut_by_channel.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

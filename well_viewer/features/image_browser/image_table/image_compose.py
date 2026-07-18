@@ -323,16 +323,29 @@ def _shared_channel_lut(ctx, row_idx: int) -> Optional[Tuple[float, float]]:
     return image_view.get_lut(_row_channel(ctx, row_idx))
 
 
+def _auto_lut_for(ctx, chan) -> Optional[Tuple[float, float]]:
+    """The pooled Auto-LUT window for *chan*'s base channel, or None.
+
+    Populated once per Generate by the controller's pooling pass
+    (``auto_lut_by_channel``) so a channel left on Auto uses ONE brightness window
+    across every cell instead of each cell auto-fitting to its own min/max."""
+    pooled = getattr(ctx.state.image_table, "auto_lut_by_channel", None) or {}
+    if not pooled or not chan:
+        return None
+    return pooled.get(_binary_base(chan).strip().lower())
+
+
 def _parse_lut(ctx, row_idx: int, chan=None) -> Tuple[Optional[float], Optional[float]]:
     """Read (lo, hi) for grid row *row_idx*; falls back to the shared per-channel
-    default, else (None, None) for auto-fit.
+    default, then the pooled per-channel Auto window, else (None, None) for auto-fit.
 
     With a builder channel spec (``chan`` given) the range comes from the
     channel's own ``lut_min``/``lut_max`` (None ⇒ inherit the shared per-channel
-    default, then auto-fit). Without a spec (``chan`` omitted / no channel_opts
-    entry) the range inherits the shared per-channel default (a brightness tuned
-    in Review Image), else auto-fits.
-    """
+    default, then the pooled Auto window, then per-cell auto-fit). Without a spec
+    (``chan`` omitted / no channel_opts entry) the range inherits the shared
+    per-channel default (a brightness tuned in Review Image), then the pooled Auto
+    window, else auto-fits. The pooled window is what makes Auto comparable
+    cell-to-cell (see ``controller._compute_auto_luts``)."""
     spec = _channel_opts_for(ctx, chan)
     if spec is not None:
         lo = spec.get("lut_min")
@@ -341,11 +354,17 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> Tuple[Optional[float], Optional[
             shared = _shared_channel_lut_for(ctx, chan)
             if shared is not None:
                 return shared
+            pooled = _auto_lut_for(ctx, chan)
+            if pooled is not None:
+                return pooled
         return lo, hi
     # No channel spec → inherit the shared per-channel default. ``_shared_channel_lut``
     # reads the grid cell's own channel (raw row index), correct per band.
     shared = _shared_channel_lut(ctx, row_idx)
-    return shared if shared is not None else (None, None)
+    if shared is not None:
+        return shared
+    pooled = _auto_lut_for(ctx, chan or _row_channel(ctx, row_idx))
+    return pooled if pooled is not None else (None, None)
 
 
 def _row_display_opts(ctx, row_idx: int, chan=None) -> Tuple[bool, bool, str]:
@@ -876,3 +895,235 @@ def overlay_cell_rgb(ctx, cache, cell, r: int, crop_tool, channels):
         if rgb is not None:
             rgbs.append(rgb)
     return composite_additive_rgb(rgbs)
+
+
+# ── Burned-in cell chrome: scale bar + identity label ───────────────────────
+#
+# Drawn into the SOURCE-resolution cell RGB (not the QPixmap / mpl axes) so the
+# live thumbnail and the exported figure carry the identical mark — the same
+# single-source principle the RGB composer follows. Applied at the OUTERMOST cell
+# RGB only (controller._render_cell / export._build_export_figure), never inside
+# cell_display_rgb, because overlay_cell_rgb calls that per channel and would stamp
+# the mark on every channel before blending.
+
+_CHROME_COLORS: Dict[str, Tuple[int, int, int]] = {
+    "white": (255, 255, 255), "black": (0, 0, 0), "yellow": (255, 255, 0),
+    "cyan": (0, 255, 255), "magenta": (255, 0, 255), "red": (255, 0, 0),
+    "green": (0, 255, 0),
+}
+
+
+def _chrome_rgb(name) -> Tuple[int, int, int]:
+    return _CHROME_COLORS.get(str(name or "white").strip().lower(), (255, 255, 255))
+
+
+def _corner_cell(rows: int, cols: int, code: str, occupied=None):
+    """Grid ``(r, c)`` for a corner *code* (tl/tr/bl/br).
+
+    When that grid corner is blank (``occupied`` given and the corner not in it —
+    ragged wrap / facet layouts), fall back to the occupied cell nearest the corner.
+    Returns ``None`` when the grid is empty or nothing is occupied."""
+    rows = max(0, int(rows))
+    cols = max(0, int(cols))
+    if rows == 0 or cols == 0:
+        return None
+    targets = {"tl": (0, 0), "tr": (0, cols - 1),
+               "bl": (rows - 1, 0), "br": (rows - 1, cols - 1)}
+    target = targets.get(str(code or "").strip().lower())
+    if target is None:
+        return None
+    if not occupied or target in occupied:
+        return target
+    ty, tx = target
+    return min(occupied, key=lambda rc: abs(rc[0] - ty) + abs(rc[1] - tx))
+
+
+def _chrome_target_cells(rows: int, cols: int, code: str, occupied) -> set:
+    """Set of ``(r, c)`` that should carry a mark for placement *code*.
+
+    ``"all"`` → every occupied cell; a corner code → the single (fallback) corner
+    cell. Empty when the code is off / unresolvable."""
+    occ = set(occupied or ())
+    c = str(code or "").strip().lower()
+    if c == "all":
+        return occ
+    cell = _corner_cell(rows, cols, c, occ)
+    return {cell} if cell is not None else set()
+
+
+def _load_chrome_font(px: int):
+    """A PIL truetype font at *px* from the bundled Inter faces, else the default
+    bitmap font. Import is lazy so this module stays Qt-free at import time."""
+    try:
+        from PIL import ImageFont
+    except Exception:
+        return None
+    try:
+        from well_viewer.core.app_fonts import fonts_dir
+        d = fonts_dir()
+        for fname in ("Inter-SemiBold.ttf", "Inter-Regular.ttf", "Inter.ttf"):
+            fp = d / fname
+            if fp.exists():
+                return ImageFont.truetype(str(fp), max(6, int(px)))
+    except Exception:
+        logger.debug("image_table: bundled chrome font unavailable", exc_info=True)
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return None
+
+
+def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
+                     bar_color: str = "white", label_text: str = "",
+                     label_corner: str = "tl", label_font_px: int = 12,
+                     label_color: str = "white", label_bg: bool = True):
+    """Burn a scale bar and/or an identity label into an ``(H, W, 3)`` uint8 RGB.
+
+    Sizes are proportional to image height — bar thickness and margins scale with
+    ``H``; the label font scales relative to a nominal 240 px cell — so the mark
+    reads the same at the live thumbnail size and at full export resolution. The
+    scale bar is ``bar_px`` long (already computed from µm/px in source pixels).
+    Returns a mutated copy, or the input unchanged when there's nothing to draw."""
+    import numpy as _np
+
+    if rgb is None or (not bar_px and not label_text):
+        return rgb
+    a = _np.array(rgb, dtype=_np.uint8, copy=True)
+    if a.ndim != 3 or a.shape[2] < 3:
+        return rgb
+    H, W = a.shape[:2]
+    if H < 4 or W < 4:
+        return rgb
+
+    # Scale bar — a filled rectangle with a 1 px contrasting halo for legibility.
+    if bar_px and bar_px > 0:
+        blen = int(min(bar_px, W - 2))
+        if blen >= 1:
+            thick = max(2, H // 100)
+            margin = max(2, H // 25)
+            corner = str(bar_corner or "br").strip().lower()
+            if corner in ("tl", "bl"):
+                x0 = margin
+                x1 = min(W, x0 + blen)
+            else:
+                x1 = W - margin
+                x0 = max(0, x1 - blen)
+            if corner in ("tl", "tr"):
+                y0 = margin
+                y1 = min(H, y0 + thick)
+            else:
+                y1 = H - margin
+                y0 = max(0, y1 - thick)
+            col = _chrome_rgb(bar_color)
+            halo = (0, 0, 0) if col != (0, 0, 0) else (255, 255, 255)
+            a[max(0, y0 - 1):min(H, y1 + 1), max(0, x0 - 1):min(W, x1 + 1)] = halo
+            a[y0:y1, x0:x1] = col
+
+    # Identity label — PIL text with an optional translucent dark box behind it.
+    if label_text:
+        try:
+            from PIL import Image, ImageDraw
+        except Exception:
+            return a
+        font_px = max(6, int(round(float(label_font_px) * H / 240.0)))
+        font = _load_chrome_font(font_px)
+        img = Image.fromarray(a)
+        draw = ImageDraw.Draw(img, "RGBA")
+        try:
+            bbox = draw.textbbox((0, 0), label_text, font=font)
+            tw, th, tox, toy = bbox[2] - bbox[0], bbox[3] - bbox[1], bbox[0], bbox[1]
+        except Exception:
+            tw, th, tox, toy = (len(label_text) * font_px // 2, font_px, 0, 0)
+        pad = max(2, font_px // 4)
+        margin = max(2, H // 40)
+        corner = str(label_corner or "tl").strip().lower()
+        if corner in ("tr", "br"):
+            bx1 = W - margin
+            bx0 = max(0, bx1 - tw - 2 * pad)
+        else:
+            bx0 = margin
+            bx1 = min(W, bx0 + tw + 2 * pad)
+        if corner in ("bl", "br"):
+            by1 = H - margin
+            by0 = max(0, by1 - th - 2 * pad)
+        else:
+            by0 = margin
+            by1 = min(H, by0 + th + 2 * pad)
+        if label_bg:
+            draw.rectangle([bx0, by0, bx1, by1], fill=(0, 0, 0, 140))
+        draw.text((bx0 + pad - tox, by0 + pad - toy), label_text,
+                  fill=_chrome_rgb(label_color) + (255,), font=font)
+        a = _np.asarray(img.convert("RGB"), dtype=_np.uint8)
+    return a
+
+
+def cell_identity_label(ctx, cell, overlay_chans=None) -> str:
+    """The identity string for a cell (well · channel · T · FOV), or "" when unset.
+
+    Single source for both the burned-in label and the tooltip / export title. An
+    OVERLAY_CHAN cell names its merged channel set."""
+    from well_viewer.domain.selections_model import well_display_label
+    well, chan, tp, fov = (cell.get("well"), cell.get("chan"),
+                           cell.get("tp"), cell.get("fov"))
+    if not (well and tp):
+        return ""
+    if chan == OVERLAY_CHAN:
+        label = "+".join(str(c).upper() for c in (overlay_chans or [])) or "overlay"
+    elif chan:
+        label = str(chan).upper()
+    else:
+        return ""
+    s = f"{well_display_label(ctx, well)}  {label}  T:{tp}"
+    return s + (f"  FOV:{fov}" if fov else "")
+
+
+def resolve_chrome_plan(ctx, cells):
+    """Resolve the per-Generate chrome plan → ``(bar_px, bar_targets, label_targets)``.
+
+    ``bar_px`` is the scale-bar length in source pixels (0 = off); the two target
+    sets are the ``(r, c)`` cells that show the bar / label, from the "which cell(s)"
+    placement code (all, or a grid corner with blank-corner fallback). Empty grid or
+    disabled feature → empty sets."""
+    st = ctx.state.image_table
+    rows = len(cells)
+    cols = len(cells[0]) if rows and cells[0] else 0
+    occupied = {
+        (r, c)
+        for r, row in enumerate(cells)
+        for c, cell in enumerate(row)
+        if cell.get("well") and cell.get("chan") and cell.get("tp")
+    }
+    bar_px = 0
+    ps = float(getattr(st, "pixel_size_um", 0.0) or 0.0)
+    sb = float(getattr(st, "scale_bar_um", 0.0) or 0.0)
+    if ps > 0 and sb > 0:
+        bar_px = max(1, int(round(sb / ps)))
+    bar_targets = (_chrome_target_cells(rows, cols, getattr(st, "scale_bar_cells", "br"),
+                                        occupied) if bar_px else set())
+    label_on = str(getattr(st, "label_mode", "none")).strip().lower() == "identity"
+    label_targets = (_chrome_target_cells(rows, cols, getattr(st, "label_cells", "all"),
+                                          occupied) if label_on else set())
+    return bar_px, bar_targets, label_targets
+
+
+def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None):
+    """Per-cell ``draw_cell_chrome`` kwargs for grid cell ``(r, c)``, or ``None`` when
+    this cell carries no mark. *plan* is :func:`resolve_chrome_plan`'s tuple."""
+    bar_px, bar_targets, label_targets = plan
+    st = ctx.state.image_table
+    bar = bar_px if (bar_px and (r, c) in bar_targets) else 0
+    label_text = ""
+    if (r, c) in label_targets:
+        label_text = cell_identity_label(ctx, cell, overlay_chans)
+    if not bar and not label_text:
+        return None
+    return dict(
+        bar_px=bar,
+        bar_corner=getattr(st, "scale_bar_img_corner", "br"),
+        bar_color=getattr(st, "scale_bar_color", "white"),
+        label_text=label_text,
+        label_corner=getattr(st, "label_img_corner", "tl"),
+        label_font_px=int(getattr(st, "label_font_px", 12)),
+        label_color=getattr(st, "label_color", "white"),
+        label_bg=bool(getattr(st, "label_bg", True)),
+    )

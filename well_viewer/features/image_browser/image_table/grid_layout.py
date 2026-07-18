@@ -247,7 +247,17 @@ def _axis_dim_values(ctx, dim: str, *, collapse_overlay: bool = True) -> List[st
         opts = _channel_options(ctx)
         sel = getattr(ctx.state.image_table, "active_channels", None) or set()
         if sel:
-            return [c for c in opts if c in sel]
+            # Respect the builder's drag order. ``channel_opts`` is an ordered dict
+            # built by iterating the shelf's ``Axis.channels`` in order
+            # (state.spec_to_state_fields), so its key order IS the order the user
+            # dropped the chips. ``active_channels`` is an unordered set, so filtering
+            # ``opts`` (canonical pipeline order) by it would silently re-sort the axis.
+            # Order by channel_opts, then append any selected-but-unkeyed tokens
+            # (old saved states, Advanced grid) in canonical order.
+            copts = getattr(ctx.state.image_table, "channel_opts", None) or {}
+            ordered = [c for c in copts if c in sel]
+            ordered += [c for c in opts if c in sel and c not in copts]
+            return ordered
         # Default (nothing ticked) = the real channels only. Binary variants are
         # opt-in — they only join the axis when explicitly selected, so a plain
         # "Channels × Time" build isn't silently doubled.

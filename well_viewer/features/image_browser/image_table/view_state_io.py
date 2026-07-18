@@ -47,6 +47,39 @@ def _restore_spacing(ctx, state: dict) -> None:
             setattr(it, k, max(lo, v))
 
 
+_DISPLAY_DEFAULTS = {
+    "pixel_size_um": 0.0, "scale_bar_um": 0.0, "scale_bar_cells": "br",
+    "scale_bar_img_corner": "br", "scale_bar_color": "white",
+    "label_mode": "none", "label_cells": "all", "label_img_corner": "tl",
+    "label_font_px": 12, "label_color": "white", "label_bg": True,
+}
+
+
+def _snapshot_display(ctx) -> dict:
+    """Scale-bar + burned-in-label display options (the A/B feature fields)."""
+    it = ctx.state.image_table
+    return {k: getattr(it, k, d) for k, d in _DISPLAY_DEFAULTS.items()}
+
+
+def _restore_display(ctx, state: dict) -> None:
+    it = ctx.state.image_table
+    for k, d in _DISPLAY_DEFAULTS.items():
+        v = state.get(k)
+        if v is None:
+            continue
+        try:
+            if isinstance(d, bool):
+                setattr(it, k, bool(v))
+            elif isinstance(d, float):
+                setattr(it, k, max(0.0, float(v)))
+            elif isinstance(d, int):
+                setattr(it, k, int(v))
+            else:
+                setattr(it, k, str(v))
+        except (TypeError, ValueError):
+            swallowed()
+
+
 def _snapshot_builder(ctx) -> dict:
     """Builder tree state: per-channel render options + Fixed panel pinned values."""
     out: dict = {}
@@ -100,6 +133,7 @@ def snapshot_image_table(ctx) -> dict:
     except Exception:
         swallowed()
     out.update(_snapshot_builder(ctx))
+    out.update(_snapshot_display(ctx))
     return out
 
 
@@ -203,5 +237,6 @@ def apply_image_table(ctx, state: dict) -> None:
             _logger.debug("image_table: zoom restore failed", exc_info=True)
 
     _restore_spacing(ctx, state)
+    _restore_display(ctx, state)
     # Intentionally NOT calling image_table_generate here — restore only pre-fills
     # the dropdowns; the user clicks Generate to load images off disk.

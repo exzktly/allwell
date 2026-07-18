@@ -75,8 +75,9 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     layout.addStretch(1)
 
     help_lbl = QLabel(
-        "Select wells here, choose channels in the Build Layout row, then press "
-        "Build table followed by Generate.", parent,
+        "Select wells here, then build the table on the shelf — drag a root "
+        "(Well/Timepoint/FOV) onto Rows or Columns and nest channels under it — "
+        "and press Generate.", parent,
     )
     help_lbl.setObjectName("Muted")
     help_lbl.setWordWrap(True)

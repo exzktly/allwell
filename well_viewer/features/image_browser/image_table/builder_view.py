@@ -299,6 +299,21 @@ def _apply_now(ctx) -> None:
         image_table_apply_spec(ctx, builder_spec(ctx), render=False)
 
 
+def builder_flush_pending(ctx) -> None:
+    """Force any debounced shelf edit to land NOW (called from the Generate action).
+
+    Shelf edits schedule ``_apply_now`` on a 120 ms single-shot timer
+    (``_schedule_apply``). A Generate click inside that window would otherwise
+    render the *stale* cell model — the apply fires just after — so the grid takes
+    two clicks to catch up. Flushing the pending timer synchronously here makes the
+    first Generate reflect the latest edit."""
+    rt = _rt(ctx)
+    t = getattr(rt, "builder_timer", None)
+    if t is not None and t.isActive():
+        t.stop()
+        _apply_now(ctx)
+
+
 def _edit(ctx) -> None:
     """After any shelf edit: mark the table stale (so the header cues a Generate),
     redraw the shelf, and schedule a render-less layout rebuild. Rendering is

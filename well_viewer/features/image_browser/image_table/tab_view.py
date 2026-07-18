@@ -22,7 +22,7 @@ from functools import partial
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QMenu, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
 )
 from PySide6.QtCore import Qt
@@ -40,6 +40,7 @@ from well_viewer.features.image_browser.image_table.controller import (
     image_table_repopulate_dropdowns,
     image_table_rebuild_grid,
     image_table_save_to_gallery,
+    image_table_set_display,
     image_table_set_spacing,
     image_table_set_thresh_frac,
     image_table_set_zoom,
@@ -49,7 +50,7 @@ from well_viewer.features.image_browser.image_table.build_layout import (
     image_table_reset_layout,
 )
 from well_viewer.features.image_browser.image_table.builder_view import (
-    build_shelf, builder_notify_rendered,
+    build_shelf, builder_notify_rendered, builder_flush_pending,
 )
 
 
@@ -133,6 +134,53 @@ def _build_properties_dock(ctx, dock) -> None:
         grid.addWidget(st, r[0], 1)
         r[0] += 1
 
+    def _propf(label: str, key: str, default: float, lo: float, hi: float,
+               step: float, decimals: int, tip: str) -> None:
+        lab = QLabel(label, panel)
+        lab.setToolTip(tip)
+        grid.addWidget(lab, r[0], 0)
+        st = Stepper(panel, value=float(getattr(its, key, default)),
+                     minimum=float(lo), maximum=float(hi), single_step=step,
+                     decimals=decimals)
+        st.setToolTip(tip)
+        st.valueChanged.connect(lambda v, k=key: image_table_set_display(ctx, k, v))
+        grid.addWidget(st, r[0], 1)
+        r[0] += 1
+
+    def _combo(label: str, key: str, choices, tip: str) -> None:
+        lab = QLabel(label, panel)
+        lab.setToolTip(tip)
+        grid.addWidget(lab, r[0], 0)
+        cb = QComboBox(panel)
+        cb.setToolTip(tip)
+        for disp, val in choices:
+            cb.addItem(disp, val)
+        ix = cb.findData(getattr(its, key, None))
+        if ix >= 0:
+            cb.setCurrentIndex(ix)
+        cb.currentIndexChanged.connect(
+            lambda _i, k=key, _cb=cb: image_table_set_display(ctx, k, _cb.currentData()))
+        grid.addWidget(cb, r[0], 1)
+        r[0] += 1
+
+    def _check(label: str, key: str, tip: str) -> None:
+        lab = QLabel(label, panel)
+        lab.setToolTip(tip)
+        grid.addWidget(lab, r[0], 0)
+        chk = QCheckBox(panel)
+        chk.setChecked(bool(getattr(its, key, False)))
+        chk.setToolTip(tip)
+        chk.toggled.connect(lambda v, k=key: image_table_set_display(ctx, k, bool(v)))
+        grid.addWidget(chk, r[0], 1)
+        r[0] += 1
+
+    _CELLS = [("All cells", "all"), ("Top-left", "tl"), ("Top-right", "tr"),
+              ("Bottom-left", "bl"), ("Bottom-right", "br")]
+    _CORNERS = [("Top-left", "tl"), ("Top-right", "tr"),
+                ("Bottom-left", "bl"), ("Bottom-right", "br")]
+    _COLORS = [("White", "white"), ("Black", "black"), ("Yellow", "yellow"),
+               ("Cyan", "cyan"), ("Magenta", "magenta")]
+
     _cap("Spacing (px)")
     _prop("Cell gap", "cell_gap", 2, 0, 200,
           "Gap between adjacent images within a group.")
@@ -147,6 +195,31 @@ def _build_properties_dock(ctx, dock) -> None:
           "Font size of the row / column axis value labels.")
     _prop("Group labels", "group_font_pt", 11, 6, 48,
           "Font size of the facet-group band labels (nested axes only).")
+
+    _cap("Scale bar")
+    _propf("Pixel size (µm/px)", "pixel_size_um", 0.0, 0.0, 100.0, 0.05, 3,
+           "Physical size of one pixel in microns. Not stored by the pipeline — "
+           "enter it to enable the scale bar. 0 = off.")
+    _propf("Bar length (µm)", "scale_bar_um", 0.0, 0.0, 5000.0, 1.0, 1,
+           "Scale-bar length in microns. 0 = off. Bar pixels = length ÷ pixel size.")
+    _combo("Show on", "scale_bar_cells", _CELLS,
+           "Which cell(s) show the scale bar: every cell, or one grid corner.")
+    _combo("Position", "scale_bar_img_corner", _CORNERS,
+           "Where in the image the bar sits.")
+    _combo("Colour", "scale_bar_color", _COLORS, "Scale-bar colour.")
+
+    _cap("Cell labels")
+    _combo("Mode", "label_mode", [("None", "none"), ("Identity", "identity")],
+           "Burn a well · channel · timepoint label into the image.")
+    _combo("Show on", "label_cells", _CELLS,
+           "Which cell(s) show the label: every cell, or one grid corner.")
+    _combo("Position", "label_img_corner", _CORNERS,
+           "Where in the image the label sits.")
+    _propf("Font (px)", "label_font_px", 12, 6, 48, 1.0, 0,
+           "Label font size (relative to a 240 px cell, so live and export match).")
+    _combo("Colour", "label_color", _COLORS, "Label text colour.")
+    _check("Background box", "label_bg",
+           "Draw a translucent dark box behind the label for legibility.")
     pl.addLayout(grid)
     pl.addStretch(1)
     dock.layout().addWidget(panel)
@@ -224,8 +297,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.setContentsMargins(0, 0, 0, 0)
 
     def _generate(_=None) -> None:
-        # The one render trigger: draw the grid from current state, then clear the
-        # shelf's "edited — press Generate" cue.
+        # The one render trigger: flush any debounced shelf edit so the grid
+        # reflects the latest builder state on the FIRST click (not the second),
+        # draw the grid from current state, then clear the "edited — press
+        # Generate" cue.
+        builder_flush_pending(ctx)
         image_table_generate(ctx)
         builder_notify_rendered(ctx)
 

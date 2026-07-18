@@ -20,8 +20,11 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
     _load_array,
     _row_display_opts,
+    cell_chrome_kwargs,
     cell_display_rgb,
+    draw_cell_chrome,
     overlay_cell_rgb,
+    resolve_chrome_plan,
 )
 from well_viewer.features.image_browser.image_table.grid_layout import _axis_dim_values
 
@@ -196,6 +199,9 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
     rendered = getattr(ctx.state.image_table, "last_render", None) or {}
     crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
+    # Scale bar + identity labels are burned into the same RGB the live grid uses,
+    # so the export matches the screen (single-source parity).
+    chrome_plan = resolve_chrome_plan(ctx, cells)
     # Display toggles (top-hat / boundaries / binary) + LUT are per ROW —
     # mirror the live thumbnail, reading each from the cell's row box so the
     # export matches what's on screen.
@@ -271,6 +277,13 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
                 # changes the live look auto-propagates to the export.
                 rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr) \
                     if arr is not None else None
+
+            # Burn the scale bar / label into the source-res RGB (before any
+            # gallery downscale, so the white bar/text survive max-pooling).
+            if rgb is not None:
+                ck = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
+                if ck:
+                    rgb = draw_cell_chrome(rgb, **ck)
 
             if rgb is not None:
                 if cell_max_px:

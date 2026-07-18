@@ -227,6 +227,63 @@ def _finite_positive(v) -> bool:
     return 0.0 < f < float("inf")  # finite & positive (NaN/inf compare False)
 
 
+def _draw_scatter_agg_legends(ax_agg, scatter_data, marker_fg) -> None:
+    """Build the aggregate scatter's two compact legends from proxy handles.
+
+    The aggregate encodes **well/group identity as marker shape** and
+    **timepoint as colour**, so a per-point legend explodes to
+    N_wells × N_timepoints rows. Instead draw two small keys:
+
+    - a **wells** legend — one entry per well/group, its marker in a neutral
+      colour (``marker_fg``), labelled with the Sample-Definition display name;
+    - a **timepoint** colour key — one filled dot per timepoint in its viridis
+      colour, labelled ``t=Xh``.
+
+    Single-entry keys are skipped (one group, or one timepoint) so a redundant
+    one-row box never appears.
+    """
+    from matplotlib.lines import Line2D
+    from matplotlib.legend import Legend
+
+    wells: "dict[str, str]" = {}      # group_label -> marker
+    tps: "dict[float, Any]" = {}      # timepoint  -> colour
+    for data in scatter_data.values():
+        glabel = data.get('group_label') or data.get('label', '')
+        if glabel not in wells:
+            wells[glabel] = data.get('marker', 'o')
+        tp = data.get('timepoint')
+        if tp is not None and tp not in tps:
+            tps[tp] = data.get('color', (0, 0, 0, 1))
+
+    # Both keys are built as *standalone* ``Legend`` artists via ``add_artist``
+    # (not ``ax.legend``), which leaves ``ax.legend_`` unset. That is deliberate:
+    # ``apply_export_style_to_current`` repositions ``ax.get_legend()`` to the
+    # ``legend_loc`` pref ("best"), which would otherwise drop the timepoint key
+    # on top of the wells key. Keeping them off ``legend_`` pins their corners.
+    def _add(handles, loc, title) -> None:
+        leg = Legend(ax_agg, handles, [h.get_label() for h in handles],
+                     loc=loc, fontsize=8, title=title)
+        leg.get_frame().set_facecolor("none")
+        leg.get_frame().set_alpha(0.0)
+        ax_agg.add_artist(leg)
+        style_legend(leg, ax_agg)
+
+    if len(wells) > 1:
+        _add(
+            [Line2D([], [], linestyle='none', marker=mk, markersize=8,
+                    color=marker_fg, label=glabel)
+             for glabel, mk in wells.items()],
+            'upper left', "Well / group",
+        )
+    if len(tps) > 1:
+        _add(
+            [Line2D([], [], linestyle='none', marker='o', markersize=8,
+                    color=color, label=f"t={tp}h")
+             for tp, color in sorted(tps.items())],
+            'lower right', "Timepoint",
+        )
+
+
 def redraw_scatter_agg(
     ctx,
     stat_x: str,
@@ -296,7 +353,10 @@ def redraw_scatter_agg(
             color=_muted_fg,
         )
     else:
-        # Plot each replicate/well-timepoint as separate error bar series
+        # Plot each replicate/well-timepoint as a separate error-bar series.
+        # ``label='_nolegend_'`` keeps every point OUT of the auto-legend — the
+        # legend is built explicitly below as two compact keys (well marker +
+        # timepoint colour) instead of one row per well×timepoint.
         for label, data in scatter_data.items():
             # Skip xerr / yerr entirely when there's nothing to show.
             # ``capsize=5`` draws a "_" / "|" cap marker at every point
@@ -312,7 +372,7 @@ def redraw_scatter_agg(
                 data['y'],
                 xerr=xerr,
                 yerr=yerr,
-                label=data['label'],
+                label='_nolegend_',
                 color=data['color'],
                 marker=data.get('marker', 'o'),
                 markersize=8,
@@ -337,8 +397,7 @@ def redraw_scatter_agg(
             color=_title_fg,
         )
         ax_agg.grid(True, alpha=0.3, color=_grid)
-        _leg_agg = ax_agg.legend(loc='best', fontsize=8, framealpha=0.0, facecolor="none")
-        style_legend(_leg_agg, ax_agg)
+        _draw_scatter_agg_legends(ax_agg, scatter_data, _title_fg)
 
     # Redraw canvas
     try:

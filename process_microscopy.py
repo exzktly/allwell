@@ -1020,6 +1020,17 @@ def _split_background_wells(value) -> "list[str]":
     return out
 
 
+def _bg_well_key(token) -> str:
+    """Match key for a background well, tolerant of zero-padding (``A1`` ≡ ``A01``).
+
+    Canonicalises a 96-well token to its padded form (``"A1"`` → ``"a01"``) so a
+    user who types the unpadded well still matches the padded filenames the
+    pipeline reads; a non-well identifier falls back to a plain lowercase match so
+    odd/custom names keep working."""
+    c = _canonical_well_label(token)
+    return c.lower() if c else str(token or "").strip().lower()
+
+
 def _empty_well_tp_key(token_value) -> str:
     """Canonical timepoint key for grouping/matching empty-well frames.
 
@@ -1072,7 +1083,7 @@ def sample_empty_well_images(
     chan_idx = fields.index("channel") if "channel" in fields else -1
     well_idx = fields.index("well") if "well" in fields else -1
     tp_idx = fields.index("timepoint") if "timepoint" in fields else -1
-    wells = {w.lower() for w in _split_background_wells(background_wells)}
+    wells = {_bg_well_key(w) for w in _split_background_wells(background_wells)}
     if chan_idx < 0 or not wells:
         return {}
     want = {str(t).strip().lower() for t in (tokens or [])}
@@ -1083,7 +1094,7 @@ def sample_empty_well_images(
             return None
         if require_well:
             if well_idx < 0 or well_idx >= len(parts) \
-                    or parts[well_idx].strip().lower() not in wells:
+                    or _bg_well_key(parts[well_idx]) not in wells:
                 return None
         tok = parts[chan_idx].strip().lower()
         if want and tok not in want:
@@ -1108,7 +1119,7 @@ def sample_empty_well_images(
     #    established by the zip name, so members need not carry the well token.
     zip_hit = False
     for well, zpath in find_well_zips(input_dir):
-        if well.lower() not in wells:
+        if _bg_well_key(well) not in wells:
             continue
         zip_hit = True
         try:
@@ -1125,7 +1136,7 @@ def sample_empty_well_images(
     # 2) per-well folder(s): <input_dir>/<WELL>/...  (well set by folder name).
     if not zip_hit:
         for well, folder in find_well_folders(input_dir):
-            if well.lower() not in wells:
+            if _bg_well_key(well) not in wells:
                 continue
             for p in sorted(folder.rglob("*.tif*")):
                 _add(p.stem, p)

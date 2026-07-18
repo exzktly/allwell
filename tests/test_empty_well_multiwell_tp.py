@@ -92,6 +92,29 @@ def test_sample_pools_multiple_wells_grouped_by_timepoint(tmp_path):
     assert all(abs(float(a.mean()) - 150.0) < 1 for a in by_tp["2"])
 
 
+def test_bg_well_key_tolerates_zero_padding():
+    from process_microscopy import _bg_well_key
+    # A1 and A01 are the same 96-well position → same match key.
+    assert _bg_well_key("A1") == _bg_well_key("A01") == "a01"
+    assert _bg_well_key("h12") == "h12"
+    # A non-well identifier falls back to a plain lowercase match.
+    assert _bg_well_key("blank") == "blank"
+
+
+def test_sample_tolerates_unpadded_background_well(tmp_path):
+    # Files carry the zero-padded well token (A01); the user typed the unpadded
+    # form (A1). They must resolve to the same well so sampling still finds frames.
+    _make_plate(tmp_path, wells=("A01",), fovs=("F001", "F002"),
+                tps_levels={"T01": 77.0})
+    stacks = sample_empty_well_images(
+        tmp_path, tokens=["GFP"], schema=SCHEMA, sep=SEP,
+        background_wells=["A1"])                      # unpadded input
+    assert set(stacks) == {"gfp"}
+    by_tp = stacks["gfp"]
+    assert by_tp.get("1"), "unpadded 'A1' should match the padded 'A01' files"
+    assert all(abs(float(a.mean()) - 77.0) < 1 for a in by_tp["1"])
+
+
 def test_models_are_per_timepoint_and_differ(tmp_path):
     _make_plate(tmp_path, wells=("H12", "G12"), fovs=("F001", "F002"),
                 tps_levels={"T01": 50.0, "T02": 150.0})

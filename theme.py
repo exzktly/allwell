@@ -554,7 +554,10 @@ QCheckBox, QRadioButton {{
     background: transparent;
     color: {c.text_primary};
     spacing: {s.sm}px;
-    padding: {s.xs}px {s.xs}px;
+    /* Vertical only — horizontal padding would insert dead space before a
+       text-less indicator (e.g. the WrapCheckBox composite), pushing its label
+       away from the box. */
+    padding: {s.xs}px 0;
 }}
 QCheckBox::indicator, QRadioButton::indicator {{
     width: 16px;

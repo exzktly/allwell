@@ -443,7 +443,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     zoom_lbl = QPushButton(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
-    zoom_lbl.setFixedWidth(52)
+    # Wide enough for the max "400%" without clipping the trailing % (52 was tight).
+    zoom_lbl.setFixedWidth(60)
     zoom_lbl.setToolTip("Click to reset zoom to 100%")
     zoom_lbl.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.0))
     reg.register("_image_table_zoom_lbl", zoom_lbl)

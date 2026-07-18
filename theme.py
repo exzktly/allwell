@@ -416,6 +416,10 @@ QPushButton#Danger:hover {{
 QPushButton#Ghost, QToolButton#Ghost {{
     background-color: transparent;
     border-color: transparent;
+    /* Ghost buttons are icon-like (✕ close, ▲/▾ reorder). The default 10px
+       horizontal button padding ate a compact fixed width and clipped the glyph,
+       so keep their padding tight. */
+    padding: {s.xs}px {s.xs}px;
 }}
 QPushButton#Ghost:hover, QToolButton#Ghost:hover {{
     background-color: {c.panel};

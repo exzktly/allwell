@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
-from well_viewer.core.channel_state_controller import recalculate_threshold
+from well_viewer.core.channel_state_controller import recalculate_threshold, set_ratio_metrics
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.safe import swallowed
 
@@ -144,8 +144,46 @@ def _reset_gating_state(ctx) -> None:
     cg.use_scatter_thresh = False
     cg.gating_choices = None
     cg.thresh_choices = None
+    # The gate *values* leak the same way as the scatter-gate config: the
+    # cell_gating loader merges them in additively and early-returns for a
+    # dataset with no gating block, so a stale fluor gate / ThreshFracOn would
+    # silently filter the new dataset's cells. Clear the typed slice; no widget
+    # sync is needed — recalculate_threshold (later in the load) rebuilds the
+    # Cell-Gating rows to their defaults before re-applying any persisted values,
+    # and the gating accessors read this slice, not the edits.
+    cg.fluor_gates.clear()
+    cg.thresh_frac_on.clear()
     ctx.runtime.review.included_overrides = {}
     app._app_state.heatmap.active_layout_name = None
+
+
+def _reset_sample_definitions_state(ctx) -> None:
+    """Clear the previous dataset's sample-definition selection state on a swap.
+
+    ``selections`` / ``current_selection_id`` / ``notes_text`` are only
+    overwritten by the sample-definitions hydrator when the new dataset has a
+    block; ``active_solo_wells`` is never reset. Left in place, they'd carry the
+    previous dataset's replicate sets / groups / notes into the new one (audit
+    X1 pattern, mirroring :func:`_reset_gating_state`). ``well_labels`` is reset
+    in ``DatasetState.begin_load``; ``plot_groups`` is reset in the load block;
+    ratio metrics are reset at their hydration point (heavy channel-combo
+    cascade must not run here on the not-yet-loaded dataset).
+    """
+    sel = ctx.state.selection
+    sel.selections = []
+    sel.current_selection_id = None
+    sel.active_solo_wells.clear()
+    sel.notes_text = ""
+    # Sync the Notes editor so it doesn't keep showing the previous dataset's
+    # text (the hydrator re-fills it only when the new dataset has notes). Mirrors
+    # the clear in ``sample_definitions.clear_all``; no-op before it's built.
+    notes_edit = ctx.widgets.get_or_none("_notes_edit")
+    if notes_edit is not None:
+        blocked = notes_edit.blockSignals(True)
+        try:
+            notes_edit.clear()
+        finally:
+            notes_edit.blockSignals(blocked)
 
 
 def load_directory(ctx, d: Path, label=None) -> None:
@@ -244,6 +282,10 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # Clear the prior dataset's gate / override / cell-gating state before the
     # new dataset hydrates (audit X1 — stops cross-dataset gate leakage).
     _reset_gating_state(ctx)
+    # Same X1 pattern for the sample-definition selection state (replicate sets /
+    # groups / notes / solo wells): the hydrator early-returns for a dataset with
+    # no sample_definitions block, so clear before it runs.
+    _reset_sample_definitions_state(ctx)
     # Signal any in-flight smFISH "Apply to All" worker to abort so
     # it doesn't overwrite the *new* dataset's CSVs with counts
     # computed against the previous dataset.
@@ -348,6 +390,15 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # Auto-load any persisted ratio definitions and heatmap layouts that live
     # in the same data directory. Both calls are safe no-ops when no file
     # exists; errors are logged and swallowed.
+    #
+    # Reset ratio metrics first: ``ratios.load_from_data_dir`` early-returns when
+    # the new dataset has no ``ratios`` section, which would leave the previous
+    # dataset's ratio channels defined (and computing wrong per-cell values).
+    # Done here (not in the early reset block) because ``set_ratio_metrics`` runs
+    # a channel-combo cascade that must see the loaded dataset — the same call the
+    # ratios hydrator makes below, and ``recalculate_threshold`` rebuilds the
+    # combos afterward.
+    set_ratio_metrics(ctx, [])
     app._persistence.load("ratios")
     # Eagerly hydrate Cell Gating thresholds from ``pipeline_info.json`` so the
     # very first plot draw (line / bar / batch export) has the user's

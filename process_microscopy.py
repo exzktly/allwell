@@ -69,6 +69,10 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
+from util.well_token import (
+    split_background_wells as _split_background_wells,
+    background_well_key as _bg_well_key,
+)
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -1001,34 +1005,6 @@ def _load_image_source(source) -> "np.ndarray | None":
 # per-timepoint field tracks background drift; ``_POOLED_TP`` is the
 # all-timepoints fallback used when a sample's timepoint has no blank frame.
 _POOLED_TP = "__pooled__"
-
-
-def _split_background_wells(value) -> "list[str]":
-    """Parse the comma-separated background-well value into a clean, de-duped list.
-
-    Accepts a single well (``"H12"``), a comma-separated string (``"H12, G12"``),
-    or an already-split list. Order-preserving; case-insensitive de-dupe.
-    """
-    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
-    out: "list[str]" = []
-    seen: set = set()
-    for it in items:
-        w = str(it or "").strip()
-        if w and w.lower() not in seen:
-            seen.add(w.lower())
-            out.append(w)
-    return out
-
-
-def _bg_well_key(token) -> str:
-    """Match key for a background well, tolerant of zero-padding (``A1`` ≡ ``A01``).
-
-    Canonicalises a 96-well token to its padded form (``"A1"`` → ``"a01"``) so a
-    user who types the unpadded well still matches the padded filenames the
-    pipeline reads; a non-well identifier falls back to a plain lowercase match so
-    odd/custom names keep working."""
-    c = _canonical_well_label(token)
-    return c.lower() if c else str(token or "").strip().lower()
 
 
 def _empty_well_tp_key(token_value) -> str:

@@ -359,13 +359,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         rl.addWidget(edit)
 
         remove_btn = QPushButton("✕", row)
+        remove_btn.setFixedWidth(36)   # wide enough that the button padding doesn't clip ✕
         remove_btn.setProperty("variant", "secondary")
-        # The default 6px×10px button padding left only ~4px for the glyph at a
-        # 24px fixed width, so the ✕ was clipped to an illegible stub. Trim the
-        # horizontal padding and give it a square footprint so the mark centres.
-        remove_btn.setStyleSheet("padding: 4px;")
-        remove_btn.setFixedSize(26, 26)
-        remove_btn.setToolTip("Remove this channel")
         rl.addWidget(remove_btn)
 
         # Pin each checkbox to a width derived from font metrics + a fixed

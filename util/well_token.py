@@ -48,3 +48,30 @@ def canonical_well_label(token: str) -> Optional[str]:
 def is_valid_well_name(token: str) -> bool:
     """True iff *token* canonicalises to a valid 96-well position."""
     return canonical_well_label(token) is not None
+
+
+def split_background_wells(value) -> "list[str]":
+    """Parse the comma-separated background-well value into a clean, de-duped list.
+
+    Accepts a single well (``"H12"``), a comma-separated string (``"H12, G12"``),
+    or an already-split list. Order-preserving; case-insensitive de-dupe.
+    """
+    items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
+    out: "list[str]" = []
+    seen: set = set()
+    for it in items:
+        w = str(it or "").strip()
+        if w and w.lower() not in seen:
+            seen.add(w.lower())
+            out.append(w)
+    return out
+
+
+def background_well_key(token) -> str:
+    """Match key for a background well, tolerant of zero-padding (``A1`` ≡ ``A01``).
+
+    Canonicalises a 96-well token to its padded form (``"A1"`` → ``"a01"``) so a user
+    who types the unpadded well still matches the padded filenames the pipeline
+    reads; a non-well identifier falls back to a plain lowercase match."""
+    c = canonical_well_label(token)
+    return c.lower() if c else str(token or "").strip().lower()

@@ -292,18 +292,22 @@ def well_aggregate_stats(
 
     Each loaded well contributes one mean / fraction value (per the
     active gating); sample SD (ddof=1) is taken across those values
-    and divided by √n when ``use_sem`` is True. Shared between
-    :meth:`_compute_rep_stats` (line / bar plot rep-set stats) and
-    ``scatter_controller._agg_wells`` (scatter aggregate plot) so the
-    three paths agree on what "mean across wells under active
-    gating" means.
+    and divided by √n when ``use_sem`` is True.
 
     When ``per_fov_spread`` is True the spread is taken across
     per-FOV means inside each well instead of across wells: the
     per-well mean stays the same but the returned ``mean_err`` is
-    the mean of the per-well FOV spreads (a conservative pooling
-    that keeps the answer well-defined for both single- and
-    multi-well groups).
+    the mean of the per-well FOV spreads.
+
+    .. note::
+       Legacy helper — **no production callers**. The scatter-aggregate
+       plot (its former only consumer) was moved onto the canonical
+       :func:`group_replicate_stats` + :func:`_reduce_reps` replicate model
+       (the same one line / bar / Stats use) so it now agrees with those
+       paths in FOV mode too; this helper's FOV path did *not* (it averaged
+       per-well FOV spreads instead of pooling FOVs across wells as
+       independent replicates). Kept for reference / potential reuse — route
+       new work through ``group_replicate_stats`` instead.
     """
     well_means: List[float] = []
     well_fracs: List[float] = []
@@ -375,11 +379,11 @@ def compute_rep_stats(
     Each well contributes one mean-fluor value; SD/SEM is across those values.
     Results are cached in _stats_cache.
 
-    Thin wrapper over :meth:`_well_aggregate_stats` which carries the
-    shared per-well aggregation + ddof=1 stats logic. ``_agg_wells``
-    in scatter_controller delegates to the same helper so all three
-    plot paths (line / bar / scatter-agg) compute the "mean across
-    wells under active gating" identically.
+    Reduces :func:`group_replicate_stats` (the ONE canonical per-replicate
+    producer) via :func:`_reduce_reps`. The scatter-aggregate plot's
+    ``_agg_wells`` reduces the very same producer, so all three plot paths
+    (line / bar / scatter-agg) — and the Stats tab — compute "mean across
+    replicates under active gating" identically in both well and FOV modes.
     """
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep", rset.name, tuple(rset.wells), target_t, threshold, use_sem,

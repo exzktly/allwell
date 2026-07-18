@@ -24,7 +24,7 @@ import pandas as pd
 
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
-from well_viewer.domain.stats_compute import well_aggregate_stats
+from well_viewer.domain.stats_compute import group_replicate_stats, _reduce_reps
 from well_viewer.domain.metric_registry import column_gating_exempt
 from well_viewer.domain.selections_model import (
     active_replicate_sets, color_for_replicate_set, color_for_well,
@@ -344,16 +344,24 @@ def collect_scatter_agg_data(
     active_rsets = active_replicate_sets(
         ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
+    # Each entry is ``(identity, display_label, wells)``. ``identity`` is the raw
+    # rep-set name / well token used as the click/CSV/export key; ``display_label``
+    # is the user-defined Sample-Definition name shown in the legend (mirrors the
+    # per-cell scatter's ``collect_scatter_data``).
     if active_rsets:
         # Mode: replicate sets
-        labels_to_process = [(r.name, r.wells) for r in active_rsets]
+        labels_to_process = [
+            (r.name, replicate_display_label(ctx, r), r.wells) for r in active_rsets
+        ]
     else:
         # Mode: individual wells
         selected_wells = sorted(
             (lbl for lbl in ctx.state.selection.selected_wells if lbl in ctx.state.dataset.well_paths),
             key=lambda lbl: parse_rc(lbl),
         )
-        labels_to_process = [(lbl, [lbl]) for lbl in selected_wells]
+        labels_to_process = [
+            (lbl, well_display_label(ctx, lbl), [lbl]) for lbl in selected_wells
+        ]
 
     # Define markers for each well/group
     markers = ['o', 's', '^', 'D', 'v', 'p', '*', 'h', '+', 'x']  # circle, square, triangle, diamond, etc.
@@ -392,31 +400,32 @@ def collect_scatter_agg_data(
         val_col_y = f"{ch_y}_{intensity_y}"
 
     def _agg_wells(wells, tp, val_col, threshold, metric):
-        """Mean ± SD/SEM across well-level values for the scatter-aggregate plot.
+        """Mean ± SD/SEM for the scatter-aggregate plot, via the ONE replicate
+        model the bar / line plots and the Stats tab use.
 
-        Delegates to ``WellViewerApp._well_aggregate_stats`` so this
-        path agrees numerically with the line/bar plots'
-        ``_compute_rep_stats`` and the Stats tab's pairwise tests.
-        Returns ``(value, err)`` picking ``frac`` when ``metric ==
-        "frac"`` and ``mean`` otherwise. When ``per_fov`` is on (driven
-        by the app's "Across FOV" toggle), the spread is computed
-        across per-FOV means rather than across wells.
+        Reduces ``group_replicate_stats`` — the single canonical producer of
+        per-replicate summaries — so this path agrees numerically with
+        ``compute_rep_stats`` / ``compute_rep_per_fov_stats`` (and thus the
+        Stats tab's tests) in **both** modes. Each well is one replicate in
+        well-mode; every FOV across all of the group's wells is one replicate
+        when ``per_fov`` (the "Across FOV" toggle) is on — so a rep-set's FOV
+        spread pools FOVs across wells rather than averaging per-well spreads.
+        Returns ``(value, err)`` picking ``frac`` when ``metric == "frac"`` and
+        ``mean`` otherwise.
         """
         if not val_col:
             return float("nan"), 0.0
-        gm, gerr, gf, ferr = well_aggregate_stats(ctx,
-            wells, tp,
-            threshold=threshold,
+        reps = group_replicate_stats(
+            ctx, wells, tp,
+            use_fov=per_fov,
             val_col=val_col,
+            threshold=threshold,
             fluor_gates=fluor_gates,
-            use_sem=use_sem,
-            per_fov_spread=per_fov,
         )
-        if metric == "frac":
-            return gf, ferr
-        return gm, gerr
+        field = "frac" if metric == "frac" else "mean"
+        return _reduce_reps(reps, field, use_sem)
 
-    for label_idx, (label, wells) in enumerate(labels_to_process):
+    for label_idx, (identity, disp_label, wells) in enumerate(labels_to_process):
         marker = markers[label_idx % len(markers)]
 
         for tp in sorted(timepoints_h):
@@ -426,7 +435,7 @@ def collect_scatter_agg_data(
             if math.isnan(mean_x) or math.isnan(mean_y):
                 continue
 
-            data_key = f"{label}_tp{tp}"
+            data_key = f"{identity}_tp{tp}"
             tp_color = tp_to_color.get(tp, (0, 0, 0, 1))
             scatter_data[data_key] = {
                 'x': [mean_x],
@@ -436,7 +445,11 @@ def collect_scatter_agg_data(
                 'color': tp_color,
                 'marker': marker,
                 'timepoint': tp,
-                'label': f"{label} (t={tp}h)",
+                # Per-point legend text (kept for CSV / click / batch-export
+                # consumers reading ``data["label"]``); the tab renderer builds a
+                # tidy two-part legend from ``group_label`` + ``timepoint``.
+                'label': f"{disp_label} (t={tp}h)",
+                'group_label': disp_label,
             }
 
     return scatter_data

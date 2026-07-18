@@ -117,7 +117,7 @@ QLabel#ITBNote { color: #5F6B7C; font-size: 10px; }
 
 QToolButton#ITBOpt {
     color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
-    border-radius: 5px; padding: 1px 7px; font-size: 11px;
+    border-radius: 5px; padding: 3px 8px; font-size: 12px;
 }
 QToolButton#ITBOpt:hover { color: #E6E9EF; border-color: #6B8AFD; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }

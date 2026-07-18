@@ -133,9 +133,8 @@ def _build_properties_dock(ctx, dock) -> None:
         st = Stepper(panel, value=float(getattr(its, key, default)),
                      minimum=float(lo), maximum=float(hi), single_step=1.0, decimals=0)
         st.setToolTip(tip)
-        # A 1–4 digit value doesn't need the full column; cap + left-align it so
-        # the ▴/▾ column isn't shoved against (and clipped by) the panel edge.
-        st.setMaximumWidth(66)
+        # The Stepper self-sizes to its value width; left-align it so it sits by
+        # the label rather than stretching across the column to the panel edge.
         st.valueChanged.connect(lambda v, k=key: image_table_set_spacing(ctx, k, v))
         grid.addWidget(st, r[0], 1, Qt.AlignLeft)
         r[0] += 1
@@ -149,8 +148,7 @@ def _build_properties_dock(ctx, dock) -> None:
                      minimum=float(lo), maximum=float(hi), single_step=step,
                      decimals=decimals)
         st.setToolTip(tip)
-        # µm/px shows up to 3 decimals ("0.000"); still far narrower than the column.
-        st.setMaximumWidth(92)
+        # The Stepper self-sizes to its value width (incl. decimals); left-align it.
         st.valueChanged.connect(lambda v, k=key: image_table_set_display(ctx, k, v))
         grid.addWidget(st, r[0], 1, Qt.AlignLeft)
         r[0] += 1

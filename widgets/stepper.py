@@ -24,7 +24,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 from PySide6.QtCore import QEvent, Qt, Signal  # noqa: E402
-from PySide6.QtGui import QDoubleValidator  # noqa: E402
+from PySide6.QtGui import QDoubleValidator, QFontMetrics  # noqa: E402
 from PySide6.QtWidgets import (  # noqa: E402
     QFrame, QHBoxLayout, QLineEdit, QSizePolicy, QToolButton, QVBoxLayout,
 )
@@ -89,6 +89,7 @@ class Stepper(QFrame):
         self._edit.installEventFilter(self)
         self.setStyleSheet(self._build_qss())
         self.setValue(value)
+        self._update_size()
 
     # ── value API ────────────────────────────────────────────────────────
     def value(self) -> float:
@@ -109,6 +110,7 @@ class Stepper(QFrame):
         self._min, self._max = float(lo), float(hi)
         self._validator.setRange(self._min, self._max, self._decimals)
         self.setValue(self._value)
+        self._update_size()
 
     def setMinimum(self, lo: float) -> None:
         self.setRange(lo, self._max)
@@ -123,20 +125,44 @@ class Stepper(QFrame):
         self._decimals = max(0, int(n))
         self._validator.setDecimals(self._decimals)
         self._edit.setText(self._format(self._value))
+        self._update_size()
 
     def setSuffix(self, text: str) -> None:
         self._suffix = text or ""
         self._edit.setText(self._format(self._value))
+        self._update_size()
 
     def setPrefix(self, text: str) -> None:
         self._prefix = text or ""
         self._edit.setText(self._format(self._value))
+        self._update_size()
 
     def bindingAdapter(self):
         """``(getter, setter, change_signal)`` for binding-driven panels."""
         return (self.value, self.setValue, self.valueChanged)
 
     # ── internals ────────────────────────────────────────────────────────
+    def _update_size(self) -> None:
+        """Size the widget to the widest value its range can display (plus the
+        ▴/▾ column), so it stays compact and its arrows are never clipped.
+
+        The bare ``QLineEdit`` sizeHint is ~17 characters wide, which made every
+        Stepper demand ~186px — arrows floated far from the value in wide rows and
+        got clipped at the edge of narrow docks. Bounding the width to the actual
+        value length fixes both. Clamped to a sane [4, 11]-digit range so a huge
+        ``maximum`` (e.g. 1e9) doesn't blow it back up, and a tiny one still shows
+        the arrows. Recomputed whenever the range / decimals / affixes change."""
+        fm: QFontMetrics = self._edit.fontMetrics()
+        samples = [self._format(self._min), self._format(self._max),
+                   self._format(self._value)]
+        text_w = max((fm.horizontalAdvance(s) for s in samples), default=0)
+        text_w = max(fm.horizontalAdvance("0000"),
+                     min(text_w, fm.horizontalAdvance("0" * 11)))
+        # edit padding (8+8) + the arrow column + frame.
+        full = int(text_w) + 16 + 26
+        self.setMaximumWidth(full)
+        self.setMinimumWidth(min(full, 58))
+
     def _clamp(self, v: float) -> float:
         return max(self._min, min(self._max, v))
 

@@ -10,10 +10,10 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.9.** This map tracks the current release; the version
+**Reflects All-Well v8.8.11.** This map tracks the current release; the version
 string itself is centralized in the repo-root `version.py` (§3) and surfaced on
 the title-bar version pill. Feature areas that changed materially in the
-v8.4 → v8.8.9 line carry inline `(vX.Y.Z)` markers so you can tell recent
+v8.4 → v8.8.11 line carry inline `(vX.Y.Z)` markers so you can tell recent
 structure from long-standing structure. Bump `version.py` on a release —
 nothing else carries the app version.
 
@@ -78,7 +78,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.5.3; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.11; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -768,7 +768,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/scatter/{controller,callbacks}.py` | Scatter Plot (cells + aggregate). The per-axis fluor-gate (`fluor_gate_x` / `fluor_gate_y`) is bypassed when an axis column ends with `_smfish_count` — the gate is a fluorescence-intensity floor and would strip every integer-count cell on a count axis. The mixed-axis case (one count, one intensity) still gates the intensity axis. The interactive rectangular gates live in `scatter/gating.py` (a documented naming exception): each box is stamped at draw time with its axis metric columns (`x_col`/`y_col`) and a `name` (auto-assigned `Gate N`, shown on the plot, editable in the Properties sidebar's gate list via `rename_gate`), so beyond the on-plot "% inside" labels its `compute_gate_inclusion` (matplotlib-free, reuses `_in_gate` + `resolve_value_series`) lets the Cell Gating tab turn the selected gate(s) into the `Gate_Pass` inclusion layer. The gating (inclusion) and thresholding (fraction-on) layers each have their OWN *Gates* multi-select checkbox menu, so they can be configured independently (`cell_gating_selected_scatter_gates(app, mode)`); each selection is a set of names in `_cell_gating_gating_choices` / `_cell_gating_thresh_choices` (`None` ⇒ all gates, auto-including ones drawn later). Each box's stamped `x_col`/`y_col` also drive on-axes rendering: `gating.draw_gates` / `gate_edge_at` only show and hit-test a gate when `app._scatter_axes_cols` (the columns currently on the axes, recorded by `paint_gates`) match it — a gate drawn on a different X/Y pair is hidden, since its box coords are meaningless there. Drawing / editing / clearing a gate fans out through `_notify_gates_changed` to the Cell Gating tab's `_scatter_gates_changed_cb`, which refreshes the pickers and recomputes inclusion immediately (signature-guarded); the per-cell scatter itself opts out of `Gate_Pass` so its cloud never shrinks under its own gates. A second, independent Cell Gating toggle applies the same selected gate as a **fraction-on threshold** instead of (or as well as) inclusion: the worker writes a per-cell `Gate_On` column and `aggregate_with_threshold_df(on_col="Gate_On")` (selected via `stats_compute._thresh_on_col`) makes gate membership the "on" population for fraction-on, replacing the `value > ThreshFracOn` cutoff. The per-cell tab's **Color by time** toggle (`_scatter_color_by_tp`) colours each point by its timepoint instead of by well identity (one `Line2D` per well-timepoint in a shared viridis scale from `collect.timepoint_color_map`, which the aggregate scatter reuses); it overrides density shading, and with >1 well selected it forces the "Separate axes" stacked layout (`_render_scatter_faceted`) so each well's time-coloured cloud gets its own panel. |
 | `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. |
 | `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. Log-X/Log-Y is a **single per-figure axis pref** (`x_log` / `y_log`) that the on-plot checkboxes and the Properties-sidebar toggles both drive (v8.4) — they previously wrote two independent stores and the export pass clobbered the button. Log-Y histograms pass `log=log_y` straight into `ax.hist` rather than computing a density from 0 and log-scaling afterwards (which corrupted the bar heights). |
-| `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. |
+| `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. The replicate unit is the **one rule** `domain/stats_compute.replicate_unit` — shared with the bar/line error bars so the test's `n` and the plotted spread never disagree. In **FOV mode** every FOV **across all of a group's wells** is an independent replicate (`n` = total FOVs, pooled across wells — v8.8.11; previously multi-well groups fell back to well-as-replicate and FOV mode only affected single-well groups); otherwise each well is one replicate. Pooling FOVs across wells is pseudo-replication (smaller p-values than a well-level test) — an explicitly requested behaviour. |
 | `features/image_browser/image_table/controller.py` | Image Table grid: render-model assembly + Generate/export orchestration. The "turn cache + state into pixels" work is split into sibling modules it re-exports (so call sites and external importers are unchanged) and which `test_monolith_budgets.py` ratchets: `image_compose.py` (LUT palette + per-channel cmap/LUT resolution, array loading, mask/threshold rendering, the RGB cell composer `cell_display_rgb`, the boundary overlay, and the channel-overlay blender `overlay_cell_rgb`), `grid_layout.py` (axis/cell layout math + the per-dimension well/channel/FOV/timepoint option lists), `build_layout.py` (flat + nested grid assembly + `image_table_apply_spec`), and `facet_view.py` (faceted render placement — axis labels + group spacing). **Headless plain-data render model (v8.7.2).** `ctx.runtime.image_table.cells` is a `rows × cols` grid of plain `{"well","chan","tp","fov"}` string dicts — the render contract, no Qt widgets. The renderer (`image_table_generate`), the layout math, the per-cell override popover (`grid_ops.py`), and `persistence/view_state.py` all read/write those strings directly; off-axis held values live on `state.fixed_vals` (read by `grid_layout._fixed_off_axis`) and grid size on `state.rows`/`state.cols`, so there are no held-value combos or grid-size spinners. A **grouped/tiled** well layout (`group_size`, 0 = off) bands each channel across multiple rows; it persists through `persistence/view_state.py` (`group_size` / `group_row_span`). **Builder shelf (v8.7).** The **sole** authoring surface is `builder_view.py` — a root + nested-channels drag-and-drop tree: each axis gets a root (Well/Timepoint/FOV) with channels nested under it, each channel carrying its own render options (raw/corrected · mask · ≥thr · boundary · colormap/LUT) via a ⚙ menu; a derived **Fixed** panel auto-lists the off-axis roots with value pickers; a **Separate ↔ Overlay** switch (`state.composite`) collapses a root's channel axis to a single entry and additively blends every selected channel into each cell — "blend this root's channels into one cell" (the layout emits the `image_compose.OVERLAY_CHAN` sentinel as the sole channel value via `grid_layout._axis_dim_values`; `image_compose.overlay_cell_rgb` blends it in both the live grid and export, and the flag round-trips through `view_state`); wells come from the sidebar plate. The shelf edits a Qt-free `TableSpec` (`state.py`) and calls `build_layout.image_table_apply_spec`, which flattens it onto the existing `row_dims`/`col_dims`/`active_*`/`composite`/`group_size` state (+ a per-channel `channel_opts` block) and drives the layout + a debounced `image_table_generate`. Per-channel display is **position-independent**: the four `image_compose._row_*` helpers resolve options from `channel_opts` keyed by the cell's channel, and the live generate path is unified onto `cell_display_rgb` so the live grid, the channel-overlay blend, and export always agree. A ⚙ "≥threshold" reuses main's `"<CHAN> (binary)"` token. Per-cell tweaks come from right-clicking a rendered cell (`grid_ops.image_table_cell_override_menu`, which writes the cell dict). The v8.7.2 excision removed the old dropdown selector grid, the per-row LUT/Display table (`grid_view.py`, `lut_ops.py`, the `lut_row_map` sharing), and the Composite toggle button — all superseded by the shelf. **Plate (96-well) layout.** A **Plate A–H × 1–12** toggle in the shelf header lays each selected well's image out in true plate positions with correct axis labels, using two *virtual* layout dims — `well_row` (A–H) and `well_col` (1–12), enumerated from the plate selection in `grid_layout` (`_well_row_options` / `_well_col_options`). They never get their own render-model cell key: `grid_layout.compose_plate_well` resolves each `(row, col)` back to the real `well` token (blank when that position is absent), and `facet_view._cv` derives them back from the composed well so the A–H / 1–12 headers label every band — unlike the `group_size`/Wrap trick, whose facet headers only reflect the first band. It rides the existing single-dim `_build_nested_layout` path (`row_dims=["well_row"]`, `col_dims=["well_col"]`); the channel is held fixed (`TableSpec.plate` flag round-trips through `spec_to_state_fields` / `spec_from_state`), and it's mutually exclusive with Wrap *and* with channel Overlay (plate mode writes `composite=False`). |
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The image pixel-value hover tooltip lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` and `role_output_filename` both consume it. (As of the §6.2 self-sufficiency fix this catalog is **reader-side only** — the pipeline writer, `process_microscopy.build_processed_output_path`, uses explicit `suffix=` strings rather than importing `well_viewer`. If catalog-driven *writing* is revived, move `ROLE_CATALOG` into a Qt-free `*_core` module first so the pipeline can import it without breaking the contract.) The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
@@ -921,6 +921,21 @@ horizontal alignment with the applied angle** — `ha="center"` at 0°,
 own `ha="right"` (drawn alongside its 45° rotation for many-bar axes) survived
 the flatten-to-0° and left horizontal category labels right-anchored under
 their bar instead of centered.
+
+**Per-panel axis limits (v8.8.11).** The bar figure is a 3-panel stack
+(Value / Fraction / Events), so a single flat `y_lim` can't address it. Axis
+limits are read **per-axis from each panel's own prefs bucket** (the same
+per-axis storage the font sizes already used) and each panel applies its own
+stored limit — so a Fraction- or Events-panel limit sticks instead of the
+panel auto-scaling. The earlier dead second mechanism (`apply_bar_ylims` +
+`ylim_*_edit` widgets that were never constructed) was removed; its
+fold-change-reset intent (a FC scale change lets autofit reclaim the panels)
+is reimplemented against the real per-axis export store. Also restored in the
+same release: the Properties sidebar reads global style keys with **bracket**
+access, so `features/export/style._ensure_export_style_prefs` now backfills
+missing default keys (and seeds the full default set before layering a saved
+non-default diff) — a restored `persistence.json` carrying a partial
+`export_style_prefs` diff no longer `KeyError`s the panel open.
 
 ### 5.9 Typed state, the event bus, and the DI context
 
@@ -1561,6 +1576,7 @@ load_controller.load_path(app, path)  ← well_viewer/core/load_controller.py
               ├── exit Split View if active (§5.10) — restore the single
               │   notebook before view-state restore + redraw touch it
               ├── glob *.csv, validate header, load each into pandas
+              ├── reset prior-dataset state BEFORE hydration (see below)
               ├── populate app._well_paths, app._cache
               ├── _build_tok_to_label, _rebuild_all_timepoints_cache, …
               ├── hydrate persisted state (sample_definitions, ratios,
@@ -1569,6 +1585,31 @@ load_controller.load_path(app, path)  ← well_viewer/core/load_controller.py
               ├── _recalculate_threshold        ← invokes _update_channel_selector
               └── app._redraw()                  ← plot_orchestrator.redraw
 ```
+
+**Cross-dataset state reset on swap (audit X1, v8.8.11).** Opening a new
+dataset while one is already loaded used to leak the previous dataset's
+in-memory state into the new one (reported as *well labels persisting*). The
+per-dataset persistence loaders **early-return** (or merge additively) when the
+new dataset's `pipeline_info` / sidecar block is absent, so any field left in
+place survives the swap and silently applies to the new data. The load path
+therefore clears the leaking state to its "empty" defaults **before** hydration,
+at the existing load-path chokepoints — the new dataset's own sidecar (if any)
+repopulates afterwards:
+
+- `DatasetState.begin_load` clears `well_labels` (the reported leak — its loader
+  merged additively).
+- `_reset_sample_definitions_state` (`core/load_controller.py`) clears
+  `selections` / `current_selection_id` / `notes_text` (+ the Notes editor
+  widget) / `active_solo_wells`.
+- `_reset_gating_state` clears the scatter-gate config **and** the gate *values*
+  (`fluor_gates` / `thresh_frac_on`); `recalculate_threshold` later in the load
+  rebuilds the Cell-Gating rows before re-applying any persisted values.
+- Ratio metrics are reset at their hydration point (their channel-combo cascade
+  must run against the loaded dataset), and stale Review-Image / Preview /
+  Playground image caches are dropped via the `on_dataset_loaded` hooks.
+
+This is the same "loader early-returns → stale state" class the gating reset
+already handled; the fix extended it to the sibling fields that were missed.
 
 ### 9.2 Selecting wells
 

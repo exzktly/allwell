@@ -576,7 +576,10 @@ Every plot tab carries the same action buttons on its controls row:
   line / marker widths, axis limits + log-scale, layout engine, and an
   export-profile picker. Axis **limits** and **log-scale** are scoped to the
   one plot; global publication style (fonts, line/marker, grid, legend) is
-  shared across tabs. Settings persist across redraws.
+  shared across tabs. On the Bar Plots tab (a Value / Fraction / Events panel
+  stack) axis limits are stored **per panel**, so a limit set on the Fraction or
+  Events panel sticks instead of that panel auto-scaling. Settings persist
+  across redraws.
 
 #### Fold-change normalization
 
@@ -690,7 +693,9 @@ count) — plus a CDF.
   (single-timepoint data draws a single point).
 - **Controls** (under **Display ▾**) — the **error band** (SEM / SD); the
   **per-FOV spread** toggle, which treats each field of view as a replicate so
-  the band reflects field-to-field variability; the shared
+  the band reflects field-to-field variability (for a multi-well group every
+  FOV across *all* its wells is pooled as an independent replicate — see the
+  pseudo-replication note under [Statistics](#statistics)); the shared
   [Fold-change](#fold-change-normalization) dropdowns (all three panels — mean,
   fraction-on, and N — normalize together).
 - **Optimal use** — turn on FOV spread when you have several fields per well
@@ -769,6 +774,15 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
   the replicate sets defined on [Sample Definitions](#sample-definitions).
 - **Controls** — the group editor (sidebar); the test selection; the timepoint;
   an FOV-replicate indicator that mirrors the plot tabs' FOV mode.
+- **Replicate unit.** What counts as one replicate is the single rule shared
+  with the bar / line error bars, so the test's `n` and the plotted spread never
+  disagree. With FOV mode **off**, each well in a group is one replicate. With
+  FOV mode **on**, every field of view **across all of the group's wells** is an
+  independent replicate (`n` = total FOVs), not just the well count.
+  > **Note.** Pooling FOVs across wells treats each field as an independent
+  > replicate — statistically this is pseudo-replication and tends to produce
+  > smaller p-values than a well-level test. It's an explicitly-chosen mode;
+  > leave FOV mode off for well-level replicates.
 - **Optimal use** — define replicate sets first so the tests run on
   biologically meaningful groups rather than single wells.
 
@@ -1249,13 +1263,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.9.app`
-for the full app, or `dist/AllWell-8.8.9-<profile>.app` for a subset (e.g.
-`AllWell-8.8.9-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.11.app`
+for the full app, or `dist/AllWell-8.8.11-<profile>.app` for a subset (e.g.
+`AllWell-8.8.11-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.8.9.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.8.11.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

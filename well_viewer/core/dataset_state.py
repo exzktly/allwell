@@ -87,6 +87,11 @@ class DatasetState:
         self.persistence_doc = None
         self.well_paths.clear()
         self.cache.clear()
+        # Well labels are per-dataset (persisted in the new dataset's
+        # pipeline_info sample_definitions block). The loader merges them in
+        # additively and early-returns when the new dataset has no block, so
+        # clear here — else the previous dataset's labels leak into this one.
+        self.well_labels.clear()
         # A new dataset has no crop until its persisted region (if any) loads.
         self.crop_region = None
 

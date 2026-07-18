@@ -430,6 +430,27 @@ def _loaded_smfish(ctx) -> None:
     smfish_sync_from_app(ctx)
 
 
+def _loaded_image_browser(ctx) -> None:
+    # Drop the previous dataset's decoded-image caches so the Review Image /
+    # Preview panels never show its pixels before the next redecode. The caches
+    # live on the typed state slices (not the widgets), so this is valid even
+    # when the tab was never built; feature_slice is None under a thin build.
+    ri = ctx.state.feature_slice("review_image")
+    if ri is not None:
+        ri.clear_caches()
+    pv = ctx.state.feature_slice("preview")
+    if pv is not None:
+        pv.clear_caches()
+
+
+def _loaded_playground(ctx) -> None:
+    # Playground's per-frame + reference-field caches are keyed by well/channel,
+    # not by data dir, so they must be dropped on a dataset swap.
+    pg = ctx.state.feature_slice("playground")
+    if pg is not None:
+        pg.clear_caches()
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # on_selection_changed hooks — relocated from
 # ``selection_controller._refresh_tab_view`` (the branches that ``return redrew``
@@ -642,6 +663,7 @@ def _features() -> "list[FeatureDescriptor]":
         FeatureDescriptor(
             name="Image Browser", group="Images", build=_build_image_browser,
             lazy_only=True,
+            on_dataset_loaded=_loaded_image_browser,
             states=(
                 StateSpec("review_image", _state_review_image),
                 StateSpec("preview", _state_preview),
@@ -734,7 +756,8 @@ def _features() -> "list[FeatureDescriptor]":
                           on_selection_changed=_sel_cell_browser,
                           per_well_selection=True),
         FeatureDescriptor(name="Playground", parent="Image Browser",
-                          on_activate=_activate_playground),
+                          on_activate=_activate_playground,
+                          on_dataset_loaded=_loaded_playground),
 
         # ── Sample Definitions sub-leaf ────────────────────────────────────
         FeatureDescriptor(name="Cell Gating", parent="Sample Definitions",

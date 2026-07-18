@@ -227,6 +227,7 @@ def load_from_pipeline_info(ctx) -> bool:
 
 def clear_all(ctx) -> None:
     """Clear every definition driven from the Sample Definitions tab."""
+    app = ctx.window  # transitional bridge: the refresh tail below still reads app._*
     confirm = QMessageBox.question(
         ctx.window, "Clear sample definitions",
         "Discard all well labels, replicate sets, bar groups, ratio "

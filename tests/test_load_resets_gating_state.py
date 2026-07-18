@@ -24,6 +24,8 @@ def test_reset_clears_all_leaky_gating_attrs():
         use_scatter_thresh=True,
         gating_choices={"G1"},
         thresh_choices={"G1"},
+        fluor_gates={"gfp": 10.0},
+        thresh_frac_on={"gfp": 80.0},
     )
     rt = AppRuntime()
     rt.review.included_overrides = {"A01/0/1/5": False}
@@ -44,4 +46,8 @@ def test_reset_clears_all_leaky_gating_attrs():
     assert cg.use_scatter_thresh is False
     assert cg.gating_choices is None
     assert cg.thresh_choices is None
+    # Gate *values* leak the same way (the cell_gating loader is additive and
+    # early-returns for a block-less dataset), so the swap-reset clears them too.
+    assert cg.fluor_gates == {}
+    assert cg.thresh_frac_on == {}
     assert app._app_state.heatmap.active_layout_name is None

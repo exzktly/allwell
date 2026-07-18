@@ -115,3 +115,12 @@ class PreviewState:
     # signal handler re-enters the refresh path, which can re-enter here through
     # the channel / well callbacks. Was the loose ``app._update_preview_in_progress``.
     update_in_progress: bool = False
+
+    def clear_caches(self) -> None:
+        """Drop the decoded preview image maps — call on dataset swap so the
+        panel never shows the previous dataset's pixels before the next
+        ``update_preview`` redecodes."""
+        self.fluor.clear()
+        self.overlay.clear()
+        self.mask.clear()
+        self.tophat_fluor.clear()

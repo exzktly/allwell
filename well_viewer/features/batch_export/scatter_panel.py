@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 
 from well_viewer.features.batch_export._common import (
     BarGroup,
+    PLOT_BG,
     WELL_COLORS,
+    get_color,
     _groups_with_loaded_wells,
     unique_export_stem,
 )
@@ -100,6 +102,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
         mode_row.addStretch(1)
         layout.addLayout(mode_row)
 
+        self._build_scatter_display_options(layout)
+
         sep = QFrame(); sep.setFrameShape(QFrame.HLine)
         layout.addWidget(sep)
 
@@ -112,6 +116,41 @@ class ScatterBatchExportPanel(BatchExportPanel):
         layout.addWidget(info)
 
         self._build_run_row(layout, button_text="\u25b6  Run Scatter Batch Export")
+
+    def _build_scatter_display_options(self, layout: QVBoxLayout) -> None:
+        """Display-option controls mirroring the on-tab Scatter plot.
+
+        Cells mode exposes the full set (density shading, X/Y log, overlay vs
+        separate-axes faceting, colour-by-time, show gates); the aggregate mode
+        exposes X/Y log. Defaults match the on-tab scatter (log axes on, gates
+        shown, overlay). Values are read at export time and passed straight into
+        the tab's own ``render_scatter_points`` / ``draw_gates`` (single source
+        of truth), so a batch figure looks like the tab."""
+        row = QHBoxLayout()
+        row.setContentsMargins(12, 0, 12, 4)
+        if self._scatter_mode == "cells":
+            self._sc_density_cb = QCheckBox("Color by density")
+            self._sc_xlog_cb = QCheckBox("X log"); self._sc_xlog_cb.setChecked(True)
+            self._sc_ylog_cb = QCheckBox("Y log"); self._sc_ylog_cb.setChecked(True)
+            self._sc_color_tp_cb = QCheckBox("Color by time")
+            self._sc_gates_cb = QCheckBox("Show gates"); self._sc_gates_cb.setChecked(True)
+            for w in (self._sc_density_cb, self._sc_xlog_cb, self._sc_ylog_cb,
+                      self._sc_color_tp_cb, self._sc_gates_cb):
+                row.addWidget(w)
+            row.addWidget(QLabel("Layout:"))
+            self._sc_layout_cb = QComboBox()
+            self._sc_layout_cb.addItems(["Overlay", "Separate axes"])
+            self._sc_layout_cb.setToolTip(
+                "Overlay draws every group on one axis; Separate axes stacks one "
+                "panel per group (also forced when Color by time is on).")
+            row.addWidget(self._sc_layout_cb)
+        else:
+            self._sc_agg_xlog_cb = QCheckBox("X log")
+            self._sc_agg_ylog_cb = QCheckBox("Y log")
+            row.addWidget(self._sc_agg_xlog_cb)
+            row.addWidget(self._sc_agg_ylog_cb)
+        row.addStretch(1)
+        layout.addLayout(row)
 
     def _init_timepoint_dropdown(self) -> None:
         timepoints = sorted(set(self._ctx.state.dataset.all_timepoints_cache or []))
@@ -448,19 +487,114 @@ class ScatterBatchExportPanel(BatchExportPanel):
         except OSError as exc:
             return f"{grp.name} scatter-cells CSV: {exc}"
         try:
-            def _draw(ax):
-                for label, data in scatter_data.items():
-                    ax.scatter(data["x"], data["y"], label=label, color=data["color"],
-                               alpha=0.6, s=26, edgecolors="none")
-            self._export_scatter_figure(
-                _draw,
-                xlabel=col_x, ylabel=col_y,
-                title=f"{grp.name} \u2014 Scatter Cells (t={tp_h:.1f}h)",
-                fig_path=fig_path, fmt=fmt,
-            )
+            with self._app_group_scope(grp):
+                self._render_scatter_cells_figure(
+                    scatter_data, col_x=col_x, col_y=col_y, tps_list=[tp_h],
+                    title=f"{grp.name} \u2014 Scatter Cells (t={tp_h:.1f}h)",
+                    fig_path=fig_path, fmt=fmt,
+                )
         except Exception as exc:
             return f"{grp.name} scatter-cells figure: {exc}"
         return None
+
+    def _render_scatter_cells_figure(
+        self, scatter_data, *, col_x: str, col_y: str, tps_list, title: str,
+        fig_path: Path, fmt: str,
+    ) -> None:
+        """Render a per-cell scatter figure by reusing the tab's own
+        ``render_scatter_points`` (+ ``draw_gates``), honouring the panel's
+        density / X-Y log / colour-by-time / overlay-vs-faceted / show-gates
+        options. One axis for Overlay, one axis per group for Separate axes
+        (also forced by Color by time). Must run inside ``_app_group_scope`` so
+        the gate/geometry lookups see the group's selections."""
+        from matplotlib.figure import Figure as _Figure
+        from well_viewer.features.scatter.gating import (
+            render_scatter_points, draw_gates,
+        )
+        from well_viewer.features.scatter._layout import log1p_axis_suffix
+
+        density_on = self._sc_density_cb.isChecked()
+        x_log = self._sc_xlog_cb.isChecked()
+        y_log = self._sc_ylog_cb.isChecked()
+        color_by_tp = self._sc_color_tp_cb.isChecked()
+        show_gates = self._sc_gates_cb.isChecked()
+        separate = self._sc_layout_cb.currentText().startswith("Separate")
+        prefs = self._ctx.state.export_prefs.style_prefs or {}
+        marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
+        ink = get_color("TXT_MUT")
+
+        items = list(scatter_data.items())
+        faceted = (separate or color_by_tp) and len(items) > 1
+        xlabel = col_x + log1p_axis_suffix(x_log)
+        ylabel = col_y + log1p_axis_suffix(y_log)
+
+        n_panels = len(items) if faceted else 1
+        fig = _Figure(figsize=(8, max(6, 3 * n_panels) if faceted else 6),
+                      dpi=300, facecolor=PLOT_BG)
+
+        def _panel(ax, data_dict) -> None:
+            _ipts, legend_handles = render_scatter_points(
+                self._ctx, ax, data_dict,
+                density_on=density_on, x_log=x_log, y_log=y_log,
+                marker_size=marker_size, color_by_tp=color_by_tp,
+            )
+            ax.set_ylabel(ylabel)
+            ax.grid(True, alpha=0.3)
+            if legend_handles:
+                ax.legend(handles=legend_handles, loc="best", fontsize=8,
+                          framealpha=0.0, facecolor="none")
+            elif ax.get_legend_handles_labels()[0]:
+                ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
+            if show_gates:
+                draw_gates(self._ctx, ax, data_dict, tps_list, ink, handles=False)
+
+        # render_scatter_points reads color_by_tp via the param; draw_gates reads
+        # gates_hidden + axes_cols off ctx. Swap those for the render and restore
+        # so a batch export never disturbs the live Scatter tab's state.
+        _rt = self._ctx.runtime.scatter
+        _saved = (_rt.axes_cols, _rt.gate_render, _rt.metadata,
+                  self._ctx.state.scatter.gates_hidden,
+                  self._ctx.state.scatter.color_by_tp)
+        try:
+            self._ctx.state.scatter.gates_hidden = not show_gates
+            self._ctx.state.scatter.color_by_tp = color_by_tp
+            _rt.axes_cols = (col_x, col_y)
+            if faceted:
+                axes = list(fig.subplots(n_panels, 1, sharex=True, sharey=True))
+                for ax, (label, data) in zip(axes, items):
+                    _panel(ax, {label: data})
+                axes[-1].set_xlabel(xlabel)
+                fig.suptitle(title, fontsize=11, fontweight="bold",
+                             color=get_color("PLOT_TXT"))
+            else:
+                ax = fig.add_subplot(1, 1, 1)
+                _panel(ax, scatter_data)
+                ax.set_xlabel(xlabel)
+                ax.set_title(title, color=get_color("PLOT_TXT"))
+            self._save_figure(fig, fig_path, fmt)
+        finally:
+            (_rt.axes_cols, _rt.gate_render, _rt.metadata,
+             self._ctx.state.scatter.gates_hidden,
+             self._ctx.state.scatter.color_by_tp) = _saved
+
+    def _apply_agg_log_scale(self, ax) -> None:
+        """Apply the aggregate panel's X/Y log toggles to *ax* (log10(v+1),
+        the same transform the on-tab scatter uses)."""
+        from well_viewer.core.plot_style import apply_axis_log_scale
+        if getattr(self, "_sc_agg_xlog_cb", None) and self._sc_agg_xlog_cb.isChecked():
+            ax._aw_force_xlog = True
+            ax._aw_log_plus1 = True
+            apply_axis_log_scale(ax, "x", True)
+        if getattr(self, "_sc_agg_ylog_cb", None) and self._sc_agg_ylog_cb.isChecked():
+            ax._aw_force_ylog = True
+            ax._aw_log_plus1 = True
+            apply_axis_log_scale(ax, "y", True)
+
+    def _agg_axis_labels(self, stat_x: str, stat_y: str) -> "tuple[str, str]":
+        from well_viewer.features.scatter._layout import log1p_axis_suffix
+        x_on = bool(getattr(self, "_sc_agg_xlog_cb", None) and self._sc_agg_xlog_cb.isChecked())
+        y_on = bool(getattr(self, "_sc_agg_ylog_cb", None) and self._sc_agg_ylog_cb.isChecked())
+        return stat_x + log1p_axis_suffix(x_on), stat_y + log1p_axis_suffix(y_on)
 
     def _run_scatter_agg_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
@@ -514,9 +648,11 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         color=data["color"], marker=data.get("marker", "o"),
                         linestyle="none", capsize=5, alpha=0.75,
                     )
+                self._apply_agg_log_scale(ax)
+            _xl, _yl = self._agg_axis_labels(stat_x, stat_y)
             self._export_scatter_figure(
                 _draw,
-                xlabel=stat_x, ylabel=stat_y,
+                xlabel=_xl, ylabel=_yl,
                 title=f"{grp.name} \u2014 Scatter Aggregate (t={tp_h:.1f}h)",
                 fig_path=fig_path, fmt=fmt,
             )
@@ -569,18 +705,25 @@ class ScatterBatchExportPanel(BatchExportPanel):
         except OSError as exc:
             return f"{grp.name} scatter-cells CSV: {exc}"
         try:
-            def _draw(ax):
-                for tp_h, label, data in combined_series:
-                    ax.scatter(data["x"], data["y"],
-                               label=f"{label} @ t={tp_h:.1f}h",
-                               alpha=0.55, s=24)
-            self._export_scatter_figure(
-                _draw,
-                xlabel=self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb),
-                ylabel=self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb),
-                title=f"{grp.name} \u2014 Scatter Cells (all selected tps)",
-                fig_path=fig_path, fmt=fmt, legend_fontsize=7,
-            )
+            col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
+            col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
+            with self._app_group_scope(grp):
+                # One collection over all selected timepoints so the figure has
+                # per-point tp arrays (Color by time) and proper per-group
+                # entries (faceting) \u2014 the CSV above keeps its per-tp rows.
+                ch_x_base = self._sc_cells_x_cb.currentText().split(" ")[0]
+                ch_y_base = self._sc_cells_y_cb.currentText().split(" ")[0]
+                fig_data = _collect_scatter_data(
+                    self._ctx, col_x, col_y, sorted(timepoints),
+                    well_colors=WELL_COLORS,
+                    fluor_gate_x=_get_fluor_gate(self._ctx, ch_x_base),
+                    fluor_gate_y=_get_fluor_gate(self._ctx, ch_y_base),
+                )
+                self._render_scatter_cells_figure(
+                    fig_data, col_x=col_x, col_y=col_y, tps_list=sorted(timepoints),
+                    title=f"{grp.name} \u2014 Scatter Cells (all selected tps)",
+                    fig_path=fig_path, fmt=fmt,
+                )
         except Exception as exc:
             return f"{grp.name} scatter-cells figure: {exc}"
         return None
@@ -638,9 +781,11 @@ class ScatterBatchExportPanel(BatchExportPanel):
                         marker=data.get("marker", "o"),
                         linestyle="none", capsize=5, alpha=0.75,
                     )
+                self._apply_agg_log_scale(ax)
+            _xl, _yl = self._agg_axis_labels(stat_x, stat_y)
             self._export_scatter_figure(
                 _draw,
-                xlabel=stat_x, ylabel=stat_y,
+                xlabel=_xl, ylabel=_yl,
                 title=f"{grp.name} \u2014 Scatter Aggregate (all selected tps)",
                 fig_path=fig_path, fmt=fmt, legend_fontsize=7,
             )

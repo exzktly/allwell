@@ -16,6 +16,31 @@ they are safe to import from anywhere.
 from __future__ import annotations
 
 import sys
+from contextlib import contextmanager
+
+
+@contextmanager
+def hidden_sibling_axes(fig, keep_ax):
+    """Hide every axes except *keep_ax* for the duration of the block, then
+    restore the original visibility.
+
+    Used so a bbox-cropped ``savefig`` (or clipboard export) renders ONLY the
+    target panel: ``savefig(bbox_inches=<one axis>)`` still rasterises the whole
+    figure and merely crops to that rectangle, so a neighbouring panel whose
+    title / axis label / tick labels physically fall inside the crop rectangle
+    would otherwise bleed into the output. Hiding the siblings keeps the crop
+    clean without moving the target (manual ``subplots_adjust`` layouts don't
+    relayout on ``set_visible``).
+    """
+    others = [a for a in fig.axes if a is not keep_ax]
+    prev = [a.get_visible() for a in others]
+    for a in others:
+        a.set_visible(False)
+    try:
+        yield
+    finally:
+        for a, vis in zip(others, prev):
+            a.set_visible(vis)
 
 
 def _render_figure(fig, fmt, savefig_kwargs, rc_overrides) -> bytes:

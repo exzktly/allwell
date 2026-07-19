@@ -83,3 +83,45 @@ def test_distinct_panels_keep_separate_slots(loaded_app):
     assert line._groups == []  # the "line" slot is still empty
     doc = loaded_app._ctx.runtime.batch_export.export_groups_doc
     assert set(doc) == {"bar"} and doc["bar"][0]["name"] == "BarGrp"
+
+
+def test_editing_does_not_write_disk_but_running_does(loaded_app, tmp_path, monkeypatch):
+    """Editing groups only mirrors in memory (no disk write, so a well click on
+    an iCloud-synced data dir doesn't spin fileproviderd); a real batch run is
+    the single place the groups are flushed to persistence.json."""
+    panel = _panel(loaded_app)
+    reg = loaded_app._ctx.persistence
+    calls: list = []
+    real_save = reg.save
+    monkeypatch.setattr(reg, "schedule_save",
+                        lambda name: calls.append(("schedule", name)))
+    monkeypatch.setattr(reg, "save",
+                        lambda name: (calls.append(("save", name)), real_save(name))[1])
+
+    # Editing a group must NOT touch disk for the export_groups domain.
+    _add_solo_group(panel, loaded_app)
+    assert not any(n == "export_groups" for _, n in calls), calls
+
+    # Running a batch flushes exactly once via the immediate save.
+    out_dir = tmp_path / "run"
+    out_dir.mkdir()
+    panel._run_batch_jobs(
+        jobs=[object()],
+        progress_text_fn=lambda job, step, total: "x",
+        run_job_fn=lambda job, write_dir: None,
+        success_text="ok", status_text="ok", out_dir=out_dir,
+    )
+    assert ("save", "export_groups") in calls, calls
+
+
+def test_groups_get_distinct_colors_by_index(loaded_app):
+    """Plate-map / group-card colouring is by group index, so different groups
+    get different colours (previously well-position rank gave same-column groups
+    the same colour)."""
+    from well_viewer.features.batch_export._common import BarGroup
+    panel = _panel(loaded_app)
+    wells = list(loaded_app._app_state.dataset.well_paths)
+    g0 = BarGroup("G0"); g0.solo_wells.append(wells[0])
+    g1 = BarGroup("G1"); g1.solo_wells.append(wells[1])
+    panel._groups = [g0, g1]
+    assert panel._group_color(0) != panel._group_color(1)

@@ -21,11 +21,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from well_viewer.domain.batch_models import BarGroup
+from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import (
     aggregate_group,
     aggregate_well,
+    compute_rep_n_above,
     compute_rep_n_above_stats,
     compute_rep_per_fov_stats,
     compute_rep_stats,
@@ -690,46 +691,91 @@ def collect_bar_items_for_group(
             members.append((w, w, [w], None,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
 
+    def _member_pts(wells: List[str], rset_name: Optional[str]) -> list:
+        """AggPoint list for one member, matching the plotting tab's statistic.
+
+        A pooled multi-well replicate set uses ``compute_rep_stats`` /
+        ``compute_rep_per_fov_stats`` (mean-of-per-well-means) — NOT the old
+        pool-of-cells ``aggregate_group`` — so batch bars equal the tab. A solo
+        well (or a non-pooled single-well entry) stays on ``aggregate_group``
+        (== ``aggregate_well`` for one well), preserving its within-well spread.
+        The caller sets ``active_val_col`` so the rep-set stat reads the batch
+        panel's column."""
+        if rset_name is not None and len(wells) > 1:
+            rset = ReplicateSet(rset_name, wells)
+            rset_per_fov = replicate_unit(len(wells), per_fov_spread) == "fov"
+            all_tps: set = set()
+            for w in wells:
+                for t, *_ in aggregate_well(ctx, w, threshold=threshold,
+                                            use_sem=False, val_col=val_col,
+                                            fluor_gates=fluor_gates):
+                    all_tps.add(t)
+            out_pts: list = []
+            for t in sorted(all_tps):
+                if rset_per_fov:
+                    gm, gerr, gf, gfe, gnpf_m, gnpf_s = compute_rep_per_fov_stats(
+                        ctx, rset, t, threshold, use_sem)
+                    nval = 0
+                else:
+                    gm, gerr, gf, _ = compute_rep_stats(ctx, rset, t, threshold, use_sem)
+                    nval = compute_rep_n_above(ctx, rset, t)
+                    gfe, gnpf_m, gnpf_s = 0.0, 0.0, 0.0
+                out_pts.append((t, gm, gerr, gf, nval, 0, gfe, gnpf_m, gnpf_s))
+            return out_pts
+        return aggregate_group(ctx,
+            wells, threshold=threshold, use_sem=use_sem,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+
+    member_pts_by_key = {
+        key: _member_pts(wells, rset_name)
+        for (key, _bd, wells, rset_name, _c) in members
+    }
+    # Control frac series (rep-set stat) — resolved once, indexed per tp below.
+    _ctrl_frac_series: dict = {}
+    if fc_vs_ctrl and fc_ctrl_lbl:
+        _ctrl_frac_series = _fc.member_frac_stats_series(
+            ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
+            use_sem=use_sem, per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        )
+
     def _format_tp(t: float) -> str:
         return f"{t:.4g}"
 
+    def _lookup_at(series: dict, target_t: float):
+        if target_t in series:
+            return series[target_t]
+        for ct, val in series.items():
+            if abs(ct - target_t) < 1e-6:
+                return val
+        return None
+
     def _items_for_tp(target_t: float) -> List[BarItem]:
-        # Resolve control denominator once per tp.
+        # Resolve control denominator once per tp — the rep-set statistic
+        # (``control_stats_at_for_bar``), matching the members' numerator.
         fc_control_mean_at_t = None
         fc_control_spread_at_t = None
         fc_control_frac_at_t = None
         fc_control_frac_spread_at_t = None
         if fc_vs_ctrl and fc_ctrl_lbl:
-            ctrl_stats = _fc.control_stats_at(
+            ctrl_stats = _fc.control_stats_at_for_bar(
                 ctx, fc_ctrl_lbl, target_t,
                 threshold=threshold, val_col=val_col,
+                use_sem=use_sem, per_fov_spread=per_fov_spread,
                 fluor_gates=fluor_gates,
             )
             if ctrl_stats is not None:
                 fc_control_mean_at_t, fc_control_spread_at_t = ctrl_stats
-            ctrl_pts = _fc.control_pts_for_line(
-                ctx, fc_ctrl_lbl, threshold=threshold, val_col=val_col,
-                fluor_gates=fluor_gates,
-            )
-            if ctrl_pts:
-                for pt in ctrl_pts:
-                    if abs(pt[0] - target_t) < 1e-6:
-                        cf, cfs = _fc._pt_frac(pt)
-                        if cf is not None:
-                            fc_control_frac_at_t = cf
-                            fc_control_frac_spread_at_t = cfs
-                        break
+            _cfrac = _lookup_at(_ctrl_frac_series, target_t)
+            if _cfrac is not None:
+                fc_control_frac_at_t, fc_control_frac_spread_at_t = _cfrac
 
         out: List[BarItem] = []
         tp_str = _format_tp(target_t)
         multi_tp = len(target_ts) > 1
         for (key, base_display, wells, rset_name, color) in members:
-            pts = aggregate_group(ctx,
-                wells, threshold=threshold, use_sem=use_sem,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
+            pts = member_pts_by_key[key]
             matched = [pt for pt in pts if abs(pt[0] - target_t) < 1e-6]
             if matched:
                 pt = matched[0]

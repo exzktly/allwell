@@ -99,6 +99,21 @@ class LineSeries:
     cdf_vals: List[float] = field(default_factory=list)
 
 
+@dataclass
+class LineAxes:
+    """The four stacked Line-Graphs panels, passed explicitly to the renderer.
+
+    Bundling the axes is what lets :func:`render_line_series` draw the same
+    four-panel figure both on-tab (axes from ``ctx.widgets``) and off-screen
+    (batch export owns its own :class:`~matplotlib.figure.Figure`). Order and
+    identity match the tab: mean / fraction / N(above) / CDF.
+    """
+    mean: object
+    frac: object
+    n: object
+    cdf: object
+
+
 def _apply_order(items, saved_order, key):
     """Reorder ``items`` so entries matching ``saved_order`` come first.
 
@@ -367,15 +382,18 @@ def collect_line_series(
     return series_out, band_lbl
 
 
-def _paint_series(ctx, series, *, fov_active: bool) -> "tuple[bool, bool, bool]":
+def _paint_series(axes: "LineAxes", series, *, fov_active: bool) -> "tuple[bool, bool, bool]":
     """Draw one collected line series onto the mean / fraction / N / CDF axes
     (audit A5). Returns ``(painted_ts, painted_cdf, painted_n)`` — the caller
     ORs these across series to decide legend/empty handling. Pure side effect on
-    the axes; the drawing sequence mirrors the original inline loop exactly."""
-    ax_mean = ctx.widgets.get_or_none("_line_ax_mean")
-    ax_frac = ctx.widgets.get_or_none("_line_ax_frac")
-    ax_n = ctx.widgets.get_or_none("_line_ax_n")
-    ax_cdf = ctx.widgets.get_or_none("_line_ax_cdf")
+    the axes; the drawing sequence mirrors the original inline loop exactly.
+
+    Takes an explicit :class:`LineAxes` bundle (not ``ctx.widgets``) so the same
+    painter serves the on-tab redraw and off-screen batch export."""
+    ax_mean = axes.mean
+    ax_frac = axes.frac
+    ax_n = axes.n
+    ax_cdf = axes.cdf
     any_ts = any_cdf = any_n = False
     color = series.color
     agg_times = [p.t for p in series.points if p.has_mean]
@@ -456,19 +474,42 @@ def _has_labeled(ax) -> bool:
     return any(lbl and not str(lbl).startswith("_") for lbl in labels)
 
 
+_DEFAULT_LEGEND_VISIBLE = {"mean": True, "frac": True, "n": True, "cdf": True}
+
+
 def _finalize_line_axes(
-    ctx, *, any_ts: bool, any_cdf: bool, any_n: bool,
+    axes: "LineAxes", *, any_ts: bool, any_cdf: bool, any_n: bool,
     fov_active: bool, fc_active: bool, legend_kw: dict,
     threshold: float, warn: str, muted_fg,
+    legend_visible: "Optional[dict]" = None,
+    show_threshold_line: bool = True,
+    cdf_xrange: "Optional[Tuple[float, float]]" = None,
+    empty_cdf_msg: "Optional[str]" = None,
+    draggable_legends: bool = False,
 ) -> None:
     """Post-paint axis finishing (audit A5): N-panel integer ticks, per-panel
     legends (honouring saved visibility), and the CDF threshold line / x-range /
-    empty message. Extracted verbatim from ``redraw_line_plots``."""
-    ax_mean = ctx.widgets.get_or_none("_line_ax_mean")
-    ax_frac = ctx.widgets.get_or_none("_line_ax_frac")
-    ax_n = ctx.widgets.get_or_none("_line_ax_n")
-    ax_cdf = ctx.widgets.get_or_none("_line_ax_cdf")
-    legend_visible = ctx.state.plot.legend_visible
+    empty message.
+
+    All tab-only inputs are parameters so the finalizer works off-screen:
+    ``legend_visible`` (defaults to all-visible), ``show_threshold_line``,
+    ``cdf_xrange`` (``None`` → caller-derived; the on-tab wrapper passes the
+    ``_cdf_xmin/xmax_edit`` values), ``empty_cdf_msg`` (``None`` → draw nothing
+    when the CDF is empty), and ``draggable_legends`` (tab only)."""
+    ax_mean = axes.mean
+    ax_frac = axes.frac
+    ax_n = axes.n
+    ax_cdf = axes.cdf
+    if legend_visible is None:
+        legend_visible = _DEFAULT_LEGEND_VISIBLE
+
+    def _place_legend(ax, key: str):
+        leg = ax.legend(**legend_kw)
+        if draggable_legends:
+            leg.set_draggable(True)
+        leg.set_visible(legend_visible.get(key, True))
+        return leg
+
     if any_n:
         cur_lo, cur_hi = ax_n.get_ylim()
         ax_n.set_ylim(0, max(cur_hi, 1))
@@ -479,42 +520,70 @@ def _finalize_line_axes(
             ax_n.yaxis.set_major_locator(MaxNLocator(integer=True))
     if any_ts:
         if _has_labeled(ax_mean):
-            leg_mean = ax_mean.legend(**legend_kw)
-            leg_mean.set_draggable(True)
-            leg_mean.set_visible(legend_visible["mean"])
+            _place_legend(ax_mean, "mean")
         if _has_labeled(ax_frac):
-            leg_frac = ax_frac.legend(**legend_kw)
-            leg_frac.set_draggable(True)
-            leg_frac.set_visible(legend_visible["frac"])
+            _place_legend(ax_frac, "frac")
         if any_n and _has_labeled(ax_n):
-            leg_n = ax_n.legend(**legend_kw)
-            leg_n.set_draggable(True)
-            leg_n.set_visible(legend_visible.get("n", True))
+            _place_legend(ax_n, "n")
     if any_cdf:
-        _show_thr = getattr(ctx.state.plot, "show_threshold_line", False)
-        if _show_thr:
+        if show_threshold_line:
             ax_cdf.axvline(threshold, color=warn, lw=1.2, ls="--", label=f"threshold={threshold:.2f}", zorder=4, picker=8)
-        _xmin_edit = ctx.widgets.get_or_none("_cdf_xmin_edit")
-        try:
-            cdf_lo = float(_xmin_edit.text())
-        except (ValueError, AttributeError):
-            cdf_lo = 0.0
-        _xmax_edit = ctx.widgets.get_or_none("_cdf_xmax_edit")
-        try:
-            cdf_hi = float(_xmax_edit.text())
-        except (ValueError, AttributeError):
-            cdf_hi = 300.0
+        if cdf_xrange is not None:
+            cdf_lo, cdf_hi = cdf_xrange
+        else:
+            cdf_lo, cdf_hi = 0.0, 300.0
         if cdf_hi <= cdf_lo:
             cdf_hi = cdf_lo + 1.0
-        if _show_thr:
+        if show_threshold_line:
             ax_cdf.axvspan(threshold, cdf_hi, alpha=0.05, color=warn, zorder=1)
         if _has_labeled(ax_cdf):
-            leg_cdf = ax_cdf.legend(**legend_kw)
-            leg_cdf.set_draggable(True)
-            leg_cdf.set_visible(legend_visible["cdf"])
+            _place_legend(ax_cdf, "cdf")
         ax_cdf.set_xlim(cdf_lo, cdf_hi)
-    else:
-        ax_cdf.text(0.5, 0.5, f"No {ctx.state.channel.active_channel.upper()} data found.", transform=ax_cdf.transAxes, ha="center", va="center", color=muted_fg, fontsize=10)
+    elif empty_cdf_msg is not None:
+        ax_cdf.text(0.5, 0.5, empty_cdf_msg, transform=ax_cdf.transAxes, ha="center", va="center", color=muted_fg, fontsize=10)
+
+
+def render_line_series(
+    axes: "LineAxes", series_list, *,
+    fov_active: bool, fc_active: bool, threshold: float,
+    legend_kw: dict, warn_color, muted_fg,
+    legend_visible: "Optional[dict]" = None,
+    show_threshold_line: bool = True,
+    cdf_xrange: "Optional[Tuple[float, float]]" = None,
+    empty_cdf_msg: "Optional[str]" = None,
+    draggable_legends: bool = False,
+) -> "tuple[bool, bool, bool]":
+    """Paint every :class:`LineSeries` onto *axes* then finalize the panels.
+
+    Single source of truth for line-plot *drawing*, mirroring how
+    ``collect_line_series`` is the single source of truth for the *data*. Both
+    the on-tab redraw (``redraw_line_plots``) and the batch-export figure call
+    this with their own :class:`LineAxes`, so the four-panel layout
+    (mean / fraction / N(above) / CDF) can never drift between them.
+
+    When ``cdf_xrange`` is ``None`` the CDF x-limits are derived from the plotted
+    values (batch behaviour); the tab passes its own ``_cdf_xmin/xmax_edit``
+    range. Returns ``(any_ts, any_cdf, any_n)``.
+    """
+    any_ts = any_cdf = any_n = False
+    for series in series_list:
+        ts, cdf, n = _paint_series(axes, series, fov_active=fov_active)
+        any_ts = any_ts or ts
+        any_cdf = any_cdf or cdf
+        any_n = any_n or n
+    if cdf_xrange is None and any_cdf:
+        _vals = [v for s in series_list for v in (s.cdf_vals or [])]
+        if _vals:
+            cdf_xrange = (min(_vals), max(_vals))
+    _finalize_line_axes(
+        axes, any_ts=any_ts, any_cdf=any_cdf, any_n=any_n,
+        fov_active=fov_active, fc_active=fc_active, legend_kw=legend_kw,
+        threshold=threshold, warn=warn_color, muted_fg=muted_fg,
+        legend_visible=legend_visible, show_threshold_line=show_threshold_line,
+        cdf_xrange=cdf_xrange, empty_cdf_msg=empty_cdf_msg,
+        draggable_legends=draggable_legends,
+    )
+    return any_ts, any_cdf, any_n
 
 
 def redraw_line_plots(
@@ -635,25 +704,35 @@ def redraw_line_plots(
         ctx.notify.set_status("No wells selected.")
         return
 
-    any_ts = any_cdf = any_n = False
     # Single source of truth: ask ``collect_line_series`` for the
-    # fully-normalized series in legend order, then iterate to paint.
+    # fully-normalized series in legend order, then paint via the shared
+    # renderer (also used by the batch export, so the panel set never drifts).
     series_list, _ = collect_line_series(
         ctx,
         threshold=threshold, use_sem=use_sem,
         miss_sink=fc_misses, include_cdf=True,
         all_fluor_values_filtered=all_fluor_values_filtered,
     )
-    for series in series_list:
-        ts, cdf, n = _paint_series(ctx, series, fov_active=_fov_active)
-        any_ts = any_ts or ts
-        any_cdf = any_cdf or cdf
-        any_n = any_n or n
-
-    _finalize_line_axes(
-        ctx, any_ts=any_ts, any_cdf=any_cdf, any_n=any_n,
+    # The tab's CDF x-range comes from the _cdf_xmin/xmax_edit widgets (default
+    # 0–300), not the data — resolve it here and hand it to the shared renderer.
+    def _edit_float(name: str, default: float) -> float:
+        try:
+            return float(ctx.widgets.get_or_none(name).text())
+        except (ValueError, AttributeError):
+            return default
+    _cdf_xrange = (_edit_float("_cdf_xmin_edit", 0.0),
+                   _edit_float("_cdf_xmax_edit", 300.0))
+    axes = LineAxes(ax_mean, ax_frac, ax_n, ax_cdf)
+    render_line_series(
+        axes, series_list,
         fov_active=_fov_active, fc_active=bool(fc_vs_ctrl or fc_vs_t0),
-        legend_kw=legend_kw, threshold=threshold, warn=warn, muted_fg=_muted_fg,
+        threshold=threshold, legend_kw=legend_kw,
+        warn_color=warn, muted_fg=_muted_fg,
+        legend_visible=ctx.state.plot.legend_visible,
+        show_threshold_line=getattr(ctx.state.plot, "show_threshold_line", False),
+        cdf_xrange=_cdf_xrange,
+        empty_cdf_msg=f"No {ctx.state.channel.active_channel.upper()} data found.",
+        draggable_legends=True,
     )
 
     if fc_misses:

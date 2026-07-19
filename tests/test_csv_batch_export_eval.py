@@ -310,8 +310,10 @@ def test_batch_line_replicates_and_single_wells(ctx, tmp_path):
     assert solo[0]["wells"] == "B01" and solo[0]["n_wells"] == "1"
 
     rep_by_t = {r["time_h"]: r["mean_gfp_mean_intensity"] for r in rep}
-    assert rep_by_t["0.0000"] == "108.500000"      # pool-of-cells A01+A02
-    assert rep_by_t["48.0000"] == "204.500000"
+    # Mean-of-per-well-means (the tab's rep-set statistic): mean(A01, A02).
+    # Equals pool-of-cells here only because the fixture has equal cell counts.
+    assert rep_by_t["0.0000"] == "108.500000"      # mean(103.5, 113.5)
+    assert rep_by_t["48.0000"] == "204.500000"     # mean(199.5, 209.5)
     solo_by_t = {r["time_h"]: r["mean_gfp_mean_intensity"] for r in solo}
     assert solo_by_t["0.0000"] == "123.500000"     # B01 solo
 
@@ -338,6 +340,39 @@ def test_batch_line_regression_figure_render(ctx, tmp_path):
     # a non-CSV figure file was committed alongside the CSV
     assert any(p.suffix != ".csv" and p.name.startswith("batch_G")
                for p in out_dir.iterdir())
+
+
+def test_batch_line_figure_has_four_panels_incl_n_above(ctx):
+    """Regression for the reported bug: the on-tab Line Graphs figure has FOUR
+    stacked panels (mean / fraction / N(above) / CDF) but the batch line figure
+    dropped the N(above) panel. The batch figure now reuses the tab's renderer,
+    so it must have four axes with the N(above) panel third."""
+    from well_viewer.features.batch_export import BatchExportPanel
+
+    panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
+    grp = _make_mixed_group("Cond1")
+    with panel._app_group_scope(grp), panel._app_val_col_scope("gfp_mean_intensity"):
+        fig = panel._render_group_figure(grp, 50.0, True, "SEM")
+    assert len(fig.axes) == 4, [ax.get_ylabel() for ax in fig.axes]
+    # Panel order matches the tab: mean / fraction / N(above) / CDF.
+    assert fig.axes[2].get_ylabel().startswith("N(above)")
+    assert "CDF" in fig.axes[3].get_title() or "Cumulative" in fig.axes[3].get_ylabel()
+
+
+def test_batch_line_solo_well_error_matches_within_well(ctx, tmp_path):
+    """A solo well in a batch group keeps its within-well cell spread (the tab's
+    per-well statistic), NOT a replicate spread of 0 — i.e. a solo is never
+    silently treated as a one-well replicate set."""
+    out_dir = tmp_path / "batch_line_solo"
+    from well_viewer.domain.batch_models import BarGroup
+
+    _run_line_batch(ctx, [BarGroup("G", members=[], solo_wells=["B01"])], out_dir)
+    rows = _parse_csv((out_dir / "batch_G.csv").read_text())
+    solo = [r for r in rows if r["member"] == "B01"]
+    assert solo and all(r["member_type"] == "solo_well" for r in solo)
+    # Within-well SEM across B01's 6 cells is > 0 (a 1-well replicate spread
+    # would be exactly 0).
+    assert any(float(r["sem_gfp_mean_intensity"]) > 0 for r in solo)
 
 
 # =============================================================================
@@ -504,6 +539,72 @@ def test_batch_scatter_agg_replicates_and_single_wells(ctx, tmp_path):
     assert by_label["RepA"]["x_err"] == "5"           # SEM of per-well means
     assert by_label["B01"]["x"] == "123.5"            # solo well GFP
     assert by_label["B01"]["x_err"] == "0"            # single well → no spread
+
+
+def test_batch_scatter_cells_honors_display_options(ctx, tmp_path, monkeypatch):
+    """The scatter-cells batch figure reuses the tab's render_scatter_points and
+    honours the new panel options: density shading, per-axis log, and the
+    Overlay-vs-Separate-axes layout (one panel per group when separated)."""
+    from well_viewer.features.batch_export import ScatterBatchExportPanel
+    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+    from well_viewer.features.scatter.controller import collect_scatter_data
+
+    panel = ScatterBatchExportPanel(ctx, None, scatter_mode="cells",
+                                    use_sidebar_groups=False)
+    panel._sc_density_cb.setChecked(True)
+    panel._sc_xlog_cb.setChecked(True)
+    panel._sc_ylog_cb.setChecked(False)
+    panel._sc_layout_cb.setCurrentText("Separate axes")
+
+    captured: dict = {}
+    monkeypatch.setattr(panel, "_save_figure",
+                        lambda fig, p, f: captured.update(fig=fig))
+
+    grp = BarGroup("Cond1", members=[ReplicateSet("RepA", ["A01", "A02"])],
+                   solo_wells=["B01"])
+    col_x = panel._scatter_axis_col(panel._sc_cells_x_cb, panel._sc_cells_metric_x_cb)
+    col_y = panel._scatter_axis_col(panel._sc_cells_y_cb, panel._sc_cells_metric_y_cb)
+    with panel._app_group_scope(grp):
+        data = collect_scatter_data(ctx, col_x, col_y, [0.0],
+                                    well_colors=["#888", "#aaa", "#ccc"])
+        panel._render_scatter_cells_figure(
+            data, col_x=col_x, col_y=col_y, tps_list=[0.0],
+            title="t", fig_path=tmp_path / "x.png", fmt="png")
+
+    fig = captured["fig"]
+    # Separate axes → one panel per group (RepA + B01).
+    assert len(fig.axes) == len(data) >= 2
+    ax0 = fig.axes[0]
+    assert getattr(ax0, "_aw_force_xlog", False) is True    # X log applied
+    assert getattr(ax0, "_aw_force_ylog", True) is False    # Y linear
+    # Density shading draws a per-point PathCollection tagged for density.
+    assert any(getattr(c, "_aw_density_collection", False) for c in ax0.collections)
+    # State is restored — the batch never leaves the live Scatter tab dirty.
+    assert ctx.state.scatter.gates_hidden is False
+    assert ctx.state.scatter.color_by_tp is False
+
+
+def test_batch_scatter_agg_honors_log_scale(ctx, tmp_path, monkeypatch):
+    """The aggregate scatter batch applies the X/Y log toggles to the figure."""
+    from well_viewer.features.batch_export import ScatterBatchExportPanel
+    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+
+    panel = ScatterBatchExportPanel(ctx, None, scatter_mode="aggregate",
+                                    use_sidebar_groups=False)
+    panel._sc_agg_xlog_cb.setChecked(True)
+    panel._sc_agg_ylog_cb.setChecked(False)
+    captured: dict = {}
+    monkeypatch.setattr(panel, "_save_figure",
+                        lambda fig, p, f: captured.update(fig=fig))
+
+    grp = BarGroup("Cond1", members=[ReplicateSet("RepA", ["A01", "A02"])],
+                   solo_wells=["B01"])
+    err = panel._run_scatter_agg_job(grp, 0.0, tmp_path / "a.csv",
+                                     tmp_path / "a.png", "png")
+    assert err is None, err
+    ax0 = captured["fig"].axes[0]
+    assert getattr(ax0, "_aw_force_xlog", False) is True
+    assert not getattr(ax0, "_aw_force_ylog", False)   # Y stays linear
 
 
 # =============================================================================

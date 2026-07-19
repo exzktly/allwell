@@ -1771,11 +1771,21 @@ Line tab — lineplot_controller.redraw_line_plots(…) →
       miss_sink=fc_misses) is called inside collect_line_series.
       Drag-order from ``_line_order_rsets`` / ``_line_order_wells``
       is applied before the per-trace work.
-   4. The renderer just iterates the resulting LineSeries and calls
-      ax.plot. The batch line CSV / figure go through
+   4. The renderer is the shared ``lineplot.controller.render_line_series``
+      (over a ``LineAxes`` bundle): the on-tab redraw and the batch export
+      figure BOTH call it, so the four-panel layout (mean / fraction /
+      N(above) / CDF) can never drift between them. The batch line CSV /
+      figure collect via
       ``features.batch_export._line_series_runner.collect_line_series_for_group``
-      — same data shape, pool-of-cells stat for the batch
-      numerator (matches the prior batch behaviour).
+      — a thin orchestrator for a mixed ``BarGroup`` that reuses the tab's OWN
+      statistic per member: rep-set members via ``compute_rep_stats`` /
+      ``compute_rep_per_fov_stats`` (mean-of-per-well-means, per-FOV), solo
+      wells via ``aggregate_well`` (within-well) so a solo stays byte-for-byte
+      identical to its on-tab per-well export. The old pool-of-cells batch
+      numerator (a documented divergence here) is gone. The bar batch path is
+      the same shape: ``barplot.collect.collect_bar_items_for_group`` pools
+      multi-well members via ``compute_rep_stats`` and keeps solos on
+      ``aggregate_well``.
    5. After redraw, app._set_status(…) surfaces a one-line warning
       naming any timepoints where the control had no sample.
 

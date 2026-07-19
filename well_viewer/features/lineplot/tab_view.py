@@ -23,7 +23,7 @@ from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.export.service import export_plot_data
 from well_viewer.features.lineplot.controller import on_fig_click
 
-# The Line Graphs figure: three stacked subplots (mean / fraction / CDF).
+# The Line Graphs figure: four stacked subplots (mean / fraction / N(above) / CDF).
 _FIG_W, _FIG_H, _DPI = 7.2, 14.0, 100
 
 

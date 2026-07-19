@@ -571,6 +571,50 @@ class BatchExportPanel(QWidget):
             if saved is not None:
                 chan.active_val_col = saved
 
+    @contextmanager
+    def _app_group_scope(self, grp: "BarGroup"):
+        """Temporarily make the app's selection state describe just *grp*: one
+        selection per replicate-set member, plus the group's solo wells as
+        single-well selections.
+
+        The plotting-tab collectors (``collect_line_series`` /
+        ``collect_bar_items`` / ``collect_scatter_data``) read
+        ``app._rep_sets_active()`` / ``app._app_state.selection.selected_wells``
+        (both derived from ``app._app_state.selection.selections``). Swapping
+        ``selections`` for the duration lets the batch export reuse those tab
+        collectors verbatim — so a batch group behaves exactly like the tab,
+        honouring replicate-set aggregation inside the group. Solo wells are
+        represented as single-well selections so the mode-exclusive collectors
+        (rep-sets *or* raw ``selected_wells``, never both) still include them:
+        ``active_replicate_sets`` treats any non-hidden selection with a loaded
+        well as a rep-set, and a one-well rep-set's stat equals the raw well's,
+        so solos are numerically unchanged while pooled members get the tab's
+        mean-of-per-well-means."""
+        from well_viewer.domain.selections_model import make_selection
+        sel = self._ctx.state.selection
+        saved = (sel.selections, sel.current_selection_id, sel.selected_wells)
+        try:
+            used_names: set = set()
+            used_ids: set = set()
+            selections = [
+                make_selection(name=m.name, wells=list(m.wells), source="rep_set",
+                               used_names=used_names, used_ids=used_ids,
+                               fallback_color_idx=i)
+                for i, m in enumerate(grp.members)
+            ]
+            for j, w in enumerate(grp.solo_wells):
+                selections.append(
+                    make_selection(name=w, wells=[w], source="well",
+                                   used_names=used_names, used_ids=used_ids,
+                                   fallback_color_idx=len(grp.members) + j)
+                )
+            sel.selections = selections
+            sel.current_selection_id = None
+            sel.selected_wells = set(grp.solo_wells)
+            yield
+        finally:
+            (sel.selections, sel.current_selection_id, sel.selected_wells) = saved
+
     def _export_val_col_for(self, channel_attr: str) -> str:
         """Resolve the (Channel, Property) pair to a CSV column / ratio key.
 
@@ -1461,125 +1505,113 @@ class BatchExportPanel(QWidget):
             csv_path = write_dir / f"{safe}.csv"
             fig_path = write_dir / f"{safe}.{fmt}"
 
-            try:
-                from well_viewer.features.batch_export._line_series_runner import (
-                    collect_line_series_for_group,
-                )
-                from well_viewer.features.export.service import (
-                    _well_labels_map,
-                    line_metric_fieldnames, line_metric_row,
-                    well_name_for, well_names_joined,
-                )
-                # Resolve the panel's (Channel, Property) selection into a
-                # column / ratio key — independent of whatever the plot-tab
-                # ctxbar has picked.
-                _val_col = self._export_val_col_for("_line_channel_cb")
-                _ch = _ch_selected
-                _metric = self._selected_export_metric_key("_line_channel_cb")
-                _fluor_gates = _get_all_fluor_gates(self._ctx)
-                _well_labels = _well_labels_map(self._ctx)
-                panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
-                # Two passes through the same shared collector: raw values
-                # for the standard mean / spread columns, fold-change
-                # values for the additive ``fold_change_*`` columns when
-                # active. Mirrors the bar batch CSV's additive schema.
-                series_raw = collect_line_series_for_group(
-                    self._ctx, grp,
-                    threshold=threshold, use_sem=use_sem,
-                    val_col=_val_col,
-                    fluor_gates=_fluor_gates,
-                    fc_state=(False, "", False),
-                )
-                if fc_active:
-                    series_fc = collect_line_series_for_group(
+            # Resolve the panel's (Channel, Property) selection into a
+            # column / ratio key — independent of whatever the plot-tab
+            # ctxbar has picked.
+            _val_col = self._export_val_col_for("_line_channel_cb")
+            _ch = _ch_selected
+            _metric = self._selected_export_metric_key("_line_channel_cb")
+            _fluor_gates = _get_all_fluor_gates(self._ctx)
+            panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
+
+            # ``collect_line_series_for_group`` is the thin batch orchestrator
+            # that reuses the tab's rep-set statistic (``compute_rep_stats``) for
+            # members and ``aggregate_well`` for solos — so batch curves match
+            # the tab while a solo well stays byte-for-byte identical to its
+            # on-tab per-well export. The scope makes a replicate-set fold-change
+            # control resolvable; ``_app_val_col_scope`` because the rep-set stat
+            # reads ``active_val_col``.
+            with self._app_group_scope(grp), self._app_val_col_scope(_val_col):
+                try:
+                    from well_viewer.features.batch_export._line_series_runner import (
+                        collect_line_series_for_group,
+                    )
+                    from well_viewer.features.export.service import (
+                        _well_labels_map,
+                        line_metric_fieldnames, line_metric_row,
+                        well_name_for, well_names_joined,
+                    )
+                    _well_labels = _well_labels_map(self._ctx)
+                    # Two passes through the same shared collector: raw values
+                    # for the standard mean / spread columns, fold-change
+                    # values for the additive ``fold_change_*`` columns when
+                    # active. Mirrors the bar batch CSV's additive schema.
+                    series_raw = collect_line_series_for_group(
                         self._ctx, grp,
                         threshold=threshold, use_sem=use_sem,
-                        val_col=_val_col,
-                        fluor_gates=_fluor_gates,
-                        fc_state=panel_fc_state,
-                    )
-                    fc_points_by_key = {
-                        s.key: s.points for s in series_fc
-                    }
-                else:
-                    fc_points_by_key = {}
-                rows_out: List[dict] = []
-                for series in series_raw:
-                    if series.kind == "repset":
-                        wells_str = ";".join(series.wells)
-                        well_names_str = well_names_joined(wells_str, _well_labels)
-                        member_type = "replicate_set"
-                        n_wells = len(series.wells)
-                    else:
-                        wells_str = series.wells[0] if series.wells else series.key
-                        well_names_str = well_name_for(wells_str, _well_labels)
-                        member_type = "solo_well"
-                        n_wells = 1
-                    fc_pts = fc_points_by_key.get(series.key, [])
-                    for i, pt in enumerate(series.points):
-                        row = {
-                            "group": grp.name,
-                            "member": series.key,
-                            "member_type": member_type,
-                            "wells": wells_str,
-                            "well_names": well_names_str,
-                            "n_wells": n_wells,
-                        }
-                        row.update(line_metric_row(
-                            pt.as_aggpoint(), ch=_ch, metric=_metric,
-                            threshold=threshold, band_lbl=band_lbl,
-                        ))
-                        if fc_active and i < len(fc_pts):
-                            _attach_fc_row(
-                                row, fc_pts[i].as_aggpoint(), band_lbl,
-                                fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
-                            )
-                        rows_out.append(row)
-                if rows_out:
-                    fieldnames = (
-                        ["group", "member", "member_type",
-                         "wells", "well_names", "n_wells"]
-                        + line_metric_fieldnames(_ch, _metric, band_lbl)
+                        val_col=_val_col, fluor_gates=_fluor_gates,
+                        fc_state=(False, "", False),
                     )
                     if fc_active:
-                        fieldnames += [
-                            "fold_change_mean",
-                            f"fold_change_{band_lbl.lower()}",
-                            "fold_change_mode",
-                            "fold_change_control",
-                        ]
-                    with open(csv_path, "w", newline="") as fh:
-                        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-                        writer.writeheader()
-                        writer.writerows(rows_out)
-            except OSError as exc:
-                return f"{grp.name} CSV: {exc}"
-
-            try:
-                from well_viewer.domain import fold_change as _fc
-                fc_control_means: dict = {}
-                if fc_vs_ctrl and fc_ctrl_lbl:
-                    fc_control_means = _fc.pts_to_mean_by_t(
-                        _fc.control_pts_for_line(
-                            self._ctx, fc_ctrl_lbl, threshold=threshold,
-                            val_col=_val_col,
-                            fluor_gates=_fluor_gates,
+                        series_fc = collect_line_series_for_group(
+                            self._ctx, grp,
+                            threshold=threshold, use_sem=use_sem,
+                            val_col=_val_col, fluor_gates=_fluor_gates,
+                            fc_state=panel_fc_state,
                         )
-                    )
-                # ``_render_group_figure`` calls helpers (notably
-                # ``_compute_rep_stats``) that read ``app._app_state.channel.active_val_col``
-                # directly. Swap it for the duration of the render so a
-                # batch export against a ratio column or a non-MFI
-                # property draws the correct curves.
-                with self._app_val_col_scope(_val_col):
+                        fc_points_by_key = {s.key: s.points for s in series_fc}
+                    else:
+                        fc_points_by_key = {}
+                    rows_out: List[dict] = []
+                    for series in series_raw:
+                        if series.kind == "repset":
+                            wells_str = ";".join(series.wells)
+                            well_names_str = well_names_joined(wells_str, _well_labels)
+                            member_type = "replicate_set"
+                            n_wells = len(series.wells)
+                        else:
+                            wells_str = series.wells[0] if series.wells else series.key
+                            well_names_str = well_name_for(wells_str, _well_labels)
+                            member_type = "solo_well"
+                            n_wells = 1
+                        fc_pts = fc_points_by_key.get(series.key, [])
+                        for i, pt in enumerate(series.points):
+                            row = {
+                                "group": grp.name,
+                                "member": series.key,
+                                "member_type": member_type,
+                                "wells": wells_str,
+                                "well_names": well_names_str,
+                                "n_wells": n_wells,
+                            }
+                            row.update(line_metric_row(
+                                pt.as_aggpoint(), ch=_ch, metric=_metric,
+                                threshold=threshold, band_lbl=band_lbl,
+                            ))
+                            if fc_active and i < len(fc_pts):
+                                _attach_fc_row(
+                                    row, fc_pts[i].as_aggpoint(), band_lbl,
+                                    fc_vs_ctrl, fc_vs_t0, fc_ctrl_lbl,
+                                )
+                            rows_out.append(row)
+                    if rows_out:
+                        fieldnames = (
+                            ["group", "member", "member_type",
+                             "wells", "well_names", "n_wells"]
+                            + line_metric_fieldnames(_ch, _metric, band_lbl)
+                        )
+                        if fc_active:
+                            fieldnames += [
+                                "fold_change_mean",
+                                f"fold_change_{band_lbl.lower()}",
+                                "fold_change_mode",
+                                "fold_change_control",
+                            ]
+                        with open(csv_path, "w", newline="") as fh:
+                            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+                            writer.writeheader()
+                            writer.writerows(rows_out)
+                except OSError as exc:
+                    return f"{grp.name} CSV: {exc}"
+
+                try:
                     fig = self._render_group_figure(
                         grp, threshold, use_sem, band_lbl,
-                        fc_control_means=fc_control_means,
-                        fc_vs_t0=fc_vs_t0,
+                        fc_state=panel_fc_state, val_col=_val_col,
                     )
-                self._save_figure(fig, fig_path, fmt)
-            except Exception as exc:
-                return f"{grp.name} figure: {exc}"
+                    self._save_figure(fig, fig_path, fmt)
+                except Exception as exc:
+                    return f"{grp.name} figure: {exc}"
 
             _logger.info("Batch: wrote %s and %s", csv_path.name, fig_path.name)
             return None
@@ -1605,19 +1637,39 @@ class BatchExportPanel(QWidget):
     def _render_group_figure(
         self, grp: BarGroup, threshold: float, use_sem: bool, band_lbl: str,
         *,
-        fc_control_means: Optional[Dict[float, float]] = None,
-        fc_vs_t0: bool = False,
+        fc_state: tuple = (False, "", False),
+        val_col: Optional[str] = None,
     ):
+        """Render the batch line figure for *grp*, reusing the Line-Graphs tab's
+        own renderer (``render_line_series``) so the figure is the SAME
+        four-panel layout (mean / fraction / N(above) / CDF) the tab draws — no
+        re-implementation to drift out of sync (this is what fixed the dropped
+        N(above) panel). Series come from ``collect_line_series_for_group``,
+        which reuses the tab's per-member statistic. Must be called inside
+        ``_app_group_scope(grp)`` + ``_app_val_col_scope`` (``_run_group`` does):
+        the rep-set stat reads ``active_val_col`` and a rep-set fold-change
+        control resolves against the group's scoped selections."""
         from matplotlib.figure import Figure as _Figure
         from well_viewer.domain import fold_change as _fc
+        from well_viewer.features.lineplot.controller import (
+            LineAxes, render_line_series,
+        )
+        from well_viewer.features.batch_export._line_series_runner import (
+            collect_line_series_for_group,
+        )
 
-        fc_active = bool(fc_control_means) or bool(fc_vs_t0)
-        fig = _Figure(figsize=(10, 11), dpi=300, facecolor=PLOT_BG)
-        ax_mean = fig.add_subplot(3, 1, 1)
-        ax_frac = fig.add_subplot(3, 1, 2, sharex=ax_mean)
-        ax_cdf = fig.add_subplot(3, 1, 3)
-        fig.subplots_adjust(hspace=0.55, top=0.92, bottom=0.07, left=0.13, right=0.97)
-        fig.suptitle(grp.name, fontsize=11, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
+        fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
+        fc_active = fc_vs_ctrl or fc_vs_t0
+        _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
+
+        # Four stacked panels — identical to the tab (lineplot/tab_view.py).
+        fig = _Figure(figsize=(10, 13), dpi=300, facecolor=PLOT_BG)
+        ax_mean = fig.add_subplot(4, 1, 1)
+        ax_frac = fig.add_subplot(4, 1, 2, sharex=ax_mean)
+        ax_n = fig.add_subplot(4, 1, 3, sharex=ax_mean)
+        ax_cdf = fig.add_subplot(4, 1, 4)
+        fig.subplots_adjust(hspace=0.55, top=0.93, bottom=0.06, left=0.13, right=0.97)
+        fig.suptitle(grp.name, fontsize=11, fontweight="bold", color=get_color("PLOT_TXT"), y=0.98)
 
         legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none",
                          edgecolor=PLOT_SPN, labelcolor=get_color("PLOT_TXT"))
@@ -1625,99 +1677,48 @@ class BatchExportPanel(QWidget):
         from well_viewer.data.metric_labels import (
             METRIC_KEY_TO_LABEL as _MLB,
             threshold_qualifier, fraction_title,
+            events_per_fov_title, events_total_title,
         )
         _metric_key = self._selected_export_metric_key("_line_channel_cb")
         _metric_label = _MLB.get(_metric_key, "Mean Intensity")
         _thr_q = threshold_qualifier(_metric_key)
+        _fov_active = bool(self._ctx.state.plot.use_fov_replicates)
         _fc_suffix = _fc.fold_change_suffix(
-            bool(fc_control_means), bool(fc_vs_t0), self._fc_control_label,
+            fc_vs_ctrl, fc_vs_t0, self._fc_control_label,
         ) if fc_active else ""
         apply_ax_style(ax_mean, f"{_ch} {_metric_label}{_thr_q} \u00b1 {band_lbl}{_fc_suffix}", f"{_ch} {_metric_label}{_fc_suffix}")
-        apply_ax_style(ax_frac, fraction_title(_metric_key), "Fraction")
+        apply_ax_style(ax_frac, f"{fraction_title(_metric_key)}{_fc_suffix}", "Fraction" + _fc_suffix)
+        if _fov_active:
+            _n_title, _n_ylabel = events_per_fov_title(_metric_key, band_lbl), "N(above)/FOV"
+        else:
+            _n_title, _n_ylabel = events_total_title(_metric_key), "N(above)"
+        apply_ax_style(ax_n, f"{_n_title}{_fc_suffix}", _n_ylabel + _fc_suffix)
         apply_ax_style(ax_cdf, f"{_ch} {_metric_label} CDF", "Cumulative fraction")
-        ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
+        ax_mean.tick_params(labelbottom=False)
+        ax_frac.tick_params(labelbottom=False)
+        ax_n.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
         ax_frac.set_ylim(-0.05, 1.05)
         ax_cdf.set_xlabel(f"{_ch} {_metric_label}", fontsize=8, labelpad=5)
         ax_cdf.set_ylim(-0.02, 1.05)
 
-        any_ts = any_cdf = False
-        all_fluor_vals: List[float] = []
-
-        _val_col = self._export_val_col_for("_line_channel_cb")
-        _fluor_gates = _get_all_fluor_gates(self._ctx)
-        from well_viewer.features.batch_export._line_series_runner import (
-            collect_line_series_for_group,
-        )
-        fc_state_for_fig = (
-            bool(fc_control_means),
-            self._fc_control_label if fc_active else "",
-            bool(fc_vs_t0),
-        )
+        # Batch collector (tab rep-set stat for members, aggregate_well for
+        # solos) feeds the SAME renderer the on-tab redraw uses, so the batch
+        # figure gets the identical four panels (incl. N(above)).
         series_list = collect_line_series_for_group(
             self._ctx, grp,
             threshold=threshold, use_sem=use_sem,
-            val_col=_val_col,
-            fluor_gates=_fluor_gates,
-            fc_state=fc_state_for_fig,
-            include_cdf=True,
+            val_col=_val_col, fluor_gates=_get_all_fluor_gates(self._ctx),
+            fc_state=fc_state, include_cdf=True,
         )
-        import numpy as _np
-        for series in series_list:
-            color = series.color
-            display_name = series.display
-            agg_times = [p.t for p in series.points if p.has_mean]
-            agg_means = [p.mean for p in series.points if p.has_mean]
-            agg_errs = [p.spread for p in series.points if p.has_mean]
-            if agg_times:
-                ax_mean.plot(agg_times, agg_means, color=color, lw=2, marker="o",
-                             markersize=4, label=display_name, zorder=3)
-                ax_mean.fill_between(
-                    agg_times,
-                    [m - e for m, e in zip(agg_means, agg_errs)],
-                    [m + e for m, e in zip(agg_means, agg_errs)],
-                    color=color, alpha=0.15, zorder=2,
-                )
-                vf = [(p.t, p.frac) for p in series.points if p.has_frac]
-                if vf:
-                    vt2, vf2 = zip(*vf)
-                    ax_frac.plot(vt2, vf2, color=color, lw=2, marker="s",
-                                 markersize=3, label=display_name, zorder=3)
-                    ax_frac.fill_between(vt2, 0, vf2, color=color, alpha=0.10, zorder=2)
-                any_ts = True
-            fluor_vals = _np.sort(_np.asarray(series.cdf_vals, dtype=float))
-            n = int(fluor_vals.size)
-            if n:
-                all_fluor_vals.extend(fluor_vals.tolist())
-                cdf = _np.arange(1, n + 1) / n
-                ax_cdf.plot(fluor_vals, cdf,
-                            color=color, lw=1.8,
-                            label=f"{display_name} (n={n:,})", zorder=3)
-                any_cdf = True
-
-        if any_ts:
-            # Threshold is in raw-fluorescence units; once fold-change scaling
-            # is applied the curves no longer live on that axis, so the line
-            # would be misleading. Suppress it in that case.
-            if not fc_active:
-                ax_mean.axhline(threshold, color=WARN, lw=1.0, ls="--", alpha=0.8)
-            # Skip the legend call entirely when no labeled artists were
-            # plotted (e.g. all NaN means for a non-MFI property + a
-            # threshold that filters every cell) — matplotlib otherwise
-            # emits the noisy "No artists with labels found to put in
-            # legend" UserWarning to stderr.
-            if ax_mean.get_legend_handles_labels()[0]:
-                ax_mean.legend(**legend_kw)
-            if ax_frac.get_legend_handles_labels()[0]:
-                ax_frac.legend(**legend_kw)
-        if any_cdf:
-            ax_cdf.axvline(threshold, color=WARN, lw=1.2, ls="--",
-                           label=f"threshold={threshold:.2f}", zorder=5)
-            if all_fluor_vals:
-                lo, hi = min(all_fluor_vals), max(all_fluor_vals)
-                ax_cdf.axvspan(threshold, hi, alpha=0.05, color=WARN, zorder=1)
-                ax_cdf.set_xlim(lo, hi)
-            if ax_cdf.get_legend_handles_labels()[0]:
-                ax_cdf.legend(**legend_kw)
-
+        render_line_series(
+            LineAxes(ax_mean, ax_frac, ax_n, ax_cdf), series_list,
+            fov_active=_fov_active, fc_active=fc_active, threshold=threshold,
+            legend_kw=legend_kw, warn_color=WARN, muted_fg=get_color("PLOT_TXT"),
+            legend_visible=None,
+            # Batch has always drawn the CDF threshold line and derives its
+            # x-range from the data (cdf_xrange=None).
+            show_threshold_line=True, cdf_xrange=None,
+            draggable_legends=False,
+        )
         return fig
 

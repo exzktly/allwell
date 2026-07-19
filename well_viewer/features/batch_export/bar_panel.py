@@ -276,28 +276,33 @@ class BarBatchExportPanel(BatchExportPanel):
                 _per_fov_spread = bool(self._ctx.state.plot.use_fov_replicates)
 
                 panel_fc_state = (fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0)
-                items_raw = collect_bar_items_for_group(
-                    self._ctx, grp, target_ts,
-                    val_col=_val_col, threshold=threshold,
-                    use_sem=use_sem, per_fov_spread=_per_fov_spread,
-                    fc_state=FC_STATE_OFF,
-                    fluor_gates=_fluor_gates,
-                    pool_replicates=pool_replicates,
-                    group_mode=group_mode,
-                )
-                if fc_active:
-                    items_fc = collect_bar_items_for_group(
+                # ``collect_bar_items_for_group`` now aggregates pooled rep-set
+                # members with the tab's ``compute_rep_stats`` (which reads
+                # ``active_val_col``), so swap the column for the duration —
+                # the figure path is already inside ``_app_val_col_scope``.
+                with self._app_val_col_scope(_val_col):
+                    items_raw = collect_bar_items_for_group(
                         self._ctx, grp, target_ts,
                         val_col=_val_col, threshold=threshold,
                         use_sem=use_sem, per_fov_spread=_per_fov_spread,
-                        fc_state=panel_fc_state,
+                        fc_state=FC_STATE_OFF,
                         fluor_gates=_fluor_gates,
                         pool_replicates=pool_replicates,
                         group_mode=group_mode,
                     )
-                    fc_by_key_tp = {(it.key, it.tp): it for it in items_fc}
-                else:
-                    fc_by_key_tp = {}
+                    if fc_active:
+                        items_fc = collect_bar_items_for_group(
+                            self._ctx, grp, target_ts,
+                            val_col=_val_col, threshold=threshold,
+                            use_sem=use_sem, per_fov_spread=_per_fov_spread,
+                            fc_state=panel_fc_state,
+                            fluor_gates=_fluor_gates,
+                            pool_replicates=pool_replicates,
+                            group_mode=group_mode,
+                        )
+                        fc_by_key_tp = {(it.key, it.tp): it for it in items_fc}
+                    else:
+                        fc_by_key_tp = {}
 
                 # Build a (key → member metadata) map keyed by either rset
                 # name (pooled) or individual well (expanded).

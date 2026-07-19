@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import csv
 import re
-from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Optional
 
@@ -408,45 +407,6 @@ class ScatterBatchExportPanel(BatchExportPanel):
             status_text=f"Scatter batch export ({self._scatter_mode}): {len(jobs)} group(s) \u2192 {out_dir}",
             out_dir=out_dir,
         )
-
-    @contextmanager
-    def _app_group_scope(self, grp: "BarGroup"):
-        """Temporarily make the app's selection state describe just *grp*: one
-        selection per replicate-set member, plus the group's solo wells as the
-        per-well selection. The scatter_controller collectors read
-        ``app._rep_sets_active()`` / ``app._app_state.selection.selected_wells`` (both derived from
-        ``app._app_state.selection.selections``), so we swap ``_selections`` for the duration."""
-        from well_viewer.domain.selections_model import make_selection
-        sel = self._ctx.state.selection
-        saved = (sel.selections, sel.current_selection_id, sel.selected_wells)
-        try:
-            used_names: set = set()
-            used_ids: set = set()
-            selections = [
-                make_selection(name=m.name, wells=list(m.wells), source="rep_set",
-                               used_names=used_names, used_ids=used_ids,
-                               fallback_color_idx=i)
-                for i, m in enumerate(grp.members)
-            ]
-            # Represent each solo well as its own single-well selection too.
-            # ``collect_scatter_data`` (shared with the on-tab plot) uses
-            # replicate-sets *or* the raw ``selected_wells`` — never both — so a
-            # group that mixes replicate sets with single wells would otherwise
-            # silently drop the single wells from the export. Making them
-            # single-member selections keeps them in the rep-set branch, matching
-            # this scope's documented intent (members + solo wells).
-            for j, w in enumerate(grp.solo_wells):
-                selections.append(
-                    make_selection(name=w, wells=[w], source="well",
-                                   used_names=used_names, used_ids=used_ids,
-                                   fallback_color_idx=len(grp.members) + j)
-                )
-            sel.selections = selections
-            sel.current_selection_id = None
-            sel.selected_wells = set(grp.solo_wells)
-            yield
-        finally:
-            (sel.selections, sel.current_selection_id, sel.selected_wells) = saved
 
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,

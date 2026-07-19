@@ -310,8 +310,10 @@ def test_batch_line_replicates_and_single_wells(ctx, tmp_path):
     assert solo[0]["wells"] == "B01" and solo[0]["n_wells"] == "1"
 
     rep_by_t = {r["time_h"]: r["mean_gfp_mean_intensity"] for r in rep}
-    assert rep_by_t["0.0000"] == "108.500000"      # pool-of-cells A01+A02
-    assert rep_by_t["48.0000"] == "204.500000"
+    # Mean-of-per-well-means (the tab's rep-set statistic): mean(A01, A02).
+    # Equals pool-of-cells here only because the fixture has equal cell counts.
+    assert rep_by_t["0.0000"] == "108.500000"      # mean(103.5, 113.5)
+    assert rep_by_t["48.0000"] == "204.500000"     # mean(199.5, 209.5)
     solo_by_t = {r["time_h"]: r["mean_gfp_mean_intensity"] for r in solo}
     assert solo_by_t["0.0000"] == "123.500000"     # B01 solo
 
@@ -338,6 +340,39 @@ def test_batch_line_regression_figure_render(ctx, tmp_path):
     # a non-CSV figure file was committed alongside the CSV
     assert any(p.suffix != ".csv" and p.name.startswith("batch_G")
                for p in out_dir.iterdir())
+
+
+def test_batch_line_figure_has_four_panels_incl_n_above(ctx):
+    """Regression for the reported bug: the on-tab Line Graphs figure has FOUR
+    stacked panels (mean / fraction / N(above) / CDF) but the batch line figure
+    dropped the N(above) panel. The batch figure now reuses the tab's renderer,
+    so it must have four axes with the N(above) panel third."""
+    from well_viewer.features.batch_export import BatchExportPanel
+
+    panel = BatchExportPanel(ctx, None, use_sidebar_groups=False)
+    grp = _make_mixed_group("Cond1")
+    with panel._app_group_scope(grp), panel._app_val_col_scope("gfp_mean_intensity"):
+        fig = panel._render_group_figure(grp, 50.0, True, "SEM")
+    assert len(fig.axes) == 4, [ax.get_ylabel() for ax in fig.axes]
+    # Panel order matches the tab: mean / fraction / N(above) / CDF.
+    assert fig.axes[2].get_ylabel().startswith("N(above)")
+    assert "CDF" in fig.axes[3].get_title() or "Cumulative" in fig.axes[3].get_ylabel()
+
+
+def test_batch_line_solo_well_error_matches_within_well(ctx, tmp_path):
+    """A solo well in a batch group keeps its within-well cell spread (the tab's
+    per-well statistic), NOT a replicate spread of 0 — i.e. a solo is never
+    silently treated as a one-well replicate set."""
+    out_dir = tmp_path / "batch_line_solo"
+    from well_viewer.domain.batch_models import BarGroup
+
+    _run_line_batch(ctx, [BarGroup("G", members=[], solo_wells=["B01"])], out_dir)
+    rows = _parse_csv((out_dir / "batch_G.csv").read_text())
+    solo = [r for r in rows if r["member"] == "B01"]
+    assert solo and all(r["member_type"] == "solo_well" for r in solo)
+    # Within-well SEM across B01's 6 cells is > 0 (a 1-well replicate spread
+    # would be exactly 0).
+    assert any(float(r["sem_gfp_mean_intensity"]) > 0 for r in solo)
 
 
 # =============================================================================

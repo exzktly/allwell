@@ -360,11 +360,24 @@ hiddenimports = [
     "PIL.ImageOps",
     "PIL.TiffImagePlugin",
     "PIL.PngImagePlugin",
+    # JPEG raw/cell images. PIL registers decoders per-plugin and the frozen
+    # build ships only the plugins named here; without this, ``PIL.Image.open``
+    # on a ``.jpg``/``.jpeg`` (an accepted input ext — image_discovery._IMAGE_EXTS)
+    # raises "cannot identify image file". The scatter Cell Viewer reads *raw*
+    # inputs (unlike the Image Table, which shows the pipeline's uncompressed TIFF
+    # outputs), so a JPEG input decodes fine from source but silently blanks in the
+    # bundle. (JpegImagePlugin pulls PIL.JpegPresets, which PyInstaller follows.)
+    "PIL.JpegImagePlugin",
 
     # tifffile + imageio
     "tifffile",
     "imageio",
     "imageio.plugins.tifffile",
+    # imageio loads format plugins lazily by name. The pipeline writes PNG
+    # overlays via imageio v3 (pipeline/io.py::_safe_imwrite -> iio.imwrite for
+    # ".png"), which dispatches to the pillow plugin — absent it, PNG writes fail
+    # in the frozen build with a "could not find a backend" error.
+    "imageio.plugins.pillow",
 
     # imagecodecs — the top-level package only; compiled per-codec extensions
     # (lzw, jpeg, zstd, etc.) are collected via collect_all() below so their

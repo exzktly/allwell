@@ -34,6 +34,7 @@ from well_viewer.features.batch_export._common import (
     PLOT_BG,
     PLOT_SPN,
     WARN,
+    WELL_COLORS,
     get_color,
     BarGroup,
     _PLATE_COLS,
@@ -68,7 +69,6 @@ from well_viewer.core.channel_state_controller import (
 )
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
-_rank_color_rset = _lazy("well_viewer.features.grouping.controller", "rank_color_rset")
 _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_loaded")
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _get_all_profile_names = _lazy("well_viewer.features.export.style", "get_all_profile_names_ctx")
@@ -1041,22 +1041,34 @@ class BatchExportPanel(QWidget):
         self._refresh_auto_group_name(grp)
         self._refresh_single_btn(tok)
 
+    def _group_color(self, index: int) -> str:
+        """Distinct palette colour for export group *index*.
+
+        Export groups are coloured by their position in the group list, NOT by
+        their wells' plate rank — otherwise two groups spanning the same columns
+        get the same hue (well-position ranking is column-based). Group-index
+        colouring guarantees each group a distinct colour in the plate map,
+        group-card dot, and member chips.
+        """
+        return WELL_COLORS[index % len(WELL_COLORS)]
+
     def _refresh_single_btn(self, tok: str) -> None:
         btn = self._map_btns.get(tok)
         if btn is None or tok not in self._ctx.state.dataset.well_paths:
             return
-        for g in self._groups:
-            if tok in g.wells:
-                c = _rank_color_rset(self._ctx, g)  # decision #1: colour by well-position rank
-                btn.set_colors(c, _CLR_WHITE)
-                return
+        # Last group containing the well wins, matching _refresh_map.
+        owner = next((gi for gi in range(len(self._groups) - 1, -1, -1)
+                      if tok in self._groups[gi].wells), None)
+        if owner is not None:
+            btn.set_colors(self._group_color(owner), _CLR_WHITE)
+            return
         btn.set_colors(get_color("BG_CELL"), get_color("TXT_PRI"))
 
     def _refresh_map(self) -> None:
         avail = set(self._ctx.state.dataset.well_paths.keys())
         tok_color: Dict[str, str] = {}
-        for grp in self._groups:
-            c = _rank_color_rset(self._ctx, grp)  # decision #1: colour by well-position rank
+        for gi, grp in enumerate(self._groups):
+            c = self._group_color(gi)
             for w in grp.wells:
                 tok_color[w] = c   # last group wins — matches the main-viewer plates
         active_wells: set = set()
@@ -1105,7 +1117,7 @@ class BatchExportPanel(QWidget):
 
     def _build_group_card(self, gi: int, grp: BarGroup) -> QWidget:
         is_sel = (gi == self._active_grp)
-        color = _rank_color_rset(self._ctx, grp)  # decision #1: colour by well-position rank
+        color = self._group_color(gi)
         card = QFrame()
         card.setFrameShape(QFrame.StyledPanel)
         if is_sel:
@@ -1329,7 +1341,13 @@ class BatchExportPanel(QWidget):
         return self._deserialize_groups(doc.get(self._persist_key))
 
     def _persist_groups(self) -> None:
-        """Mirror the editor into the batch-export groups doc + schedule a save."""
+        """Mirror the editor into the in-memory batch-export groups doc.
+
+        In-memory only — the disk write is deferred to ``_save_export_groups_now``
+        (called when a batch export actually runs). Otherwise every well click /
+        group selection would rewrite ``persistence.json`` in the (possibly
+        iCloud-synced) data dir and hammer the OS file-provider sync daemon.
+        """
         if getattr(self, "_suppress_persist", False):
             return
         be = self._ctx.runtime.batch_export
@@ -1338,7 +1356,15 @@ class BatchExportPanel(QWidget):
             doc = {}
             be.export_groups_doc = doc
         doc[self._persist_key] = self._serialize_groups()
-        self._ctx.persistence.schedule_save("export_groups")
+
+    def _save_export_groups_now(self) -> None:
+        """Flush the export-group definitions to disk — called only when a batch
+        export actually runs, so interactive editing never writes per click."""
+        be = self._ctx.runtime.batch_export
+        if be.export_groups_doc is None:
+            be.export_groups_doc = {}
+        be.export_groups_doc[self._persist_key] = self._serialize_groups()
+        self._ctx.persistence.save("export_groups")
 
     def _reload_persisted_groups(self) -> None:
         """Re-hydrate from persistence (called after a dataset (re)load)."""
@@ -1383,6 +1409,15 @@ class BatchExportPanel(QWidget):
         leaves the previous complete export intact.
         """
         from PySide6.QtWidgets import QApplication
+
+        # Persist the export-group definitions now — the ONLY place they hit
+        # disk, so interactive well clicks never rewrite persistence.json in the
+        # (possibly iCloud-synced) data dir. Never let a persistence hiccup abort
+        # the export the user asked for.
+        try:
+            self._save_export_groups_now()
+        except Exception:
+            _logger.exception("Batch export: persisting export groups failed")
 
         self._prog_bar.setVisible(True)
         self._prog_bar.setMaximum(max(len(jobs), 1))

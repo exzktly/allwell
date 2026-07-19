@@ -391,10 +391,13 @@ class AllWellApp(QMainWindow):
             sb_layout.addWidget(l)
             sb_layout.addWidget(_KbdHint(hint))
             sb_layout.addSpacing(theme_v2.Spacing.xs)
-        # "Open Application Log" / "Log" tray button removed per
-        # redesign-bug-batch-2 — the button affordance is gone; the
-        # _toggle_log_drawer implementation stays in place for any other
-        # entry point or future re-introduction.
+        # Application-log tray button (far-right of the status bar). Opens the
+        # shell log drawer (_toggle_log_drawer); also bound to ⌘/Ctrl+L. Mirrors
+        # the title-bar help-drawer button (self._help_btn).
+        self._log_btn = IconButton("terminal-square")
+        self._log_btn.setToolTip("Open the application log (⌘L)")
+        self._log_btn.clicked.connect(self._toggle_log_drawer)
+        sb_layout.addWidget(self._log_btn)
         statusbar.setStyleSheet(
             f"#StatusBar {{ background-color: {theme_v2.Colors.titlebar}; "
             f"border-top: 1px solid {theme_v2.Colors.border_subtle}; }}"
@@ -412,6 +415,8 @@ class AllWellApp(QMainWindow):
         - ⌘← / Ctrl+← — back through the section tab history.
         - ⌘→ / Ctrl+→ — forward through the section tab history.
         - ⌘/ / Ctrl+/ — toggle the help drawer (matches the header ? button).
+        - ⌘L / Ctrl+L — toggle the application log drawer (matches the
+          status-bar log button).
         - ⌘W / Ctrl+W — close the window.
 
         Every shortcut here is surfaced somewhere in the chrome (statusbar
@@ -425,6 +430,7 @@ class AllWellApp(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Left"), self, activated=self._tab_history_back)
         QShortcut(QKeySequence("Ctrl+Right"), self, activated=self._tab_history_forward)
         QShortcut(QKeySequence("Ctrl+/"), self, activated=self._toggle_help_drawer)
+        QShortcut(QKeySequence("Ctrl+L"), self, activated=self._toggle_log_drawer)
         QShortcut(QKeySequence("Ctrl+W"), self, activated=self.close)
 
     def _tab_history_back(self) -> None:

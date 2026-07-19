@@ -37,6 +37,11 @@ from well_viewer.core.channel_state_controller import (
 )
 from well_viewer.data.data_loading import get_rows as _get_rows
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
+# The Scatter tab's own point + gate renderers, reused by the batch figure — a
+# call, not an import statement, so they stay off the deferred-import budget.
+_render_scatter_points = _lazy("well_viewer.features.scatter.gating", "render_scatter_points")
+_draw_gates = _lazy("well_viewer.features.scatter.gating", "draw_gates")
+_log1p_axis_suffix = _lazy("well_viewer.features.scatter._layout", "log1p_axis_suffix")
 _compose_scatter_agg_stat = _lazy("well_viewer.features.scatter.controller", "compose_scatter_agg_stat")
 
 
@@ -508,10 +513,6 @@ class ScatterBatchExportPanel(BatchExportPanel):
         (also forced by Color by time). Must run inside ``_app_group_scope`` so
         the gate/geometry lookups see the group's selections."""
         from matplotlib.figure import Figure as _Figure
-        from well_viewer.features.scatter.gating import (
-            render_scatter_points, draw_gates,
-        )
-        from well_viewer.features.scatter._layout import log1p_axis_suffix
 
         density_on = self._sc_density_cb.isChecked()
         x_log = self._sc_xlog_cb.isChecked()
@@ -525,15 +526,15 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
         items = list(scatter_data.items())
         faceted = (separate or color_by_tp) and len(items) > 1
-        xlabel = col_x + log1p_axis_suffix(x_log)
-        ylabel = col_y + log1p_axis_suffix(y_log)
+        xlabel = col_x + _log1p_axis_suffix(x_log)
+        ylabel = col_y + _log1p_axis_suffix(y_log)
 
         n_panels = len(items) if faceted else 1
         fig = _Figure(figsize=(8, max(6, 3 * n_panels) if faceted else 6),
                       dpi=300, facecolor=PLOT_BG)
 
         def _panel(ax, data_dict) -> None:
-            _ipts, legend_handles = render_scatter_points(
+            _ipts, legend_handles = _render_scatter_points(
                 self._ctx, ax, data_dict,
                 density_on=density_on, x_log=x_log, y_log=y_log,
                 marker_size=marker_size, color_by_tp=color_by_tp,
@@ -546,7 +547,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             elif ax.get_legend_handles_labels()[0]:
                 ax.legend(loc="best", fontsize=8, framealpha=0.0, facecolor="none")
             if show_gates:
-                draw_gates(self._ctx, ax, data_dict, tps_list, ink, handles=False)
+                _draw_gates(self._ctx, ax, data_dict, tps_list, ink, handles=False)
 
         # render_scatter_points reads color_by_tp via the param; draw_gates reads
         # gates_hidden + axes_cols off ctx. Swap those for the render and restore
@@ -591,10 +592,9 @@ class ScatterBatchExportPanel(BatchExportPanel):
             apply_axis_log_scale(ax, "y", True)
 
     def _agg_axis_labels(self, stat_x: str, stat_y: str) -> "tuple[str, str]":
-        from well_viewer.features.scatter._layout import log1p_axis_suffix
         x_on = bool(getattr(self, "_sc_agg_xlog_cb", None) and self._sc_agg_xlog_cb.isChecked())
         y_on = bool(getattr(self, "_sc_agg_ylog_cb", None) and self._sc_agg_ylog_cb.isChecked())
-        return stat_x + log1p_axis_suffix(x_on), stat_y + log1p_axis_suffix(y_on)
+        return stat_x + _log1p_axis_suffix(x_on), stat_y + _log1p_axis_suffix(y_on)
 
     def _run_scatter_agg_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,

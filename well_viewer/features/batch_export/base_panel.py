@@ -73,6 +73,11 @@ _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_l
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _get_all_profile_names = _lazy("well_viewer.features.export.style", "get_all_profile_names_ctx")
 _ensure_custom_export_profiles = _lazy("well_viewer.features.export.style", "ensure_custom_export_profiles_ctx")
+# The Line-Graphs tab's shared renderer, reused by the batch line figure (proxy
+# is callable, so ``_LineAxes(...)`` constructs the dataclass) — a call, not an
+# import statement, so it stays off the deferred-import budget.
+_render_line_series = _lazy("well_viewer.features.lineplot.controller", "render_line_series")
+_LineAxes = _lazy("well_viewer.features.lineplot.controller", "LineAxes")
 
 # Shared width for OUTPUT-SETTINGS row labels so the value controls line up in a
 # single column (Folder / Format / Style Preset / Channel / Fold change).
@@ -1651,9 +1656,6 @@ class BatchExportPanel(QWidget):
         control resolves against the group's scoped selections."""
         from matplotlib.figure import Figure as _Figure
         from well_viewer.domain import fold_change as _fc
-        from well_viewer.features.lineplot.controller import (
-            LineAxes, render_line_series,
-        )
         from well_viewer.features.batch_export._line_series_runner import (
             collect_line_series_for_group,
         )
@@ -1710,8 +1712,8 @@ class BatchExportPanel(QWidget):
             val_col=_val_col, fluor_gates=_get_all_fluor_gates(self._ctx),
             fc_state=fc_state, include_cdf=True,
         )
-        render_line_series(
-            LineAxes(ax_mean, ax_frac, ax_n, ax_cdf), series_list,
+        _render_line_series(
+            _LineAxes(ax_mean, ax_frac, ax_n, ax_cdf), series_list,
             fov_active=_fov_active, fc_active=fc_active, threshold=threshold,
             legend_kw=legend_kw, warn_color=WARN, muted_fg=get_color("PLOT_TXT"),
             legend_visible=None,

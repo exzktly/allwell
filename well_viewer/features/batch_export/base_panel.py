@@ -1731,8 +1731,11 @@ class BatchExportPanel(QWidget):
             _n_title, _n_ylabel = events_total_title(_metric_key), "N(above)"
         apply_ax_style(ax_n, f"{_n_title}{_fc_suffix}", _n_ylabel + _fc_suffix)
         apply_ax_style(ax_cdf, f"{_ch} {_metric_label} CDF", "Cumulative fraction")
-        ax_mean.tick_params(labelbottom=False)
-        ax_frac.tick_params(labelbottom=False)
+        # Each time panel (mean / fraction / N) shows its own timepoints +
+        # x-label, matching the on-tab figure (lineplot/controller.py). The
+        # panels are well-separated by hspace, so each reads as its own graph.
+        ax_mean.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
+        ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
         ax_n.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
         ax_frac.set_ylim(-0.05, 1.05)
         ax_cdf.set_xlabel(f"{_ch} {_metric_label}", fontsize=8, labelpad=5)

@@ -44,6 +44,7 @@ from well_viewer.domain.stats_compute import (
 from well_viewer.domain.selections_model import (
     color_for_well as _color_for_well,
     replicate_display_label as _replicate_display_label,
+    well_display_label as _well_display_label,
 )
 from well_viewer.data.data_loading import get_rows as _get_rows
 
@@ -169,8 +170,8 @@ def collect_line_series_for_group(
                              per_fov_spread=rep_per_fov)
         points = [_aggpoint_to_linepoint(pt) for pt in _normalize(list(pts or []))]
         series_out.append(LineSeries(
-            key=w, display=w, color=_color_for_well(w), kind="well",
-            wells=[w], points=points, cdf_vals=_cdf_for([w]),
+            key=w, display=_well_display_label(ctx, w), color=_color_for_well(w),
+            kind="well", wells=[w], points=points, cdf_vals=_cdf_for([w]),
         ))
 
     return series_out

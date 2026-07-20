@@ -194,6 +194,33 @@ def test_ontab_line_replicate_set_fallback(ctx, tmp_path):
     assert a02_tp48["mean_gfp_mean_intensity"] == "209.500000"
 
 
+def test_batch_line_solo_well_uses_sample_label(ctx):
+    """The Batch Export line collector must resolve a solo well's legend label
+    through the same sample-label map the live Line Graphs tab uses
+    (``well_display_label``), not the bare well token. Regression for the
+    well-number-in-legend bug: a labelled well shows its sample name, an
+    unlabelled one falls back to the token."""
+    from well_viewer.features.batch_export._line_series_runner import (
+        collect_line_series_for_group,
+    )
+    from well_viewer.domain.batch_models import BarGroup
+
+    val_col = f"{ctx.state.channel.active_channel}_{ctx.state.channel.active_metric}"
+    prev_labels = dict(ctx.state.dataset.well_labels)
+    ctx.state.dataset.well_labels = {"B01": "Treated"}
+    try:
+        series = collect_line_series_for_group(
+            ctx, BarGroup("G", members=[], solo_wells=["B01", "B02"]),
+            threshold=-1.0, use_sem=True, val_col=val_col, fluor_gates={},
+        )
+    finally:
+        ctx.state.dataset.well_labels = prev_labels
+
+    by_key = {s.key: s for s in series}
+    assert by_key["B01"].display == "Treated"   # labelled → sample name
+    assert by_key["B02"].display == "B02"        # unlabelled → bare token
+
+
 # =============================================================================
 # 2. ON-TAB BAR EXPORT  (export_bar_plot_data)
 # =============================================================================

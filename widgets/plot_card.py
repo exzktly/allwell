@@ -214,6 +214,19 @@ if _HAVE_MPL:
             self._save_btn.hide()
             self._save_btn.installEventFilter(self)
             self._save_btn.clicked.connect(self._on_save_axis_clicked)
+            # Optional "save the WHOLE figure to Saved Plots" button — one click
+            # sends every panel as a single combined gallery entry. Only shown on
+            # multi-axis figures (on a single-axis figure the per-panel save above
+            # already captures the whole figure, so it would just duplicate it).
+            self._save_fig_btn_hovered = False
+            self._save_fig_btn = IconButton(
+                "layout-grid", self.canvas, size=theme.Typography.body_size,
+                tooltip="Save the whole figure to Saved Plots",
+            )
+            self._save_fig_btn.adjustSize()
+            self._save_fig_btn.hide()
+            self._save_fig_btn.installEventFilter(self)
+            self._save_fig_btn.clicked.connect(self._on_save_figure_clicked)
             # Single-shot, delayed hide so the cursor can transit from the
             # canvas onto the floating button (which itself fires
             # ``figure_leave_event``) without the button vanishing first.
@@ -228,13 +241,17 @@ if _HAVE_MPL:
             """The hover buttons to show for the current figure, right→left.
 
             Copy is offered only on multi-axis figures (single-axis is covered
-            by the whole-canvas Copy); the save button shows on any figure once
-            a save handler is wired."""
+            by the whole-canvas Copy); the per-panel save button shows on any
+            figure once a save handler is wired; the whole-figure save button is
+            multi-axis-only (single-axis per-panel save already == whole figure)."""
             btns = []
-            if len(self.figure.axes) > 1:
+            multi = len(self.figure.axes) > 1
+            if multi:
                 btns.append(self._copy_btn)
             if self._save_handler is not None:
                 btns.append(self._save_btn)
+                if multi:
+                    btns.append(self._save_fig_btn)
             return btns
 
         def _on_canvas_motion(self, event) -> None:
@@ -261,10 +278,12 @@ if _HAVE_MPL:
             self._copy_hide_timer.start()
 
         def _maybe_hide_copy_btn(self) -> None:
-            if self._copy_btn_hovered or self._save_btn_hovered:
+            if (self._copy_btn_hovered or self._save_btn_hovered
+                    or self._save_fig_btn_hovered):
                 return
             self._copy_btn.hide()
             self._save_btn.hide()
+            self._save_fig_btn.hide()
             self._hover_ax = None
 
         def _position_hover_btns(self, ax) -> None:
@@ -293,6 +312,7 @@ if _HAVE_MPL:
                 return
             from widgets.fig_clipboard import (
                 axis_tight_bbox_inches, copy_figure_to_clipboard,
+                hidden_sibling_axes,
             )
             # Capture in publication mode (the canonical export look), then
             # revert — mirrors the whole-canvas Copy path.
@@ -302,14 +322,19 @@ if _HAVE_MPL:
                     self.setPlotTheme("publication")
                 bbox = axis_tight_bbox_inches(
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
-                status = copy_figure_to_clipboard(
-                    self.figure,
-                    svg_kwargs={"bbox_inches": bbox},
-                    pdf_kwargs={"bbox_inches": bbox},
-                )
+                # Hide sibling panels while cropping so a neighbour's title /
+                # labels / ticks that fall inside the crop rectangle don't bleed
+                # into the exported panel.
+                with hidden_sibling_axes(self.figure, ax):
+                    status = copy_figure_to_clipboard(
+                        self.figure,
+                        svg_kwargs={"bbox_inches": bbox},
+                        pdf_kwargs={"bbox_inches": bbox},
+                    )
             finally:
                 if self._plot_theme != prev:
                     self.setPlotTheme(prev)
+                self.canvas.draw_idle()
             failed = status.startswith("Copy failed")
             # Neutral message: this is a clipboard copy, not tied to any one app.
             msg = status if failed else "Copied panel to clipboard"
@@ -335,7 +360,9 @@ if _HAVE_MPL:
                 return
             import io
 
-            from widgets.fig_clipboard import axis_tight_bbox_inches
+            from widgets.fig_clipboard import (
+                axis_tight_bbox_inches, hidden_sibling_axes,
+            )
             # Render the hovered panel in publication mode (the canonical export
             # look), mirroring the Copy path, then revert.
             prev = self._plot_theme
@@ -345,19 +372,58 @@ if _HAVE_MPL:
                     self.setPlotTheme("publication")
                 bbox = axis_tight_bbox_inches(
                     ax, pad_in=theme.Spacing.xs / float(self.figure.dpi))
+                # Hide sibling panels while cropping so a neighbour's title /
+                # labels / ticks that fall inside the crop rectangle don't bleed
+                # into the saved panel.
                 buf = io.BytesIO()
-                self.figure.savefig(
-                    buf, format="png", bbox_inches=bbox, dpi=300,
-                    facecolor=self.figure.get_facecolor())
+                with hidden_sibling_axes(self.figure, ax):
+                    self.figure.savefig(
+                        buf, format="png", bbox_inches=bbox, dpi=300,
+                        facecolor=self.figure.get_facecolor())
                 png_bytes = buf.getvalue()
             finally:
                 if self._plot_theme != prev:
                     self.setPlotTheme(prev)
+                self.canvas.draw_idle()
             label = ""
             try:
                 label = (ax.get_title() or "").strip()
             except Exception:
                 label = ""
+            self._dispatch_saved_png(png_bytes, label)
+
+        def _on_save_figure_clicked(self) -> None:
+            """Save the WHOLE figure (all panels) as a single Saved Plots entry."""
+            if self._save_handler is None:
+                return
+            import io
+
+            # Render the entire figure in publication mode (the canonical export
+            # look), mirroring the per-panel save path, then revert.
+            prev = self._plot_theme
+            png_bytes = b""
+            try:
+                if prev != "publication":
+                    self.setPlotTheme("publication")
+                buf = io.BytesIO()
+                self.figure.savefig(
+                    buf, format="png", bbox_inches="tight", dpi=300,
+                    facecolor=self.figure.get_facecolor())
+                png_bytes = buf.getvalue()
+            finally:
+                if self._plot_theme != prev:
+                    self.setPlotTheme(prev)
+                self.canvas.draw_idle()
+            label = ""
+            try:
+                sup = getattr(self.figure, "_suptitle", None)
+                label = (sup.get_text() or "").strip() if sup is not None else ""
+            except Exception:
+                label = ""
+            self._dispatch_saved_png(png_bytes, label)
+
+        def _dispatch_saved_png(self, png_bytes: bytes, label: str) -> None:
+            """Hand a captured PNG to the save handler and toast the result."""
             try:
                 status = self._save_handler(png_bytes, label) or "Saved plot"
                 failed = False
@@ -388,6 +454,13 @@ if _HAVE_MPL:
                     self._copy_hide_timer.stop()
                 elif event.type() == QEvent.Leave:
                     self._save_btn_hovered = False
+                    self._copy_hide_timer.start()
+            elif obj is getattr(self, "_save_fig_btn", None):
+                if event.type() == QEvent.Enter:
+                    self._save_fig_btn_hovered = True
+                    self._copy_hide_timer.stop()
+                elif event.type() == QEvent.Leave:
+                    self._save_fig_btn_hovered = False
                     self._copy_hide_timer.start()
             return super().eventFilter(obj, event)
 

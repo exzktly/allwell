@@ -51,6 +51,66 @@ def test_axis_tight_bbox_is_smaller_than_figure():
     assert (bb.width * bb.height) < (full.width * full.height)
 
 
+def test_hidden_sibling_axes_hides_and_restores():
+    """Inside the block only *keep_ax* is visible; on exit every sibling's
+    original visibility is restored (including a sibling that started hidden)."""
+    import matplotlib
+    matplotlib.use("Agg", force=False)
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    from widgets.fig_clipboard import hidden_sibling_axes
+
+    fig = Figure(figsize=(4, 6))
+    FigureCanvasAgg(fig)
+    ax0 = fig.add_subplot(3, 1, 1)
+    ax1 = fig.add_subplot(3, 1, 2)
+    ax2 = fig.add_subplot(3, 1, 3)
+    ax2.set_visible(False)                    # a sibling that starts hidden
+
+    with hidden_sibling_axes(fig, ax1):
+        assert ax1.get_visible() is True      # target stays visible
+        assert ax0.get_visible() is False     # siblings hidden inside the block
+        assert ax2.get_visible() is False
+
+    # Original visibility restored on exit.
+    assert ax0.get_visible() is True
+    assert ax1.get_visible() is True
+    assert ax2.get_visible() is False
+
+
+def test_panel_save_hides_siblings_during_savefig(qapp):
+    """The per-panel Saved-Plots crop must render with sibling panels hidden, so a
+    neighbour's title / ticks that fall inside the crop rectangle can't bleed in.
+    Spy on ``savefig`` to record axis visibility at capture time."""
+    from widgets.plot_card import PlotCard
+
+    card = PlotCard(figsize=(3, 4))
+    ax0 = card.figure.add_subplot(2, 1, 1)
+    ax0.plot([0, 1], [0, 1])
+    ax0.set_title("neighbour title")
+    ax1 = card.figure.add_subplot(2, 1, 2)
+    ax1.plot([0, 1], [1, 0])
+    card.set_save_handler(lambda png, label: "ok")
+
+    seen = {}
+    real_savefig = card.figure.savefig
+
+    def spy_savefig(*args, **kwargs):
+        seen["vis"] = [a.get_visible() for a in card.figure.axes]
+        return real_savefig(*args, **kwargs)
+
+    card.figure.savefig = spy_savefig
+    card._hover_ax = ax1          # save the BOTTOM panel
+    card._on_save_axis_clicked()
+
+    # At savefig time: target visible, neighbour hidden.
+    assert seen["vis"] == [False, True]
+    # Visibility restored afterwards.
+    assert ax0.get_visible() is True
+    assert ax1.get_visible() is True
+
+
 def test_copy_figure_to_clipboard_status_on_fallback(monkeypatch):
     import matplotlib
     matplotlib.use("Agg", force=False)

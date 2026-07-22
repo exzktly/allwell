@@ -187,16 +187,18 @@ def test_scale_bar_show_toggle_gates_the_bar():
     assert bar_px == 100 and targets == {(0, 0)}
 
 
-def test_default_state_shows_a_bar_once_toggled_on():
-    """Fresh state ships sensible pixel-size + length defaults, so enabling the
-    toggle alone produces a visible bar (the 'set it but nothing appears' fix)."""
+def test_default_state_shows_bar_once_pixel_size_is_entered():
+    """The toggle ships ON and the bar length is pre-set, so entering only the
+    pixel size draws the bar — the user's workflow ("set the values, get a bar").
+    A fresh table shows nothing until a pixel size is given (no wrong-scale bar)."""
     app = _fake_app(wells=["A01"], channels=["gfp"])
     st = app._app_state.image_table            # untouched: defaults only
-    assert st.pixel_size_um > 0 and st.scale_bar_um > 0
+    assert st.scale_bar_show is True and st.scale_bar_um > 0
+    assert st.pixel_size_um == 0.0             # uncalibrated ⇒ no bar yet
     cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
-    assert IC.resolve_chrome_plan(app._ctx, cells)[0] == 0   # off by default
-    st.scale_bar_show = True
-    assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar on toggle
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] == 0   # nothing before calibration
+    st.pixel_size_um = 0.5                      # the ONE value the user must enter
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar appears
 
 
 # ── Behavior: global-per-channel Auto LUT ───────────────────────────────────

@@ -66,7 +66,11 @@ def playground_repopulate_dropdowns(ctx) -> None:
     st.fov = st.fov or (fovs[0] if fovs else None)
     # The playground combos are not registered; reach them (widgets) via the
     # blessed ctx.window accessor. _set_combo stays app/window-first (widget I/O).
-    _set_combo(ctx.window, "_playground_well_cb", wells, st.well)
+    # The well is a single-select plate (not a combo) — mirror the selection onto it.
+    plate = getattr(ctx.window, "_playground_well_plate", None)
+    if plate is not None:
+        plate.setEnabledWells(wells)
+        plate.setSelectedWellIds([st.well] if (st.well and st.well in wells) else [])
     _set_combo(ctx.window, "_playground_chan_cb", channels, st.channel)
     _set_combo(ctx.window, "_playground_tp_cb", tps, st.timepoint)
     _set_combo(ctx.window, "_playground_fov_cb", fovs, st.fov)
@@ -92,8 +96,9 @@ def _read_widgets_into_state(ctx) -> None:
     (so headless tests can set ``ctx.state.playground`` fields directly)."""
     st = _st(ctx)
     win = ctx.window
-    for attr, field in (("_playground_well_cb", "well"),
-                        ("_playground_chan_cb", "channel"),
+    # Well is driven by the single-select plate (its selectionChanged writes
+    # ``st.well`` directly), so it's not read from a combo here.
+    for attr, field in (("_playground_chan_cb", "channel"),
                         ("_playground_tp_cb", "timepoint"),
                         ("_playground_fov_cb", "fov")):
         v = _read_combo(win, attr)

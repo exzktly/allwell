@@ -147,6 +147,33 @@ def test_tab_builds_and_populates_selectors(playground_app):
     assert "NUC+SEG" not in items
 
 
+def test_well_is_a_single_select_plate_that_drives_state(playground_app, monkeypatch):
+    """The well selector is a single-select plate (no groupings/replicates): it
+    enables exactly the dataset wells, drives ``st.well`` on selection, and never
+    holds more than one well."""
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.image_browser.playground import controller as C
+    monkeypatch.setattr(C, "_load_array",
+                        lambda *a, **k: np.full((32, 32), 100.0, np.float32))
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+
+    plate = app._playground_well_plate
+    assert plate.selectionMode() == "select"
+    # the old Well combo is gone
+    assert not hasattr(app, "_playground_well_cb")
+
+    wells = sorted(app._app_state.dataset.well_paths.keys())
+    assert len(wells) >= 2
+
+    plate.setSelectedWellIds([wells[1]])
+    assert st.well == wells[1]                       # plate drove the state
+
+    # single-select: asking for two collapses to one
+    plate.setSelectedWellIds([wells[0], wells[1]])
+    assert len(plate.selectedWellIds()) == 1
+
+
 def test_on_change_corrects_and_renders(playground_app, monkeypatch):
     app = playground_app
     st = app._app_state.playground

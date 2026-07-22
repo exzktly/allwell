@@ -189,6 +189,7 @@ def _build_properties_dock(ctx, dock) -> None:
                 ("Bottom-left", "bl"), ("Bottom-right", "br")]
     _COLORS = [("White", "white"), ("Black", "black"), ("Yellow", "yellow"),
                ("Cyan", "cyan"), ("Magenta", "magenta")]
+    _BAR_COLORS = [("Auto (contrast)", "auto")] + _COLORS
 
     _cap("Spacing (px)")
     _prop("Cell gap", "cell_gap", 2, 0, 200,
@@ -219,7 +220,9 @@ def _build_properties_dock(ctx, dock) -> None:
            "Which cell(s) show the scale bar: every cell, or one grid corner.")
     _combo("Position", "scale_bar_img_corner", _CORNERS,
            "Where in the image the bar sits.")
-    _combo("Colour", "scale_bar_color", _COLORS, "Scale-bar colour.")
+    _combo("Colour", "scale_bar_color", _BAR_COLORS,
+           "Scale-bar colour. 'Auto' picks black or white per cell for contrast "
+           "(so a white bar isn't lost on a light 'Greys' background).")
 
     _cap("Cell labels")
     _combo("Mode", "label_mode", [("None", "none"), ("Identity", "identity")],

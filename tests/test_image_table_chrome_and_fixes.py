@@ -85,6 +85,26 @@ def test_draw_cell_chrome_bar_length_matches_px():
     assert 58 <= widest <= 62
 
 
+def test_auto_bar_color_is_visible_on_a_light_background():
+    """The default 'Greys' colormap renders dim fluorescence as a near-white
+    image; a fixed white bar is then invisible. 'auto' must pick a dark bar so it
+    reads against the light background (the reported "bar doesn't appear" bug)."""
+    light = np.full((200, 200, 3), 234, np.uint8)     # near-white, like Greys(dim)
+    out = IC.draw_cell_chrome(light.copy(), bar_px=80, bar_corner="br",
+                              bar_color="auto")
+    # The bar region must contain clearly dark pixels (a black bar on white).
+    region = out[-40:, -120:]
+    assert int((region < 60).sum()) > 100, "auto bar not visible on a light background"
+
+
+def test_auto_bar_color_is_visible_on_a_dark_background():
+    dark = np.zeros((200, 200, 3), np.uint8)
+    out = IC.draw_cell_chrome(dark.copy(), bar_px=80, bar_corner="br",
+                              bar_color="auto")
+    region = out[-40:, -120:]
+    assert int((region > 200).sum()) > 100, "auto bar not visible on a dark background"
+
+
 def test_draw_cell_chrome_noop_when_nothing_to_draw():
     rgb = np.zeros((50, 50, 3), np.uint8)
     assert IC.draw_cell_chrome(rgb, bar_px=0, label_text="") is rgb

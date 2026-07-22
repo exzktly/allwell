@@ -1014,9 +1014,21 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
             else:
                 y1 = H - margin
                 y0 = max(0, y1 - thick)
-            col = _chrome_rgb(bar_color)
+            # Colour: "auto" (default) picks black or white for maximum contrast
+            # against the pixels the bar covers — essential because the default
+            # "Greys" colormap renders dim fluorescence as a near-white background,
+            # where a fixed white bar is invisible. A named colour is honoured as-is.
+            if str(bar_color or "").strip().lower() in ("", "auto"):
+                region = a[y0:min(H, y1 + 1), max(0, x0 - 1):min(W, x1 + 1), :3]
+                bright = float(region.mean()) > 140.0 if region.size else False
+                col = (0, 0, 0) if bright else (255, 255, 255)
+            else:
+                col = _chrome_rgb(bar_color)
+            # A contrasting halo (≥2 px) frames the bar so it reads even against a
+            # same-toned background.
             halo = (0, 0, 0) if col != (0, 0, 0) else (255, 255, 255)
-            a[max(0, y0 - 1):min(H, y1 + 1), max(0, x0 - 1):min(W, x1 + 1)] = halo
+            pad = max(1, thick // 3)
+            a[max(0, y0 - pad):min(H, y1 + pad), max(0, x0 - pad):min(W, x1 + pad)] = halo
             a[y0:y1, x0:x1] = col
 
     # Identity label — PIL text with an optional translucent dark box behind it.

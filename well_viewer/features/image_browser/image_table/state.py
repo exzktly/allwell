@@ -96,7 +96,7 @@ class ImageTableState:
     scale_bar_um: float = 50.0
     scale_bar_cells: str = "br"
     scale_bar_img_corner: str = "br"
-    scale_bar_color: str = "white"
+    scale_bar_color: str = "auto"   # "auto" = black/white per local contrast
 
     # Burned-in cell labels (identity text drawn into the pixels). ``label_mode``
     # "none"/"identity"; ``label_cells`` picks which cell(s) ("all" or a grid corner);

@@ -116,11 +116,24 @@ def image_table_refresh_picker(ctx) -> None:
 def image_table_select_all(ctx) -> None:
     ctx.state.image_table.active_wells = set(ctx.state.dataset.well_paths.keys())
     image_table_refresh_picker(ctx)
+    _rebuild_layout_for_well_change(ctx)
 
 
 def image_table_clear_active(ctx) -> None:
     ctx.state.image_table.active_wells = set()
     image_table_refresh_picker(ctx)
+    _rebuild_layout_for_well_change(ctx)
+
+
+def _rebuild_layout_for_well_change(ctx) -> None:
+    """Re-run the layout (debounced) so a Wells axis follows a well-set change.
+
+    Invokes the callback the shelf registers on ``ctx.runtime.image_table`` at
+    build time, so the controller needs no ``builder_view`` import (matching the
+    row/col_dims_refresh hooks). No-op before the shelf is built."""
+    cb = getattr(ctx.runtime.image_table, "selection_rebuild_cb", None)
+    if callable(cb):
+        cb()
 
 
 # ── Pipeline-info-driven dropdown options ────────────────────────────────────

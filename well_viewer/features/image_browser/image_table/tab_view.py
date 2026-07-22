@@ -208,14 +208,18 @@ def _build_properties_dock(ctx, dock) -> None:
 
     _cap("Scale bar")
     _check("Show scale bar", "scale_bar_show",
-           "Burn a scale bar into the rendered images. Needs a Pixel µm/px and a "
-           "Bar length below (both default to sensible values — set Pixel µm/px to "
-           "your objective's real value).")
-    _propf("Pixel µm/px", "pixel_size_um", 0.65, 0.0, 100.0, 0.05, 3,
-           "Physical size of one pixel in microns. Not stored by the pipeline — "
-           "set it to your objective's value so the bar is to scale. 0 = no bar.")
+           "Burn a scale bar into the rendered images (on by default). Enter the "
+           "Pixel µm/px below to make it appear; untick to hide it without clearing "
+           "the values.")
+    _propf("Pixel µm/px", "pixel_size_um", 0.0, 0.0, 100.0, 0.05, 3,
+           "Physical size of one pixel in microns — the one value the pipeline "
+           "can't supply. Set it to your objective's value; the bar appears once "
+           "it's > 0. 0 = no bar.")
     _propf("Bar length µm", "scale_bar_um", 50.0, 0.0, 5000.0, 1.0, 1,
            "Scale-bar length in microns. Bar pixels = length ÷ pixel size. 0 = no bar.")
+    _propf("Bar thickness px", "scale_bar_thickness_px", 4, 1, 40, 1.0, 0,
+           "Bar thickness (px, relative to a 240 px cell). Increase it if the bar "
+           "is too thin to see once cells are downscaled.")
     _combo("Show on", "scale_bar_cells", _CELLS,
            "Which cell(s) show the scale bar: every cell, or one grid corner.")
     _combo("Position", "scale_bar_img_corner", _CORNERS,

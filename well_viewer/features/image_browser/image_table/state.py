@@ -86,17 +86,20 @@ class ImageTableState:
     # Scale bar (burned into the rendered pixels so live grid == export). The bar is
     # ``round(scale_bar_um / pixel_size_um)`` px long, drawn in ``scale_bar_img_corner``
     # of the image, on the cell(s) selected by ``scale_bar_cells`` ("all", or a grid
-    # corner "tl"/"tr"/"bl"/"br"). ``scale_bar_show`` is the master on/off switch;
-    # when on, the bar still needs a valid ``pixel_size_um`` + ``scale_bar_um`` (both
-    # > 0). Pixel size isn't in pipeline_info, so it's a user-entered value — it
-    # (and the bar length) default to sensible, clearly-editable values so flipping
-    # the toggle on shows a bar immediately, which the user then calibrates.
-    scale_bar_show: bool = False
-    pixel_size_um: float = 0.65
+    # corner "tl"/"tr"/"bl"/"br"). ``scale_bar_show`` is the master on/off switch and
+    # defaults ON, so simply entering a pixel size (the one value the pipeline can't
+    # supply — bar length defaults to 50 µm) draws the bar; the toggle then hides it
+    # without clearing the values. ``pixel_size_um`` defaults to 0 (= no bar) so a
+    # fresh table never shows a wrong-scale bar before it's calibrated.
+    scale_bar_show: bool = True
+    pixel_size_um: float = 0.0
     scale_bar_um: float = 50.0
     scale_bar_cells: str = "br"
     scale_bar_img_corner: str = "br"
     scale_bar_color: str = "auto"   # "auto" = black/white per local contrast
+    # Bar thickness in px-at-a-nominal-240 px cell (scaled to each image like the
+    # label font). User-tunable because a too-thin bar can disappear on downscale.
+    scale_bar_thickness_px: int = 4
 
     # Burned-in cell labels (identity text drawn into the pixels). ``label_mode``
     # "none"/"identity"; ``label_cells`` picks which cell(s) ("all" or a grid corner);

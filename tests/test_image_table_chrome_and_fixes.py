@@ -105,6 +105,21 @@ def test_auto_bar_color_is_visible_on_a_dark_background():
     assert int((region > 200).sum()) > 100, "auto bar not visible on a dark background"
 
 
+def test_scale_bar_thickness_is_tunable():
+    """The bar thickness is user-tunable (a too-thin bar vanishes on downscale)."""
+    rgb = np.zeros((240, 240, 3), np.uint8)
+
+    def bar_rows(thick_px):
+        out = IC.draw_cell_chrome(rgb.copy(), bar_px=100, bar_corner="br",
+                                  bar_color="white", bar_thickness_px=thick_px)
+        ys = np.where((out[..., 0] == 255).any(axis=1))[0]
+        return int(ys.max() - ys.min() + 1) if ys.size else 0
+
+    assert bar_rows(2) == 2
+    assert bar_rows(4) == 4
+    assert bar_rows(10) == 10                          # thicker → taller bar
+
+
 def test_draw_cell_chrome_noop_when_nothing_to_draw():
     rgb = np.zeros((50, 50, 3), np.uint8)
     assert IC.draw_cell_chrome(rgb, bar_px=0, label_text="") is rgb
@@ -187,16 +202,18 @@ def test_scale_bar_show_toggle_gates_the_bar():
     assert bar_px == 100 and targets == {(0, 0)}
 
 
-def test_default_state_shows_a_bar_once_toggled_on():
-    """Fresh state ships sensible pixel-size + length defaults, so enabling the
-    toggle alone produces a visible bar (the 'set it but nothing appears' fix)."""
+def test_default_state_shows_bar_once_pixel_size_is_entered():
+    """The toggle ships ON and the bar length is pre-set, so entering only the
+    pixel size draws the bar — the user's workflow ("set the values, get a bar").
+    A fresh table shows nothing until a pixel size is given (no wrong-scale bar)."""
     app = _fake_app(wells=["A01"], channels=["gfp"])
     st = app._app_state.image_table            # untouched: defaults only
-    assert st.pixel_size_um > 0 and st.scale_bar_um > 0
+    assert st.scale_bar_show is True and st.scale_bar_um > 0
+    assert st.pixel_size_um == 0.0             # uncalibrated ⇒ no bar yet
     cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
-    assert IC.resolve_chrome_plan(app._ctx, cells)[0] == 0   # off by default
-    st.scale_bar_show = True
-    assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar on toggle
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] == 0   # nothing before calibration
+    st.pixel_size_um = 0.5                      # the ONE value the user must enter
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar appears
 
 
 # ── Behavior: global-per-channel Auto LUT ───────────────────────────────────

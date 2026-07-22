@@ -974,16 +974,19 @@ def _load_chrome_font(px: int):
 
 
 def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
-                     bar_color: str = "white", label_text: str = "",
+                     bar_color: str = "white", bar_thickness_px: int = 0,
+                     label_text: str = "",
                      label_corner: str = "tl", label_font_px: int = 12,
                      label_color: str = "white", label_bg: bool = True):
     """Burn a scale bar and/or an identity label into an ``(H, W, 3)`` uint8 RGB.
 
-    Sizes are proportional to image height — bar thickness and margins scale with
-    ``H``; the label font scales relative to a nominal 240 px cell — so the mark
-    reads the same at the live thumbnail size and at full export resolution. The
-    scale bar is ``bar_px`` long (already computed from µm/px in source pixels).
-    Returns a mutated copy, or the input unchanged when there's nothing to draw."""
+    Sizes are proportional to image height — the bar length is ``bar_px`` source
+    pixels; margins scale with ``H``; the label font and the bar *thickness* scale
+    relative to a nominal 240 px cell — so a mark reads the same at the live
+    thumbnail size and at full export resolution. ``bar_thickness_px`` is that
+    nominal thickness (≤ 0 → a sensible auto default); a too-thin bar can vanish
+    when the cell is downscaled, so it's user-tunable. Returns a mutated copy, or
+    the input unchanged when there's nothing to draw."""
     import numpy as _np
 
     if rgb is None or (not bar_px and not label_text):
@@ -995,11 +998,16 @@ def draw_cell_chrome(rgb, *, bar_px: int = 0, bar_corner: str = "br",
     if H < 4 or W < 4:
         return rgb
 
-    # Scale bar — a filled rectangle with a 1 px contrasting halo for legibility.
+    # Scale bar — a filled rectangle with a contrasting halo for legibility.
     if bar_px and bar_px > 0:
         blen = int(min(bar_px, W - 2))
         if blen >= 1:
-            thick = max(2, H // 100)
+            # Thickness scales with the cell (like the label font) so it's stable
+            # across live/export; user value is px-at-240, ≤0 falls back to auto.
+            if bar_thickness_px and bar_thickness_px > 0:
+                thick = max(1, int(round(float(bar_thickness_px) * H / 240.0)))
+            else:
+                thick = max(2, H // 100)
             margin = max(2, H // 25)
             corner = str(bar_corner or "br").strip().lower()
             if corner in ("tl", "bl"):
@@ -1134,6 +1142,7 @@ def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None):
         bar_px=bar,
         bar_corner=getattr(st, "scale_bar_img_corner", "br"),
         bar_color=getattr(st, "scale_bar_color", "white"),
+        bar_thickness_px=int(getattr(st, "scale_bar_thickness_px", 4)),
         label_text=label_text,
         label_corner=getattr(st, "label_img_corner", "tl"),
         label_font_px=int(getattr(st, "label_font_px", 12)),

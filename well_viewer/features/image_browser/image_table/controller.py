@@ -333,6 +333,58 @@ def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
 
 
 
+def _cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
+              img_x: int, img_y: int):
+    """MFI of the segmented cell under full-image ``(img_x, img_y)``, or None.
+
+    Decodes the tile's mask and builds its ``{base_chan}_mean_intensity`` nid→MFI
+    map lazily on first hover (cached on ``label``), so the readout matches the
+    Segmentation tab's cell-under-cursor MFI. Returns None for background,
+    overlay/ratio/nuc-seg tiles (no intensity column), or any decode/lookup
+    failure. Module-level (not nested in ``_install_cell_events``) to keep that
+    builder under the cyclomatic-complexity ratchet."""
+    if not hasattr(label, "_mfi_by_nid"):
+        label._mask_arr = None  # type: ignore[attr-defined]
+        label._mfi_by_nid = {}  # type: ignore[attr-defined]
+        try:
+            import numpy as _np
+            # One deferred feature import (collect owns both helpers) so this
+            # stays off the deferred-import budget's growth.
+            from well_viewer.features.image_browser.review_image.collect import (
+                review_build_mfi_map,
+                review_norm_fov,
+            )
+            from well_viewer.core.ui_helpers import norm_timepoint
+            cache = ctx.state.image_table.image_cache
+            if not isinstance(cache, dict):
+                cache = {}
+            mask = _load_mask_array(ctx, cache, well, tp, fov)
+            if mask is not None:
+                label._mask_arr = _np.asarray(mask)  # type: ignore[attr-defined]
+                # The CSV row keys are normalised; the cell carries the raw
+                # image-filename tokens, so normalise before the lookup (as the
+                # binary-mask render does). Gate on the cell's OWN base channel,
+                # stripping any " (binary)" variant suffix.
+                label._mfi_by_nid = review_build_mfi_map(  # type: ignore[attr-defined]
+                    ctx, label._mask_arr, well,
+                    review_norm_fov(fov), norm_timepoint(ctx, tp),
+                    channel=_binary_base(chan),
+                ) or {}
+        except Exception:
+            swallowed()  # decode/lookup best-effort; tooltip drops MFI on failure
+    mask = getattr(label, "_mask_arr", None)
+    if mask is None:
+        return None
+    try:
+        nid = int(mask[int(img_y), int(img_x)])
+    except Exception:
+        swallowed()  # out-of-bounds / non-numeric mask cell → no MFI
+        return None
+    if nid <= 0:
+        return None
+    return (getattr(label, "_mfi_by_nid", None) or {}).get(nid)
+
+
 def _install_cell_events(
     ctx, label, crop_tool, well: str, chan: str, tp: str, fov: str,
 ) -> None:
@@ -395,54 +447,6 @@ def _install_cell_events(
         img_y = max(0, min(full_h - 1, img_y))
         return (img_x, img_y)
 
-    def _cell_mfi(_lbl, img_x: int, img_y: int):
-        """MFI of the segmented cell under full-image ``(img_x, img_y)``, or None.
-
-        Decodes the tile's mask and builds its ``{base_chan}_mean_intensity``
-        nid→MFI map lazily on first hover (cached on the label), so the readout
-        matches the Segmentation tab's cell-under-cursor MFI. Returns None for
-        background, overlay/ratio/nuc-seg tiles (no intensity column), or any
-        decode/lookup failure."""
-        if not hasattr(_lbl, "_mfi_by_nid"):
-            _lbl._mask_arr = None  # type: ignore[attr-defined]
-            _lbl._mfi_by_nid = {}  # type: ignore[attr-defined]
-            try:
-                import numpy as _np
-                from well_viewer.features.image_browser.review_image.collect import (
-                    review_build_mfi_map,
-                )
-                from well_viewer.features.image_browser.review_image.controller import (
-                    review_norm_fov,
-                )
-                from well_viewer.core.ui_helpers import norm_timepoint
-                cache = ctx.state.image_table.image_cache
-                if not isinstance(cache, dict):
-                    cache = {}
-                mask = _load_mask_array(ctx, cache, well, tp, fov)
-                if mask is not None:
-                    _lbl._mask_arr = _np.asarray(mask)  # type: ignore[attr-defined]
-                    # The CSV row keys are normalised; the cell carries the raw
-                    # image-filename tokens, so normalise before the lookup (as
-                    # the binary-mask render does). Gate on the cell's OWN base
-                    # channel, stripping any " (binary)" variant suffix.
-                    _lbl._mfi_by_nid = review_build_mfi_map(  # type: ignore[attr-defined]
-                        ctx, _lbl._mask_arr, well,
-                        review_norm_fov(fov), norm_timepoint(ctx, tp),
-                        channel=_binary_base(chan),
-                    ) or {}
-            except Exception:
-                pass
-        mask = getattr(_lbl, "_mask_arr", None)
-        if mask is None:
-            return None
-        try:
-            nid = int(mask[int(img_y), int(img_x)])
-        except Exception:
-            return None
-        if nid <= 0:
-            return None
-        return (getattr(_lbl, "_mfi_by_nid", None) or {}).get(nid)
-
     def _hover_text(_lbl, lx: int, ly: int) -> str:
         """Pixel readout for label-local ``(lx, ly)``; '' when the cursor is off
         the rendered image or the label carries no array. Includes the combo
@@ -461,7 +465,7 @@ def _install_cell_events(
         prefix = f"{well_display_label(ctx, well)} {chan.upper()} T:{tp}"
         if fov:
             prefix += f" FOV:{fov}"
-        mfi = _cell_mfi(_lbl, x, y)
+        mfi = _cell_mfi(ctx, _lbl, chan, well, tp, fov, x, y)
         suffix = f"  MFI:{mfi:.1f}" if mfi is not None else ""
         return f"{prefix}  ({x}, {y}) = {intensity}{suffix}"
 

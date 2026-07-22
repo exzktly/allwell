@@ -1,10 +1,10 @@
 """A composite parent's sub-tab-owned state slices must drop with the sub-tab.
 
 Image Browser survives as a top-level feature in the thin profile but its sub-tabs
-are narrowed to ``["Segmentation"]``. Its ``image_table`` / ``playground`` state
-slices live on the *parent* descriptor (not on the sub-leaf descriptors, which carry
-no state), and their state modules are physically stripped from a subset bundle.
-Without sub-tab gating, ``attach_feature_state`` imports those stripped modules
+are narrowed to ``["Segmentation", "Image Table"]``. Its ``playground`` state slice
+lives on the *parent* descriptor (not on the sub-leaf descriptors, which carry
+no state), and its state module is physically stripped from a subset bundle.
+Without sub-tab gating, ``attach_feature_state`` imports that stripped module
 eagerly in ``WellViewerApp.__init__`` and a frozen thin build silently exits.
 
 These lock in the fix: the tagged slices are pruned when the profile drops their
@@ -33,8 +33,10 @@ def _image_browser_state_attrs(profile):
 
 
 def test_thin_prunes_subtab_owned_slices():
+    # thin admits Segmentation + Image Table, so their slices stay; Playground
+    # (and Cell Browser) are pruned, so ``playground`` drops.
     assert _image_browser_state_attrs(load_profile("thin")) == {
-        "review_image", "preview",
+        "review_image", "preview", "image_table",
     }
 
 
@@ -47,9 +49,9 @@ def test_full_keeps_all_slices():
 def test_attach_skips_pruned_slices_under_thin():
     state = AppState()
     attach_feature_state(state, build_feature_registry(load_profile("thin")))
-    # Segmentation's slice survives; the dropped sub-tabs' slices do not.
+    # Segmentation + Image Table slices survive; the dropped Playground slice does not.
     assert state.feature_slice("review_image") is not None
-    assert state.feature_slice("image_table") is None
+    assert state.feature_slice("image_table") is not None
     assert state.feature_slice("playground") is None
 
 

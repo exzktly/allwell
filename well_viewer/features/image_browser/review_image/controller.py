@@ -483,6 +483,10 @@ def _show_image_pixel_tooltip(ctx, event, channel_label: str, label) -> None:
             nid = int(_np.asarray(mask_arr)[int(img_y), int(img_x)])
             if nid > 0:
                 extra = f"  cell:{nid}"
+                mfi_by_nid = ctx.state.review_image.mfi_by_nid or {}
+                mfi = mfi_by_nid.get(nid)
+                if mfi is not None:
+                    extra += f"  MFI:{mfi:.1f}"
         except Exception:
             swallowed()  # was: pass (silent except)
     global_pos = lbl.mapToGlobal(QPoint(ex, ey))

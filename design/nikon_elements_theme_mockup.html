@@ -22,7 +22,7 @@
   --plot-bg:#131A24; --plot-grid:#1F2733; --plot-spine:#3A4658;
   --radius-sm:5px; --radius-md:8px; --radius-lg:12px;
   --btn-border:var(--border-subtle); --btn-border-hover:var(--border);
-  --panel-hdr-bg:transparent; --panel-hdr-border:transparent;
+  --panel-hdr-bg:transparent; --panel-hdr-border:transparent; --input-bg:var(--panel-elevated);
   --btn-pad-v:6px; --btn-pad-h:10px; --panel-pad:14px; --gap:8px; --nav-pad-v:8px; --content-pad:16px;
   --btn-weight:500; --tab-underline:2px;
 }
@@ -41,7 +41,25 @@
   --plot-bg:#0A0A0A; --plot-grid:#1D1D1F; --plot-spine:#55585E;
   --radius-sm:2px; --radius-md:3px; --radius-lg:4px;
   --btn-border:#565A62; --btn-border-hover:#727782;
-  --panel-hdr-bg:#34363C; --panel-hdr-border:#26282C;
+  --panel-hdr-bg:#34363C; --panel-hdr-border:#26282C; --input-bg:#2C2E33;
+  --btn-pad-v:3px; --btn-pad-h:8px; --panel-pad:9px; --gap:5px; --nav-pad-v:5px; --content-pad:11px;
+  --btn-weight:600; --tab-underline:2px;
+}
+/* Nikon NIS-Elements — classic LIGHT gray variant, grounded in IMG_0217:
+   medium silver-gray chrome, WHITE input fields with dark text, gold/amber
+   active accent, flat hairline buttons, black image canvas, dark text. */
+:root[data-theme="nikon-elements-light"] {
+  --titlebar:#CBCBC6; --surface:#BEBEB9; --rail:#C6C6C1; --panel:#CFCFCA;
+  --panel-elevated:#DCDCD7; --hover:#E9E9E4; --active:#B4B4AF;
+  --border-subtle:#B0B0AB; --border:#9A9A95; --border-strong:#7E7E79;
+  --text-primary:#1B1B1A; --text-secondary:#3E3E3C; --text-muted:#6E6E6A; --text-faint:#8C8C88;
+  --accent:#E19A0F; --accent-hover:#F2AE1C; --accent-pressed:#B87C08; --accent-dim:#EEDCA2; --accent-fg:#1A1206;
+  --brand:#FFE100; --brand-fg:#1A1206;
+  --success:#2E8B22; --warn:#C8791A; --danger:#C0342C;
+  --plot-bg:#0A0A0A; --plot-grid:#1D1D1F; --plot-spine:#55585E;
+  --radius-sm:2px; --radius-md:3px; --radius-lg:4px;
+  --btn-border:#9A9A95; --btn-border-hover:#7E7E79;
+  --panel-hdr-bg:#C0C0BB; --panel-hdr-border:#A6A6A1; --input-bg:#FFFFFF;
   --btn-pad-v:3px; --btn-pad-h:8px; --panel-pad:9px; --gap:5px; --nav-pad-v:5px; --content-pad:11px;
   --btn-weight:600; --tab-underline:2px;
 }
@@ -68,10 +86,9 @@ body {
 }
 .app-title { font-size:17px; font-weight:600; letter-spacing:.2px; }
 .version-pill {
-  font-family:"JetBrains Mono","Consolas",monospace; font-size:11px;
-  color:var(--brand); padding:2px 7px; border-radius:var(--radius-sm);
-  border:1px solid color-mix(in srgb, var(--brand) 40%, transparent);
-  background:color-mix(in srgb, var(--brand) 10%, transparent);
+  font-family:"JetBrains Mono","Consolas",monospace; font-size:11px; font-weight:600;
+  color:var(--brand-fg); padding:2px 7px; border-radius:var(--radius-sm); border:1px solid transparent;
+  background:var(--brand);
 }
 .spacer { flex:1 1 auto; }
 .icon-btn {
@@ -165,11 +182,11 @@ body {
 .chips { display:flex; gap:8px; flex-wrap:wrap; }
 .chip.sel { background:var(--accent-dim); border-color:var(--accent); }
 
-.field { display:flex; align-items:center; gap:8px; background:var(--panel-elevated); border:1px solid var(--border);
+.field { display:flex; align-items:center; gap:8px; background:var(--input-bg); border:1px solid var(--border);
   border-radius:var(--radius-sm); padding:6px 10px; margin-bottom:8px; }
 .field .grip { color:var(--text-muted); }
 .field .name { flex:1; font-size:12px; font-weight:500; }
-.input { background:var(--panel-elevated); border:1px solid var(--border); border-radius:var(--radius-sm);
+.input { background:var(--input-bg); border:1px solid var(--border); border-radius:var(--radius-sm);
   padding:5px 8px; font-size:12px; color:var(--text-primary); min-width:64px; }
 .input.focus { border-color:var(--accent); }
 .toggles { display:inline-flex; background:var(--panel-elevated); border:1px solid var(--border-subtle);

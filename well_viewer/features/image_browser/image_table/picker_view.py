@@ -49,11 +49,11 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
         ctx.state.image_table.active_wells = new
         image_table_refresh_picker(ctx)
         # Re-run the layout so a Wells axis tracks the plate — otherwise the grid
-        # stays frozen at the selection it had when the shelf was last edited.
-        from well_viewer.features.image_browser.image_table.builder_view import (
-            schedule_selection_rebuild,
-        )
-        schedule_selection_rebuild(ctx)
+        # stays frozen at the selection it had when the shelf was last edited. The
+        # shelf registers this callback on build (no cross-module import here).
+        cb = getattr(ctx.runtime.image_table, "selection_rebuild_cb", None)
+        if callable(cb):
+            cb()
     plate.selectionChanged.connect(_on_plate_changed)
 
     btn_row = QWidget(parent)

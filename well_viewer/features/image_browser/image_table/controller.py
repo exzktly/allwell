@@ -128,12 +128,12 @@ def image_table_clear_active(ctx) -> None:
 def _rebuild_layout_for_well_change(ctx) -> None:
     """Re-run the layout (debounced) so a Wells axis follows a well-set change.
 
-    Lazy import keeps ``controller`` free of a module-scope ``builder_view``
-    dependency (the shelf imports the controller's re-exports)."""
-    from well_viewer.features.image_browser.image_table.builder_view import (
-        schedule_selection_rebuild,
-    )
-    schedule_selection_rebuild(ctx)
+    Invokes the callback the shelf registers on ``ctx.runtime.image_table`` at
+    build time, so the controller needs no ``builder_view`` import (matching the
+    row/col_dims_refresh hooks). No-op before the shelf is built."""
+    cb = getattr(ctx.runtime.image_table, "selection_rebuild_cb", None)
+    if callable(cb):
+        cb()
 
 
 # ── Pipeline-info-driven dropdown options ────────────────────────────────────

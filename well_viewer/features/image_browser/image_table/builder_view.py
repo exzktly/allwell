@@ -576,6 +576,10 @@ def _accept_tray(tok: str) -> bool:
 def build_shelf(ctx, parent: QWidget) -> None:
     """Build the builder shelf into *parent* (called from build_image_table_tab)."""
     reg = ctx.widgets
+    # Expose the selection-rebuild trigger on the runtime so the sidebar plate /
+    # Select All / Clear can re-run the layout on a well-set change without
+    # importing this view module (matching the row/col_dims_refresh callback hooks).
+    _rt(ctx).selection_rebuild_cb = lambda: schedule_selection_rebuild(ctx)
     parent.setObjectName("ITBShelf")
     parent.setStyleSheet(_QSS)
     layout = parent.layout()

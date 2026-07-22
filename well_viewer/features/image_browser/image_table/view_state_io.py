@@ -48,7 +48,8 @@ def _restore_spacing(ctx, state: dict) -> None:
 
 
 _DISPLAY_DEFAULTS = {
-    "pixel_size_um": 0.0, "scale_bar_um": 0.0, "scale_bar_cells": "br",
+    "scale_bar_show": False,
+    "pixel_size_um": 0.65, "scale_bar_um": 50.0, "scale_bar_cells": "br",
     "scale_bar_img_corner": "br", "scale_bar_color": "white",
     "label_mode": "none", "label_cells": "all", "label_img_corner": "tl",
     "label_font_px": 12, "label_color": "white", "label_bg": True,

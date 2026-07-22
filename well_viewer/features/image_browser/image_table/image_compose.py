@@ -1094,9 +1094,10 @@ def resolve_chrome_plan(ctx, cells):
         if cell.get("well") and cell.get("chan") and cell.get("tp")
     }
     bar_px = 0
+    show = bool(getattr(st, "scale_bar_show", False))
     ps = float(getattr(st, "pixel_size_um", 0.0) or 0.0)
     sb = float(getattr(st, "scale_bar_um", 0.0) or 0.0)
-    if ps > 0 and sb > 0:
+    if show and ps > 0 and sb > 0:
         bar_px = max(1, int(round(sb / ps)))
     bar_targets = (_chrome_target_cells(rows, cols, getattr(st, "scale_bar_cells", "br"),
                                         occupied) if bar_px else set())

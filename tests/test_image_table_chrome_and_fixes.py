@@ -120,6 +120,7 @@ def test_chrome_target_cells_all_vs_single_corner():
 def test_resolve_chrome_plan_bar_px_and_targets():
     app = _fake_app(wells=["A01"], channels=["gfp"])
     st = app._app_state.image_table
+    st.scale_bar_show = True
     st.pixel_size_um = 0.5
     st.scale_bar_um = 50.0
     st.scale_bar_cells = "br"
@@ -140,11 +141,42 @@ def test_resolve_chrome_plan_bar_px_and_targets():
 def test_resolve_chrome_plan_off_when_pixel_size_zero():
     app = _fake_app(wells=["A01"], channels=["gfp"])
     st = app._app_state.image_table
+    st.scale_bar_show = True                          # toggled on, but…
     st.pixel_size_um = 0.0                            # unknown → bar disabled
     st.scale_bar_um = 50.0
     cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
     bar_px, bar_targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
     assert bar_px == 0 and bar_targets == set()
+
+
+def test_scale_bar_show_toggle_gates_the_bar():
+    """The 'Show scale bar' toggle is the master switch: with valid calibration,
+    the bar is off when the toggle is off and on when it's on."""
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    st = app._app_state.image_table
+    st.pixel_size_um = 0.5
+    st.scale_bar_um = 50.0
+    cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
+
+    st.scale_bar_show = False
+    bar_px, targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
+    assert bar_px == 0 and targets == set()
+
+    st.scale_bar_show = True
+    bar_px, targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
+    assert bar_px == 100 and targets == {(0, 0)}
+
+
+def test_default_state_shows_a_bar_once_toggled_on():
+    """Fresh state ships sensible pixel-size + length defaults, so enabling the
+    toggle alone produces a visible bar (the 'set it but nothing appears' fix)."""
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    st = app._app_state.image_table            # untouched: defaults only
+    assert st.pixel_size_um > 0 and st.scale_bar_um > 0
+    cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] == 0   # off by default
+    st.scale_bar_show = True
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar on toggle
 
 
 # ── Behavior: global-per-channel Auto LUT ───────────────────────────────────
@@ -272,6 +304,7 @@ def test_generate_with_scale_bar_and_auto_lut_on_mini_dataset(qtbot, mini_datase
     assert ctx.runtime.image_table.cells, "preset did not build a grid"
 
     st = ctx.state.image_table
+    st.scale_bar_show = True
     st.pixel_size_um = 0.5
     st.scale_bar_um = 20.0
     st.scale_bar_cells = "all"

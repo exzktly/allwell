@@ -61,6 +61,10 @@ class ReviewImageState:
     include_cache: dict = field(default_factory=dict)
     threshold_map_cache: dict = field(default_factory=dict)
     override_version: int = 0
+    # {nucleus_id: mean fluorescence intensity} for the currently displayed
+    # channel / FOV / timepoint — rebuilt each full refresh so the hover tooltip
+    # can report the cell-under-cursor's MFI without re-slicing the CSV per move.
+    mfi_by_nid: dict | None = None
 
     # render options
     # Which image stage the canvas shows: "corrected" (final = flat-field +

@@ -20,6 +20,7 @@ from well_viewer.data.data_loading import extract_well_token as _extract_well_to
 from well_viewer.features.image_browser.review_image.collect import (
     flatfield_field_for,
     review_build_include_map,
+    review_build_mfi_map,
     review_build_threshold_map,
     review_collect_timepoints,
     review_norm_fov,
@@ -385,6 +386,11 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
             state.review_image.include_cache.clear()
         state.review_image.include_cache[ic_key] = include_by_nid
 
+    # Per-cell MFI for the hover tooltip — the displayed channel's
+    # {chan}_mean_intensity keyed by nucleus id. Rebuilt each refresh so it
+    # tracks the active channel / FOV / timepoint; empty for non-fluor overlays.
+    state.review_image.mfi_by_nid = review_build_mfi_map(ctx, center, well, fov, tp)
+
     above_by_nid: Optional[Dict[int, bool]] = None
     if bool(state.review_image.binary_mask):
         fluor_gates = get_all_fluor_gates(ctx)
@@ -666,6 +672,16 @@ def render_review_image_display(ctx, *, pan_only: bool = False) -> None:
     cy = max(0, (max(nh, ch) - ch) // 2) - int(pan_y)
     hbar.setValue(max(hbar.minimum(), min(hbar.maximum(), cx)))
     vbar.setValue(max(vbar.minimum(), min(vbar.maximum(), cy)))
+    # Force a synchronous repaint when the pixmap actually changed. setPixmap
+    # only schedules an async update(); toggles like Binary/Outline live inside
+    # the "View ▾" QMenu popover, whose nested event loop swallows that deferred
+    # paint until the menu closes (previously the change showed only after a
+    # tab switch forced a redraw). Gated on ``rebuild`` so pan-only reuse — which
+    # already repaints via the scrollbar move — stays free of the extra paint.
+    if rebuild:
+        vp = canvas.viewport()
+        if vp is not None:
+            vp.repaint()
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] render_review_image_display done img=%sx%s shown=%sx%s scale=%.4f rebuild=%s",

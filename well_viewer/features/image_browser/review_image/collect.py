@@ -268,6 +268,48 @@ def review_build_include_map(
     return include_by_nid
 
 
+def review_build_mfi_map(
+    ctx, mask_arr, well: str, fov: str, tp: str, channel=None,
+) -> Dict[int, float]:
+    """Build ``{nid: mean fluorescence intensity}`` for cells in the displayed
+    FOV/timepoint.
+
+    MFI is the per-cell ``{channel}_mean_intensity`` CSV column for the displayed
+    image channel (``active_image_channel`` unless ``channel`` overrides it).
+    Returns an empty map when the channel carries no intensity column (e.g. the
+    nuc+seg overlay or a ratio pseudo-channel), so callers can silently skip the
+    readout. Only nuclei actually present in ``mask_arr`` are reported.
+    """
+    chan = str(
+        channel if channel is not None
+        else ctx.state.channel.active_image_channel or ""
+    ).strip().lower()
+    if not chan:
+        return {}
+    col = f"{chan}_mean_intensity"
+    df = get_rows(ctx, well)
+    if df is None or df.empty or col not in df.columns:
+        return {}
+    keys = review_row_keys_series(ctx, df)
+    if keys is None:
+        return {}
+    present = {int(nid) for nid in _np.unique(_np.asarray(mask_arr)) if int(nid) > 0}
+    fov_eq = keys.map(lambda k: k[0] == fov and k[1] == tp and k[2] != "")
+    sub = df.loc[fov_eq.fillna(False).to_numpy()]
+    if sub.empty:
+        return {}
+    sub_keys = keys.loc[sub.index]
+    nids = sub_keys.map(lambda k: k[2]).map(_safe_int_or_none)
+    vals = pd.to_numeric(sub[col], errors="coerce").to_numpy()
+    out: Dict[int, float] = {}
+    for nid, v in zip(nids, vals):
+        if nid is None or (present and nid not in present):
+            continue
+        if _np.isfinite(v):
+            out[int(nid)] = float(v)
+    return out
+
+
 def _binary_gate_columns(ctx, channel=None):
     """Return ``(val_col, threshold)`` for the Segmentation binary mask.
 

@@ -1010,7 +1010,9 @@ class AllWellApp(QMainWindow):
     def _toggle_log_drawer(self) -> None:
         if self._log_drawer is None:
             from widgets.drawer import Drawer
-            drawer = Drawer(self, width_hint=460)
+            # A wide, horizontal log panel that rises from the bottom edge (log
+            # lines are long — a narrow side panel wrapped/clipped them).
+            drawer = Drawer(self, edge="bottom", height_fraction=0.4)
             body = QWidget(drawer)
             bl = QVBoxLayout(body)
             bl.setContentsMargins(0, 0, 0, 0)

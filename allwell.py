@@ -405,6 +405,9 @@ class AllWellApp(QMainWindow):
         rl.addWidget(statusbar)
         self._log_drawer = None  # lazy
         self._log_ring: list[str] = []
+        # Capture logs from startup (not lazily on first drawer-open) so the
+        # drawer shows history the moment it opens — and onto the right logger.
+        self._attach_log_ring_buffer()
 
     def _install_shortcuts(self) -> None:
         """Global ⌘/Ctrl shortcuts the statusbar + help drawer advertise.
@@ -1039,35 +1042,63 @@ class AllWellApp(QMainWindow):
         else:
             self._log_drawer.open()
 
+    def _append_log_line(self, text: str) -> None:
+        """Append one formatted record to the open drawer view (main-thread only)."""
+        try:
+            view = getattr(self, "_log_view", None)
+            if view is not None:
+                view.append(text)
+        except Exception:
+            swallowed()
+
     def _attach_log_ring_buffer(self) -> None:
         """Install a logging.Handler that keeps the last N records in
-        ``self._log_ring`` so the Log drawer has something to show without
-        having to subscribe live."""
+        ``self._log_ring`` (so the Log drawer has history to show) and appends
+        new records live while the drawer is open.
+
+        The whole app logs under the ``"well_viewer"`` logger, which sets
+        ``propagate = False`` (see ``core/status_view.build_bottom``) — so a
+        handler on the *root* logger, as this used to be, never receives those
+        records and the drawer stays empty. Attach directly to ``"well_viewer"``
+        (plus root, for the few ``__name__`` loggers under ``services/`` that
+        still propagate). Called once at startup so records emitted before the
+        drawer is first opened are captured. Idempotent."""
+        if getattr(self, "_log_ring_attached", False):
+            return
         import logging as _logging
+        from PySide6.QtCore import QTimer as _QTimer
 
         ring = self._log_ring
+        app = self
 
         class _RingHandler(_logging.Handler):
             def emit(self, record):  # noqa: N802
                 try:
-                    ring.append(self.format(record))
+                    line = self.format(record)
+                    ring.append(line)
                     if len(ring) > 1000:
                         del ring[:500]
+                    drawer = getattr(app, "_log_drawer", None)
+                    if drawer is not None and drawer.isVisible():
+                        # Marshal to the Qt main thread (records may come from
+                        # worker threads).
+                        _QTimer.singleShot(0, lambda t=line: app._append_log_line(t))
                 except Exception:
                     swallowed()  # was: pass (silent except)
 
         h = _RingHandler()
         h.setFormatter(_logging.Formatter("%(asctime)s  %(levelname)-7s  %(name)s  %(message)s",
                                           datefmt="%H:%M:%S"))
-        # Default root level is WARNING — that hides every ``logger.info``
-        # call (progress streams, status updates, etc) from the drawer.
-        # Lower both the handler and the root level to INFO so the user
-        # actually sees what the workers are doing.
+        # Default level is WARNING — that hides every ``logger.info`` call
+        # (progress streams, status updates, …). Lower the handler and each
+        # target logger to INFO so the user sees what the app is doing.
         h.setLevel(_logging.INFO)
-        root = _logging.getLogger()
-        if root.level > _logging.INFO or root.level == _logging.NOTSET:
-            root.setLevel(_logging.INFO)
-        root.addHandler(h)
+        for _name in ("well_viewer", ""):
+            lg = _logging.getLogger(_name)
+            if lg.level == _logging.NOTSET or lg.level > _logging.INFO:
+                lg.setLevel(_logging.INFO)
+            lg.addHandler(h)
+        self._log_ring_attached = True
 
     def _open_dataset(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Open results directory")

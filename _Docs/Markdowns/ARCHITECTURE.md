@@ -1499,10 +1499,13 @@ that opens a small demo window so you can iterate visually with
 The app has two complementary theme surfaces:
 
 1. **`theme.py`** (repo root) — Python-side design tokens for the v2
-   redesign. `Colors`, `Typography`, `Spacing`, `Radii`, plus a `qss()`
-   builder that produces the full application stylesheet. The `widgets/`
-   package and most of the app shell read from `theme.Colors.*`; the v2 dark
-   palette is hardcoded here. This is the single source of the app chrome QSS.
+   redesign. `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control
+   padding — themeable for density), plus a `qss()` builder that produces the
+   full application stylesheet. The `widgets/` package and most of the app shell
+   read from `theme.Colors.*`; the default (`allwell-dark`) palette is the class
+   values here. This is the single source of the app chrome QSS. `theme.py`
+   *also* holds the **theme registry** (`THEMES` / `apply_theme` /
+   `select_theme_from_env`) — see "Selecting a theme" below.
 2. **`ui/theme/`** — a small dark-palette colour-token module read by
    matplotlib-side plot styling, the Analyze tab, and a few batch-export
    panels. `ui/theme/styles.py` defines `_DARK_THEME` (named colours) +
@@ -1514,14 +1517,50 @@ The app has two complementary theme surfaces:
 The earlier multi-theme machinery in `ui/theme/` (a `set_theme` switcher, the
 `build_stylesheet` Template driver, `ThemeManager`, the `FM_*` font tuples, and
 the `dark/light/amber/beige.qss` files) was unused dead code — the app only
-ever rendered the dark palette via `theme.qss()` — and has been removed.
+ever rendered the dark palette via `theme.qss()` — and was removed. The current
+theme registry (below) is the sanctioned replacement and lives in `theme.py`,
+not `ui/theme/`; there is **no `ui/theme/theme_manager.py`**.
+
+### Selecting a theme
+
+A **theme** is a bundle of token overrides applied onto the token classes
+(`Colors` / `Metrics` / `Radii`) *before the UI is built*. Because `qss()` reads
+those classes at call time and every `widgets/*` builder reads `theme.Colors.*`
+at construction, applying a theme up-front re-skins the whole app with **no
+per-widget rewiring**.
+
+- `theme.THEMES` maps a name → sparse override bundle. Built-ins:
+  `allwell-dark` (the default; the class values are its palette) and
+  `nikon-elements` (neutral charcoal chrome, NIS-azure accent, flat
+  hairline-bordered buttons via `control_border` + small radii + tighter
+  `Metrics` padding, near-black plot canvas; Nikon-yellow reserved for the
+  version pill via `Colors.brand` / `brand_fg`).
+- `theme.apply_theme(name)` resets every themeable attribute to its captured
+  default, applies the bundle, and fires post-apply hooks
+  (`register_theme_hook`). `select_theme_from_env()` reads the **`ALLWELL_THEME`**
+  env var (falling back to `allwell-dark` on unset/unknown). `allwell.main()`
+  calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
+  var. `tests/visual/render_views.py` honours it too, so
+  `ALLWELL_THEME=nikon-elements … render_views.py` audits any theme.
+- **Startup-only, by design.** There is no in-app live switch — a runtime swap
+  would need every cached inline QSS rebuilt on `QEvent.StyleChange` (see the
+  per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is
+  a dev-facing env var / flag.
+- `WELL_COLORS_TUPLE` (categorical data identity) and `CPub` (white-bg
+  publication export) are deliberately **theme-independent**.
+- `ui/theme/styles.py` registers `refresh_from_theme` as a theme hook, so its
+  `get_color()` palette (Analyze tab, batch-export, plot styling) re-derives from
+  the freshly-applied `Colors`. (Names imported elsewhere as
+  `from ui.theme.styles import X` are value copies frozen at import time — chrome
+  that must follow a theme switch reads `get_color()` live.)
 
 When you add a colour or size:
 
 - For widgets in `widgets/`, the app shell, or the v2-styled chrome:
-  add to `theme.Colors` / `theme.Spacing` / etc.
+  add to `theme.Colors` / `theme.Spacing` / `theme.Metrics` / etc. To let a
+  theme override it, add the attribute to the relevant bundle in `THEMES`.
 - For plot styling, the Analyze tab, or anything reading via
-  `get_color()`: add to `ui/theme/styles._DARK_THEME`.
+  `get_color()`: add to `ui/theme/styles._build_dark_theme()`.
 - **Do not** hardcode hex / px values inline.
 
 The publication-export plot surface uses `theme.CPub` and feeds the
@@ -1534,16 +1573,18 @@ rcParams seen by later figures.
 own stylesheet at construction (`self.setStyleSheet(self._build_qss())`
 or `self.setStyleSheet(self._qss())`) — that's load-bearing for
 per-widget object-name scoping, but it freezes the colour tokens at
-construction time. Today the global QSS is static and this is fine; if
-a runtime theme switcher ever ships (the `ui/theme/theme_manager.py`
-scaffold is there for exactly that), widgets need to rebuild their
-inline QSS when Qt fires `QEvent.StyleChange`.
+construction time. This is why theme selection is **startup-only**: the theme
+is applied before these widgets build, so they read the themed `theme.Colors.*`
+at construction. A *runtime* switch would additionally need every such widget to
+rebuild its inline QSS when Qt fires `QEvent.StyleChange`.
 
-`widgets/_support.install_qss_refresh(widget, qss_factory)` is the
-opt-in helper: it installs a single event filter that catches
-`StyleChange` and calls `widget.setStyleSheet(qss_factory())`. Idempotent.
-PlotCard uses it as the canonical example; other widgets should adopt it
-when their inline QSS depends on `theme.Colors` values.
+`widgets/_support.install_qss_refresh(widget, qss_factory)` is the opt-in helper
+for that future: it installs a single event filter that catches `StyleChange`
+and calls `widget.setStyleSheet(qss_factory())` (idempotent). It is currently
+**defined but unused** — PlotCard deliberately reverted it (`plot_card.py`) after
+the event filter's own `setStyleSheet` re-fired `StyleChange` recursively and
+caused a ~20 s load stall. Any future live-switch work must adopt it (with the
+equality guard) across the ~20 widgets that freeze inline QSS.
 
 ---
 

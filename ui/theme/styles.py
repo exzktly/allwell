@@ -21,7 +21,11 @@ from typing import Dict
 # Publication-mode plot canvas, which is white-on-dark on purpose.
 from theme import Colors as _C  # noqa: E402
 
-_DARK_THEME: Dict[str, str] = {
+def _build_dark_theme() -> Dict[str, str]:
+    # Rebuilt on demand (not captured once) so a theme switch — which mutates
+    # ``theme.Colors`` in place — is reflected by ``get_color()``. Registered as
+    # a ``theme`` hook via :func:`refresh_from_theme` below.
+    return {
     # Surfaces — v2 design tokens
     "BG_APP": _C.surface,             # was "#0F172A"
     "BG_SIDE": _C.rail,               # was "#1E293B"
@@ -62,7 +66,10 @@ _DARK_THEME: Dict[str, str] = {
     "button_bg": _C.panel_elevated, "button_text": _C.text_primary,
     "button_text_disabled": _C.text_muted, "BTN_TEXT_BLACK": _C.ink_dark,
     "INSET_SHADOW": _C.surface, "INSET_HIGHLIGHT": _C.border,
-}
+    }
+
+
+_DARK_THEME: Dict[str, str] = _build_dark_theme()
 
 
 # Well palette — derived from the canonical tuple in the repo-root ``theme``
@@ -99,3 +106,24 @@ for _name, _value in _DARK_THEME.items():
     globals()[_name] = _value
 for _name, _value in _WELL_COLORS.items():
     globals()[_name] = _value
+
+
+def refresh_from_theme(_name: "str | None" = None) -> None:
+    """Re-derive the palette from the freshly-applied ``theme.Colors``.
+
+    Registered as a ``theme.register_theme_hook`` so that after
+    ``theme.apply_theme(...)`` runs the live ``get_color()`` accessor and the
+    module-level colour constants track the active theme. Names pulled elsewhere
+    via ``from ui.theme.styles import X`` are value copies frozen at their import
+    time and are *not* updated — chrome that must follow a theme switch reads
+    ``get_color()`` live.
+    """
+    _DARK_THEME.clear()
+    _DARK_THEME.update(_build_dark_theme())
+    for _n, _v in _DARK_THEME.items():
+        globals()[_n] = _v
+
+
+# Keep get_color()/constants in sync when the app applies a non-default theme.
+import theme as _theme  # noqa: E402
+_theme.register_theme_hook(refresh_from_theme)

@@ -44,6 +44,7 @@ _manifest: list[tuple[str, str]] = []
 def setup_app() -> QApplication:
     app = QApplication.instance() or QApplication(sys.argv)
     import theme as th
+    import ui.theme.styles as _styles  # noqa: F401  (registers a theme hook)
     from well_viewer.core.app_fonts import register_qt_fonts
 
     # Mirror allwell.main(): prefer the bundled Inter / JetBrains Mono so the
@@ -55,6 +56,10 @@ def setup_app() -> QApplication:
     th.Typography.family_mono = mono_family or QFontDatabase.systemFont(
         QFontDatabase.SystemFont.FixedFont
     ).family()
+    # Honour ALLWELL_THEME so the audit can render any registered theme (e.g.
+    # ALLWELL_THEME=nikon-elements) — applied before qss() and before any view
+    # is built, exactly as allwell.main() does.
+    th.select_theme_from_env()
     app.setStyleSheet(th.qss())
     return app
 

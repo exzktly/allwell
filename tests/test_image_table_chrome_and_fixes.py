@@ -85,6 +85,26 @@ def test_draw_cell_chrome_bar_length_matches_px():
     assert 58 <= widest <= 62
 
 
+def test_auto_bar_color_is_visible_on_a_light_background():
+    """The default 'Greys' colormap renders dim fluorescence as a near-white
+    image; a fixed white bar is then invisible. 'auto' must pick a dark bar so it
+    reads against the light background (the reported "bar doesn't appear" bug)."""
+    light = np.full((200, 200, 3), 234, np.uint8)     # near-white, like Greys(dim)
+    out = IC.draw_cell_chrome(light.copy(), bar_px=80, bar_corner="br",
+                              bar_color="auto")
+    # The bar region must contain clearly dark pixels (a black bar on white).
+    region = out[-40:, -120:]
+    assert int((region < 60).sum()) > 100, "auto bar not visible on a light background"
+
+
+def test_auto_bar_color_is_visible_on_a_dark_background():
+    dark = np.zeros((200, 200, 3), np.uint8)
+    out = IC.draw_cell_chrome(dark.copy(), bar_px=80, bar_corner="br",
+                              bar_color="auto")
+    region = out[-40:, -120:]
+    assert int((region > 200).sum()) > 100, "auto bar not visible on a dark background"
+
+
 def test_draw_cell_chrome_noop_when_nothing_to_draw():
     rgb = np.zeros((50, 50, 3), np.uint8)
     assert IC.draw_cell_chrome(rgb, bar_px=0, label_text="") is rgb
@@ -120,6 +140,7 @@ def test_chrome_target_cells_all_vs_single_corner():
 def test_resolve_chrome_plan_bar_px_and_targets():
     app = _fake_app(wells=["A01"], channels=["gfp"])
     st = app._app_state.image_table
+    st.scale_bar_show = True
     st.pixel_size_um = 0.5
     st.scale_bar_um = 50.0
     st.scale_bar_cells = "br"
@@ -140,11 +161,42 @@ def test_resolve_chrome_plan_bar_px_and_targets():
 def test_resolve_chrome_plan_off_when_pixel_size_zero():
     app = _fake_app(wells=["A01"], channels=["gfp"])
     st = app._app_state.image_table
+    st.scale_bar_show = True                          # toggled on, but…
     st.pixel_size_um = 0.0                            # unknown → bar disabled
     st.scale_bar_um = 50.0
     cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
     bar_px, bar_targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
     assert bar_px == 0 and bar_targets == set()
+
+
+def test_scale_bar_show_toggle_gates_the_bar():
+    """The 'Show scale bar' toggle is the master switch: with valid calibration,
+    the bar is off when the toggle is off and on when it's on."""
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    st = app._app_state.image_table
+    st.pixel_size_um = 0.5
+    st.scale_bar_um = 50.0
+    cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
+
+    st.scale_bar_show = False
+    bar_px, targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
+    assert bar_px == 0 and targets == set()
+
+    st.scale_bar_show = True
+    bar_px, targets, _ = IC.resolve_chrome_plan(app._ctx, cells)
+    assert bar_px == 100 and targets == {(0, 0)}
+
+
+def test_default_state_shows_a_bar_once_toggled_on():
+    """Fresh state ships sensible pixel-size + length defaults, so enabling the
+    toggle alone produces a visible bar (the 'set it but nothing appears' fix)."""
+    app = _fake_app(wells=["A01"], channels=["gfp"])
+    st = app._app_state.image_table            # untouched: defaults only
+    assert st.pixel_size_um > 0 and st.scale_bar_um > 0
+    cells = [[{"well": "A01", "chan": "GFP", "tp": "0", "fov": ""}]]
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] == 0   # off by default
+    st.scale_bar_show = True
+    assert IC.resolve_chrome_plan(app._ctx, cells)[0] > 0    # bar on toggle
 
 
 # ── Behavior: global-per-channel Auto LUT ───────────────────────────────────
@@ -272,6 +324,7 @@ def test_generate_with_scale_bar_and_auto_lut_on_mini_dataset(qtbot, mini_datase
     assert ctx.runtime.image_table.cells, "preset did not build a grid"
 
     st = ctx.state.image_table
+    st.scale_bar_show = True
     st.pixel_size_um = 0.5
     st.scale_bar_um = 20.0
     st.scale_bar_cells = "all"

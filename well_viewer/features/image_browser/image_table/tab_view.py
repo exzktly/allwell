@@ -189,6 +189,7 @@ def _build_properties_dock(ctx, dock) -> None:
                 ("Bottom-left", "bl"), ("Bottom-right", "br")]
     _COLORS = [("White", "white"), ("Black", "black"), ("Yellow", "yellow"),
                ("Cyan", "cyan"), ("Magenta", "magenta")]
+    _BAR_COLORS = [("Auto (contrast)", "auto")] + _COLORS
 
     _cap("Spacing (px)")
     _prop("Cell gap", "cell_gap", 2, 0, 200,
@@ -206,16 +207,22 @@ def _build_properties_dock(ctx, dock) -> None:
           "Font size of the facet-group band labels (nested axes only).")
 
     _cap("Scale bar")
-    _propf("Pixel µm/px", "pixel_size_um", 0.0, 0.0, 100.0, 0.05, 3,
+    _check("Show scale bar", "scale_bar_show",
+           "Burn a scale bar into the rendered images. Needs a Pixel µm/px and a "
+           "Bar length below (both default to sensible values — set Pixel µm/px to "
+           "your objective's real value).")
+    _propf("Pixel µm/px", "pixel_size_um", 0.65, 0.0, 100.0, 0.05, 3,
            "Physical size of one pixel in microns. Not stored by the pipeline — "
-           "enter it to enable the scale bar. 0 = off.")
-    _propf("Bar length µm", "scale_bar_um", 0.0, 0.0, 5000.0, 1.0, 1,
-           "Scale-bar length in microns. 0 = off. Bar pixels = length ÷ pixel size.")
+           "set it to your objective's value so the bar is to scale. 0 = no bar.")
+    _propf("Bar length µm", "scale_bar_um", 50.0, 0.0, 5000.0, 1.0, 1,
+           "Scale-bar length in microns. Bar pixels = length ÷ pixel size. 0 = no bar.")
     _combo("Show on", "scale_bar_cells", _CELLS,
            "Which cell(s) show the scale bar: every cell, or one grid corner.")
     _combo("Position", "scale_bar_img_corner", _CORNERS,
            "Where in the image the bar sits.")
-    _combo("Colour", "scale_bar_color", _COLORS, "Scale-bar colour.")
+    _combo("Colour", "scale_bar_color", _BAR_COLORS,
+           "Scale-bar colour. 'Auto' picks black or white per cell for contrast "
+           "(so a white bar isn't lost on a light 'Greys' background).")
 
     _cap("Cell labels")
     _combo("Mode", "label_mode", [("None", "none"), ("Identity", "identity")],

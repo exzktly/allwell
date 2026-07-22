@@ -302,7 +302,7 @@ _DISPLAY_FLOAT_KEYS = ("pixel_size_um", "scale_bar_um")
 _DISPLAY_INT_KEYS = ("label_font_px",)
 _DISPLAY_STR_KEYS = ("scale_bar_cells", "scale_bar_img_corner", "scale_bar_color",
                      "label_mode", "label_cells", "label_img_corner", "label_color")
-_DISPLAY_BOOL_KEYS = ("label_bg",)
+_DISPLAY_BOOL_KEYS = ("label_bg", "scale_bar_show")
 
 
 def image_table_set_display(ctx, key: str, value) -> None:

@@ -1,17 +1,23 @@
-"""Drawer — a right-edge slide-in overlay panel.
+"""Drawer — an edge slide-in overlay panel (right edge or bottom edge).
 
-A child widget of some host (usually the main window) that animates in from the
-right, over a dim backdrop, and dismisses on outside-click or ``Esc``. Hosts an
+A child widget of some host (usually the main window) that animates in from an
+edge, over a dim backdrop, and dismisses on outside-click or ``Esc``. Hosts an
 arbitrary content widget.
+
+``edge="right"`` (default) slides a vertical panel in from the right and is sized
+by ``width_hint`` / ``width_fraction``. ``edge="bottom"`` slides a full-width
+horizontal panel up from the bottom and is sized by ``height_hint`` /
+``height_fraction`` — use it for wide, log-style content.
 
 API
 ---
-* ``Drawer(host, parent=None, *, width_hint=None, width_fraction=0.34)``
+* ``Drawer(host, parent=None, *, edge="right", width_hint=None,
+  width_fraction=0.34, height_hint=None, height_fraction=0.4)``
 * ``setContentWidget(widget)`` / ``contentWidget()``
 * ``open()`` / ``close()`` / ``toggle()`` / ``isOpen()``
 * ``opened`` / ``closed`` signals.
 
-Widths are logical-pixel / fraction based (DPI-aware via the host's logical
+Sizes are logical-pixel / fraction based (DPI-aware via the host's logical
 geometry); colours from ``theme`` tokens.
 """
 
@@ -60,13 +66,18 @@ class Drawer(QWidget):
     closed = Signal()
 
     def __init__(self, host: QWidget, parent: QWidget | None = None, *,
-                 width_hint: int | None = None, width_fraction: float = 0.34) -> None:
+                 edge: str = "right",
+                 width_hint: int | None = None, width_fraction: float = 0.34,
+                 height_hint: int | None = None, height_fraction: float = 0.4) -> None:
         super().__init__(parent or host)
         self.setObjectName("Drawer")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._host = host
+        self._edge = edge if edge in ("right", "bottom") else "right"
         self._width_hint = int(width_hint) if width_hint else None
         self._width_fraction = float(width_fraction)
+        self._height_hint = int(height_hint) if height_hint else None
+        self._height_fraction = float(height_fraction)
         self._open = False
 
         self._backdrop = _Backdrop(host)
@@ -110,14 +121,13 @@ class Drawer(QWidget):
         self._sync_backdrop_geom()
         self._backdrop.setVisible(True)
         self._backdrop.raise_()
-        w = self._drawer_width()
-        h = self._host.height()
-        self.setGeometry(self._host.width(), 0, w, h)
+        start, end = self._closed_rect(), self._open_rect()
+        self.setGeometry(start)
         self.show()
         self.raise_()
         self._anim.stop()
-        self._anim.setStartValue(QRect(self._host.width(), 0, w, h))
-        self._anim.setEndValue(QRect(self._host.width() - w, 0, w, h))
+        self._anim.setStartValue(start)
+        self._anim.setEndValue(end)
         self._anim.start()
         self.opened.emit()
 
@@ -125,11 +135,9 @@ class Drawer(QWidget):
         if not self._open:
             return
         self._open = False
-        w = self.width()
-        h = self._host.height()
         self._anim.stop()
         self._anim.setStartValue(self.geometry())
-        self._anim.setEndValue(QRect(self._host.width(), 0, w, h))
+        self._anim.setEndValue(self._closed_rect())
         self._anim.start()
         self.closed.emit()
 
@@ -141,6 +149,27 @@ class Drawer(QWidget):
         if self._width_hint:
             return min(self._width_hint, self._host.width())
         return max(280, round(self._host.width() * self._width_fraction))
+
+    def _drawer_height(self) -> int:
+        if self._height_hint:
+            return min(self._height_hint, self._host.height())
+        return max(200, round(self._host.height() * self._height_fraction))
+
+    def _open_rect(self) -> QRect:
+        """On-screen geometry when fully open, per edge."""
+        if self._edge == "bottom":
+            h = self._drawer_height()
+            return QRect(0, self._host.height() - h, self._host.width(), h)
+        w = self._drawer_width()
+        return QRect(self._host.width() - w, 0, w, self._host.height())
+
+    def _closed_rect(self) -> QRect:
+        """Off-screen (dismissed) geometry the panel animates to/from, per edge."""
+        if self._edge == "bottom":
+            h = self._drawer_height()
+            return QRect(0, self._host.height(), self._host.width(), h)
+        w = self._drawer_width()
+        return QRect(self._host.width(), 0, w, self._host.height())
 
     def _sync_backdrop_geom(self) -> None:
         self._backdrop.setGeometry(0, 0, self._host.width(), self._host.height())
@@ -160,10 +189,7 @@ class Drawer(QWidget):
             return False
         if obj is self._host:
             if event.type() == QEvent.Resize and self.isVisible():
-                w = self._drawer_width()
-                h = self._host.height()
-                self.setGeometry(self._host.width() - w if self._open else self._host.width(),
-                                 0, w, h)
+                self.setGeometry(self._open_rect() if self._open else self._closed_rect())
                 self._sync_backdrop_geom()
         return super().eventFilter(obj, event)
 
@@ -175,12 +201,18 @@ class Drawer(QWidget):
 
     def _build_qss(self) -> str:
         c, r = theme.Colors, theme.Radii
+        if self._edge == "bottom":
+            frame = (f"border-top: 1px solid {c.border_subtle};"
+                     f" border-top-left-radius: {r.lg}px;"
+                     f" border-top-right-radius: {r.lg}px;")
+        else:
+            frame = (f"border-left: 1px solid {c.border_subtle};"
+                     f" border-top-left-radius: {r.lg}px;"
+                     f" border-bottom-left-radius: {r.lg}px;")
         return f"""
         #Drawer {{
             background-color: {c.rail};
-            border-left: 1px solid {c.border_subtle};
-            border-top-left-radius: {r.lg}px;
-            border-bottom-left-radius: {r.lg}px;
+            {frame}
         }}
         #DrawerBackdrop {{ background: transparent; }}
         """

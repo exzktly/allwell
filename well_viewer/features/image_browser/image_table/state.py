@@ -86,13 +86,17 @@ class ImageTableState:
     # Scale bar (burned into the rendered pixels so live grid == export). The bar is
     # ``round(scale_bar_um / pixel_size_um)`` px long, drawn in ``scale_bar_img_corner``
     # of the image, on the cell(s) selected by ``scale_bar_cells`` ("all", or a grid
-    # corner "tl"/"tr"/"bl"/"br"). ``scale_bar_um`` = 0 (or ``pixel_size_um`` = 0)
-    # turns it off. Pixel size isn't in pipeline_info, so it's a user-entered value.
-    pixel_size_um: float = 0.0
-    scale_bar_um: float = 0.0
+    # corner "tl"/"tr"/"bl"/"br"). ``scale_bar_show`` is the master on/off switch;
+    # when on, the bar still needs a valid ``pixel_size_um`` + ``scale_bar_um`` (both
+    # > 0). Pixel size isn't in pipeline_info, so it's a user-entered value — it
+    # (and the bar length) default to sensible, clearly-editable values so flipping
+    # the toggle on shows a bar immediately, which the user then calibrates.
+    scale_bar_show: bool = False
+    pixel_size_um: float = 0.65
+    scale_bar_um: float = 50.0
     scale_bar_cells: str = "br"
     scale_bar_img_corner: str = "br"
-    scale_bar_color: str = "white"
+    scale_bar_color: str = "auto"   # "auto" = black/white per local contrast
 
     # Burned-in cell labels (identity text drawn into the pixels). ``label_mode``
     # "none"/"identity"; ``label_cells`` picks which cell(s) ("all" or a grid corner);

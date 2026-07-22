@@ -184,3 +184,49 @@ def test_plate_spec_round_trips_through_state():
     assert [c.channel for c in spec.rows.channels] == ["gfp"]
     # and flattening it back reproduces the plate axes
     assert spec_to_state_fields(spec)["row_dims"] == ["well_row"]
+
+
+# ── plate mode must yield to a manual row/col drag ───────────────────────────
+
+def test_dropping_on_an_axis_exits_plate_mode():
+    """Regression: with Plate mode on, dragging a root/channel onto Rows or
+    Columns was silently discarded — ``spec_to_state_fields`` kept forcing
+    well_row/well_col — so the user's row/column spec was ignored. A drop onto an
+    axis is a manual layout and must turn Plate off so it takes effect."""
+    from well_viewer.features.image_browser.image_table import builder_view as B
+
+    app = _fake_app(wells=["A01", "A02", "B01", "B02"],
+                    channels=("gfp", "mcherry"),
+                    active_wells=["A01", "A02", "B01", "B02"])
+    ctx = app._ctx
+
+    # Enter plate mode; the axes flatten to the virtual plate dims.
+    spec = B.builder_spec(ctx)
+    B._set_plate(ctx, True)
+    image_table_apply_spec(ctx, B.builder_spec(ctx), render=False)
+    assert B.builder_spec(ctx).plate is True
+    assert ctx.state.image_table.row_dims == ["well_row"]
+    assert ctx.state.image_table.col_dims == ["well_col"]
+
+    # Now specify a manual layout: channels down rows, wells across columns.
+    B._on_zone_drop(ctx, "cols", "well")
+    B._on_zone_drop(ctx, "rows", "newchan:gfp")
+    image_table_apply_spec(ctx, B.builder_spec(ctx), render=False)
+
+    # Plate mode is off and the manual axes are honored.
+    assert B.builder_spec(ctx).plate is False
+    assert ctx.state.image_table.row_dims == ["channel"]
+    assert ctx.state.image_table.col_dims == ["well"]
+
+
+def test_dropping_a_root_on_fixed_leaves_plate_mode_untouched():
+    """Only an axis (rows/cols) drop cancels plate mode — pinning a root under
+    Fixed does not (plate already auto-derives the fixed dims)."""
+    from well_viewer.features.image_browser.image_table import builder_view as B
+
+    app = _fake_app(wells=["A01", "B02"], channels=("gfp",), active_wells=["A01", "B02"])
+    ctx = app._ctx
+    B.builder_spec(ctx)
+    B._set_plate(ctx, True)
+    B._on_zone_drop(ctx, "fixed", "timepoint")
+    assert B.builder_spec(ctx).plate is True

@@ -116,11 +116,24 @@ def image_table_refresh_picker(ctx) -> None:
 def image_table_select_all(ctx) -> None:
     ctx.state.image_table.active_wells = set(ctx.state.dataset.well_paths.keys())
     image_table_refresh_picker(ctx)
+    _rebuild_layout_for_well_change(ctx)
 
 
 def image_table_clear_active(ctx) -> None:
     ctx.state.image_table.active_wells = set()
     image_table_refresh_picker(ctx)
+    _rebuild_layout_for_well_change(ctx)
+
+
+def _rebuild_layout_for_well_change(ctx) -> None:
+    """Re-run the layout (debounced) so a Wells axis follows a well-set change.
+
+    Lazy import keeps ``controller`` free of a module-scope ``builder_view``
+    dependency (the shelf imports the controller's re-exports)."""
+    from well_viewer.features.image_browser.image_table.builder_view import (
+        schedule_selection_rebuild,
+    )
+    schedule_selection_rebuild(ctx)
 
 
 # ── Pipeline-info-driven dropdown options ────────────────────────────────────

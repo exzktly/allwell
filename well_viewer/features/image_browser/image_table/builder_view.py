@@ -314,6 +314,24 @@ def builder_flush_pending(ctx) -> None:
         _apply_now(ctx)
 
 
+def schedule_selection_rebuild(ctx) -> None:
+    """Rebuild the selector grid (debounced) when the sidebar plate selection changes.
+
+    Selecting / drag-selecting wells (or Select All / Clear) only updated
+    ``active_wells`` + the plate display before — nothing re-ran the layout, so a
+    Wells row/column axis stayed frozen at whatever the selection was when the shelf
+    was last edited. A user who built "channels × wells" with one well selected and
+    then picked three more still saw a single column. This re-flattens the live spec
+    against the new selection, reusing the shelf's 120 ms debounce so a drag-select's
+    per-cell ``selectionChanged`` burst coalesces into one rebuild (and a Generate
+    inside that window flushes it via ``builder_flush_pending``). No render — the
+    grid draws on Generate, matching a shelf edit. No-op before the shelf has
+    authored a spec."""
+    if getattr(_rt(ctx), "builder_spec", None) is None:
+        return
+    _schedule_apply(ctx)
+
+
 def _edit(ctx) -> None:
     """After any shelf edit: mark the table stale (so the header cues a Generate),
     redraw the shelf, and schedule a render-less layout rebuild. Rendering is
@@ -735,6 +753,12 @@ def _on_zone_drop(ctx, zone: str, tok: str) -> None:
         _move_channel(spec, axis, int(idx), zone)
     else:
         return
+    # Assigning a root/channel to an axis is a manual row/col layout — it's
+    # mutually exclusive with Plate mode, which otherwise overrides BOTH axes with
+    # well_row/well_col (spec_to_state_fields) and silently discards this drop. Exit
+    # plate mode so the drop takes effect (the button re-syncs via _refresh_plate).
+    if zone in ("rows", "cols") and getattr(spec, "plate", False):
+        spec.plate = False
     _edit(ctx)
 
 

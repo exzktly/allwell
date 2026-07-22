@@ -70,11 +70,16 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
     rec = get_store(ctx).get(plot_id)
     if rec is None:
         return
-    # Restore the group-driven selections FIRST so the plot's bars/traces match
-    # the saved figure (view_state doesn't snapshot them), THEN re-run the saved
-    # stats test so ``stats.pairwise`` is repopulated against those groups. Both
-    # happen before ``view_state.restore`` activates the tab and does the final
-    # redraw — which draws the significance brackets from the fresh results.
+    # Re-apply the gating block (fluor gates / ThreshFracOn / scatter-gate config)
+    # FIRST so the Included population that shapes every downstream plot matches
+    # the saved figure — the async gating worker recomputes it, and the redraws
+    # below (and the worker's own completion redraw) reflect it.
+    _restore_thresholds(ctx, rec.thresholds)
+    # Restore the group-driven selections so the plot's bars/traces match the
+    # saved figure (view_state doesn't snapshot them), THEN re-run the saved stats
+    # test so ``stats.pairwise`` is repopulated against those groups. Both happen
+    # before ``view_state.restore`` activates the tab and does the final redraw —
+    # which draws the significance brackets from the fresh results.
     _restore_selections(ctx, rec.params.get("selections"),
                         rec.params.get("active_solo_wells"))
     _restore_stats(ctx, rec.params.get("stats"))
@@ -82,6 +87,49 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
         view_state.restore(ctx, dict(rec.params))
     except Exception:
         _logger.debug("saved_plots: restore failed for %r", plot_id, exc_info=True)
+    # view_state.restore ends with a tab activation, but ``setCurrentByName`` fires
+    # no change (hence no style pass / no deferred per-tab apply) when the saved
+    # tab is already current. Unconditionally flush the target tab's deferred
+    # per-tab state (Heat Map / Bar / Scatter / Distribution / Image Table) and
+    # force its redraw, so restored axis limits + Heat-Map display settings reach
+    # the live figure regardless of whether the tab actually switched.
+    _reapply_target_tab(ctx, rec.params.get("active_centre_tab") or rec.tab)
+
+
+def _reapply_target_tab(ctx, tab: str) -> None:
+    """Flush deferred per-tab state for *tab* and force its figure redraw.
+
+    Robust delivery for state that only reaches the figure via a redraw's style
+    pass (axis limits) or a deferred per-tab apply (Heat Map view_state_io) — both
+    of which ``view_state.restore``'s tab activation skips when the tab is already
+    the current one."""
+    if not tab:
+        return
+    try:
+        view_state.apply_pending_tab_state(ctx, tab)
+    except Exception:
+        _logger.debug("saved_plots: pending tab flush failed for %r", tab, exc_info=True)
+    try:
+        ctx.features.redraw(ctx, tab)  # no-op for non-plot tabs
+    except Exception:
+        _logger.debug("saved_plots: target-tab redraw failed for %r", tab, exc_info=True)
+
+
+def _restore_thresholds(ctx, block) -> None:
+    """Re-apply a saved plot's gating *block* (as produced by
+    ``build_gating_block``): fluor gates, ThreshFracOn cuts, and the scatter-gate
+    inclusion/thresholding config.
+
+    Delegates to ``persistence.cell_gating.restore_gating_block``, which resets
+    the live gating slice to defaults FIRST (so a gate the user added after saving
+    is cleared), applies the saved block, and kicks the gating worker so the
+    Included population is recomputed → plots update. No-op-safe on any error / an
+    empty block (older records saved with all-default gating)."""
+    from well_viewer.persistence.cell_gating import restore_gating_block
+    try:
+        restore_gating_block(ctx, block)
+    except Exception:
+        _logger.debug("saved_plots: threshold restore failed", exc_info=True)
 
 
 def _restore_selections(ctx, sels, solo_wells=None) -> None:

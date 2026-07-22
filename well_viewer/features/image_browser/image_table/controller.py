@@ -300,6 +300,7 @@ def image_table_set_spacing(ctx, key: str, value) -> None:
 
 _DISPLAY_FLOAT_KEYS = ("pixel_size_um", "scale_bar_um")
 _DISPLAY_INT_KEYS = ("label_font_px",)
+_DISPLAY_INT_MIN1_KEYS = ("scale_bar_thickness_px",)
 _DISPLAY_STR_KEYS = ("scale_bar_cells", "scale_bar_img_corner", "scale_bar_color",
                      "label_mode", "label_cells", "label_img_corner", "label_color")
 _DISPLAY_BOOL_KEYS = ("label_bg", "scale_bar_show")
@@ -313,6 +314,8 @@ def image_table_set_display(ctx, key: str, value) -> None:
         setattr(ctx.state.image_table, key, max(0.0, float(value)))
     elif key in _DISPLAY_INT_KEYS:
         setattr(ctx.state.image_table, key, max(6, int(round(float(value)))))
+    elif key in _DISPLAY_INT_MIN1_KEYS:
+        setattr(ctx.state.image_table, key, max(1, int(round(float(value)))))
     elif key in _DISPLAY_STR_KEYS:
         setattr(ctx.state.image_table, key, str(value))
     elif key in _DISPLAY_BOOL_KEYS:

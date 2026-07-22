@@ -97,6 +97,9 @@ class ImageTableState:
     scale_bar_cells: str = "br"
     scale_bar_img_corner: str = "br"
     scale_bar_color: str = "auto"   # "auto" = black/white per local contrast
+    # Bar thickness in px-at-a-nominal-240 px cell (scaled to each image like the
+    # label font). User-tunable because a too-thin bar can disappear on downscale.
+    scale_bar_thickness_px: int = 4
 
     # Burned-in cell labels (identity text drawn into the pixels). ``label_mode``
     # "none"/"identity"; ``label_cells`` picks which cell(s) ("all" or a grid corner);

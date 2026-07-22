@@ -105,6 +105,21 @@ def test_auto_bar_color_is_visible_on_a_dark_background():
     assert int((region > 200).sum()) > 100, "auto bar not visible on a dark background"
 
 
+def test_scale_bar_thickness_is_tunable():
+    """The bar thickness is user-tunable (a too-thin bar vanishes on downscale)."""
+    rgb = np.zeros((240, 240, 3), np.uint8)
+
+    def bar_rows(thick_px):
+        out = IC.draw_cell_chrome(rgb.copy(), bar_px=100, bar_corner="br",
+                                  bar_color="white", bar_thickness_px=thick_px)
+        ys = np.where((out[..., 0] == 255).any(axis=1))[0]
+        return int(ys.max() - ys.min() + 1) if ys.size else 0
+
+    assert bar_rows(2) == 2
+    assert bar_rows(4) == 4
+    assert bar_rows(10) == 10                          # thicker → taller bar
+
+
 def test_draw_cell_chrome_noop_when_nothing_to_draw():
     rgb = np.zeros((50, 50, 3), np.uint8)
     assert IC.draw_cell_chrome(rgb, bar_px=0, label_text="") is rgb

@@ -65,14 +65,35 @@ def capture_params(ctx, tab: str) -> tuple[dict, dict]:
     if stats_cfg is not None:
         params["stats"] = stats_cfg
 
-    thresholds: dict[str, Any] = {}
-    fluor = _safe(lambda: get_all_fluor_gates(ctx))
-    if isinstance(fluor, dict) and fluor:
-        thresholds["fluor_gates"] = {str(k): float(v) for k, v in fluor.items()}
-    tfo = _safe(lambda: dict(ctx.state.cell_gating.thresh_frac_on))
-    if isinstance(tfo, dict) and tfo:
-        thresholds["thresh_frac_on"] = {str(k): float(v) for k, v in tfo.items()}
+    # The full gating block — fluor gates, ThreshFracOn cuts, AND the scatter-gate
+    # inclusion/thresholding config — captured with the SAME serializer the
+    # pipeline-info sidecar uses (``build_gating_block``), so Restore can re-apply
+    # the exact Included population that shaped the saved figure. Stored on
+    # ``SavedPlot.thresholds`` (keys ``fluor_gates`` / ``thresh_frac_on`` are
+    # unchanged, so ``build_summary`` + older records still read cleanly).
+    thresholds: dict[str, Any] = _safe(lambda: _capture_gating_block(ctx)) or {}
     return params, thresholds
+
+
+def _capture_gating_block(ctx) -> dict:
+    """The non-default gating block (gate values + scatter-gate config) for the
+    live ``ctx.state.cell_gating`` slice — mirrors ``cell_gating.save_to_pipeline_info``."""
+    from well_viewer.domain.gating_state import build_gating_block
+
+    cg = ctx.state.cell_gating
+
+    def _sorted_or_none(s):
+        return None if s is None else sorted(s)
+
+    return build_gating_block(
+        get_all_fluor_gates(ctx),
+        dict(cg.thresh_frac_on),
+        scatter_gates=cg.scatter_gates or None,
+        use_scatter_gates=cg.use_scatter_gates,
+        scatter_gate_choices_gating=_sorted_or_none(cg.gating_choices),
+        scatter_gate_choices_thresh=_sorted_or_none(cg.thresh_choices),
+        use_scatter_thresh=cg.use_scatter_thresh,
+    )
 
 
 def _capture_selections(ctx) -> list | None:

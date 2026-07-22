@@ -121,6 +121,16 @@ def snapshot(ctx) -> dict:
         "use_fov_replicates": bool(ctx.state.plot.use_fov_replicates),
         "show_threshold_line": bool(ctx.state.plot.show_threshold_line),
         "show_significance": bool(ctx.state.plot.show_significance),
+        # Per-panel legend-trace visibility, the user's Line-graph draw order (the
+        # Bar draw order rides in the per-tab block), and the cross-tab focus
+        # timepoint — all shape the rendered plot but were previously uncaptured.
+        "legend_visible": {
+            str(k): bool(v)
+            for k, v in (ctx.state.plot.legend_visible or {}).items()
+        },
+        "line_order_rsets": [str(x) for x in (ctx.state.plot.line_order_rsets or [])],
+        "line_order_wells": [str(x) for x in (ctx.state.plot.line_order_wells or [])],
+        "focus_timepoint": ctx.state.plot.focus_timepoint,
         "fold_change": {
             "vs_control_on": bool(ctx.state.plot.fc_vs_control_on),
             "control_label": str(ctx.state.plot.fc_control_label or ""),
@@ -276,10 +286,15 @@ def _snapshot_scatter(ctx) -> dict:
         v = _combo_text(ctx, attr)
         if v is not None:
             out[key] = v
-    # Which sub-tab (per-cell vs aggregate) was active.
+    # Which sub-tab (per-cell vs aggregate) was active, plus the per-cell display
+    # toggles ("Color by time" and "Show gates") — both shape the rendered scatter
+    # and were previously not captured, so a restored scatter lost them.
     _sc = ctx.state.feature_slice("scatter")
-    if _sc is not None and _sc.mode:
-        out["mode"] = str(_sc.mode)
+    if _sc is not None:
+        if _sc.mode:
+            out["mode"] = str(_sc.mode)
+        out["color_by_tp"] = bool(_sc.color_by_tp)
+        out["gates_hidden"] = bool(_sc.gates_hidden)
     # Per-timepoint multi-select checkboxes for each sub-tab (the dataset-wide
     # timepoint filter the user can toggle). Mirrors the Bar tab's
     # ``timepoint_selections`` round-trip.
@@ -356,6 +371,28 @@ def restore(ctx, state: dict) -> None:
     if "show_significance" in state:
         try:
             ctx.state.plot.show_significance = bool(state["show_significance"])
+        except Exception:
+            swallowed()
+
+    lv = state.get("legend_visible")
+    if isinstance(lv, dict):
+        try:
+            ctx.state.plot.legend_visible = {str(k): bool(v) for k, v in lv.items()}
+        except Exception:
+            swallowed()
+
+    for _key in ("line_order_rsets", "line_order_wells"):
+        _val = state.get(_key)
+        if isinstance(_val, list):
+            try:
+                setattr(ctx.state.plot, _key, [str(x) for x in _val])
+            except Exception:
+                swallowed()
+
+    if "focus_timepoint" in state:
+        _ft = state.get("focus_timepoint")
+        try:
+            ctx.state.plot.focus_timepoint = None if _ft is None else float(_ft)
         except Exception:
             swallowed()
 
@@ -730,6 +767,24 @@ def _apply_scatter(ctx, state: dict) -> None:
                 ref(ctx)
             except Exception:
                 swallowed()
+    # Per-cell display toggles. Set the typed state (the source of truth every
+    # renderer reads) and sync the "Color by time" button label/checked when it
+    # exists; the "Show gates" sidebar toggle reads gates_hidden off state when it
+    # is (re)built, so no widget sync is needed there.
+    _sc = ctx.state.feature_slice("scatter")
+    if _sc is not None:
+        if "color_by_tp" in state:
+            _sc.color_by_tp = bool(state["color_by_tp"])
+            btn = ctx.widgets.get_or_none("_scatter_color_by_tp_btn")
+            if btn is not None:
+                try:
+                    btn.setChecked(_sc.color_by_tp)
+                    btn.setText(
+                        "Color by time: On" if _sc.color_by_tp else "Color by time: Off")
+                except Exception:
+                    swallowed()
+        if "gates_hidden" in state:
+            _sc.gates_hidden = bool(state["gates_hidden"])
     mode = state.get("mode")
     set_mode = ctx.runtime.scatter.set_mode
     if mode and callable(set_mode):

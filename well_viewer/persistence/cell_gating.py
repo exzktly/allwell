@@ -70,14 +70,67 @@ def load_from_pipeline_info(ctx) -> bool:
     block = read_gating_params(state.dataset.data_dir)
     if not block:
         return False
+    return apply_gating_block(ctx, block)
 
-    applied = False
+
+def apply_gating_block(ctx, block) -> bool:
+    """Apply a ``cell_gating`` *block* (as produced by ``build_gating_block``)
+    onto the live ``ctx.state.cell_gating`` slice + Cell Gating tab widgets.
+
+    Extracted from :func:`load_from_pipeline_info` so both the sidecar load path
+    AND Saved-Plots restore can re-apply the same gating state (gate values +
+    scatter-gate config) from an in-memory block, not just the on-disk sidecar.
+    Returns True when the block was applied (the tab materialised + widgets
+    mirrored); False for an empty block or when the tab could not be built.
+
+    Note: this seeds the typed slice + widgets but does NOT reset pre-existing
+    slice values and does NOT run the gating worker — the sidecar-load path
+    applies it onto a freshly-cleared slice and recomputes the Included
+    population separately (``_kick_off_gating_after_load``). Saved-Plots restore
+    wants a reset + a worker kick, so it uses :func:`restore_gating_block`.
+    """
+    if not isinstance(block, dict) or not block:
+        return False
+    applied = _write_gating_block_to_slice(ctx.state.cell_gating, block)
+    if not _mirror_gating_to_widgets(ctx):
+        return False
+    return applied
+
+
+def restore_gating_block(ctx, block) -> None:
+    """Reset the live gating slice to defaults, apply *block*, and recompute the
+    Included population (kicks the gating worker).
+
+    Saved-Plots restore uses this so a restored plot recreates the EXACT gated
+    population behind the saved figure: the reset clears any gate the user added
+    after saving (``build_gating_block`` / the block only carry non-default
+    values), and the worker kick refreshes the Included flags every plot reads.
+    Best-effort — a missing / empty / all-default block still resets + refreshes.
+    """
+    cg = ctx.state.cell_gating
+    cg.fluor_gates.clear()
+    cg.thresh_frac_on.clear()
+    cg.scatter_gates = []
+    cg.use_scatter_gates = False
+    cg.use_scatter_thresh = False
+    cg.gating_choices = None
+    cg.thresh_choices = None
+    if isinstance(block, dict) and block:
+        _write_gating_block_to_slice(cg, block)
+    _mirror_gating_to_widgets(ctx, run_worker=True)
+
+
+def _write_gating_block_to_slice(cg, block: dict) -> bool:
+    """Write a gating *block*'s gate values + scatter-gate config onto the typed
+    ``CellGatingState`` slice *cg*. Pure state mutation — no widgets, no worker.
+
+    R6 + Epic-cellgating: the typed slice is the source of truth. Additive for
+    ``fluor_gates`` / ``thresh_frac_on`` (only keys the block carries are written);
+    callers wanting a clean reset clear the dicts first.
+    """
     # ``cell_area_threshold`` is retired from this block — the QC layer now owns
     # cell-area gating and migrates any legacy value (see QCParams.from_pipeline_info).
-
-    # R6 + Epic-cellgating: the typed CellGatingState slice is the source of
-    # truth — write the gate values and the scatter-gate config onto it directly.
-    cg = state.cell_gating
+    applied = False
     fluor_gates = block.get("fluor_gates") or {}
     if isinstance(fluor_gates, dict):
         for ch, val in fluor_gates.items():
@@ -123,7 +176,14 @@ def load_from_pipeline_info(ctx) -> bool:
             setattr(cg, attr, set(str(n) for n in sel) if isinstance(sel, list) else None)
         else:
             setattr(cg, attr, _legacy_selection())
+    return applied
 
+
+def _mirror_gating_to_widgets(ctx, *, run_worker: bool = False) -> bool:
+    """Materialize the lazily-built Cell Gating tab and mirror the typed slice
+    onto its widgets. When *run_worker*, also kick the gating worker so the
+    Included population is recomputed. Returns False when the tab can't be built.
+    """
     # Materialize the lazily-built tab (core seam; the one app-bound step) so its
     # QLineEdits + checkboxes exist, then mirror the typed slice onto them.
     from well_viewer.core.channel_state_controller import (
@@ -134,6 +194,7 @@ def load_from_pipeline_info(ctx) -> bool:
         return False
     from well_viewer.features.grouping.cell_gating_tab_view import (
         cell_gating_apply_persisted_state,
+        cell_gating_start_gating_worker,
     )
     cell_gating_apply_persisted_state(ctx)
 
@@ -141,4 +202,6 @@ def load_from_pipeline_info(ctx) -> bool:
     # shows the persisted threshold on load (guarded; no-op before it's built).
     refresh_thresh_frac_quick_edit(ctx)
 
-    return applied
+    if run_worker:
+        cell_gating_start_gating_worker(ctx)
+    return True

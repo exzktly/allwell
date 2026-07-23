@@ -289,15 +289,15 @@ def _activate_cell_browser(ctx) -> None:
 def _activate_playground(ctx) -> None:
     from well_viewer.core.safe import swallowed
     from well_viewer.features.image_browser.playground.controller import (
-        playground_repopulate_dropdowns,
+        playground_activate,
     )
-    # Playground picks its own well/channel/tp/FOV via in-tab dropdowns; show
-    # the canonical plate selector for parity, then refresh its selectors for
-    # any dataset loaded since it last built.
+    # Playground is a single-well tab: it picks its channel/timepoint/FOV via
+    # in-tab dropdowns, but its well comes from the ever-present sidebar plate.
+    # Show that plate, then reconcile it with the frame's single well and render.
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     ctx.coordinator.refresh_sidebar_map()
     try:
-        playground_repopulate_dropdowns(ctx)
+        playground_activate(ctx)
     except Exception:
         swallowed()
 
@@ -504,6 +504,13 @@ def _sel_spatial(ctx) -> None:
 def _sel_smfish(ctx) -> None:
     from well_viewer.features.smfish.tab_view import smfish_sync_from_app
     smfish_sync_from_app(ctx)
+
+
+def _sel_playground(ctx) -> None:
+    from well_viewer.features.image_browser.playground.controller import (
+        playground_sync_selected_well,
+    )
+    playground_sync_selected_well(ctx)
 
 
 def _sel_sample_definitions(ctx) -> None:
@@ -768,7 +775,9 @@ def _features() -> "list[FeatureDescriptor]":
                           per_well_selection=True),
         FeatureDescriptor(name="Playground", parent="Image Browser",
                           on_activate=_activate_playground,
-                          on_dataset_loaded=_loaded_playground),
+                          on_selection_changed=_sel_playground,
+                          on_dataset_loaded=_loaded_playground,
+                          single_well_selection=True),
 
         # ── Sample Definitions sub-leaf ────────────────────────────────────
         FeatureDescriptor(name="Cell Gating", parent="Sample Definitions",

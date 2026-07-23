@@ -86,36 +86,10 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     # Frame selection
     _section("Frame")
-    # Well picker — a single-select plate map. Deliberately group/replicate-blind:
-    # its enabled wells come straight from the flat dataset well list, and it never
-    # consults grouping state. Replaces the old Well dropdown; the picked well's
-    # frame renders on the right.
-    from widgets.well_plate_selector import WellPlateSelector
-    from well_viewer.core.ui_helpers import (
-        apply_sidebar_plate_geometry, well_plate_tooltip_provider,
-    )
-    well_lbl = QLabel("Well", controls)
-    well_lbl.setObjectName("Muted")
-    cl.addWidget(well_lbl)
-    well_plate = WellPlateSelector(controls)
-    well_plate.setActionsVisible(False)
-    well_plate.setSelectionMode("select")
-    well_plate.setSingleSelectionMode(True)          # one well at a time
-    well_plate.setRowColumnSelectable(False)         # no row/column multi-select
-    well_plate.setEnabledWells([])                   # nothing until a dataset loads
-    well_plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    apply_sidebar_plate_geometry(well_plate)
-    cl.addWidget(well_plate)
-    app._playground_well_plate = well_plate
-
-    def _on_well_plate(ids) -> None:
-        tok = next((w for w in ids if w in ctx.state.dataset.well_paths), None)
-        if tok is None or tok == ctx.state.playground.well:
-            return
-        ctx.state.playground.well = tok
-        on_change()
-    well_plate.selectionChanged.connect(_on_well_plate)
-
+    # The frame's well is chosen on the ever-present sidebar plate (single-well
+    # on this tab — see the Playground descriptor's ``single_well_selection`` +
+    # ``on_selection_changed`` hook in ``features/registry.py``). No in-tab plate:
+    # the one on the left rail is the picker, so we don't duplicate it here.
     _combo(_row(controls, "Channel"), [], "_playground_chan_cb")
     _combo(_row(controls, "Timepoint"), [], "_playground_tp_cb")
     _combo(_row(controls, "FOV"), [], "_playground_fov_cb")

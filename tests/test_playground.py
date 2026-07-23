@@ -147,10 +147,11 @@ def test_tab_builds_and_populates_selectors(playground_app):
     assert "NUC+SEG" not in items
 
 
-def test_well_is_a_single_select_plate_that_drives_state(playground_app, monkeypatch):
-    """The well selector is a single-select plate (no groupings/replicates): it
-    enables exactly the dataset wells, drives ``st.well`` on selection, and never
-    holds more than one well."""
+def test_well_is_driven_by_the_sidebar_plate(playground_app, monkeypatch):
+    """The frame's well comes from the ever-present sidebar plate, not a
+    duplicated in-tab plate. Selecting on the sidebar drives ``st.well`` via the
+    ``on_selection_changed`` hook; from a multi-well selection the lowest-rank
+    well is taken."""
     app = playground_app
     st = app._app_state.playground
     from well_viewer.features.image_browser.playground import controller as C
@@ -158,20 +159,27 @@ def test_well_is_a_single_select_plate_that_drives_state(playground_app, monkeyp
                         lambda *a, **k: np.full((32, 32), 100.0, np.float32))
     monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
 
-    plate = app._playground_well_plate
-    assert plate.selectionMode() == "select"
-    # the old Well combo is gone
+    # No duplicated in-tab plate / old Well combo — the left-rail plate is used.
+    assert not hasattr(app, "_playground_well_plate")
     assert not hasattr(app, "_playground_well_cb")
+
+    # Registered as a single-well tab so the sidebar plate goes single-select.
+    assert app._features.get("Playground").single_well_selection is True
 
     wells = sorted(app._app_state.dataset.well_paths.keys())
     assert len(wells) >= 2
 
-    plate.setSelectedWellIds([wells[1]])
-    assert st.well == wells[1]                       # plate drove the state
+    # A sidebar-plate selection drives the frame well.
+    app._app_state.selection.selected_wells = {wells[1]}
+    C.playground_sync_selected_well(app._ctx)
+    assert st.well == wells[1]
 
-    # single-select: asking for two collapses to one
-    plate.setSelectedWellIds([wells[0], wells[1]])
-    assert len(plate.selectedWellIds()) == 1
+    # From a multi-well selection (carried in from another tab) the lowest
+    # plate-rank well is chosen.
+    app._app_state.selection.selected_wells = {wells[0], wells[1]}
+    assert C.playground_first_selected_well(app._ctx) == wells[0]
+    C.playground_sync_selected_well(app._ctx)
+    assert st.well == wells[0]
 
 
 def test_on_change_corrects_and_renders(playground_app, monkeypatch):

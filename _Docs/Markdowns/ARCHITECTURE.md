@@ -227,8 +227,10 @@ well_viewer/
 │   │   │                 criteria_view.py, sort_view.py, worker.py
 │   │   └── playground/   controller.py, renderer.py, state.py, tab_view.py,
 │   │                     worker.py   ← single-frame background-correction testbed
-│   │                     (single-select, group-blind WellPlateSelector picks the
-│   │                      frame's well, replacing the Well combo — v8.8.22)
+│   │                     (a single-well tab: the frame's well is picked on the
+│   │                      ever-present sidebar plate — Playground registers
+│   │                      single_well_selection + an on_selection_changed hook,
+│   │                      no in-tab plate of its own)
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py

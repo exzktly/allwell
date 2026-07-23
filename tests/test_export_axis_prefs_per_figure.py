@@ -122,3 +122,38 @@ def test_per_axis_limits_apply_to_each_panel():
     assert fig.axes[1].get_ylim() == (0.2, 0.8)    # Fraction panel keeps its own limit
     # Panel 3 has no stored limit and is not the target → not pinned to panel 1's.
     assert fig.axes[2].get_ylim() != (0.0, 10.0)
+
+
+def test_per_axis_style_controls_apply_to_each_panel():
+    """Everything under the Properties "Axis #" selector (tick rotation, tick
+    length / direction, tick visibility) is scoped per-axis: a value stored in
+    one panel's bucket applies to that panel and not the others, which fall back
+    to the shared global value. Regression: these were read from the flat prefs
+    and applied to every axis regardless of the "Axis #" selection."""
+    app = _app()
+    fig = app._bar_fig
+    for _ in range(3):
+        ax = fig.add_subplot(3, 1, len(fig.axes) + 1)
+        ax.plot([0, 1, 2], [0, 1, 2])
+        ax.set_xticks([0, 1, 2])
+        ax.set_xticklabels(["a", "b", "c"])
+    prefs = PS.figure_prefs(app._ctx, fig)
+    # Global baseline: flat (0°) rotation + 4.0 tick length.
+    prefs["x_tick_angle"] = 0
+    prefs["tick_length"] = 4.0
+    # Override only panel 1 via its bucket, the way the sidebar's _persist does.
+    prefs["axis_target"] = "1"
+    prefs["axis_buckets"] = {"1": {"x_tick_angle": 45, "tick_length": 12}}
+    PS.apply_export_style_to_current(app._ctx, fig)
+
+    # Panel 1 uses its bucket: 45° / right-aligned + long ticks.
+    a0 = fig.axes[0].get_xticklabels()[0]
+    assert round(a0.get_rotation()) == 45
+    assert a0.get_ha() == "right"
+    assert fig.axes[0].xaxis.get_major_ticks()[0].tick1line.get_markersize() == 12
+    # Panels 2 & 3 fall back to the global baseline: 0° / centered + short ticks.
+    for other in (fig.axes[1], fig.axes[2]):
+        lbl = other.get_xticklabels()[0]
+        assert round(lbl.get_rotation()) == 0
+        assert lbl.get_ha() == "center"
+        assert other.xaxis.get_major_ticks()[0].tick1line.get_markersize() == 4.0

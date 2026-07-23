@@ -366,6 +366,20 @@ def figure_prefs(ctx, fig):
     return _FigurePrefs(global_prefs, axis)
 
 
+def axis_scoped_value(prefs, idx, key, default=None):
+    """Per-axis value for a Properties "Axis #" style key, for callers *outside*
+    :func:`apply_export_style_prefs` (the bar renderer's group-label footers).
+
+    *prefs* is a :func:`figure_prefs` view — it carries the per-figure
+    ``axis_buckets`` — so the panel's own bucket entry (axis ``idx``, 1-based)
+    wins, else the shared global value. Same rule the function uses internally."""
+    buckets = prefs.get("axis_buckets") or {}
+    v = (buckets.get(str(idx)) or {}).get(key)
+    if v in (None, ""):
+        v = prefs.get(key, default)
+    return v
+
+
 def apply_export_style_prefs(fig, prefs: dict) -> None:
     for ax in fig.axes:
         if not hasattr(ax, "_fixed_axes_position"):
@@ -384,11 +398,20 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
     # dict without ``axis_buckets`` just get the global size everywhere.
     _axis_buckets = prefs.get("axis_buckets") or {}
 
-    def _axis_font_size(_idx, key, default):
+    def _axis_style(_idx, key, default):
+        # Per-axis value for a control grouped under the Properties "Axis #"
+        # selector (tick rotation / tick length / direction / visibility / group
+        # label size): the panel's own bucket entry wins, else the shared global
+        # value. So an "Axis #" edit scopes these to one panel — the same
+        # global-baseline-plus-bucket model the font sizes use — instead of the
+        # old flat read that pushed one value onto every axis.
         v = (_axis_buckets.get(str(_idx)) or {}).get(key)
         if v in (None, ""):
             v = prefs.get(key, default)
-        return int(float(v))
+        return v
+
+    def _axis_font_size(_idx, key, default):
+        return int(float(_axis_style(_idx, key, default)))
 
     def _axis_limit(_idx, key):
         # Per-axis limit: a panel's own bucket entry wins so every subplot of a
@@ -438,7 +461,7 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         # slanted look). Without this the bar renderer's ``ha="right"`` (drawn
         # alongside its own 45° rotation) survives even after this pass flattens
         # the rotation back to 0°, leaving labels right-aligned under their bar.
-        _x_angle = int(prefs.get("x_tick_angle", 0))
+        _x_angle = int(_axis_style(idx, "x_tick_angle", 0))
         _x_ha = "center" if _x_angle == 0 else "right"
         for tick in ax.get_xticklabels():
             tick.set_rotation(_x_angle)
@@ -648,17 +671,18 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
                 apply_axis_log_scale(ax, "y", _ylog)
 
-        if bool(prefs.get("tick_minor", False)):
+        _tick_minor = bool(_axis_style(idx, "tick_minor", False))
+        if _tick_minor:
             ax.minorticks_on()
         else:
             ax.minorticks_off()
-        length = float(prefs.get("tick_length", 4.0))
-        direction = str(prefs.get("tick_direction", "out"))
-        if bool(prefs.get("tick_major", True)):
+        length = float(_axis_style(idx, "tick_length", 4.0))
+        direction = str(_axis_style(idx, "tick_direction", "out"))
+        if bool(_axis_style(idx, "tick_major", True)):
             ax.tick_params(which="major", length=length, direction=direction)
         else:
             ax.tick_params(which="major", length=0)
-        if bool(prefs.get("tick_minor", False)):
+        if _tick_minor:
             ax.tick_params(which="minor", length=max(1.0, length * 0.6), direction=direction)
 
         leg = ax.get_legend()

@@ -37,13 +37,17 @@ from well_viewer.features.barplot.controller import (
 )
 
 
-def _annotate_cluster_footers(items, axes, fontsize: float = 8) -> None:
+def _annotate_cluster_footers(items, axes, fontsize=8) -> None:
     """Per-cluster well/rset label centred under each axis's xtick row.
 
     Group-by-well multi-tp shows ``t=0`` / ``t=1`` / ... as the per-bar
     ticks (mirrored on every panel via ``set_xticklabels``), so the
     cluster's identity gets a footer on EACH axis below its tick row.
     Text uses the same muted_fg the ticks themselves are drawn with.
+
+    ``fontsize`` may be a number (same size on every panel) or a
+    ``callable(ax) -> float`` so the caller can honour a per-axis "Group label
+    size" set via the Properties "Axis #" selector.
     """
     if not items or not axes:
         return
@@ -51,10 +55,11 @@ def _annotate_cluster_footers(items, axes, fontsize: float = 8) -> None:
     xs = _clustered_x_positions(items)
     for ax in axes:
         _muted_fg = tokens_for(ax)[2]
+        _fs = fontsize(ax) if callable(fontsize) else fontsize
         for gk, cx in _cluster_centers(items, xs):
             ax.annotate(gk, xy=(cx, 0), xycoords=("data", "axes fraction"),
                         xytext=(0, -32), textcoords="offset points",
-                        ha="center", va="top", fontsize=fontsize, fontweight="bold",
+                        ha="center", va="top", fontsize=_fs, fontweight="bold",
                         color=_muted_fg, annotation_clip=False)
 import numpy as np
 import pandas as pd
@@ -84,7 +89,6 @@ from well_viewer.data.data_loading import (
     resolve_value_series,
 )
 from well_viewer.core.plot_style import (
-    _ensure_export_style_prefs,
     apply_ax_style,
     apply_export_style_to_current,
     tokens_for,
@@ -631,9 +635,19 @@ def draw_grouped_bar_mode(
     )
     if (str(getattr(ctx.state.plot, "bar_group_mode", "well") or "well") == "well"
             and len(target_ts) > 1):
-        _fsize = float(_ensure_export_style_prefs(ctx).get("group_label_size", 8))
+        # Group-label size is scoped per-axis by the Properties "Axis #" selector
+        # (like the other Axes-section controls), so resolve it per panel from the
+        # figure's buckets rather than one flat global size for every panel.
+        from well_viewer.core.plot_style import axis_scoped_value, figure_prefs
+        _fig = ctx.runtime.barplot.fig
+        _prefs = figure_prefs(ctx, _fig)
+        _axes_order = list(_fig.axes)
+
+        def _grp_size(ax):
+            idx = (_axes_order.index(ax) + 1) if ax in _axes_order else 1
+            return float(axis_scoped_value(_prefs, idx, "group_label_size", 8))
         _xtick_axes = [ax_mean, ax_frac] + ([ax_n] if ax_n is not None else [])
-        _annotate_cluster_footers(items, _xtick_axes, fontsize=_fsize)
+        _annotate_cluster_footers(items, _xtick_axes, fontsize=_grp_size)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     _ch = ctx.state.channel.active_channel.upper()
     from well_viewer.data.metric_labels import (

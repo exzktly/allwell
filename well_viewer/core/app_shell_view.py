@@ -49,8 +49,13 @@ def build_ui(win) -> None:
     top_layout.addWidget(open_btn)
     outer.addWidget(top)
 
+    # 1px separator under the topbar. objectName "Separator" so it fills with
+    # ``theme.Colors.border_subtle`` (matching the app-header separator) — a bare
+    # QFrame.HLine would instead paint Qt's default light etched line, ignoring
+    # the theme (it read too light on the grey theme's dark surfaces).
     win._top_sep = QFrame()
-    win._top_sep.setFrameShape(QFrame.HLine)
+    win._top_sep.setObjectName("Separator")
+    win._top_sep.setFixedHeight(1)
     outer.addWidget(win._top_sep)
 
     # ── Horizontal splitter: sidebar | plots ───────────────────────────

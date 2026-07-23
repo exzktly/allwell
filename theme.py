@@ -64,6 +64,11 @@ class Colors:
     border_subtle   = "#1B2331"   # --border-subtle : hairlines within a panel
     border          = "#2A3343"   # --border        : default control border
     border_strong   = "#3B475C"   # --border-strong : hover/focus ring on inputs
+    # Resting border on push/tool buttons. Defaults to the same subtle hairline
+    # buttons used before it was split out; a theme can make buttons read as
+    # crisp "toolbar" controls (e.g. All-Well Grey) without also thickening
+    # every panel/divider that reads ``border_subtle``.
+    control_border  = "#1B2331"   # --control-border : QPushButton / QToolButton edge
 
     # ── Text ─────────────────────────────────────────────────────────────
     text_primary    = "#E6E9EF"   # --text-primary   : body, headings, primary labels
@@ -77,6 +82,13 @@ class Colors:
     accent_pressed  = "#5772E6"   # darkened --accent for :pressed (not a token)
     accent_dim      = "#2C3A66"   # --accent-dim : low-emphasis selected backgrounds
     accent_fg       = "#F0F4FF"   # --accent-fg  : text/icon on accent-filled buttons
+
+    # ── Brand cue (version pill) ─────────────────────────────────────────
+    # A small, theme-swappable brand chip. The default palette keeps it a
+    # transparent, faint-text pill (visually the pre-existing version label);
+    # a variant theme (e.g. All-Well Grey) can recolour the text — see ``THEMES``.
+    brand           = "transparent"  # --brand    : version-pill fill
+    brand_fg        = "#404B5C"      # --brand-fg : version-pill text (== text_faint)
 
     # ── Status ───────────────────────────────────────────────────────────
     success         = "#4ADE80"   # --success
@@ -198,13 +210,34 @@ class Spacing:
 
 
 class Radii:
-    """Border-radius tokens (DESIGN_TOKENS.md §4)."""
+    """Border-radius tokens (DESIGN_TOKENS.md §4).
+
+    Tightened to a flat, near-rectangular "instrument-panel" feel — the shared
+    default for both bundled themes (``allwell-dark`` and ``allwell-grey``).
+    """
 
     xs   = 3     # --r-xs   : file chip, logo tile, tiny inline indicators
-    sm   = 5     # --r-sm   : buttons, inputs, chips — dominant radius
-    md   = 8     # --r-md   : cards (plot card, plate card, panel sections)
-    lg   = 12    # --r-lg   : floating overlays (toasts, drawers, dialogs)
+    sm   = 3     # --r-sm   : buttons, inputs, chips — dominant radius
+    md   = 4     # --r-md   : cards (plot card, plate card, panel sections)
+    lg   = 6     # --r-lg   : floating overlays (toasts, drawers, dialogs)
     pill = 999   # --r-pill : status dot rings, count badges
+
+
+class Metrics:
+    """Control padding tokens (px) — themeable for density.
+
+    Split out from :class:`Spacing` (a pure 4-px layout scale) so the *inside* of
+    buttons/inputs can be tightened (a denser, flatter "instrument-panel" control
+    feel) without disturbing the layout gutters. :func:`qss` reads these for the
+    button / tool-button / input / combo paddings. These tightened values are the
+    shared default for both bundled themes (``allwell-dark`` and ``allwell-grey``).
+    """
+
+    btn_pad_v    = 4   # QPushButton / QToolButton vertical padding
+    btn_pad_h    = 9   # QPushButton horizontal padding
+    toolbtn_pad_h = 4  # QToolButton horizontal padding (kept compact)
+    input_pad_v  = 4   # QLineEdit / QSpinBox / QComboBox vertical padding
+    input_pad_h  = 8   # …horizontal padding
 
 
 def _icon_path(name: str) -> str:
@@ -229,7 +262,7 @@ def qss() -> str:
     / :class:`Radii` / :class:`Spacing`; there are no hardcoded hex literals in
     the returned string.
     """
-    c, t, r, s = Colors, Typography, Radii, Spacing
+    c, t, r, s, m = Colors, Typography, Radii, Spacing, Metrics
     _chev = _icon_path("chevron-down.svg")
     _chev_up = _icon_path("chevron-up.svg")
     _check = _icon_path("check.svg")
@@ -315,18 +348,18 @@ QLabel#Warn    {{ color: {c.warn}; }}
 QPushButton, QToolButton {{
     background-color: {c.panel_elevated};
     color: {c.text_primary};
-    border: 1px solid {c.border_subtle};
+    border: 1px solid {c.control_border};
     border-radius: {r.sm}px;
-    padding: 6px 10px;
+    padding: {m.btn_pad_v}px {m.btn_pad_h}px;
     font-size: {t.small_size}px;
     font-weight: {t.medium};
 }}
 QToolButton {{
-    /* Match QPushButton's 6px vertical padding so tool buttons (Crop / Export /
+    /* Match QPushButton's vertical padding so tool buttons (Crop / Export /
        Build / More / Channels) are the same height as push buttons on toolbars;
        keep horizontal padding compact. The hasMenu padding-right caret rule
        below still overrides the right side. */
-    padding: 6px 4px;
+    padding: {m.btn_pad_v}px {m.toolbtn_pad_h}px;
 }}
 QPushButton:hover, QToolButton:hover {{
     background-color: {c.hover};
@@ -477,7 +510,7 @@ QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox {{
     color: {c.text_primary};
     border: 1px solid {c.border};
     border-radius: {r.sm}px;
-    padding: 5px 8px;
+    padding: {m.input_pad_v}px {m.input_pad_h}px;
     selection-background-color: {c.accent};
     selection-color: {c.accent_fg};
 }}
@@ -523,7 +556,7 @@ QComboBox {{
     color: {c.text_primary};
     border: 1px solid {c.border};
     border-radius: {r.sm}px;
-    padding: 5px 8px;
+    padding: {m.input_pad_v}px {m.input_pad_h}px;
 }}
 QComboBox:hover {{
     border-color: {c.border_strong};
@@ -781,3 +814,147 @@ QProgressBar::chunk {{
     border-radius: {r.sm}px;
 }}
 """
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Theme registry
+# ─────────────────────────────────────────────────────────────────────────────
+# A *theme* is a bundle of token overrides applied onto the token classes above
+# (``Colors`` / ``Metrics`` / ``Radii``) before the UI is built. Because
+# :func:`qss` reads those classes at call time and every ``widgets/*`` builder
+# reads ``theme.Colors.*`` at construction, applying a theme up-front (see
+# ``allwell.main`` → :func:`select_theme_from_env`) re-skins the whole app with
+# no per-widget rewiring. Selection is a dev-facing env var — ``ALLWELL_THEME``
+# — so there is no in-app live switch (which would need every cached inline QSS
+# rebuilt on ``QEvent.StyleChange``; see ARCHITECTURE.md §8). ``WELL_COLORS_TUPLE``
+# (categorical data identity) and ``CPub`` (white-bg publication export) are
+# deliberately theme-independent.
+
+import os as _os
+import logging as _logging
+
+_LOG = _logging.getLogger(__name__)
+
+DEFAULT_THEME = "allwell-dark"
+
+# Classes a theme bundle may override, by name.
+_THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
+
+# All-Well Grey: a neutral charcoal-grey chrome variant (colour-only) — restrained
+# azure accent, near-black image canvas, and a yellow version-pill text cue via
+# ``brand_fg``. Shares the flat, tight control feel (``Radii`` / ``Metrics``) with
+# ``allwell-dark``, so this bundle overrides *only* colours. (The look was designed
+# against real Nikon NIS-Elements AR screenshots; the ``control_border`` split lets
+# its buttons read as crisp toolbar controls without thickening panel dividers.)
+_ALLWELL_GREY = {
+    "Colors": {
+        "titlebar": "#191B1E", "surface": "#141618", "rail": "#1F2226",
+        "panel": "#24272C", "panel_elevated": "#2D3137", "hover": "#373C43",
+        "active": "#3E444D",
+        # Structural dividers (top-bar border, splitter handle, separators,
+        # panel edges) read this. Kept a touch darker than the surfaces so the
+        # region seams are subtle dark grooves rather than light lines. Control
+        # borders use ``border`` / ``control_border`` and stay crisp.
+        "border_subtle": "#101214", "border": "#3F444B", "border_strong": "#50565E",
+        "control_border": "#3F444B",
+        "text_primary": "#EAECEE", "text_secondary": "#B8BDC4",
+        "text_muted": "#878D95", "text_faint": "#5E646C",
+        "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
+        "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
+        # brand (pill fill) inherits the default 'transparent'; only the text
+        # colour differs, so just brand_fg is overridden.
+        "brand_fg": "#FFE100",
+        "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",
+        "plot_bg": "#0A0C10", "plot_grid": "#1D2128", "plot_spine": "#50565E",
+        "focus_ring": "rgba(45, 140, 235, 0.35)",
+    },
+}
+
+# name → override bundle. ``allwell-dark`` is the built-in default (no overrides;
+# the class values above are its palette). ``allwell-grey`` is a colour-only
+# variant sharing allwell-dark's Radii/Metrics.
+THEMES = {
+    DEFAULT_THEME: {},
+    "allwell-grey": _ALLWELL_GREY,
+}
+
+# Capture the default value of every attribute any theme may touch, so switching
+# back to ``allwell-dark`` (or between themes) restores untouched tokens.
+_THEME_DEFAULTS: dict = {}
+for _cname, _bundle in THEMES.items():
+    for _k, _attrs in _bundle.items():
+        _cls = _THEMEABLE_CLASSES[_k]
+        _slot = _THEME_DEFAULTS.setdefault(_k, {})
+        for _attr in _attrs:
+            if _attr not in _slot:
+                _slot[_attr] = getattr(_cls, _attr)
+
+_ACTIVE_THEME = DEFAULT_THEME
+_THEME_HOOKS: list = []
+
+
+def available_themes() -> tuple:
+    """Names of the registered themes (``ALLWELL_THEME`` accepts any of these)."""
+    return tuple(THEMES.keys())
+
+
+def active_theme() -> str:
+    """Name of the currently-applied theme."""
+    return _ACTIVE_THEME
+
+
+def register_theme_hook(fn):
+    """Register ``fn(name)`` to run after every :func:`apply_theme`.
+
+    Used by ``ui/theme/styles.py`` to re-derive its ``get_color()`` palette from
+    the freshly-applied ``Colors``. Idempotent; returns ``fn`` (usable as a
+    decorator).
+    """
+    if fn not in _THEME_HOOKS:
+        _THEME_HOOKS.append(fn)
+    return fn
+
+
+def apply_theme(name: str) -> str:
+    """Apply the named theme's token overrides onto the token classes.
+
+    Resets every themeable attribute to its captured default first, then applies
+    the bundle, so calls are idempotent and switching between themes is clean.
+    Fires the registered post-apply hooks. Raises ``KeyError`` for unknown names.
+    """
+    global _ACTIVE_THEME
+    if name not in THEMES:
+        raise KeyError(f"unknown theme {name!r}; choose from {available_themes()}")
+    # 1) restore defaults for anything any theme might have changed
+    for _cname, _defaults in _THEME_DEFAULTS.items():
+        _cls = _THEMEABLE_CLASSES[_cname]
+        for _attr, _val in _defaults.items():
+            setattr(_cls, _attr, _val)
+    # 2) apply this theme's overrides
+    for _cname, _attrs in THEMES[name].items():
+        _cls = _THEMEABLE_CLASSES[_cname]
+        for _attr, _val in _attrs.items():
+            setattr(_cls, _attr, _val)
+    _ACTIVE_THEME = name
+    for _hook in list(_THEME_HOOKS):
+        try:
+            _hook(name)
+        except Exception:  # a broken hook must not break theming
+            _LOG.exception("theme hook %r failed", _hook)
+    return name
+
+
+def select_theme_from_env(default: str = DEFAULT_THEME,
+                          var: str = "ALLWELL_THEME") -> str:
+    """Apply the theme named by the ``ALLWELL_THEME`` env var (dev-facing).
+
+    Falls back to ``default`` when the var is unset/blank or names an unknown
+    theme (logged). Returns the applied theme name. Call once at startup, before
+    building any widgets.
+    """
+    name = (_os.environ.get(var) or "").strip() or default
+    if name not in THEMES:
+        _LOG.warning("unknown %s=%r; falling back to %r (available: %s)",
+                     var, name, default, ", ".join(available_themes()))
+        name = default
+    return apply_theme(name)

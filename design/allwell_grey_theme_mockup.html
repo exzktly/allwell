@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="allwell-grey">
+<head>
+<meta charset="utf-8">
+<title>All-Well — All-Well Grey theme mockup</title>
+<style>
+/* ────────────────────────────────────────────────────────────────────────
+   Theme-token mockup of the All-Well shell. CSS variables mirror the Qt
+   design tokens in theme.py (Colors / Radii / Spacing). Toggle the
+   <html data-theme="..."> attribute to preview a theme. This file is a
+   design reference only — the real styling lives in theme.py's qss().
+   ──────────────────────────────────────────────────────────────────────── */
+
+:root[data-theme="allwell-dark"] {
+  --titlebar:#0A0E15; --surface:#0B0F17; --rail:#0E131C; --panel:#131A24;
+  --panel-elevated:#1A2230; --hover:#212B3B; --active:#2A3548;
+  --border-subtle:#1B2331; --border:#2A3343; --border-strong:#3B475C;
+  --text-primary:#E6E9EF; --text-secondary:#98A2B3; --text-muted:#5F6B7C; --text-faint:#404B5C;
+  --accent:#6B8AFD; --accent-hover:#84A0FF; --accent-pressed:#5772E6; --accent-dim:#2C3A66; --accent-fg:#F0F4FF;
+  --brand:transparent; --brand-fg:#404B5C;
+  --success:#4ADE80; --warn:#F59E0B; --danger:#F87171;
+  --plot-bg:#131A24; --plot-grid:#1F2733; --plot-spine:#3A4658;
+  --radius-sm:3px; --radius-md:4px; --radius-lg:6px;
+  --btn-border:var(--border-subtle); --btn-border-hover:var(--border);
+  --panel-hdr-bg:transparent; --panel-hdr-border:transparent; --input-bg:var(--panel-elevated);
+  --btn-pad-v:4px; --btn-pad-h:9px; --panel-pad:12px; --gap:6px; --nav-pad-v:6px; --content-pad:14px;
+  --btn-weight:500; --tab-underline:2px;
+}
+/* All-Well Grey — a colour-only variant: neutral charcoal-grey chrome + azure
+   accent, near-black image canvas, yellow version-pill text. Shares the flat,
+   tight control feel (radii/padding) with allwell-dark. (Designed against real
+   Nikon NIS-Elements AR screenshots.) */
+:root[data-theme="allwell-grey"] {
+  --titlebar:#191B1E; --surface:#141618; --rail:#1F2226; --panel:#24272C;
+  --panel-elevated:#2D3137; --hover:#373C43; --active:#3E444D;
+  --border-subtle:#101214; --border:#3F444B; --border-strong:#50565E;
+  --text-primary:#EAECEE; --text-secondary:#B8BDC4; --text-muted:#878D95; --text-faint:#5E646C;
+  --accent:#2D8CEB; --accent-hover:#43A0FF; --accent-pressed:#1668B8; --accent-dim:#22415E; --accent-fg:#FFFFFF;
+  --brand:transparent; --brand-fg:#FFE100;
+  --success:#3FB950; --warn:#FFB300; --danger:#F04747;
+  --plot-bg:#0A0C10; --plot-grid:#1D2128; --plot-spine:#50565E;
+  --radius-sm:3px; --radius-md:4px; --radius-lg:6px;
+  --btn-border:#3F444B; --btn-border-hover:#50565E;
+  --panel-hdr-bg:transparent; --panel-hdr-border:transparent; --input-bg:var(--panel-elevated);
+  --btn-pad-v:4px; --btn-pad-h:9px; --panel-pad:12px; --gap:6px; --nav-pad-v:6px; --content-pad:14px;
+  --btn-weight:600; --tab-underline:2px;
+}
+
+* { box-sizing:border-box; margin:0; padding:0; }
+html,body { background:var(--surface); }
+body {
+  font-family:"Inter","Segoe UI",system-ui,sans-serif;
+  font-size:13px; color:var(--text-primary);
+  width:1640px; height:980px; overflow:hidden;
+  display:flex; flex-direction:column;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── Title bar ─────────────────────────────────────────────────────── */
+.titlebar {
+  height:44px; background:var(--titlebar); border-bottom:1px solid var(--border-subtle);
+  display:flex; align-items:center; padding:0 14px; gap:10px; flex:0 0 auto;
+}
+.brand-tile {
+  width:24px; height:24px; border-radius:var(--radius-sm);
+  background:conic-gradient(from 200deg,#6AB2FB,#06F906,#FAAC38,#DF2020,#6AB2FB);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.15);
+}
+.app-title { font-size:17px; font-weight:600; letter-spacing:.2px; }
+.version-pill {
+  font-family:"JetBrains Mono","Consolas",monospace; font-size:11px; font-weight:600;
+  color:var(--brand-fg); padding:2px 7px; border-radius:var(--radius-sm); border:1px solid transparent;
+  background:var(--brand);
+}
+.spacer { flex:1 1 auto; }
+.icon-btn {
+  width:30px; height:30px; border-radius:var(--radius-sm);
+  border:1px solid transparent; background:transparent; color:var(--text-secondary);
+  display:flex; align-items:center; justify-content:center; font-size:15px; cursor:default;
+}
+.icon-btn:hover { background:var(--panel); }
+.icon-btn.on { color:var(--accent); background:var(--accent-dim); border-color:var(--accent); }
+
+/* ── Mode row ──────────────────────────────────────────────────────── */
+.moderow {
+  height:44px; background:var(--surface); border-bottom:1px solid var(--border-subtle);
+  display:flex; align-items:center; padding:0 14px; gap:10px; flex:0 0 auto;
+}
+.segmented {
+  display:flex; background:var(--panel-elevated); border:1px solid var(--border-subtle);
+  border-radius:var(--radius-sm); padding:2px; gap:2px; width:220px;
+}
+.segmented .seg {
+  flex:1; text-align:center; padding:5px 0; border-radius:calc(var(--radius-sm) - 1px);
+  font-size:12px; font-weight:var(--btn-weight); color:var(--text-secondary);
+}
+.segmented .seg.active { background:var(--accent); color:var(--accent-fg); box-shadow:0 1px 2px rgba(0,0,0,.3); }
+.btn {
+  background:var(--panel-elevated); color:var(--text-primary);
+  border:1px solid var(--btn-border); border-radius:var(--radius-sm);
+  padding:var(--btn-pad-v) var(--btn-pad-h); font-size:12px; font-weight:var(--btn-weight);
+  display:inline-flex; align-items:center; gap:6px; cursor:default; white-space:nowrap;
+}
+.btn:hover { background:var(--hover); border-color:var(--btn-border-hover); }
+.btn.primary { background:var(--accent); border-color:var(--accent); color:var(--accent-fg); font-weight:600; }
+.btn.ghost { background:transparent; border-color:transparent; color:var(--text-secondary); }
+.btn.small { padding:4px 8px; font-size:11px; }
+.btn .caret { color:var(--text-muted); font-size:9px; }
+
+/* ── Body split ────────────────────────────────────────────────────── */
+.body { flex:1 1 auto; display:flex; min-height:0; }
+
+/* ── Rail ──────────────────────────────────────────────────────────── */
+.rail {
+  width:340px; background:var(--rail); border-right:1px solid var(--border-subtle);
+  padding:14px 12px; display:flex; flex-direction:column; gap:2px; flex:0 0 auto; overflow:hidden;
+}
+.eyebrow { font-size:11px; font-weight:600; letter-spacing:.12em; color:var(--text-muted); text-transform:uppercase; margin-bottom:8px; }
+.navitem {
+  display:flex; align-items:center; gap:10px; padding:var(--nav-pad-v) 10px; border-radius:var(--radius-sm);
+  color:var(--text-secondary); font-size:13px; font-weight:500;
+}
+.navitem .ico { width:16px; text-align:center; color:var(--text-muted); }
+.navitem:hover { background:var(--panel); }
+.navitem.active { background:var(--accent-dim); color:var(--text-primary); }
+.navitem.active .ico { color:var(--accent); }
+.navitem.active { box-shadow:inset 2px 0 0 var(--accent); }
+
+.plate { margin:14px 4px 10px; display:grid; grid-template-columns:16px repeat(12,1fr); gap:5px; }
+.plate .col-h, .plate .row-h { font-size:10px; color:var(--text-muted); text-align:center; align-self:center; }
+.plate .well { width:20px; height:20px; border-radius:50%; background:var(--panel-elevated); border:1px solid var(--border); }
+.plate .well.on { background:var(--accent); border-color:var(--accent-pressed); }
+.railbtns { display:flex; gap:8px; margin:4px 0 8px; }
+.railnote { font-size:12px; color:var(--text-muted); margin-top:6px; line-height:1.5; }
+.railnote b { color:var(--text-secondary); font-weight:600; }
+.collapse { margin-top:auto; font-size:13px; color:var(--text-secondary); padding-top:10px; border-top:1px solid var(--border-subtle); }
+
+/* ── Center ────────────────────────────────────────────────────────── */
+.center { flex:1 1 auto; display:flex; flex-direction:column; min-width:0; background:var(--surface); }
+.subtabs { display:flex; gap:22px; padding:12px 18px 0; border-bottom:1px solid var(--border-subtle); }
+.subtab { padding-bottom:10px; font-size:13px; font-weight:500; color:var(--text-muted); border-bottom:var(--tab-underline) solid transparent; }
+.subtab.active { color:var(--text-primary); border-bottom-color:var(--accent); }
+.content { padding:var(--content-pad) 16px; overflow:hidden; display:flex; flex-direction:column; gap:var(--gap); }
+
+.buildrow { display:flex; align-items:center; gap:10px; font-size:13px; }
+.buildrow .k { color:var(--text-secondary); font-weight:600; }
+.buildrow .v { color:var(--accent); font-family:"JetBrains Mono",monospace; font-size:12px; }
+.buildrow .mut { color:var(--text-muted); }
+
+.panel { background:var(--panel); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:var(--panel-pad); }
+.panel > .hdr { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:10px;
+  margin-left:calc(-1 * var(--panel-pad)); margin-right:calc(-1 * var(--panel-pad)); margin-top:calc(-1 * var(--panel-pad));
+  padding:6px var(--panel-pad); background:var(--panel-hdr-bg);
+  border-bottom:1px solid var(--panel-hdr-border); border-radius:var(--radius-md) var(--radius-md) 0 0; }
+.panel > .hdr .hint { color:var(--text-muted); font-weight:400; margin-left:8px; }
+.row2 { display:grid; grid-template-columns:1fr 1fr; gap:var(--gap); }
+
+.chip {
+  display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:var(--radius-sm);
+  background:var(--panel-elevated); border:1px solid var(--border); font-size:12px; font-weight:500;
+}
+.chip .dot { width:9px; height:9px; border-radius:2px; }
+.chip.grip::before { content:"⠿"; color:var(--text-muted); margin-right:2px; }
+.chips { display:flex; gap:8px; flex-wrap:wrap; }
+.chip.sel { background:var(--accent-dim); border-color:var(--accent); }
+
+.field { display:flex; align-items:center; gap:8px; background:var(--input-bg); border:1px solid var(--border);
+  border-radius:var(--radius-sm); padding:6px 10px; margin-bottom:8px; }
+.field .grip { color:var(--text-muted); }
+.field .name { flex:1; font-size:12px; font-weight:500; }
+.input { background:var(--input-bg); border:1px solid var(--border); border-radius:var(--radius-sm);
+  padding:5px 8px; font-size:12px; color:var(--text-primary); min-width:64px; }
+.input.focus { border-color:var(--accent); }
+.toggles { display:inline-flex; background:var(--panel-elevated); border:1px solid var(--border-subtle);
+  border-radius:var(--radius-sm); padding:2px; gap:2px; margin-top:10px; }
+.toggles .t { padding:5px 12px; font-size:12px; font-weight:var(--btn-weight); color:var(--text-secondary); border-radius:calc(var(--radius-sm) - 1px); }
+.toggles .t.on { background:var(--accent-dim); border:1px solid var(--accent); color:var(--text-primary); }
+
+.actionbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.actionbar .sep { color:var(--text-faint); }
+.plotcard { flex:1 1 auto; background:var(--plot-bg); border:1px solid var(--border-subtle);
+  border-radius:var(--radius-md); min-height:160px; display:flex; align-items:center; justify-content:center;
+  color:var(--text-faint); position:relative; overflow:hidden; }
+.plotcard .grid { position:absolute; inset:0;
+  background-image:linear-gradient(var(--plot-grid) 1px,transparent 1px),linear-gradient(90deg,var(--plot-grid) 1px,transparent 1px);
+  background-size:44px 34px; opacity:.5; }
+.plotcard .title { position:absolute; top:12px; left:14px; color:var(--accent); font-weight:600; font-size:14px; }
+.plotcard .ph { font-size:40px; opacity:.4; }
+
+/* ── Status bar ────────────────────────────────────────────────────── */
+.statusbar { height:34px; background:var(--titlebar); border-top:1px solid var(--border-subtle);
+  display:flex; align-items:center; padding:0 14px; gap:14px; font-size:12px; color:var(--text-secondary); flex:0 0 auto; }
+.statusbar .mut { color:var(--text-muted); }
+.pillchip { padding:3px 9px; border-radius:var(--radius-sm); background:var(--panel-elevated); border:1px solid var(--border-subtle); font-size:11px; }
+.kbd { padding:2px 6px; border-radius:var(--radius-sm); background:var(--panel); border:1px solid var(--border-subtle);
+  font-family:"JetBrains Mono",monospace; font-size:10px; color:var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- Title bar -->
+<div class="titlebar">
+  <div class="brand-tile"></div>
+  <div class="app-title">All-Well</div>
+  <div class="version-pill">v8.8.13</div>
+  <div class="spacer"></div>
+  <div class="icon-btn">⟳</div>
+  <div class="icon-btn on">🖼</div>
+  <div class="icon-btn">🗑</div>
+  <div class="icon-btn">⌂</div>
+  <div class="icon-btn">↺</div>
+  <div class="icon-btn">ⓘ</div>
+</div>
+
+<!-- Mode row -->
+<div class="moderow">
+  <div class="segmented"><div class="seg active">◉ Review</div><div class="seg">⋮ Analyze</div></div>
+  <div class="icon-btn">⯈</div>
+  <div class="spacer"></div>
+  <div class="btn primary">Open…</div>
+  <div class="btn ghost">▤</div>
+</div>
+
+<!-- Body -->
+<div class="body">
+
+  <!-- Rail -->
+  <div class="rail">
+    <div class="eyebrow">Section</div>
+    <div class="navitem"><span class="ico">📈</span>Plotting</div>
+    <div class="navitem"><span class="ico">Σ</span>Statistics</div>
+    <div class="navitem"><span class="ico">◇</span>Multivariate</div>
+    <div class="navitem"><span class="ico">⬚</span>Spatial</div>
+    <div class="navitem active"><span class="ico">▦</span>Image Browser</div>
+    <div class="navitem"><span class="ico">◎</span>smFISH</div>
+    <div class="navitem"><span class="ico">▤</span>Review CSV</div>
+    <div class="navitem"><span class="ico">◷</span>Sample Definitions</div>
+    <div class="navitem"><span class="ico">▧</span>Saved Plots</div>
+    <div class="navitem"><span class="ico">⤓</span>Batch Export</div>
+
+    <div class="plate">
+      <div class="col-h"></div>
+      <div class="col-h">1</div><div class="col-h">2</div><div class="col-h">3</div><div class="col-h">4</div>
+      <div class="col-h">5</div><div class="col-h">6</div><div class="col-h">7</div><div class="col-h">8</div>
+      <div class="col-h">9</div><div class="col-h">10</div><div class="col-h">11</div><div class="col-h">12</div>
+      <!-- rows A..H -->
+      <div class="row-h">A</div><div class="well on"></div><div class="well on"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">B</div><div class="well on"></div><div class="well on"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">C</div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">D</div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">E</div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">F</div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">G</div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+      <div class="row-h">H</div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div><div class="well"></div>
+    </div>
+    <div class="railbtns"><div class="btn small">Select All</div><div class="btn small">Clear</div></div>
+    <div class="railnote">4 wells active</div>
+    <div class="railnote">Select wells here, choose channels in the <b>Build Layout</b> row, then press <b>Build table</b> followed by Generate.</div>
+    <div class="collapse">▸ Plot Groups</div>
+  </div>
+
+  <!-- Center -->
+  <div class="center">
+    <div class="subtabs">
+      <div class="subtab active">Image Table</div>
+      <div class="subtab">Segmentation</div>
+      <div class="subtab">Cell Browser</div>
+      <div class="subtab">Playground</div>
+    </div>
+    <div class="content">
+      <div class="buildrow">
+        <span class="k">Build</span>
+        <span class="v">[GFP,MCHERRY,DAPI,NUC+SEG] ▾</span>
+        <span class="mut">Timepoint →</span>
+        <span class="mut">fixed Well=A01, FOV=1</span>
+        <div class="spacer"></div>
+        <span class="mut" style="font-size:12px">Wrap cols</span>
+        <span class="input" style="min-width:52px">0 ⌄</span>
+        <div class="btn">Clear builder</div>
+      </div>
+
+      <div class="panel">
+        <div class="hdr">Channels <span class="hint">drag onto a root to nest it</span></div>
+        <div class="chips">
+          <div class="chip grip"><span class="dot" style="background:#06F906"></span>GFP</div>
+          <div class="chip grip"><span class="dot" style="background:#DF2020"></span>MCHERRY</div>
+          <div class="chip grip"><span class="dot" style="background:#0606F9"></span>DAPI</div>
+          <div class="chip grip"><span class="dot" style="background:#D406F9"></span>NUC+SEG</div>
+        </div>
+      </div>
+
+      <div class="row2">
+        <div class="panel">
+          <div class="hdr">Rows <span class="hint">root ↓ · channels nested</span></div>
+          <div class="field"><span class="grip">⠿</span><span class="dot" style="width:9px;height:9px;border-radius:2px;background:#06F906"></span><span class="name">GFP</span><span class="btn small ghost">✎ corr</span><span class="btn small ghost">✕</span></div>
+          <div class="field"><span class="grip">⠿</span><span class="dot" style="width:9px;height:9px;border-radius:2px;background:#DF2020"></span><span class="name">MCHERRY</span><span class="btn small ghost">✎ corr</span><span class="btn small ghost">✕</span></div>
+          <div class="field"><span class="grip">⠿</span><span class="dot" style="width:9px;height:9px;border-radius:2px;background:#0606F9"></span><span class="name">DAPI</span><span class="btn small ghost">✎ corr</span><span class="btn small ghost">✕</span></div>
+          <div class="toggles"><div class="t on">Separate</div><div class="t">⬚ Overlay</div></div>
+        </div>
+        <div class="panel">
+          <div class="hdr">Columns <span class="hint">root → · channels nested</span></div>
+          <div class="chip sel" style="width:100%;justify-content:space-between"><span><span class="dot" style="background:var(--warn)"></span>&nbsp;Timepoint</span><span style="color:var(--text-muted)">✕</span></div>
+          <div class="railnote" style="margin-top:12px">drop channels here</div>
+          <div style="height:40px"></div>
+          <div class="field" style="margin-top:8px"><span class="grip">⠿</span><span class="name">Well =</span><span class="input">A01 ⌄</span><span class="mut" style="color:var(--text-muted);font-size:11px">(from plate)</span></div>
+        </div>
+      </div>
+
+      <div class="actionbar">
+        <div class="btn primary">Generate</div>
+        <div class="btn">Reset table</div>
+        <div class="btn">Clear images</div>
+        <div class="btn">Crop <span class="caret">▾</span></div>
+        <span class="sep">|</span>
+        <span class="mut" style="color:var(--text-muted)">ON threshold</span>
+        <div class="btn">GFP <span class="caret">▾</span></div>
+        <span class="input focus" style="min-width:74px">50.0 ⌄</span>
+        <div class="btn">Export <span class="caret">▾</span></div>
+        <div class="spacer"></div>
+        <span class="mut" style="color:var(--text-muted)">Zoom</span>
+        <div class="btn small">−</div><span class="pillchip">100%</span><div class="btn small">+</div>
+      </div>
+
+      <div class="plotcard">
+        <div class="grid"></div>
+        <div class="title">Image Table</div>
+        <div class="ph">🖼</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Status bar -->
+<div class="statusbar">
+  <span><b style="color:var(--text-primary)">4 well(s)</b> <span class="mut">| 72 nuclei</span></span>
+  <div class="spacer"></div>
+  <span class="pillchip">Threshold 50</span>
+  <span class="pillchip">Band SEM</span>
+  <span class="pillchip">Log ▴</span>
+  <span class="mut">Open <span class="kbd">⌘O</span></span>
+  <span class="mut">Help <span class="kbd">⌘/</span></span>
+  <span class="mut">Export <span class="kbd">⌘E</span></span>
+</div>
+
+</body>
+</html>

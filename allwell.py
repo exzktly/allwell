@@ -187,8 +187,10 @@ class AllWellApp(QMainWindow):
 
     # ── UI construction ──────────────────────────────────────────────────
     def _apply_stylesheet(self) -> None:
-        # Single source of truth for the app stylesheet — see theme.py.
-        # Ships one dark theme; there is no per-theme QSS to swap.
+        # Single source of truth for the app stylesheet — see theme.py. The
+        # active theme's tokens are already applied by ``main`` (via
+        # ``theme.select_theme_from_env``) before this runs, so ``qss()`` here
+        # reflects the selected theme (ALLWELL_THEME); default is allwell-dark.
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(theme_v2.qss())
@@ -218,11 +220,16 @@ class AllWellApp(QMainWindow):
         # Phase 10 (B2): version pill next to wordmark.
         self._version_pill = QLabel(f"v{_APP_VERSION}")
         self._version_pill.setObjectName("VersionPill")
+        # Brand pill. Reads the theme-swappable ``brand`` / ``brand_fg`` tokens:
+        # the default palette makes it a transparent, faint-text label; the
+        # All-Well Grey theme keeps it transparent with yellow text.
         self._version_pill.setStyleSheet(
-            f"color: {theme_v2.Colors.text_faint}; "
+            f"background-color: {theme_v2.Colors.brand}; "
+            f"color: {theme_v2.Colors.brand_fg}; "
             f"font-family: {theme_v2.Typography.family_mono}; "
             f"font-size: {theme_v2.Typography.caption_size}px; "
-            f"font-weight: 500; padding-left: 4px;"
+            f"font-weight: 600; padding: 1px 6px; margin-left: 4px; "
+            f"border-radius: {theme_v2.Radii.xs}px;"
         )
         hl.addWidget(self._version_pill)
 
@@ -1342,6 +1349,8 @@ def main() -> None:
     )
     ap.add_argument("--data_dir", type=Path, default=None,
                     help="Pre-load a results directory into the Review tab on startup.")
+    ap.add_argument("--theme", default=None, choices=theme_v2.available_themes(),
+                    help="UI theme (overrides the ALLWELL_THEME env var).")
     args = ap.parse_args()
 
     _boot_diag.boot("creating QApplication (loads Qt platform plugin) …")
@@ -1378,6 +1387,14 @@ def main() -> None:
         ).family()
     except Exception:
         theme_v2.Typography.family_mono = _mono_family or ""
+    # Select the UI theme (dev-facing ALLWELL_THEME env var) BEFORE building any
+    # widgets, so qss() and every widget's cached inline QSS pick up its tokens.
+    # Importing ui.theme.styles here guarantees its theme-refresh hook is
+    # registered before the theme is applied, so get_color() tracks the theme.
+    import ui.theme.styles as _ui_styles  # noqa: F401  (registers a theme hook)
+    _active_theme = (theme_v2.apply_theme(args.theme) if args.theme
+                     else theme_v2.select_theme_from_env())
+    _boot_diag.boot(f"theme applied: {_active_theme}")
     app.setStyleSheet(theme_v2.qss())
     _boot_diag.boot("building main window (AllWellApp) …")
     win = AllWellApp(data_path=args.data_dir)

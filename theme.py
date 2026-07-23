@@ -848,18 +848,20 @@ _THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
 # its buttons read as crisp toolbar controls without thickening panel dividers.)
 _ALLWELL_GREY = {
     "Colors": {
-        "titlebar": "#202225", "surface": "#1B1D1F", "rail": "#26292D",
-        "panel": "#2B2E33", "panel_elevated": "#34383E", "hover": "#3E434A",
-        "active": "#454B54",
-        "border_subtle": "#3A3E44", "border": "#454A51", "border_strong": "#565C64",
-        "control_border": "#454A51",
+        "titlebar": "#191B1E", "surface": "#141618", "rail": "#1F2226",
+        "panel": "#24272C", "panel_elevated": "#2D3137", "hover": "#373C43",
+        "active": "#3E444D",
+        "border_subtle": "#34383E", "border": "#3F444B", "border_strong": "#50565E",
+        "control_border": "#3F444B",
         "text_primary": "#EAECEE", "text_secondary": "#B8BDC4",
         "text_muted": "#878D95", "text_faint": "#5E646C",
         "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
         "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
-        "brand": "transparent", "brand_fg": "#FFE100",
+        # brand (pill fill) inherits the default 'transparent'; only the text
+        # colour differs, so just brand_fg is overridden.
+        "brand_fg": "#FFE100",
         "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",
-        "plot_bg": "#101216", "plot_grid": "#23272E", "plot_spine": "#565C64",
+        "plot_bg": "#0A0C10", "plot_grid": "#1D2128", "plot_spine": "#50565E",
         "focus_ring": "rgba(45, 140, 235, 0.35)",
     },
 }

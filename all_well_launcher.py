@@ -132,6 +132,24 @@ else:
 sys.path.insert(0, str(_BUNDLE_DIR))
 
 
+def _apply_baked_theme() -> None:
+    """Apply a build-time-baked default UI theme, if the bundle carries one.
+
+    ``ALLWELL_THEME=<name> scripts/build_executable.sh`` writes
+    ``allwell_theme.txt`` at the bundle root (mirroring the profile marker). Read
+    it and ``setdefault`` the env var so ``allwell.main`` picks it up — while a
+    runtime ``ALLWELL_THEME`` env var or ``--theme`` flag still overrides (soft).
+    No-op when running from source or from an unthemed build.
+    """
+    import os
+    try:
+        name = (_BUNDLE_DIR / "allwell_theme.txt").read_text(encoding="utf-8").strip()
+    except OSError:
+        return
+    if name:
+        os.environ.setdefault("ALLWELL_THEME", name)
+
+
 def _dispatch() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "--run-pipeline":
         # Strip the sentinel so process_microscopy's argparse sees
@@ -172,6 +190,7 @@ def _dispatch() -> None:
         sys.modules["_bootstrap_lib"] = _mod
         _spec.loader.exec_module(_mod)
         sys.exit(_mod.main())
+    _apply_baked_theme()
     from allwell import main
     main()
 

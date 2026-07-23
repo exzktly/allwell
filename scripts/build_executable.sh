@@ -50,6 +50,15 @@ fi
 if [[ -n "${ALLWELL_PROFILE:-}" && "${ALLWELL_PROFILE}" != "full" ]]; then
     echo "  (ALLWELL_PROFILE=${ALLWELL_PROFILE} — building a feature subset)"
 fi
+# Build-time THEME selection (soft default): choose which UI theme the frozen app
+# starts on. The spec bakes ``allwell_theme.txt`` into the bundle and the launcher
+# setdefault()s ALLWELL_THEME from it, so the shipped exe defaults to this theme
+# while a runtime ``ALLWELL_THEME`` / ``--theme`` still overrides. Unset = 'blue'.
+# Example (a grey-by-default build):
+#   ALLWELL_THEME=grey scripts/build_executable.sh
+if [[ -n "${ALLWELL_THEME:-}" ]]; then
+    echo "  (ALLWELL_THEME=${ALLWELL_THEME} — baking as the default theme; runtime-overridable)"
+fi
 echo "Running PyInstaller against $SPEC_FILE ..."
 pyinstaller "$SPEC_FILE" --noconfirm --log-level "${ALLWELL_LOG_LEVEL:-INFO}"
 

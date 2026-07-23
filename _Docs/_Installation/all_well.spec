@@ -248,6 +248,23 @@ if _profile_active:
     _marker_path.write_text(_PROFILE, encoding="utf-8")
     extra_data.append((str(_marker_path), "."))
 
+# Build-time THEME selection (soft): ``ALLWELL_THEME=<name> scripts/build_executable.sh``
+# bakes ``allwell_theme.txt`` at the bundle root; all_well_launcher._apply_baked_theme
+# reads it and setdefault()s ALLWELL_THEME, so the frozen app starts on that theme
+# while a runtime ALLWELL_THEME / --theme still overrides. Unknown names are ignored
+# (the build stays on the default 'blue'). Mirrors the profile marker above.
+_BAKED_THEME = os.environ.get("ALLWELL_THEME", "").strip()
+if _BAKED_THEME:
+    import theme as _thememod  # Qt-free; safe at build time
+    if _BAKED_THEME in _thememod.available_themes():
+        _theme_marker = Path(_tempfile.mkdtemp()) / "allwell_theme.txt"
+        _theme_marker.write_text(_BAKED_THEME, encoding="utf-8")
+        extra_data.append((str(_theme_marker), "."))
+        print(f"[all_well.spec] ALLWELL_THEME={_BAKED_THEME!r} — baking as the default theme")
+    else:
+        print(f"[all_well.spec] WARNING: ALLWELL_THEME={_BAKED_THEME!r} is not a known theme "
+              f"({_thememod.available_themes()}); not baking — the build defaults to 'blue'.")
+
 datas = sibling_scripts + [mpl_data, stardist_data, csbdeep_data] + extra_data
 
 

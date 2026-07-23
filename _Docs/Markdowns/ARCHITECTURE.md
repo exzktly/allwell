@@ -1560,6 +1560,12 @@ per-widget rewiring**.
   calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
   var. `tests/visual/render_views.py` honours it too, so
   `ALLWELL_THEME=grey … render_views.py` audits any theme.
+- **Build-time default (soft).** `ALLWELL_THEME=<name> scripts/build_executable.sh`
+  bakes `allwell_theme.txt` at the frozen bundle root (mirroring the profile
+  marker); `all_well_launcher._apply_baked_theme` reads it and `setdefault`s the
+  env var, so the shipped exe starts on that theme while a runtime `ALLWELL_THEME`
+  / `--theme` still overrides. The `.spec` validates the name against
+  `theme.available_themes()` and skips baking an unknown one (build stays `blue`).
 - **Startup-only, by design.** There is no in-app live switch — a runtime swap
   would need every cached inline QSS rebuilt on `QEvent.StyleChange` (see the
   per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is

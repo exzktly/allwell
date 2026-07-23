@@ -78,6 +78,19 @@ _EXPORT_FILTER_ORDER = ("png", "tiff", "svg", "eps", "pdf")
 # them. See ``well_viewer.core.plot_style.apply_export_style_prefs``.
 _PER_AXIS_FONT_KEYS = ("tick_label_size", "axis_label_size", "title_size")
 
+# Every OTHER control under the "Axis #" selector in the Axes section — tick
+# rotation, tick length / direction / visibility, and the bar group-label size.
+# These share the font keys' semantics (per-axis bucket overriding a shared
+# global baseline, "All" resets), so the whole Axes section is scoped by "Axis #"
+# instead of a subset silently applying to every panel. ``apply_export_style_prefs``
+# reads each of these per-axis (via ``_axis_style``); the bar renderer reads
+# ``group_label_size`` per-axis via ``axis_scoped_value``.
+_PER_AXIS_STYLE_KEYS = (
+    *_PER_AXIS_FONT_KEYS,
+    "x_tick_angle", "group_label_size",
+    "tick_major", "tick_minor", "tick_length", "tick_direction",
+)
+
 
 class ExportStyleSidebar(QWidget):
     def __init__(self, app, parent, fig, canvas, default_name: str):
@@ -311,10 +324,12 @@ class ExportStyleSidebar(QWidget):
         self._axis_keys = (
             "x_lim_min", "x_lim_max", "y_lim_min", "y_lim_max",
             "x_log", "y_log",
-            # Font sizes are per-axis too: an "Axis #" selection scopes tick /
-            # axis-label / title sizes to that one panel; "All" applies to every
-            # panel. Stored in the same per-axis buckets as the limits.
-            *_PER_AXIS_FONT_KEYS,
+            # Everything else under the "Axis #" selector is per-axis too: an
+            # "Axis #" selection scopes the tick sizes, tick rotation, tick
+            # length / direction / visibility, and group-label size to that one
+            # panel; "All" applies to every panel. Stored in the same per-axis
+            # buckets as the limits.
+            *_PER_AXIS_STYLE_KEYS,
         )
         self._axis_buckets: dict[str, dict] = dict(self._prefs.get("axis_buckets") or {})
         # Default the targeted axis to the subplot showing the active metric (so
@@ -818,10 +833,12 @@ class ExportStyleSidebar(QWidget):
         _t_getter = self._getters.get("axis_target")
         target = str(_t_getter()) if _t_getter is not None else "All"
         for k, getter in self._getters.items():
-            # Per-axis font sizes must not leak into the shared global style when
-            # a single axis is targeted — they live only in that axis's bucket.
-            # (When "All" is selected they *do* write the global baseline.)
-            if k in _PER_AXIS_FONT_KEYS and target != "All":
+            # Per-axis Axes-section controls (font sizes, tick rotation / length /
+            # direction / visibility, group-label size) must not leak into the
+            # shared global style when a single axis is targeted — they live only
+            # in that axis's bucket. (When "All" is selected they *do* write the
+            # global baseline.)
+            if k in _PER_AXIS_STYLE_KEYS and target != "All":
                 continue
             self._prefs[k] = getter()
         # Mirror the axis-specific keys into the bucket for the currently
@@ -831,13 +848,13 @@ class ExportStyleSidebar(QWidget):
         for k in self._axis_keys:
             g = self._getters.get(k)
             bucket[k] = g() if g is not None else self._prefs.get(k)
-        # An "All" font edit resets every panel: drop the per-axis font overrides
-        # so they fall back to the freshly-set global size.
+        # An "All" edit resets every panel: drop the per-axis overrides for the
+        # Axes-section style keys so they fall back to the freshly-set global value.
         if target == "All":
             for i in range(1, len(self._fig.axes) + 1):
                 b = self._axis_buckets.get(str(i))
                 if b:
-                    for k in _PER_AXIS_FONT_KEYS:
+                    for k in _PER_AXIS_STYLE_KEYS:
                         b.pop(k, None)
         self._prefs["axis_buckets"] = self._axis_buckets
 
@@ -919,10 +936,11 @@ class ExportStyleSidebar(QWidget):
                     continue
                 if k in new_bucket and new_bucket[k] is not None:
                     setter(new_bucket[k])
-                elif k in _PER_AXIS_FONT_KEYS:
-                    # A panel with no font override shows the current global size
-                    # (not the neutral default), so switching axes doesn't make
-                    # the field misreport what's actually rendered.
+                elif k in _PER_AXIS_STYLE_KEYS:
+                    # A panel with no override for an Axes-section style key shows
+                    # the current global value (not the neutral default), so
+                    # switching axes doesn't make the field misreport what's
+                    # actually rendered.
                     setter(self._prefs.get(k, DEFAULT_EXPORT_STYLE_PREFS[k]))
                 else:
                     setter(DEFAULT_EXPORT_STYLE_PREFS[k])

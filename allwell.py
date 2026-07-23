@@ -221,8 +221,8 @@ class AllWellApp(QMainWindow):
         self._version_pill = QLabel(f"v{_APP_VERSION}")
         self._version_pill.setObjectName("VersionPill")
         # Brand pill. Reads the theme-swappable ``brand`` / ``brand_fg`` tokens:
-        # the default palette makes it a transparent, faint-text label (as
-        # before); a branded theme (Nikon Elements) fills it Nikon-yellow.
+        # the default palette makes it a transparent, faint-text label; the
+        # All-Well Grey theme keeps it transparent with yellow text.
         self._version_pill.setStyleSheet(
             f"background-color: {theme_v2.Colors.brand}; "
             f"color: {theme_v2.Colors.brand_fg}; "

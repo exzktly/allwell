@@ -66,7 +66,7 @@ class Colors:
     border_strong   = "#3B475C"   # --border-strong : hover/focus ring on inputs
     # Resting border on push/tool buttons. Defaults to the same subtle hairline
     # buttons used before it was split out; a theme can make buttons read as
-    # crisp "toolbar" controls (e.g. Nikon Elements) without also thickening
+    # crisp "toolbar" controls (e.g. All-Well Grey) without also thickening
     # every panel/divider that reads ``border_subtle``.
     control_border  = "#1B2331"   # --control-border : QPushButton / QToolButton edge
 
@@ -86,7 +86,7 @@ class Colors:
     # ── Brand cue (version pill) ─────────────────────────────────────────
     # A small, theme-swappable brand chip. The default palette keeps it a
     # transparent, faint-text pill (visually the pre-existing version label);
-    # a branded theme (e.g. Nikon Elements) can fill it — see ``THEMES``.
+    # a variant theme (e.g. All-Well Grey) can recolour the text — see ``THEMES``.
     brand           = "transparent"  # --brand    : version-pill fill
     brand_fg        = "#404B5C"      # --brand-fg : version-pill text (== text_faint)
 
@@ -210,30 +210,33 @@ class Spacing:
 
 
 class Radii:
-    """Border-radius tokens (DESIGN_TOKENS.md §4)."""
+    """Border-radius tokens (DESIGN_TOKENS.md §4).
+
+    Tightened to a flat, near-rectangular "instrument-panel" feel — the shared
+    default for both bundled themes (``allwell-dark`` and ``allwell-grey``).
+    """
 
     xs   = 3     # --r-xs   : file chip, logo tile, tiny inline indicators
-    sm   = 5     # --r-sm   : buttons, inputs, chips — dominant radius
-    md   = 8     # --r-md   : cards (plot card, plate card, panel sections)
-    lg   = 12    # --r-lg   : floating overlays (toasts, drawers, dialogs)
+    sm   = 3     # --r-sm   : buttons, inputs, chips — dominant radius
+    md   = 4     # --r-md   : cards (plot card, plate card, panel sections)
+    lg   = 6     # --r-lg   : floating overlays (toasts, drawers, dialogs)
     pill = 999   # --r-pill : status dot rings, count badges
 
 
 class Metrics:
     """Control padding tokens (px) — themeable for density.
 
-    Split out from :class:`Spacing` (a pure 4-px layout scale) so a theme can
-    tighten the *inside* of buttons/inputs (a denser, flatter "instrument-panel"
-    control feel) without disturbing the layout gutters. :func:`qss` reads these
-    for the button / tool-button / input / combo paddings; the defaults below
-    reproduce the values those rules used before they were tokenised, so an
-    unthemed build is byte-identical.
+    Split out from :class:`Spacing` (a pure 4-px layout scale) so the *inside* of
+    buttons/inputs can be tightened (a denser, flatter "instrument-panel" control
+    feel) without disturbing the layout gutters. :func:`qss` reads these for the
+    button / tool-button / input / combo paddings. These tightened values are the
+    shared default for both bundled themes (``allwell-dark`` and ``allwell-grey``).
     """
 
-    btn_pad_v    = 6   # QPushButton / QToolButton vertical padding
-    btn_pad_h    = 10  # QPushButton horizontal padding
+    btn_pad_v    = 4   # QPushButton / QToolButton vertical padding
+    btn_pad_h    = 9   # QPushButton horizontal padding
     toolbtn_pad_h = 4  # QToolButton horizontal padding (kept compact)
-    input_pad_v  = 5   # QLineEdit / QSpinBox / QComboBox vertical padding
+    input_pad_v  = 4   # QLineEdit / QSpinBox / QComboBox vertical padding
     input_pad_h  = 8   # …horizontal padding
 
 
@@ -837,12 +840,13 @@ DEFAULT_THEME = "allwell-dark"
 # Classes a theme bundle may override, by name.
 _THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
 
-# Nikon NIS-Elements (dark). Grounded in real NIS-Elements AR screenshots:
-# neutral charcoal chrome, restrained NIS-azure accent, flat near-rectangular
-# hairline-bordered buttons (crisp ``control_border`` + small radii + tighter
-# ``Metrics`` padding), near-black image canvas. Nikon-yellow (#FFE100) is
-# reserved for the brand pill via ``brand`` / ``brand_fg``.
-_NIKON_ELEMENTS = {
+# All-Well Grey: a neutral charcoal-grey chrome variant (colour-only) — restrained
+# azure accent, near-black image canvas, and a yellow version-pill text cue via
+# ``brand_fg``. Shares the flat, tight control feel (``Radii`` / ``Metrics``) with
+# ``allwell-dark``, so this bundle overrides *only* colours. (The look was designed
+# against real Nikon NIS-Elements AR screenshots; the ``control_border`` split lets
+# its buttons read as crisp toolbar controls without thickening panel dividers.)
+_ALLWELL_GREY = {
     "Colors": {
         "titlebar": "#202225", "surface": "#1B1D1F", "rail": "#26292D",
         "panel": "#2B2E33", "panel_elevated": "#34383E", "hover": "#3E434A",
@@ -858,18 +862,14 @@ _NIKON_ELEMENTS = {
         "plot_bg": "#101216", "plot_grid": "#23272E", "plot_spine": "#565C64",
         "focus_ring": "rgba(45, 140, 235, 0.35)",
     },
-    "Metrics": {
-        "btn_pad_v": 4, "btn_pad_h": 9, "toolbtn_pad_h": 4,
-        "input_pad_v": 4, "input_pad_h": 8,
-    },
-    "Radii": {"sm": 3, "md": 4, "lg": 6},
 }
 
 # name → override bundle. ``allwell-dark`` is the built-in default (no overrides;
-# the class values above are its palette).
+# the class values above are its palette). ``allwell-grey`` is a colour-only
+# variant sharing allwell-dark's Radii/Metrics.
 THEMES = {
     DEFAULT_THEME: {},
-    "nikon-elements": _NIKON_ELEMENTS,
+    "allwell-grey": _ALLWELL_GREY,
 }
 
 # Capture the default value of every attribute any theme may touch, so switching

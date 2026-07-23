@@ -1547,17 +1547,19 @@ per-widget rewiring**.
 
 - `theme.THEMES` maps a name → sparse override bundle. Built-ins:
   `allwell-dark` (the default; the class values are its palette) and
-  `nikon-elements` (neutral charcoal chrome, NIS-azure accent, flat
-  hairline-bordered buttons via `control_border` + small radii + tighter
-  `Metrics` padding, near-black plot canvas; Nikon-yellow reserved for the
-  version pill via `Colors.brand` / `brand_fg`).
+  `allwell-grey` (a **colour-only** variant — neutral charcoal-grey chrome, azure
+  accent, near-black plot canvas, yellow version-pill text via `Colors.brand_fg`).
+  Both share the flat, tight control feel: the `Radii`/`Metrics` defaults
+  (small radii + crisp `control_border` + compact padding) are app-wide, so the
+  `allwell-grey` bundle overrides only `Colors`. (Its look was designed against
+  real Nikon NIS-Elements AR screenshots.)
 - `theme.apply_theme(name)` resets every themeable attribute to its captured
   default, applies the bundle, and fires post-apply hooks
   (`register_theme_hook`). `select_theme_from_env()` reads the **`ALLWELL_THEME`**
   env var (falling back to `allwell-dark` on unset/unknown). `allwell.main()`
   calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
   var. `tests/visual/render_views.py` honours it too, so
-  `ALLWELL_THEME=nikon-elements … render_views.py` audits any theme.
+  `ALLWELL_THEME=allwell-grey … render_views.py` audits any theme.
 - **Startup-only, by design.** There is no in-app live switch — a runtime swap
   would need every cached inline QSS rebuilt on `QEvent.StyleChange` (see the
   per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is

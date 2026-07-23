@@ -57,7 +57,7 @@ def setup_app() -> QApplication:
         QFontDatabase.SystemFont.FixedFont
     ).family()
     # Honour ALLWELL_THEME so the audit can render any registered theme (e.g.
-    # ALLWELL_THEME=nikon-elements) — applied before qss() and before any view
+    # ALLWELL_THEME=allwell-grey) — applied before qss() and before any view
     # is built, exactly as allwell.main() does.
     th.select_theme_from_env()
     app.setStyleSheet(th.qss())

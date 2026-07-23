@@ -992,7 +992,9 @@ reviewing and curating individual cells.
   with **Reset** to restore every cell and **Clear crop** to remove just the
   box; click-drag to pan and scroll to zoom (zoom is kept when you switch
   wells); a **Raw / Flat-field / Corrected** source toggle; LUT + colormap +
-  binary + mask-overlay controls; the QC debris gate.
+  binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
+  read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
+  channel (the same per-cell readout the Image Table shows).
 - **Definition.** *Included* is the per-cell keep/drop flag every plot and
   export honours. A cell counts only when it is manually **kept** *and* it
   passes QC. Overrides persist to `cell_overrides.json` next to the CSVs.
@@ -1018,7 +1020,8 @@ channel for every well).
 - **Fixed panel** — every root dimension **not** on an axis is listed under
   **Fixed**, pinned to a single value you choose. Drag a root out of Fixed onto an
   axis to make it vary; click the **×** on a root to drop it back to Fixed. Wells
-  come from the sidebar plate.
+  come from the sidebar plate; changing that selection — including **Select all /
+  none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
   Corrected**, **Mask**, **≥ threshold** (renders that channel's ThreshFracOn
   threshold-binary, positive cells white), a **boundary** outline overlay, and a
@@ -1034,7 +1037,8 @@ channel for every well).
   position — rows labelled **A–H**, columns **1–12** — using the first channel in the
   builder as the image. Toggle it on in the shelf header; wells come from the plate
   selection (a partial selection renders a correctly-labelled partial plate), and it's
-  mutually exclusive with **Wrap cols**. Prefer this over well-on-columns + Wrap when
+  mutually exclusive with **Wrap cols** — dragging any root or channel onto Rows /
+  Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
   you want a plate view: Wrap only labels the first band, whereas Plate labels every
   row and column correctly.
 - **Action strip** — **Generate** · **Reset table** (back to defaults) · **Clear
@@ -1044,11 +1048,13 @@ channel for every well).
   Save to Saved Plots) · **Zoom** · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
-- **Scale bar** — enter the **pixel size (µm/px)** and a **bar length (µm)** in the
-  Properties panel to burn a scale bar into the images (pixel size isn't stored by
-  the pipeline, so you supply it). Choose which cell(s) show it (**every cell**, or a
-  single grid corner), where in the image it sits, and its colour. The bar is drawn
-  into the pixels, so the live grid and the exported figure match exactly.
+- **Scale bar** — **on by default**: enter the **pixel size (µm/px)** and a **bar
+  length (µm)** in the Properties panel to burn a scale bar into the images (pixel
+  size isn't stored by the pipeline, so you supply it). Choose which cell(s) show it
+  (**every cell**, or a single grid corner), where in the image it sits, its
+  **thickness**, and its colour (**Auto** picks black or white for contrast against
+  the pixels underneath). The bar is drawn into the pixels, so the live grid and the
+  exported figure match exactly.
 - **Cell labels** — set **Mode → Identity** to burn each cell's *well · channel ·
   timepoint* label into the image (respecting custom Well Labels), with the same
   which-cell / in-image-corner / colour / background-box controls as the scale bar —
@@ -1058,7 +1064,8 @@ channel for every well).
   is directly comparable cell-to-cell; set an explicit LUT min/max on the channel to
   override.
 - **Pixel readout** — hover a rendered cell to see that pixel's intensity (prefixed
-  with the cell's combo identity); the readout now stays put when the cursor comes
+  with the cell's combo identity), plus the segmented cell's id and **mean intensity
+  (MFI)** when the cursor is over one; the readout now stays put when the cursor comes
   to rest instead of reverting to the plain cell tooltip.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
@@ -1094,11 +1101,13 @@ background-flattening / subtraction methods on a **single raw frame**, without
 re-running the pipeline (it shares the pipeline's exact correction code).
 
 - **Needs** — a loaded dataset with image ZIPs.
-- **Controls** — pick a well / channel / timepoint / FOV; choose any flat-field
-  + background method and tune its parameters; a **Raw / Flat-field /
-  Corrected** toggle; LUT / colormap / binary + precomputed-mask overlay;
-  pan / zoom; per-source LUT memory; a frame-local binary threshold; a hover
-  pixel-intensity readout; a QC size-cleanup preview.
+- **Controls** — pick the frame's **well on the ever-present left-rail plate**
+  (single-well here — the tab has no plate of its own, it drives the sidebar
+  picker), and the **channel / timepoint / FOV** from the in-tab dropdowns;
+  choose any flat-field + background method and tune its parameters; a **Raw /
+  Flat-field / Corrected** toggle; LUT / colormap / binary + precomputed-mask
+  overlay; pan / zoom; per-source LUT memory; a frame-local binary threshold; a
+  hover pixel-intensity readout; a QC size-cleanup preview.
 - **Optimal use** — dial in a correction method + radius here on a
   representative frame *before* committing to a full Analyze re-run with those
   settings.
@@ -1184,7 +1193,9 @@ Read the schema + channel tokens + FOVs + timepoints the dataset was built with
 
 **What it is.** A per-dataset gallery of plots you have captured. Hover any plot
 panel's top-right corner and click the **save** button to send that panel —
-plus the exact parameters / thresholds that produced it — here.
+plus the exact parameters / thresholds that produced it — here. On a multi-panel
+figure a **one-click whole-figure save** captures the entire figure at once
+rather than a single panel.
 
 - **Per-card controls** — **Restore** (reload the plot with its saved
   parameters), **Export**, **Rename**, **Delete**, and a collapsible parameter
@@ -1205,6 +1216,14 @@ points. The bar and line batch panels also expose the same
 [Fold-change normalization](#fold-change-normalization) dropdowns, with
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
+
+Batch figures are drawn through the **same renderers as the on-screen plots**, so
+a group's figure matches what the plotting tab shows for that selection: each
+group is drawn in its own **distinct colour**, **solo wells are labelled by their
+sample name** (their Well Label) rather than the raw well token, and line-graph
+batch panels carry the **timepoint ticks and x-axis label on every time panel**.
+Building a batch no longer writes to the dataset on every click — the panel edits
+are held and saved once.
 
 ---
 
@@ -1277,13 +1296,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.11.app`
-for the full app, or `dist/AllWell-8.8.11-<profile>.app` for a subset (e.g.
-`AllWell-8.8.11-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.22.app`
+for the full app, or `dist/AllWell-8.8.22-<profile>.app` for a subset (e.g.
+`AllWell-8.8.22-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.8.11.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.8.22.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

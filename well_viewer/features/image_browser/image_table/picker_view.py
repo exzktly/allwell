@@ -24,7 +24,10 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-    layout.setContentsMargins(0, 0, 0, 0)
+    # A left/right gutter so the plate, the "N wells active" count, and the help
+    # text are inset from the rail edge like the rest of the sidebar (they used to
+    # sit flush against the window's left edge).
+    layout.setContentsMargins(12, 0, 12, 8)
     layout.setSpacing(0)
 
     plate = WellPlateSelector(parent)
@@ -58,7 +61,7 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
 
     btn_row = QWidget(parent)
     bl = QHBoxLayout(btn_row)
-    bl.setContentsMargins(6, 2, 6, 2)
+    bl.setContentsMargins(0, 4, 0, 4)
     bl.setSpacing(4)
 
     select_all = QPushButton("Select All", btn_row)

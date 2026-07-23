@@ -853,7 +853,7 @@ _NIKON_ELEMENTS = {
         "text_muted": "#878D95", "text_faint": "#5E646C",
         "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
         "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
-        "brand": "#FFE100", "brand_fg": "#1B1D1F",
+        "brand": "transparent", "brand_fg": "#FFE100",
         "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",
         "plot_bg": "#101216", "plot_grid": "#23272E", "plot_spine": "#565C64",
         "focus_ring": "rgba(45, 140, 235, 0.35)",

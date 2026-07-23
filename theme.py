@@ -851,7 +851,11 @@ _ALLWELL_GREY = {
         "titlebar": "#191B1E", "surface": "#141618", "rail": "#1F2226",
         "panel": "#24272C", "panel_elevated": "#2D3137", "hover": "#373C43",
         "active": "#3E444D",
-        "border_subtle": "#34383E", "border": "#3F444B", "border_strong": "#50565E",
+        # Structural dividers (top-bar border, splitter handle, separators,
+        # panel edges) read this. Kept a touch darker than the surfaces so the
+        # region seams are subtle dark grooves rather than light lines. Control
+        # borders use ``border`` / ``control_border`` and stay crisp.
+        "border_subtle": "#101214", "border": "#3F444B", "border_strong": "#50565E",
         "control_border": "#3F444B",
         "text_primary": "#EAECEE", "text_secondary": "#B8BDC4",
         "text_muted": "#878D95", "text_faint": "#5E646C",

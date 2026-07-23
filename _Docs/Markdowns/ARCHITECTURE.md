@@ -1518,7 +1518,7 @@ The app has two complementary theme surfaces:
    redesign. `Colors`, `Typography`, `Spacing`, `Radii`, `Metrics` (control
    padding — themeable for density), plus a `qss()` builder that produces the
    full application stylesheet. The `widgets/` package and most of the app shell
-   read from `theme.Colors.*`; the default (`allwell-dark`) palette is the class
+   read from `theme.Colors.*`; the default (`blue`) palette is the class
    values here. This is the single source of the app chrome QSS. `theme.py`
    *also* holds the **theme registry** (`THEMES` / `apply_theme` /
    `select_theme_from_env`) — see "Selecting a theme" below.
@@ -1546,20 +1546,20 @@ at construction, applying a theme up-front re-skins the whole app with **no
 per-widget rewiring**.
 
 - `theme.THEMES` maps a name → sparse override bundle. Built-ins:
-  `allwell-dark` (the default; the class values are its palette) and
-  `allwell-grey` (a **colour-only** variant — neutral charcoal-grey chrome, azure
+  `blue` (the default; the class values are its palette) and
+  `grey` (a **colour-only** variant — neutral charcoal-grey chrome, azure
   accent, near-black plot canvas, yellow version-pill text via `Colors.brand_fg`).
   Both share the flat, tight control feel: the `Radii`/`Metrics` defaults
   (small radii + crisp `control_border` + compact padding) are app-wide, so the
-  `allwell-grey` bundle overrides only `Colors`. (Its look was designed against
+  `grey` bundle overrides only `Colors`. (Its look was designed against
   real Nikon NIS-Elements AR screenshots.)
 - `theme.apply_theme(name)` resets every themeable attribute to its captured
   default, applies the bundle, and fires post-apply hooks
   (`register_theme_hook`). `select_theme_from_env()` reads the **`ALLWELL_THEME`**
-  env var (falling back to `allwell-dark` on unset/unknown). `allwell.main()`
+  env var (falling back to `blue` on unset/unknown). `allwell.main()`
   calls it once, before building `AllWellApp`; `--theme <name>` overrides the env
   var. `tests/visual/render_views.py` honours it too, so
-  `ALLWELL_THEME=allwell-grey … render_views.py` audits any theme.
+  `ALLWELL_THEME=grey … render_views.py` audits any theme.
 - **Startup-only, by design.** There is no in-app live switch — a runtime swap
   would need every cached inline QSS rebuilt on `QEvent.StyleChange` (see the
   per-instance-QSS note below), which hit a ~20 s repaint cascade. Selection is

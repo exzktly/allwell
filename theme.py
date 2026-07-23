@@ -66,7 +66,7 @@ class Colors:
     border_strong   = "#3B475C"   # --border-strong : hover/focus ring on inputs
     # Resting border on push/tool buttons. Defaults to the same subtle hairline
     # buttons used before it was split out; a theme can make buttons read as
-    # crisp "toolbar" controls (e.g. All-Well Grey) without also thickening
+    # crisp "toolbar" controls (e.g. the grey theme) without also thickening
     # every panel/divider that reads ``border_subtle``.
     control_border  = "#1B2331"   # --control-border : QPushButton / QToolButton edge
 
@@ -84,11 +84,11 @@ class Colors:
     accent_fg       = "#F0F4FF"   # --accent-fg  : text/icon on accent-filled buttons
 
     # ── Brand cue (version pill) ─────────────────────────────────────────
-    # A small, theme-swappable brand chip. The default palette keeps it a
-    # transparent, faint-text pill (visually the pre-existing version label);
-    # a variant theme (e.g. All-Well Grey) can recolour the text — see ``THEMES``.
+    # A small, theme-swappable brand chip. The default (blue) palette keeps it a
+    # transparent pill with white text; a variant theme (e.g. grey) can recolour
+    # the text — see ``THEMES``.
     brand           = "transparent"  # --brand    : version-pill fill
-    brand_fg        = "#404B5C"      # --brand-fg : version-pill text (== text_faint)
+    brand_fg        = "#FFFFFF"      # --brand-fg : version-pill text
 
     # ── Status ───────────────────────────────────────────────────────────
     success         = "#4ADE80"   # --success
@@ -213,7 +213,7 @@ class Radii:
     """Border-radius tokens (DESIGN_TOKENS.md §4).
 
     Tightened to a flat, near-rectangular "instrument-panel" feel — the shared
-    default for both bundled themes (``allwell-dark`` and ``allwell-grey``).
+    default for both bundled themes (``blue`` and ``grey``).
     """
 
     xs   = 3     # --r-xs   : file chip, logo tile, tiny inline indicators
@@ -230,7 +230,7 @@ class Metrics:
     buttons/inputs can be tightened (a denser, flatter "instrument-panel" control
     feel) without disturbing the layout gutters. :func:`qss` reads these for the
     button / tool-button / input / combo paddings. These tightened values are the
-    shared default for both bundled themes (``allwell-dark`` and ``allwell-grey``).
+    shared default for both bundled themes (``blue`` and ``grey``).
     """
 
     btn_pad_v    = 4   # QPushButton / QToolButton vertical padding
@@ -835,18 +835,19 @@ import logging as _logging
 
 _LOG = _logging.getLogger(__name__)
 
-DEFAULT_THEME = "allwell-dark"
+DEFAULT_THEME = "blue"
 
 # Classes a theme bundle may override, by name.
 _THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
 
-# All-Well Grey: a neutral charcoal-grey chrome variant (colour-only) — restrained
-# azure accent, near-black image canvas, and a yellow version-pill text cue via
+# Grey: a neutral charcoal-grey chrome variant (colour-only) — restrained azure
+# accent, near-black image canvas, and a yellow version-pill text cue via
 # ``brand_fg``. Shares the flat, tight control feel (``Radii`` / ``Metrics``) with
-# ``allwell-dark``, so this bundle overrides *only* colours. (The look was designed
-# against real Nikon NIS-Elements AR screenshots; the ``control_border`` split lets
-# its buttons read as crisp toolbar controls without thickening panel dividers.)
-_ALLWELL_GREY = {
+# the default ``blue`` theme, so this bundle overrides *only* colours. (The look
+# was designed against real Nikon NIS-Elements AR screenshots; the
+# ``control_border`` split lets its buttons read as crisp toolbar controls
+# without thickening panel dividers.)
+_GREY = {
     "Colors": {
         "titlebar": "#191B1E", "surface": "#141618", "rail": "#1F2226",
         "panel": "#24272C", "panel_elevated": "#2D3137", "hover": "#373C43",
@@ -870,16 +871,16 @@ _ALLWELL_GREY = {
     },
 }
 
-# name → override bundle. ``allwell-dark`` is the built-in default (no overrides;
-# the class values above are its palette). ``allwell-grey`` is a colour-only
-# variant sharing allwell-dark's Radii/Metrics.
+# name → override bundle. ``blue`` is the built-in default (no overrides; the
+# class values above are its palette). ``grey`` is a colour-only variant sharing
+# blue's Radii/Metrics.
 THEMES = {
     DEFAULT_THEME: {},
-    "allwell-grey": _ALLWELL_GREY,
+    "grey": _GREY,
 }
 
 # Capture the default value of every attribute any theme may touch, so switching
-# back to ``allwell-dark`` (or between themes) restores untouched tokens.
+# back to ``blue`` (or between themes) restores untouched tokens.
 _THEME_DEFAULTS: dict = {}
 for _cname, _bundle in THEMES.items():
     for _k, _attrs in _bundle.items():

@@ -190,7 +190,7 @@ class AllWellApp(QMainWindow):
         # Single source of truth for the app stylesheet — see theme.py. The
         # active theme's tokens are already applied by ``main`` (via
         # ``theme.select_theme_from_env``) before this runs, so ``qss()`` here
-        # reflects the selected theme (ALLWELL_THEME); default is allwell-dark.
+        # reflects the selected theme (ALLWELL_THEME); default is blue.
         app = QApplication.instance()
         if app is not None:
             app.setStyleSheet(theme_v2.qss())
@@ -221,8 +221,8 @@ class AllWellApp(QMainWindow):
         self._version_pill = QLabel(f"v{_APP_VERSION}")
         self._version_pill.setObjectName("VersionPill")
         # Brand pill. Reads the theme-swappable ``brand`` / ``brand_fg`` tokens:
-        # the default palette makes it a transparent, faint-text label; the
-        # All-Well Grey theme keeps it transparent with yellow text.
+        # the default (blue) theme is a transparent pill with white text; the
+        # grey theme keeps it transparent with yellow text.
         self._version_pill.setStyleSheet(
             f"background-color: {theme_v2.Colors.brand}; "
             f"color: {theme_v2.Colors.brand_fg}; "

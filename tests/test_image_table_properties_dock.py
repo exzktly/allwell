@@ -20,9 +20,9 @@ def test_properties_dock_slides_out_not_in_sidebar(image_table_app):
     dock = ctx.runtime.image_table.props_dock
     assert dock is not None
     assert dock.isHidden()                          # closed by default
-    # 3 spacing gaps + 2 axis label font sizes + scale-bar (pixel size, bar length)
-    # + cell-label font size = 8 steppers.
-    assert len(dock.findChildren(Stepper)) == 8
+    # 3 spacing gaps + 2 axis label font sizes + scale-bar (pixel size, bar length,
+    # bar thickness) + cell-label font size = 9 steppers.
+    assert len(dock.findChildren(Stepper)) == 9
 
     TV._toggle_props_dock(ctx)
     assert not dock.isHidden()                      # the button slides it out

@@ -227,8 +227,10 @@ well_viewer/
 │   │   │                 criteria_view.py, sort_view.py, worker.py
 │   │   └── playground/   controller.py, renderer.py, state.py, tab_view.py,
 │   │                     worker.py   ← single-frame background-correction testbed
-│   │                     (single-select, group-blind WellPlateSelector picks the
-│   │                      frame's well, replacing the Well combo — v8.8.22)
+│   │                     (a single-well tab: the frame's well is picked on the
+│   │                      ever-present sidebar plate — Playground registers
+│   │                      single_well_selection + an on_selection_changed hook,
+│   │                      no in-tab plate of its own)
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
@@ -835,7 +837,7 @@ The relevant modules:
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
-| `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 48-colour well palette. |
+| `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 96-colour well palette (one colour per plate position — a shorter, submultiple-of-12 palette repeats colours down each column). |
 | `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract is documented in the module's own docstring. |
 | `domain/sample_definitions.py` | Read / write the `sample_definitions` block inside `pipeline_info.json`. |
 | `domain/batch_models.py` | `BarGroup` + `ReplicateSet` — plain dataclasses used by every plot tab + batch export. |
@@ -1526,7 +1528,7 @@ The app has two complementary theme surfaces:
    matplotlib-side plot styling, the Analyze tab, and a few batch-export
    panels. `ui/theme/styles.py` defines `_DARK_THEME` (named colours) +
    `_WELL_COLORS` and exposes them as `get_color("ACCENT")` and as import-time
-   constants (`PLOT_BG`, `TXT_PRI`, `TXT_MUT`, `WELL_COLOR_1..48`). The well
+   constants (`PLOT_BG`, `TXT_PRI`, `TXT_MUT`, `WELL_COLOR_1..96`). The well
    palette is sourced from `theme.WELL_COLORS_TUPLE` so both surfaces hand out
    identical per-well colours.
 

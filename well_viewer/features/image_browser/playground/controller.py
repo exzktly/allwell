@@ -54,7 +54,11 @@ def _set_combo(win, attr: str, options, current):
 
 
 def playground_repopulate_dropdowns(ctx) -> None:
-    """Refresh the frame selectors from the loaded dataset (idempotent)."""
+    """Refresh the frame selectors from the loaded dataset (idempotent).
+
+    The well is *not* a combo here — it is driven by the ever-present sidebar
+    plate (single-well on this tab); see :func:`playground_sync_selected_well`.
+    """
     st = ctx.state.playground
     wells = _well_options(ctx)
     channels = [c for c in _channel_options(ctx) if _is_real_channel(c)]
@@ -66,14 +70,50 @@ def playground_repopulate_dropdowns(ctx) -> None:
     st.fov = st.fov or (fovs[0] if fovs else None)
     # The playground combos are not registered; reach them (widgets) via the
     # blessed ctx.window accessor. _set_combo stays app/window-first (widget I/O).
-    # The well is a single-select plate (not a combo) — mirror the selection onto it.
-    plate = getattr(ctx.window, "_playground_well_plate", None)
-    if plate is not None:
-        plate.setEnabledWells(wells)
-        plate.setSelectedWellIds([st.well] if (st.well and st.well in wells) else [])
     _set_combo(ctx.window, "_playground_chan_cb", channels, st.channel)
     _set_combo(ctx.window, "_playground_tp_cb", tps, st.timepoint)
     _set_combo(ctx.window, "_playground_fov_cb", fovs, st.fov)
+
+
+# ── sidebar-plate well selection (single-well tab) ───────────────────────────
+
+def playground_first_selected_well(ctx):
+    """Lowest-plate-rank well in the current sidebar selection (``None`` if the
+    selection is empty). The Playground is single-well, so on entry from a
+    multi-well tab this picks a stable, well-ordered representative."""
+    from well_viewer.domain.selections_model import well_rank
+    wells = [w for w in ctx.state.selection.selected_wells
+             if w in ctx.state.dataset.well_paths]
+    return min(wells, key=well_rank) if wells else None
+
+
+def playground_sync_selected_well(ctx) -> None:
+    """Adopt the sidebar plate's selected well as the frame's well and re-render.
+
+    Wired as the Playground's ``on_selection_changed`` hook, so a click on the
+    ever-present sidebar plate drives the rendered frame. No-op (keeps the
+    current frame) when nothing is selected or the well is unchanged."""
+    tok = playground_first_selected_well(ctx)
+    st = _st(ctx)
+    if tok is None or tok == st.well:
+        return
+    st.well = tok
+    playground_on_change(ctx)
+
+
+def playground_activate(ctx) -> None:
+    """Refresh the frame selectors, then reconcile the sidebar plate with the
+    frame's single well and render. Called when the Playground sub-tab becomes
+    active; mirrors smFISH's collapse-to-one-well activation so exactly one well
+    is lit on the plate and it matches what's rendered."""
+    playground_repopulate_dropdowns(ctx)
+    keep = playground_first_selected_well(ctx) or _st(ctx).well
+    sel = ctx.state.selection
+    if keep is not None and sel.selected_wells != {keep}:
+        from well_viewer.core.selection_controller import set_selected_wells
+        set_selected_wells(ctx, {keep}, commit=False)
+    _st(ctx).well = keep
+    playground_on_change(ctx)
 
 
 # ── widget → state ───────────────────────────────────────────────────────────
@@ -96,8 +136,8 @@ def _read_widgets_into_state(ctx) -> None:
     (so headless tests can set ``ctx.state.playground`` fields directly)."""
     st = _st(ctx)
     win = ctx.window
-    # Well is driven by the single-select plate (its selectionChanged writes
-    # ``st.well`` directly), so it's not read from a combo here.
+    # Well is driven by the ever-present sidebar plate (single-well on this tab)
+    # via ``playground_sync_selected_well``, so it's not read from a combo here.
     for attr, field in (("_playground_chan_cb", "channel"),
                         ("_playground_tp_cb", "timepoint"),
                         ("_playground_fov_cb", "fov")):

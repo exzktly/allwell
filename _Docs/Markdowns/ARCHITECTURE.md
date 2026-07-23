@@ -10,10 +10,10 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.13.** This map tracks the current release; the version
+**Reflects All-Well v8.8.22.** This map tracks the current release; the version
 string itself is centralized in the repo-root `version.py` (§3) and surfaced on
 the title-bar version pill. Feature areas that changed materially in the
-v8.4 → v8.8.13 line carry inline `(vX.Y.Z)` markers so you can tell recent
+v8.4 → v8.8.22 line carry inline `(vX.Y.Z)` markers so you can tell recent
 structure from long-standing structure. Bump `version.py` on a release —
 nothing else carries the app version.
 
@@ -65,8 +65,14 @@ A handful of things live on the application root rather than per-pane because
 they're shell-wide:
 
 - **Stylesheet.** `theme.qss()` is set as the application-wide QSS string in
-  `AllWellApp._apply_stylesheet`. All chrome reads from it.
+  `AllWellApp._apply_stylesheet`. All chrome reads from it. The active theme is
+  chosen once at startup (dev-facing `ALLWELL_THEME` env var / `--theme` flag) —
+  see §8.
 - **Help drawer + keyboard shortcuts** (`Ctrl+O`, `Ctrl+E`, `Ctrl+←`/`→`).
+- **Application Log drawer** — a bottom-edge, full-width `Drawer` opened by the
+  status-bar log tray (`_log_btn`). Its ring handler attaches to the
+  `well_viewer` logger (which sets `propagate = False`) at startup, so it
+  captures history before first open and appends live (v8.8.20).
 - **Status bar** (bottom of the window) with a status-message label and
   key-hint chips.
 - **App icon, window geometry persistence.**
@@ -78,7 +84,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.11; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.22; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -198,6 +204,8 @@ well_viewer/
 │   │   │              / Playground sub-tabs; descends like the Plotting stack)
 │   │   ├── review_image/ controller.py, renderer.py, state.py, collect.py,
 │   │   │                 box_select.py
+│   │   │                 (collect.review_build_mfi_map → per-cell MFI-on-hover
+│   │   │                  tooltips, shared by Segmentation + Image Table — v8.8.17)
 │   │   ├── image_table/  controller.py, tab_view.py, builder_view.py,
 │   │   │                 state.py, grid_layout.py, grid_ops.py,
 │   │   │                 picker_view.py, image_compose.py, facet_view.py,
@@ -209,11 +217,18 @@ well_viewer/
 │   │   │                  plain data — see §5.5. grid_ops = the right-click per-cell
 │   │   │                  override popover. image_compose also burns the optional
 │   │   │                  scale bar + per-cell identity label into the source RGB
-│   │   │                  (draw_cell_chrome) so live grid and export match — v8.8.12)
+│   │   │                  (draw_cell_chrome) so live grid and export match — v8.8.12;
+│   │   │                  scale bar on by default, editable thickness, auto-contrast
+│   │   │                  colour — v8.8.22. A sidebar well-selection change / Select
+│   │   │                  All / Clear reruns the layout via builder_view.schedule_
+│   │   │                  selection_rebuild, and dropping a root/channel on Rows/Columns
+│   │   │                  exits Plate mode — v8.8.17)
 │   │   ├── cell_browser/ controller.py, collect.py, state.py, tab_view.py,
 │   │   │                 criteria_view.py, sort_view.py, worker.py
 │   │   └── playground/   controller.py, renderer.py, state.py, tab_view.py,
 │   │                     worker.py   ← single-frame background-correction testbed
+│   │                     (single-select, group-blind WellPlateSelector picks the
+│   │                      frame's well, replacing the Well combo — v8.8.22)
 │   ├── review_csv/   tab_view.py   ← Data-tab CSV inspector (was review_image/csv_tab_view.py)
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
@@ -1482,7 +1497,7 @@ Notable members worth knowing about by name:
 | `SavedSelectionsList` | The rich saved-selection list with composition (drag-to-reorder, per-group flat well editing, recolour popovers). A group is one condition — its wells are its implicit replicate set, so there are no replicate sub-partitions / solo strips. |
 | `LutSelector`, `GradientStrip`, `ColorPickerPopover` | The colour-map picker + its preview strip + the freeform colour-picker popover. |
 | `lut_cmaps.lut_cmap` | Qt-free resolver (v8.5.2) that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
-| `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. |
+| `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped) (v8.8.20). |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6 (v8.5.1). Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. |
 | `TitleBar`, `WindowResizeGrips`, `_window_chrome` | Frameless-window chrome (currently disabled by default — see `_window_chrome.should_use_frameless`). |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |

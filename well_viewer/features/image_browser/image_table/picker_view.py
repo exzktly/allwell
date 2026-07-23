@@ -24,10 +24,12 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     if layout is None:
         layout = QVBoxLayout(parent)
         parent.setLayout(layout)
-    # A left/right gutter so the plate, the "N wells active" count, and the help
-    # text are inset from the rail edge like the rest of the sidebar (they used to
-    # sit flush against the window's left edge).
-    layout.setContentsMargins(12, 0, 12, 8)
+    # No horizontal inset: the plate spans the full rail width, identical to every
+    # other sidebar tab's plate (the main / Stats / Preview / Groups pickers are all
+    # flush at 0). A left/right gutter here used to make *only* this tab's plate
+    # render ~24px narrower — the aspect-locked plate then shrank in both dimensions,
+    # so the well picker looked smaller on the Image Table tab than anywhere else.
+    layout.setContentsMargins(0, 0, 0, 8)
     layout.setSpacing(0)
 
     plate = WellPlateSelector(parent)

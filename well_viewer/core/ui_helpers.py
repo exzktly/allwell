@@ -51,6 +51,14 @@ def apply_sidebar_plate_geometry(plate) -> None:
       ``minimumSizeHint`` is the (small) floor, and the sidebar scroll area
       (``app_shell_view``) handles vertical overflow.
 
+    Because the plate paints from its own ``width()`` (not ``contentsRect``), its
+    on-screen size is set entirely by how wide its container lets it be. So a
+    matching rule holds for callers: the plate's container must add **no
+    horizontal inset** — every sidebar plate spans the full rail width, so the
+    picker is the SAME size on every tab. (A left/right gutter on one tab's plate
+    layout makes only that tab's plate render narrower, and — aspect-locked — it
+    shrinks in both dimensions; that was the Image Table "shrinking plate" bug.)
+
     Non-sidebar plate consumers (run dashboard, saved-selections mini-plate)
     deliberately do not call this — they size the plate for their own context.
     """

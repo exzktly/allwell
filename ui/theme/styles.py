@@ -75,7 +75,7 @@ _DARK_THEME: Dict[str, str] = _build_dark_theme()
 # Well palette — derived from the canonical tuple in the repo-root ``theme``
 # module so every consumer (matplotlib's ``axes.prop_cycle`` via
 # ``widgets/plot_card.plot_palette``, the QSS template substitution below,
-# and ``well_viewer.plate_layout.WELL_COLORS``) reads the same 48 entries
+# and ``well_viewer.plate_layout.WELL_COLORS``) reads the same 96 entries
 # in the same order. Adjusting the palette only requires editing the
 # source tuple in ``theme.py``.
 from theme import WELL_COLORS_TUPLE as _WELL_COLORS_TUPLE  # noqa: E402

@@ -257,7 +257,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 - `data/` modules use bare names (`data_loading.py`, `auto_threshold.py`, `crop_tool.py`, `image_discovery.py`, `image_resolver.py`, `metric_labels.py`, `zipfile_cache.py`) — each is one self-contained utility, no internal suffix scheme.
 - `domain/` mixes suffixed (`stats_compute`, `fold_change_scopes`, `gating_state`) and bare (`fold_change.py`, `selections_model.py`, `viewer_state.py`, `plate_layout.py`) names.
 - `persistence/` modules are named for the `pipeline_info.json` block they persist (`bar_groups.py`, `ratios.py`, `cell_gating.py`) — no `_persistence.py` suffix.
-- `features/image_browser/image_table/view_state_io.py` — a feature-owned `view_state` (de)serialization module (the `view_state_io` descriptor hook, §5.3); a persistence-IO role, not a view/compute one.
+- `features/image_browser/image_table/view_state_io.py` and `features/heatmap/view_state_io.py` — feature-owned `view_state` (de)serialization modules (the `view_state_io` descriptor hook, §5.3); a persistence-IO role, not a view/compute one.
 - `runtime_app.py`, `viewer_context.py` — top-level singletons; no suffix.
 
 A few rules of thumb so you know where to put something new:
@@ -537,9 +537,10 @@ everything core used to hard-code:
   "save to gallery" hover button); plot tabs apply *all* registered decorators
   via `ui_helpers.apply_plot_card_decorators`, so no tab imports Saved Plots;
 - `view_state_io` — a feature that owns its own `view_state` snapshot/restore
-  pair (Image Table); `persistence/view_state.py` fans this out and so never
-  names the feature (its `image_table/view_state_io.py` is imported only when the
-  feature is present);
+  pair (Image Table and Heat Map); `persistence/view_state.py` fans this out and
+  so never names the feature (each `view_state_io.py` is imported only when its
+  feature is present). Heat Map's captures the colormap / scale / vmin·vmax /
+  toggles / active layout by reusing the layout-sidecar serializer;
 - `per_well_selection` / `single_well_selection` — selection-behaviour flags
   that replaced the hard-coded tab-name sets in `selection_controller`.
 

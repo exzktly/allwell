@@ -384,6 +384,16 @@ def _redraw_heatmap():
     return redraw_heatmap
 
 
+def _heatmap_view_state_io():
+    """Heat Map's (snapshot, apply) view-state pair (lazy). ``view_state`` fans
+    this out via the registry so it never names Heat Map — a profiled-out Heat Map
+    isn't in the registry, so its ``view_state_io.py`` is never imported."""
+    from well_viewer.features.heatmap.view_state_io import (
+        apply_heatmap, snapshot_heatmap,
+    )
+    return snapshot_heatmap, apply_heatmap
+
+
 def _redraw_scatter():
     from well_viewer.features.scatter.tab_view import scatter_redraw_active
     return scatter_redraw_active
@@ -741,6 +751,7 @@ def _features() -> "list[FeatureDescriptor]":
             on_activate=_activate_heatmap,
             on_channel_changed=_channel_heatmap,
             redraw=_redraw_heatmap,
+            view_state_io=_heatmap_view_state_io,
             states=(StateSpec("heatmap", _state_heatmap),),
         ),
 

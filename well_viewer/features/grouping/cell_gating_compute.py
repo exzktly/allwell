@@ -23,6 +23,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from well_viewer.data.data_loading import resolve_value_series
 from well_viewer.core.lazy import lazy as _lazy
 
 # Lazy so this pure-compute module imports without eagerly pulling the scatter
@@ -193,3 +194,285 @@ def scan_fc_fractions(
         diffs = np.divide(abs_gap, larger, out=np.zeros_like(abs_gap), where=larger > 0)
     diffs = np.where(np.isfinite(diffs), diffs, 0.0)
     return fa, fb, diffs
+
+
+# ── Cell-gating row/timepoint selection + the two-well optimiser ──────────────
+#
+# Relocated from ``cell_gating_tab_view``: pure DataFrame/array work with no Qt
+# and no ``ctx``, which is what this module is for. The view had grown them
+# inline alongside the widget wiring, so they could only be exercised through a
+# full-app fixture despite depending on nothing but their arguments.
+
+
+def _cell_gating_valid_mask(frame_df):
+    """Boolean mask: rows that pass crop AND QC (absent columns ⇒ all-pass).
+
+    The per-channel fluorescence gate (``Included``) is deliberately NOT applied:
+    the CDFs and the threshold optimizer are what the user reads to SET that
+    gate, so filtering by it would be circular — raising the threshold would
+    shrink the very curve being read, and the optimizer would only see cells
+    that already pass its own (asynchronously-rewritten) cut. Crop + QC are
+    independent of the fluorescence gate, so they show the valid population
+    without that feedback loop.
+    """
+    mask = pd.Series(True, index=frame_df.index)
+    for col in ("QC_Pass", "Crop_Pass"):
+        if col in frame_df.columns:
+            vals = pd.to_numeric(frame_df[col], errors="coerce").fillna(1)
+            mask = mask & vals.eq(1)
+    return mask
+
+
+def _cell_gating_valid_rows(frame_df):
+    """Rows of ``frame_df`` selected by :func:`_cell_gating_valid_mask`."""
+    return frame_df[_cell_gating_valid_mask(frame_df)]
+
+
+def _gate_geom_sig(gates):
+    return tuple(
+        (g.get("x_col"), g.get("y_col"),
+         round(float(g.get("x0", 0.0)), 6), round(float(g.get("y0", 0.0)), 6),
+         round(float(g.get("x1", 0.0)), 6), round(float(g.get("y1", 0.0)), 6))
+        for g in gates
+    )
+
+
+def _timepoint_label(timepoint) -> str:
+    """Human-readable label for a ``(kind, value)`` timepoint token."""
+    kind, value = timepoint
+    if kind == "hours":
+        return f"{value:g} h"
+    return str(value)
+
+
+def _distinct_timepoints(df) -> list[tuple[str, object]]:
+    """Ordered distinct ``(kind, value)`` timepoint tokens present in ``df``.
+
+    Prefers the numeric ``timepoint_hours`` column; falls back to the
+    ``timepoint`` string column. Returns ``[]`` when neither is available.
+    """
+    if df is None or getattr(df, "empty", True):
+        return []
+    if "timepoint_hours" in df.columns:
+        h = pd.to_numeric(df["timepoint_hours"], errors="coerce").dropna().unique()
+        if len(h):
+            return [("hours", float(v)) for v in sorted(float(x) for x in h)]
+    if "timepoint" in df.columns:
+        s = df["timepoint"].fillna("").astype(str).str.strip()
+        vals = [v for v in s.unique() if v != ""]
+
+        def _key(v: str):
+            try:
+                return (0, float(v), "")
+            except ValueError:
+                return (1, 0.0, v.lower())
+
+        return [("str", v) for v in sorted(vals, key=_key)]
+    return []
+
+
+def _earliest_timepoint(df):
+    """The earliest ``(kind, value)`` timepoint token present in *df* (or None)."""
+    tps = _distinct_timepoints(df)
+    if not tps:
+        return None
+    return sorted(tps, key=lambda t: (0, t[1]) if t[0] == "hours" else (1, str(t[1])))[0]
+
+
+def _filter_rows_by_timepoint(df, timepoint):
+    """Rows of ``df`` at ``timepoint`` (a ``(kind, value)`` token).
+
+    ``None`` ⇒ all rows. Unknown / missing timepoint columns ⇒ all rows (so the
+    optimizer degrades to its previous all-timepoints behaviour).
+    """
+    if timepoint is None or df is None or df.empty:
+        return df
+    kind, value = timepoint
+    if kind == "hours" and "timepoint_hours" in df.columns:
+        col = pd.to_numeric(df["timepoint_hours"], errors="coerce")
+        return df.loc[col == value]
+    if "timepoint" in df.columns:
+        col = df["timepoint"].fillna("").astype(str).str.strip()
+        sel = col == str(value)
+        if not sel.any():
+            num = pd.to_numeric(col, errors="coerce")
+            try:
+                sel = num == float(value)
+            except (TypeError, ValueError):
+                pass
+        return df.loc[sel]
+    return df
+
+
+def _valid_values_for_channel(df, channel_key: str, ratios=None,
+                              timepoint=None) -> np.ndarray:
+    """Finite per-cell values for ``channel_key`` over the QC+Crop-valid
+    population (at ``timepoint`` if given). Mirrors the CDF population — the
+    fluorescence ``Included`` gate is deliberately not applied so the optimizer
+    isn't filtered by the very threshold it's helping pick (see
+    :func:`_cell_gating_valid_mask`)."""
+    if df is None or df.empty:
+        return np.array([], dtype=float)
+    df = _filter_rows_by_timepoint(df, timepoint)
+    if df is None or df.empty:
+        return np.array([], dtype=float)
+    val_col = channel_key if str(channel_key).startswith("ratio:") else f"{channel_key}_mean_intensity"
+    values = resolve_value_series(df, val_col, ratios).to_numpy(dtype=float)
+    mask = _cell_gating_valid_mask(df).to_numpy(copy=False) & np.isfinite(values)
+    return values[mask]
+
+
+def _optimize_thresh_frac_on_between_wells(
+    df_a,
+    df_b,
+    *,
+    channel_key: str,
+    min_threshold: float,
+    max_threshold: float,
+    steps: int,
+    ratios=None,
+    timepoint=None,
+    ctrl_values=None,
+    base_values_a=None,
+    base_values_b=None,
+    op_ctrl: str = "ratio",
+    op_t0: str = "ratio",
+    order: str = "ctrl_first",
+) -> ThreshFracOptimizationResult:
+    """Return the threshold maximizing the **relative** fraction-on gap:
+    ``|fraction_on(A) - fraction_on(B)| / max(fraction_on(A), fraction_on(B))``.
+
+    The absolute gap ``|fa - fb|`` peaks wherever the populations diverge
+    *most in count* — useful when both wells share an "on" tail. But for two
+    skewed fluorescence distributions where most cells are barely-on, the
+    absolute gap stays small even where the well *ratio* differs sharply
+    (one well 5% on, the other 0.5% on is a 10× difference but only 0.045
+    in absolute terms). Normalising by the larger fraction surfaces those
+    relative differences instead, which is what a fraction-on cut is
+    supposed to discriminate. When both fractions are zero we treat the
+    relative gap as zero rather than emit ``nan``.
+
+    ``timepoint`` is an optional ``(kind, value)`` token (see
+    :func:`_distinct_timepoints`); when given, only rows at that timepoint
+    contribute to each well's fraction-on.
+    """
+    lo = float(min_threshold)
+    hi = float(max_threshold)
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        raise ValueError("threshold range must be finite.")
+    if hi < lo:
+        raise ValueError("max threshold must be greater than or equal to min threshold.")
+    if int(steps) < 2:
+        raise ValueError("steps must be at least 2.")
+    if int(steps) > 10001:
+        raise ValueError("steps must be 10,001 or fewer.")
+
+    values_a = _valid_values_for_channel(df_a, channel_key, ratios, timepoint)
+    values_b = _valid_values_for_channel(df_b, channel_key, ratios, timepoint)
+    if values_a.size == 0:
+        raise ValueError("Well A has no valid finite values for the selected channel.")
+    if values_b.size == 0:
+        raise ValueError("Well B has no valid finite values for the selected channel.")
+
+    thresholds = np.linspace(lo, hi, int(steps))
+    # Raw fraction-on scan, optionally fold-change-adjusted at each threshold
+    # (control / baseline value arrays supplied by the caller). With all None
+    # this is the original raw-fraction relative-gap scan.
+    fa, fb, diffs = scan_fc_fractions(
+        thresholds, values_a, values_b,
+        ctrl_values=ctrl_values,
+        base_values_a=base_values_a,
+        base_values_b=base_values_b,
+        op_ctrl=op_ctrl, op_t0=op_t0, order=order,
+    )
+
+    # The threshold where the relative fraction-on gap is biggest.
+    # ``np.argmax`` returns the FIRST index attaining the maximum, so when
+    # a run of thresholds ties for the max gap (fraction-on is a step
+    # function, so ties are common between two separated populations) the
+    # lowest such threshold is reported.
+    best_idx = int(np.argmax(diffs))
+    best_t = float(thresholds[best_idx])
+    frac_a = float(fa[best_idx])
+    frac_b = float(fb[best_idx])
+    return ThreshFracOptimizationResult(
+        threshold=best_t,
+        frac_a=frac_a,
+        frac_b=frac_b,
+        difference=float(diffs[best_idx]),
+        n_a=int(values_a.size),
+        n_b=int(values_b.size),
+    )
+
+
+def _cell_gating_first_frame_rows(df) -> tuple:
+    """Return ``(sub_df, description)`` for the first FOV's first timepoint."""
+    if df is None or df.empty:
+        return df, ""
+
+    fov_series = (df["fov"].fillna("1").astype(str).str.strip().replace("", "1")
+                  if "fov" in df.columns
+                  else pd.Series(["1"] * len(df), index=df.index))
+
+    def _fov_token(token: str) -> tuple:
+        try:
+            return (0, float(token))
+        except ValueError:
+            return (1, token.lower())
+
+    unique_fovs = sorted(fov_series.unique(), key=_fov_token)
+    first_fov = unique_fovs[0] if unique_fovs else "1"
+    same_fov = df.loc[fov_series == first_fov]
+    if same_fov.empty:
+        return same_fov, ""
+
+    tp_h = (pd.to_numeric(same_fov.get("timepoint_hours"), errors="coerce")
+            if "timepoint_hours" in same_fov.columns
+            else pd.Series(np.nan, index=same_fov.index, dtype=float))
+    tp_str = (same_fov.get("timepoint", pd.Series([""] * len(same_fov),
+                                                   index=same_fov.index))
+              .fillna("").astype(str).str.strip())
+    tp_str_num = pd.to_numeric(tp_str, errors="coerce")
+
+    if tp_h.notna().any():
+        min_h = float(tp_h.min())
+        mask = (tp_h == min_h)
+        frame_desc_tp = f"{min_h:g}"
+    elif tp_str_num.notna().any():
+        min_n = float(tp_str_num.min())
+        mask = tp_str_num == min_n
+        frame_desc_tp = f"{min_n:g}"
+    else:
+        non_empty = tp_str[tp_str != ""]
+        if non_empty.empty:
+            mask = pd.Series(True, index=same_fov.index)
+            frame_desc_tp = ""
+        else:
+            first = sorted(non_empty.unique(), key=str.lower)[0]
+            mask = tp_str == first
+            frame_desc_tp = first
+
+    frame_df = same_fov.loc[mask]
+    frame_desc = f"fov={first_fov}, tp={frame_desc_tp}"
+    return frame_df, frame_desc
+
+
+def _opt_curve_ylim(*series) -> tuple:
+    """Y-limits for the optimizer-curve popup.
+
+    Defaults to the familiar [0, 1] fraction-on frame, but expands to cover
+    whatever the plotted curves actually span (with padding). Under fold change
+    the adjusted fractions can be ratios (>1) or differences (<0), and the
+    relative gap can exceed 1 when fa/fb straddle zero — without this they'd be
+    clipped above / below the axis and vanish.
+    """
+    ys = np.concatenate([np.asarray(s, dtype=float).ravel() for s in series]) \
+        if series else np.array([], dtype=float)
+    ys = ys[np.isfinite(ys)]
+    if not ys.size:
+        return (-0.02, 1.02)
+    ymin = min(-0.02, float(ys.min()))
+    ymax = max(1.02, float(ys.max()))
+    pad = 0.02 * (ymax - ymin)
+    return (ymin - pad, ymax + pad)
+

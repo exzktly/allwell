@@ -391,8 +391,14 @@ class _PlateGrid(QWidget):
 
     def set_drag_mime(self, mime: str | None) -> None:
         """When *mime* is set, pressing a well and dragging past the platform
-        drag distance starts a ``QDrag`` carrying that well's id under *mime*
-        (and clicks no longer toggle selection — the well is a drag source)."""
+        drag distance starts a ``QDrag`` carrying that well's id under *mime*.
+
+        Clicking still selects: the press only arms the drag, and a release that
+        never reached the drag distance applies the ordinary click behaviour
+        (toggle in ``select`` mode, ``wellActivated`` in ``passive`` mode).
+        Press-and-drag paint/rubber-band selection is the one gesture the drag
+        source takes over, since it is the same gesture as dragging a well out.
+        """
         self._drag_mime = mime or None
         if not self._drag_mime:
             self._drag_press_pos = None
@@ -560,11 +566,25 @@ class _PlateGrid(QWidget):
         if not self._is_enabled((r, c)):
             return
         if self._drag_mime:
-            # Drag-source mode: capture the press, don't toggle; a QDrag is
-            # started on the first move beyond the platform drag distance.
+            # Drag-source mode: capture the press and arm a possible QDrag, but
+            # defer the selection action to the release. A press that never
+            # travels past the platform drag distance is an ordinary click, so
+            # the plate keeps working as a well picker while it doubles as a
+            # drag source.
             self._drag_press_pos = event.position().toPoint()
             self._drag_press_cell = (r, c)
             event.accept()
+            return
+        self._press_well(r, c)
+
+    def _press_well(self, r: int, c: int) -> None:
+        """Apply the selection behaviour of a left-press on well ``(r, c)``.
+
+        Split out of :meth:`mousePressEvent` because drag-source mode replays it
+        from :meth:`mouseReleaseEvent`, once the gesture is known to be a click
+        rather than the start of a QDrag.
+        """
+        if not self._is_enabled((r, c)):
             return
         if self._mode == "passive":
             self.wellActivated.emit(_well_id(r, c))
@@ -636,8 +656,17 @@ class _PlateGrid(QWidget):
                 self.toggle_well(cell[0], cell[1], force=self._drag_adding)
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+        # A drag-source press defers its selection action until the gesture is
+        # resolved: ``mouseMoveEvent`` clears the armed cell the moment it
+        # starts a QDrag, so a cell still armed here belongs to a plain click
+        # and gets the press behaviour now. ``_press_well`` may set
+        # ``_drag_active``, which the block below then finishes exactly as it
+        # would for a press-driven selection.
+        pending = self._drag_press_cell
         self._drag_press_pos = None
         self._drag_press_cell = None
+        if pending is not None:
+            self._press_well(pending[0], pending[1])
         if self._drag_active:
             self._drag_active = False
             self._drag_visited = set()

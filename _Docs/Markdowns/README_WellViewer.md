@@ -761,6 +761,14 @@ place cells in a grid that mirrors your plate or your experimental design.
   - **⇄ Transpose** — swap the rows and columns of the layout.
   - The layout editor: drag wells into the grid and **Edit label** on any row /
     column header.
+- **Selecting wells.** The sidebar plate map does double duty on this tab: a
+  *click* on a well selects or deselects it exactly as on every other tab, while
+  a *press-and-drag* off a well carries it into the layout grid below. The one
+  gesture the drag source takes over is press-and-drag selection across several
+  wells — use the row / column headers, the corner all/none toggle, or
+  **Auto-populate from selection** for bulk work. You can also click a heatmap
+  cell to select its wells; **Shift**-click adds to the selection and
+  **Ctrl**-click (**Cmd** on macOS) toggles individual wells in and out.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then scrub the
   timepoint slider to watch the metric evolve.
@@ -1296,13 +1304,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.27.app`
-for the full app, or `dist/AllWell-8.8.27-<profile>.app` for a subset (e.g.
-`AllWell-8.8.27-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.28.app`
+for the full app, or `dist/AllWell-8.8.28-<profile>.app` for a subset (e.g.
+`AllWell-8.8.28-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.8.27.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.8.28.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

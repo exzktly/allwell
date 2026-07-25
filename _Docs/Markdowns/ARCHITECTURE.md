@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.28.** This map describes the app as it stands today;
+**Reflects All-Well v8.8.29.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.28; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.29; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -103,7 +103,9 @@ allwell/
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
-│   ├── well_token.py           ← canonical 96-well token parser (single source of truth)
+│   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
+│   │                              process_microscopy, WellPlateZipper, analyze_tab and
+│   │                              input_resolution_service all parse well names through it)
 │   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
@@ -447,9 +449,13 @@ What lives on `WellViewerApp`:
 - **`__init__`** (~140 lines) — wires the bus, the persistence registry,
   the widget registry, the viewer context, the redraw / selection
   coordinators, then calls `views.app_shell_view.build_ui(self)`.
-- **One-line proxy methods** (~190 of them) — each `app._method(…)` call site
+- **One-line proxy methods** (~90 of them) — each `app._method(…)` call site
   resolves to a 1-line delegator that forwards to the controller function.
-  Pattern:
+  A delegator exists only for as long as some call site still goes through
+  `app`; once the `ctx` migration rewires the callers to the controller
+  function directly, the proxy is dead weight and is deleted rather than left
+  standing. `tests/test_guardrails.py` meters the class at 113 methods and 876
+  lines, and both ratchets only move down. Pattern:
 
   ```python
   def _set_active_channel(self, channel: str) -> None: return set_active_channel(self, channel)
@@ -860,7 +866,8 @@ The relevant modules:
 |--------|-----|
 | `data/data_loading.py` | CSV parsing, channel detection, threshold-aware aggregation, per-well array helpers. `df_included_mask` is the single inclusion chokepoint — effective inclusion is `Included==1 AND QC_Pass==1 AND Crop_Pass==1 AND Gate_Pass==1` (the optional `QC_Pass` / `Crop_Pass` / `Gate_Pass` layers default to pass when absent), and every consumer (overlay, plots, stats, aggregation, export) composes it so QC debris-gating, the Segmentation crop, and scatter-gate inclusion apply uniformly. The `Included` layer is set by the Cell Gating tab's `GatingWorker` from the per-channel FluorGating intensity floors; the separate `Gate_Pass` layer carries the scatter-gate inclusion (the union of the Scatter Plot's rectangular gates via `scatter.gating.compute_gate_inclusion`) and, when "Use scatter gates" is on, *replaces* the intensity floors (the worker sets `Included=1`, `Gate_Pass=`membership). Keeping it a separate layer lets the **per-cell scatter** call `df_included_mask(df, include_gate=False)` so it keeps showing the full cloud (and the gates over it) instead of filtering itself by its own gates, while every other view filters via the default. Measurement columns are normalised to lower-case at read time so per-channel lookups are case-insensitive; `smfish_count` metrics honour the channel's `ThreshFracOn` cutoff just like intensities (a cell is "on" when its spot count exceeds the cutoff — set `ThreshFracOn=0` for the classic "any detected spot" population), and only shape/morphology metrics pass `threshold=-1.0` to keep every cell (they have no per-channel ON cutoff). The `aggregate_with_threshold_df` contract is unchanged — `value > threshold` defines the "on" population — only which threshold the controllers feed it for counts changed. `resolve_value_series` emits a deduped WARN naming the missing column when both the direct and case-folded lookups miss, surfacing schema-mismatch bugs that would otherwise show up as silently-empty plots. |
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
-| `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). |
+| `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). Also the single home for `normalize_numeric_token`, the FOV/timepoint token normaliser that collapses `1`, `01` and `1.0` to one key. Every site that compares such a token routes through it: `review_image/collect.review_norm_fov` (the review side's public name, kept because the image-table and review-image call sites are written against it), `core/dataset_state._norm_fov` and `image_table/image_compose._norm_token` are aliases of it. Tokens reach the viewer from filenames, CSV columns and combo text, so a second copy that formats differently silently strands a filter. |
+| `data/cache_projectors.py` | Registry of the inclusion-verdict projectors, plus `project_verdict_column` — the one cache walk they all perform (resolve the target wells, skip empty / missing frames, write the int column, log a computation failure against its layer rather than raising). `features/qc` and `features/crop` register here and share that walk; the registry is what lets `data_loading.get_rows` apply them without the data layer importing `features/`, and the shared walk lives here for the same reason — neither feature may depend on the other. |
 | `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
 | `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 96-colour well palette (one colour per plate position — a shorter, submultiple-of-12 palette repeats colours down each column). |
 | `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract is documented in the module's own docstring. |
@@ -1075,8 +1082,8 @@ collaborators, and `ctx.window`, nothing else.
 `tests/test_ctx_app_burndown.py` hard-bans any `ctx.app` (`CTX_APP_BUDGET = 0`);
 `tests/test_ctx_service_accessors.py` freezes the accessor set (adding one is a
 reviewed act); `tests/test_guardrails.py` holds `runtime_app.py` to ratcheting
-line-count and `self._*` attribute-count ceilings (it can only ratchet down),
-plus the state-package import boundary above.
+line-count, `self._*` attribute-count and defensive-`getattr`-probe ceilings (it
+can only ratchet down), plus the state-package import boundary above.
 
 ### 5.10 Split View (optional, one-line removable)
 
@@ -2586,6 +2593,19 @@ visual reference only. Rendered screenshots live under
 - **Plate selections are well IDs (strings), not (row, col) tuples.**
   `_selected_wells: set[str]`. Convert to / from tuples at the
   edge with `data_loading.parse_well_token`.
+- **Parse a well name with `util.well_token`, never a local regex.** The
+  canonicaliser strips surrounding whitespace, uppercases the row and
+  zero-pads the column (`" a1 "` → `"A01"`), and returns `None` for anything
+  outside A–H / 1–12. Ask it once and use what it returns rather than
+  validating and then re-matching — `canonical_well_label` is both the test and
+  the conversion. A second parser is not a style problem: when the pipeline
+  carried its own, a folder named `"A1 "` was a well to the Analyze-side input
+  resolver and not a well to the pipeline that then processed it.
+- **Normalise FOV / timepoint tokens with
+  `data.image_resolver.normalize_numeric_token`.** These arrive from filenames,
+  CSV columns and combo text, so `1`, `01` and `1.0` must collapse to one key
+  before anything compares them. A local copy that formats differently strands
+  a filter silently — a combo whose text never matches any row.
 - **Selections survive a tab switch.** Whenever you read or write
   `_selected_wells`, you're touching app-wide state — clobbering it in a
   tab-local handler will leak across tabs.

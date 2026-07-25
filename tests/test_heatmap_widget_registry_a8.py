@@ -31,6 +31,15 @@ def test_build_registers_handles_and_stamps_app(viewer_app, qtbot):
     parent = QWidget()
     qtbot.addWidget(parent)
     build_heatmap_tab(app._ctx, parent)
+    # The heat-map builder ends with a redraw, and matplotlib's Qt backend
+    # services that through ``draw_idle`` — a *queued* draw. Unlike the other
+    # tab builders in this family, that leaves work outstanding when the test
+    # body returns, and pytest-qt's post-test ``_process_events`` then runs it
+    # after the canvas's C++ object is gone ("Internal C++ object
+    # (FigureCanvasQTAgg) already deleted"). Let the queued draw settle while
+    # the canvas is still alive. ``canvas.draw()`` is not enough — it renders
+    # but does not cancel the pending timer.
+    qtbot.wait(1)
 
     for name in _HANDLES:
         assert app._widget_registry.has(name), f"{name} not registered"

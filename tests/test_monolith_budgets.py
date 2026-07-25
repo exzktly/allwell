@@ -92,7 +92,16 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV
 # (_numeric_option_errors + _INT_FIELDS) that blocks a bad radius/FFT/mesh/QC
 # value up front instead of silently dropping it. Then L2 (+5): the `_alive`
 # flag + guarded log-poller re-arm so it stops on app close. Resume from 1211.
-ANALYZE_TAB_BUDGET = 1211
+# Ratcheted to 1063: the form-reading code moved to the form mixin where it
+# belongs — _collect_run_options, _background_well_validation_error, and the
+# module-level field parsers (_safe_qc_float / _safe_seg_float / _INT_FIELDS /
+# _numeric_option_errors). They read the form's widgets; the tab only hosts them.
+ANALYZE_TAB_BUDGET = 1063
+
+# analyze_tab_form.py carried no budget while analyze_tab.py did, so every
+# addition to the pair landed here by default. Opened at its measured size so it
+# ratchets down like the rest instead of becoming the new dumping ground.
+ANALYZE_TAB_FORM_BUDGET = 1462
 
 
 def _line_count(rel: str) -> int:
@@ -152,4 +161,14 @@ def test_analyze_tab_line_budget():
         f"analyze_tab.py is {n} lines, over the {ANALYZE_TAB_BUDGET} budget. "
         "Carve form-build / validation / run / log-poll into helpers rather than "
         "appending; the ratchet only moves down."
+    )
+
+
+def test_analyze_tab_form_line_budget():
+    n = _line_count("analyze_tab_form.py")
+    assert n <= ANALYZE_TAB_FORM_BUDGET, (
+        f"analyze_tab_form.py is {n} lines, over the "
+        f"{ANALYZE_TAB_FORM_BUDGET} budget. Each form section is already its own "
+        "_build_* method; extract a cohesive group of them into a sibling module "
+        "rather than appending. The ratchet only moves down."
     )

@@ -35,6 +35,7 @@ import pipeline.shape_features as _sfc
 # to replace.
 # ---------------------------------------------------------------------------
 from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP
+from util.well_token import canonical_well_label, is_valid_well_name
 
 _SCHEMA_LABELS = ("Experiment", "Channel", "Well", "FOV", "Timepoint", "— ignore —")
 # strict=: the two tuples are positionally paired, so a length mismatch is a
@@ -42,6 +43,77 @@ _SCHEMA_LABELS = ("Experiment", "Channel", "Well", "FOV", "Timepoint", "— igno
 # the picker rather than raising.
 _LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
 _FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
+
+
+# ── Entry-boundary parsing + numeric validation ─────────────────────────────
+#
+# Moved here from ``analyze_tab`` with ``_collect_run_options``: these read the
+# form's text fields and belong beside the widgets they read, not in the tab
+# that hosts them. ``_numeric_option_errors`` is re-exported by ``analyze_tab``
+# so ``from analyze_tab import _numeric_option_errors`` still resolves.
+
+def _safe_qc_float(text: str) -> float:
+    """Parse a QC bound from a text field; 0.0 (= no bound) on empty/invalid."""
+    try:
+        return float(str(text).strip() or "0")
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _safe_seg_float(text: str, default: float) -> float:
+    """Parse a segmentation-parameter field; *default* on empty/invalid."""
+    try:
+        return float(str(text).strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+_INT_FIELDS = {
+    "tophat_radius_nir": "Nuclear tophat radius",
+    "tophat_radius_fluor": "Fluor tophat radius",
+    "fft_small_nir": "Nuclear FFT small-object px",
+    "fft_small_fluor": "Fluor FFT small-object px",
+    "tf_threads": "TF threads",
+    "workers": "Workers",
+    "remote_batch_size": "Remote batch size",
+}
+
+
+def _numeric_option_errors(opts: dict) -> list[str]:
+    """Return human-readable errors for out-of-range / unparseable numeric run
+    options. Empty/blank means "use the pipeline default" and is allowed."""
+    errors: list[str] = []
+    for key, label in _INT_FIELDS.items():
+        raw = str(opts.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            if int(raw) < 0:
+                errors.append(f"{label} must be a whole number ≥ 0 (got {raw!r}).")
+        except ValueError:
+            errors.append(f"{label} must be a whole number (got {raw!r}).")
+    for key, label, allow_zero in (("mesh_ratio", "Mesh tile ratio", False),
+                                   ("mesh_sigma", "Mesh sigma", True)):
+        raw = str(opts.get(key, "") or "").strip()
+        if not raw:
+            continue
+        try:
+            val = float(raw)
+        except ValueError:
+            errors.append(f"{label} must be a number (got {raw!r}).")
+            continue
+        if allow_zero and val < 0:
+            errors.append(f"{label} must be ≥ 0.")
+        elif not allow_zero and val <= 0:
+            errors.append(f"{label} must be > 0.")   # 0 → downstream div-by-zero
+    mn = opts.get("qc_min_area") or 0.0
+    mx = opts.get("qc_max_area") or 0.0
+    if mn and mx and mn > mx:
+        errors.append("QC minimum area must be ≤ maximum area.")
+    sol = opts.get("qc_min_solidity") or 0.0
+    if not (0.0 <= sol <= 1.0):
+        errors.append("QC minimum solidity must be between 0 and 1.")
+    return errors
 
 
 class AnalyzeTabFormMixin:
@@ -162,6 +234,7 @@ class AnalyzeTabFormMixin:
         # stays open — the correction stages it configures are the common tuning
         # knobs, not an advanced afterthought.
         self._build_qc_section(parent)
+        self._build_auto_threshold_section(parent)
         self._build_shape_features_section(parent)
         self._build_output_options_section(parent)
         self._build_compute_options_section(parent)
@@ -883,6 +956,14 @@ class AnalyzeTabFormMixin:
         combo("_flatfield_cb", d.get("flatfield"))
         combo("_background_cb", d.get("background"))
         s("_background_well_edit", d.get("background_well"))
+        # Auto-threshold. The sidecar records the NEGATIVE (`--no_auto_threshold`),
+        # so the checkbox is its inverse; setChecked fires toggled, which syncs
+        # the two control-well rows' visibility.
+        nat = d.get("no_auto_threshold")
+        if nat is not None and hasattr(self, "_auto_threshold_cb"):
+            self._auto_threshold_cb.setChecked(not bool(nat))
+        s("_pos_control_well_edit", d.get("pos_control_well"))
+        s("_neg_control_well_edit", d.get("neg_control_well"))
         chk("_qc_remove_debris_cb", d.get("qc_remove_debris"))
         s("_qc_min_area_edit", d.get("qc_min_area"))
         s("_qc_max_area_edit", d.get("qc_max_area"))
@@ -1167,3 +1248,215 @@ class AnalyzeTabFormMixin:
             if w is not None:
                 w.setVisible(bool(show))
 
+    def _build_auto_threshold_section(self, parent: QWidget) -> None:
+        """Auto-threshold — every threshold-related control in one place.
+
+        The pipeline's last step writes a default per-channel ThreshFracOn cut
+        into ``pipeline_info.json``, which the Cell Gating tab reads the next
+        time the dataset is loaded. The checkbox here turns that step on and off
+        (it drives the pipeline's ``--no_auto_threshold``, which until now had no
+        UI at all), and the two control-well fields change *how* the cut is
+        chosen: named together, the thresholds come from the separation between
+        those two wells rather than from an Otsu split of cell signal against
+        background.
+
+        Collapsed by default, like the other optional sections.
+        """
+        sec = self._section(
+            parent, "Auto-threshold",
+            collapsible=True, collapsed=True,
+            info="After a run finishes, All-Well can pick a default 'on' "
+                 "threshold for each channel and store it with the dataset, so "
+                 "the Cell Gating tab opens with sensible values. Left blank, "
+                 "each threshold is an Otsu split separating cell signal from "
+                 "background. Name a positive and a negative control well and "
+                 "the thresholds instead come from the separation between those "
+                 "two wells, which is usually the better cut. The segmentation "
+                 "channel is always set to 0 — it defines cell boundaries and is "
+                 "not something to gate on.",
+        )
+
+        self._auto_threshold_cb = WrapCheckBox(
+            "Calculate cell-gating thresholds when the run finishes", sec,
+        )
+        self._auto_threshold_cb.setChecked(True)
+        self._auto_threshold_cb.setToolTip(
+            "On (default): the pipeline writes a default per-channel threshold "
+            "into pipeline_info.json at the end of the run. Off: no thresholds "
+            "are written and the Cell Gating tab starts from its own defaults."
+        )
+        sec.layout().addWidget(self._auto_threshold_cb)
+
+        rpos = self._row(sec, "Positive control well")
+        self._pos_control_well_edit = self._entry(rpos, "", width=160)
+        self._pos_control_well_edit.setPlaceholderText("e.g. B02")
+        self._pos_control_well_edit.setToolTip(
+            "A well where the signal is known to be ON. Optional — but if you "
+            "give one you must give the negative control too."
+        )
+        rpos.layout().addStretch(1)
+
+        rneg = self._row(sec, "Negative control well")
+        self._neg_control_well_edit = self._entry(rneg, "", width=160)
+        self._neg_control_well_edit.setPlaceholderText("e.g. B11")
+        self._neg_control_well_edit.setToolTip(
+            "A well where the signal is known to be OFF. The threshold chosen "
+            "for each channel is the one that best separates this well from the "
+            "positive control."
+        )
+        rneg.layout().addStretch(1)
+
+        # ``_row`` returns the right-hand cell — the "Positive control well" /
+        # "Negative control well" labels live in the cell's parent, so the rows
+        # to hide are the parents, or the labels stay behind on their own.
+        self._auto_threshold_rows = (rpos.parentWidget(), rneg.parentWidget())
+
+        def _sync_auto_threshold(_=None) -> None:
+            on = self._auto_threshold_cb.isChecked()
+            for row in self._auto_threshold_rows:
+                row.setVisible(on)
+
+        self._auto_threshold_cb.toggled.connect(_sync_auto_threshold)
+        _sync_auto_threshold()
+
+    def _auto_threshold_validation_error(self) -> str | None:
+        """Block the run when the control wells are half-given or unusable.
+
+        Returns ``None`` when the request is valid — including the common cases
+        of the pass being switched off, or both fields left blank (which selects
+        the Otsu pass).
+        """
+        if not self._auto_threshold_cb.isChecked():
+            return None
+        pos = self._pos_control_well_edit.text().strip()
+        neg = self._neg_control_well_edit.text().strip()
+        if not pos and not neg:
+            return None
+        if not pos or not neg:
+            missing = "positive" if not pos else "negative"
+            return (
+                f"Auto-threshold needs both control wells, or neither — the "
+                f"{missing} control well is empty.\n\n"
+                "The threshold is chosen from the separation between the two "
+                "wells, so one on its own says nothing. Clear both to fall back "
+                "to the automatic Otsu split."
+            )
+        bad = [w for w in (pos, neg) if not is_valid_well_name(w)]
+        if bad:
+            label = ", ".join(f"'{w}'" for w in bad)
+            return (f"Control well {label} is not a valid 96-well position.\n\n"
+                    "Use a row letter A–H followed by a column number 1–12 "
+                    "(e.g. B02).")
+        if canonical_well_label(pos) == canonical_well_label(neg):
+            return ("The positive and negative control wells are the same well "
+                    f"('{pos}').\n\nThey have to differ — the threshold comes "
+                    "from the separation between them.")
+        input_dir = Path(self._input_edit.text().strip())
+        sep = self._filename_sep_edit.text() or DEFAULT_SEP
+        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
+        from services.input_resolution_service import well_present_in_input
+        missing_wells = [w for w in (pos, neg)
+                         if not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
+        if missing_wells:
+            label = ", ".join(f"'{w}'" for w in missing_wells)
+            return (f"Control well {label} was not found in the input folder.\n\n"
+                    f"The threshold pass reads each control well's measurements "
+                    f"after the run — confirm they exist in:\n{input_dir}")
+        return None
+
+    def _background_well_validation_error(self) -> str | None:
+        """When empty_well drives flat-field and/or background, the background
+        well must be specified and must exist in the input. Returns an error
+        message to block the run, or None when the request is valid (or empty_well
+        isn't selected)."""
+        uses = []
+        if self._flatfield_cb.currentText() == "empty_well":
+            uses.append("flat-field correction")
+        if self._background_cb.currentText() == "empty_well":
+            uses.append("background subtraction")
+        if not uses:
+            return None
+        which = " and ".join(uses)
+        # One or several comma-separated wells (e.g. "H12, G12"), pooled.
+        raw = self._background_well_edit.text().strip()
+        seen, wells = set(), []
+        for tok in raw.replace(";", ",").split(","):
+            w = tok.strip()
+            if w and w.lower() not in seen:
+                seen.add(w.lower())
+                wells.append(w)
+        if not wells:
+            return (f"Empty-well {which} requires a Background well.\n\n"
+                    "Enter one empty/background well (e.g. H12) — or several "
+                    "comma-separated (e.g. H12, G12) — so its measured "
+                    "background can be sampled.")
+        input_dir = Path(self._input_edit.text().strip())
+        sep = self._filename_sep_edit.text() or DEFAULT_SEP
+        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
+        from services.input_resolution_service import well_present_in_input
+        missing = [w for w in wells
+                   if not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
+        if missing:
+            label = ", ".join(f"'{w}'" for w in missing)
+            return (f"Background well {label} was not found in the input folder.\n\n"
+                    f"Empty-well {which} reads its reference images from the named "
+                    f"well(s) — confirm they exist in:\n{input_dir}")
+        return None
+
+    def _collect_run_options(self) -> dict:
+        method = self._seg_method()
+        try:
+            min_area = int(self._min_nucleus_area_edit.text().strip() or "50")
+        except ValueError:
+            min_area = 50
+        cyto = self._cytoplasm_edit.text().strip()
+        if method != "stardist_seeded_watershed_cell":
+            cyto = ""
+        return dict(
+            raw=Path(self._input_edit.text().strip()),
+            scratch_dir=self._scratch_edit.text().strip() or None,
+            nuclear_token=self._nuclear_token_edit.text().strip() or "NIR",
+            fluor_tokens=self._fluor_tokens_list(),
+            csv_prefix=self._csv_prefix_edit.text().strip() or "measurements",
+            tophat_radius_nir=self._tophat_radius_nir_edit.text(),
+            tophat_radius_fluor=self._tophat_radius_fluor_edit.text(),
+            fft_small_nir=self._fft_small_nir_edit.text(),
+            fft_small_fluor=self._fft_small_fluor_edit.text(),
+            mesh_ratio=self._mesh_ratio_edit.text(),
+            mesh_sigma=self._mesh_sigma_edit.text(),
+            no_tophat_nir=self._no_tophat_nir_cb.isChecked(),
+            no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
+            # Always-on (no longer user options): zip in/out + move loose TIFs.
+            compress_input_well_folders=True,
+            compress_output_well_folders=True,
+            move_source_tifs=True,
+            remote_batch_size=self._remote_batch_size_edit.text(),
+            force=self._force_cb.isChecked(),
+            cpu_only=self._cpu_only_cb.isChecked(),
+            tf_threads=self._tf_threads_edit.text(),
+            workers=self._workers_edit.text(),
+            stardist_tile_px=self._stardist_tile_px_edit.text(),
+            filename_schema=self._build_schema_arg(),
+            filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
+            smfish_tokens=self._smfish_tokens_list(),
+            shape_features=list(self._shape_chips.checkedData()),
+            flatfield=self._flatfield_cb.currentText(),
+            background=self._background_cb.currentText(),
+            background_well=self._background_well_edit.text().strip(),
+            auto_threshold=self._auto_threshold_cb.isChecked(),
+            pos_control_well=self._pos_control_well_edit.text().strip(),
+            neg_control_well=self._neg_control_well_edit.text().strip(),
+            qc_remove_debris=self._qc_remove_debris_cb.isChecked(),
+            qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),
+            qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
+            qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
+            phase_token=self._phase_token(),
+            segmentation_method=method,
+            cytoplasm_token=cyto,
+            min_nucleus_area_px=min_area,
+            cellpose_model=self._cellpose_model_cb.currentText(),
+            cellpose_diameter=_safe_seg_float(self._cellpose_diameter_edit.text(), 0.0),
+            cellpose_flow_threshold=_safe_seg_float(self._cellpose_flow_thr_edit.text(), 0.4),
+            cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
+            cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
+        )

@@ -181,6 +181,20 @@ def build_pipeline_args(
     # The background well feeds both empty_well flat-field and empty_well bg.
     if bg_well and (flatfield == "empty_well" or background == "empty_well"):
         args += ["--background_well", bg_well]
+    # Auto-threshold. The form's checkbox is the positive statement ("calculate
+    # thresholds"); the pipeline flag is the negative, so only the off case emits
+    # anything. Absent from a legacy opts dict ⇒ on, matching prior behaviour.
+    if not opts.get("auto_threshold", True):
+        args.append("--no_auto_threshold")
+    else:
+        pos_well = str(opts.get("pos_control_well", "") or "").strip()
+        neg_well = str(opts.get("neg_control_well", "") or "").strip()
+        # Both or neither: one control well on its own carries no separation to
+        # optimise, so a half-filled pair falls back to the Otsu pass rather
+        # than reaching the pipeline and being rejected there.
+        if pos_well and neg_well:
+            args += ["--pos_control_well", pos_well,
+                     "--neg_control_well", neg_well]
     if opts.get("qc_remove_debris"):
         args.append("--qc_remove_debris")
         for flag, key in (("--qc_min_area", "qc_min_area"),

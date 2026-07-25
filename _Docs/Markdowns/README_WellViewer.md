@@ -334,7 +334,41 @@ You can also explicitly override the output folder.
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
 
-### 5. Quality control — field flatness & background correction
+### 5. Auto-threshold — picking each channel's "on" cut
+
+Collapsed by default. When a run finishes, All-Well can choose a default **on**
+threshold for each channel and store it with the dataset, so the Cell Gating tab
+opens with sensible values instead of a flat 50 everywhere.
+
+- **Calculate cell-gating thresholds when the run finishes** — on by default.
+  Turn it off and no thresholds are written; the Cell Gating tab starts from its
+  own defaults and you set them by hand.
+- **Positive control well** / **Negative control well** — optional, and it is
+  both or neither. Leave them blank and each channel's threshold is an Otsu
+  split separating cell signal from image background, which works when a
+  channel's cells are cleanly brighter than background and not otherwise. Name
+  a well where the signal is known to be ON and one where it is known to be
+  OFF, and each threshold is instead the cut that best separates those two
+  wells — usually the better answer, because it is anchored to biology rather
+  than to pixel statistics.
+
+The run is blocked if only one control well is filled in, if either is not a
+valid 96-well position, if the two are the same well, or if either is missing
+from the input folder.
+
+**The segmentation channel is always set to 0.** That channel exists to find
+cell boundaries, not to be gated on, so a threshold for it is meaningless. Zero
+means every cell counts as "on" for that channel, which is how it is
+neutralised — it is not the same as leaving it unset. Like every other value
+here it is only a default: a threshold you have already set on the Cell Gating
+tab is never overwritten by a later run.
+
+One thing the software cannot check for you: the two control wells are compared
+symmetrically, so entering them the wrong way round still produces a threshold.
+The run log warns when the positive control ends up with the *lower* fraction of
+on cells, which is the tell.
+
+### 6. Quality control — field flatness & background correction
 
 The **Quality Control** section bundles optional, pre-measurement clean-up that
 runs **per channel at quantification time** (so it changes the pixel values that
@@ -430,7 +464,7 @@ recomputes the verdict live as you tune the thresholds, with no re-segmentation
 (the debris gate is edited from the [Cell Gating](#cell-gating) tab in Review).
 A cell counts only when it is manually kept **and** it passes QC.
 
-### 6. Compute options
+### 7. Compute options
 
 - **TF threads.** TensorFlow intra-op parallelism (CPU only; ignored on
   Metal). Defaults to 4.
@@ -441,7 +475,7 @@ A cell counts only when it is manually kept **and** it passes QC.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
 
-### 7. Run / Stop / Log
+### 8. Run / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
 - **Stop** signals the entire pipeline process group (sub-workers
@@ -1315,13 +1349,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.0.app`
-for the full app, or `dist/AllWell-8.9.0-<profile>.app` for a subset (e.g.
-`AllWell-8.9.0-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.1.app`
+for the full app, or `dist/AllWell-8.9.1-<profile>.app` for a subset (e.g.
+`AllWell-8.9.1-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.9.0.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.9.1.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

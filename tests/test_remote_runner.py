@@ -1655,6 +1655,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/io.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",
+        "pipeline/threshold_optimize.py",
         "_Docs/requirements-remote.txt",
     )
 

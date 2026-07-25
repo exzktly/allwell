@@ -668,6 +668,33 @@ def _cell_at_event(ctx, event) -> Optional[Tuple[int, int]]:
     return r, c
 
 
+def _event_modifiers(event) -> Tuple[bool, bool]:
+    """Return ``(shift, ctrl)`` for a matplotlib mouse *event*.
+
+    Qt's ``QMouseEvent`` carries the authoritative modifier state, but PySide6
+    exposes it as a ``KeyboardModifier`` flag object that ``int()`` refuses to
+    convert — the value has to be read through ``.value``. Matplotlib's own
+    ``event.key`` is the fallback for events with no GUI event attached (it only
+    tracks modifiers while the canvas holds keyboard focus, so it is not enough
+    on its own). ``cmd`` counts as ctrl because that is what macOS reports for
+    the Command key; Qt already folds Command into ``ControlModifier`` there.
+    """
+    gui_event = getattr(event, "guiEvent", None)
+    modifiers = getattr(gui_event, "modifiers", None)
+    if callable(modifiers):
+        try:
+            flags = modifiers()
+            value = int(getattr(flags, "value", flags))
+            from PySide6.QtCore import Qt as _Qt
+            shift_bit = int(getattr(_Qt.ShiftModifier, "value", _Qt.ShiftModifier))
+            ctrl_bit = int(getattr(_Qt.ControlModifier, "value", _Qt.ControlModifier))
+            return bool(value & shift_bit), bool(value & ctrl_bit)
+        except Exception:
+            swallowed()  # fall through to the matplotlib key state
+    keys = set((getattr(event, "key", None) or "").lower().split("+"))
+    return "shift" in keys, bool(keys & {"control", "ctrl", "cmd"})
+
+
 def on_heatmap_click(ctx, event) -> None:
     rc = _cell_at_event(ctx, event)
     if rc is None:
@@ -678,18 +705,7 @@ def on_heatmap_click(ctx, event) -> None:
         return
 
     selected = set(ctx.state.selection.selected_wells or set())
-    modifiers = 0
-    try:
-        # Matplotlib events expose the GUI event for modifier inspection.
-        gui_event = getattr(event, "guiEvent", None)
-        if gui_event is not None and hasattr(gui_event, "modifiers"):
-            modifiers = int(gui_event.modifiers())
-    except Exception:
-        modifiers = 0
-
-    from PySide6.QtCore import Qt as _Qt
-    shift = bool(modifiers & int(_Qt.ShiftModifier))
-    ctrl = bool(modifiers & int(_Qt.ControlModifier))
+    shift, ctrl = _event_modifiers(event)
 
     if shift:
         selected.update(wells_here)

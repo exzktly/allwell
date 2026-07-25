@@ -550,7 +550,12 @@ tabs and is what every plot / aggregate / export consumes.
   Groups are *plotting selections only* — not replicate sets or stats groups —
   and loading one drives both the plate selection and, where a tab keeps its
   own well set, that tab's set too. The Image Table sidebar mirrors the drawer
-  read-only, so a saved set can drive the image grid as well.
+  read-only, so a saved set can drive the image grid as well. When Sample
+  Definition groups are defined, the plots draw one trace per *visible*
+  replicate set rather than per well, so loading a Plot Group there shows every
+  set the group touches and hides the rest — any well the group names that
+  belongs to no set is carried alongside them. Only visibility changes; no
+  replicate set's membership is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
   Click into a pane to focus it — the focused pane drives the sidebar and the

@@ -770,6 +770,16 @@ functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
+The same module builds the **Plot Groups** drawer. Loading a group writes the
+saved wells through `set_selected_wells`, then reconciles replicate visibility
+through the pure `plot_group_visibility_plan`: in replicate mode the plotting
+tabs draw one trace per *visible* replicate set and never read
+`selection.selected_wells`, so a load that only wrote that store changed nothing
+on screen. Every set the group's wells touch is shown, the rest hidden, and
+wells belonging to no set become `active_solo_wells`. This is visibility only —
+no replicate set's membership is edited, so Plot Groups still never mutate
+Sample Definitions.
+
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is
 `features/image_browser/image_table/picker_view.py`, the Sample-Definitions group editor

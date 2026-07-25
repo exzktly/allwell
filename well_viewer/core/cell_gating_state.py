@@ -11,7 +11,7 @@ input/view:
 
 - every path that changes an edit's text funnels through the two
   ``editingFinished`` handlers or the persistence loader, and each of those now
-  writes this slice (see ``cell_gating_tab_view._cell_gating_sync_gate_state``);
+  writes this slice (see ``cell_gating.controller._cell_gating_sync_gate_state``);
 - the accessors read this slice, so gate values exist independent of whether
   the (lazily-built) Cell Gating tab exists;
 - persistence serialises this slice, not widget text.

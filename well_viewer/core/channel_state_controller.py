@@ -150,7 +150,7 @@ def recalculate_threshold(ctx) -> None:
     from well_viewer.persistence.cell_gating import load_from_pipeline_info
     load_from_pipeline_info(ctx)
     if ctx.runtime.cell_gating.fluor_gate_edits is not None:
-        from well_viewer.features.grouping.cell_gating_tab_view import (
+        from well_viewer.features.grouping.cell_gating.controller import (
             cell_gating_load_cell_areas,
             cell_gating_load_threshold_frac_on,
         )
@@ -806,7 +806,7 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     # the ratio rows into the table whenever the ratio set changes.
     if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         try:
-            from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_load_cell_areas
+            from well_viewer.features.grouping.cell_gating.controller import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
@@ -935,7 +935,7 @@ def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     to; the fallback is kept explicit in case that ever changes)."""
     if channel is None:
         channel = ctx.state.channel.active_channel
-    from well_viewer.features.grouping.cell_gating_tab_view import _cell_gating_resolve_key
+    from well_viewer.features.grouping.cell_gating.controller import _cell_gating_resolve_key
     key = _cell_gating_resolve_key(ctx, channel)
     tf = ctx.state.cell_gating.thresh_frac_on
     return tf[key] if key in tf else ctx.state.channel.threshold
@@ -959,7 +959,7 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
         build = ctx.runtime.centre.build_pending
         if callable(build):
             build("Sample Definitions")
-        from well_viewer.features.grouping.cell_gating_tab_view import build_cell_gating_subtab
+        from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(ctx)
     return ctx.runtime.cell_gating.fluor_gate_edits is not None
 
@@ -987,7 +987,7 @@ def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     # The Cell Gating tab is built lazily; materialize it so its edits dict exists.
     if not ensure_cell_gating_tab_built(ctx):
         return
-    from well_viewer.features.grouping.cell_gating_tab_view import (
+    from well_viewer.features.grouping.cell_gating.controller import (
         _cell_gating_resolve_key,
         cell_gating_on_threshold_frac_on_change,
     )
@@ -1050,7 +1050,7 @@ def get_fluor_gate(ctx, channel: str) -> float:
     ``ctx``. The slice defaults an unset channel to 0.0 (gate off) — the same
     value the old tab-not-built guard returned — independent of whether the
     lazily-built Cell Gating tab exists."""
-    from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_get_fluor_gate
+    from well_viewer.features.grouping.cell_gating.controller import cell_gating_get_fluor_gate
     return cell_gating_get_fluor_gate(ctx, channel)
 
 

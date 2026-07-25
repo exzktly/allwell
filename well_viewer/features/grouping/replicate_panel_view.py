@@ -258,10 +258,8 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
     )
-    from well_viewer.features.grouping.cell_gating_tab_view import (
-        build_cell_gating_subtab,
-        cell_gating_sync_scatter_gates,
-    )
+    from well_viewer.features.grouping.cell_gating.controller import cell_gating_sync_scatter_gates
+    from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_subtab
     from well_viewer.features.scatter.ratio_panel_view import build_ratios_inline_panel
     from well_viewer.core.ui_helpers import notes_schedule_save
     from well_viewer.persistence import sample_definitions as _sd

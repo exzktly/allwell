@@ -4,9 +4,7 @@ import pandas as pd
 import pytest
 
 from well_viewer.domain.ratio_models import RatioMetric
-from well_viewer.features.grouping.cell_gating_tab_view import (
-    _optimize_thresh_frac_on_between_wells,
-)
+from well_viewer.features.grouping.cell_gating.gating_compute import _optimize_thresh_frac_on_between_wells
 
 
 def _df(values, *, included=None, den=None, qc=None, crop=None):

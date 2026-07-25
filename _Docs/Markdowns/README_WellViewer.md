@@ -550,7 +550,12 @@ tabs and is what every plot / aggregate / export consumes.
   Groups are *plotting selections only* — not replicate sets or stats groups —
   and loading one drives both the plate selection and, where a tab keeps its
   own well set, that tab's set too. The Image Table sidebar mirrors the drawer
-  read-only, so a saved set can drive the image grid as well.
+  read-only, so a saved set can drive the image grid as well. When Sample
+  Definition groups are defined, the plots draw one trace per *visible*
+  replicate set rather than per well, so loading a Plot Group there shows every
+  set the group touches and hides the rest — any well the group names that
+  belongs to no set is carried alongside them. Only visibility changes; no
+  replicate set's membership is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
   Click into a pane to focus it — the focused pane drives the sidebar and the
@@ -769,6 +774,12 @@ place cells in a grid that mirrors your plate or your experimental design.
   **Auto-populate from selection** for bulk work. You can also click a heatmap
   cell to select its wells; **Shift**-click adds to the selection and
   **Ctrl**-click (**Cmd** on macOS) toggles individual wells in and out.
+- **Auto-populate from selection** fills the grid from whichever selection is
+  live. With Sample Definition groups defined it lays out **one cell per visible
+  replicate set**, each holding all of that set's loaded wells, so the heat map
+  shows one value per set. With no groups defined it lays out one cell per
+  selected well, in plate order. Either way the grid grows (up to 32×32) if the
+  selection needs more cells than it currently has.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then scrub the
   timepoint slider to watch the metric evolve.
@@ -1304,13 +1315,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.33.app`
-for the full app, or `dist/AllWell-8.8.33-<profile>.app` for a subset (e.g.
-`AllWell-8.8.33-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.0.app`
+for the full app, or `dist/AllWell-8.9.0-<profile>.app` for a subset (e.g.
+`AllWell-8.9.0-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.8.33.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.9.0.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

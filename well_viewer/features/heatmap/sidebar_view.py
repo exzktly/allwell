@@ -405,16 +405,34 @@ def _clear_cell(ctx, r: int, c: int) -> None:
         refresh_heatmap_layout_sidebar(ctx)
 
 
-def _on_autopopulate(ctx) -> None:
-    """Lay the currently selected wells into the grid in plate order.
+def _autopopulate_cells(ctx) -> list[list[str]]:
+    """The list of cells "Auto-populate from selection" should build, in order.
 
-    Grows the grid (capped at 32×32, the spinbox limit) when the selection
-    has more wells than the current grid can hold.
+    Which selection it reads depends on the mode the plate is in, because the
+    two modes express a selection in different places:
+
+    * **replicate mode** (Sample Definition groups defined) — the selection
+      lives in ``selection.selections`` and ``selected_wells`` is empty or stale,
+      so reading the latter produced a grid of whichever individual wells
+      happened to be left in it. Each *visible* replicate set becomes ONE cell
+      holding all of its loaded wells, which is what makes the heat map show one
+      value per set rather than one per well.
+    * **plain mode** — each individually selected well becomes its own cell, in
+      plate order.
     """
-    layout = _ensure_sidebar_layout(ctx)
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    rep_sets = active_replicate_sets(ctx.state.selection.selections,
+                                     ctx.state.dataset.well_paths)
+    if rep_sets:
+        loaded = ctx.state.dataset.well_paths
+        cells = [[w for w in (getattr(rs, "wells", None) or []) if w in loaded]
+                 for rs in rep_sets]
+        return [wells for wells in cells if wells]
+
     selected = list(ctx.state.selection.selected_wells or [])
     if not selected:
-        return
+        return []
     parse_rc = getattr(ctx.window, "_parse_rc", None)
     if callable(parse_rc):
         try:
@@ -423,10 +441,24 @@ def _on_autopopulate(ctx) -> None:
             wells = sorted(selected)
     else:
         wells = sorted(selected)
+    return [[w] for w in wells]
+
+
+def _on_autopopulate(ctx) -> None:
+    """Lay the current selection into the grid, one cell per selected entry.
+
+    Grows the grid (capped at 32×32, the spinbox limit) when the selection
+    has more entries than the current grid can hold. See
+    :func:`_autopopulate_cells` for what counts as an entry in each mode.
+    """
+    layout = _ensure_sidebar_layout(ctx)
+    cells = _autopopulate_cells(ctx)
+    if not cells:
+        return
 
     rows, cols = layout.rows, layout.cols
     capacity = rows * cols
-    needed = len(wells)
+    needed = len(cells)
     if needed > capacity:
         # Grow rows so capacity ≥ needed; cap at 32 to match the spinbox.
         new_rows = min(32, max(rows, -(-needed // max(1, cols))))
@@ -439,10 +471,10 @@ def _on_autopopulate(ctx) -> None:
         rows, cols = layout.rows, layout.cols
 
     layout.cells.clear()
-    for i, w in enumerate(wells[: rows * cols]):
+    for i, cell_wells in enumerate(cells[: rows * cols]):
         r = i // cols
         c = i % cols
-        layout.assign(r, c, [w])
+        layout.assign(r, c, list(cell_wells))
 
     _persist_and_redraw(ctx)
     refresh_heatmap_layout_sidebar(ctx)

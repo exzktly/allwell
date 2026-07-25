@@ -15,6 +15,7 @@ from well_viewer.core.selection_controller import on_sidebar_plate_row_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_selection_changed
 from well_viewer.core.selection_controller import on_sidebar_plate_well_activated
 from well_viewer.core.selection_controller import on_sidebar_plate_well_dropped
+from well_viewer.core.selection_controller import rebuild_all
 from well_viewer.core.selection_controller import set_selected_wells
 import logging
 
@@ -295,6 +296,48 @@ def _plot_groups_add_current(ctx, name_edit=None) -> None:
     )
 
 
+def plot_group_visibility_plan(selections, wells) -> tuple[list[bool], set[str]]:
+    """How loading a Plot Group of *wells* should repaint replicate visibility.
+
+    Returns ``(hidden_flags, solo_wells)`` — one ``hidden`` flag per entry of
+    *selections*, in order, and the subset of *wells* that belongs to no
+    replicate set (which the plotting tabs carry as solo wells). A set is shown
+    when the group names at least one of its wells.
+
+    Pure, so the mapping is testable without an application. Returns all-hidden
+    and every well solo for an empty *selections*, which the caller treats as
+    "not in replicate mode" and ignores.
+    """
+    flags: list[bool] = []
+    claimed: set[str] = set()
+    for s in selections:
+        members = set(s.get("wells") or []) if isinstance(s, dict) else set()
+        hit = members & set(wells)
+        flags.append(not hit)
+        claimed |= hit
+    return flags, set(wells) - claimed
+
+
+def _apply_plot_group_to_rep_mode(ctx, wells) -> None:
+    """Repaint replicate visibility from a just-loaded Plot Group. No-op when no
+    replicate sets are defined (plain mode already honours ``selected_wells``)."""
+    sel = ctx.state.selection
+    selections = [s for s in (sel.selections or []) if isinstance(s, dict)]
+    if not selections:
+        return
+    flags, solo = plot_group_visibility_plan(selections, wells)
+    changed = False
+    for s, hidden in zip(selections, flags, strict=True):
+        if bool(s.get("hidden")) != hidden:
+            s["hidden"] = hidden
+            changed = True
+    if set(sel.active_solo_wells or set()) != solo:
+        sel.active_solo_wells = set(solo)
+        changed = True
+    if changed:
+        rebuild_all(ctx)
+
+
 def _plot_groups_load(ctx, group_id: str) -> None:
     group = next(
         (g for g in ctx.state.selection.plot_groups if g.get("id") == group_id),
@@ -307,6 +350,17 @@ def _plot_groups_load(ctx, group_id: str) -> None:
     # ``set_selected_wells`` is the single mutation point (prev-sel tracking +
     # redraw fan-out); thread ctx.
     set_selected_wells(ctx, wells)
+    # In replicate mode the plotting tabs read the *visible* replicate sets, not
+    # ``selected_wells`` — clicks there toggle each group's ``hidden`` flag so
+    # the plate highlight and the plots stay in lock-step (see
+    # ``selection_controller.on_plate_sel_change``). Writing ``selected_wells``
+    # alone therefore changed nothing on screen, which read as the group failing
+    # to load. Mirror the group onto visibility the same way a row / column
+    # click does: show every set the group touches, hide the rest, and carry any
+    # well the group names that belongs to no set as a solo well. This changes
+    # only what is *shown* — no replicate set's membership is touched, so Plot
+    # Groups still never mutate Sample Definitions.
+    _apply_plot_group_to_rep_mode(ctx, wells)
     # Mirror the selection into the Image Table's tab-local well set so a
     # group picked from any sidebar (plotting or Image Table) immediately
     # drives the Image Table grid — without this, the Image Table's plate

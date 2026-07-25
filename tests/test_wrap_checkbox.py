@@ -41,3 +41,25 @@ def test_wrap_checkbox_api(qapp):
     assert cb.isChecked() and seen == [True]
     cb.setChecked(False)
     assert not cb.isChecked()
+
+
+def test_wrap_checkbox_reports_its_wrapped_height(qapp):
+    """The composite must advertise ``heightForWidth``, not just its label.
+
+    A QWidget does not inherit its child's height-for-width, and the default
+    size policy does not advertise one — so a parent column sized this row from
+    a single line and a label that wrapped to two lines spilled over whatever
+    sat below it. The Analyze form's "Dry-run cleanup" row is the case that
+    surfaced this.
+    """
+    from widgets.wrap_checkbox import WrapCheckBox
+
+    cb = WrapCheckBox(_LABEL)
+    assert cb.sizePolicy().hasHeightForWidth() is True
+    assert cb.hasHeightForWidth() is True
+
+    wide = cb.heightForWidth(600)
+    narrow = cb.heightForWidth(180)
+    assert narrow > wide, (
+        f"height did not grow as the label wrapped ({wide} -> {narrow})"
+    )

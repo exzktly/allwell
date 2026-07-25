@@ -47,6 +47,34 @@ class _FlowHeightSync(QObject):
         return False
 
 
+class _FlowItemVisibility(QObject):
+    """Invalidates a :class:`FlowLayout` when one of its widgets is shown or hidden.
+
+    ``FlowLayout._do_layout`` skips hidden widgets, so *which widgets are
+    visible* is an input to the layout in a way it is not for a box layout —
+    hiding an item does not merely blank a slot, it changes where every later
+    item lands and whether the row wraps at all. Qt does not reliably deliver a
+    layout request for that: a call site that hides one widget and shows another
+    (a per-mode control row swapping its option group) leaves the layout holding
+    positions computed for the previous visible set, and the newly-shown widget
+    is placed on top of whatever was laid out without it.
+
+    Watching Show / Hide on every managed widget and invalidating makes the
+    layout recompute on the next pass, which is what a box layout gets for free.
+    """
+
+    def __init__(self, layout: QLayout) -> None:
+        super().__init__(layout)
+        self._layout = layout
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if isinstance(event, QEvent) and event.type() in (
+            QEvent.Show, QEvent.Hide, QEvent.ShowToParent, QEvent.HideToParent,
+        ):
+            self._layout.invalidate()
+        return False
+
+
 def sync_flow_height(widget: QWidget) -> None:
     """Make *widget* (a host of a :class:`FlowLayout`) always reserve the height
     its wrapped rows need. See :class:`_FlowHeightSync` for why the layout's own
@@ -97,6 +125,9 @@ class FlowLayout(QLayout):
         self._items: list = []
         self._h_space = h_spacing
         self._v_space = v_spacing
+        # Watches every managed widget for show/hide; see _FlowItemVisibility
+        # for why the visible set has to invalidate this layout explicitly.
+        self._vis_watcher = _FlowItemVisibility(self)
         self.setContentsMargins(QMargins(margin, margin, margin, margin))
 
     # ── item bookkeeping ────────────────────────────────────────────────────
@@ -106,6 +137,11 @@ class FlowLayout(QLayout):
 
     def addItem(self, item) -> None:  # Qt override
         self._items.append(item)
+        # Every path in — addWidget, insertWidget, addLayout, addSpacing —
+        # funnels through here, so this is the one place to hook the watcher.
+        widget = item.widget()
+        if widget is not None:
+            widget.installEventFilter(self._vis_watcher)
 
     def count(self) -> int:
         return len(self._items)
@@ -117,7 +153,11 @@ class FlowLayout(QLayout):
 
     def takeAt(self, index: int):
         if 0 <= index < len(self._items):
-            return self._items.pop(index)
+            item = self._items.pop(index)
+            widget = item.widget()
+            if widget is not None:
+                widget.removeEventFilter(self._vis_watcher)
+            return item
         return None
 
     # ── QBoxLayout drop-in convenience ───────────────────────────────────────

@@ -46,6 +46,28 @@ class WrapCheckBox(QWidget):
         self._lbl.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         lay.addWidget(self._lbl, 1)
         self._cb.toggled.connect(self.toggled)
+        # The inner label wraps, so this composite's height depends on the width
+        # it is given — but a QWidget does not inherit its child's
+        # ``heightForWidth``, and the default size policy does not advertise one.
+        # Without this a parent column sizes the row from a single line's height
+        # and a label that wraps to two spills over whatever sits below it.
+        policy = self.sizePolicy()
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
+
+    # ── height depends on width (the label wraps) ────────────────────────────
+    def hasHeightForWidth(self) -> bool:  # Qt naming
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # Qt naming
+        """Height this row needs at *width*, never less than the indicator."""
+        lay = self.layout()
+        margins = lay.contentsMargins()
+        inner = (width - self._cb.sizeHint().width() - lay.spacing()
+                 - margins.left() - margins.right())
+        label_h = self._lbl.heightForWidth(max(0, inner))
+        return (max(self._cb.sizeHint().height(), label_h)
+                + margins.top() + margins.bottom())
 
     # clicking anywhere on the row (including the wrapped label) toggles
     def mousePressEvent(self, event) -> None:

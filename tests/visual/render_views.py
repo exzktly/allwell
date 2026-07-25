@@ -124,7 +124,10 @@ def make_app(load: bool):
     rev._load_path(dataset)
     QApplication.processEvents()
     rev._set_selected_wells(set(WELLS), commit=False)
-    rebuild_all(rev)
+    # ``rebuild_all`` takes the frozen ViewerContext, not the window. Passing the
+    # window resolves ``ctx.window`` to ``QWidget.window`` — a bound method — and
+    # the first attribute the controller reaches for raises AttributeError.
+    rebuild_all(rev._ctx)
     return w, rev
 
 
@@ -192,14 +195,22 @@ def capture_review(app) -> None:
     if goto(app, rev, "Statistics"):
         grab(w, "20-statistics", "Statistics — group comparison")
 
-    # 3) Image Table (empty image state).
-    if goto(app, rev, "Image Table"):
-        grab(w, "30-image-table", "Image Table (no image archives — empty state)")
+    # 3) Multivariate — one grab per analysis mode. The modes are a
+    #    SegmentedControl, not an inner QTabWidget, so _capture_inner cannot see
+    #    them; each swaps a different per-mode option group into the control row.
+    if goto(app, rev, "Multivariate"):
+        _capture_multivariate_modes(app, w, rev)
 
-    # 4) Segmentation + sub-tabs.
+    # 4) Spatial.
+    if goto(app, rev, "Spatial"):
+        grab(w, "26-spatial", "Spatial — per-well cell positions")
+
+    # 5) Image Browser + its four sub-tabs. "Image Table" and "Segmentation" are
+    #    both leaves of this one rail entry, so a separate top-level grab for
+    #    each only re-shot whichever sub-tab happened to be current.
     if goto(app, rev, "Segmentation"):
-        _capture_inner(app, w, rev, _current_page(rev), "40-segmentation",
-                       "Segmentation", fallback="40-segmentation")
+        _capture_inner(app, w, rev, _current_page(rev), "30-image-browser",
+                       "Image Browser", fallback="30-image-browser")
 
     # 5) smFISH (lazy, image-dependent → empty state).
     if goto(app, rev, "smFISH"):
@@ -218,7 +229,11 @@ def capture_review(app) -> None:
     if goto(app, rev, "Batch Export"):
         grab(w, "80-batch-export", "Batch Export — multi-well figure export")
 
-    # 9) Analyze mode.
+    # 9) Saved Plots.
+    if goto(app, rev, "Saved Plots"):
+        grab(w, "85-saved-plots", "Saved Plots — pinned figures")
+
+    # 10) Analyze mode.
     print("[analyze mode]")
     rev._central_pane_stack.setCurrentIndex(1)
     settle(app, 400)
@@ -226,7 +241,7 @@ def capture_review(app) -> None:
     rev._central_pane_stack.setCurrentIndex(0)
     settle(app)
 
-    # 10) Help drawer dialog.
+    # 11) Help drawer dialog.
     print("[dialogs]")
     try:
         w._toggle_help_drawer()
@@ -242,6 +257,35 @@ def _current_page(rev) -> QWidget:
     nb = rev._notebook
     name = nb.currentName()
     return rev._tab_frames.get(name) if hasattr(rev, "_tab_frames") else rev
+
+
+def _capture_multivariate_modes(app, w, rev) -> None:
+    """Grab the Multivariate tab once per analysis mode.
+
+    Its four modes are a ``SegmentedControl``, not an inner ``QTabWidget``, so
+    ``_capture_inner`` finds nothing and the tab was only ever shot in whichever
+    mode happened to be current. Each mode swaps a different option group into
+    the control row, and the widest of them (Faceting) is the only one that
+    makes the row wrap — so a single-mode grab could not show a wrapped row.
+
+    Degrades to one plain grab when the feature is profiled out.
+    """
+    try:
+        from well_viewer.features.multivariate import controller as mv_ctrl
+        from well_viewer.features.multivariate import state as mv_state
+    except ImportError:
+        grab(w, "25-multivariate", "Multivariate")
+        return
+    modes = (
+        (mv_state.MODE_CORRELATION, "Correlation"),
+        (mv_state.MODE_DIMRED, "Dim. Reduction"),
+        (mv_state.MODE_CLUSTERING, "Clustering"),
+        (mv_state.MODE_FACET, "Faceting"),
+    )
+    for key, label in modes:
+        mv_ctrl.mv_set_mode(rev._ctx, key)
+        settle(app, 300)
+        grab(w, f"25-multivariate-{_slug(label)}", f"Multivariate → {label}")
 
 
 def _capture_inner(app, w, rev, page: QWidget, prefix: str, title: str,

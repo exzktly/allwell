@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.31.** This map describes the app as it stands today;
+**Reflects All-Well v8.8.32.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.31; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.32; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -2274,10 +2274,18 @@ fixture (it doesn't help).
 six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate
 because it takes minutes rather than seconds and its per-test memory profile is
 fragile under parallel load. It exists because the ~270 tests it covers
-previously had *no* automated coverage anywhere: `tests/test_qc_reopen_apply.py`
-called a `ctx`-taking function with the raw app from the day that function
-migrated, and sat red indefinitely because nothing ran it. Run it by hand before
-merging anything that reshapes a feature package.
+previously had *no* automated coverage anywhere, so a test could sit red
+indefinitely with nothing to report it — several did, each one a `ctx`-taking
+function called with the raw app from the day that function migrated. Run it by
+hand before merging anything that reshapes a feature package.
+
+That particular defect also has a *static* counterpart in the fast lane
+(`tests/test_frozen_ctx_guardrail.py`), which scans the test suite's own call
+sites: on a real `WellViewerApp`, `ctx.window` resolves to Qt's `QWidget.window`
+**method** instead of raising, so the failure surfaces frames later — or not at
+all, when the callee wraps its body in a `try`, leaving a green test that
+asserted nothing. Catching it statically means it no longer depends on the
+nightly lane.
 
 **What the environment gives you that CI does not (and vice versa).** The two
 lanes are not the same machine, and the differences decide which failures you
@@ -2687,6 +2695,7 @@ The map (each rule links to the test that holds it):
 | No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
 | `runtime_app` line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |
 | No `ctx.app` — features reach the window shell only through the frozen `ViewerContext` accessors (§5.9) | `tests/test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
+| No `ctx._x` scratch attributes, and no `ctx`-taking function called with the raw `app` / `self` — including the module-qualified `sc.foo(app)` spelling. Call sites are scanned in `well_viewer/` **and** `tests/`, since a test handing a real-app fixture to a `ctx` function is the same defect (§5.9) | `tests/test_frozen_ctx_guardrail.py` |
 | The `ViewerContext` window-service accessor set is closed — after the A5 teardown it is exactly `{"window"}`; every other window service is now a held collaborator (`ctx.notify` / `ctx.figures` / `ctx.coordinator` / `ctx.persistence` / `ctx.features`), and adding a new accessor is a reviewed act (§5.9) | `tests/test_ctx_service_accessors.py` |
 | `AppRuntime` is live-object-only — `persistence/` never imports `app_runtime` (§5.9) | `tests/test_app_runtime.py` |
 | `process_microscopy` / `image_table` controller line budgets | `tests/test_monolith_budgets.py` |

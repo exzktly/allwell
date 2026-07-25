@@ -18,8 +18,21 @@ def _set_flatfield_mode(app, mode, background_well=""):
     app._app_state.dataset.pipeline_info = info
 
 
+def _build_segmentation_panel(app):
+    """Build the Segmentation control strip, which owns the Stage control.
+
+    Tab bodies build lazily, so ``loaded_app`` alone leaves
+    ``ctx.runtime.review_image.source_seg`` at its ``None`` default — the
+    builder in ``preview/panel_view.build_review_image_panel`` is what assigns
+    it. Every other Image Browser sub-tab test does the same thing.
+    """
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+    assert show_image_browser_subtab(app._ctx, "Segmentation")
+    return app._ctx.runtime.review_image.source_seg
+
+
 def test_source_segmented_control_built(loaded_app):
-    seg = getattr(loaded_app, "_review_image_source_seg", None)
+    seg = _build_segmentation_panel(loaded_app)
     assert seg is not None
     data = [seg._data[i] for i in range(seg.count())]
     assert data == ["raw", "flatfield", "corrected"]
@@ -41,18 +54,19 @@ def test_flatfield_field_for_gaussian_and_none(loaded_app):
 
 def test_set_source_updates_state_syncs_control_and_clears_lut(loaded_app):
     app = loaded_app
+    _build_segmentation_panel(app)
     chan = str(app._app_state.channel.active_image_channel or "").lower()
     app._app_state.image_view.lut_by_channel[chan] = (10.0, 200.0)
 
     set_review_image_source(app._ctx, "flatfield")
     assert app._app_state.review_image.image_source == "flatfield"
-    assert app._review_image_source_seg.currentData() == "flatfield"
+    assert app._ctx.runtime.review_image.source_seg.currentData() == "flatfield"
     # Switching stages drops the active channel's cached LUT (ranges differ).
     assert chan not in app._app_state.image_view.lut_by_channel
 
     set_review_image_source(app._ctx, "corrected")
     assert app._app_state.review_image.image_source == "corrected"
-    assert app._review_image_source_seg.currentData() == "corrected"
+    assert app._ctx.runtime.review_image.source_seg.currentData() == "corrected"
 
     set_review_image_source(app._ctx, "bogus")  # invalid → ignored
     assert app._app_state.review_image.image_source == "corrected"

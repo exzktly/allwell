@@ -54,7 +54,7 @@ def test_cell_viewer_and_properties_are_mutually_exclusive(loaded_app):
 
     # Opening the Properties / Export-Style sidebar hides the cell viewer
     # (one panel at a time in the shared dock).
-    app._open_export_style_panel("scatter_cells")
+    app._ctx.figures.open_style_panel("scatter_cells")
     assert viewer.isHidden()
     sidebar = app._export_style_sidebars.get(id(app._scatter_fig))
     assert sidebar is not None and not sidebar.isHidden()

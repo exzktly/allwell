@@ -343,18 +343,23 @@ opens with sensible values instead of a flat 50 everywhere.
 - **Calculate cell-gating thresholds when the run finishes** — on by default.
   Turn it off and no thresholds are written; the Cell Gating tab starts from its
   own defaults and you set them by hand.
-- **Positive control well** / **Negative control well** — optional, and it is
-  both or neither. Leave them blank and each channel's threshold is an Otsu
-  split separating cell signal from image background, which works when a
-  channel's cells are cleanly brighter than background and not otherwise. Name
-  a well where the signal is known to be ON and one where it is known to be
-  OFF, and each threshold is instead the cut that best separates those two
-  wells — usually the better answer, because it is anchored to biology rather
-  than to pixel statistics.
+- **Method** — how each threshold is chosen:
+  - **Otsu (whole dataset)** — the default. Splits each channel's per-cell
+    signal from image background, pooled across the whole plate. Needs no
+    controls, but it cannot tell which cells are *biologically* positive, so it
+    works when a channel's cells are cleanly brighter than background and not
+    otherwise.
+  - **Positive / negative controls** — the cut that best separates a well you
+    know is ON from one you know is OFF. Usually the better answer, because it
+    is anchored to biology rather than to pixel statistics.
+- **Positive control well** / **Negative control well** — shown for the control
+  method, which needs both. Switching back to Otsu hides them but keeps what you
+  typed, so you can flip between the two methods without re-entering wells.
 
-The run is blocked if only one control well is filled in, if either is not a
-valid 96-well position, if the two are the same well, or if either is missing
-from the input folder.
+Under the control method the run is blocked if only one well is filled in, if
+either is not a valid 96-well position, if the two are the same well, or if
+either is missing from the input folder. Under Otsu the fields are dormant and
+never checked.
 
 **The segmentation channel is always set to 0.** That channel exists to find
 cell boundaries, not to be gated on, so a threshold for it is meaningless. Zero

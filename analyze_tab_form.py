@@ -964,6 +964,16 @@ class AnalyzeTabFormMixin:
             self._auto_threshold_cb.setChecked(not bool(nat))
         s("_pos_control_well_edit", d.get("pos_control_well"))
         s("_neg_control_well_edit", d.get("neg_control_well"))
+        # The sidecar records the wells, not the method — on the pipeline side
+        # naming both IS the method. Infer it back so reloading a control-well
+        # run reopens on that method rather than silently on Otsu.
+        if hasattr(self, "_auto_threshold_method_cb"):
+            used_controls = bool(str(d.get("pos_control_well") or "").strip()
+                                 and str(d.get("neg_control_well") or "").strip())
+            idx = self._auto_threshold_method_cb.findData(
+                "controls" if used_controls else "otsu")
+            if idx >= 0:
+                self._auto_threshold_method_cb.setCurrentIndex(idx)
         chk("_qc_remove_debris_cb", d.get("qc_remove_debris"))
         s("_qc_min_area_edit", d.get("qc_min_area"))
         s("_qc_max_area_edit", d.get("qc_max_area"))
@@ -1253,12 +1263,15 @@ class AnalyzeTabFormMixin:
 
         The pipeline's last step writes a default per-channel ThreshFracOn cut
         into ``pipeline_info.json``, which the Cell Gating tab reads the next
-        time the dataset is loaded. The checkbox here turns that step on and off
-        (it drives the pipeline's ``--no_auto_threshold``, which until now had no
-        UI at all), and the two control-well fields change *how* the cut is
-        chosen: named together, the thresholds come from the separation between
-        those two wells rather than from an Otsu split of cell signal against
-        background.
+        time the dataset is loaded. Three controls, in the order they apply:
+        the checkbox turns the step on and off (it drives the pipeline's
+        ``--no_auto_threshold``, which until now had no UI at all); the method
+        combo picks how the cut is chosen; and the two well fields name the
+        controls the second method compares.
+
+        The method is an explicit choice rather than being inferred from whether
+        the well fields are filled, so switching back to Otsu does not mean
+        clearing the wells and losing them.
 
         Collapsed by default, like the other optional sections.
         """
@@ -1267,11 +1280,12 @@ class AnalyzeTabFormMixin:
             collapsible=True, collapsed=True,
             info="After a run finishes, All-Well can pick a default 'on' "
                  "threshold for each channel and store it with the dataset, so "
-                 "the Cell Gating tab opens with sensible values. Left blank, "
-                 "each threshold is an Otsu split separating cell signal from "
-                 "background. Name a positive and a negative control well and "
-                 "the thresholds instead come from the separation between those "
-                 "two wells, which is usually the better cut. The segmentation "
+                 "the Cell Gating tab opens with sensible values. Otsu (the "
+                 "default) splits cell signal from background across the whole "
+                 "dataset. Control wells instead take the cut that best "
+                 "separates a well you know is ON from one you know is OFF, "
+                 "which is usually the better answer because it is anchored to "
+                 "biology rather than to pixel statistics. The segmentation "
                  "channel is always set to 0 — it defines cell boundaries and is "
                  "not something to gate on.",
         )
@@ -1286,6 +1300,23 @@ class AnalyzeTabFormMixin:
             "are written and the Cell Gating tab starts from its own defaults."
         )
         sec.layout().addWidget(self._auto_threshold_cb)
+
+        rmethod = self._row(sec, "Method")
+        self._auto_threshold_method_cb = QComboBox(rmethod)
+        self._auto_threshold_method_cb.addItem("Otsu (whole dataset)", "otsu")
+        self._auto_threshold_method_cb.addItem("Positive / negative controls",
+                                               "controls")
+        self._auto_threshold_method_cb.setFixedWidth(220)
+        self._auto_threshold_method_cb.setToolTip(
+            "Otsu: split each channel's per-cell signal from image background, "
+            "pooled across the dataset — no controls needed, but it cannot tell "
+            "which cells are biologically positive.\n"
+            "Positive / negative controls: sweep for the cut that best separates "
+            "the two named wells."
+        )
+        rmethod.layout().addWidget(self._auto_threshold_method_cb)
+        rmethod.layout().addStretch(1)
+        self._auto_threshold_method_row = rmethod.parentWidget()
 
         rpos = self._row(sec, "Positive control well")
         self._pos_control_well_edit = self._entry(rpos, "", width=160)
@@ -1313,33 +1344,45 @@ class AnalyzeTabFormMixin:
 
         def _sync_auto_threshold(_=None) -> None:
             on = self._auto_threshold_cb.isChecked()
+            self._auto_threshold_method_row.setVisible(on)
+            # The well fields belong to one method, so they follow it as well as
+            # the master switch. Their text is left alone — switching to Otsu and
+            # back must not cost the user their wells.
+            wells = on and self._auto_threshold_method() == "controls"
             for row in self._auto_threshold_rows:
-                row.setVisible(on)
+                row.setVisible(wells)
 
         self._auto_threshold_cb.toggled.connect(_sync_auto_threshold)
+        self._auto_threshold_method_cb.currentIndexChanged.connect(_sync_auto_threshold)
         _sync_auto_threshold()
+
+    def _auto_threshold_method(self) -> str:
+        """``"otsu"`` or ``"controls"`` — the selected estimator."""
+        return str(self._auto_threshold_method_cb.currentData() or "otsu")
 
     def _auto_threshold_validation_error(self) -> str | None:
         """Block the run when the control wells are half-given or unusable.
 
-        Returns ``None`` when the request is valid — including the common cases
-        of the pass being switched off, or both fields left blank (which selects
-        the Otsu pass).
+        Returns ``None`` when the request is valid — including the cases of the
+        pass being switched off, or the Otsu method being selected, neither of
+        which reads the well fields at all.
         """
         if not self._auto_threshold_cb.isChecked():
             return None
+        if self._auto_threshold_method() != "controls":
+            # Otsu needs no wells. Any text left in the fields is dormant, kept
+            # so switching methods back and forth does not lose it.
+            return None
         pos = self._pos_control_well_edit.text().strip()
         neg = self._neg_control_well_edit.text().strip()
-        if not pos and not neg:
-            return None
         if not pos or not neg:
             missing = "positive" if not pos else "negative"
             return (
-                f"Auto-threshold needs both control wells, or neither — the "
-                f"{missing} control well is empty.\n\n"
+                f"The control-well method needs both wells — the {missing} "
+                f"control well is empty.\n\n"
                 "The threshold is chosen from the separation between the two "
-                "wells, so one on its own says nothing. Clear both to fall back "
-                "to the automatic Otsu split."
+                "wells, so one on its own says nothing. Switch Method back to "
+                "Otsu if you don't have a pair."
             )
         bad = [w for w in (pos, neg) if not is_valid_well_name(w)]
         if bad:
@@ -1444,6 +1487,7 @@ class AnalyzeTabFormMixin:
             background=self._background_cb.currentText(),
             background_well=self._background_well_edit.text().strip(),
             auto_threshold=self._auto_threshold_cb.isChecked(),
+            auto_threshold_method=self._auto_threshold_method(),
             pos_control_well=self._pos_control_well_edit.text().strip(),
             neg_control_well=self._neg_control_well_edit.text().strip(),
             qc_remove_debris=self._qc_remove_debris_cb.isChecked(),

@@ -1367,13 +1367,23 @@ keeps only the run/log/dashboard orchestration. Both files carry a line budget
 behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
 
 The optional sections fold by default; **Auto-threshold** is one of them, and it
-owns every threshold-related control. Its checkbox drives the pipeline's
-`--no_auto_threshold` (which previously had no UI), and its positive- and
-negative-control well fields drive `--pos_control_well` / `--neg_control_well`.
-The pair is validated together — both or neither, each a valid 96-well position,
-distinct, and present in the input folder — by
+owns every threshold-related control: a checkbox driving the pipeline's
+`--no_auto_threshold` (which previously had no UI), a **Method** combo choosing
+between Otsu and the control-well optimizer, and the two well fields that feed
+`--pos_control_well` / `--neg_control_well`.
+
+The method is an explicit selection rather than being inferred from whether the
+well fields are filled, so switching back to Otsu does not mean clearing the
+wells and losing them — the fields hide but keep their text, and
+`build_pipeline_args` emits the flags only under the control method, so dormant
+text cannot silently override the choice. On the pipeline side there is no
+method flag: naming both wells *is* the method, which is also how
+`_apply_pipeline_info` infers the combo back from a sidecar.
+
+Under the control method the pair is validated together — both wells, each a
+valid 96-well position, distinct, and present in the input folder — by
 `_auto_threshold_validation_error`, which blocks the run the same way the
-background-well check does.
+background-well check does. Under Otsu it does not read the fields at all.
 
 The Run path:
 

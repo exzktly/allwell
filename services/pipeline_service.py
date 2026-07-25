@@ -70,14 +70,10 @@ def _emit_execution_flags(args: list[str], opts: dict) -> None:
 def _emit_auto_threshold_flags(args: list[str], opts: dict) -> None:
     """Append the end-of-run threshold flags.
 
-    Extracted from :func:`build_pipeline_args` to keep that function under the
-    cyclomatic-complexity ratchet, alongside :func:`_emit_execution_flags`.
-
-    Three states, and only two of them emit anything. Otsu is the pipeline's
-    default and needs no flag — it runs whenever no control wells are named,
-    which is also why well text left dormant by a switch back to Otsu must not
-    be emitted: on the pipeline side, naming both wells *is* the control method,
-    so passing them would silently override the user's choice of estimator.
+    Otsu is the pipeline's default and needs no flag — it runs whenever no
+    control wells are named. That is also why wells left dormant by a switch back
+    to Otsu must not be emitted: naming both *is* the control method on the
+    pipeline side, so passing them would override the user's choice.
     """
     if not opts.get("auto_threshold", True):
         args.append("--no_auto_threshold")

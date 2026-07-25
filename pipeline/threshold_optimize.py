@@ -1,30 +1,18 @@
 """Two-population threshold optimizer — the shared numeric core.
 
-Given two per-cell intensity populations that are known to differ — canonically
-a positive-control well and a negative-control well — this picks the threshold
-that best separates them, by sweeping candidate thresholds and taking the one
-where the *relative* fraction-on gap is largest:
+Picks the threshold best separating two per-cell intensity populations (a
+positive- and a negative-control well) by sweeping candidates and taking the
+largest relative fraction-on gap, ``|fa-fb| / max(|fa|, |fb|)``.
 
-    |fraction_on(A) - fraction_on(B)| / max(|fraction_on(A)|, |fraction_on(B)|)
-
-Two callers share it, which is why it lives here rather than beside either:
-
-* ``process_microscopy`` — the end-of-run threshold pass, when the run named a
-  positive and a negative control well.
-* ``well_viewer.features.grouping.cell_gating.gating_compute`` — the Cell Gating
-  tab's "Optimize ThreshFracOn" button, which adds an optional fold-change layer
-  on top of these primitives.
-
-Keeping one implementation is the point. The pipeline may not import
-``well_viewer`` (ARCHITECTURE §6.2), so without this module the pipeline would
-need its own copy of the sweep — and a second copy of an objective function is
-how the two sides start giving different answers on the same data. The
-fold-change layer deliberately does *not* move here: it depends on
-``well_viewer.domain.fold_change``, which would drag the viewer into the
+Shared by ``process_microscopy``'s end-of-run pass and the Cell Gating tab's
+"Optimize ThreshFracOn" button, so the two cannot give different answers on the
+same data. The pipeline may not import ``well_viewer`` (ARCHITECTURE §6.2), so
+the core lives here and the viewer's fold-change layer stays behind in
+``gating_compute`` — moving it would drag ``domain.fold_change`` into the
 pipeline's import graph.
 
-Stdlib + numpy only, for the same reason ``pipeline.auto_threshold`` is. Listed
-in ``services.remote_runner._REQUIRED_REMOTE_FILES`` so a remote run receives it.
+Stdlib + numpy only, and listed in
+``services.remote_runner._REQUIRED_REMOTE_FILES``.
 """
 
 from __future__ import annotations
@@ -34,16 +22,12 @@ from dataclasses import dataclass
 import numpy as np
 
 
-# Sweep defaults for callers with no user to ask (the pipeline). The GUI takes
-# these from its own fields instead.
+# Defaults for callers with no user to ask (the pipeline); the GUI uses its own
+# fields. The upper bound is a percentile, not the max: a few saturated cells
+# would stretch the grid into a region where both fractions are 0 and the gap
+# can never win the argmax.
 DEFAULT_SWEEP_STEPS = 512
-# The sweep's upper bound is a high percentile of the pooled populations rather
-# than their max: a handful of saturated cells sit orders of magnitude above the
-# bulk, and a grid stretched to reach them spends most of its resolution in a
-# region where both fractions are 0 — where the relative gap is 0.0 by
-# definition and can never win the argmax.
 SWEEP_HI_PERCENTILE = 99.5
-# Guard rails shared with the GUI path, so both reject the same inputs.
 MIN_SWEEP_STEPS = 2
 MAX_SWEEP_STEPS = 10001
 
@@ -78,23 +62,14 @@ def frac_curve(values: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
 def relative_gap(fa: np.ndarray, fb: np.ndarray) -> np.ndarray:
     """Per-threshold ``|fa-fb| / max(|fa|, |fb|)``, with 0.0 where undefined.
 
-    The absolute gap ``|fa - fb|`` peaks wherever the populations diverge most
-    *in count* — useful when both share an "on" tail. But for two skewed
-    fluorescence distributions where most cells are barely-on, the absolute gap
-    stays small even where the well *ratio* differs sharply (one well 5% on, the
-    other 0.5% on is a 10x difference but only 0.045 in absolute terms).
-    Normalising by the larger fraction surfaces those relative differences,
-    which is what a fraction-on cut is meant to discriminate.
+    Relative rather than absolute because for skewed distributions the ratio is
+    what a fraction-on cut discriminates: 5% on vs 0.5% on is a 10x difference
+    but only 0.045 absolute.
 
-    The denominator uses the **magnitude** ``max(|fa|, |fb|)`` rather than
-    ``max(fa, fb)``: under a subtractive fold-change the adjusted fractions are
-    differences that can go negative, and a signed denominator would zero the gap
-    across the whole negative region and spike at the sign crossing — inverting
-    the curve and the chosen threshold. Magnitude is sign-safe and, for the
-    non-negative raw / ratio cases, identical to a signed ``max``.
-
-    Zero-magnitude and non-finite entries become ``0.0`` so ``argmax`` stays
-    meaningful rather than selecting a NaN.
+    The denominator is a **magnitude**, not a signed ``max(fa, fb)``: under a
+    subtractive fold-change the fractions can go negative, and a signed
+    denominator would zero the gap across that region and spike at the sign
+    crossing, inverting the chosen threshold.
     """
     abs_gap = np.abs(fa - fb)
     larger = np.maximum(np.abs(fa), np.abs(fb))
@@ -105,10 +80,9 @@ def relative_gap(fa: np.ndarray, fb: np.ndarray) -> np.ndarray:
 
 def sweep_thresholds(min_threshold: float, max_threshold: float,
                      steps: int) -> np.ndarray:
-    """The candidate-threshold grid, or raise ``ValueError`` describing why not.
+    """The candidate-threshold grid, or ``ValueError`` describing why not.
 
-    Shared so the pipeline and the GUI reject the same inputs with the same
-    wording; the GUI surfaces the message directly to the user.
+    Shared so both callers reject the same inputs; the GUI shows the message.
     """
     lo = float(min_threshold)
     hi = float(max_threshold)
@@ -134,9 +108,8 @@ def best_from_curves(
 ) -> ThreshFracOptimizationResult:
     """Package the argmax of *diffs* as a result.
 
-    ``np.argmax`` returns the FIRST index attaining the maximum, so when a run
-    of thresholds ties (fraction-on is a step function, so ties are common
-    between two separated populations) the lowest tied threshold is reported.
+    ``np.argmax`` takes the FIRST index at the maximum, so a run of tied
+    thresholds (common — fraction-on is a step function) reports the lowest.
     """
     best_idx = int(np.argmax(diffs))
     return ThreshFracOptimizationResult(
@@ -150,17 +123,11 @@ def best_from_curves(
 
 
 def sweep_bounds(*populations: np.ndarray) -> tuple[float, float]:
-    """``(lo, hi)`` sweep bounds derived from the pooled *populations*.
+    """``(lo, hi)`` sweep bounds from the pooled *populations*.
 
-    ``lo`` is the pooled minimum, not 0.0: channels routinely sit on a large
-    background offset, and starting the grid at zero spends its lower half on
-    thresholds where both fractions are 1.0 and the gap is 0.0. ``hi`` is the
-    :data:`SWEEP_HI_PERCENTILE` percentile — see that constant for why not the
-    max, and note the fallback to the true max when the percentile collapses onto
-    ``lo``.
-
-    Returns a degenerate ``(lo, lo)`` when there is no spread to scan; the caller
-    treats that as "no usable threshold for this channel".
+    ``lo`` is the pooled minimum, not 0.0 — channels sit on a background offset,
+    and starting at zero wastes half the grid where both fractions are 1.0.
+    Returns a degenerate ``(lo, lo)`` when there is no spread to scan.
     """
     finite = [np.asarray(p, dtype=float).ravel() for p in populations if p is not None]
     pooled = np.concatenate(finite) if finite else np.array([], dtype=float)
@@ -184,10 +151,9 @@ def optimize_between_populations(
 ) -> ThreshFracOptimizationResult:
     """Threshold best separating *values_a* from *values_b*.
 
-    The raw (no fold-change) sweep, which is what the pipeline needs. Bounds
-    default to :func:`sweep_range_for` over both populations. Raises
-    ``ValueError`` when either population is empty or the sweep range is
-    unusable — callers skip that channel rather than record a guess.
+    The raw (no fold-change) sweep the pipeline uses; bounds default to
+    :func:`sweep_bounds`. Raises ``ValueError`` on an empty population or an
+    unusable range, so callers skip the channel rather than record a guess.
     """
     values_a = np.asarray(values_a, dtype=float)
     values_b = np.asarray(values_b, dtype=float)
@@ -218,24 +184,19 @@ def optimize_between_populations(
 
 # ── Pipeline-side layer: per-well CSVs → per-channel thresholds ──────────────
 #
-# The pipeline writes one CSV per well (``pipeline.io.write_csvs_per_well``),
-# one row per segmented cell, carrying a ``<channel>_mean_intensity`` column.
-# Those are the values the Cell Gating tab plots and gates on, so deriving the
-# threshold from them puts it exactly where the user will later see it on the
-# CDF. Deliberately NOT re-derived from the ``*_out.zip`` mask/tophat pairs:
-# ``pipeline.auto_threshold.sample_cell_and_bg`` pools cell means with matched
-# *background* pixels, which is right for an Otsu split against background and
-# wrong here — background pixels land identically in both control wells and
-# dilute the very gap this objective maximises.
+# Reads the per-well CSVs rather than re-deriving values from the ``*_out.zip``
+# mask/tophat pairs. Two reasons: those CSV values are what the Cell Gating tab
+# plots, so the threshold lands where the user will see it; and
+# ``sample_cell_and_bg`` pools cell means with *background* pixels, which is
+# right for an Otsu split and wrong here — background lands identically in both
+# control wells and dilutes the gap being maximised.
 
 def _row_passes(row: dict) -> bool:
     """Honour ``QC_Pass`` / ``Crop_Pass`` when the CSV carries them.
 
-    The pipeline does not write these today — they are Review-side layers
-    computed after the fact — so this is all-pass in practice. It is here so a
-    sidecar-merged or hand-curated CSV is read on the same population the Cell
-    Gating tab's optimizer uses (``gating_compute._cell_gating_valid_mask``)
-    rather than silently on a wider one.
+    The pipeline does not write these (they are Review-side layers), so this is
+    all-pass in practice. It keeps a hand-curated or sidecar-merged CSV read on
+    the same population as ``gating_compute._cell_gating_valid_mask``.
     """
     for col in ("QC_Pass", "Crop_Pass"):
         raw = row.get(col)
@@ -255,11 +216,8 @@ def read_channel_values(csv_path, channel: str) -> np.ndarray:
     """
     import csv
 
-    # ``process_microscopy`` writes the column as ``tok.lower()``, and the
-    # viewer's channel keys are lower-cased too, but the token reaching here
-    # comes straight off the command line in whatever case the user typed
-    # (``--fluor_tokens GFP``). Match case-insensitively rather than trusting
-    # either end.
+    # The pipeline writes the column as ``tok.lower()`` but the token arrives in
+    # whatever case was typed on the command line, so match case-insensitively.
     want = f"{str(channel).strip().lower()}_mean_intensity"
     out: list[float] = []
     try:
@@ -321,12 +279,9 @@ def estimate_thresholds_from_controls(
 ) -> dict[str, float]:
     """Per-channel thresholds separating the positive from the negative control.
 
-    One entry per channel in *fluor_channels* that both control wells carry
-    usable values for; a channel missing from either well, or with no spread to
-    scan, is skipped with a warning rather than silently falling back to a
-    different objective — a sidecar mixing two estimators is unexplainable.
-
-    Values are rounded to the nearest integer, matching the Otsu pass.
+    A channel missing from either well, or with no spread to scan, is skipped
+    with a warning rather than falling back to Otsu — a sidecar mixing two
+    estimators is unexplainable. Rounded to integers, matching the Otsu pass.
     """
     pos_csv = find_well_csv(output_dir, csv_prefix, pos_well)
     neg_csv = find_well_csv(output_dir, csv_prefix, neg_well)
@@ -366,9 +321,8 @@ def estimate_thresholds_from_controls(
             neg_well, 100.0 * result.frac_b, result.difference,
             result.n_a, result.n_b,
         )
-        # The objective is symmetric, so it cannot tell the two wells apart and
-        # will happily maximise a gap pointing the wrong way. This is the only
-        # guard against a two-character typo poisoning every downstream default.
+        # The objective is symmetric, so it cannot tell the wells apart — this
+        # is the only guard against a swap poisoning every downstream default.
         if result.frac_a < result.frac_b:
             log.warning(
                 "Auto-threshold %s: the positive control (%s) has a LOWER "

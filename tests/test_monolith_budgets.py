@@ -104,7 +104,7 @@ ANALYZE_TAB_BUDGET = 1063
 # the opening value, set at the end of the PR that introduced the budget — not a
 # ratchet that was raised. From here it only moves down; the next section added
 # to this form should come with an extraction.
-ANALYZE_TAB_FORM_BUDGET = 1506
+ANALYZE_TAB_FORM_BUDGET = 1492
 
 
 def _line_count(rel: str) -> int:

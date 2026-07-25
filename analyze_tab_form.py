@@ -47,10 +47,9 @@ _FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
 
 # ── Entry-boundary parsing + numeric validation ─────────────────────────────
 #
-# Moved here from ``analyze_tab`` with ``_collect_run_options``: these read the
-# form's text fields and belong beside the widgets they read, not in the tab
-# that hosts them. ``_numeric_option_errors`` is re-exported by ``analyze_tab``
-# so ``from analyze_tab import _numeric_option_errors`` still resolves.
+# These read the form's text fields, so they live beside the widgets rather than
+# in the tab that hosts them. ``analyze_tab`` re-exports
+# ``_numeric_option_errors`` so its old import path still resolves.
 
 def _safe_qc_float(text: str) -> float:
     """Parse a QC bound from a text field; 0.0 (= no bound) on empty/invalid."""
@@ -956,17 +955,15 @@ class AnalyzeTabFormMixin:
         combo("_flatfield_cb", d.get("flatfield"))
         combo("_background_cb", d.get("background"))
         s("_background_well_edit", d.get("background_well"))
-        # Auto-threshold. The sidecar records the NEGATIVE (`--no_auto_threshold`),
-        # so the checkbox is its inverse; setChecked fires toggled, which syncs
-        # the two control-well rows' visibility.
+        # The sidecar records the NEGATIVE (`--no_auto_threshold`), so the
+        # checkbox is its inverse; setChecked fires toggled and syncs the rows.
         nat = d.get("no_auto_threshold")
         if nat is not None and hasattr(self, "_auto_threshold_cb"):
             self._auto_threshold_cb.setChecked(not bool(nat))
         s("_pos_control_well_edit", d.get("pos_control_well"))
         s("_neg_control_well_edit", d.get("neg_control_well"))
-        # The sidecar records the wells, not the method — on the pipeline side
-        # naming both IS the method. Infer it back so reloading a control-well
-        # run reopens on that method rather than silently on Otsu.
+        # The sidecar records wells, not a method — naming both IS the method on
+        # the pipeline side, so infer the combo back from them.
         if hasattr(self, "_auto_threshold_method_cb"):
             used_controls = bool(str(d.get("pos_control_well") or "").strip()
                                  and str(d.get("neg_control_well") or "").strip())
@@ -1261,18 +1258,12 @@ class AnalyzeTabFormMixin:
     def _build_auto_threshold_section(self, parent: QWidget) -> None:
         """Auto-threshold — every threshold-related control in one place.
 
-        The pipeline's last step writes a default per-channel ThreshFracOn cut
-        into ``pipeline_info.json``, which the Cell Gating tab reads the next
-        time the dataset is loaded. Three controls, in the order they apply:
-        the checkbox turns the step on and off (it drives the pipeline's
-        ``--no_auto_threshold``, which until now had no UI at all); the method
-        combo picks how the cut is chosen; and the two well fields name the
-        controls the second method compares.
+        Three controls, in the order they apply: the checkbox drives the
+        pipeline's ``--no_auto_threshold``; the method combo picks how the cut is
+        chosen; the two well fields name the controls the second method compares.
 
         The method is an explicit choice rather than being inferred from whether
-        the well fields are filled, so switching back to Otsu does not mean
-        clearing the wells and losing them.
-
+        the wells are filled, so switching back to Otsu does not lose them.
         Collapsed by default, like the other optional sections.
         """
         sec = self._section(
@@ -1337,17 +1328,15 @@ class AnalyzeTabFormMixin:
         )
         rneg.layout().addStretch(1)
 
-        # ``_row`` returns the right-hand cell — the "Positive control well" /
-        # "Negative control well" labels live in the cell's parent, so the rows
-        # to hide are the parents, or the labels stay behind on their own.
+        # ``_row`` returns the right-hand cell; the labels live in its parent,
+        # so hide the parents or the labels stay behind on their own.
         self._auto_threshold_rows = (rpos.parentWidget(), rneg.parentWidget())
 
         def _sync_auto_threshold(_=None) -> None:
             on = self._auto_threshold_cb.isChecked()
             self._auto_threshold_method_row.setVisible(on)
-            # The well fields belong to one method, so they follow it as well as
-            # the master switch. Their text is left alone — switching to Otsu and
-            # back must not cost the user their wells.
+            # Text is left alone — switching to Otsu and back must not cost the
+            # user their wells.
             wells = on and self._auto_threshold_method() == "controls"
             for row in self._auto_threshold_rows:
                 row.setVisible(wells)
@@ -1363,16 +1352,13 @@ class AnalyzeTabFormMixin:
     def _auto_threshold_validation_error(self) -> str | None:
         """Block the run when the control wells are half-given or unusable.
 
-        Returns ``None`` when the request is valid — including the cases of the
-        pass being switched off, or the Otsu method being selected, neither of
-        which reads the well fields at all.
+        ``None`` when valid — including the pass being off or Otsu selected,
+        neither of which reads the well fields.
         """
         if not self._auto_threshold_cb.isChecked():
             return None
         if self._auto_threshold_method() != "controls":
-            # Otsu needs no wells. Any text left in the fields is dormant, kept
-            # so switching methods back and forth does not lose it.
-            return None
+            return None       # Otsu needs no wells; any text is dormant
         pos = self._pos_control_well_edit.text().strip()
         neg = self._neg_control_well_edit.text().strip()
         if not pos or not neg:

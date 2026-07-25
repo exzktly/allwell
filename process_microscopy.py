@@ -1534,11 +1534,9 @@ def _apply_thresholds_to_pipeline_info(
 def _segmentation_tokens(args) -> set[str]:
     """Channel token(s) that ARE the segmentation input, lower-cased.
 
-    ``--nuclear_token`` always — ``main`` has already remapped it onto
-    ``--phase_token`` for the label-free methods by the time this runs, so those
-    need no special case — plus ``--cytoplasm_token`` under
-    ``stardist_seeded_watershed_cell``. Exactly the pair that joins
-    ``fluor_tokens_for_quant``.
+    ``--nuclear_token`` (already remapped onto ``--phase_token`` for the
+    label-free methods by the time this runs) plus ``--cytoplasm_token`` under
+    seeded watershed — the same pair that joins ``fluor_tokens_for_quant``.
     """
     toks = {str(getattr(args, "nuclear_token", "") or "").strip().lower()}
     if (getattr(args, "segmentation_method", "") == "stardist_seeded_watershed_cell"
@@ -1553,23 +1551,18 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
 
     * ``--no_auto_threshold`` — skip entirely.
     * no control wells — Otsu on a pooled cell-mean / background-pixel
-      distribution, per channel (:func:`_estimate_thresholds_standalone`).
-    * both ``--pos_control_well`` and ``--neg_control_well`` — the threshold
-      maximising the relative fraction-on gap between those two wells, per
-      channel, read from the per-well CSVs this run just wrote.
+      distribution (:func:`_estimate_thresholds_standalone`).
+    * both control wells — the threshold maximising the relative fraction-on gap
+      between them, read from the per-well CSVs this run just wrote.
 
-    In both non-skip modes the segmentation channel is written **0**. It exists
-    to define cell boundaries, not to be gated on, so any estimate for it is
-    noise. Zero is not the same as absent: absent means the viewer's 50.0
-    default, whereas 0 means every cell with a positive intensity counts as ON —
-    which is the intended way to neutralise the channel.
+    In both non-skip modes the segmentation channel is written **0**: it defines
+    cell boundaries rather than being something to gate on. Zero is not absent —
+    absent means the viewer's 50.0 default, whereas 0 counts every cell with a
+    positive intensity as ON, which is how the channel is neutralised.
 
-    Returns the channels actually written (existing values are never overwritten
-    — see :func:`_apply_thresholds_to_pipeline_info`), so a caller that reports
-    through its own channel can echo them.
-
-    Nothing here raises. Auto-threshold is informational: the run's real output
-    is already on disk, and the user can set any threshold by hand in the GUI.
+    Returns the channels actually written (existing values are never
+    overwritten). Never raises: auto-threshold is informational and the run's
+    real output is already on disk.
     """
     if getattr(args, "no_auto_threshold", False):
         log.info("Auto-threshold skipped (--no_auto_threshold).")
@@ -4589,17 +4582,11 @@ def main() -> None:
         )
         _sys.exit(1)
 
-    # Auto-threshold pass: now that every well has been processed and the output
-    # zips, per-well CSVs and pipeline_info sidecar are on disk, write a default
-    # ThreshFracOn cut per channel into ``pipeline_info.json``'s
-    # ``cell_gating.thresh_frac_on`` block, which the Cell Gating tab picks up
-    # the next time the dataset is loaded. See ``run_auto_threshold_pass`` for
-    # the three modes and why the segmentation channel is pinned to 0.
-    #
-    # It stays inside the pipeline's own dependency set (skimage's
-    # threshold_otsu, tifffile's imread, and the Qt-free
-    # ``pipeline.threshold_optimize``) so a run produces thresholds even where
-    # ``well_viewer`` is not installed.
+    # Auto-threshold: every well is processed and the output zips, per-well CSVs
+    # and sidecar are on disk, so write the default ThreshFracOn cut per channel
+    # into ``cell_gating.thresh_frac_on``. See ``run_auto_threshold_pass`` for
+    # the three modes. Stays inside the pipeline's own dependency set, so a run
+    # produces thresholds even where ``well_viewer`` is not installed.
     run_auto_threshold_pass(args, output_dir, fluor_tokens_for_quant, log)
 
     # audit E5: a run with per-well failures must not exit 0 — otherwise the

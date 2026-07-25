@@ -2393,10 +2393,9 @@ class _RemoteProcess:
 def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
     """Read *multi*- and *single*-valued flags out of a pipeline argv.
 
-    A multi-valued flag (``--fluor_tokens GFP mCherry DAPI``) consumes every
-    following entry until the next ``--`` token. Reading one with a plain
-    ``next(it)`` picks up only its FIRST value, which is how the batched-remote
-    threshold pass came to see a single channel on a multi-channel plate.
+    A multi-valued flag (``--fluor_tokens GFP mCherry DAPI``) consumes entries
+    until the next ``--``. A plain ``next(it)`` picks up only the FIRST, which is
+    how the batched-remote threshold pass came to see one channel of many.
     """
     out: dict = {}
     argv = [str(a) for a in argv]
@@ -2420,20 +2419,16 @@ def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
 
 
 def _auto_threshold_args_from_argv(argv):
-    """Reconstruct just enough of the pipeline's parsed args to re-run its
-    threshold pass locally after a batched remote run.
+    """Reconstruct enough of the pipeline's parsed args to re-run its threshold
+    pass locally after a batched remote run.
 
-    The batched path suppresses the per-batch pass with ``--no_auto_threshold``
-    (an incomplete plate would write defaults from partial data) and runs it once
-    here against the fully-downloaded output. Rebuilding the arg object — rather
-    than re-implementing the pass — is what keeps the local and remote answers
-    identical when either side gains a mode, which is exactly how this path
-    previously drifted into thresholding only the first fluor channel and never
-    the segmentation one.
+    Rebuilding the arg object rather than re-implementing the pass is what keeps
+    the local and remote answers identical when either gains a mode — this path
+    previously drifted into thresholding only the first fluor channel.
 
     ``no_auto_threshold`` is forced False: the flag in *argv* is the batching
-    suppression, not the user's choice, and honouring it here would mean a
-    batched run never got thresholds at all.
+    suppression, not the user's choice, so honouring it would mean a batched run
+    never got thresholds at all.
     """
     from types import SimpleNamespace
 

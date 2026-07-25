@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.9.0.** This map describes the app as it stands today;
+**Reflects All-Well v8.9.1.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.9.0; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.9.1; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -96,6 +96,7 @@ allwell/
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
 │   ├── auto_threshold.py       ← Otsu / threshold helpers (GUI Cell-Gating reads these too)
+│   ├── threshold_optimize.py    ← two-population threshold sweep (shared with Cell Gating)
 │   ├── flatfield.py            ← flat-field illumination estimators (GUI validation view too)
 │   ├── shape_features.py       ← per-cell shape-feature catalog (pipeline emits, GUI labels)
 │   ├── cellpose.py             ← Cellpose segmenters (Torch imported lazily)
@@ -863,7 +864,7 @@ Data-layer helpers (under `well_viewer/data/`):
 
 | Module | Role |
 |--------|------|
-| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. |
+| `data/auto_threshold.py` | Otsu-based per-channel default threshold estimator. Delegates the shared helpers (`parse_tp_hours`, `pick_endpoint_timepoints`, `sample_cell_and_bg`) to the top-level `pipeline.auto_threshold` so the pipeline and the GUI agree exactly. The Cell Gating tab's *two-well* optimizer shares its numeric core the same way, through `pipeline.threshold_optimize` — the sweep, the relative-fraction-on-gap objective and the range/steps validation live there, so the Analyze side's control-well pass and the Review side's "Optimize ThreshFracOn" button reduce to one implementation. `gating_compute` re-exports those names and keeps only what depends on the viewer: the fold-change layer (which would otherwise drag `well_viewer.domain.fold_change` into `pipeline/`) and the DataFrame/ratio plumbing. |
 | `data/zipfile_cache.py` | Process-wide LRU of open `ZipFile` handles, lock-guarded so `read_member_bytes` / `scan_zip_members` share one open file across the thousands of per-member reads the Image Table / heatmap / smFISH-worker paths issue. Invalidated on dataset swap. |
 
 ### 5.6 The data layer
@@ -1357,8 +1358,34 @@ top-hat radii, segmentation method, smFISH options, worker count) plus a
 live-streaming log panel and a Run / Stop button. The form-building code was
 extracted into `analyze_tab_form.py` (a mixin consumed by `AnalyzeTab`) during
 the Code-Diet pass so `analyze_tab.py` stays under its line budget; the two are
-edited together. Verbose inline helper paragraphs are collapsed behind hover
-`ⓘ` icons (`_info_icon` / `_section(info=…)`). The Run path:
+edited together. The split follows one rule: code that *reads the form's
+widgets* lives with the widgets, so `_collect_run_options`, the well-field
+validators and the entry-boundary numeric parsers (`_safe_qc_float`,
+`_safe_seg_float`, `_numeric_option_errors`) are all in the mixin, and the tab
+keeps only the run/log/dashboard orchestration. Both files carry a line budget
+(`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
+behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
+
+The optional sections fold by default; **Auto-threshold** is one of them, and it
+owns every threshold-related control: a checkbox driving the pipeline's
+`--no_auto_threshold` (which previously had no UI), a **Method** combo choosing
+between Otsu and the control-well optimizer, and the two well fields that feed
+`--pos_control_well` / `--neg_control_well`.
+
+The method is an explicit selection rather than being inferred from whether the
+well fields are filled, so switching back to Otsu does not mean clearing the
+wells and losing them — the fields hide but keep their text, and
+`build_pipeline_args` emits the flags only under the control method, so dormant
+text cannot silently override the choice. On the pipeline side there is no
+method flag: naming both wells *is* the method, which is also how
+`_apply_pipeline_info` infers the combo back from a sidecar.
+
+Under the control method the pair is validated together — both wells, each a
+valid 96-well position, distinct, and present in the input folder — by
+`_auto_threshold_validation_error`, which blocks the run the same way the
+background-well check does. Under Otsu it does not read the fields at all.
+
+The Run path:
 
 1. Validate the form.
 2. Call `services.pipeline_service.find_pipeline_script()` to locate
@@ -1400,6 +1427,44 @@ That is also why the auto-threshold estimator was inlined into
 viewer. The viewer's copy is still used by the GUI's "Auto-threshold"
 button on the Cell Gating tab; the pipeline's copy is now the standalone
 fallback.
+
+**The end-of-run threshold pass** is `run_auto_threshold_pass`, one call at the
+tail of `main()`, with three modes:
+
+| condition | what it writes |
+|---|---|
+| `--no_auto_threshold` | nothing |
+| no control wells | Otsu on a pooled per-cell / background-pixel distribution, per channel (`_estimate_thresholds_standalone`) |
+| `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold maximising the relative fraction-on gap between those two wells (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
+
+In both non-skip modes the segmentation channel — `--nuclear_token`, already
+remapped onto `--phase_token` for the label-free methods by the time the pass
+runs, plus `--cytoplasm_token` under seeded watershed — is written **0** and
+excluded from the estimate. It defines cell boundaries rather than being
+something to gate on, so any estimate for it is noise. Zero is not the same as
+absent: absent means the viewer's 50.0 default, whereas 0 classifies every cell
+with a positive intensity as ON, which is how the channel is neutralised.
+`_apply_thresholds_to_pipeline_info` never overwrites a value already in the
+sidecar, so all of this is a default the user can override — including the zero.
+
+The control-well mode reads the per-well CSVs the run has just written, not the
+`*_out.zip` images: those CSV values are exactly what the Cell Gating tab plots,
+so a pipeline-chosen threshold lands where the user will later see it on the CDF.
+`sample_cell_and_bg` is deliberately *not* reused here — it pools cell means with
+matched background pixels, which is right for an Otsu split against background
+and wrong for a two-well comparison, where background pixels land identically in
+both wells and dilute the gap being maximised.
+
+The objective is symmetric, so it cannot tell the two control wells apart; the
+pass logs a warning when the positive control ends up with the *lower*
+fraction-on, which is the only signal that the two wells were entered the wrong
+way round.
+
+Batched remote runs suppress the per-batch pass (partial-plate data would write
+misleading defaults) and re-run it once locally over the full downloaded output
+— `services/remote_runner._run_local_auto_threshold`, which rebuilds an args
+object from the pipeline argv and calls the same `run_auto_threshold_pass` so
+the two paths cannot drift.
 
 Inputs / outputs / contract:
 

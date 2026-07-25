@@ -45,68 +45,17 @@ from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
     _FIELD_TO_LABEL, _LABEL_TO_FIELD, _SCHEMA_LABELS,
+    # Entry-boundary numeric validation lives with the fields it reads; re-exported
+    # so ``from analyze_tab import _numeric_option_errors`` still resolves.
+    _numeric_option_errors,  # noqa: F401 (re-export)
 )
 
-
-def _safe_qc_float(text: str) -> float:
-    """Parse a QC bound from a text field; 0.0 (= no bound) on empty/invalid."""
-    try:
-        return float(str(text).strip() or "0")
-    except (TypeError, ValueError):
-        return 0.0
 
 
 # Numeric fields are plain QLineEdits with no validators, and bad values used to
 # be swallowed deep in the pipeline (a non-integer radius silently dropped its
 # flag; mesh_ratio=0 caused a downstream division-by-zero). Validate them at the
 # entry boundary instead (audit X4/X6). Pure + module-level so it's unit-tested.
-_INT_FIELDS = {
-    "tophat_radius_nir": "Nuclear tophat radius",
-    "tophat_radius_fluor": "Fluor tophat radius",
-    "fft_small_nir": "Nuclear FFT small-object px",
-    "fft_small_fluor": "Fluor FFT small-object px",
-    "tf_threads": "TF threads",
-    "workers": "Workers",
-    "remote_batch_size": "Remote batch size",
-}
-
-
-def _numeric_option_errors(opts: dict) -> list[str]:
-    """Return human-readable errors for out-of-range / unparseable numeric run
-    options. Empty/blank means "use the pipeline default" and is allowed."""
-    errors: list[str] = []
-    for key, label in _INT_FIELDS.items():
-        raw = str(opts.get(key, "") or "").strip()
-        if not raw:
-            continue
-        try:
-            if int(raw) < 0:
-                errors.append(f"{label} must be a whole number ≥ 0 (got {raw!r}).")
-        except ValueError:
-            errors.append(f"{label} must be a whole number (got {raw!r}).")
-    for key, label, allow_zero in (("mesh_ratio", "Mesh tile ratio", False),
-                                   ("mesh_sigma", "Mesh sigma", True)):
-        raw = str(opts.get(key, "") or "").strip()
-        if not raw:
-            continue
-        try:
-            val = float(raw)
-        except ValueError:
-            errors.append(f"{label} must be a number (got {raw!r}).")
-            continue
-        if allow_zero and val < 0:
-            errors.append(f"{label} must be ≥ 0.")
-        elif not allow_zero and val <= 0:
-            errors.append(f"{label} must be > 0.")   # 0 → downstream div-by-zero
-    mn = opts.get("qc_min_area") or 0.0
-    mx = opts.get("qc_max_area") or 0.0
-    if mn and mx and mn > mx:
-        errors.append("QC minimum area must be ≤ maximum area.")
-    sol = opts.get("qc_min_solidity") or 0.0
-    if not (0.0 <= sol <= 1.0):
-        errors.append("QC minimum solidity must be between 0 and 1.")
-    return errors
-
 # ---------------------------------------------------------------------------
 # Schema vocabulary — kept in sync with process_microscopy.py
 # ---------------------------------------------------------------------------
@@ -144,13 +93,6 @@ def _has_well_content(folder: Path) -> bool:
     except OSError:
         return False
 
-
-def _safe_seg_float(text: str, default: float) -> float:
-    """Parse a segmentation-parameter field; *default* on empty/invalid."""
-    try:
-        return float(str(text).strip() or default)
-    except (TypeError, ValueError):
-        return default
 
 
 # ---------------------------------------------------------------------------
@@ -462,45 +404,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     "'Phase' (the brightfield image to segment).")
         return errors
 
-    def _background_well_validation_error(self) -> str | None:
-        """When empty_well drives flat-field and/or background, the background
-        well must be specified and must exist in the input. Returns an error
-        message to block the run, or None when the request is valid (or empty_well
-        isn't selected)."""
-        uses = []
-        if self._flatfield_cb.currentText() == "empty_well":
-            uses.append("flat-field correction")
-        if self._background_cb.currentText() == "empty_well":
-            uses.append("background subtraction")
-        if not uses:
-            return None
-        which = " and ".join(uses)
-        # One or several comma-separated wells (e.g. "H12, G12"), pooled.
-        raw = self._background_well_edit.text().strip()
-        seen, wells = set(), []
-        for tok in raw.replace(";", ",").split(","):
-            w = tok.strip()
-            if w and w.lower() not in seen:
-                seen.add(w.lower())
-                wells.append(w)
-        if not wells:
-            return (f"Empty-well {which} requires a Background well.\n\n"
-                    "Enter one empty/background well (e.g. H12) — or several "
-                    "comma-separated (e.g. H12, G12) — so its measured "
-                    "background can be sampled.")
-        input_dir = Path(self._input_edit.text().strip())
-        sep = self._filename_sep_edit.text() or DEFAULT_SEP
-        schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
-        from services.input_resolution_service import well_present_in_input
-        missing = [w for w in wells
-                   if not well_present_in_input(input_dir, w, schema=schema, sep=sep)]
-        if missing:
-            label = ", ".join(f"'{w}'" for w in missing)
-            return (f"Background well {label} was not found in the input folder.\n\n"
-                    f"Empty-well {which} reads its reference images from the named "
-                    f"well(s) — confirm they exist in:\n{input_dir}")
-        return None
-
     def _collapse_seg_param_stack(self) -> None:
         """Size the per-method parameter stack to its *current* page only.
 
@@ -774,6 +677,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         if bw_err:
             QMessageBox.critical(self, "Background Well Error", bw_err)
             return None
+        at_err = self._auto_threshold_validation_error()
+        if at_err:
+            QMessageBox.critical(self, "Control Well Error", at_err)
+            return None
         pipeline = find_pipeline_script()
         if pipeline is None:
             QMessageBox.critical(self, "Configuration Error",
@@ -795,61 +702,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._run_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
         self._dashboard.set_status("Running…")
-
-    def _collect_run_options(self) -> dict:
-        method = self._seg_method()
-        try:
-            min_area = int(self._min_nucleus_area_edit.text().strip() or "50")
-        except ValueError:
-            min_area = 50
-        cyto = self._cytoplasm_edit.text().strip()
-        if method != "stardist_seeded_watershed_cell":
-            cyto = ""
-        return dict(
-            raw=Path(self._input_edit.text().strip()),
-            scratch_dir=self._scratch_edit.text().strip() or None,
-            nuclear_token=self._nuclear_token_edit.text().strip() or "NIR",
-            fluor_tokens=self._fluor_tokens_list(),
-            csv_prefix=self._csv_prefix_edit.text().strip() or "measurements",
-            tophat_radius_nir=self._tophat_radius_nir_edit.text(),
-            tophat_radius_fluor=self._tophat_radius_fluor_edit.text(),
-            fft_small_nir=self._fft_small_nir_edit.text(),
-            fft_small_fluor=self._fft_small_fluor_edit.text(),
-            mesh_ratio=self._mesh_ratio_edit.text(),
-            mesh_sigma=self._mesh_sigma_edit.text(),
-            no_tophat_nir=self._no_tophat_nir_cb.isChecked(),
-            no_tophat_fluor=self._no_tophat_fluor_cb.isChecked(),
-            # Always-on (no longer user options): zip in/out + move loose TIFs.
-            compress_input_well_folders=True,
-            compress_output_well_folders=True,
-            move_source_tifs=True,
-            remote_batch_size=self._remote_batch_size_edit.text(),
-            force=self._force_cb.isChecked(),
-            cpu_only=self._cpu_only_cb.isChecked(),
-            tf_threads=self._tf_threads_edit.text(),
-            workers=self._workers_edit.text(),
-            stardist_tile_px=self._stardist_tile_px_edit.text(),
-            filename_schema=self._build_schema_arg(),
-            filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
-            smfish_tokens=self._smfish_tokens_list(),
-            shape_features=list(self._shape_chips.checkedData()),
-            flatfield=self._flatfield_cb.currentText(),
-            background=self._background_cb.currentText(),
-            background_well=self._background_well_edit.text().strip(),
-            qc_remove_debris=self._qc_remove_debris_cb.isChecked(),
-            qc_min_area=_safe_qc_float(self._qc_min_area_edit.text()),
-            qc_max_area=_safe_qc_float(self._qc_max_area_edit.text()),
-            qc_min_solidity=_safe_qc_float(self._qc_min_solidity_edit.text()),
-            phase_token=self._phase_token(),
-            segmentation_method=method,
-            cytoplasm_token=cyto,
-            min_nucleus_area_px=min_area,
-            cellpose_model=self._cellpose_model_cb.currentText(),
-            cellpose_diameter=_safe_seg_float(self._cellpose_diameter_edit.text(), 0.0),
-            cellpose_flow_threshold=_safe_seg_float(self._cellpose_flow_thr_edit.text(), 0.4),
-            cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
-            cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
-        )
 
     def _expected_well_count(self, opts: dict) -> int:
         # Delegate to the service so the progress denominator uses the same

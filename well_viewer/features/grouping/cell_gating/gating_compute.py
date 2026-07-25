@@ -10,18 +10,27 @@ Two clusters live here:
 * ``apply_fluor_gating`` — the per-well gating math that ``GatingWorker`` runs
   off the GUI thread (writes the ``Included`` / ``Gate_Pass`` / ``Gate_On``
   columns for one well's DataFrame).
-* the ThreshFracOn optimizer's numeric scan core
-  (``fraction_on_for_threshold`` / ``frac_curve`` / ``scan_fc_fractions`` and the
-  ``ThreshFracOptimizationResult`` it produces).
+* the ThreshFracOn optimizer's viewer-side layer — the fold-change-aware
+  ``scan_fc_fractions`` and the DataFrame/ratio plumbing that feeds it. Its
+  numeric primitives (``fraction_on_for_threshold`` / ``frac_curve`` / the
+  relative-gap objective / ``ThreshFracOptimizationResult``) live in
+  ``pipeline.threshold_optimize``, shared with the pipeline's end-of-run
+  positive/negative-control pass, and are re-exported here.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 
+from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
+    ThreshFracOptimizationResult,
+    best_from_curves as _best_from_curves,
+    frac_curve,
+    fraction_on_for_threshold,
+    relative_gap as _relative_gap,
+    sweep_thresholds as _sweep_thresholds,
+)
 from well_viewer.data.data_loading import resolve_value_series
 from well_viewer.core.lazy import lazy as _lazy
 
@@ -102,32 +111,14 @@ def apply_fluor_gating(
 
 
 # ── ThreshFracOn optimizer numeric core ──────────────────────────────────────
-@dataclass(frozen=True)
-class ThreshFracOptimizationResult:
-    """Best threshold scan result for a two-well fraction-on comparison."""
-
-    threshold: float
-    frac_a: float
-    frac_b: float
-    difference: float
-    n_a: int
-    n_b: int
-
-
-def fraction_on_for_threshold(values: np.ndarray, threshold: float) -> float:
-    if values.size == 0:
-        return float("nan")
-    return float(np.count_nonzero(values > threshold) / values.size)
-
-
-def frac_curve(values: np.ndarray, thresholds: np.ndarray) -> np.ndarray:
-    """Fraction-on of *values* at each scanned threshold."""
-    return np.array(
-        [fraction_on_for_threshold(values, float(t)) for t in thresholds],
-        dtype=float,
-    )
-
-
+#
+# The sweep primitives and the relative-gap objective live in
+# ``pipeline.threshold_optimize`` because the pipeline needs the same answer for
+# its end-of-run positive/negative-control pass, and may not import
+# ``well_viewer`` (ARCHITECTURE §6.2). They are re-exported here under their
+# original names so this module's callers and tests are unaffected. What stays
+# here is everything that depends on the viewer: the fold-change layer below and
+# the DataFrame/ratio plumbing further down.
 def scan_fc_fractions(
     thresholds: np.ndarray,
     values_a: np.ndarray,
@@ -185,14 +176,7 @@ def scan_fc_fractions(
                 op_ctrl=op_ctrl, op_t0=op_t0, order=order,
             )
 
-    abs_gap = np.abs(fa - fb)
-    # Sign-safe denominator: magnitude, not signed max — see docstring. For
-    # non-negative raw / ratio fractions this equals the old max(fa, fb).
-    larger = np.maximum(np.abs(fa), np.abs(fb))
-    with np.errstate(invalid="ignore", divide="ignore"):
-        diffs = np.divide(abs_gap, larger, out=np.zeros_like(abs_gap), where=larger > 0)
-    diffs = np.where(np.isfinite(diffs), diffs, 0.0)
-    return fa, fb, diffs
+    return fa, fb, _relative_gap(fa, fb)
 
 
 # ── Cell-gating row/timepoint selection + the two-well optimiser ──────────────
@@ -354,16 +338,7 @@ def _optimize_thresh_frac_on_between_wells(
     :func:`_distinct_timepoints`); when given, only rows at that timepoint
     contribute to each well's fraction-on.
     """
-    lo = float(min_threshold)
-    hi = float(max_threshold)
-    if not np.isfinite(lo) or not np.isfinite(hi):
-        raise ValueError("threshold range must be finite.")
-    if hi < lo:
-        raise ValueError("max threshold must be greater than or equal to min threshold.")
-    if int(steps) < 2:
-        raise ValueError("steps must be at least 2.")
-    if int(steps) > 10001:
-        raise ValueError("steps must be 10,001 or fewer.")
+    thresholds = _sweep_thresholds(min_threshold, max_threshold, steps)
 
     values_a = _valid_values_for_channel(df_a, channel_key, ratios, timepoint)
     values_b = _valid_values_for_channel(df_b, channel_key, ratios, timepoint)
@@ -372,7 +347,6 @@ def _optimize_thresh_frac_on_between_wells(
     if values_b.size == 0:
         raise ValueError("Well B has no valid finite values for the selected channel.")
 
-    thresholds = np.linspace(lo, hi, int(steps))
     # Raw fraction-on scan, optionally fold-change-adjusted at each threshold
     # (control / baseline value arrays supplied by the caller). With all None
     # this is the original raw-fraction relative-gap scan.
@@ -383,24 +357,8 @@ def _optimize_thresh_frac_on_between_wells(
         base_values_b=base_values_b,
         op_ctrl=op_ctrl, op_t0=op_t0, order=order,
     )
-
-    # The threshold where the relative fraction-on gap is biggest.
-    # ``np.argmax`` returns the FIRST index attaining the maximum, so when
-    # a run of thresholds ties for the max gap (fraction-on is a step
-    # function, so ties are common between two separated populations) the
-    # lowest such threshold is reported.
-    best_idx = int(np.argmax(diffs))
-    best_t = float(thresholds[best_idx])
-    frac_a = float(fa[best_idx])
-    frac_b = float(fb[best_idx])
-    return ThreshFracOptimizationResult(
-        threshold=best_t,
-        frac_a=frac_a,
-        frac_b=frac_b,
-        difference=float(diffs[best_idx]),
-        n_a=int(values_a.size),
-        n_b=int(values_b.size),
-    )
+    return _best_from_curves(thresholds, fa, fb, diffs,
+                             n_a=values_a.size, n_b=values_b.size)
 
 
 def _cell_gating_first_frame_rows(df) -> tuple:

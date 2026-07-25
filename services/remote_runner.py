@@ -194,6 +194,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/io.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
+    "pipeline/threshold_optimize.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for
     # the GUI superset.
@@ -2389,6 +2390,71 @@ class _RemoteProcess:
         self._tee_thread.start()
 
 
+def _parse_argv_flags(argv, multi: set[str], single: set[str]) -> dict:
+    """Read *multi*- and *single*-valued flags out of a pipeline argv.
+
+    A multi-valued flag (``--fluor_tokens GFP mCherry DAPI``) consumes entries
+    until the next ``--``. A plain ``next(it)`` picks up only the FIRST, which is
+    how the batched-remote threshold pass came to see one channel of many.
+    """
+    out: dict = {}
+    argv = [str(a) for a in argv]
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in multi:
+            values: list[str] = []
+            i += 1
+            while i < len(argv) and not argv[i].startswith("--"):
+                values.append(argv[i])
+                i += 1
+            out[arg] = values
+            continue
+        if arg in single:
+            out[arg] = argv[i + 1] if i + 1 < len(argv) else ""
+            i += 2
+            continue
+        i += 1
+    return out
+
+
+def _auto_threshold_args_from_argv(argv):
+    """Reconstruct enough of the pipeline's parsed args to re-run its threshold
+    pass locally after a batched remote run.
+
+    Rebuilding the arg object rather than re-implementing the pass is what keeps
+    the local and remote answers identical when either gains a mode — this path
+    previously drifted into thresholding only the first fluor channel.
+
+    ``no_auto_threshold`` is forced False: the flag in *argv* is the batching
+    suppression, not the user's choice, so honouring it would mean a batched run
+    never got thresholds at all.
+    """
+    from types import SimpleNamespace
+
+    flags = _parse_argv_flags(
+        argv,
+        multi={"--fluor_tokens"},
+        single={
+            "--nuclear_token", "--cytoplasm_token", "--segmentation_method",
+            "--csv_prefix", "--filename_schema", "--filename_sep",
+            "--pos_control_well", "--neg_control_well",
+        },
+    )
+    return SimpleNamespace(
+        no_auto_threshold=False,
+        fluor_tokens=flags.get("--fluor_tokens", []),
+        nuclear_token=flags.get("--nuclear_token", ""),
+        cytoplasm_token=flags.get("--cytoplasm_token", ""),
+        segmentation_method=flags.get("--segmentation_method", ""),
+        csv_prefix=flags.get("--csv_prefix", "measurements"),
+        filename_schema=flags.get("--filename_schema", ""),
+        filename_sep=flags.get("--filename_sep", "_"),
+        pos_control_well=flags.get("--pos_control_well", ""),
+        neg_control_well=flags.get("--neg_control_well", ""),
+    )
+
+
 class _BatchedRemoteProcess:
     """``_RemoteProcess``-compatible wrapper that runs the pipeline in
     sequential batches of ``batch_size`` wells.
@@ -2839,38 +2905,20 @@ class _BatchedRemoteProcess:
             # (pulls TensorFlow indirectly). Don't pay that cost on
             # every import of remote_runner.
             sys.path.insert(0, str(repo_root()))
-            from process_microscopy import (
-                _estimate_thresholds_standalone,
-                _apply_thresholds_to_pipeline_info,
-            )
-            # Parse the channel tokens out of the pipeline argv so we
-            # don't have to re-thread them through __init__.
-            fluor_tokens: list[str] = []
-            schema = ""
-            sep = "_"
-            it = iter(self._pipeline_argv)
-            for arg in it:
-                if arg == "--fluor_tokens":
-                    fluor_tokens = next(it, "").split()
-                elif arg == "--filename_schema":
-                    schema = next(it, "")
-                elif arg == "--filename_sep":
-                    sep = next(it, "_")
+            from process_microscopy import run_auto_threshold_pass
             import logging
             log_pylog = logging.getLogger("allwell.local_auto_threshold")
             self._log(
                 "[remote] running auto-threshold pass locally over "
                 f"{self._local_output_dir} (full plate, all batches drained)\n"
             )
-            thresholds = _estimate_thresholds_standalone(
+            args = _auto_threshold_args_from_argv(self._pipeline_argv)
+            written = run_auto_threshold_pass(
+                args,
                 self._local_output_dir,
-                fluor_channels=fluor_tokens,
-                filename_schema=schema,
-                filename_sep=sep,
-                log=log_pylog,
-            )
-            written = _apply_thresholds_to_pipeline_info(
-                self._local_output_dir, thresholds, log_pylog,
+                [args.nuclear_token, *args.fluor_tokens] if args.nuclear_token
+                else list(args.fluor_tokens),
+                log_pylog,
             )
             if written:
                 self._log(

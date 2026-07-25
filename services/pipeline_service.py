@@ -67,6 +67,29 @@ def _emit_execution_flags(args: list[str], opts: dict) -> None:
             args += [flag, str(v)]
 
 
+def _emit_auto_threshold_flags(args: list[str], opts: dict) -> None:
+    """Append the end-of-run threshold flags.
+
+    Otsu is the pipeline's default and needs no flag — it runs whenever no
+    control wells are named. That is also why wells left dormant by a switch back
+    to Otsu must not be emitted: naming both *is* the control method on the
+    pipeline side, so passing them would override the user's choice.
+    """
+    if not opts.get("auto_threshold", True):
+        args.append("--no_auto_threshold")
+        return
+    if str(opts.get("auto_threshold_method", "otsu") or "otsu") != "controls":
+        return
+    pos_well = str(opts.get("pos_control_well", "") or "").strip()
+    neg_well = str(opts.get("neg_control_well", "") or "").strip()
+    # Both or neither: one control well on its own carries no separation to
+    # optimise, so a half-filled pair falls back to the Otsu pass rather than
+    # reaching the pipeline and being rejected there. The form blocks this case;
+    # the guard is for the CLI-shaped callers.
+    if pos_well and neg_well:
+        args += ["--pos_control_well", pos_well, "--neg_control_well", neg_well]
+
+
 def build_pipeline_args(
     pipeline: Path,
     input_dir: Path,
@@ -181,6 +204,10 @@ def build_pipeline_args(
     # The background well feeds both empty_well flat-field and empty_well bg.
     if bg_well and (flatfield == "empty_well" or background == "empty_well"):
         args += ["--background_well", bg_well]
+    # Auto-threshold. The form's checkbox is the positive statement ("calculate
+    # thresholds"); the pipeline flag is the negative, so only the off case emits
+    # anything. Absent from a legacy opts dict ⇒ on, matching prior behaviour.
+    _emit_auto_threshold_flags(args, opts)
     if opts.get("qc_remove_debris"):
         args.append("--qc_remove_debris")
         for flag, key in (("--qc_min_area", "qc_min_area"),

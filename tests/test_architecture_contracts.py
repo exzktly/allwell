@@ -46,6 +46,7 @@ PIPELINE_FILES = [
     "pipeline/io.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
+    "pipeline/threshold_optimize.py",
     "util/well_token.py",
     "util/timepoint.py",
     "util/aw_safe.py",

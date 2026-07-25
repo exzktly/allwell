@@ -1304,6 +1304,7 @@ from pipeline.auto_threshold import (
     pick_endpoint_timepoints as _pick_endpoint_timepoints,
     sample_cell_and_bg as _sample_cell_and_bg,
 )
+from pipeline.threshold_optimize import estimate_thresholds_from_controls
 from util.aw_safe import swallowed
 
 
@@ -1528,6 +1529,84 @@ def _apply_thresholds_to_pipeline_info(
         log.warning("Auto-threshold: cannot write %s: %s", info_path, exc)
         return {}
     return written
+
+
+def _segmentation_tokens(args) -> set[str]:
+    """Channel token(s) that ARE the segmentation input, lower-cased.
+
+    ``--nuclear_token`` (already remapped onto ``--phase_token`` for the
+    label-free methods by the time this runs) plus ``--cytoplasm_token`` under
+    seeded watershed — the same pair that joins ``fluor_tokens_for_quant``.
+    """
+    toks = {str(getattr(args, "nuclear_token", "") or "").strip().lower()}
+    if (getattr(args, "segmentation_method", "") == "stardist_seeded_watershed_cell"
+            and getattr(args, "cytoplasm_token", "")):
+        toks.add(str(args.cytoplasm_token).strip().lower())
+    return {t for t in toks if t}
+
+
+def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list[str],
+                            log: logging.Logger) -> dict[str, float]:
+    """Write the post-run per-channel ThreshFracOn defaults. Three modes:
+
+    * ``--no_auto_threshold`` — skip entirely.
+    * no control wells — Otsu on a pooled cell-mean / background-pixel
+      distribution (:func:`_estimate_thresholds_standalone`).
+    * both control wells — the threshold maximising the relative fraction-on gap
+      between them, read from the per-well CSVs this run just wrote.
+
+    In both non-skip modes the segmentation channel is written **0**: it defines
+    cell boundaries rather than being something to gate on. Zero is not absent —
+    absent means the viewer's 50.0 default, whereas 0 counts every cell with a
+    positive intensity as ON, which is how the channel is neutralised.
+
+    Returns the channels actually written (existing values are never
+    overwritten). Never raises: auto-threshold is informational and the run's
+    real output is already on disk.
+    """
+    if getattr(args, "no_auto_threshold", False):
+        log.info("Auto-threshold skipped (--no_auto_threshold).")
+        return {}
+    try:
+        seg_tokens = _segmentation_tokens(args)
+        non_seg = [c for c in fluor_tokens_for_quant
+                   if str(c).strip().lower() not in seg_tokens]
+        pos = str(getattr(args, "pos_control_well", "") or "").strip()
+        neg = str(getattr(args, "neg_control_well", "") or "").strip()
+        if pos and neg:
+            log.info("Auto-threshold: control wells %s (positive) vs %s (negative).",
+                     pos, neg)
+            thresholds = estimate_thresholds_from_controls(
+                output_dir,
+                fluor_channels=non_seg,
+                csv_prefix=args.csv_prefix,
+                pos_well=pos,
+                neg_well=neg,
+                log=log,
+            )
+        else:
+            thresholds = _estimate_thresholds_standalone(
+                output_dir,
+                fluor_channels=non_seg,
+                filename_schema=args.filename_schema,
+                filename_sep=args.filename_sep,
+                log=log,
+            )
+        for tok in seg_tokens:
+            thresholds[tok] = 0.0
+        written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
+        if written:
+            log.info(
+                "Auto-threshold defaults written for %d channel(s): %s",
+                len(written),
+                ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
+            )
+        else:
+            log.info("Auto-threshold pass produced no new defaults.")
+        return written
+    except Exception as exc:
+        log.warning("Auto-threshold pass failed: %s", exc)
+        return {}
 
 
 def build_processed_output_path(
@@ -4149,6 +4228,21 @@ def build_parser() -> argparse.ArgumentParser:
                        "downloaded output dir."
                    ))
 
+    p.add_argument("--pos_control_well", default="",
+                   help=(
+                       "Well label of the positive control (e.g. B02). With "
+                       "--neg_control_well, the end-of-run threshold pass picks "
+                       "each non-segmentation channel's default by sweeping for "
+                       "the cut that maximises the relative fraction-on gap "
+                       "between these two wells, instead of Otsu-splitting cell "
+                       "signal from background. Both or neither."
+                   ))
+    p.add_argument("--neg_control_well", default="",
+                   help=(
+                       "Well label of the negative control (e.g. B11). See "
+                       "--pos_control_well."
+                   ))
+
     return p
 
 # ---------------------------------------------------------------------------
@@ -4488,47 +4582,12 @@ def main() -> None:
         )
         _sys.exit(1)
 
-    # Auto-threshold pass: now that every well has been processed and the
-    # output zips + pipeline_info sidecar are on disk, compute a default
-    # ThreshFracOn cut per channel via Otsu on a balanced per-cell /
-    # background-pixel distribution. The result lands in
-    # ``pipeline_info.json``'s ``cell_gating.thresh_frac_on`` block and the
-    # Cell Gating tab picks it up the next time the dataset is loaded.
-    #
-    # The implementation lives entirely inside this module (see
-    # ``_estimate_thresholds_standalone`` above) so the pipeline can produce
-    # auto-thresholds even when ``well_viewer`` is not installed — the only
-    # third-party dependencies are skimage's threshold_otsu and tifffile's
-    # imread, which the rest of the pipeline already uses. Any failure is
-    # logged and the pipeline continues — auto-threshold is informational
-    # only and the user can always set thresholds manually in the GUI.
-    #
-    # v5.4.7: skipped when ``--no_auto_threshold`` is set (AllWell's
-    # batched remote runner passes this so the per-batch pass doesn't
-    # overwrite the prior batch's defaults with incomplete-plate data;
-    # the runner re-runs it once locally after all batches drain).
-    if args.no_auto_threshold:
-        log.info("Auto-threshold skipped (--no_auto_threshold).")
-    else:
-        try:
-            thresholds = _estimate_thresholds_standalone(
-                output_dir,
-                fluor_channels=fluor_tokens_for_quant,
-                filename_schema=args.filename_schema,
-                filename_sep=args.filename_sep,
-                log=log,
-            )
-            written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-            if written:
-                log.info(
-                    "Auto-threshold defaults written for %d channel(s): %s",
-                    len(written),
-                    ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
-                )
-            else:
-                log.info("Auto-threshold pass produced no new defaults.")
-        except Exception as exc:
-            log.warning("Auto-threshold pass failed: %s", exc)
+    # Auto-threshold: every well is processed and the output zips, per-well CSVs
+    # and sidecar are on disk, so write the default ThreshFracOn cut per channel
+    # into ``cell_gating.thresh_frac_on``. See ``run_auto_threshold_pass`` for
+    # the three modes. Stays inside the pipeline's own dependency set, so a run
+    # produces thresholds even where ``well_viewer`` is not installed.
+    run_auto_threshold_pass(args, output_dir, fluor_tokens_for_quant, log)
 
     # audit E5: a run with per-well failures must not exit 0 — otherwise the
     # remote layer reads success and deletes the inputs for wells that never

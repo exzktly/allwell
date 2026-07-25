@@ -15,6 +15,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QWidget
 
 from well_viewer.features.distribution.tab_view import build_distribution_tab
+from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (
     "_distribution_export_dock", "_chan_cb_distribution", "_distribution_tp_cb",
@@ -32,10 +33,7 @@ def test_build_registers_handles_and_stamps_app(viewer_app, qtbot):
     qtbot.addWidget(parent)
     build_distribution_tab(app._ctx, parent)
 
-    for name in _HANDLES:
-        assert app._widget_registry.has(name), f"{name} not registered"
-        assert getattr(app, name, None) is not None, f"{name} not on app"
-        assert getattr(app, name) is app._widget_registry.get(name)
+    assert_handles_registered(app, _HANDLES)
 
     # The `_var` aliases must point at the same widget as their primary handle.
     assert app._distribution_tp_var is app._distribution_tp_cb

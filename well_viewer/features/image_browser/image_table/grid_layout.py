@@ -92,12 +92,8 @@ def _find_ratio_for_channel(ctx, chan: str):
     return None
 
 
-def _tp_sort_key(tp: str):
-    """Sort key for timepoint strings; uses parse_timepoint_hours so
-    ``01d02h30m``-style values order chronologically."""
-    from well_viewer.data.data_loading import parse_timepoint_hours
-    h = parse_timepoint_hours(str(tp))
-    return (h is None, h if h is not None else 0.0, str(tp))
+# Timepoint ordering is shared app-wide — see util.timepoint.sort_key.
+from util.timepoint import sort_key as _tp_sort_key
 
 
 def _cache_column_tokens(ctx, column: str) -> List[str]:

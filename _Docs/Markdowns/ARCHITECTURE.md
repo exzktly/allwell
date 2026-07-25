@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.38.** This map describes the app as it stands today;
+**Reflects All-Well v8.8.39.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.38; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.39; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -106,6 +106,8 @@ allwell/
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, WellPlateZipper, analyze_tab and
 │   │                              input_resolution_service all parse well names through it)
+│   ├── timepoint.py            ← timepoint token → hours + the shared sort key
+│   │                              (pipeline, services and well_viewer all use it)
 │   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
@@ -2606,20 +2608,23 @@ visual reference only. Rendered screenshots live under
   CSV columns and combo text, so `1`, `01` and `1.0` must collapse to one key
   before anything compares them. A local copy that formats differently strands
   a filter silently — a combo whose text never matches any row.
-- **Converting a timepoint token to *hours* has four implementations, and they
-  do not agree.** `pipeline.auto_threshold.parse_tp_hours`,
-  `data.image_identity.parse_timepoint_hours`,
-  `process_microscopy._parse_timepoint_hours`, and the one inlined in
-  `services.remote_runner._tp_sort_key` (which exists because `services/` may
-  not import `well_viewer` — §6.2). They resolve 27 of 32 sampled tokens
-  identically; the divergences are that `process_microscopy` returns `nan`
-  where the others return `None` for an unparseable token, and that
-  `pipeline.auto_threshold` alone parses a seconds suffix (`45s`) and a leading
-  digit run (`12abc`). `tests/test_timepoint_parser_divergence.py` pins all of
-  it. Do not "just consolidate" these: adopting one grammar everywhere changes
-  which timepoints a dataset's plots contain, so it is a product decision about
-  what a timepoint token may look like, not a refactor. When it is made, that
-  test is where it shows up.
+- **Read a timepoint token as hours with `util.timepoint.parse_hours`, and sort
+  timepoints with `util.timepoint.sort_key`.** Both are stdlib-only, so the
+  pipeline, `services/` and `well_viewer/` all import them (`services/` may not
+  import `well_viewer` — §6.2 — which is what forced a separate copy before).
+  Three names remain for call-site reasons and all delegate:
+  `data.image_identity.parse_timepoint_hours` (the viewer's, consumed by
+  `normalize_tp` for canonical keys), `pipeline.auto_threshold.parse_tp_hours`,
+  and `process_microscopy._parse_timepoint_hours` — the last a deliberate
+  `nan`-returning adapter, so `timepoint_hours` stays a float column with no
+  `None` to special-case into the CSV. Its one trade is that a literal `"nan"`
+  token and an unreadable one are indistinguishable in its return; use
+  `parse_hours` and test for `None` when that matters.
+  `tests/test_timepoint_parsing.py` fuzzes the parsers against each other and
+  asserts the sort-key identity, so a reintroduced local copy fails there. The
+  grammar is deliberately strict: it will not scavenge a digit from anywhere in
+  the token, because a guessed number becomes a canonical key nothing else
+  recognises.
 - **Selections survive a tab switch.** Whenever you read or write
   `_selected_wells`, you're touching app-wide state — clobbering it in a
   tab-local handler will leak across tabs.

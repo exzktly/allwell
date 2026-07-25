@@ -47,6 +47,7 @@ PIPELINE_FILES = [
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
     "util/well_token.py",
+    "util/timepoint.py",
     "util/aw_safe.py",
 ]
 

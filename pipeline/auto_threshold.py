@@ -17,56 +17,27 @@ pipeline-must-be-standalone contract.
 from __future__ import annotations
 
 import random
-import re
 from typing import Iterable, List, Optional, Tuple
 
 import numpy as np
+
+from util.timepoint import parse_hours as _parse_hours, sort_key as tp_sort_key
 
 
 DEFAULT_CELLS_PER_IMAGE_CAP = 800
 
 
 def parse_tp_hours(tp: str) -> Optional[float]:
-    """Convert a timepoint string to hours.
+    """Convert a timepoint string to hours; ``None`` when unparseable.
 
-    Recognises:
-      - plain numerics (``"24"``, ``"1.5"``) — interpreted as hours
-      - ``DDdHHhMMm`` / ``2d`` / ``48h`` / ``30m`` / ``45s``
-      - any string containing digits — the first integer run is used
-        as a fallback ordinal
-
-    Returns ``None`` when nothing parseable is found.
+    Delegates to :func:`util.timepoint.parse_hours`. This used to be a looser
+    parser that scavenged the first digit run from anywhere in the token, which
+    made it read ``"5%"`` as 5 hours and disagree with every other parser about
+    ``"a1b2"``. It only fed the sort in :func:`pick_endpoint_timepoints`, so
+    nothing broke — but two answers to "what hour is this token" is one too
+    many, and the strict grammar is the one that produces canonical keys.
     """
-    s = str(tp or "").strip()
-    if not s:
-        return None
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    total = 0.0
-    matched = False
-    for value, unit in re.findall(r"(\d+(?:\.\d+)?)\s*([dhms])", s, flags=re.IGNORECASE):
-        matched = True
-        v = float(value)
-        u = unit.lower()
-        if u == "d":
-            total += v * 24.0
-        elif u == "h":
-            total += v
-        elif u == "m":
-            total += v / 60.0
-        elif u == "s":
-            total += v / 3600.0
-    if matched:
-        return total
-    m = re.search(r"\d+", s)
-    if m:
-        try:
-            return float(int(m.group(0)))
-        except ValueError:
-            return None
-    return None
+    return _parse_hours(tp)
 
 
 def pick_endpoint_timepoints(tps: Iterable[str]) -> List[str]:
@@ -77,7 +48,7 @@ def pick_endpoint_timepoints(tps: Iterable[str]) -> List[str]:
     """
     sorted_tps = sorted(
         {str(t).strip() for t in tps if str(t).strip()},
-        key=lambda t: (parse_tp_hours(t) is None, parse_tp_hours(t) or 0.0, t),
+        key=tp_sort_key,
     )
     if not sorted_tps:
         return []

@@ -34,6 +34,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Mapping, Optional
 
+from util.timepoint import parse_hours as _parse_hours
 from util.well_token import canonical_well_label
 
 # pandas is imported lazily inside the Series-level helpers so the
@@ -341,59 +342,12 @@ def normalize_fov_series(fov):
 
 # Re-export the timepoint-hours parser from the pipeline so this module
 # is the one place callers look up time-format handling.
-_TP_FULL_RE = re.compile(
-    r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?",
-    re.IGNORECASE,
-)
-_TP_UNIT_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
-    re.IGNORECASE,
-)
-_TP_TRAILING_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)$")
-
-
 def parse_timepoint_hours(value: Any) -> Optional[float]:
-    """Parse a timepoint token into fractional hours.
-
-    Handles every form seen in the wild: ``"T01"``, ``"24"``, ``"24h"``,
-    ``"1.0"``, ``"day3"``, ``"02d04h30m"``, plus a bare integer/float.
-    Returns ``None`` for opaque labels that can't be parsed.
-
-    This is the central time-format resolver; both
-    :func:`normalize_tp` (canonical key form) and :func:`tp_hours`
-    (numeric arithmetic) consume it. Kept stdlib-only here so the
-    module doesn't drag in the pipeline's heavy imports (tifffile)."""
-    s = str(value or "").strip()
-    if not s:
-        return None
-    # 1. Full DDdHHhMMm.
-    m = _TP_FULL_RE.fullmatch(s)
-    if m and any(m.groups()):
-        days = int(m.group(1) or 0)
-        hours = int(m.group(2) or 0)
-        mins = int(m.group(3) or 0)
-        return days * 24.0 + hours + mins / 60.0
-    # 2. Standalone unit: "48h", "2d", "30m".
-    m = _TP_UNIT_RE.fullmatch(s)
-    if m:
-        val = float(m.group(1))
-        unit = m.group(2)[0].lower()
-        if unit == "h":
-            return val
-        if unit == "d":
-            return val * 24.0
-        if unit == "m":
-            return val / 60.0
-    # 3. Pure number (treat as hours).
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    # 4. Prefixed ordinal — "T01" → 1.0, "day02" → 2.0.
-    m = _TP_TRAILING_NUM_RE.search(s)
-    if m:
-        return float(m.group(1))
-    return None
+    """Parse a timepoint token into fractional hours; ``None`` for an opaque
+    label. The viewer's name for :func:`util.timepoint.parse_hours`, kept
+    because :func:`normalize_tp`, :func:`tp_hours` and a dozen call sites are
+    written against it."""
+    return _parse_hours(value)
 
 
 def normalize_tp(value: Any) -> str:

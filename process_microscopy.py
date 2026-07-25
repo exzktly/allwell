@@ -72,6 +72,7 @@ from skimage.segmentation import watershed
 from util.well_token import (
     split_background_wells as _split_background_wells,
     background_well_key as _bg_well_key,
+    canonical_well_label as _canonical_well_label,
 )
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
@@ -383,18 +384,16 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 96-well plate helpers
 # ---------------------------------------------------------------------------
-
-# Valid well names: A1/A01 – H12  (rows A-H, columns 1-12 or 01-12)
-_WELL_RE = re.compile(r"^([A-Ha-h])(\d{1,2})$")
-
-
-def is_valid_well_name(stem: str) -> bool:
-    """Return True if *stem* (filename without extension) is a valid 96-well position."""
-    m = _WELL_RE.match(stem)
-    if not m:
-        return False
-    col = int(m.group(2))
-    return 1 <= col <= 12
+#
+# The 96-well parser (A1/A01 – H12, rows A-H, columns 1-12) is
+# ``util.well_token.canonical_well_label``, imported above as
+# ``_canonical_well_label``. The pipeline used to carry its own regex plus an
+# is-valid wrapper, validate a name with one and then re-match it with the
+# other to build the canonical label. The two agreed on every token except one:
+# the canonicaliser strips surrounding whitespace and the pipeline's ``^…$``
+# match did not, so a directory or zip named ``"A1 "`` was a well to the
+# Analyze-side input resolver and not a well to the pipeline that then
+# processed the same folder. One parser, one answer, one parse per name.
 
 
 def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
@@ -412,10 +411,10 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
         if p.name.startswith("."):
             log.debug("Skipping hidden file: %s", p.name)
             continue
-        if is_valid_well_name(p.stem):
-            # Normalise to upper-case, zero-padded column: a1 → A01
-            m = _WELL_RE.match(p.stem)
-            well = f"{m.group(1).upper()}{int(m.group(2)):02d}"
+        # Canonicalises to upper-case, zero-padded column (a1 → A01) and
+        # returns None for anything that is not a 96-well position.
+        well = _canonical_well_label(p.stem)
+        if well is not None:
             found.append((well, p))
         else:
             skipped.append(p)
@@ -447,23 +446,11 @@ def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
     for p in entries:
         if not p.is_dir() or p.name.startswith(".") or p.name.startswith("_"):
             continue
-        if is_valid_well_name(p.name):
-            m = _WELL_RE.match(p.name)
-            well = f"{m.group(1).upper()}{int(m.group(2)):02d}"
+        well = _canonical_well_label(p.name)
+        if well is not None:
             found.append((well, p))
     log.info("Found %d well folder(s) in %s", len(found), input_dir)
     return sorted(found, key=lambda x: x[0])
-
-
-def _canonical_well_label(token: str) -> str | None:
-    """Return canonical 96-well label (e.g. B03) for *token*, or None if invalid.
-
-    Thin wrapper over :func:`util.well_token.canonical_well_label` so the
-    pipeline and the GUI tools (WellPlateZipper, analyze_tab,
-    services/input_resolution_service) all share one parser.
-    """
-    from util.well_token import canonical_well_label as _cwl
-    return _cwl(token)
 
 
 def organize_loose_tifs_into_well_folders(

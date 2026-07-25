@@ -868,22 +868,13 @@ def _refresh_review_csv_rows_impl(ctx, rows: Optional[List[dict]] = None) -> Non
         for label in sels:
             rows.extend(review_load_rows(ctx, label))
 
-    def _norm(v: object) -> str:
-        s = str(v or "").strip()
-        if not s:
-            return ""
-        try:
-            return f"{float(s):g}"
-        except Exception:
-            return s
-
     fov_cb = w.get_or_none("_review_fov_cb")
     tp_cb = w.get_or_none("_review_tp_cb")
-    fov_sel = _norm(fov_cb.currentText()) if fov_cb is not None else ""
+    fov_sel = review_norm_fov(fov_cb.currentText()) if fov_cb is not None else ""
     tp_sel = norm_timepoint(ctx, tp_cb.currentText()) if tp_cb is not None else ""
     filtered = []
     for row in rows:
-        row_fov = _norm(row.get("fov", row.get("FOV", "")))
+        row_fov = review_norm_fov(row.get("fov", row.get("FOV", "")))
         row_tp = norm_timepoint(ctx, row.get("timepoint", row.get("tp", row.get("time", ""))))
         if fov_sel and row_fov != fov_sel:
             continue

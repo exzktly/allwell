@@ -15,6 +15,7 @@ from well_viewer.core.ui_helpers import norm_timepoint
 import logging
 from typing import Dict, List, Optional, Tuple
 
+from well_viewer.data.image_resolver import normalize_numeric_token
 from well_viewer.domain.tp_match import tp_close
 
 logger = logging.getLogger(__name__)
@@ -100,20 +101,11 @@ def _binary_base(chan: str) -> str:
 def _is_nuc_seg(chan: str) -> bool:
     return str(chan or "").strip().upper() == NUC_SEG_TOKEN
 
-def _norm_token(value: object) -> str:
-    """Normalize a numeric-or-string FOV/timepoint to a stable form.
-
-    ``"1"`` and ``"1.0"`` collapse to ``"1"``; non-numeric strings are
-    returned untouched. This matches the form emitted by the filename
-    extractors that key the image dicts in ``find_well_images_and_masks``.
-    """
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    try:
-        return f"{float(raw):g}"
-    except (TypeError, ValueError):
-        return raw
+# Normalize a numeric-or-string FOV/timepoint to a stable form: ``"1"`` and
+# ``"1.0"`` collapse to ``"1"``, non-numeric strings pass through. This matches
+# the form emitted by the filename extractors that key the image dicts in
+# ``find_well_images_and_masks``.
+_norm_token = normalize_numeric_token
 
 def _numeric_token(value: object) -> Optional[float]:
     """Reduce a timepoint/FOV string to a numeric key for cache-key matching.

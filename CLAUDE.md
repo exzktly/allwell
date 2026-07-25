@@ -50,6 +50,12 @@ scripts/build_executable.sh --clean            # macOS .app (always pass --clean
 ALLWELL_PROFILE=<name> scripts/build_executable.sh   # feature-subset binary
 ```
 
+On Claude Code on the web, `.claude/hooks/session-start.sh` has already installed
+the test deps and the Qt system libraries (`libegl1` and friends — Qt needs
+GL/EGL even under the offscreen QPA), so `ruff check .` and `scripts/test.sh`
+work from the first turn. It does **not** install TF/StarDist/Torch/Cellpose; the
+`slow` segmentation tests still need those by hand. See ARCHITECTURE.md §10.6.
+
 Test deps: `pip install -r tests/requirements-dev.txt` — pinned to the app's
 runtime stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) and deliberately without
 TF/Torch/StarDist, so the `importorskip` tests for those **skip** in CI. Keep
@@ -221,12 +227,18 @@ not a log.
 
 **Scheduling your own check-ins is pre-authorized.** `send_later` (and the
 equivalent self-wakeup tools) needs no permission — standing grant, never ask.
-It is also allowlisted in `.claude/settings.json`, so the harness shouldn't
-prompt for it either.
+Cancelling one you no longer need (`delete_trigger`) is part of the same grant.
+Both are allowlisted in `.claude/settings.json`, under every spelling of the
+MCP server name the session may use, so the harness shouldn't prompt either.
 Use it freely to re-check a running CI job, a queued workflow, or an open PR,
 and re-arm it as often as the work needs. A silent re-arm is the correct move
 when nothing has changed: don't narrate a wake-up that found the job still
-running.
+running. Delete the trigger once the work it watched is finished — a merged PR
+does not need an hourly wake-up.
+
+Project settings only apply once the harness trusts them; a remote session that
+still prompts is loading none of the file. The fix there is the same allowlist in
+the user-level `~/.claude/settings.json`, which needs no trust step.
 
 **Every PR bumps the version.** No exceptions — a PR that ships anything ships
 a new version. Patch (`8.8.24` → `8.8.25`) for fixes, docs, tooling, and small

@@ -1296,13 +1296,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.26.app`
-for the full app, or `dist/AllWell-8.8.26-<profile>.app` for a subset (e.g.
-`AllWell-8.8.26-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.27.app`
+for the full app, or `dist/AllWell-8.8.27-<profile>.app` for a subset (e.g.
+`AllWell-8.8.27-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.8.26.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.8.27.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

@@ -861,8 +861,8 @@ DEFAULT_THEME = "blue"
 _THEMEABLE_CLASSES = {"Colors": Colors, "Metrics": Metrics, "Radii": Radii}
 
 # Grey: a neutral charcoal-grey chrome variant (colour-only) — restrained azure
-# accent, near-black image canvas, and a yellow version-pill text cue via
-# ``brand_fg``. Shares the flat, tight control feel (``Radii`` / ``Metrics``) with
+# accent and a near-black image canvas.
+# Shares the flat, tight control feel (``Radii`` / ``Metrics``) with
 # the default ``blue`` theme, so this bundle overrides *only* colours. (The look
 # was designed against real Nikon NIS-Elements AR screenshots; the
 # ``control_border`` split lets its buttons read as crisp toolbar controls
@@ -882,9 +882,8 @@ _GREY = {
         "text_muted": "#878D95", "text_faint": "#5E646C",
         "accent": "#2D8CEB", "accent_hover": "#43A0FF", "accent_pressed": "#1668B8",
         "accent_dim": "#22415E", "accent_fg": "#FFFFFF",
-        # brand (pill fill) inherits the default 'transparent'; only the text
-        # colour differs, so just brand_fg is overridden.
-        "brand_fg": "#FFE100",
+        # The brand tokens (version-pill fill + text) are not overridden here:
+        # the pill stays the default transparent-with-white-text in every theme.
         "success": "#3FB950", "warn": "#FFB300", "danger": "#F04747",
         "plot_bg": "#0A0C10", "plot_grid": "#1D2128", "plot_spine": "#50565E",
         "focus_ring": "rgba(45, 140, 235, 0.35)",

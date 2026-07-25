@@ -43,24 +43,29 @@ ALLWELL_PROFILE=thin python allwell.py         # run a feature subset (profiles/
 python process_microscopy.py --input_dir … --output_dir …   # pipeline only, no GUI deps
 
 ruff check .                                   # lint — CI pins ruff==0.15.8, config in pyproject.toml
-pytest tests/ -m "not slow"                    # THE default test command (see §2)
-pytest tests/test_app_smoke.py                 # full-app tests: one or two files at a time
+scripts/test.sh                                # THE test command — CI runs this same script
+scripts/test.sh tests/test_app_smoke.py -m ""  # full-app tests: one or two files at a time
 
 scripts/build_executable.sh --clean            # macOS .app (always pass --clean)
 ALLWELL_PROFILE=<name> scripts/build_executable.sh   # feature-subset binary
 ```
 
-Test deps: `pip install -r tests/requirements-dev.txt` (deliberately lightweight —
-no TF/Torch/StarDist; those tests mock or degrade). Qt needs
-`QT_QPA_PLATFORM=offscreen`, which `tests/conftest.py` sets for you.
+Test deps: `pip install -r tests/requirements-dev.txt` — pinned to the app's
+runtime stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) and deliberately without
+TF/Torch/StarDist, so the `importorskip` tests for those **skip** in CI. Keep
+the pins: as lower bounds, CI resolved numpy 2.x / pandas 3.x against an app
+that ships numpy 1.24. pytest config lives in `pyproject.toml`, not
+`tests/pytest.ini` — a config under `tests/` loads for `pytest tests/` but not
+for a bare `python -m pytest`.
 
 ## 2. Running tests — read this before typing `pytest`
 
 The suite has two lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
-- **Fast lane** (~800 tests, ~40s): `pytest tests/ -m "not slow"`. Pure-logic,
-  guardrail, and per-feature tests. This is what CI runs.
+- **Fast lane** (~1,770 tests, ~55s): `scripts/test.sh`. Pure-logic, guardrail,
+  and per-feature tests. CI invokes this same script, so local and CI runs
+  cannot drift in flags or config — don't hand-roll a `pytest` command.
 - **Full-app tests**: anything using the `viewer_app` / `loaded_app` /
   `loaded_app_shape` / `image_table_app` fixtures (~70 files, auto-marked `slow`
   by `conftest.py`). Each builds a real `WellViewerApp` (~1,800 QObjects) whose

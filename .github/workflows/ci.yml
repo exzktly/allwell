@@ -5,12 +5,15 @@ name: CI
 # The pytest job runs `-m "not slow"`: full-app Qt tests (the `viewer_app` /
 # `loaded_app` fixtures) are auto-marked `slow` by tests/conftest.py because they
 # are slow under the offscreen QPA platform (and a true C-level hang can't be
-# interrupted by pytest's signal timeout). The fast lane (~800 tests, ~40s) is
+# interrupted by pytest's signal timeout). The fast lane (~1,770 tests, ~60s) is
 # the guardrails + pure-logic + per-feature/widget tests — the refactor-safety
 # net. The heavy full-app integration tests + the real-StarDist e2e + the
 # playground worker run in the local/manual full pass (`pytest` with no marker
 # filter, or `-m slow`). A job-level timeout-minutes is the backstop if a `slow`
 # tag is ever missed.
+#
+# The pytest command itself lives in scripts/test.sh so a developer running the
+# fast lane locally runs byte-identical flags; this job only adds --junitxml.
 
 on:
   pull_request:
@@ -66,9 +69,7 @@ jobs:
           # report, still fails the job; only the post-success teardown segfault
           # is tolerated. pytest writes the report at session end, before the
           # atexit teardown that segfaults, so a clean run always produces it.
-          python -m pytest -m "not slow" -q \
-            --timeout=90 --timeout-method=signal \
-            --junitxml=.pytest-report.xml || true
+          scripts/test.sh --junitxml=.pytest-report.xml || true
           python - <<'PY'
           import sys, xml.etree.ElementTree as ET
           from pathlib import Path

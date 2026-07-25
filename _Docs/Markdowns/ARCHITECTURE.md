@@ -2190,7 +2190,10 @@ you're in before you type the command.
 
 - **Pure-logic / unit tests** (Qt-free: `pipeline/*`, `domain/*`,
   `spatial_compute`, `multivariate_compute`, layout math, …). Fast, cheap,
-  safe to run in bulk. This is the CI "fast lane": `pytest tests/ -m "not slow"`.
+  safe to run in bulk. This is the CI "fast lane" — run it with
+  **`scripts/test.sh`** (~1,770 tests, ~55s). CI invokes that same script, so a
+  local run and the CI run cannot drift in flags or config; hand-rolling
+  `pytest tests/ -m "not slow"` skips the `--timeout=90` CI applies.
 - **Full-app tests** (anything using the `viewer_app` / `loaded_app` /
   `loaded_app_shape` / `image_table_app` fixtures — ~70 files). Each one
   constructs a **real `WellViewerApp`** under the offscreen QPA. `conftest.py`'s
@@ -2219,12 +2222,12 @@ fixture (it doesn't help).
 
 **Rules for running tests here:**
 
-1. **Bulk runs use the fast lane only:** `pytest tests/ -m "not slow"`. Never run
-   a bare `pytest tests/` (or `-m slow` across everything) in this environment —
-   that's the command that kills the container.
+1. **Bulk runs use the fast lane only:** `scripts/test.sh`. Never run a bare
+   `pytest tests/` (or `-m slow` across everything) in this environment — that's
+   the command that kills the container.
 2. **Run full-app tests in small, fresh processes.** Invoke them a *file or two at
-   a time* — `pytest tests/test_app_smoke.py`,
-   `pytest tests/test_multivariate_tab.py` — so the OS reclaims the leaked memory
+   a time* — `scripts/test.sh tests/test_app_smoke.py -m ""`,
+   `scripts/test.sh tests/test_multivariate_tab.py -m ""` — so the OS reclaims the leaked memory
    when each short-lived process exits. Budget roughly ≤ ~15–20 full-app tests per
    process.
 3. **Prefer the pure-logic layer.** New behaviour should be testable without the
@@ -2233,6 +2236,31 @@ fixture (it doesn't help).
 4. **Long runs will be interrupted.** A single `pytest` invocation that takes many
    minutes is at risk of a container recycle. Keep each invocation short; if you
    need broad coverage, script several small invocations rather than one large one.
+
+**What the environment gives you that CI does not (and vice versa).** The two
+lanes are not the same machine, and the differences decide which failures you
+can reproduce:
+
+| | CI | A dev machine |
+|---|---|---|
+| Deps | `tests/requirements-dev.txt`, pinned to the app's stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) | `_Docs/requirements.txt` — same pins, plus the ML stack |
+| ML stack | absent — `importorskip("stardist")` / `("tensorflow")` tests **skip** | present, so those tests actually run |
+| OS / Python | ubuntu-latest, 3.11, case-sensitive FS | typically macOS arm64, 3.10.14, case-**in**sensitive FS |
+| Timeout | `--timeout=90` per test | same, via `scripts/test.sh` |
+| State | fresh clone — no `~/.allwell/scratch`, no datasets, no `__pycache__` | whatever you have lying around |
+
+So a green CI run has *not* exercised StarDist or TensorFlow, and a green local
+run has not proven your filenames are case-correct for Linux. The dep pins were
+lower bounds until recently, which had CI resolving numpy 2.x / pandas 3.x
+against an app that ships numpy 1.24 / pandas 2.2 — the single largest source of
+"passes locally, fails in CI". Keep them pinned.
+
+The pytest configuration lives in **`pyproject.toml`** (`[tool.pytest.ini_options]`),
+not `tests/pytest.ini`. That matters: an ini under `tests/` is found by
+`pytest tests/` (rootdir becomes `tests/`) but *not* by a bare `python -m pytest`
+from the repo root (rootdir stays at the root), so markers, `filterwarnings`, and
+`testpaths` silently applied in one lane and not the other. A root config is
+discovered from either.
 
 ---
 

@@ -10,10 +10,10 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.22.** This map tracks the current release; the version
+**Reflects All-Well v8.8.24.** This map tracks the current release; the version
 string itself is centralized in the repo-root `version.py` (§3) and surfaced on
 the title-bar version pill. Feature areas that changed materially in the
-v8.4 → v8.8.22 line carry inline `(vX.Y.Z)` markers so you can tell recent
+v8.4 → v8.8.24 line carry inline `(vX.Y.Z)` markers so you can tell recent
 structure from long-standing structure. Bump `version.py` on a release —
 nothing else carries the app version.
 
@@ -84,7 +84,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.22; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.24; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -97,6 +97,7 @@ allwell/
 │   ├── cellpose.py             ← Cellpose segmenters (Torch imported lazily)
 │   ├── stardist.py             ← StarDist segmenters + per-worker model state (TF lazy)
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
+│                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth)
 │   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
@@ -1470,6 +1471,56 @@ Small dependency-light service modules used by `analyze_tab.py`:
 These modules deliberately have no Qt imports beyond what the Analyze tab
 itself uses — keeping them potentially reusable for a CLI driver.
 
+### 6.5 Scratch, staging, and where each write lands (v8.8.24)
+
+A run touches two classes of storage, and keeping them apart is what makes it
+survive an unreliable output volume.
+
+**Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
+where per-well working files go: the extracted input TIFs, every intermediate
+image, and the per-FOV checkpoints. Resolution order is `$ALLWELL_SCRATCH_DIR`
+(set by `--scratch_dir` or the Analyze tab's *Scratch disk* field) →
+**`~/.allwell/scratch`** (the default) → `output_dir` (last resort, warned).
+
+The default used to be `output_dir`, and the Analyze field auto-seeded
+`<input>/Temp`, so *both* put the whole run's bulk I/O on user-chosen volumes.
+That is the bug behind **"many wells fail with `OSError: [Errno 9] Bad file
+descriptor` on local runs but never on Slurm"**: each FOV-group writes ~6 images,
+each staged tmp → fsync → rename (three filesystem operations apiece), times
+every FOV × timepoint × well, times N worker processes — all funnelled through
+one SMB session when the volume is a NAS. macOS's `smbfs` does not re-open
+server-side handles across a session reconnect, so every descriptor opened
+before the drop returns `EBADF`. Slurm never sees it: inputs are rsynced to the
+cluster and the pipeline runs against cluster-local storage. (NFS would give
+`ESTALE`, so the errno identifies the protocol.) The scratch base is a dedicated
+subdirectory, never `~` itself, because `_sweep_stale_scratch_dirs` *deletes*
+what its `_tmp_*` glob finds.
+
+Both modes honour it. Folder mode used to pin its staging to `output_dir` so the
+closing commit could be a same-filesystem `rename`; `pipeline.io._commit_staging_dir`
+now falls back to a copy on `EXDEV`, so the staging dir is free to live anywhere.
+`_sweep_stale_scratch_dirs_all` sweeps the scratch base *and* `output_dir` (when
+they differ) so staging left by pre-change runs is still reclaimed.
+
+**Results (small, durable).** Only two writes per well must land on `output_dir`:
+the per-well CSV and `<well>_out.zip`. Both now carry the same
+retry-with-backoff shield `_safe_imwrite` has always had, via
+`pipeline.io.retry_write` — they stage to `__aw_tmp_` and commit with
+`os.replace`, so re-running is safe, and a transient fault costs a retry instead
+of the whole well. `_AtomicTextHandle.__exit__` guards its `flush()`/`close()`
+(previously unguarded, the direct source of the bare errno) and aborts the
+commit rather than renaming a short file over a good CSV.
+
+**Remote is pinned, not defaulted.** `remote_runner._build_remote_argv` emits an
+explicit `--scratch_dir=<remote_output>` and drops any local `--scratch_dir`, so
+Slurm runs keep their pre-change behaviour — a cluster home is typically a
+small-quota NFS share, and the remote output dir already lives in the host's
+configured staging area.
+
+The run logs its resolved scratch base on the `Scratch  :` line; if that ever
+reads back as the output dir on a network mount, that is the failure
+configuration.
+
 ---
 
 ## 7. The widget library (`widgets/`)
@@ -2564,6 +2615,19 @@ top-hat-filtered fluorescence (`*_tophat.tif`), masks (`*_labels.tif`), overlays
 (`*_overlay.png`), and smFISH-processed channels (`*_smfish.tif`) from inside
 those ZIPs. If channel tokens differ from what the viewer expected, re-open the
 directory — `pipeline_info.json` is re-read on every open.
+
+**Many wells fail with `OSError: [Errno 9] Bad file descriptor` on a local run
+(but never on a remote / Slurm run).** — The output or scratch volume is a
+network mount. macOS's SMB client invalidates every open file handle when the
+session drops and reconnects, and a run's parallel I/O is more than enough to
+provoke that; whichever wells had files open at that moment fail. Check the
+`Scratch  :` line at the top of the run log — it must **not** be a network path
+(it defaults to `~/.allwell/scratch`; set Analyze → *Scratch disk* or
+`--scratch_dir` to a local SSD if it isn't). If it's already local and wells
+still fail, the remaining exposure is the two per-well result writes on the
+output dir; lower `--workers` to cut the concurrent load, or write results
+locally and copy to the NAS afterwards. `mount | grep <path>` confirms the
+protocol — `smbfs` gives `EBADF`, NFS would give `ESTALE`. See §6.5.
 
 **Auto-threshold reports `timepoint unknown`.** — `pipeline_info.json` doesn't
 have a schema that names a `tp` or `timepoint` field. Re-run the pipeline with

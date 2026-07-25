@@ -4339,7 +4339,21 @@ class RemoteRunner:
                 i += 2
             elif arg == "--output_dir":
                 out.extend([arg, remote_output])
+                # Pin the remote scratch to the remote output dir. The pipeline's
+                # default moved to ``~/.allwell/scratch`` to keep a local run's
+                # bulk I/O off a network-mounted output volume; on a cluster that
+                # default would be wrong — the login/compute home is typically a
+                # small-quota NFS share, while ``remote_output`` already lives in
+                # the host's configured staging area. Passing it explicitly keeps
+                # remote runs byte-identical to their previous behaviour.
+                out.append(f"--scratch_dir={remote_output}")
                 i += 2
+            elif arg.startswith("--scratch_dir"):
+                # Never forward a local scratch path to the remote host.
+                if arg == "--scratch_dir":
+                    i += 2
+                else:
+                    i += 1
             elif arg == "--incremental":
                 # Incremental is a client-side concern on remote runs: the
                 # client uploads only the new-FOV files and merges the partial

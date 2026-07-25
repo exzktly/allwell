@@ -43,7 +43,7 @@ log = logging.getLogger("process_microscopy")
 DEFAULT_SCRATCH_SUBDIR = Path(".allwell") / "scratch"
 
 
-def default_scratch_base() -> "Path | None":
+def default_scratch_base() -> Path | None:
     """``~/.allwell/scratch``, created on demand, or None if unusable."""
     try:
         p = Path.home() / DEFAULT_SCRATCH_SUBDIR
@@ -286,7 +286,7 @@ _WRITE_MAX_ATTEMPTS = 5
 _RETRY_BASE_DELAY_S = 0.5
 
 
-def _free_bytes(path: Path) -> "int | None":
+def _free_bytes(path: Path) -> int | None:
     """Free bytes on *path*'s volume, or ``None`` if it can't be determined."""
     try:
         return shutil.disk_usage(path.parent).free
@@ -337,7 +337,7 @@ def retry_write(fn, *, what: str, cleanup=None):
             time.sleep(_RETRY_BASE_DELAY_S * (2 ** attempt))
 
 
-def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
+def _safe_imwrite(out_path: Path | str, data: np.ndarray) -> None:
     """Atomic image write: tmp file → fsync → rename, with retry on OSError.
 
     Routes ``.tif/.tiff`` through tifffile and ``.png`` through imageio v3.
@@ -424,7 +424,7 @@ def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
             raise
 
 
-def _safe_atomic_text_write(out_path: "Path | str") -> "_AtomicTextHandle":
+def _safe_atomic_text_write(out_path: Path | str) -> _AtomicTextHandle:
     """Return a context manager that yields a file handle for atomic text writing.
 
     On clean exit the buffered bytes are fsynced and the temp file is renamed
@@ -438,7 +438,7 @@ class _AtomicTextHandle:
     def __init__(self, out_path: Path) -> None:
         self._out_path = out_path
         self._tmp = out_path.with_name(f"__aw_tmp_{out_path.name}.pid{os.getpid()}")
-        self._fh: "io.TextIOBase | None" = None
+        self._fh: io.TextIOBase | None = None
 
     def __enter__(self):
         # newline="" matches csv.writer's expectation; the sole text-write
@@ -454,7 +454,7 @@ class _AtomicTextHandle:
         # instead: it must NOT be swallowed — a failed flush means the tmp file
         # is short, and renaming that over the target would silently truncate
         # the CSV — but it must not mask an exception already in flight either.
-        close_exc: "OSError | None" = None
+        close_exc: OSError | None = None
         try:
             if self._fh is not None:
                 try:
@@ -488,7 +488,7 @@ class _AtomicTextHandle:
         return False
 
 
-def _verify_files_complete(paths: "list[Path]", min_size: int = 1) -> "list[Path]":
+def _verify_files_complete(paths: list[Path], min_size: int = 1) -> list[Path]:
     """Return only paths that exist and have ``stat.st_size >= min_size``.
 
     Skipped paths are warned to the worker log so a partial/zero-length file
@@ -596,10 +596,10 @@ from pipeline.incremental_keys import (  # noqa: F401 (re-export, audit A2)
 
 
 def merge_records_into_csv(
-    out_path: "Path | str",
-    new_records: "list[dict]",
+    out_path: Path | str,
+    new_records: list[dict],
     *,
-    key_fields: "tuple[str, ...]" = ("well", "fov", "timepoint", "nucleus_id"),
+    key_fields: tuple[str, ...] = ("well", "fov", "timepoint", "nucleus_id"),
 ) -> int:
     """Append *new_records* to an existing per-well CSV, skipping duplicate keys.
 
@@ -616,11 +616,11 @@ def merge_records_into_csv(
     if not new_records:
         return 0
 
-    def _key(row: "dict") -> tuple:
+    def _key(row: dict) -> tuple:
         return tuple(str(row.get(f, "")) for f in key_fields)
 
-    existing_rows: "list[dict]" = []
-    fieldnames: "list[str]" = []
+    existing_rows: list[dict] = []
+    fieldnames: list[str] = []
     if path.exists():
         try:
             with open(path, newline="") as fh:
@@ -632,7 +632,7 @@ def merge_records_into_csv(
             fieldnames = []
 
     seen = {_key(r) for r in existing_rows}
-    to_add: "list[dict]" = []
+    to_add: list[dict] = []
     for rec in new_records:
         k = _key(rec)
         if k in seen:
@@ -663,7 +663,7 @@ def merge_records_into_csv(
     return len(to_add)
 
 
-def merge_images_into_zip(out_zip: "Path | str", image_dir: "Path | str") -> int:
+def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
     """Add the new images in *image_dir* to *out_zip*, keeping existing members.
 
     Members already present in the zip win on an arcname collision (matches the
@@ -685,7 +685,7 @@ def merge_images_into_zip(out_zip: "Path | str", image_dir: "Path | str") -> int
     ) if image_dir.is_dir() else []
     images = _verify_files_complete(candidates)
 
-    existing_names: "set[str]" = set()
+    existing_names: set[str] = set()
     if out_zip.exists():
         try:
             with zipfile.ZipFile(out_zip, "r") as zf:

@@ -2,7 +2,6 @@ import os
 import sys
 import shutil
 import argparse
-from typing import List, Optional
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary + parser — shared with process_microscopy via util.schema so
@@ -51,11 +50,11 @@ def build_arg_parser():
     return parser
 
 
-def generate_wells() -> List[str]:
+def generate_wells() -> list[str]:
     return [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]
 
 
-def _well_index_from_schema(schema: List[str]) -> Optional[int]:
+def _well_index_from_schema(schema: list[str]) -> int | None:
     """Return the position index of the \"well\" field, or None if absent."""
     try:
         return schema.index("well")
@@ -65,9 +64,9 @@ def _well_index_from_schema(schema: List[str]) -> Optional[int]:
 
 def _extract_well_from_filename(
     fname: str,
-    schema: List[str],
+    schema: list[str],
     sep: str,
-) -> Optional[str]:
+) -> str | None:
     """
     Extract the well token from *fname* using the given schema.
 
@@ -89,7 +88,7 @@ def _extract_well_from_filename(
 def group_by_well(
     search_dir: str,
     recursive: bool,
-    schema: List[str],
+    schema: list[str],
     sep: str,
 ) -> dict:
     """Single pass through *search_dir*; return ``{well_label: [paths]}``.
@@ -130,7 +129,7 @@ def group_by_well(
 
 
 def folder_well(
-    well: str, files: List[str], output_dir: str,
+    well: str, files: list[str], output_dir: str,
     *, move: bool = False,
 ) -> None:
     """Place *files* into a per-well subfolder <output_dir>/<well>/.

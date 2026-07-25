@@ -175,7 +175,7 @@ from pipeline.io import (  # noqa: F401
 )
 
 
-def _report_worker_failure(well_label: str, output_dir: "Path | None", exc: BaseException) -> None:
+def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
     """Log a worker failure with classification + a pointer to the trace file.
 
     Generic ``OSError: [Errno 9] Bad file descriptor`` and ``BrokenProcessPool``
@@ -209,7 +209,7 @@ def _report_worker_failure(well_label: str, output_dir: "Path | None", exc: Base
     log.error("FAILED well %s: %s.%s", well_label, exc, err_hint, exc_info=True)
 
 
-def _dump_well_failure_trace(output_dir: Path, well_label: str, exc: BaseException) -> "Path | None":
+def _dump_well_failure_trace(output_dir: Path, well_label: str, exc: BaseException) -> Path | None:
     """Persist a worker-side exception trace for *well_label*.
 
     ProcessPoolExecutor pickles the exception back to the parent, but if the
@@ -241,7 +241,7 @@ def _dump_well_failure_trace(output_dir: Path, well_label: str, exc: BaseExcepti
 
 def _dump_fov_failure_trace(
     output_dir: Path, well_label: str, fov_stem: str, exc: BaseException,
-) -> "Path | None":
+) -> Path | None:
     """Persist a worker-side exception trace for a single FOV-group.
 
     The per-well analogue (:func:`_dump_well_failure_trace`) only fires when a
@@ -535,7 +535,7 @@ def organize_loose_tifs_into_well_folders(
 def extract_zip(
     zip_path: Path,
     dest_dir: Path,
-    members_to_extract: "set[str] | None" = None,
+    members_to_extract: set[str] | None = None,
 ) -> int:
     """
     Extract image members of *zip_path* flat into *dest_dir*.
@@ -700,8 +700,8 @@ def _parse_timepoint_hours(tp: str) -> float:
 
 
 def parse_filename(
-    path: "Path | str",
-    schema: "list[str] | None" = None,
+    path: Path | str,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
 ) -> dict:
     """
@@ -839,7 +839,7 @@ def correct_single_frame(image, *, flatfield_mode: str = "none",
         combined_ew=combined_ew, ff_field=ff_field)
 
 
-def _load_image_source(source) -> "np.ndarray | None":
+def _load_image_source(source) -> np.ndarray | None:
     """Load a 2-D float32 image from either a ``Path`` on disk or a
     ``(zip_path, member_name)`` tuple (a TIFF stored inside a per-well zip).
     Returns None on any read error so sampling can skip it."""
@@ -895,12 +895,12 @@ def _empty_well_field(models, token: str, tp_key: str):
 def sample_empty_well_images(
     input_dir: Path,
     *,
-    tokens: "list[str]",
-    schema: "list[str] | None",
+    tokens: list[str],
+    schema: list[str] | None,
     sep: str,
-    background_wells: "list[str]",
+    background_wells: list[str],
     max_samples: int = 30,
-) -> "dict[str, dict[str, list[np.ndarray]]]":
+) -> dict[str, dict[str, list[np.ndarray]]]:
     """Sample empty/background-well frames, pooled across the given *background_
     wells* and **grouped by timepoint**.
 
@@ -924,7 +924,7 @@ def sample_empty_well_images(
         return {}
     want = {str(t).strip().lower() for t in (tokens or [])}
 
-    def _token_of(stem: str, *, require_well: bool) -> "str | None":
+    def _token_of(stem: str, *, require_well: bool) -> str | None:
         parts = stem.split(sep)
         if chan_idx >= len(parts):
             return None
@@ -944,7 +944,7 @@ def sample_empty_well_images(
         return ""
 
     # source := Path on disk | (zip_path, member_name); grouped (token, tp_key).
-    by_token_tp: "dict[str, dict[str, list]]" = defaultdict(lambda: defaultdict(list))
+    by_token_tp: dict[str, dict[str, list]] = defaultdict(lambda: defaultdict(list))
 
     def _add(stem: str, source) -> None:
         tok = _token_of(stem, require_well=False)
@@ -984,14 +984,14 @@ def sample_empty_well_images(
             if tok is not None:
                 by_token_tp[tok][_tp_of(p.stem)].append(p)
 
-    def _load_capped(sources) -> "list[np.ndarray]":
+    def _load_capped(sources) -> list[np.ndarray]:
         step = max(1, len(sources) // max_samples)
         return [a for a in (_load_image_source(s)
                             for s in sources[::step][:max_samples]) if a is not None]
 
-    out: "dict[str, dict[str, list[np.ndarray]]]" = {}
+    out: dict[str, dict[str, list[np.ndarray]]] = {}
     for tok, by_tp in by_token_tp.items():
-        per_tp: "dict[str, list[np.ndarray]]" = {}
+        per_tp: dict[str, list[np.ndarray]] = {}
         pooled_sources: list = []
         for tp_key, sources in by_tp.items():
             imgs = _load_capped(sources)
@@ -1010,12 +1010,12 @@ def sample_empty_well_images(
 def build_background_models(
     input_dir: Path,
     *,
-    tokens: "list[str]",
-    schema: "list[str] | None",
+    tokens: list[str],
+    schema: list[str] | None,
     sep: str,
-    background_wells: "list[str] | str" = "",
+    background_wells: list[str] | str = "",
     max_samples: int = 30,
-) -> "dict[str, dict[str, np.ndarray]]":
+) -> dict[str, dict[str, np.ndarray]]:
     """Per-channel, **per-timepoint** additive background fields from the empty/
     background well(s) (for ``--background empty_well``). Pools frames across all
     named blank wells and groups by timepoint via :func:`sample_empty_well_images`,
@@ -1026,9 +1026,9 @@ def build_background_models(
     stacks = sample_empty_well_images(
         input_dir, tokens=tokens, schema=schema, sep=sep,
         background_wells=background_wells, max_samples=max_samples)
-    models: "dict[str, dict[str, np.ndarray]]" = {}
+    models: dict[str, dict[str, np.ndarray]] = {}
     for tok, by_tp in stacks.items():
-        per_tp: "dict[str, np.ndarray]" = {}
+        per_tp: dict[str, np.ndarray] = {}
         for tp_key, imgs in by_tp.items():
             field = estimate_background_field(imgs)
             if field is not None:
@@ -1054,8 +1054,8 @@ def apply_smfish_log(image: np.ndarray) -> np.ndarray:
 
 def compute_shape_features(
     labels: np.ndarray,
-    selected_keys: "list[str] | None",
-) -> "dict[int, dict[str, float]]":
+    selected_keys: list[str] | None,
+) -> dict[int, dict[str, float]]:
     """Per-cell morphology features keyed by label id.
 
     Computes the user-selected shape features (``selected_keys``) **plus** the
@@ -1076,9 +1076,9 @@ def compute_shape_features(
     label_ids = table["label"]
     emit_keys = list(sfc.normalize_selection(selected_keys)) + list(sfc.ALWAYS_ON_KEYS)
 
-    out: "dict[int, dict[str, float]]" = {}
+    out: dict[int, dict[str, float]] = {}
     for i, lab in enumerate(label_ids):
-        rec: "dict[str, float]" = {}
+        rec: dict[str, float] = {}
         for key in emit_keys:
             feat = sfc.BY_KEY.get(key)
             if feat is None:
@@ -1120,7 +1120,7 @@ def compute_region_areas(
     labels: np.ndarray,
     *,
     close_radius: int = 2,
-) -> "dict[int, float]":
+) -> dict[int, float]:
     """Per-label area (px) of the connected bright *region* each nucleus sits in.
 
     StarDist mis-segments a bright debris blob into many small star-convex
@@ -1138,7 +1138,7 @@ def compute_region_areas(
     lab = np.asarray(labels)
     ids = np.unique(lab)
     ids = ids[ids != 0]
-    out: "dict[int, float]" = {int(n): 0.0 for n in ids}
+    out: dict[int, float] = {int(n): 0.0 for n in ids}
     if not out:
         return out
     img = np.asarray(image, dtype=np.float32)
@@ -1172,7 +1172,7 @@ def compute_region_areas(
     ncomp = int(comp.max()) + 1
     keyed = lab[sel].astype(np.int64) * ncomp + comp[sel].astype(np.int64)
     ukey, ucount = np.unique(keyed, return_counts=True)
-    best_count: "dict[int, int]" = {}
+    best_count: dict[int, int] = {}
     for k, cnt in zip(ukey.tolist(), ucount.tolist()):
         l, c = divmod(k, ncomp)
         if c == 0:
@@ -1186,13 +1186,13 @@ def compute_region_areas(
 def build_flatfield_models(
     input_dir: Path,
     *,
-    tokens: "list[str]",
-    schema: "list[str] | None",
+    tokens: list[str],
+    schema: list[str] | None,
     sep: str,
     mode: str,
-    background_wells: "list[str] | str" = "",
+    background_wells: list[str] | str = "",
     max_samples: int = 30,
-) -> "dict[str, dict[str, np.ndarray]]":
+) -> dict[str, dict[str, np.ndarray]]:
     """Precompute per-channel flat-field models for the ``basic`` / ``empty_well`` modes.
 
     Returns the uniform nested shape ``{token_lower: {tp_key: field, _POOLED_TP:
@@ -1212,7 +1212,7 @@ def build_flatfield_models(
         return {}
     want = {str(t).strip().lower() for t in (tokens or [])}
 
-    models: "dict[str, dict[str, np.ndarray]]" = {}
+    models: dict[str, dict[str, np.ndarray]] = {}
     if mode == "empty_well":
         if not _split_background_wells(background_wells):
             return {}
@@ -1220,7 +1220,7 @@ def build_flatfield_models(
             input_dir, tokens=tokens, schema=schema, sep=sep,
             background_wells=background_wells, max_samples=max_samples)
         for tok, by_tp in stacks.items():
-            per_tp: "dict[str, np.ndarray]" = {}
+            per_tp: dict[str, np.ndarray] = {}
             for tp_key, imgs in by_tp.items():
                 field = estimate_basic_flatfield(imgs)
                 if field is not None:
@@ -1228,7 +1228,7 @@ def build_flatfield_models(
             if per_tp:
                 models[tok] = per_tp
     else:  # basic — whole-plate sampling from loose/folder TIFFs on disk.
-        by_token: "dict[str, list[Path]]" = {}
+        by_token: dict[str, list[Path]] = {}
         for path in sorted(input_dir.rglob("*.tif*")):
             parts = path.stem.split(sep)
             if chan_idx >= len(parts):
@@ -1310,13 +1310,13 @@ from util.aw_safe import swallowed
 def _estimate_thresholds_standalone(
     output_dir: Path,
     *,
-    fluor_channels: "list[str]",
+    fluor_channels: list[str],
     filename_schema: str,
     filename_sep: str,
     log: logging.Logger,
     cells_per_image_cap: int = _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,
-    rng_seed: "int | None" = None,
-) -> "dict[str, float]":
+    rng_seed: int | None = None,
+) -> dict[str, float]:
     """Otsu-based per-channel threshold estimator that depends only on
     modules already imported by this file. Returns ``{channel: threshold}``.
     """
@@ -1335,21 +1335,21 @@ def _estimate_thresholds_standalone(
                      if f.strip()]
     sep = filename_sep or "_"
 
-    def _parse_fields(stem: str) -> "dict[str, str]":
+    def _parse_fields(stem: str) -> dict[str, str]:
         parts = stem.split(sep)
         return {f: (parts[i] if i < len(parts) else "")
                 for i, f in enumerate(schema_fields)}
 
     rng = _random.Random(rng_seed)
-    per_channel: "dict[str, list[float]]" = {c: [] for c in channels}
+    per_channel: dict[str, list[float]] = {c: [] for c in channels}
     # Track how many candidate (label, fluor) image pairs we attempted to
     # decode per channel and how many failed (audit E9). A decode failure was
     # only logged at DEBUG — invisible at the default level — so a channel
     # whose tophat images are mostly corrupt would silently compute its Otsu
     # threshold from a small, biased subset. We surface a WARN in the summary
     # when a meaningful fraction was dropped.
-    per_channel_attempted: "dict[str, int]" = {c: 0 for c in channels}
-    per_channel_decode_failed: "dict[str, int]" = {c: 0 for c in channels}
+    per_channel_attempted: dict[str, int] = {c: 0 for c in channels}
+    per_channel_decode_failed: dict[str, int] = {c: 0 for c in channels}
 
     well_zips = sorted(p for p in output_dir.glob("*_out.zip") if not p.name.startswith("."))
     if not well_zips:
@@ -1366,8 +1366,8 @@ def _estimate_thresholds_standalone(
             log.warning("Auto-threshold: cannot open %s: %s", zpath.name, exc)
             continue
         with zf:
-            label_members: "dict[tuple[str, str], str]" = {}     # (fov, tp) -> name
-            tophat_members: "dict[tuple[str, str, str], str]" = {}  # (ch, fov, tp) -> name
+            label_members: dict[tuple[str, str], str] = {}     # (fov, tp) -> name
+            tophat_members: dict[tuple[str, str, str], str] = {}  # (ch, fov, tp) -> name
             for name in zf.namelist():
                 if "/" in name or name.startswith("."):
                     continue
@@ -1447,7 +1447,7 @@ def _estimate_thresholds_standalone(
         log.info("Auto-threshold: completed well %d/%d (%s)",
                  w_idx, len(well_zips), zpath.name)
 
-    thresholds: "dict[str, float]" = {}
+    thresholds: dict[str, float] = {}
     for ch in channels:
         # A biased threshold reports itself: if a large fraction of this
         # channel's tophat/label pairs failed to decode, the Otsu estimate is
@@ -1486,9 +1486,9 @@ def _estimate_thresholds_standalone(
 
 def _apply_thresholds_to_pipeline_info(
     output_dir: Path,
-    thresholds: "dict[str, float]",
+    thresholds: dict[str, float],
     log: logging.Logger,
-) -> "dict[str, float]":
+) -> dict[str, float]:
     """Merge ``thresholds`` into ``output_dir/pipeline_info.json`` under
     ``cell_gating.thresh_frac_on``. User-set values are preserved.
     """
@@ -1510,7 +1510,7 @@ def _apply_thresholds_to_pipeline_info(
 
     cell_gating = dict(existing.get("cell_gating") or {})
     tfo = dict(cell_gating.get("thresh_frac_on") or {})
-    written: "dict[str, float]" = {}
+    written: dict[str, float] = {}
     for ch, thr in thresholds.items():
         if ch in tfo:  # never overwrite a user-set value
             continue
@@ -1960,30 +1960,30 @@ def _quantify_image_group(
 
 def process_image_group(
     nuclear_path: Path,
-    fluor_paths: "list[Path]",
-    fluor_tokens: "list[str]",
+    fluor_paths: list[Path],
+    fluor_tokens: list[str],
     output_dir: Path,
     nuclear_token: str,
     tophat_nir: bool,
     tophat_radius_nir: int,
-    tophat_fluor: "list[bool]",
-    tophat_radius_fluor: "list[int]",
+    tophat_fluor: list[bool],
+    tophat_radius_fluor: list[int],
     fft_small_nir: int = 0,
-    fft_small_fluor: "list[int] | None" = None,
+    fft_small_fluor: list[int] | None = None,
     mesh_ratio: float = 3.0,
     mesh_sigma: float = 3.0,
     save_tophat_images: bool = True,
-    schema: "list[str] | None" = None,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
-    smfish_tokens: "list[str] | None" = None,
+    smfish_tokens: list[str] | None = None,
     segmentation_method: str = DEFAULT_SEGMENTATION_METHOD,
     cytoplasm_token: str = "",
     min_nucleus_area_px: int = 50,
-    shape_features: "list[str] | None" = None,
+    shape_features: list[str] | None = None,
     flatfield_mode: str = "none",
-    flatfield_models: "dict | None" = None,
+    flatfield_models: dict | None = None,
     background_method: str = "sliding_disk",
-    background_models: "dict | None" = None,
+    background_models: dict | None = None,
     qc_remove_debris: bool = False,
     cellpose_diameter: float = 0.0,
     cellpose_model: str = "cyto3",
@@ -2071,13 +2071,13 @@ def process_image_group(
 _GROUP_IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 
 
-def _grouping_channel_idx(schema: "list[str]") -> "int | None":
+def _grouping_channel_idx(schema: list[str]) -> int | None:
     """The schema's ``channel`` slot index, or None for substring-fallback mode."""
     return schema.index("channel") if "channel" in schema else None
 
 
 def _is_nuclear_filename(
-    name: str, stem: str, nuclear_token: str, channel_idx: "int | None", sep: str,
+    name: str, stem: str, nuclear_token: str, channel_idx: int | None, sep: str,
 ) -> bool:
     """Whether *name* is a nuclear file (audit A1) — schema ``channel`` slot, or
     substring fallback. Shared so dir + zip scanners classify identically."""
@@ -2089,7 +2089,7 @@ def _is_nuclear_filename(
 
 def _derive_fluor_filename(
     name: str, stem: str, suffix: str, nuclear_token: str, fluor_token: str,
-    channel_idx: "int | None", sep: str,
+    channel_idx: int | None, sep: str,
 ) -> str:
     """Derive one fluor channel's *filename* from a nuclear name (audit A1);
     ``""`` if the channel slot is out of range. Shared by both scanners."""
@@ -2106,8 +2106,8 @@ def _collect_image_groups(
     entries,
     *,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
-    channel_idx: "int | None",
+    fluor_tokens: list[str],
+    channel_idx: int | None,
     sep: str,
     exists,
     on_missing_fluor,
@@ -2148,11 +2148,11 @@ def _collect_image_groups(
 def find_image_groups_in_zip(
     zip_path: Path,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
+    fluor_tokens: list[str],
     dest_dir: Path,
-    schema: "list[str] | None" = None,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
-) -> "tuple[list[tuple[Path, list[Path]]], set[str]]":
+) -> tuple[list[tuple[Path, list[Path]]], set[str]]:
     """
     Discover complete image groups from filenames inside *zip_path*.
 
@@ -2214,10 +2214,10 @@ def find_image_groups_in_zip(
 def find_image_groups(
     input_dir: Path,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
-    schema: "list[str] | None" = None,
+    fluor_tokens: list[str],
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
-) -> "list[tuple[Path, list[Path]]]":
+) -> list[tuple[Path, list[Path]]]:
     """
     Recursively scan *input_dir* for nuclear-channel files and locate all
     fluorescent-channel counterparts for each.
@@ -2250,7 +2250,7 @@ def find_image_groups(
         on_missing_fluor=lambda fn: log.warning("  missing fluor file: %s", fn),
     )
 
-    groups: "list[tuple[Path, list[Path]]]" = [
+    groups: list[tuple[Path, list[Path]]] = [
         (ctx, [ctx.parent / fn for fn in fluor_names])
         for _name, ctx, fluor_names in grp
     ]
@@ -2333,7 +2333,7 @@ _CORRUPT_MODEL_MARKERS = (
 )
 
 
-def _purge_stardist_cache() -> "list[str]":
+def _purge_stardist_cache() -> list[str]:
     """Remove cached StarDist pretrained-model files so the next
     ``from_pretrained`` re-downloads them.
 
@@ -2348,17 +2348,17 @@ def _purge_stardist_cache() -> "list[str]":
     ``*.h5`` / partial download archives) under each keras cache root. Returns
     the paths removed, for logging.
     """
-    roots: "list[Path]" = []
+    roots: list[Path] = []
     kh = os.environ.get("KERAS_HOME")
     if kh:
         roots.append(Path(kh))
     roots.append(Path(os.path.expanduser("~")) / ".keras")
-    removed: "list[str]" = []
-    seen: "set[str]" = set()
+    removed: list[str] = []
+    seen: set[str] = set()
     for models in (r / "models" for r in roots):
         if not models.is_dir():
             continue
-        targets: "set[Path]" = set()
+        targets: set[Path] = set()
         for p in models.rglob("*"):
             if not p.is_file():
                 continue
@@ -2410,7 +2410,7 @@ def _stardist_lock_is_dead(lockdir: Path) -> bool:
     """A leaked lock is reclaimable when its recorded holder PID(s) are no longer
     running (instant — the crashed/killed-worker case), or — no PID recorded, a
     reused PID, or a hung holder — it is older than the stale window."""
-    pids: "list[int]" = []
+    pids: list[int] = []
     try:
         for p in lockdir.iterdir():
             if p.name.startswith("pid.") and p.name[4:].isdigit():
@@ -2436,7 +2436,7 @@ def _stardist_cache_models_dir() -> Path:
 
 
 @contextlib.contextmanager
-def _stardist_download_lock(timeout: "float | None" = None):
+def _stardist_download_lock(timeout: float | None = None):
     """Cross-process advisory lock serialising the StarDist model download/purge.
 
     All spawn-pool workers run ``_worker_init`` → ``from_pretrained`` at once; on
@@ -2702,7 +2702,7 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
 _FOV_CHECKPOINT_SCHEMA = 1
 
 
-def _json_safe(records: "list[dict]") -> "list[dict]":
+def _json_safe(records: list[dict]) -> list[dict]:
     """Cast numpy scalars in record dicts to plain Python types so the
     records survive a JSON round-trip. Mutates a copy, not the input."""
     out: list[dict] = []
@@ -2726,7 +2726,7 @@ def _fov_stem(nuclear_path: Path) -> str:
     return nuclear_path.stem
 
 
-def _checkpoint_paths(tmp_images: Path, fov_id: str) -> "tuple[Path, Path]":
+def _checkpoint_paths(tmp_images: Path, fov_id: str) -> tuple[Path, Path]:
     """Return ``(records_json, done_marker)`` for a given FOV id."""
     return (
         tmp_images / f".fov_{fov_id}.records.json",
@@ -2734,7 +2734,7 @@ def _checkpoint_paths(tmp_images: Path, fov_id: str) -> "tuple[Path, Path]":
     )
 
 
-def _load_fov_checkpoint(tmp_images: Path, fov_id: str) -> "list[dict] | None":
+def _load_fov_checkpoint(tmp_images: Path, fov_id: str) -> list[dict] | None:
     """Return cached records for ``fov_id``, or None if no valid
     checkpoint exists.
 
@@ -2761,7 +2761,7 @@ def _load_fov_checkpoint(tmp_images: Path, fov_id: str) -> "list[dict] | None":
 
 
 def _save_fov_checkpoint(
-    tmp_images: Path, fov_id: str, records: "list[dict]",
+    tmp_images: Path, fov_id: str, records: list[dict],
 ) -> None:
     """Atomically persist ``records`` and create the ``.done`` marker.
 
@@ -2810,12 +2810,12 @@ def _prune_scratch_files(tmp_images: Path) -> None:
 
 
 def _process_groups_in_worker(
-    groups: "list[tuple[Path, list[Path]]]",
+    groups: list[tuple[Path, list[Path]]],
     shared_kwargs: dict,
     well_label: str,
     fov_threads: int = 1,
-    errors_dir: "Path | None" = None,
-) -> "tuple[list[dict], list[str]]":
+    errors_dir: Path | None = None,
+) -> tuple[list[dict], list[str]]:
     """
     Process all image groups for one well within a single worker process.
 
@@ -2870,7 +2870,7 @@ def _process_groups_in_worker(
     _fov_done = 0
     log.info("Well %s — %d FOV-group(s)", well_label, _fov_total)
 
-    def _run_group(nuclear_path: Path, fluor_paths: "list[Path]") -> "list[dict]":
+    def _run_group(nuclear_path: Path, fluor_paths: list[Path]) -> list[dict]:
         _t0 = time.perf_counter()
         recs = process_image_group(nuclear_path, fluor_paths, **kwargs)
         log.info("FOV %s processed in %.1f s (%d nuclei)",
@@ -2891,8 +2891,8 @@ def _process_groups_in_worker(
         return recs
 
     def _process_or_resume(
-        nuclear_path: Path, fluor_paths: "list[Path]",
-    ) -> "list[dict]":
+        nuclear_path: Path, fluor_paths: list[Path],
+    ) -> list[dict]:
         """Load cached records if a checkpoint exists, else process the
         FOV from scratch."""
         fov_id = _fov_stem(nuclear_path)
@@ -2957,13 +2957,13 @@ def process_well_zip_task(
     output_dir: Path,
     shared_kwargs_template: dict,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
+    fluor_tokens: list[str],
     csv_prefix: str,
-    schema: "list[str] | None" = None,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
     incremental: bool = False,
-    incremental_prior_dir: "Path | None" = None,
-) -> "tuple[list[dict], list[str]]":
+    incremental_prior_dir: Path | None = None,
+) -> tuple[list[dict], list[str]]:
     """
     Top-level picklable task: full lifecycle for one zipped well.
 
@@ -3134,13 +3134,13 @@ def process_well_folder_task(
     output_dir: Path,
     shared_kwargs_template: dict,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
+    fluor_tokens: list[str],
     csv_prefix: str,
-    schema: "list[str] | None" = None,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
     incremental: bool = False,
-    incremental_prior_dir: "Path | None" = None,
-) -> "tuple[list[dict], list[str]]":
+    incremental_prior_dir: Path | None = None,
+) -> tuple[list[dict], list[str]]:
     """
     Top-level picklable task: full lifecycle for one uncompressed well folder.
 
@@ -3360,7 +3360,7 @@ def output_exists_for_well_folder(
     return out_ok and csv_ok
 
 
-def _unique_tokens_preserve_order(tokens: "list[str]") -> "list[str]":
+def _unique_tokens_preserve_order(tokens: list[str]) -> list[str]:
     """Stable de-dupe for channel tokens, ignoring case and surrounding whitespace."""
     seen: set[str] = set()
     out: list[str] = []
@@ -3381,7 +3381,7 @@ def _unique_tokens_preserve_order(tokens: "list[str]") -> "list[str]":
 
 def _run_well_worker_pool(
     *,
-    items: "list[tuple[str, Path]]",
+    items: list[tuple[str, Path]],
     output_dir: Path,
     workers: int,
     force: bool,
@@ -3516,20 +3516,20 @@ def _run_well_worker_pool(
 def process_well_zips(
     input_dir: Path,
     output_dir: Path,
-    well_zips: "list[tuple[str, Path]]",
+    well_zips: list[tuple[str, Path]],
     shared_kwargs_template: dict,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
+    fluor_tokens: list[str],
     workers: int,
     csv_prefix: str,
     force: bool = False,
     incremental: bool = False,
-    incremental_prior_dir: "Path | None" = None,
+    incremental_prior_dir: Path | None = None,
     force_cpu: bool = False,
     threads_per_worker: int = 0,
-    schema: "list[str] | None" = None,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
-) -> "list[str]":
+) -> list[str]:
     """
     Dispatch one worker process per well zip.
 
@@ -3568,20 +3568,20 @@ def process_well_zips(
 def process_well_folders(
     input_dir: Path,
     output_dir: Path,
-    well_folders: "list[tuple[str, Path]]",
+    well_folders: list[tuple[str, Path]],
     shared_kwargs_template: dict,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
+    fluor_tokens: list[str],
     workers: int,
     csv_prefix: str,
     force: bool = False,
     incremental: bool = False,
-    incremental_prior_dir: "Path | None" = None,
+    incremental_prior_dir: Path | None = None,
     force_cpu: bool = False,
     threads_per_worker: int = 0,
-    schema: "list[str] | None" = None,
+    schema: list[str] | None = None,
     sep: str = DEFAULT_SEP,
-) -> "list[str]":
+) -> list[str]:
     """
     Dispatch one worker process per well folder (uncompressed input).
 
@@ -3645,18 +3645,18 @@ def _pipeline_info_jsonable(value):
 
 
 def _effective_fluor_tokens_for_sidecar(
-    fluor_tokens: "list[str]",
+    fluor_tokens: list[str],
     *,
     nuclear_token: str,
     segmentation_method: str,
     cytoplasm_token: str,
-) -> "list[str]":
+) -> list[str]:
     """Channels that end up with quantified intensity columns in the CSVs."""
     ordered = [str(nuclear_token or "").strip(), *[str(tok or "").strip() for tok in fluor_tokens]]
     if segmentation_method == "stardist_seeded_watershed_cell":
         ordered.append(str(cytoplasm_token or "").strip())
-    out: "list[str]" = []
-    seen: "set[str]" = set()
+    out: list[str] = []
+    seen: set[str] = set()
     for tok in ordered:
         if not tok:
             continue
@@ -3668,15 +3668,15 @@ def _effective_fluor_tokens_for_sidecar(
     return out
 
 
-def _parse_numeric_token(value: str) -> "float | None":
+def _parse_numeric_token(value: str) -> float | None:
     try:
         return float(str(value).strip())
     except (TypeError, ValueError):
         return None
 
 
-def _collect_image_stems(input_dir: Path) -> "set[str]":
-    stems: "set[str]" = set()
+def _collect_image_stems(input_dir: Path) -> set[str]:
+    stems: set[str] = set()
     for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
         for p in input_dir.glob(pat):
             stems.add(p.stem)
@@ -3710,13 +3710,13 @@ def _collect_available_schema_values(
     filename_sep: str,
     field_name: str,
     sort_key,
-) -> "list[str]":
+) -> list[str]:
     fields = [f.strip().lower() for f in filename_schema.split(":")]
     try:
         field_idx = fields.index(field_name)
     except ValueError:
         return []
-    values: "set[str]" = set()
+    values: set[str] = set()
     for stem in _collect_image_stems(input_dir):
         parts = stem.split(filename_sep)
         if 0 <= field_idx < len(parts):
@@ -3731,7 +3731,7 @@ def _collect_available_timepoints(
     *,
     filename_schema: str,
     filename_sep: str,
-) -> "list[str]":
+) -> list[str]:
     # Shared with the viewer and the remote runner so a dropdown, a plot axis
     # and this listing cannot order the same tokens differently.
     _sort_key = _tp_sort_key
@@ -3749,7 +3749,7 @@ def _collect_available_fovs(
     *,
     filename_schema: str,
     filename_sep: str,
-) -> "list[str]":
+) -> list[str]:
     def _sort_key(fov: str):
         n = _parse_numeric_token(fov)
         return (n is None, n or 0.0, fov)
@@ -3769,15 +3769,15 @@ def write_pipeline_info(
     filename_schema: str,
     filename_sep: str,
     nuclear_token: str,
-    fluor_tokens: "list[str]",
-    smfish_tokens: "list[str]",
+    fluor_tokens: list[str],
+    smfish_tokens: list[str],
     segmentation_method: str,
     cytoplasm_token: str,
     min_nucleus_area_px: int,
-    shape_features: "list[str] | None" = None,
-    qc_options: "dict | None" = None,
+    shape_features: list[str] | None = None,
+    qc_options: dict | None = None,
     phase_token: str = "",
-    execution_options: "dict | None" = None,
+    execution_options: dict | None = None,
 ) -> Path:
     """Serialize the run metadata sidecar to ``<output_dir>/pipeline_info.json``."""
     if segmentation_method != "stardist_seeded_watershed_cell":
@@ -4427,7 +4427,7 @@ def main() -> None:
 
     # Per-well failures are surfaced here so main() can signal them via the
     # process exit code (audit E5) rather than always exiting 0.
-    failed_wells: "list[str]" = []
+    failed_wells: list[str] = []
     if well_zips:
         log.info("Zip mode: %d well zip(s) detected.", len(well_zips))
         failed_wells = process_well_zips(

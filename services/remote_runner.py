@@ -50,7 +50,7 @@ import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Iterable, Optional
+from collections.abc import Callable, Iterable
 
 from services.remote_config import (
     RemoteHost,
@@ -284,7 +284,7 @@ def _fmt_secs(s: float) -> str:
     return f"{int(s // 60)}m{int(s % 60):02d}s"
 
 
-def _zip_is_complete(path: "Path") -> bool:
+def _zip_is_complete(path: Path) -> bool:
     """True iff *path* is a fully-transferred, valid zip.
 
     ``zipfile.is_zipfile`` looks for the end-of-central-directory record, which
@@ -1070,7 +1070,7 @@ def _filter_new_fovs_in_staging(
     filename_schema: str,
     filename_sep: str,
     log_fn: Callable[[str], None] | None = None,
-) -> "tuple[tuple[Path, ...], tuple[str, ...]]":
+) -> tuple[tuple[Path, ...], tuple[str, ...]]:
     """Client-side incremental split: rewrite each staged well zip to keep only
     members whose ``(fov, timepoint)`` is NOT already in the well's local CSV,
     and drop wells whose every input FOV is already done.
@@ -1148,7 +1148,7 @@ def _filter_new_fovs_in_staging(
 
 def _scan_output_fov_tps(
     output_dir: Path, *, schema: str, sep: str,
-) -> "tuple[set[str], set[str]]":
+) -> tuple[set[str], set[str]]:
     """``(timepoints, fovs)`` token sets recovered from the merged outputs in
     *output_dir* — the ``<well>_out.zip`` members (and any loose images / output
     well folders). Output member names keep the input stem, so the schema-indexed
@@ -1156,8 +1156,8 @@ def _scan_output_fov_tps(
     fields = [f.strip().lower() for f in str(schema or "").split(":")]
     ti = fields.index("timepoint") if "timepoint" in fields else -1
     fi = fields.index("fov") if "fov" in fields else -1
-    tps: "set[str]" = set()
-    fovs: "set[str]" = set()
+    tps: set[str] = set()
+    fovs: set[str] = set()
 
     def _add(name: str) -> None:
         stem = Path(name).stem
@@ -1905,7 +1905,7 @@ def _looks_like_rsync_filename(line: str) -> bool:
     return bool(_RSYNC_FILENAME_RE.match(line))
 
 
-def _iter_rsync_lines(stdout) -> "Iterable[str]":
+def _iter_rsync_lines(stdout) -> Iterable[str]:
     """Yield rsync stdout 'lines' split on BOTH ``\\n`` and ``\\r``.
 
     Critical for surfacing ``--info=progress2`` updates in real time:
@@ -2068,7 +2068,7 @@ def _stream_rsync_with_retry(
     log_fn: Callable[[str], None] | None = None,
     progress_fn=None,
     stop_event: threading.Event | None = None,
-) -> "tuple[int, float, int, int]":
+) -> tuple[int, float, int, int]:
     """Run a *streaming* rsync (:func:`_run_rsync_streaming`) with bounded retry
     on transient network failures, resuming via ``--partial`` each attempt.
 
@@ -2316,18 +2316,18 @@ class _RemoteProcess:
         self,
         ssh_proc: subprocess.Popen,
         run: _RemoteRun,
-        fetcher: "Fetcher",
+        fetcher: Fetcher,
     ):
         self._ssh = ssh_proc
         self._run = run
         self._fetcher = fetcher
-        self._stdout_pipe: Optional[io.TextIOBase] = None
+        self._stdout_pipe: io.TextIOBase | None = None
         # Tee the ssh stdout into the fetcher AND back out to the caller.
         # The caller (PipelineRunner._run_pipeline_subprocess) reads from
         # self.stdout one line at a time; the fetcher also receives
         # every line via the same tee.
-        self._tee_thread: Optional[threading.Thread] = None
-        self._line_q: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._tee_thread: threading.Thread | None = None
+        self._line_q: queue.Queue[str | None] = queue.Queue()
         self._start_tee()
 
     # Popen-compatible attributes ───────────────────────────────────────
@@ -2337,17 +2337,17 @@ class _RemoteProcess:
         return self._ssh.pid
 
     @property
-    def returncode(self) -> Optional[int]:
+    def returncode(self) -> int | None:
         return self._ssh.returncode
 
     @property
-    def stdout(self) -> "_QueueLineIterator":
+    def stdout(self) -> _QueueLineIterator:
         return self._lines
 
-    def poll(self) -> Optional[int]:
+    def poll(self) -> int | None:
         return self._ssh.poll()
 
-    def wait(self, timeout: Optional[float] = None) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         rc = self._ssh.wait(timeout=timeout)
         # Drain remaining lines, then close the queue.
         if self._tee_thread is not None:
@@ -2373,7 +2373,7 @@ class _RemoteProcess:
         assert self._ssh.stdout is not None
         self._lines = _QueueLineIterator(self._line_q)
 
-        def _pump(src: io.TextIOBase, q: "queue.Queue[Optional[str]]") -> None:
+        def _pump(src: io.TextIOBase, q: queue.Queue[str | None]) -> None:
             try:
                 for line in src:
                     self._fetcher.observe(line)
@@ -2409,7 +2409,7 @@ class _BatchedRemoteProcess:
 
     def __init__(
         self,
-        runner: "RemoteRunner",
+        runner: RemoteRunner,
         zipped: ZippedInput,
         local_output_dir: Path,
         pipeline_argv: list[str],
@@ -2429,10 +2429,10 @@ class _BatchedRemoteProcess:
         self._log = log_fn or (lambda _m: None)
         self._progress = progress_fn
         self._stop = stop_event or threading.Event()
-        self._returncode: Optional[int] = None
-        self._line_q: "queue.Queue[Optional[str]]" = queue.Queue()
+        self._returncode: int | None = None
+        self._line_q: queue.Queue[str | None] = queue.Queue()
         self._lines = _QueueLineIterator(self._line_q)
-        self._current_proc: Optional[subprocess.Popen] = None
+        self._current_proc: subprocess.Popen | None = None
         # Guards _current_proc: the worker thread reassigns it per batch while
         # the GUI thread reads it in terminate()/kill()/pid/send_signal (E20).
         self._current_proc_lock = threading.Lock()
@@ -2502,19 +2502,19 @@ class _BatchedRemoteProcess:
         return proc.pid if proc else -1
 
     @property
-    def returncode(self) -> Optional[int]:
+    def returncode(self) -> int | None:
         return self._returncode
 
     @property
-    def stdout(self) -> "_QueueLineIterator":
+    def stdout(self) -> _QueueLineIterator:
         return self._lines
 
-    def poll(self) -> Optional[int]:
+    def poll(self) -> int | None:
         if self._worker.is_alive():
             return None
         return self._returncode
 
-    def wait(self, timeout: Optional[float] = None) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         self._worker.join(timeout=timeout)
         if self._worker.is_alive():
             # Timed out; the worker is still running — not a completion, so
@@ -2690,7 +2690,7 @@ class _BatchedRemoteProcess:
                         _outer=_outer_progress,
                     ) -> None:
                         _outer((_idx + pct) / _n)
-                    inner_progress: "Callable[[float], None] | None" = _scaled_progress
+                    inner_progress: Callable[[float], None] | None = _scaled_progress
                 else:
                     inner_progress = None
                 sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(
@@ -2893,10 +2893,10 @@ class _QueueLineIterator:
     """Iterator that pulls lines off a queue; sentinel ``None`` ends
     iteration. Lets the Popen consumer treat us like a file."""
 
-    def __init__(self, q: "queue.Queue[Optional[str]]"):
+    def __init__(self, q: queue.Queue[str | None]):
         self._q = q
 
-    def __iter__(self) -> "_QueueLineIterator":
+    def __iter__(self) -> _QueueLineIterator:
         return self
 
     def __next__(self) -> str:
@@ -2934,7 +2934,7 @@ class Fetcher:
         self._progress = progress_fn
         self._delete_after_download = delete_after_download
         self._stop = threading.Event()
-        self._pending: queue.Queue[Optional[str]] = queue.Queue()
+        self._pending: queue.Queue[str | None] = queue.Queue()
         self._worker = threading.Thread(target=self._loop, daemon=True)
         self._worker.start()
 
@@ -3470,17 +3470,17 @@ class RemoteRunner:
 
     def __init__(self, host: RemoteHost):
         self.host = host
-        self._run: Optional[_RemoteRun] = None
+        self._run: _RemoteRun | None = None
         self._cache: DatasetCache = DatasetCache(host)
         # The Fetcher created in spawn(), kept so cancel() can interrupt an
         # in-flight per-well download, and a stop flag the end-of-run retry
         # backstop polls. Without these, Stop did nothing while the final
         # per-well rsync was in flight / retry-looping.
-        self._fetcher: Optional["Fetcher"] = None
+        self._fetcher: Fetcher | None = None
         self._cancelled: threading.Event = threading.Event()
 
     @property
-    def run(self) -> Optional[_RemoteRun]:
+    def run(self) -> _RemoteRun | None:
         return self._run
 
     # ── Required-file sync ──────────────────────────────────────────────

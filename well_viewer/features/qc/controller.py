@@ -10,7 +10,6 @@ so re-gating QC can never clobber hand-curated include/exclude edits.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from .params import QCParams, compute_qc_pass
 from well_viewer.core.safe import swallowed
@@ -32,7 +31,7 @@ def get_qc_params(ctx) -> QCParams:
     return qc.params
 
 
-def apply_qc_to_cache(ctx, label: Optional[str] = None) -> None:
+def apply_qc_to_cache(ctx, label: str | None = None) -> None:
     """Write the ``QC_Pass`` column onto cached well frame(s).
 
     With ``label`` given, only that well; otherwise every cached well. A no-op
@@ -89,7 +88,7 @@ def set_qc_params(ctx, params: QCParams) -> None:
         swallowed()  # was: pass (silent except)
 
 
-def qc_excluded_count(ctx, labels=None, params: Optional[QCParams] = None) -> "tuple[int, int]":
+def qc_excluded_count(ctx, labels=None, params: QCParams | None = None) -> tuple[int, int]:
     """``(n_excluded, n_total)`` across the given wells (default: all cached) —
     powers the live readout in the QC view. Counts only QC failures, independent
     of manual exclusions. Pass ``params`` to preview a candidate threshold set

@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -56,7 +55,7 @@ class BarBatchExportPanel(BatchExportPanel):
     def __init__(
         self,
         ctx,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         *,
         use_sidebar_groups: bool = False,
     ) -> None:
@@ -241,7 +240,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
         used_stems: set = set()
 
-        def _run_job(job, write_dir) -> Optional[str]:
+        def _run_job(job, write_dir) -> str | None:
             grp, tp_strs = job
             safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
             try:
@@ -306,7 +305,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
                 # Build a (key → member metadata) map keyed by either rset
                 # name (pooled) or individual well (expanded).
-                _meta_by_key: Dict[str, tuple] = {}
+                _meta_by_key: dict[str, tuple] = {}
                 for rset in grp.members:
                     valid = [w for w in rset.wells if w in self._ctx.state.dataset.well_paths]
                     if not valid:
@@ -324,7 +323,7 @@ class BarBatchExportPanel(BatchExportPanel):
                     if w in self._ctx.state.dataset.well_paths and w not in _meta_by_key:
                         _meta_by_key[w] = ("solo_well", w, 1)
 
-                rows_csv: List[dict] = []
+                rows_csv: list[dict] = []
                 for item in items_raw:
                     meta = _meta_by_key.get(item.key)
                     if meta is None:
@@ -531,7 +530,7 @@ class BarBatchExportPanel(BatchExportPanel):
 
     def _render_per_cell_panels(
         self, *, fig, ax_mean, ax_frac, ax_n,
-        grp: BarGroup, target_ts: List[float], tp_strs: List[str],
+        grp: BarGroup, target_ts: list[float], tp_strs: list[str],
         threshold: float, use_sem: bool, band_lbl: str,
         fc_state: tuple,
         pool_replicates: bool,
@@ -561,10 +560,10 @@ class BarBatchExportPanel(BatchExportPanel):
         # across its wells via ``pool_groups`` (the rset *name* is the column
         # key; ``draw_violin`` / ``draw_beeswarm`` route the row-fetch through
         # it), matching the on-tab behaviour. Solo wells stay their own columns.
-        base_wells: List[str] = []
-        base_colors: List[str] = []
-        base_full: List[str] = []  # disambiguating identity (cluster header)
-        pool_groups: Optional[Dict[str, List[str]]] = None
+        base_wells: list[str] = []
+        base_colors: list[str] = []
+        base_full: list[str] = []  # disambiguating identity (cluster header)
+        pool_groups: dict[str, list[str]] | None = None
         if pool_replicates:
             pool_groups = {}
             for ri, rset in enumerate(grp.members):
@@ -608,11 +607,11 @@ class BarBatchExportPanel(BatchExportPanel):
 
         # Materialise the (well \u00d7 tp) columns + cluster keys (single-line
         # labels: the cluster header carries the disambiguating identity).
-        plot_wells: List[str] = []
-        plot_colors: List[str] = []
-        plot_labels: List[str] = []
-        plot_tps: List[float] = []
-        group_keys: List[str] = []
+        plot_wells: list[str] = []
+        plot_colors: list[str] = []
+        plot_labels: list[str] = []
+        plot_tps: list[float] = []
+        group_keys: list[str] = []
         multi_tp = len(target_ts) > 1
         if group_mode == "timepoint":
             for t, t_str in zip(target_ts, tp_strs):

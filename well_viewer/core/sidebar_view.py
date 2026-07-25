@@ -241,7 +241,7 @@ def _plot_groups_schedule_save(ctx) -> None:
         p.schedule_save("plot_groups")
 
 
-def _wells_for_new_plot_group(ctx) -> "list[str]":
+def _wells_for_new_plot_group(ctx) -> list[str]:
     """The well set a new Plot Group should capture, sorted by plate position.
 
     Prefers the raw plate selection (``selected_wells``). But once replicate

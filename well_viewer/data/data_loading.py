@@ -11,7 +11,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import Dict, Iterator, List, Optional, Tuple
+from collections.abc import Iterator
 
 import numpy as np
 import pandas as pd
@@ -119,7 +119,7 @@ def load_well_csv(path: Path) -> pd.DataFrame:
     return df
 
 
-def detect_fluor_channels(df: pd.DataFrame) -> List[str]:
+def detect_fluor_channels(df: pd.DataFrame) -> list[str]:
     """Return sorted channel prefixes that have a ``*_mean_intensity`` column."""
     if df is None or df.empty:
         return []
@@ -128,7 +128,7 @@ def detect_fluor_channels(df: pd.DataFrame) -> List[str]:
                    if c.endswith(suffix) and len(c) > len(suffix)})
 
 
-def detect_smfish_channels(df: pd.DataFrame) -> List[str]:
+def detect_smfish_channels(df: pd.DataFrame) -> list[str]:
     """Return sorted channel prefixes that have a ``*_smfish_count`` column."""
     if df is None or df.empty:
         return []
@@ -137,7 +137,7 @@ def detect_smfish_channels(df: pd.DataFrame) -> List[str]:
                    if c.endswith(suffix) and len(c) > len(suffix)})
 
 
-def detect_shape_features(df: pd.DataFrame) -> List[str]:
+def detect_shape_features(df: pd.DataFrame) -> list[str]:
     """Return the per-cell ``shape_*`` columns present in *df*, in catalog order.
 
     Channel-independent morphology columns emitted by the pipeline's
@@ -161,7 +161,7 @@ def detect_nuclear_channel_token(df: pd.DataFrame) -> str:
     return str(val or "").strip().lower()
 
 
-def normalize_channel_tokens(tokens: List[str]) -> List[str]:
+def normalize_channel_tokens(tokens: list[str]) -> list[str]:
     """Stable lower-case de-dupe for channel tokens."""
     out: list[str] = []
     seen: set[str] = set()
@@ -175,10 +175,10 @@ def normalize_channel_tokens(tokens: List[str]) -> List[str]:
 
 
 def merge_fluor_channels(
-    pipeline_fluor: List[str],
-    detected_fluor: List[str],
+    pipeline_fluor: list[str],
+    detected_fluor: list[str],
     seg_channel_token: str = "",
-) -> List[str]:
+) -> list[str]:
     """Merge pipeline + detected channel lists with stable order, always including seg token."""
     merged = normalize_channel_tokens(list(pipeline_fluor) + list(detected_fluor))
     seg_tok = str(seg_channel_token or "").strip().lower()
@@ -187,7 +187,7 @@ def merge_fluor_channels(
     return merged
 
 
-def detect_review_image_channels(df: pd.DataFrame, fluor_channels: List[str], seg_channel_token: str = "") -> List[str]:
+def detect_review_image_channels(df: pd.DataFrame, fluor_channels: list[str], seg_channel_token: str = "") -> list[str]:
     """Return channel prefixes suitable for Review Image."""
     chans: list[str] = []
     seen: set[str] = set()
@@ -268,7 +268,7 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
     return cache[label]
 
 
-def get_all_timepoints(ctx) -> "list[float]":
+def get_all_timepoints(ctx) -> list[float]:
     """Unique included timepoints across all loaded wells.
 
     A dataset-level helper used by several plot tabs (scatter / distribution /
@@ -293,7 +293,7 @@ def get_all_timepoints(ctx) -> "list[float]":
 def resolve_value_series(
     df: pd.DataFrame,
     key: str,
-    ratios: Optional[Dict[str, RatioMetric]] = None,
+    ratios: dict[str, RatioMetric] | None = None,
 ) -> pd.Series:
     """Vectorised counterpart of the old per-row ``resolve_value``.
 
@@ -374,10 +374,10 @@ def resolve_value_series(
 #                           error instead of a single total bar); else 0.0.
 # Trailing positions so existing destructuring with `*_` (and `*extra`) keeps
 # working.
-AggPoint = Tuple[float, float, float, float, int, int, float, float, float]
+AggPoint = tuple[float, float, float, float, int, int, float, float, float]
 
 
-def _ordinal_timepoints_df(df: pd.DataFrame, tp_col: str = "timepoint_hours") -> Dict[str, float]:
+def _ordinal_timepoints_df(df: pd.DataFrame, tp_col: str = "timepoint_hours") -> dict[str, float]:
     """Build a string→ordinal mapping for rows whose numeric timepoint is NaN/missing."""
     if len(df) == 0 or "timepoint" not in df.columns:
         return {}
@@ -401,11 +401,11 @@ def aggregate_with_threshold_df(
     use_sem: bool = False,
     tp_col: str = "timepoint_hours",
     val_col: str = "gfp_mean_intensity",
-    fluor_gates: Optional[Dict[str, float]] = None,
+    fluor_gates: dict[str, float] | None = None,
     per_fov_spread: bool = False,
-    ratios: Optional[Dict[str, RatioMetric]] = None,
-    on_col: Optional[str] = None,
-) -> List[AggPoint]:
+    ratios: dict[str, RatioMetric] | None = None,
+    on_col: str | None = None,
+) -> list[AggPoint]:
     """Group rows by timepoint; compute stats for cells above threshold.
 
     Applies consistent gating across all rows up front — the inclusion chokepoint
@@ -476,7 +476,7 @@ def aggregate_with_threshold_df(
 
     need = ~np.isfinite(tp_num)
     if need.any():
-        cache: Dict[str, float] = {}
+        cache: dict[str, float] = {}
         for s in np.unique(tp_str[need]):
             s_str = str(s)
             if s_str == "":
@@ -524,12 +524,12 @@ def aggregate_with_threshold_df(
 def _aggregate_arrays(
     tp_arr: np.ndarray,
     val_arr: np.ndarray,
-    fov_arr: Optional[np.ndarray],
+    fov_arr: np.ndarray | None,
     threshold: float,
     use_sem: bool,
     per_fov_spread: bool,
-    on_arr: Optional[np.ndarray] = None,
-) -> List[AggPoint]:
+    on_arr: np.ndarray | None = None,
+) -> list[AggPoint]:
     """Per-timepoint mean / fraction of the "on" population.
 
     "On" is normally ``value > threshold``; when ``on_arr`` is given (a per-row
@@ -538,7 +538,7 @@ def _aggregate_arrays(
     (and the mean of the on-population) reflect the gate rather than the
     per-channel ThreshFracOn cutoff.
     """
-    result: List[AggPoint] = []
+    result: list[AggPoint] = []
     for t in np.unique(tp_arr):
         idx = tp_arr == t
         v = val_arr[idx]
@@ -616,9 +616,9 @@ def _all_fluor_values(df: pd.DataFrame, val_col: str = "gfp_mean_intensity") -> 
 def _all_fluor_values_filtered(
     df: pd.DataFrame,
     val_col: str = "gfp_mean_intensity",
-    fluor_gates: Optional[Dict[str, float]] = None,
-    ratios: Optional[Dict[str, RatioMetric]] = None,
-    tp_filter: Optional[float] = None,
+    fluor_gates: dict[str, float] | None = None,
+    ratios: dict[str, RatioMetric] | None = None,
+    tp_filter: float | None = None,
     tp_col: str = "timepoint_hours",
 ) -> np.ndarray:
     """Vectorised filter+resolve. Mirrors the legacy scalar filter exactly."""
@@ -661,11 +661,11 @@ def _all_fluor_values_filtered(
 # ── Beeswarm jitter ──────────────────────────────────────────────────────────
 
 def _beeswarm_jitter(
-    values: List[float],
+    values: list[float],
     x_center: float = 0.0,
     max_spread: float = 0.35,
     n_bins: int = 40,
-) -> Tuple[List[float], List[float]]:
+) -> tuple[list[float], list[float]]:
     """Standard (non-overlapping) beeswarm x-positions for a column.
 
     Each point keeps its real y value and is nudged sideways to the position
@@ -708,8 +708,8 @@ def _beeswarm_jitter(
 
     order = np.argsort(yn, kind="mergesort")     # ascending y, stable
     offs = np.zeros(n, dtype=float)
-    placed_x: List[float] = []
-    placed_y: List[float] = []                   # ascending (insertion order)
+    placed_x: list[float] = []
+    placed_y: list[float] = []                   # ascending (insertion order)
     win = 0                                       # sliding-window start
     bal = 0.0                                     # running L/R balance (symmetry)
     for idx in order:
@@ -717,7 +717,7 @@ def _beeswarm_jitter(
         while win < len(placed_y) and placed_y[win] <= y - d:
             win += 1
         # Forbidden x-intervals from still-active placed points (|Δy| < d).
-        intervals: List[Tuple[float, float]] = []
+        intervals: list[tuple[float, float]] = []
         for j in range(win, len(placed_y)):
             dy = y - placed_y[j]
             g = d2 - dy * dy
@@ -761,13 +761,13 @@ def _beeswarm_jitter(
 
 # ── Well-token parsing ───────────────────────────────────────────────────────
 
-def extract_well_token(label: str) -> Optional[str]:
+def extract_well_token(label: str) -> str | None:
     """'measurements_B10' → 'B10'."""
     m = re.search(r"([A-Ha-h])(\d{1,2})$", label)
     return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else None
 
 
-def parse_well_token(token: str) -> Optional[Tuple[int, int]]:
+def parse_well_token(token: str) -> tuple[int, int] | None:
     """Convert a well token like ``"A01"`` into ``(row, col)`` zero-based."""
     if not token:
         return None
@@ -783,7 +783,7 @@ def parse_well_token(token: str) -> Optional[Tuple[int, int]]:
 
 # ── Plot-group iteration ─────────────────────────────────────────────────────
 
-def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[Tuple[str, str, pd.DataFrame]]:
+def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, str, pd.DataFrame]]:
     """Yield ``(name, color, df)`` for each replicate set or selected well.
 
     When replicate sets are defined, one entry per replicate set with rows

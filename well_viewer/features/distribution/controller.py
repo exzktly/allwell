@@ -8,7 +8,7 @@ ratio-aware (handled transparently by ``data_loading.resolve_value_series``).
 from __future__ import annotations
 
 import math
-from typing import Iterable, List, Sequence, Tuple
+from collections.abc import Iterable, Sequence
 
 import numpy as np
 
@@ -303,7 +303,7 @@ def redraw_distribution(ctx) -> None:
     layout_cb = ctx.widgets.get_or_none("_distribution_layout_var")
     layout_choice = layout_cb.currentText() if layout_cb is not None else "Overlay"
 
-    groups: List[Tuple[str, str, np.ndarray]] = []
+    groups: list[tuple[str, str, np.ndarray]] = []
     for name, color, df in iter_plot_groups(ctx, fallback_to_all=False):
         tp_filter = tp_h if math.isfinite(tp_h) else None
         vals = _all_fluor_values_filtered(

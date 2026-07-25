@@ -73,7 +73,7 @@ def say(msg: str) -> None:
 # ── v5.2.11: debug log file ────────────────────────────────────────────────
 
 
-_LOG_FILE: "object | None" = None  # the open file or None
+_LOG_FILE: object | None = None  # the open file or None
 
 
 class _TeeStream:
@@ -171,7 +171,7 @@ def _prune_bootstrap_logs(log_dir: Path, keep: int = _BOOTSTRAP_LOG_RETENTION) -
     return removed
 
 
-def _open_log_file() -> "tuple[Path, object] | tuple[None, None]":
+def _open_log_file() -> tuple[Path, object] | tuple[None, None]:
     """Open a per-invocation bootstrap log file under
     ``~/.cache/allwell/bootstrap-<timestamp>.log`` on the LOCAL
     machine. Returns ``(path, file_handle)`` or ``(None, None)`` on

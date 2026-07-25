@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Optional, Set, Tuple
 
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.stats_compute import compute_rep_stats
@@ -94,9 +93,9 @@ class LineSeries:
     display: str
     color: str
     kind: str
-    wells: List[str]
-    points: List[LinePoint] = field(default_factory=list)
-    cdf_vals: List[float] = field(default_factory=list)
+    wells: list[str]
+    points: list[LinePoint] = field(default_factory=list)
+    cdf_vals: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -182,13 +181,13 @@ def collect_line_series(
     *,
     threshold: float,
     use_sem: bool,
-    val_col: Optional[str] = None,
-    fc_state: Optional[Tuple[bool, str, bool]] = None,
-    fc_baseline_tp: Optional[float] = None,
-    miss_sink: Optional[Set[float]] = None,
+    val_col: str | None = None,
+    fc_state: tuple[bool, str, bool] | None = None,
+    fc_baseline_tp: float | None = None,
+    miss_sink: set[float] | None = None,
     include_cdf: bool = True,
     all_fluor_values_filtered=None,
-) -> Tuple[List[LineSeries], str]:
+) -> tuple[list[LineSeries], str]:
     """Build :class:`LineSeries` for the currently-active line-plot mode.
 
     Single source of truth for the line-plot pipeline (mirrors
@@ -259,7 +258,7 @@ def collect_line_series(
             fluor_gates=fluor_gates,
         )
 
-    series_out: List[LineSeries] = []
+    series_out: list[LineSeries] = []
 
     if active_rsets:
         ordered_rsets = _apply_order(
@@ -382,7 +381,7 @@ def collect_line_series(
     return series_out, band_lbl
 
 
-def _paint_series(axes: "LineAxes", series, *, fov_active: bool) -> "tuple[bool, bool, bool]":
+def _paint_series(axes: LineAxes, series, *, fov_active: bool) -> tuple[bool, bool, bool]:
     """Draw one collected line series onto the mean / fraction / N / CDF axes
     (audit A5). Returns ``(painted_ts, painted_cdf, painted_n)`` — the caller
     ORs these across series to decide legend/empty handling. Pure side effect on
@@ -478,13 +477,13 @@ _DEFAULT_LEGEND_VISIBLE = {"mean": True, "frac": True, "n": True, "cdf": True}
 
 
 def _finalize_line_axes(
-    axes: "LineAxes", *, any_ts: bool, any_cdf: bool, any_n: bool,
+    axes: LineAxes, *, any_ts: bool, any_cdf: bool, any_n: bool,
     fov_active: bool, fc_active: bool, legend_kw: dict,
     threshold: float, warn: str, muted_fg,
-    legend_visible: "Optional[dict]" = None,
+    legend_visible: dict | None = None,
     show_threshold_line: bool = True,
-    cdf_xrange: "Optional[Tuple[float, float]]" = None,
-    empty_cdf_msg: "Optional[str]" = None,
+    cdf_xrange: tuple[float, float] | None = None,
+    empty_cdf_msg: str | None = None,
     draggable_legends: bool = False,
 ) -> None:
     """Post-paint axis finishing (audit A5): N-panel integer ticks, per-panel
@@ -544,15 +543,15 @@ def _finalize_line_axes(
 
 
 def render_line_series(
-    axes: "LineAxes", series_list, *,
+    axes: LineAxes, series_list, *,
     fov_active: bool, fc_active: bool, threshold: float,
     legend_kw: dict, warn_color, muted_fg,
-    legend_visible: "Optional[dict]" = None,
+    legend_visible: dict | None = None,
     show_threshold_line: bool = True,
-    cdf_xrange: "Optional[Tuple[float, float]]" = None,
-    empty_cdf_msg: "Optional[str]" = None,
+    cdf_xrange: tuple[float, float] | None = None,
+    empty_cdf_msg: str | None = None,
     draggable_legends: bool = False,
-) -> "tuple[bool, bool, bool]":
+) -> tuple[bool, bool, bool]:
     """Paint every :class:`LineSeries` onto *axes* then finalize the panels.
 
     Single source of truth for line-plot *drawing*, mirroring how

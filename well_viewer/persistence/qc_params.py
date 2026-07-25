@@ -18,7 +18,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 from well_viewer.domain.qc_params import QCParams
 from well_viewer.persistence import _doc
@@ -59,12 +58,12 @@ def load_from_data_dir(ctx) -> None:
     app._app_state.qc.params = QCParams.from_dict(data)
 
 
-def _legacy_path(app) -> Optional[Path]:
+def _legacy_path(app) -> Path | None:
     d = app._app_state.dataset.data_dir
     return Path(d) / _LEGACY_FILENAME if d else None
 
 
-def _absorb_legacy_sidecar(app) -> Optional[dict]:
+def _absorb_legacy_sidecar(app) -> dict | None:
     """Migrate a legacy standalone ``qc_params.json`` into the persistence doc.
 
     The old sidecar wrapped the params as ``{"schema_version": …, "qc_params":

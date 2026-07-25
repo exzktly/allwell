@@ -302,14 +302,14 @@ def _reset_bar_ylim_edits(ctx) -> None:
 
 def set_fold_change_state(
     ctx, *,
-    vs_control_on: "bool | None" = None,
-    control_label: "str | None" = None,
-    vs_t0_on: "bool | None" = None,
-    baseline_tp: "str | None" = None,
-    op: "str | None" = None,
-    op_ctrl: "str | None" = None,
-    op_t0: "str | None" = None,
-    order: "str | None" = None,
+    vs_control_on: bool | None = None,
+    control_label: str | None = None,
+    vs_t0_on: bool | None = None,
+    baseline_tp: str | None = None,
+    op: str | None = None,
+    op_ctrl: str | None = None,
+    op_t0: str | None = None,
+    order: str | None = None,
     initiating_scope: str = "",
 ) -> None:
     """Single entry point for fold-change state mutations.

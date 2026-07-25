@@ -16,7 +16,6 @@ and inter-group spacers. The controller places each cell widget at
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QPainter
@@ -124,13 +123,13 @@ class FacetPlan:
                  "row_gap", "col_gap", "label_pt", "group_pt")
 
     def __init__(self) -> None:
-        self.grid_row_of: List[int] = []
-        self.grid_col_of: List[int] = []
-        self.spacer_rows: List[int] = []
-        self.spacer_cols: List[int] = []
+        self.grid_row_of: list[int] = []
+        self.grid_col_of: list[int] = []
+        self.spacer_rows: list[int] = []
+        self.spacer_cols: list[int] = []
         # (text, grid_row, grid_col, row_span, col_span, is_group)
-        self.top: List[Tuple[str, int, int, int, int, bool]] = []
-        self.left: List[Tuple[str, int, int, int, int, bool]] = []
+        self.top: list[tuple[str, int, int, int, int, bool]] = []
+        self.left: list[tuple[str, int, int, int, int, bool]] = []
         self.corner: str = ""
         self.first_row = 0
         self.first_col = 0
@@ -144,8 +143,8 @@ class FacetPlan:
 def _slots(vals, depth: int, base: int):
     """Grid index of each logical item, inserting a spacer slot between groups
     (items whose outer prefix — all dims but the innermost — changes)."""
-    grid_of: List[int] = []
-    spacers: List[int] = []
+    grid_of: list[int] = []
+    spacers: list[int] = []
     g = base
     for i in range(len(vals)):
         if i > 0 and depth >= 2 and vals[i][:-1] != vals[i - 1][:-1]:
@@ -170,7 +169,7 @@ def _group_spans(vals, grid_of):
     return spans
 
 
-def plan_facets(ctx, cells) -> Optional[FacetPlan]:
+def plan_facets(ctx, cells) -> FacetPlan | None:
     """Compute the faceted placement, or None when there's nothing to lay out."""
     st = ctx.state.image_table
     row_dims = [d for d in (getattr(st, "row_dims", None) or []) if d in _DIM_CB]

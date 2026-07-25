@@ -14,14 +14,13 @@ Mirrors :mod:`well_viewer.features.qc.controller`.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from .region import CropRegion, compute_crop_pass, normalize_region
 from well_viewer.core.safe import swallowed
 from well_viewer.data.cache_projectors import project_verdict_column
 
 
-def get_crop_region(ctx) -> Optional[CropRegion]:
+def get_crop_region(ctx) -> CropRegion | None:
     """The active dataset-wide crop rectangle, or ``None``.
 
     A8 residuals-ledger R1: pure typed state (``ctx.state.dataset.crop_region``),
@@ -29,7 +28,7 @@ def get_crop_region(ctx) -> Optional[CropRegion]:
     return ctx.state.dataset.crop_region
 
 
-def apply_crop_to_cache(ctx, label: Optional[str] = None) -> None:
+def apply_crop_to_cache(ctx, label: str | None = None) -> None:
     """Write the ``Crop_Pass`` column onto cached well frame(s).
 
     With ``label`` given, only that well; otherwise every cached well. Writes an
@@ -87,7 +86,7 @@ def _save_redraw_refresh(ctx) -> None:
         swallowed()  # was: pass (silent except)
 
 
-def set_crop_region(ctx, region: Optional[CropRegion]) -> None:
+def set_crop_region(ctx, region: CropRegion | None) -> None:
     """Install a new crop rectangle (from a drawn box), recompute the verdict
     everywhere, persist, and re-render. A zero-area box is a no-op + status."""
     if region is not None:

@@ -32,7 +32,6 @@ Qt-free: stdlib only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
 
 
 @dataclass
@@ -57,10 +56,10 @@ class CellGatingState:
       later). An explicit (possibly empty) set selects exactly those names.
     """
 
-    fluor_gates: Dict[str, float] = field(default_factory=dict)
-    thresh_frac_on: Dict[str, float] = field(default_factory=dict)
-    scatter_gates: List[dict] = field(default_factory=list)
+    fluor_gates: dict[str, float] = field(default_factory=dict)
+    thresh_frac_on: dict[str, float] = field(default_factory=dict)
+    scatter_gates: list[dict] = field(default_factory=list)
     use_scatter_gates: bool = False
     use_scatter_thresh: bool = False
-    gating_choices: Optional[Set[str]] = None
-    thresh_choices: Optional[Set[str]] = None
+    gating_choices: set[str] | None = None
+    thresh_choices: set[str] | None = None

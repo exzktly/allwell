@@ -19,7 +19,6 @@ import logging
 import math
 from collections import Counter
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 from well_viewer.domain import fold_change as _fc
@@ -110,15 +109,15 @@ def _fc_scale(value, err, *, eff_ctrl, eff_ctrl_spread, t0, t0_spread,
     )
 
 
-FC_STATE_OFF: Tuple[bool, str, bool] = (False, "", False)
+FC_STATE_OFF: tuple[bool, str, bool] = (False, "", False)
 
 
 def collect_bar_items(
     ctx, target_t, *,
-    fc_state: Optional[Tuple[bool, str, bool]] = None,
-    fc_baseline_tp: Optional[float] = None,
-    miss_sink: Optional[set] = None,
-) -> Tuple[bool, List[BarItem], str]:
+    fc_state: tuple[bool, str, bool] | None = None,
+    fc_baseline_tp: float | None = None,
+    miss_sink: set | None = None,
+) -> tuple[bool, list[BarItem], str]:
     """Compute the bar-plot ``BarItem``s for the active mode (rep-set or per-well).
 
     Single source of truth — every consumer of bar data (on-screen renderer,
@@ -189,7 +188,7 @@ def collect_bar_items(
     def _format_tp(t: float) -> str:
         return f"{t:.4g}"
 
-    def _items_for_tp(target_t: float) -> List[BarItem]:
+    def _items_for_tp(target_t: float) -> list[BarItem]:
         """Build one ``BarItem`` per bar key at this timepoint.
 
         Fold-change resolution runs once here per tp so the control / t0
@@ -231,7 +230,7 @@ def collect_bar_items(
                 fc_control_n_at_t, fc_control_n_spread_at_t = ctrl_n
         fc_force_nan = fc_vs_ctrl and fc_ctrl_lbl and fc_control_mean_at_t is None
 
-        out: List[BarItem] = []
+        out: list[BarItem] = []
         tp_str = _format_tp(target_t)
 
         if use_groups:
@@ -597,7 +596,7 @@ def collect_bar_items(
                 ))
         return out
 
-    items: List[BarItem] = []
+    items: list[BarItem] = []
     if group_mode == "timepoint":
         # tp-major: emit all bars at t0, then all bars at t1, ...
         for tp in target_ts:
@@ -625,12 +624,12 @@ def collect_bar_items_for_group(
     threshold: float,
     use_sem: bool,
     per_fov_spread: bool,
-    fc_state: Tuple[bool, str, bool],
-    fc_baseline_tp: Optional[float] = None,
-    fluor_gates: Optional[dict] = None,
+    fc_state: tuple[bool, str, bool],
+    fc_baseline_tp: float | None = None,
+    fluor_gates: dict | None = None,
     pool_replicates: bool = True,
     group_mode: str = "well",
-) -> List[BarItem]:
+) -> list[BarItem]:
     """Build ``BarItem``s for a batch-export ``BarGroup`` (members + solo wells).
 
     Batch-side analogue of :func:`collect_bar_items` with the same
@@ -660,7 +659,7 @@ def collect_bar_items_for_group(
 
     # Build (key, display, wells, rset_name_or_None, color) member list.
     from well_viewer.domain.plate_layout import WELL_COLORS as _WELL_COLORS
-    members: List[Tuple[str, str, list[str], Optional[str], str]] = []
+    members: list[tuple[str, str, list[str], str | None, str]] = []
     if pool_replicates:
         for i, rset in enumerate(group.members):
             valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
@@ -691,7 +690,7 @@ def collect_bar_items_for_group(
             members.append((w, w, [w], None,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
 
-    def _member_pts(wells: List[str], rset_name: Optional[str]) -> list:
+    def _member_pts(wells: list[str], rset_name: str | None) -> list:
         """AggPoint list for one member, matching the plotting tab's statistic.
 
         A pooled multi-well replicate set uses ``compute_rep_stats`` /
@@ -751,7 +750,7 @@ def collect_bar_items_for_group(
                 return val
         return None
 
-    def _items_for_tp(target_t: float) -> List[BarItem]:
+    def _items_for_tp(target_t: float) -> list[BarItem]:
         # Resolve control denominator once per tp — the rep-set statistic
         # (``control_stats_at_for_bar``), matching the members' numerator.
         fc_control_mean_at_t = None
@@ -771,7 +770,7 @@ def collect_bar_items_for_group(
             if _cfrac is not None:
                 fc_control_frac_at_t, fc_control_frac_spread_at_t = _cfrac
 
-        out: List[BarItem] = []
+        out: list[BarItem] = []
         tp_str = _format_tp(target_t)
         multi_tp = len(target_ts) > 1
         for (key, base_display, wells, rset_name, color) in members:
@@ -843,7 +842,7 @@ def collect_bar_items_for_group(
             ))
         return out
 
-    items: List[BarItem] = []
+    items: list[BarItem] = []
     if group_mode == "timepoint":
         for t in target_ts:
             items.extend(_items_for_tp(t))
@@ -857,7 +856,7 @@ def collect_bar_items_for_group(
     return items
 
 
-def _pooled_wells_for_fov_mode(ctx) -> List[str]:
+def _pooled_wells_for_fov_mode(ctx) -> list[str]:
     """Wells contributing to the FOV-pooled per-tp distribution.
 
     When replicate sets are active, every well inside every visible rset is
@@ -866,7 +865,7 @@ def _pooled_wells_for_fov_mode(ctx) -> List[str]:
     active, the user's plate selection is pooled.
     """
     active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
-    out: List[str] = []
+    out: list[str] = []
     seen: set = set()
     if active_rsets:
         for rset in active_rsets:
@@ -892,9 +891,9 @@ def _pooled_wells_for_fov_mode(ctx) -> List[str]:
 
 
 def collect_bar_items_fov_pooled(
-    ctx, target_ts: List[float], *,
-    threshold: Optional[float] = None,
-) -> Tuple[List[BarItem], str]:
+    ctx, target_ts: list[float], *,
+    threshold: float | None = None,
+) -> tuple[list[BarItem], str]:
     """Build one ``BarItem`` per timepoint by pooling every well's cells.
 
     Used when the *Aggregate FOV* toggle is on AND the user has selected
@@ -935,9 +934,9 @@ def collect_bar_items_fov_pooled(
 
     # Build one (tp, val, fov) triple stream across all pooled wells. FOV ids
     # are well-prefixed so the same numeric FOV in two wells stays distinct.
-    tp_chunks: List[_np.ndarray] = []
-    val_chunks: List[_np.ndarray] = []
-    fov_chunks: List[_np.ndarray] = []
+    tp_chunks: list[_np.ndarray] = []
+    val_chunks: list[_np.ndarray] = []
+    fov_chunks: list[_np.ndarray] = []
     for w in wells:
         df = get_rows(ctx, w)
         if df is None or len(df) == 0:
@@ -972,7 +971,7 @@ def collect_bar_items_fov_pooled(
         val_chunks.append(val[final].astype(float))
         fov_chunks.append(fov_pref)
 
-    items: List[BarItem] = []
+    items: list[BarItem] = []
     if not tp_chunks:
         for t in target_ts:
             items.append(BarItem(
@@ -1050,16 +1049,16 @@ def collect_bar_items_for_app(ctx, target_t: float, *,
 # ── Bar layout + drag-reorder hit-test (Qt-free; re-exported by controller) ──
 
 
-def cluster_x_for_group_keys(group_keys: List[str]) -> List[float]:
+def cluster_x_for_group_keys(group_keys: list[str]) -> list[float]:
     """Same cluster-position arithmetic as :func:`clustered_x_positions`
     but from a parallel list of group_key strings rather than ``BarItem``s.
 
     Used by the per-cell renderers (violin / beeswarm) and the batch
     export to compute matching x positions for non-``BarItem`` callers.
     """
-    xs: List[float] = []
+    xs: list[float] = []
     cur_x = 0.0
-    last_gk: Optional[str] = None
+    last_gk: str | None = None
     for i, gk in enumerate(group_keys):
         gk = gk or ""
         if i == 0:
@@ -1075,7 +1074,7 @@ def cluster_x_for_group_keys(group_keys: List[str]) -> List[float]:
     return xs
 
 
-def drop_redundant_cluster_keys(items: List[BarItem]) -> None:
+def drop_redundant_cluster_keys(items: list[BarItem]) -> None:
     """Blank ``group_key`` for items whose cluster header would only duplicate
     the bar's own tick label, in place.
 
@@ -1096,7 +1095,7 @@ def drop_redundant_cluster_keys(items: List[BarItem]) -> None:
             it.group_key = ""
 
 
-def clustered_x_positions(items: List[BarItem]) -> List[float]:
+def clustered_x_positions(items: list[BarItem]) -> list[float]:
     """Compute clustered integer x-positions from ``BarItem.group_key``.
 
     Items sharing the same ``group_key`` get contiguous adjacent positions; a
@@ -1104,9 +1103,9 @@ def clustered_x_positions(items: List[BarItem]) -> List[float]:
     or unique ``group_key``, this reduces to ``list(range(len(items)))`` —
     matching the legacy single-tp single-cluster layout exactly.
     """
-    xs: List[float] = []
+    xs: list[float] = []
     cur_x = 0.0
-    last_gk: Optional[str] = None
+    last_gk: str | None = None
     for i, item in enumerate(items):
         gk = item.group_key or ""
         if i == 0:
@@ -1122,7 +1121,7 @@ def clustered_x_positions(items: List[BarItem]) -> List[float]:
     return xs
 
 
-def bar_idx_at_x(xdata: float, n: int, xs: Optional[List[float]] = None) -> int:
+def bar_idx_at_x(xdata: float, n: int, xs: list[float] | None = None) -> int:
     """Return the bar index nearest to *xdata*, clamped to [0, n-1].
 
     When ``xs`` (the actual on-screen x-positions from
@@ -1136,7 +1135,7 @@ def bar_idx_at_x(xdata: float, n: int, xs: Optional[List[float]] = None) -> int:
     return max(0, min(n - 1, int(round(xdata))))
 
 
-def bar_drag_xs(ctx, keys: List[str]) -> Optional[List[float]]:
+def bar_drag_xs(ctx, keys: list[str]) -> list[float] | None:
     """The on-screen x-positions for the current bars, aligned to ``keys``.
 
     Stashed by the renderer (:func:`render_bar_items` and the per-cell path).
@@ -1150,7 +1149,7 @@ def bar_drag_xs(ctx, keys: List[str]) -> Optional[List[float]]:
     return None
 
 
-def bar_guide_x(xs: Optional[List[float]], tgt: int, src: int, n: int) -> float:
+def bar_guide_x(xs: list[float] | None, tgt: int, src: int, n: int) -> float:
     """X for the drop-indicator guide line: the midpoint of the gap the bar
     would land in (after ``tgt`` when moving right, before it when moving
     left), using real cluster positions when available."""

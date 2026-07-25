@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 from well_viewer.features.image_browser.cell_browser.collect import (
     CellDescriptor,
@@ -29,11 +28,11 @@ class CellBrowserState:
     where to resume.
     """
 
-    criteria: List[Criterion] = field(default_factory=list)
-    timepoints: List[float] = field(default_factory=list)   # empty = all
-    fovs: List[str] = field(default_factory=list)           # empty = all
-    sort_keys: List[SortKey] = field(default_factory=list)  # empty = natural order
-    channels_on: List[str] = field(default_factory=list)    # channel tokens shown
+    criteria: list[Criterion] = field(default_factory=list)
+    timepoints: list[float] = field(default_factory=list)   # empty = all
+    fovs: list[str] = field(default_factory=list)           # empty = all
+    sort_keys: list[SortKey] = field(default_factory=list)  # empty = natural order
+    channels_on: list[str] = field(default_factory=list)    # channel tokens shown
     show_boundaries: bool = True
     use_tophat: bool = False   # False = raw image, True = corrected (top-hat)
     # Caption each crop with the active channel's smFISH spot count (N9). The
@@ -44,7 +43,7 @@ class CellBrowserState:
     # criteria editor is disabled (the gate is the numeric filter).
     scatter_gate_mode: bool = False
     page_size: int = DEFAULT_PAGE_SIZE
-    cells: List[CellDescriptor] = field(default_factory=list)
+    cells: list[CellDescriptor] = field(default_factory=list)
     loaded: int = 0
 
     @property

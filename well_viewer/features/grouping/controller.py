@@ -5,7 +5,6 @@ via ``WellViewerApp._sel_set_composition`` directly — no controller helpers.)"
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
 
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
@@ -197,7 +196,7 @@ def rep_refresh_map(ctx) -> None:
     sel_state = ctx.state.selection
     well_paths = ctx.state.dataset.well_paths
     plate.setEnabledWells(list(well_paths.keys()))
-    colors: Dict[str, str] = {}
+    colors: dict[str, str] = {}
     for s in sel_state.selections:
         group_color = color_for_selection(s)
         for tok in (s.get("wells") or []):
@@ -241,13 +240,13 @@ def rep_quick_pairs_from_dropdowns(ctx) -> None:
 
 
 
-def rep_sets_loaded(ctx) -> "List[ReplicateSet]":
+def rep_sets_loaded(ctx) -> list[ReplicateSet]:
     """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
     in ``_selections`` order — derived straight from the unified model.
 
     A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset`` so
     it takes ``ctx`` and names no god-object."""
-    out: "List[ReplicateSet]" = []
+    out: list[ReplicateSet] = []
     for s in ctx.state.selection.selections:
         wells = s.get("wells") or []
         if any(w in ctx.state.dataset.well_paths for w in wells):
@@ -256,7 +255,7 @@ def rep_sets_loaded(ctx) -> "List[ReplicateSet]":
 
 
 
-def rep_color_for(ctx, lbl: str) -> Optional[str]:
+def rep_color_for(ctx, lbl: str) -> str | None:
     """Return the colour for the selection that owns *lbl*, or None if the
     well is not in any selection."""
     for s in ctx.state.selection.selections:

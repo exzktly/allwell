@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional  # Any used in save_threshold
+from typing import Any  # Any used in save_threshold
 
 from well_viewer.persistence._io import atomic_write_json
 
@@ -38,7 +38,7 @@ def _resolve_pipeline_info_path(out_dir: Path) -> Path:
     return primary
 
 
-def _read_block(out_dir: Path) -> Dict[str, float]:
+def _read_block(out_dir: Path) -> dict[str, float]:
     info_path = _resolve_pipeline_info_path(out_dir)
     if not info_path.exists():
         return {}
@@ -52,7 +52,7 @@ def _read_block(out_dir: Path) -> Dict[str, float]:
     block = data.get(_SMFISH_THRESHOLDS_KEY)
     if not isinstance(block, dict):
         return {}
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for ch, val in block.items():
         try:
             out[str(ch).strip().lower()] = float(val)
@@ -92,7 +92,7 @@ def save_threshold(ctx, channel: str, threshold: float) -> None:
         )
         return
     info_path = _resolve_pipeline_info_path(Path(data_dir))
-    existing: Dict[str, Any]
+    existing: dict[str, Any]
     if info_path.exists():
         try:
             existing = json.loads(info_path.read_text())
@@ -162,7 +162,7 @@ def apply_saved_to_spinbox(ctx) -> bool:
     edit = ctx.runtime.smfish.threshold_edit
     if cb is None or edit is None:
         return False
-    saved: Dict[str, float] = ctx.runtime.smfish.thresholds_saved or {}
+    saved: dict[str, float] = ctx.runtime.smfish.thresholds_saved or {}
     if not saved:
         return False
     ch = str(cb.currentText() or "").strip().lower()
@@ -179,7 +179,7 @@ def apply_saved_to_spinbox(ctx) -> bool:
     return True
 
 
-def get_saved_threshold(ctx, channel: str) -> Optional[float]:
+def get_saved_threshold(ctx, channel: str) -> float | None:
     """Look up the saved threshold for *channel* without touching the UI."""
-    saved: Dict[str, float] = ctx.runtime.smfish.thresholds_saved or {}
+    saved: dict[str, float] = ctx.runtime.smfish.thresholds_saved or {}
     return saved.get(str(channel).strip().lower())

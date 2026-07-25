@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
 
 import logging
 
@@ -609,7 +608,7 @@ def set_review_cell_included(ctx, fov: str, tp: str, nid: str, included: str) ->
 
 
 def set_review_cells_included_batch(
-    ctx, items: List[Tuple[str, str, str, str]]
+    ctx, items: list[Tuple[str, str, str, str]]
 ) -> None:
     """Apply many (fov, tp, nid, included) overrides with a single redraw.
 
@@ -787,7 +786,7 @@ def _refresh_review_csv_impl(ctx) -> None:
     well_lbl.setText(
         ", ".join(sels[:3]) + (f" (+{len(sels) - 3} more)" if len(sels) > 3 else "")
     )
-    rows: List[dict] = []
+    rows: list[dict] = []
     for label in sels:
         try:
             df = get_rows(ctx, label)
@@ -840,7 +839,7 @@ def _refresh_review_csv_impl(ctx) -> None:
     refresh_review_csv_rows(ctx, rows)
 
 
-def refresh_review_csv_rows(ctx, rows: Optional[List[dict]] = None) -> None:
+def refresh_review_csv_rows(ctx, rows: list[dict] | None = None) -> None:
     """Populate the Review CSV table from *rows* (or the current selection).
 
     A8 E4-review: fully ctx-native — the table + filter combos + message label
@@ -851,7 +850,7 @@ def refresh_review_csv_rows(ctx, rows: Optional[List[dict]] = None) -> None:
     _refresh_review_csv_rows_impl(ctx, rows)
 
 
-def _refresh_review_csv_rows_impl(ctx, rows: Optional[List[dict]] = None) -> None:
+def _refresh_review_csv_rows_impl(ctx, rows: list[dict] | None = None) -> None:
     w = ctx.widgets
     table = w.get_or_none("_review_csv_table")
     if table is None:

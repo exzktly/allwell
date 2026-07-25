@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import statistics as _pystats
-from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -31,11 +30,11 @@ def collect_group_values(
     grp,
     target_t: float,
     *,
-    val_col: Optional[str] = None,
-    threshold: Optional[float] = None,
+    val_col: str | None = None,
+    threshold: float | None = None,
     statistic: str = "mean",
     use_fov: bool = True,
-) -> List[float]:
+) -> list[float]:
     """Return one summary value per replicate for the group's test.
 
     The replicate unit is decided by the SHARED :func:`replicate_unit` rule and
@@ -57,7 +56,7 @@ def collect_group_values(
         ctx, grp.wells, target_t, use_fov=use_fov,
         val_col=val_col, threshold=threshold,
     )
-    out: List[float] = []
+    out: list[float] = []
     for r in reps:
         s = r.summary(statistic)
         if s is not None and np.isfinite(s):
@@ -66,9 +65,9 @@ def collect_group_values(
 
 
 def collect_group_per_cell_values(
-    ctx, grp, target_t: float, *, val_col: Optional[str] = None,
-    threshold: Optional[float] = None,
-) -> List[float]:
+    ctx, grp, target_t: float, *, val_col: str | None = None,
+    threshold: float | None = None,
+) -> list[float]:
     """Return per-cell values above threshold for KS-test (distribution comparison)."""
     val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
@@ -78,7 +77,7 @@ def collect_group_per_cell_values(
             threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
     ratios = ctx.state.channel.ratio_index
-    chunks: List[np.ndarray] = []
+    chunks: list[np.ndarray] = []
     for lbl in grp.wells:
         if lbl not in ctx.state.dataset.well_paths:
             continue
@@ -115,7 +114,7 @@ def _channel_label_for_val_col(val_col: str) -> str:
     return label
 
 
-def draw_ks_cdf(ctx, group_vals: List[Tuple[str, List[float]]], tp_str: str, well_colors: list[str]) -> None:
+def draw_ks_cdf(ctx, group_vals: list[tuple[str, list[float]]], tp_str: str, well_colors: list[str]) -> None:
     """Draw empirical CDFs for the two KS-test groups."""
     app = ctx.window  # transitional: widget-heavy body still reads app._stats_*
     ax = app._stats_ax
@@ -228,7 +227,7 @@ def compute_pairwise(ctx, *, groups, target_t, val_col, statistic, threshold, te
         import scipy.stats  # noqa: F401  (availability probe)
     except ImportError:
         return []
-    group_vals: List[Tuple[str, List[float]]] = []
+    group_vals: list[tuple[str, list[float]]] = []
     for g in groups:
         if is_ks:
             vals = collect_group_per_cell_values(ctx, g, target_t,
@@ -281,11 +280,11 @@ def _resolve_sample_units(is_ks: bool, use_fov: bool) -> str:
 def _build_header_lines(
     *, test: str, channel_lbl: str, stat_lbl: str, threshold: float,
     tp_str: str, is_ks: bool, use_fov: bool,
-) -> List[str]:
+) -> list[str]:
     """Assemble the report header block (audit A5). Pure — takes resolved
     labels and returns the lines, including the FOV-mode note."""
     sample_units = _resolve_sample_units(is_ks, use_fov)
-    header_lines: List[str] = [
+    header_lines: list[str] = [
         f"Test:       {test}",
         f"Channel:    {channel_lbl}",
         f"Statistic:  {stat_lbl}" if not is_ks else "Statistic:  per-cell distribution",
@@ -302,9 +301,9 @@ def _build_header_lines(
     return header_lines
 
 
-def _format_group_summary_lines(group_vals: List[Tuple[str, List[float]]]) -> List[str]:
+def _format_group_summary_lines(group_vals: list[tuple[str, list[float]]]) -> list[str]:
     """Per-group n/mean/median/sd summary block (audit A5). Pure."""
-    lines: List[str] = []
+    lines: list[str] = []
     for name_a, vals_a in group_vals:
         if not vals_a:
             continue
@@ -323,9 +322,9 @@ def _format_group_summary_lines(group_vals: List[Tuple[str, List[float]]]) -> Li
     return lines
 
 
-def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) -> List[str]:
+def _format_pairwise_lines(pair_results, adjusted: dict, show_adjusted: bool) -> list[str]:
     """Pairwise test results + BH-adjusted p-values (audit A5). Pure."""
-    lines: List[str] = []
+    lines: list[str] = []
     for idx, (name_a, name_b, stat_name, stat_value, p, err) in enumerate(pair_results):
         lines.append(f"── {name_a}  vs  {name_b} ──")
         if err is not None:
@@ -396,7 +395,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
     channel_lbl = _channel_label_for_val_col(val_col)
     stat_lbl = _STAT_LABELS.get(statistic, statistic)
 
-    group_vals: List[Tuple[str, List[float]]] = []
+    group_vals: list[tuple[str, list[float]]] = []
     for g in groups:
         if is_ks:
             vals = collect_group_per_cell_values(
@@ -442,7 +441,7 @@ def run_stats(ctx, *, collect_group_values_fn, draw_ks_cdf_fn) -> None:
 
     # Replicate unit is per-FOV (FOVs pooled across each group's wells) when FOV
     # mode is on, else per-well. Note it in the header.
-    lines: List[str] = _build_header_lines(
+    lines: list[str] = _build_header_lines(
         test=test, channel_lbl=channel_lbl, stat_lbl=stat_lbl,
         threshold=threshold, tp_str=tp_str, is_ks=is_ks, use_fov=use_fov,
     )
@@ -520,12 +519,12 @@ def _rep_sets_loaded(ctx):
         ctx.state.selection.selections, ctx.state.dataset.well_paths)
 
 
-def _stats_groups_from_rep_sets(ctx) -> "List[BarGroup]":
+def _stats_groups_from_rep_sets(ctx) -> list[BarGroup]:
     """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""
     return [BarGroup(r.name, members=[r]) for r in _rep_sets_loaded(ctx)]
 
 
-def _stats_groups_from_visible_rep_sets(ctx) -> "List[BarGroup]":
+def _stats_groups_from_visible_rep_sets(ctx) -> list[BarGroup]:
     """One BarGroup per *visible* (non-hidden) rep-set — the traces actually
     drawn on the plots."""
     rsets = _active_replicate_sets(
@@ -762,7 +761,7 @@ def stats_update_tp_menu(ctx) -> None:
     # pick any value to compare. Mirrors the scatter-tab dropdown so the
     # _col_for_scatter_entry mapping is reused.
     channels = list(ctx.state.channel.fluor_channels) if ctx.state.channel.fluor_channels else []
-    ch_options: List[str] = []
+    ch_options: list[str] = []
     for ch in channels:
         # Display fluor tokens upper-case (GFP) to match the rest of the app;
         # col_for_scatter_entry resolves the column case-insensitively and the
@@ -919,7 +918,7 @@ def stats_refresh_fov_indicator(ctx) -> None:
 
 def stats_collect_group_values_shim(
     ctx, grp: BarGroup, target_t: float
-) -> List[float]:
+) -> list[float]:
     return collect_group_values(
         ctx, grp, target_t,
         val_col=stats_active_val_col(ctx),
@@ -971,7 +970,7 @@ def stats_run_shim(ctx) -> None:
 
 def stats_draw_ks_cdf_shim(
     ctx,
-    group_vals: List[Tuple[str, List[float]]],
+    group_vals: list[tuple[str, list[float]]],
     tp_str: str,
 ) -> None:
     draw_ks_cdf(ctx, group_vals, tp_str, WELL_COLORS)

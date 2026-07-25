@@ -7,7 +7,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 from util.aw_safe import swallowed
 
 HERE = Path(__file__).resolve().parent.parent
@@ -99,8 +99,8 @@ def _schema_field_index(schema: str, field: str) -> int:
 
 
 def _loose_timepoints_for_wells(
-    folder: Path, wells: "set[str]", *, schema: str, sep: str,
-) -> "set[str]":
+    folder: Path, wells: set[str], *, schema: str, sep: str,
+) -> set[str]:
     """Raw timepoint tokens of loose TIFs in *folder* belonging to *wells*.
 
     Tokens are compared verbatim (a dataset names its timepoints consistently),
@@ -112,7 +112,7 @@ def _loose_timepoints_for_wells(
     if wi < 0 or ti < 0:
         return set()
     targets = {canonical_well_label(w) for w in wells if w}
-    out: "set[str]" = set()
+    out: set[str] = set()
     for p in tif_files_in(folder):
         parts = p.stem.split(sep)
         if wi < len(parts) and ti < len(parts) \
@@ -123,7 +123,7 @@ def _loose_timepoints_for_wells(
     return out
 
 
-def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> "set[str]":
+def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> set[str]:
     """Raw timepoint tokens already present in a ``<WELL>.zip``'s members."""
     ti = _schema_field_index(schema, "timepoint")
     if ti < 0 or not zip_path.exists():
@@ -133,7 +133,7 @@ def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> "set[str]":
             names = zf.namelist()
     except (OSError, zipfile.BadZipFile):
         return set()
-    out: "set[str]" = set()
+    out: set[str] = set()
     for name in names:
         if name.endswith("/"):
             continue
@@ -164,7 +164,7 @@ def _has_well_content(folder: Path) -> bool:
 
 
 def well_present_in_input(input_dir: Path, well: str, *,
-                          schema: "list[str] | None" = None,
+                          schema: list[str] | None = None,
                           sep: str = "_") -> bool:
     """True iff *well* (any 96-well form, e.g. ``'c11'`` / ``'C11'``) is present
     in *input_dir* in any layout the pipeline reads: a per-well ``<WELL>.zip``,
@@ -206,7 +206,7 @@ def well_present_in_input(input_dir: Path, well: str, *,
     return False
 
 
-def iter_well_tokens(input_dir: Path) -> "list[str]":
+def iter_well_tokens(input_dir: Path) -> list[str]:
     """Canonical well tokens (``A01``) present in a *resolved* input dir.
 
     Reads the same already-grouped layouts the pipeline does — per-well
@@ -279,7 +279,7 @@ def append_loose_images_to_zips(
     filename_schema: str,
     filename_sep: str,
     log_fn: Callable[[str], None] | None = None,
-) -> "tuple[int, set[str]]":
+) -> tuple[int, set[str]]:
     """Fold loose image files sitting next to grouped well zips into those zips.
 
     When a directory already holds per-well ``<WELL>.zip`` archives and the user
@@ -439,8 +439,8 @@ def select_incremental_scope(
     # incremental run processes fresh — no full reprocess needed. (A pre-existing
     # timepoint that had no blank of its own used the pooled fallback; that rare
     # case isn't tracked here.)
-    existing_bg_tps: "set[str]" = set()
-    new_bg_tps: "set[str]" = set()
+    existing_bg_tps: set[str] = set()
+    new_bg_tps: set[str] = set()
     if empty_well_in_use and bg_tokens:
         new_bg_tps = _loose_timepoints_for_wells(
             input_dir, bg_tokens,

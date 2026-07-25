@@ -13,7 +13,7 @@ owns and calls back into the caller's controller.
 
 from __future__ import annotations
 
-from typing import Callable, Dict
+from collections.abc import Callable
 
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
 def open_timepoint_selector(
     ctx,
     *,
-    selections: Dict[str, bool],
+    selections: dict[str, bool],
     button_name: str,
     refresh_display: Callable,
     redraw: Callable,

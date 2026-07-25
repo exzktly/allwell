@@ -15,7 +15,7 @@ import io
 import re
 import zipfile
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from collections.abc import Callable
 
 from well_viewer.core import debug_flags
 from well_viewer.core.safe import swallowed
@@ -49,9 +49,9 @@ def classify_member(
     mask_re,
     overlay_re,
     tophat_fluor_re,
-    fov_tp_extractor: Callable[[str], Tuple[str, str]],
+    fov_tp_extractor: Callable[[str], tuple[str, str]],
     pipeline_fields_extractor: Callable[[str], dict[str, str]] | None = None,
-) -> Tuple[str, str, str]:
+) -> tuple[str, str, str]:
     kind, stem = classify_filename_kind(name, fluor_token=fluor_lower)
     is_mask = kind == "mask" or bool(mask_re.search(name))
     is_overlay = kind == "overlay" or bool(overlay_re.search(name))
@@ -108,7 +108,7 @@ def read_member_bytes(
     zip_path: Path,
     member: str,
     logger,
-) -> Optional[bytes]:
+) -> bytes | None:
     """Read a member from zip, supporting one nested level via outer::inner.
 
     Routes through the process-wide ZipFile LRU so multiple reads on the
@@ -140,18 +140,18 @@ def scan_zip_members(
     zip_path: Path,
     fluor_lower: str,
     image_exts: set[str],
-    classify_member_fn: Callable[[str, str, object], Tuple[str, str, str]],
+    classify_member_fn: Callable[[str, str, object], tuple[str, str, str]],
     imgref_factory: Callable[[Path, str], object],
     logger,
     member_prefix: str = "",
     fov_tp_extractor=None,
-    pipeline_info: Optional[dict] = None,
-) -> Tuple[Dict[Tuple[str, str], object], Dict[Tuple[str, str], object], Dict[Tuple[str, str], object], Dict[Tuple[str, str], object], Dict[Tuple[str, str], object]]:
-    fluor: Dict[Tuple[str, str], object] = {}
-    overlay: Dict[Tuple[str, str], object] = {}
-    mask: Dict[Tuple[str, str], object] = {}
-    tophat: Dict[Tuple[str, str], object] = {}
-    smfish: Dict[Tuple[str, str], object] = {}
+    pipeline_info: dict | None = None,
+) -> tuple[dict[tuple[str, str], object], dict[tuple[str, str], object], dict[tuple[str, str], object], dict[tuple[str, str], object], dict[tuple[str, str], object]]:
+    fluor: dict[tuple[str, str], object] = {}
+    overlay: dict[tuple[str, str], object] = {}
+    mask: dict[tuple[str, str], object] = {}
+    tophat: dict[tuple[str, str], object] = {}
+    smfish: dict[tuple[str, str], object] = {}
     from well_viewer.data.zipfile_cache import with_zipfile
     try:
         if member_prefix:
@@ -220,7 +220,7 @@ def open_imgref_as_array(
     pil_image_module,
     np_module,
     io_module,
-    read_member_bytes_fn: Callable[[Path, str], Optional[bytes]],
+    read_member_bytes_fn: Callable[[Path, str], bytes | None],
     logger,
 ):
     """Decode an image reference (disk path or zip member) into a numpy array."""
@@ -229,7 +229,7 @@ def open_imgref_as_array(
 
     if ref.disk_path is not None:
         raw_bytes = None
-        disk_path: Optional[Path] = ref.disk_path
+        disk_path: Path | None = ref.disk_path
     else:
         raw_bytes = (
             read_member_bytes_fn(ref.zip_path, ref.zip_member)

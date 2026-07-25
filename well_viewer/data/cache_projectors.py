@@ -21,12 +21,12 @@ shared walk (:func:`project_verdict_column`) that every projector performs.
 from __future__ import annotations
 
 import logging
-from typing import Callable, List, Optional
+from collections.abc import Callable
 
 _logger = logging.getLogger("well_viewer")
 
 # Registered projectors, applied in order to each freshly-loaded frame.
-_PROJECTORS: List[Callable] = []
+_PROJECTORS: list[Callable] = []
 
 
 def register_cache_projector(fn: Callable) -> None:
@@ -40,14 +40,14 @@ def clear_cache_projectors() -> None:
     _PROJECTORS.clear()
 
 
-def iter_cache_projectors() -> "List[Callable]":
+def iter_cache_projectors() -> list[Callable]:
     """The registered projectors, in registration order."""
     return list(_PROJECTORS)
 
 
 def project_verdict_column(
     ctx,
-    label: Optional[str],
+    label: str | None,
     *,
     column: str,
     verdict: Callable,

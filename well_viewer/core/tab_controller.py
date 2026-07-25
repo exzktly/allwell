@@ -297,7 +297,7 @@ def current_centre_tab(ctx) -> str:
     return _resolve_leaf(ctx, tab)
 
 
-def visible_centre_tabs(ctx) -> "set[str]":
+def visible_centre_tabs(ctx) -> set[str]:
     """Leaf names of every centre tab currently on screen.
 
     Normally ``{current_centre_tab(ctx)}``. When ``split_visible_provider`` is

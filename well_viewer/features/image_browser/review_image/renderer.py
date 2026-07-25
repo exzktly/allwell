@@ -8,7 +8,6 @@ decoding, boundary computation, or pixmap composition. Each function takes
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
@@ -43,7 +42,7 @@ except ImportError:
     _PIL_AVAILABLE = False
 
 
-def update_preview(win, well_label: Optional[str]) -> None:
+def update_preview(win, well_label: str | None) -> None:
     """Legacy win-typed entry: bridge to the ctx-native preview pipeline.
 
     Kept so the still-win callers (registry ``_activate_segmentation``,
@@ -52,7 +51,7 @@ def update_preview(win, well_label: Optional[str]) -> None:
     update_preview_ctx(win._ctx, well_label)
 
 
-def update_preview_ctx(ctx, well_label: Optional[str]) -> None:
+def update_preview_ctx(ctx, well_label: str | None) -> None:
     """Load images for *well_label* and render the inline montage.
 
     Same re-entry guard as refresh_review_image: update_preview drives the FOV
@@ -68,7 +67,7 @@ def update_preview_ctx(ctx, well_label: Optional[str]) -> None:
         ctx.state.preview.update_in_progress = False
 
 
-def _update_preview_impl(ctx, well_label: Optional[str]) -> None:
+def _update_preview_impl(ctx, well_label: str | None) -> None:
     # Local imports keep this module standalone-importable without paying
     # the cost of dragging in runtime_app at module load time.
     from well_viewer.data.image_discovery import find_well_images_and_masks
@@ -382,7 +381,7 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
     # tracks the active channel / FOV / timepoint; empty for non-fluor overlays.
     state.review_image.mfi_by_nid = review_build_mfi_map(ctx, center, well, fov, tp)
 
-    above_by_nid: Optional[Dict[int, bool]] = None
+    above_by_nid: dict[int, bool] | None = None
     if bool(state.review_image.binary_mask):
         fluor_gates = get_all_fluor_gates(ctx)
         threshold = get_thresh_frac_on(ctx)
@@ -414,12 +413,12 @@ def draw_review_image(
     ctx,
     fluor_arr,
     mask_arr,
-    include_by_nid: Dict[int, bool],
+    include_by_nid: dict[int, bool],
     *,
     fit_lut: bool = False,
     preserve_view: bool = False,
     boundary=None,
-    above_by_nid: Optional[Dict[int, bool]] = None,
+    above_by_nid: dict[int, bool] | None = None,
 ) -> None:
     # A8 D4: ctx-native pixmap compositor. Typed view/colour state lives on
     # ``ctx.state.review_image`` / ``ctx.state.image_view``; the QLabel host +

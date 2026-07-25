@@ -61,7 +61,7 @@ _STARDIST_INPUT_CLIP = (0.0, 1.0)
 _STARDIST_TILE_PX = 0
 
 
-def set_tile_px(tile_px: "int | None") -> None:
+def set_tile_px(tile_px: int | None) -> None:
     """Install the per-worker StarDist tiling threshold (px per side; 0 = off)."""
     global _STARDIST_TILE_PX
     try:
@@ -70,7 +70,7 @@ def set_tile_px(tile_px: "int | None") -> None:
         _STARDIST_TILE_PX = 0
 
 
-def _stardist_n_tiles(img: np.ndarray) -> "tuple[int, int] | None":
+def _stardist_n_tiles(img: np.ndarray) -> tuple[int, int] | None:
     """StarDist ``n_tiles`` for *img*, or None to predict untiled.
 
     Tiles each spatial axis into ceil(size / tile_px) blocks so no block exceeds

@@ -26,7 +26,6 @@ theme tokens (mirrors ``theme.py``).
 
 from __future__ import annotations
 
-from typing import List, Optional
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
@@ -173,13 +172,13 @@ def _rt(ctx):
     return ctx.runtime.image_table
 
 
-def _base_channels(ctx) -> List[str]:
+def _base_channels(ctx) -> list[str]:
     """Real channel tokens for the Channels tray — the ``(binary)`` variants are
     a render *option* here, not separate tray chips."""
     return [c for c in _channel_options(ctx) if not _is_binary_variant(c)]
 
 
-def _root_values(ctx, dim: str) -> List[str]:
+def _root_values(ctx, dim: str) -> list[str]:
     if dim == "well":
         sel = sorted(ctx.state.image_table.active_wells or set(),
                      key=lambda w: (str(w),))
@@ -224,7 +223,7 @@ def _default_spec(ctx):
     return spec
 
 
-def _fixed_dims(spec) -> List[str]:
+def _fixed_dims(spec) -> list[str]:
     return [d for d in _ROOT_DIMS if spec.rows.root != d and spec.cols.root != d]
 
 
@@ -518,7 +517,7 @@ def _cmap_swatch(cmap: str) -> str:
     return _CMAP_SWATCH.get(cmap, "#C8CDD8")
 
 
-def _standard_cmap(name: str) -> Optional[str]:
+def _standard_cmap(name: str) -> str | None:
     """The conventional display colour for a recognised fluorophore in *name*
     (GFP→Greens, RFP→Reds, BFP→Cyan, NIR→Magenta, DAPI→Blues, …), or None."""
     s = str(name or "").strip().lower()
@@ -999,7 +998,7 @@ def _build_fixed(ctx, spec) -> None:
     lay.addStretch(1)
 
 
-def _table_channels(spec) -> "dict":
+def _table_channels(spec) -> dict:
     """Distinct LUT-adjustable channels in the table, in row-then-column order,
     mapped to every ChannelSpec that shares that channel — so a channel shown once
     here edits all of its instances.
@@ -1034,7 +1033,7 @@ def _build_lut_box(ctx, spec) -> None:
         lay.addWidget(_lut_row(ctx, token, specs))
 
 
-def _lut_row(ctx, token: str, specs: "list") -> QFrame:
+def _lut_row(ctx, token: str, specs: list) -> QFrame:
     """One LUT editor row: colour swatch · channel · colormap · min · max · Auto.
     Edits fan out to every ChannelSpec sharing this channel token."""
     cs0 = specs[0]

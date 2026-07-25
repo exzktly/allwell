@@ -9,7 +9,7 @@ selection, and a hover-value status update.
 from __future__ import annotations
 
 import math
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
 
 import numpy as np
 from matplotlib import patches as mpatches
@@ -82,9 +82,9 @@ def _selected_cmap(ctx) -> str:
     return str(cb.currentText() or "viridis")
 
 
-def _selected_tp(ctx) -> Optional[float]:
+def _selected_tp(ctx) -> float | None:
     slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
-    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
+    tps: list[float] = list(ctx.state.heatmap.tp_values or [])
     if slider is None or not tps:
         return None
     idx = max(0, min(slider.value(), len(tps) - 1))
@@ -99,7 +99,7 @@ def sync_heatmap_slider_to_focus(ctx) -> None:
     focus = current_focus_tp(ctx)
     if focus is None:
         return
-    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
+    tps: list[float] = list(ctx.state.heatmap.tp_values or [])
     i = nearest_index(tps, focus)
     if i is None:
         return
@@ -115,7 +115,7 @@ def sync_heatmap_slider_to_focus(ctx) -> None:
         label.setText(f"t = {tps[i]:g} h")
 
 
-def _repsets_loaded(ctx) -> List:
+def _repsets_loaded(ctx) -> list:
     """Every loaded replicate set (incl. hidden) over ``ctx.state`` — the
     pool the heatmap's rep-set-average expansion walks. Derived from the
     domain resolver so no god-object / feature import is needed."""
@@ -124,7 +124,7 @@ def _repsets_loaded(ctx) -> List:
                                  ctx.state.dataset.well_paths)
 
 
-def _expand_repset_wells(ctx, wells: Iterable[str]) -> List[str]:
+def _expand_repset_wells(ctx, wells: Iterable[str]) -> list[str]:
     """If the rep-set average toggle is on, expand each input well to every
     well in the rep-set it belongs to. Otherwise return wells as-is.
     """
@@ -134,10 +134,10 @@ def _expand_repset_wells(ctx, wells: Iterable[str]) -> List[str]:
     rep_sets = _repsets_loaded(ctx)
     if not rep_sets:
         return src
-    out: List[str] = []
+    out: list[str] = []
     seen: set = set()
     for w in src:
-        chosen: Optional[List[str]] = None
+        chosen: list[str] | None = None
         for rs in rep_sets:
             members = list(getattr(rs, "wells", []) or [])
             if w in members:
@@ -155,7 +155,7 @@ def _expand_repset_wells(ctx, wells: Iterable[str]) -> List[str]:
     return out
 
 
-def _repset_name_for_wells(ctx, wells: Iterable[str]) -> Optional[str]:
+def _repset_name_for_wells(ctx, wells: Iterable[str]) -> str | None:
     """Return the name of the first rep-set that contains any of *wells*, or None."""
     if not bool(ctx.state.heatmap.repset_avg):
         return None
@@ -176,7 +176,7 @@ def _pool_filtered_mean(
     wells,
     *,
     val_col: str,
-    fluor_gates: Dict[str, float],
+    fluor_gates: dict[str, float],
     ratios,
     target_t: float,
 ) -> float:
@@ -187,7 +187,7 @@ def _pool_filtered_mean(
     the full per-well DataFrames inside the heatmap's O(T·R·C) inner
     loop.
     """
-    parts: List[np.ndarray] = []
+    parts: list[np.ndarray] = []
     for w in wells:
         df = get_rows(ctx, w)
         if df is None or df.empty:
@@ -213,8 +213,8 @@ def _cell_value(
     metric: str,
     val_col: str,
     threshold: float,
-    fluor_gates: Dict[str, float],
-    ratios: Optional[Dict] = None,
+    fluor_gates: dict[str, float],
+    ratios: dict | None = None,
 ) -> float:
     """Compute the heatmap cell value by pooling rows across *wells*."""
     expanded = _expand_repset_wells(ctx, wells)
@@ -284,7 +284,7 @@ def _cell_value(
     return float(matched[0][1])
 
 
-def _resolve_color_scale(arr: np.ndarray, ctx) -> Tuple[Optional[float], Optional[float]]:
+def _resolve_color_scale(arr: np.ndarray, ctx) -> tuple[float | None, float | None]:
     """Pick (vmin, vmax) for the heatmap.
 
     Mode is read from ``ctx.state.heatmap.scale_mode`` (Auto/Fixed). For Fixed we
@@ -321,9 +321,9 @@ def _compute_global_range(
     metric: str,
     val_col: str,
     threshold: float,
-    fluor_gates: Dict[str, float],
+    fluor_gates: dict[str, float],
     ratios,
-) -> Tuple[Optional[float], Optional[float]]:
+) -> tuple[float | None, float | None]:
     """Pool ``_cell_value`` across every (timepoint, cell) and return (vmin, vmax).
 
     Result is cached on ``ctx.runtime.heatmap`` keyed on the inputs that
@@ -366,8 +366,8 @@ def _compute_global_range(
     if cached is not None and cached.get("key") == cache_key:
         return cached["vmin"], cached["vmax"]
 
-    vmin: Optional[float] = None
-    vmax: Optional[float] = None
+    vmin: float | None = None
+    vmax: float | None = None
     for tp in tps:
         for (r, c), wells in layout.cells.items():
             if not (0 <= r < layout.rows and 0 <= c < layout.cols):
@@ -422,7 +422,7 @@ def redraw_heatmap(ctx) -> None:
     cmap_name = _selected_cmap(ctx)
 
     arr = np.full((layout.rows, layout.cols), np.nan, dtype=float)
-    cell_well_index: Dict[Tuple[int, int], List[str]] = {}
+    cell_well_index: dict[tuple[int, int], list[str]] = {}
 
     for (r, c), wells in layout.cells.items():
         if not (0 <= r < layout.rows and 0 <= c < layout.cols):
@@ -655,7 +655,7 @@ def _metric_axis_label(metric: str, ctx) -> str:
 
 # ── Click + hover handlers ───────────────────────────────────────────────────
 
-def _cell_at_event(ctx, event) -> Optional[Tuple[int, int]]:
+def _cell_at_event(ctx, event) -> tuple[int, int] | None:
     if event.inaxes is None or event.xdata is None or event.ydata is None:
         return None
     layout = ctx.runtime.heatmap.layout_active
@@ -668,7 +668,7 @@ def _cell_at_event(ctx, event) -> Optional[Tuple[int, int]]:
     return r, c
 
 
-def _event_modifiers(event) -> Tuple[bool, bool]:
+def _event_modifiers(event) -> tuple[bool, bool]:
     """Return ``(shift, ctrl)`` for a matplotlib mouse *event*.
 
     Qt's ``QMouseEvent`` carries the authoritative modifier state, but PySide6
@@ -746,7 +746,7 @@ def on_heatmap_motion(ctx, event) -> None:
 
 # ── Row/col label drag-to-reorder ────────────────────────────────────────────
 
-def _label_at_event(ctx, event) -> Optional[Tuple[str, int]]:
+def _label_at_event(ctx, event) -> tuple[str, int] | None:
     """Return ("row", i) or ("col", i) if *event* is near a tick label, else None.
 
     Used only for the initial press that starts a drag, so the threshold is
@@ -782,7 +782,7 @@ def _label_at_event(ctx, event) -> Optional[Tuple[str, int]]:
     return None
 
 
-def _nearest_label_in_drag(ctx, event, kind: str) -> Optional[int]:
+def _nearest_label_in_drag(ctx, event, kind: str) -> int | None:
     """Flexibly find the target row/col index during a drag.
 
     Prefers the data coordinate (when the cursor is inside the axes) so the
@@ -816,7 +816,7 @@ def _nearest_label_in_drag(ctx, event, kind: str) -> Optional[int]:
     except Exception:
         return None
     labels = ax.get_xticklabels() if kind == "col" else ax.get_yticklabels()
-    best: Optional[int] = None
+    best: int | None = None
     best_dist = float("inf")
     for i, lbl in enumerate(labels):
         try:

@@ -26,7 +26,8 @@ from __future__ import annotations
 import logging
 import re
 import uuid
-from typing import Any, Callable, Iterable, Optional, Sequence
+from typing import Any
+from collections.abc import Callable, Iterable, Sequence
 
 from util.well_token import canonical_well_label
 from well_viewer.core.safe import swallowed
@@ -57,7 +58,7 @@ def well_colors() -> list[str]:
 
 
 # ─────────────────────────────────────────────────────────── token helpers ──
-def normalize_token(raw: Any) -> Optional[str]:
+def normalize_token(raw: Any) -> str | None:
     """``"a1"`` / ``"A01"`` / ``" h12 "`` → ``"A01"`` / ``"H12"``; else ``None``.
 
     Delegates to the canonical 96-well parser in :mod:`well_token`.
@@ -191,7 +192,7 @@ def replicate_sets_loaded(selections: Iterable[Any], well_paths: Any):
     return out
 
 
-def _clean_token(w: Any) -> Optional[str]:
+def _clean_token(w: Any) -> str | None:
     """Normalise a 96-well token (``"a1"`` → ``"A01"``); drop anything that isn't
     a structurally-valid well token. (We do *not* filter against the currently
     loaded dataset — stored ≠ loaded is allowed — but junk like ``"ZZZ"`` / ints
@@ -216,7 +217,7 @@ def _clean_wells(seq: Any) -> list[str]:
 
 
 # ─────────────────────────────────────────────────────── colour / id / name ──
-def _hex6(c: Any) -> Optional[str]:
+def _hex6(c: Any) -> str | None:
     if not isinstance(c, str):
         return None
     s = c.strip()
@@ -231,8 +232,8 @@ def _hex6(c: Any) -> Optional[str]:
 
 
 def rank_color(wells: Sequence[str], fallback_idx: int = 0,
-               palette: Optional[Sequence[str]] = None,
-               used_colors: Optional[set] = None) -> str:
+               palette: Sequence[str] | None = None,
+               used_colors: set | None = None) -> str:
     """Decision-#1 colour: by the position rank of the selection's *lowest* well.
 
     Falls back to the positional palette entry when ``wells`` has no parseable
@@ -303,10 +304,10 @@ def _unique_name(name: Any, used: set) -> str:
 def make_selection(*, name: Any, wells: Any, replicates: Any = None,
                    hidden: bool = False, color: Any = None, source: Any = "user",
                    labels: Any = None, sel_id: Any = None,
-                   used_names: Optional[set] = None, used_ids: Optional[set] = None,
-                   used_colors: Optional[set] = None,
+                   used_names: set | None = None, used_ids: set | None = None,
+                   used_colors: set | None = None,
                    fallback_color_idx: int = 0,
-                   palette: Optional[Sequence[str]] = None,
+                   palette: Sequence[str] | None = None,
                    id_factory: Callable[[], str] = _default_id_factory) -> dict:
     """Build one normalised, invariant-respecting ``Selection`` dict.
 
@@ -354,7 +355,7 @@ def make_selection(*, name: Any, wells: Any, replicates: Any = None,
     return sel
 
 
-def validate_repair(selections: Any, *, palette: Optional[Sequence[str]] = None,
+def validate_repair(selections: Any, *, palette: Sequence[str] | None = None,
                     id_factory: Callable[[], str] = _default_id_factory) -> list[dict]:
     """Coerce an arbitrary list into a well-formed ``selections`` list.
 
@@ -394,7 +395,7 @@ def validate_repair(selections: Any, *, palette: Optional[Sequence[str]] = None,
     return out
 
 
-def _pick_current(selections: Sequence[dict], current_id: Any) -> Optional[str]:
+def _pick_current(selections: Sequence[dict], current_id: Any) -> str | None:
     ids = {s["id"] for s in selections}
     if isinstance(current_id, str) and current_id in ids:
         return current_id
@@ -445,10 +446,10 @@ def _resolve_v1(block: Any):
     return rep_dicts, rep_by_name, group_dicts
 
 
-def migrate_v1(block: Any, *, rep_hidden: Optional[Iterable[int]] = None,
+def migrate_v1(block: Any, *, rep_hidden: Iterable[int] | None = None,
                bar_active_grp: int = -1, active_rep_idx: int = -1,
-               loaded_tokens: Optional[Iterable[str]] = None,
-               palette: Optional[Sequence[str]] = None,
+               loaded_tokens: Iterable[str] | None = None,
+               palette: Sequence[str] | None = None,
                id_factory: Callable[[], str] = _default_id_factory):
     """A v1 ``{rep_sets, groups[, well_labels, notes]}`` block → (selections, current_id).
 
@@ -515,8 +516,8 @@ def migrate_v1(block: Any, *, rep_hidden: Optional[Iterable[int]] = None,
 
 # ──────────────────────────────────────────────────── §3.5 line-order honour ──
 def reorder_by_line_order(selections: Sequence[dict], *,
-                          rset_order: Optional[Sequence[str]] = None,
-                          well_order: Optional[Sequence[str]] = None) -> list[dict]:
+                          rset_order: Sequence[str] | None = None,
+                          well_order: Sequence[str] | None = None) -> list[dict]:
     """Stable-sort ``selections`` to match a saved line-graph order; unknowns last.
 
     A selection matches by ``name`` (the legacy rep-set/group name) first, then
@@ -598,9 +599,9 @@ def block_is_mixed(block: Any) -> bool:
 
 
 def from_block(block: Any, *, tok_to_label: Any = None,
-               line_order_rsets: Optional[Sequence[str]] = None,
-               line_order_wells: Optional[Sequence[str]] = None,
-               palette: Optional[Sequence[str]] = None,
+               line_order_rsets: Sequence[str] | None = None,
+               line_order_wells: Sequence[str] | None = None,
+               palette: Sequence[str] | None = None,
                id_factory: Callable[[], str] = _default_id_factory):
     """Parse a ``sample_definitions`` / ``bar_groups.json`` block → unified state.
 

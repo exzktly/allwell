@@ -15,7 +15,7 @@ logic) but generalised from two axis columns to an arbitrary feature set.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -54,10 +54,10 @@ def column_display_label(ctx, col: str) -> str:
 def collect_feature_matrix(
     ctx,
     *,
-    feature_cols: List[str],
+    feature_cols: list[str],
     timepoints=None,
     include_gate: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Assemble the per-cell feature matrix for the current well selection.
 
     Args:
@@ -83,15 +83,15 @@ def collect_feature_matrix(
     if timepoints:
         target_arr = np.asarray([float(t) for t in timepoints], dtype=float)
 
-    rows_X: List[np.ndarray] = []
-    grp_labels: List[str] = []
-    well_labels: List[str] = []
-    tp_values: List[float] = []
-    group_colors: Dict[str, Any] = {}
+    rows_X: list[np.ndarray] = []
+    grp_labels: list[str] = []
+    well_labels: list[str] = []
+    tp_values: list[float] = []
+    group_colors: dict[str, Any] = {}
     # Per-well colours keyed by well label (absolute plate-position rank), built
     # in BOTH modes so the renderer's "colour by: well" option works even when
     # replicate-set groups are active (group_colors is keyed by group name there).
-    well_colors: Dict[str, Any] = {}
+    well_colors: dict[str, Any] = {}
     dropped = 0
 
     def _collect_well(well_label: str, group_name: str):
@@ -117,7 +117,7 @@ def collect_feature_matrix(
         # Cells passing gate + timepoint, before requiring finite features — the
         # difference after feature-finiteness is what got dropped for NaN.
         base_count = int(np.count_nonzero(mask))
-        cols_vals: List[np.ndarray] = []
+        cols_vals: list[np.ndarray] = []
         for col in feature_cols:
             vals = np.asarray(resolve_value_series(df, col, ratios).to_numpy(), dtype=float)
             cols_vals.append(vals)
@@ -174,7 +174,7 @@ def collect_feature_matrix(
     }
 
 
-def available_feature_columns(ctx, well_label: Optional[str] = None) -> Dict[str, List[str]]:
+def available_feature_columns(ctx, well_label: str | None = None) -> dict[str, list[str]]:
     """Discover the feature columns present in the loaded dataset, by family.
 
     Dynamically derived per-dataset (never hardcoded): intensity/count columns
@@ -187,7 +187,7 @@ def available_feature_columns(ctx, well_label: Optional[str] = None) -> Dict[str
     from well_viewer.data.data_loading import detect_shape_features
     from well_viewer.domain.metric_registry import METRICS
 
-    families: Dict[str, List[str]] = {"Intensity": [], "Shape": [], "Ratios": []}
+    families: dict[str, list[str]] = {"Intensity": [], "Shape": [], "Ratios": []}
 
     # Sample a loaded well's DataFrame to read the actual columns present.
     df = None

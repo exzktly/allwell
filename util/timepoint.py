@@ -36,7 +36,7 @@ reason ``util.well_token`` and ``util.schema`` live here. Listed in
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Tuple
+from typing import Any
 
 # All components optional, but ``parse_hours`` requires at least one to match —
 # an empty match would otherwise accept every string.
@@ -50,7 +50,7 @@ _UNIT_RE = re.compile(
 _TRAILING_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)$")
 
 
-def parse_hours(value: Any) -> Optional[float]:
+def parse_hours(value: Any) -> float | None:
     """Parse a timepoint token into fractional hours, or ``None``.
 
     ``None`` means "not a timepoint I can read" — an opaque label such as
@@ -95,7 +95,7 @@ def parse_hours(value: Any) -> Optional[float]:
     return None
 
 
-def sort_key(value: Any) -> Tuple[bool, float, str]:
+def sort_key(value: Any) -> tuple[bool, float, str]:
     """Chronological sort key for a timepoint token.
 
     ``(unparseable, hours, token)`` — unparseable tokens sort last as a block

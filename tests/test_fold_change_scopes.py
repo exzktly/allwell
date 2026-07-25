@@ -8,7 +8,6 @@ tab switch.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 import pytest
 
@@ -30,7 +29,7 @@ class _TabbedApp:
     visible tab fired and the others didn't.
     """
     current_tab: str = "Bar Plots"
-    redraws: List[str] = field(default_factory=list)
+    redraws: list[str] = field(default_factory=list)
     _app_state: AppState = field(default_factory=AppState)
 
     def _current_centre_tab(self) -> str:

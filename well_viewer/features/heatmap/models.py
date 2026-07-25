@@ -9,7 +9,7 @@ factorial designs, replicate collapses, etc.).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional, Tuple
+from collections.abc import Iterable
 
 from well_viewer.data.data_loading import parse_well_token
 
@@ -20,14 +20,14 @@ class HeatmapLayout:
     rows: int
     cols: int
     # (row, col) -> list of well tokens. Missing keys = empty cell.
-    cells: Dict[Tuple[int, int], List[str]] = field(default_factory=dict)
-    row_labels: Optional[List[str]] = None
-    col_labels: Optional[List[str]] = None
+    cells: dict[tuple[int, int], list[str]] = field(default_factory=dict)
+    row_labels: list[str] | None = None
+    col_labels: list[str] | None = None
 
     # ── basic editing helpers ────────────────────────────────────────────────
 
-    def assigned_wells(self) -> List[str]:
-        out: List[str] = []
+    def assigned_wells(self) -> list[str]:
+        out: list[str] = []
         seen: set = set()
         for wells in self.cells.values():
             for w in wells:
@@ -43,12 +43,12 @@ class HeatmapLayout:
         else:
             self.cells[(row, col)] = clean
 
-    def resize(self, new_rows: int, new_cols: int) -> List[str]:
+    def resize(self, new_rows: int, new_cols: int) -> list[str]:
         """Resize the grid in place. Returns wells that were dropped."""
         new_rows = max(1, int(new_rows))
         new_cols = max(1, int(new_cols))
-        dropped: List[str] = []
-        new_cells: Dict[Tuple[int, int], List[str]] = {}
+        dropped: list[str] = []
+        new_cells: dict[tuple[int, int], list[str]] = {}
         for (r, c), wells in self.cells.items():
             if 0 <= r < new_rows and 0 <= c < new_cols:
                 new_cells[(r, c)] = list(wells)
@@ -72,7 +72,7 @@ class HeatmapLayout:
         order = list(range(self.rows))
         popped = order.pop(src)
         order.insert(dst, popped)
-        new_cells: Dict[Tuple[int, int], List[str]] = {}
+        new_cells: dict[tuple[int, int], list[str]] = {}
         for new_r, old_r in enumerate(order):
             for c in range(self.cols):
                 if (old_r, c) in self.cells:
@@ -90,7 +90,7 @@ class HeatmapLayout:
         order = list(range(self.cols))
         popped = order.pop(src)
         order.insert(dst, popped)
-        new_cells: Dict[Tuple[int, int], List[str]] = {}
+        new_cells: dict[tuple[int, int], list[str]] = {}
         for r in range(self.rows):
             for new_c, old_c in enumerate(order):
                 if (r, old_c) in self.cells:
@@ -117,10 +117,10 @@ class HeatmapLayout:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "HeatmapLayout":
+    def from_dict(cls, data: dict) -> HeatmapLayout:
         rows = int(data.get("rows", 1) or 1)
         cols = int(data.get("cols", 1) or 1)
-        cells: Dict[Tuple[int, int], List[str]] = {}
+        cells: dict[tuple[int, int], list[str]] = {}
         for entry in data.get("cells", []) or []:
             try:
                 r = int(entry.get("row", -1))
@@ -144,10 +144,10 @@ class HeatmapLayout:
         )
 
 
-def layouts_from_dict(data: object) -> List[HeatmapLayout]:
+def layouts_from_dict(data: object) -> list[HeatmapLayout]:
     if not isinstance(data, list):
         return []
-    out: List[HeatmapLayout] = []
+    out: list[HeatmapLayout] = []
     for entry in data:
         if not isinstance(entry, dict):
             continue
@@ -167,7 +167,7 @@ _PLATE_COL_LABELS = [f"{i:d}" for i in range(1, 13)]
 
 def make_plate_layout(well_tokens: Iterable[str]) -> HeatmapLayout:
     """Synthesize the default 8×12 plate layout from a list of well tokens."""
-    cells: Dict[Tuple[int, int], List[str]] = {}
+    cells: dict[tuple[int, int], list[str]] = {}
     for tok in well_tokens:
         rc = parse_well_token(tok)
         if rc is None:

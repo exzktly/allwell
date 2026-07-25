@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Dict, Optional
 
 from well_viewer.data.image_identity import CellKey
 from well_viewer.persistence._io import atomic_write_json
@@ -31,19 +30,19 @@ _logger = logging.getLogger("well_viewer")
 _SCHEMA_VERSION = 2
 
 
-def path_for(app) -> Optional[Path]:
+def path_for(app) -> Path | None:
     if app._app_state.dataset.data_dir:
         return app._app_state.dataset.data_dir / "cell_overrides.json"
     return None
 
 
-def _well_zip_fingerprints(app) -> Dict[str, str]:
+def _well_zip_fingerprints(app) -> dict[str, str]:
     """Snapshot the ``<well>_out.zip`` mtimes for every loaded well.
 
     Used both at save time (stored alongside each override) and at load
     time (compared against the file on disk).
     """
-    out: Dict[str, str] = {}
+    out: dict[str, str] = {}
     data_dir = app._app_state.dataset.data_dir
     if not data_dir:
         return out

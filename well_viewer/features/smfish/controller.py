@@ -10,7 +10,7 @@ import io
 import logging
 import re
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import numpy as np
 
@@ -26,7 +26,7 @@ _IMAGE_EXTS = {".tif", ".tiff", ".png", ".jpg", ".jpeg"}
 
 def make_classifier(
     separator: str,
-) -> Callable[[str, str, Optional[Callable[[str], tuple[str, str]]]], tuple[str, str, str]]:
+) -> Callable[[str, str, Callable[[str], tuple[str, str]] | None], tuple[str, str, str]]:
     """Build a ``classify_member`` adapter that knows the schema separator."""
 
     def _classify(name: str, fluor_lower: str, fov_tp_extractor=None, _pipeline_info=None):

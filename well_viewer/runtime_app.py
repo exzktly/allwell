@@ -40,7 +40,6 @@ import logging
 import shutil
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
     QTimer, Signal,
@@ -223,7 +222,7 @@ def teardown_review_pane(app) -> None:
 
 class WellViewerApp(QWidget):
 
-    def __init__(self, parent=None, data_path: Optional[Path] = None) -> None:
+    def __init__(self, parent=None, data_path: Path | None = None) -> None:
         super().__init__(parent)
         self._NP_AVAILABLE = _NP_AVAILABLE
         self._np = _np
@@ -377,11 +376,11 @@ class WellViewerApp(QWidget):
     # ── Threshold helpers ─────────────────────────────────────────────────────
     def _get_fluor_gate(self, channel: str) -> float: return get_fluor_gate(self._ctx, channel)
 
-    def _get_all_fluor_gates(self) -> Dict[str, float]: return get_all_fluor_gates(self._ctx)
+    def _get_all_fluor_gates(self) -> dict[str, float]: return get_all_fluor_gates(self._ctx)
 
-    def _get_thresh_frac_on(self, channel: Optional[str] = None) -> float: return get_thresh_frac_on(self._ctx, channel)
+    def _get_thresh_frac_on(self, channel: str | None = None) -> float: return get_thresh_frac_on(self._ctx, channel)
 
-    def _set_thresh_frac_on(self, value, channel: Optional[str] = None) -> None: return set_thresh_frac_on(self._ctx, value, channel)
+    def _set_thresh_frac_on(self, value, channel: str | None = None) -> None: return set_thresh_frac_on(self._ctx, value, channel)
 
     def _refresh_thresh_frac_quick_edit(self) -> None: return refresh_thresh_frac_quick_edit(self._ctx)
 
@@ -462,7 +461,7 @@ class WellViewerApp(QWidget):
         self._stats_result_text.setPlainText(text or "")
         self._stats_result_text.setReadOnly(True)
 
-    def _stats_collect_group_values(self, grp: BarGroup, target_t: float) -> List[float]:
+    def _stats_collect_group_values(self, grp: BarGroup, target_t: float) -> list[float]:
         return stats_collect_group_values_shim(self._ctx, grp, target_t)
 
     _STATS_STATISTIC_KEYS = {
@@ -480,7 +479,7 @@ class WellViewerApp(QWidget):
 
     def _stats_run(self) -> None: return stats_run_shim(self._ctx)
 
-    def _stats_draw_ks_cdf(self, group_vals: List[Tuple[str, List[float]]], tp_str: str) -> None:
+    def _stats_draw_ks_cdf(self, group_vals: list[tuple[str, list[float]]], tp_str: str) -> None:
         return stats_draw_ks_cdf_shim(self._ctx, group_vals, tp_str)
 
     # ── Preview sidebar picker ────────────────────────────────────────────────
@@ -580,7 +579,7 @@ class WellViewerApp(QWidget):
 
     def _load_path(self, path): return load_path_shim(self._ctx, path)
 
-    def _load_directory(self, d: Path, label: Optional[str] = None) -> None:
+    def _load_directory(self, d: Path, label: str | None = None) -> None:
         self._drain_pending_centre_builders()
         _load_directory_controller(self._ctx, d, label=label)
         refresh_plot_empty_states(self)
@@ -603,7 +602,7 @@ class WellViewerApp(QWidget):
 
     # ── Plate-map sidebar helpers ─────────────────────────────────────────────
 
-    def _parse_rc(self, label: str) -> Tuple[Optional[str], Optional[str]]:
+    def _parse_rc(self, label: str) -> tuple[str | None, str | None]:
         return parse_rc(label)
 
     def _rebuild_all_timepoints_cache(self) -> None:
@@ -645,7 +644,7 @@ class WellViewerApp(QWidget):
 
     def _ratio_label_for(self, ratio: RatioMetric) -> str: return ratio_label_for(self._ctx, ratio)
 
-    def _ratio_dropdown_labels(self) -> List[str]:
+    def _ratio_dropdown_labels(self) -> list[str]:
         return [self._ratio_label_for(r) for r in self._app_state.channel.ratio_metrics]
 
     def _active_channel_label(self) -> str: return active_channel_label(self._ctx)
@@ -680,7 +679,7 @@ class WellViewerApp(QWidget):
     def _refresh_bar_layout_btn_state(self) -> None: return refresh_bar_layout_btn_state(self._ctx)
     # ── Well selection (plate-map backed) ─────────────────────────────────────
 
-    def _selected_labels(self) -> List[str]:
+    def _selected_labels(self) -> list[str]:
         """Return labels in a stable order (sorted) for consistent plot colours."""
         return sorted(self._app_state.selection.selected_wells, key=lambda lbl: self._parse_rc(lbl))
 
@@ -697,11 +696,11 @@ class WellViewerApp(QWidget):
 
     def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self._ctx, value)
 
-    def _review_row_keys(self, row: dict) -> Tuple[str, str, str]: return review_row_keys(self._ctx, row)
+    def _review_row_keys(self, row: dict) -> tuple[str, str, str]: return review_row_keys(self._ctx, row)
 
     # ── Review Image color customization ──────────────────────────────────
 
-    _REVIEW_IMAGE_COLOR_DEFAULTS: Dict[str, Tuple[int, int, int]] = {
+    _REVIEW_IMAGE_COLOR_DEFAULTS: dict[str, tuple[int, int, int]] = {
         "boundary": (255, 64, 64),
         "selected": (255, 230, 64),
         "tint": (255, 255, 255),
@@ -722,7 +721,7 @@ class WellViewerApp(QWidget):
 
     def _current_centre_tab(self) -> str: return current_centre_tab(self._ctx)
 
-    def _visible_centre_tabs(self) -> "set[str]": return visible_centre_tabs(self._ctx)
+    def _visible_centre_tabs(self) -> set[str]: return visible_centre_tabs(self._ctx)
 
     def _is_tab_visible(self, name: str) -> bool: return is_tab_visible(self._ctx, name)
 
@@ -749,7 +748,7 @@ class WellViewerApp(QWidget):
     # ── Bar drag-and-drop reordering ─────────────────────────────────────────
     # Implementations live in ``well_viewer.barplot_controller``.
 
-    def _bar_current_keys(self) -> List: return _bar_ordered_keys(self._ctx)
+    def _bar_current_keys(self) -> list: return _bar_ordered_keys(self._ctx)
 
     # ── Bar plot export ───────────────────────────────────────────────────────
 
@@ -758,15 +757,15 @@ class WellViewerApp(QWidget):
 
     def _bar_well_display_label(self, lbl: str) -> str: return bar_well_display_label(self._ctx, lbl)
 
-    def _replicate_display_label(self, rset: 'ReplicateSet') -> str: return replicate_display_label(self._ctx, rset)
+    def _replicate_display_label(self, rset: ReplicateSet) -> str: return replicate_display_label(self._ctx, rset)
 
-    def _rep_sets_loaded(self) -> 'List[ReplicateSet]': return rep_sets_loaded(self._ctx)
+    def _rep_sets_loaded(self) -> list[ReplicateSet]: return rep_sets_loaded(self._ctx)
 
-    def _groups_from_rep_sets(self) -> "List[BarGroup]":
+    def _groups_from_rep_sets(self) -> list[BarGroup]:
         """One BarGroup per loaded selection (each wrapping its ReplicateSet)."""
         return [BarGroup(r.name, members=[r]) for r in self._rep_sets_loaded()]
 
-    def _rep_sets_active(self) -> 'List[ReplicateSet]': return rep_sets_active(self._ctx)
+    def _rep_sets_active(self) -> list[ReplicateSet]: return rep_sets_active(self._ctx)
 
     def _invalidate_stats_cache(self) -> None: return invalidate_stats_cache(self._ctx)
 
@@ -785,7 +784,7 @@ class WellViewerApp(QWidget):
         ("All files",        "*.*"),
     ]
 
-    def _save_matplotlib_fig(self, fig: "Figure", default_name: str) -> None:
+    def _save_matplotlib_fig(self, fig: Figure, default_name: str) -> None:
         """Show a save-file dialog and write *fig* to disk."""
         _plot_save_matplotlib_fig_orchestrator(
             self._ctx,

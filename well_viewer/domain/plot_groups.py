@@ -8,7 +8,8 @@ exist to reload a saved subset of wells into the live plate selection.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Iterable, Optional
+from typing import Any
+from collections.abc import Iterable
 
 from well_viewer.domain.selections_model import _clean_wells
 
@@ -34,9 +35,9 @@ def make_plot_group(
     *,
     name: Any,
     wells: Any,
-    group_id: Optional[str] = None,
-    used_names: Optional[set[str]] = None,
-    used_ids: Optional[set[str]] = None,
+    group_id: str | None = None,
+    used_names: set[str] | None = None,
+    used_ids: set[str] | None = None,
 ) -> dict:
     """Return a normalised Plot Group dictionary."""
     used_names = used_names if used_names is not None else set()

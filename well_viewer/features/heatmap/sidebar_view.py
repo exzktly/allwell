@@ -18,7 +18,6 @@ editor uses.
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QMimeData, Qt
 from PySide6.QtGui import QDrag
@@ -52,7 +51,7 @@ from well_viewer.core.dnd import WELL_MIME  # shared drag/drop token
 class _LayoutTable(QTableWidget):
     """The R×C grid. Drag source AND drop sink for well tokens."""
 
-    def __init__(self, on_drop, on_clear_cell, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, on_drop, on_clear_cell, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._on_drop = on_drop
         self._on_clear_cell = on_clear_cell
@@ -78,7 +77,7 @@ class _LayoutTable(QTableWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.setSizeAdjustPolicy(QAbstractScrollArea.AdjustIgnored)
 
-    def mimeTypes(self) -> List[str]:
+    def mimeTypes(self) -> list[str]:
         return [WELL_MIME]
 
     def startDrag(self, _supportedActions) -> None:
@@ -265,7 +264,7 @@ def build_heatmap_layout_sidebar(ctx, parent: QWidget) -> QWidget:
 
 def _ensure_sidebar_layout(ctx) -> HeatmapLayout:
     """Return (creating if needed) the single ``Sidebar`` layout."""
-    layouts: List[HeatmapLayout] = list(ctx.runtime.heatmap.layouts or [])
+    layouts: list[HeatmapLayout] = list(ctx.runtime.heatmap.layouts or [])
     for lay in layouts:
         if lay.name == SIDEBAR_LAYOUT_NAME:
             return lay
@@ -276,7 +275,7 @@ def _ensure_sidebar_layout(ctx) -> HeatmapLayout:
     return lay
 
 
-def _find_cell_for_token(layout: HeatmapLayout, token: str) -> Optional[Tuple[int, int]]:
+def _find_cell_for_token(layout: HeatmapLayout, token: str) -> tuple[int, int] | None:
     for (r, c), wells in layout.cells.items():
         if token in wells:
             return (r, c)
@@ -379,7 +378,7 @@ def _on_size_changed(ctx) -> None:
     refresh_heatmap_layout_sidebar(ctx)
 
 
-def _on_drop_event(ctx, kind: str, rc: Optional[Tuple[int, int]], token: str) -> None:
+def _on_drop_event(ctx, kind: str, rc: tuple[int, int] | None, token: str) -> None:
     """Handle a successful drop. Updates state and re-renders both widgets."""
     layout = _ensure_sidebar_layout(ctx)
     src = _find_cell_for_token(layout, token)

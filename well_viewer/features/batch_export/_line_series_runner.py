@@ -24,7 +24,6 @@ against the group's selections.
 from __future__ import annotations
 
 import math
-from typing import List, Optional, Tuple
 
 from well_viewer.domain import fold_change as _fc
 from well_viewer.domain.batch_models import BarGroup
@@ -59,10 +58,10 @@ def collect_line_series_for_group(
     use_sem: bool,
     val_col: str,
     fluor_gates,
-    fc_state: Tuple[bool, str, bool] = (False, "", False),
-    fc_baseline_tp: Optional[float] = None,
+    fc_state: tuple[bool, str, bool] = (False, "", False),
+    fc_baseline_tp: float | None = None,
     include_cdf: bool = False,
-) -> List["LineSeries"]:
+) -> list[LineSeries]:
     """Build :class:`LineSeries` for every member of a batch ``BarGroup``.
 
     Replicate-set members use the tab's ``compute_rep_stats`` /
@@ -113,11 +112,11 @@ def collect_line_series_for_group(
             op_ctrl=fc_op_ctrl, op_t0=fc_op_t0,
         )
 
-    def _cdf_for(wells: List[str]) -> List[float]:
+    def _cdf_for(wells: list[str]) -> list[float]:
         if not (include_cdf and wells):
             return []
         from well_viewer.data.data_loading import _all_fluor_values_filtered
-        vals: List[float] = []
+        vals: list[float] = []
         for lbl in wells:
             df = _get_rows(ctx, lbl)
             if df is None or df.empty:
@@ -128,7 +127,7 @@ def collect_line_series_for_group(
             ).tolist())
         return vals
 
-    series_out: List["LineSeries"] = []
+    series_out: list[LineSeries] = []
 
     # ── Replicate-set members: the tab's rep-set statistic ───────────────────
     for rset in group.members:

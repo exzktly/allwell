@@ -18,7 +18,7 @@ selector half imports matplotlib lazily inside each function, mirroring the
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -147,7 +147,7 @@ DENSITY_GAMMA = 0.6
 def render_scatter_points(
     ctx,
     ax,
-    scatter_data: Dict[str, Dict[str, Any]],
+    scatter_data: dict[str, dict[str, Any]],
     *,
     density_on: bool,
     x_log: bool,
@@ -196,14 +196,14 @@ def render_scatter_points(
     except Exception:
         swallowed()
 
-    interaction_points: List[Tuple[float, float, Tuple[str, str, str, int]]] = []
-    legend_handles: List[Any] = []
+    interaction_points: list[tuple[float, float, tuple[str, str, str, int]]] = []
+    legend_handles: list[Any] = []
 
     # decision: colour by timepoint (viridis), overrides identity colour. Build
     # the map once from every tp present so all wells/panels share one scale.
-    tp_color: Dict[float, Any] = {}
+    tp_color: dict[float, Any] = {}
     if color_by_tp:
-        all_tps: List[float] = []
+        all_tps: list[float] = []
         for _d in scatter_data.values():
             all_tps.extend(_d.get("tp", []) or [])
         tp_color = timepoint_color_map(all_tps)
@@ -320,21 +320,21 @@ def _gate_on_current_axes(ctx, gate) -> bool:
     return gx == cols[0] and gy == cols[1]
 
 
-def _norm_gate(g: Dict[str, float]) -> Dict[str, float]:
+def _norm_gate(g: dict[str, float]) -> dict[str, float]:
     """Return a copy of *g* with ``x0<=x1`` and ``y0<=y1`` (drag may flip them)."""
     x0, x1 = sorted((g["x0"], g["x1"]))
     y0, y1 = sorted((g["y0"], g["y1"]))
     return {"x0": x0, "y0": y0, "x1": x1, "y1": y1}
 
 
-def _in_gate(xs: np.ndarray, ys: np.ndarray, gate: Dict[str, float]) -> np.ndarray:
+def _in_gate(xs: np.ndarray, ys: np.ndarray, gate: dict[str, float]) -> np.ndarray:
     return (
         (xs >= gate["x0"]) & (xs <= gate["x1"])
         & (ys >= gate["y0"]) & (ys <= gate["y1"])
     )
 
 
-def _pct(xs: np.ndarray, ys: np.ndarray, gate: Dict[str, float]):
+def _pct(xs: np.ndarray, ys: np.ndarray, gate: dict[str, float]):
     """Return ``(pct, n_inside, total)`` or ``(None, 0, 0)`` when empty."""
     tot = int(xs.size)
     if tot == 0:
@@ -374,10 +374,10 @@ def compute_gate_inclusion(df, gates, ratios=None) -> np.ndarray:
 
 
 def compute_gate_stats(
-    scatter_data: Dict[str, Dict[str, Any]],
-    gate: Dict[str, float],
-    tps_list: List[float],
-) -> List[Tuple[str, Optional[str], int]]:
+    scatter_data: dict[str, dict[str, Any]],
+    gate: dict[str, float],
+    tps_list: list[float],
+) -> list[tuple[str, str | None, int]]:
     """Label rows ``(text, color_or_None, indent)`` for one gate.
 
     Percentages are denominated by each group's own total (the FACS reading:
@@ -391,7 +391,7 @@ def compute_gate_stats(
     groups = list(scatter_data.items())
     multi_groups = len(groups) > 1
     multi_tps = len(tps_list) > 1
-    rows: List[Tuple[str, Optional[str], int]] = []
+    rows: list[tuple[str, str | None, int]] = []
 
     if not multi_groups and not multi_tps:
         if groups:

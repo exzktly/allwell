@@ -2353,6 +2353,14 @@ fixture (it doesn't help).
    never read as success. `--shard I/N` deals the files out round-robin for a CI
    matrix; `--batch 1` is the safest setting on a constrained machine.
 
+   Two ceilings guard a batch, and they do different jobs. `--timeout=300`
+   (signal-based) catches a hung *test*. `SLOW_BATCH_TIMEOUT` (default 1800s) is
+   the wall-clock backstop for a C-level hang inside Qt, which ignores signals.
+   Keep the second one generous: app construction dominates this lane — the
+   heaviest pair, `test_multivariate_tab` + `test_playground` (29 tests), takes
+   ~12 minutes with the machine to itself and passes — and a batch cut off here
+   writes no report, so too tight a ceiling reports green tests as a failure.
+
 **The slow lane runs nightly, not on PRs** — `.github/workflows/slow-lane.yml`,
 six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate
 because it takes minutes rather than seconds and its per-test memory profile is

@@ -2301,6 +2301,29 @@ nothing beyond scipy/skimage, still runs. Availability is probed with
 share a process, and the pipeline keeps each run in its own subprocess precisely
 to avoid that.
 
+### 10.6 Environment bootstrap for remote sessions
+
+`.claude/hooks/session-start.sh`, registered as a `SessionStart` hook in
+`.claude/settings.json`, provisions a Claude Code on the web container so the
+linter and the fast lane can run there. It installs the Qt system libraries
+(`libegl1`, `libgl1`, `libxkbcommon0`, `libdbus-1-3`) and
+`tests/requirements-dev.txt`, mirroring `.github/workflows/ci.yml`'s setup steps
+so a remote session and CI resolve the same pinned versions from the same file.
+Both steps are guarded by a presence check, so a cached container re-runs the
+hook in well under a second.
+
+Without it a fresh remote container has no test stack at all, and every test
+collection dies at `import PySide6` with `libEGL.so.1: cannot open shared object
+file` — Qt needs GL/EGL even under the offscreen QPA platform.
+
+The hook exits immediately when `CLAUDE_CODE_REMOTE` is not `true`: a developer
+machine has its own environment (`_Docs/requirements.txt`) and the hook must
+never touch it. It also deliberately does **not** install the ML stack —
+TensorFlow + StarDist and Torch + Cellpose are several GB and only the `slow`
+segmentation tests need them, which is the same line `tests/requirements-dev.txt`
+draws. A remote session that needs to run §10.5's StarDist or Cellpose tests
+installs that stack by hand.
+
 ---
 
 ## 11. Recipes

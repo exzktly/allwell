@@ -50,6 +50,12 @@ scripts/build_executable.sh --clean            # macOS .app (always pass --clean
 ALLWELL_PROFILE=<name> scripts/build_executable.sh   # feature-subset binary
 ```
 
+On Claude Code on the web, `.claude/hooks/session-start.sh` has already installed
+the test deps and the Qt system libraries (`libegl1` and friends — Qt needs
+GL/EGL even under the offscreen QPA), so `ruff check .` and `scripts/test.sh`
+work from the first turn. It does **not** install TF/StarDist/Torch/Cellpose; the
+`slow` segmentation tests still need those by hand. See ARCHITECTURE.md §10.6.
+
 Test deps: `pip install -r tests/requirements-dev.txt` — pinned to the app's
 runtime stack (numpy 1.24, pandas 2.2, PySide6 6.7.3) and deliberately without
 TF/Torch/StarDist, so the `importorskip` tests for those **skip** in CI. Keep

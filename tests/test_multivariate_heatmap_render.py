@@ -12,10 +12,10 @@ import types
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
 
-from well_viewer.features.multivariate import renderer as R  # noqa: E402
+from well_viewer.features.multivariate import renderer as R
 
 
 def _annotations(ax):

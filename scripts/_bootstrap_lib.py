@@ -97,26 +97,26 @@ class _TeeStream:
         self._primary.write(data)
         try:
             self._log.write(data)
-        except Exception:  # noqa: BLE001 — never let logging break runtime
+        except Exception:  # never let logging break runtime
             pass
         try:
             self._primary.flush()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             self._log.flush()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         return len(data)
 
     def flush(self) -> None:
         try:
             self._primary.flush()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         try:
             self._log.flush()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     def fileno(self) -> int:
@@ -138,7 +138,7 @@ def _log_to_file(text: str) -> None:
     try:
         _LOG_FILE.write(text if text.endswith("\n") else text + "\n")
         _LOG_FILE.flush()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -397,7 +397,7 @@ def _load_existing_key(alias: str) -> str:
     try:
         from services.remote_config import get_remote
         host = get_remote(alias)
-    except Exception:  # noqa: BLE001 — best-effort
+    except Exception:  # best-effort
         return ""
     return host.ssh_key_path if host is not None else ""
 
@@ -947,7 +947,7 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-        except (AttributeError, OSError):  # noqa: BLE001 — Python <3.7, or already-wrapped stream
+        except (AttributeError, OSError):  # Python <3.7, or already-wrapped stream
             pass
 
     # v5.2.11: open a per-invocation debug log on the LOCAL machine.
@@ -1012,7 +1012,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from services.remote_config import get_remote
         host_entry = get_remote(args.alias)
-    except Exception:  # noqa: BLE001 — best-effort
+    except Exception:  # best-effort
         host_entry = None
     if host_entry is not None and host_entry.ssh_alias:
         ssh_target = host_entry.ssh_alias

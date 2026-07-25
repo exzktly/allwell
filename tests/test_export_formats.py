@@ -17,15 +17,15 @@ import sys
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import pytest  # noqa: E402
+import matplotlib.pyplot as plt
+import pytest
 
-from well_viewer.features.export.style import (  # noqa: E402
+from well_viewer.features.export.style import (
     _macos_pasteboard_write,
     _render_figure,
     copy_figure_to_clipboard,
 )
-from well_viewer.features.export.sidebar_view import (  # noqa: E402
+from well_viewer.features.export.sidebar_view import (
     _EXPORT_FILTER_ORDER,
     _EXPORT_FILTERS,
     ExportStyleSidebar,

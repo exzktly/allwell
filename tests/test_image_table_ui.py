@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C
 
 
 def test_build_does_not_render(image_table_app):

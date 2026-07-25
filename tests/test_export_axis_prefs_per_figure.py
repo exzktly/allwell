@@ -10,9 +10,9 @@ from types import SimpleNamespace
 
 import matplotlib
 matplotlib.use("Agg")
-from matplotlib.figure import Figure  # noqa: E402
+from matplotlib.figure import Figure
 
-from well_viewer.core import plot_style as PS  # noqa: E402
+from well_viewer.core import plot_style as PS
 
 
 class _Widgets:

@@ -33,12 +33,12 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget,
 )
 
-import theme  # noqa: E402
+import theme
 
 
 class KbdHint(QLabel):
@@ -50,7 +50,7 @@ class KbdHint(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet(self._build_qss())
 
-    def setText(self, text: str) -> None:  # noqa: A003 - QLabel override
+    def setText(self, text: str) -> None:  # QLabel override
         super().setText(text or "")
 
     def _build_qss(self) -> str:

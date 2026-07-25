@@ -44,7 +44,7 @@ _METRIC_SUFFIXES = (
 )
 
 
-from well_viewer.data.image_identity import (  # noqa: E402  (after _METRIC_SUFFIXES decl)
+from well_viewer.data.image_identity import (  # after _METRIC_SUFFIXES decl
     parse_timepoint_hours,  # re-export: single source of truth in image_identity
     normalize_fov_series as _normalize_fov_series,
 )

@@ -24,7 +24,7 @@ pytest.importorskip("skimage")
 pytest.importorskip("tifffile")
 pytest.importorskip("stardist")   # pipeline imports the dep check unconditionally
 np = pytest.importorskip("numpy")
-import tifffile  # noqa: E402
+import tifffile
 
 REPO = Path(__file__).resolve().parent.parent
 SCHEMA = "experiment:channel:well:fov:timepoint"

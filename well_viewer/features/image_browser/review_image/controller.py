@@ -30,7 +30,7 @@ from well_viewer.core.safe import swallowed
 # Pure data/query helpers live in review_image/collect.py (T4). The Qt event
 # handlers below + external callers (load_controller, the tab views) import
 # these from here, so re-export them.
-from well_viewer.features.image_browser.review_image.collect import (  # noqa: E402,F401
+from well_viewer.features.image_browser.review_image.collect import (  # noqa: F401
     _binary_gate_columns,
     _flatfield_qc,
     _load_arrays_from_refs,
@@ -62,7 +62,7 @@ def _guard_event(fn):
     def _wrapped(app, event, *args, **kwargs):
         try:
             return fn(app, event, *args, **kwargs)
-        except Exception:  # noqa: BLE001 — never let a click kill the app
+        except Exception:  # never let a click kill the app
             _logger.exception("review-image %s failed", getattr(fn, "__name__", fn))
             return None
 
@@ -250,7 +250,7 @@ def select_review_csv_row_for_cell(ctx, fov: str, tp: str, nucleus_id: str, logg
         ctx.notify.set_status(
             f"No exact Review CSV row match for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}; showing fallback rows."
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Review-image -> Review CSV navigation failed")
         try:
             ctx.notify.set_status("Could not navigate to the Review CSV row (see log for details).")
@@ -271,7 +271,7 @@ def on_review_csv_row_double_click(ctx, item) -> None:
     """
     try:
         _on_review_csv_row_double_click_impl(ctx, item)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         import logging
         logging.getLogger("well_viewer").exception(
             "Review-CSV row double-click failed",

@@ -24,8 +24,8 @@ pytest.importorskip("tensorflow")
 pytest.importorskip("stardist")
 pytest.importorskip("tifffile")
 
-import process_microscopy as pm  # noqa: E402
-from tests.fixtures.synthetic_pipeline import (  # noqa: E402
+import process_microscopy as pm
+from tests.fixtures.synthetic_pipeline import (
     DEFAULT_CENTERS,
     write_synthetic_fov,
     write_synthetic_well_folder,

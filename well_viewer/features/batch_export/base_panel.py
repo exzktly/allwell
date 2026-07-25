@@ -221,7 +221,7 @@ class BatchExportPanel(QWidget):
         self._split_sep = sep
         self._split_right_index = 2   # left(0), sep(1), right(2)
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+    def resizeEvent(self, event) -> None:  # Qt override
         super().resizeEvent(event)
         self.apply_split_orientation()
 

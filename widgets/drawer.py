@@ -30,14 +30,14 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import (  # noqa: E402
+from PySide6.QtCore import (
     QEasingCurve, QEvent, QPropertyAnimation, QRect, Qt, Signal,
 )
-from PySide6.QtGui import QPainter  # noqa: E402
-from PySide6.QtWidgets import QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-import theme  # noqa: E402
-from widgets._support import with_alpha  # noqa: E402
+import theme
+from widgets._support import with_alpha
 
 
 class _Backdrop(QWidget):
@@ -49,7 +49,7 @@ class _Backdrop(QWidget):
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setVisible(False)
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         p = QPainter(self)
         # 0.35 alpha matches theme.Colors.drop_shadow_md ("rgba(0,0,0,0.35)")
         # — keep the literal here because Drawer paints a solid backdrop
@@ -57,7 +57,7 @@ class _Backdrop(QWidget):
         # from the same design-token decision.
         p.fillRect(self.rect(), with_alpha(theme.Colors.ink_dark, 0.35))
 
-    def mousePressEvent(self, _event) -> None:  # noqa: N802
+    def mousePressEvent(self, _event) -> None:
         self.clicked.emit()
 
 
@@ -114,7 +114,7 @@ class Drawer(QWidget):
     def isOpen(self) -> bool:
         return self._open
 
-    def open(self) -> None:  # noqa: A003 - mirrors common drawer API
+    def open(self) -> None:  # mirrors common drawer API
         if self._open:
             return
         self._open = True
@@ -131,7 +131,7 @@ class Drawer(QWidget):
         self._anim.start()
         self.opened.emit()
 
-    def close(self) -> None:  # noqa: A003
+    def close(self) -> None:
         if not self._open:
             return
         self._open = False
@@ -179,7 +179,7 @@ class Drawer(QWidget):
             self.hide()
             self._backdrop.setVisible(False)
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+    def eventFilter(self, obj, event) -> bool:
         # PySide6 occasionally dispatches a non-QEvent through eventFilter
         # (observed: a QStandardItem from a QCompleter popup routed in place of
         # the QEvent). Bail before any ``event.type()`` access — and before
@@ -193,7 +193,7 @@ class Drawer(QWidget):
                 self._sync_backdrop_geom()
         return super().eventFilter(obj, event)
 
-    def keyPressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
             self.close()
             return

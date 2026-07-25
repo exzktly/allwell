@@ -212,7 +212,7 @@ def compute_auto_thresholds(
 
     try:
         from skimage.filters import threshold_otsu as _threshold_otsu
-    except Exception as exc:  # noqa: BLE001 - third party guard
+    except Exception as exc:  # third party guard
         _emit(f"Auto-threshold: skimage.filters.threshold_otsu unavailable: {exc}")
         return {}
 

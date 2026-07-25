@@ -585,7 +585,7 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
         # The export-style pass stamps the per-plot data marker onto every
         # Line2D in ``ax.lines``; tag this bracket so it's skipped and keeps its
         # flat solid shape (otherwise it renders as a row of circles).
-        bracket_line._aw_no_style_override = True  # noqa: SLF001
+        bracket_line._aw_no_style_override = True
         ax.text((xa + xb) / 2.0, y + h, _significance_marker(p_show),
                 ha="center", va="bottom", fontsize=8, color=fg,
                 zorder=6, clip_on=False)

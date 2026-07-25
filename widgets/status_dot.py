@@ -21,12 +21,12 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QRectF, QSize, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QPainter  # noqa: E402
-from PySide6.QtWidgets import QSizePolicy, QWidget  # noqa: E402
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
-import theme  # noqa: E402
-from widgets._support import with_alpha  # noqa: E402
+import theme
+from widgets._support import with_alpha
 
 _STATUS_TOKENS = {
     "success": "success",
@@ -86,7 +86,7 @@ class StatusDot(QWidget):
         return self.sizeHint()
 
     # ── painting ─────────────────────────────────────────────────────────
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         d = self._dot_d()

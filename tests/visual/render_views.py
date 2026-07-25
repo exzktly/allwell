@@ -28,11 +28,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from PySide6.QtCore import QPoint  # noqa: E402
-from PySide6.QtGui import QFontDatabase, QPainter  # noqa: E402
-from PySide6.QtWidgets import QApplication, QTabWidget, QWidget  # noqa: E402
-from PySide6.QtTest import QTest  # noqa: E402
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg  # noqa: E402
+from PySide6.QtCore import QPoint
+from PySide6.QtGui import QFontDatabase, QPainter
+from PySide6.QtWidgets import QApplication, QTabWidget, QWidget
+from PySide6.QtTest import QTest
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 
 OUT_DIR = REPO_ROOT / "_Docs" / "visual_audit" / "screenshots"
 WIN_W, WIN_H = 1640, 980

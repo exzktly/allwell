@@ -16,9 +16,9 @@ import pytest
 
 pytest.importorskip("scipy")
 pytest.importorskip("skimage")
-import tifffile  # noqa: E402
+import tifffile
 
-from process_microscopy import (  # noqa: E402
+from process_microscopy import (
     sample_empty_well_images,
     build_background_models,
     build_flatfield_models,

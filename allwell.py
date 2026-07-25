@@ -1101,7 +1101,7 @@ class AllWellApp(QMainWindow):
         app = self
 
         class _RingHandler(_logging.Handler):
-            def emit(self, record):  # noqa: N802
+            def emit(self, record):
                 try:
                     line = self.format(record)
                     ring.append(line)
@@ -1253,7 +1253,7 @@ class AllWellApp(QMainWindow):
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event) -> None:
         self._save_window_state()
         if self._review is not None and hasattr(self._review, "_persistence"):
             try:
@@ -1309,7 +1309,7 @@ def _install_combobox_popup_widener() -> None:
     QComboBox._aw_popup_widened = True
     _original_show = QComboBox.showPopup
 
-    def _wide_show(self) -> None:  # noqa: N802 — Qt API name
+    def _wide_show(self) -> None:  # Qt API name
         view = self.view()
         if view is not None:
             fm = view.fontMetrics()

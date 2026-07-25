@@ -914,7 +914,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         try:
             self._runner.stop()
             self._log_line("\n[User stopped the pipeline]\n", "WARNING")
-        except Exception:  # noqa: BLE001
+        except Exception:
             swallowed()
 
     # ------------------------------------------------------------------
@@ -1182,7 +1182,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     self._refresh_last_run_summary()  # C4: show the just-finished run
         except queue.Empty:
             pass
-        except Exception:  # noqa: BLE001 — a bad event must not kill the poller
+        except Exception:  # a bad event must not kill the poller
             swallowed()    # (would freeze the live log/dashboard permanently)
         if getattr(self, "_alive", True):
             QTimer.singleShot(80, self._poll_log)

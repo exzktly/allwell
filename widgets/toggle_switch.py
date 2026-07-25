@@ -19,14 +19,14 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import (  # noqa: E402
+from PySide6.QtCore import (
     Property, QEasingCurve, QPropertyAnimation, QRectF, QSize, Qt,
 )
-from PySide6.QtGui import QColor, QPainter, QPen  # noqa: E402
-from PySide6.QtWidgets import QCheckBox, QSizePolicy, QWidget  # noqa: E402
+from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import QCheckBox, QSizePolicy, QWidget
 
-import theme  # noqa: E402
-from widgets._support import lerp_color, with_alpha  # noqa: E402
+import theme
+from widgets._support import lerp_color, with_alpha
 
 
 class ToggleSwitch(QCheckBox):
@@ -101,13 +101,13 @@ class ToggleSwitch(QCheckBox):
         return self.sizeHint()
 
     # ── input ────────────────────────────────────────────────────────────
-    def hitButton(self, pos) -> bool:  # noqa: N802
+    def hitButton(self, pos) -> bool:
         # Toggle when clicking anywhere on the widget, not just the (zero-size)
         # indicator / label rect.
         return self.rect().contains(pos)
 
     # ── painting ─────────────────────────────────────────────────────────
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         c = theme.Colors
         tw, th = self._track_w(), self._track_h()
         x0 = float(self._pad())

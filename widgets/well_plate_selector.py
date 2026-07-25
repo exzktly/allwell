@@ -46,19 +46,19 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import (  # noqa: E402
+from PySide6.QtCore import (
     Property, QEvent, QMimeData, QPoint, QRectF, QSize, Qt, Signal,
 )
-from PySide6.QtGui import (  # noqa: E402
+from PySide6.QtGui import (
     QBrush, QColor, QDrag, QFont, QLinearGradient, QPainter, QPen, QRadialGradient,
 )
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QPushButton, QSizePolicy, QToolTip,
     QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets._support import with_alpha  # noqa: E402
+import theme
+from widgets._support import with_alpha
 
 _ROW_LETTERS = "ABCDEFGH"
 _N_ROWS = 8
@@ -232,10 +232,10 @@ class _PlateGrid(QWidget):
     # minimum height that keeps the wells circular and the row/column labels
     # legible. Prevents the Sample Definitions tab's stacked plate + groups
     # from crushing the plate when the centre column is short.
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         lab = self._label_extent()
         # Cell size that fits the offered width (label column + 12 cells).
         cell = max(1.0, (max(1.0, float(w)) - lab) / _N_COLS)
@@ -528,7 +528,7 @@ class _PlateGrid(QWidget):
             return ("well", row, col)
         return None
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
         hit = self._hit(event.position().x(), event.position().y())
@@ -607,7 +607,7 @@ class _PlateGrid(QWidget):
         else:
             self.toggle_well(r, c)
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         if (self._drag_mime and self._drag_press_pos is not None
                 and (event.buttons() & Qt.LeftButton)):
             moved = (event.position().toPoint() - self._drag_press_pos).manhattanLength()
@@ -655,7 +655,7 @@ class _PlateGrid(QWidget):
                 self._drag_visited.add(cell)
                 self.toggle_well(cell[0], cell[1], force=self._drag_adding)
 
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, event) -> None:
         # A drag-source press defers its selection action until the gesture is
         # resolved: ``mouseMoveEvent`` clears the armed cell the moment it
         # starts a QDrag, so a cell still armed here belongs to a plain click
@@ -699,19 +699,19 @@ class _PlateGrid(QWidget):
             self._changed()
 
     # ── drop sink (heatmap-layout DnD) ───────────────────────────────────
-    def dragEnterEvent(self, event) -> None:  # noqa: N802
+    def dragEnterEvent(self, event) -> None:
         if self._accept_mime and event.mimeData().hasFormat(self._accept_mime):
             event.acceptProposedAction()
             return
         super().dragEnterEvent(event)
 
-    def dragMoveEvent(self, event) -> None:  # noqa: N802
+    def dragMoveEvent(self, event) -> None:
         if self._accept_mime and event.mimeData().hasFormat(self._accept_mime):
             event.acceptProposedAction()
             return
         super().dragMoveEvent(event)
 
-    def dropEvent(self, event) -> None:  # noqa: N802
+    def dropEvent(self, event) -> None:
         if not (self._accept_mime and event.mimeData().hasFormat(self._accept_mime)):
             super().dropEvent(event)
             return
@@ -726,7 +726,7 @@ class _PlateGrid(QWidget):
             self.wellDropped.emit(well_id, token)
         event.acceptProposedAction()
 
-    def leaveEvent(self, _event) -> None:  # noqa: N802
+    def leaveEvent(self, _event) -> None:
         if (self._hover_cell, self._hover_row, self._hover_col, self._hover_corner) != (
             None, None, None, False,
         ):
@@ -734,7 +734,7 @@ class _PlateGrid(QWidget):
             self._hover_corner = False
             self.update()
 
-    def event(self, ev) -> bool:  # noqa: N802
+    def event(self, ev) -> bool:
         if ev.type() == QEvent.ToolTip:
             # A ToolTip can be delivered while a *modal* dialog (e.g. the
             # Open-directory picker) owns the event loop. Driving QToolTip from a
@@ -866,7 +866,7 @@ class _PlateGrid(QWidget):
                       max(1.0, wr.width() * 0.06)))
         p.drawArc(inner, 210 * 16, 120 * 16)
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         c = theme.Colors
         traces = theme.Colors.trace
         lab, cell, ox, oy = self._metrics()

@@ -99,13 +99,13 @@ def _fmt(ctx, dim: str, val: str) -> str:
 class _VLabel(QLabel):
     """A QLabel that paints its text rotated 90° — the left vertical facet axis."""
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         return super().sizeHint().transposed()
 
-    def minimumSizeHint(self):  # noqa: N802
+    def minimumSizeHint(self):
         return super().minimumSizeHint().transposed()
 
-    def paintEvent(self, _e):  # noqa: N802
+    def paintEvent(self, _e):
         p = QPainter(self)
         # Rotate −90° about the centre so the text reads bottom-to-top (the
         # conventional vertical facet-axis orientation).

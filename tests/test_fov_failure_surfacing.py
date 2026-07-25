@@ -21,8 +21,8 @@ import pytest
 pytest.importorskip("numpy")
 pytest.importorskip("tifffile")
 
-import process_microscopy as pm  # noqa: E402
-from services.pipeline_runner import classify_log_line  # noqa: E402
+import process_microscopy as pm
+from services.pipeline_runner import classify_log_line
 
 
 def test_dump_fov_failure_trace_writes_readable_file(tmp_path):

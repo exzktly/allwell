@@ -33,7 +33,7 @@ from well_viewer.core.plot_style import (  # noqa: F401  (re-export for compat)
 # existing ``from well_viewer.features.export.style import copy_figure_to_clipboard``
 # call sites (e.g. core/centre_view.py) keep working — same pattern as the
 # plot_style re-exports above.
-from widgets.fig_clipboard import (  # noqa: F401,E402  (re-export for back-compat)
+from widgets.fig_clipboard import (  # noqa: F401 (re-export for back-compat)
     _macos_pasteboard_write,
     _png_to_tiff,
     _render_figure,

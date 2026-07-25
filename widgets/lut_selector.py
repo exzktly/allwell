@@ -30,17 +30,17 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal  # noqa: E402
-from PySide6.QtGui import QColor  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy,
     QToolButton, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets.gradient_strip import GradientStrip  # noqa: E402
-from widgets.popover import Popover  # noqa: E402
-from widgets.search_input import SearchInput  # noqa: E402
+import theme
+from widgets.gradient_strip import GradientStrip
+from widgets.popover import Popover
+from widgets.search_input import SearchInput
 
 _CATEGORIES: dict[str, list[str]] = {
     "Perceptual": ["viridis", "plasma", "inferno", "magma", "cividis",
@@ -124,7 +124,7 @@ class _LutRow(QWidget):
     def name(self) -> str:
         return self._name
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self.clicked.emit(self._name)
         super().mousePressEvent(event)
@@ -194,7 +194,7 @@ class LutSelector(QWidget):
         self.setStyleSheet(self._build_qss())
 
     # ── API ──────────────────────────────────────────────────────────────
-    def setLut(self, name: str, reversed: bool = False) -> None:  # noqa: A002
+    def setLut(self, name: str, reversed: bool = False) -> None:
         if name not in _all_lut_names():
             name = self._lut
         changed = (name != self._lut or bool(reversed) != self._reversed)

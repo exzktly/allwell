@@ -20,12 +20,12 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QRectF, QSize, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QPainter, QPen  # noqa: E402
-from PySide6.QtWidgets import QSizePolicy, QSlider  # noqa: E402
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtWidgets import QSizePolicy, QSlider
 
-import theme  # noqa: E402
-from widgets._support import with_alpha  # noqa: E402
+import theme
+from widgets._support import with_alpha
 
 
 class StyledSlider(QSlider):
@@ -92,7 +92,7 @@ class StyledSlider(QSlider):
         return round(self.minimum() + frac * (self.maximum() - self.minimum()))
 
     # ── input ────────────────────────────────────────────────────────────
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton and self.orientation() == Qt.Horizontal:
             self.setSliderDown(True)
             self.setValue(self._value_from_x(event.position().x()))
@@ -100,24 +100,24 @@ class StyledSlider(QSlider):
             return
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         if (event.buttons() & Qt.LeftButton) and self.orientation() == Qt.Horizontal:
             self.setValue(self._value_from_x(event.position().x()))
             event.accept()
             return
         super().mouseMoveEvent(event)
 
-    def mouseReleaseEvent(self, event) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, event) -> None:
         if self.isSliderDown():
             self.setSliderDown(False)
         super().mouseReleaseEvent(event)
 
-    def wheelEvent(self, event) -> None:  # noqa: N802
+    def wheelEvent(self, event) -> None:
         # Default QSlider wheel handling is fine; keep it.
         super().wheelEvent(event)
 
     # ── painting ─────────────────────────────────────────────────────────
-    def paintEvent(self, event) -> None:  # noqa: N802
+    def paintEvent(self, event) -> None:
         if self.orientation() != Qt.Horizontal:
             return super().paintEvent(event)
 

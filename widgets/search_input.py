@@ -18,12 +18,12 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QEvent, Qt  # noqa: E402
-from PySide6.QtGui import QAction  # noqa: E402
-from PySide6.QtWidgets import QLabel, QLineEdit  # noqa: E402
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QLabel, QLineEdit
 
-import theme  # noqa: E402
-from widgets import icons  # noqa: E402
+import theme
+from widgets import icons
 
 
 class SearchInput(QLineEdit):
@@ -81,19 +81,19 @@ class SearchInput(QLineEdit):
             self._hint.move(max(0, x), max(0, y))
             self._hint.raise_()
 
-    def resizeEvent(self, event):  # noqa: N802
+    def resizeEvent(self, event):
         super().resizeEvent(event)
         self._reposition_hint()
 
-    def focusInEvent(self, event):  # noqa: N802
+    def focusInEvent(self, event):
         self._refresh_icon(active=True)
         super().focusInEvent(event)
 
-    def focusOutEvent(self, event):  # noqa: N802
+    def focusOutEvent(self, event):
         self._refresh_icon(active=False)
         super().focusOutEvent(event)
 
-    def changeEvent(self, event):  # noqa: N802
+    def changeEvent(self, event):
         if event.type() in (QEvent.FontChange, QEvent.StyleChange):
             self._icon_px = max(13, round(self.fontMetrics().height() * 0.9))
             self._refresh_icon(active=self.hasFocus())

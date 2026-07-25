@@ -53,7 +53,7 @@ class _CellThumb(QLabel):
             "#CellThumb:hover { border: 1px solid #e2a23a; }"
         )
 
-    def mousePressEvent(self, ev) -> None:  # noqa: N802 (Qt override)
+    def mousePressEvent(self, ev) -> None:  # Qt override
         on_cell_clicked(self._ctx, self._desc)
         super().mousePressEvent(ev)
 
@@ -336,7 +336,7 @@ def on_cell_clicked(ctx, desc) -> None:
             tp_cb.setCurrentText(tp_norm)
         # Centre + zoom on the highlighted cell so it's actually visible.
         zoom_review_image_to_selected_nucleus_ctx(ctx)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         _logger.exception("cell_browser: navigate-to-segmentation failed")
         _set_status(ctx, f"Could not open cell in Segmentation: {exc}")
 

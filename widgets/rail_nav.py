@@ -38,14 +38,14 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets import icons  # noqa: E402
-from widgets.selection_chip import SelectionChip  # noqa: E402
+import theme
+from widgets import icons
+from widgets.selection_chip import SelectionChip
 
 
 class _RailNavRow(QFrame):
@@ -157,12 +157,12 @@ class _RailNavRow(QFrame):
             icons.make_pixmap(self._icon_name, token, 15, dpr or 1.0)
         )
 
-    def mousePressEvent(self, ev):  # noqa: N802
+    def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton and self.isEnabled():
             self.clicked.emit(self._key)
         super().mousePressEvent(ev)
 
-    def showEvent(self, ev):  # noqa: N802
+    def showEvent(self, ev):
         self._refresh_icon()
         super().showEvent(ev)
 

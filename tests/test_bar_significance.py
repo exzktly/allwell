@@ -6,9 +6,9 @@ from types import SimpleNamespace
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from well_viewer.features.barplot.renderer import (  # noqa: E402
+from well_viewer.features.barplot.renderer import (
     _significance_marker,
     draw_significance_brackets,
 )

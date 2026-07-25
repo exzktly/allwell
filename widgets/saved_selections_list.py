@@ -48,15 +48,15 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QPoint, QTimer, Qt, Signal  # noqa: E402
-from PySide6.QtGui import QColor  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QPoint, QTimer, Qt, Signal
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu, QPushButton, QScrollArea,
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from util.well_token import canonical_well_label  # noqa: E402
+import theme
+from util.well_token import canonical_well_label
 
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"

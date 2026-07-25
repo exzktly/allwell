@@ -27,14 +27,14 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtGui import QColor  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets import icons  # noqa: E402
+import theme
+from widgets import icons
 
 _VARIANTS = ("accent", "muted")
 
@@ -101,7 +101,7 @@ class SelectionChip(QFrame):
         self._glyph.setFixedSize(size, size)
         self._glyph.setVisible(True)
 
-    def showEvent(self, event):  # noqa: N802
+    def showEvent(self, event):
         self._refresh_icon()
         super().showEvent(event)
 

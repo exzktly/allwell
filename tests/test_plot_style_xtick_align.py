@@ -16,9 +16,9 @@ from __future__ import annotations
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from well_viewer.core.plot_style import (  # noqa: E402
+from well_viewer.core.plot_style import (
     DEFAULT_EXPORT_STYLE_PREFS,
     apply_export_style_prefs,
 )

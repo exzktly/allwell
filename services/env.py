@@ -115,7 +115,7 @@ def log_env_validation(env: Mapping[str, str] | None = None) -> list[str]:
     """
     try:
         warnings, active = validate_env(env)
-    except Exception:  # noqa: BLE001 — diagnostics only; never block startup
+    except Exception:  # diagnostics only; never block startup
         logger.debug("env validation failed", exc_info=True)
         return []
     for line in active:

@@ -310,7 +310,7 @@ class ScatterCellViewer(QWidget):
         """
         try:
             self._load_cell_data_impl()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             import logging
             import traceback
             # The full traceback goes to the dev-gated logger (DEBUG), not into

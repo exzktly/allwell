@@ -66,7 +66,7 @@ class WrapCheckBox(QWidget):
     def setText(self, text: str) -> None:
         self._lbl.setText(text)
 
-    def setToolTip(self, tip: str) -> None:  # noqa: N802 (Qt casing)
+    def setToolTip(self, tip: str) -> None:  # Qt casing
         super().setToolTip(tip)
         self._cb.setToolTip(tip)
         self._lbl.setToolTip(tip)

@@ -91,6 +91,6 @@ def swallow(
     """
     try:
         yield
-    except Exception:  # noqa: BLE001 - intentional suppression boundary
+    except Exception:  # intentional suppression boundary
         where = _caller_location(2)
         (logger or _LOGGER).log(level, "swallowed @ %s: %s", where, context or "(no note)", exc_info=True)

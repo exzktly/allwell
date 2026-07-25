@@ -213,7 +213,7 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
             above_by_nid = review_build_threshold_map(
                 ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
             ) or {}
-        except Exception:  # noqa: BLE001
+        except Exception:
             above_by_nid = {}
         m = _np.asarray(mask_arr)
         passing = [nid for nid, ok in above_by_nid.items() if ok]
@@ -727,7 +727,7 @@ def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
         above_by_nid = review_build_threshold_map(
             ctx, mask_arr, well, norm_fov, norm_tp, channel=gate_channel
         ) or {}
-    except Exception:  # noqa: BLE001 — fall back to an all-off mask on any error
+    except Exception:  # fall back to an all-off mask on any error
         above_by_nid = {}
     m = _np.asarray(mask_arr)
     passing = [nid for nid, ok in above_by_nid.items() if ok]

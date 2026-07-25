@@ -30,14 +30,14 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 pytest.importorskip("pytestqt")
 
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import QDialogButtonBox  # noqa: E402
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QDialogButtonBox
 
-from services.remote_config import RemoteHost, load_remotes, write_remote  # noqa: E402
+from services.remote_config import RemoteHost, load_remotes, write_remote
 
 # Imported after the importorskip so the module fails fast on a bare
 # Python runner without Qt instead of importing analyze_remote_dialog.
-from analyze_remote_dialog import (  # noqa: E402
+from analyze_remote_dialog import (
     BootstrapLogDialog, ManageRemotesDialog, RemoteFormDialog,
 )
 

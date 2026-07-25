@@ -29,12 +29,12 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__fi
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
     QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
+import theme
 
 
 _ROW_LETTERS = "ABCDEFGH"
@@ -87,7 +87,7 @@ class _HeaderLabel(QLabel):
         self.setCursor(Qt.PointingHandCursor)
         self.setProperty("active", False)
 
-    def mousePressEvent(self, ev):  # noqa: N802
+    def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(ev)
@@ -308,7 +308,7 @@ class LabelGrid(QWidget):
                       f"{_ROW_LETTERS[r]}{c + 1:02d}" in self._enabled]
             ch.setActive(bool(tokens) and all(t in self._selected for t in tokens))
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+    def eventFilter(self, obj, event) -> bool:
         # Toggle selection on Shift+click anywhere on the cell, or on a
         # plain click on the cell's frame edge (outside the text area).
         from PySide6.QtCore import QEvent

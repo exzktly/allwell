@@ -198,7 +198,7 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None):
                         arrs.extend(_load_arrays_from_refs(
                             refs, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES))
                 field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
-    except Exception:  # noqa: BLE001 — a failed preview field falls back to raw
+    except Exception:  # a failed preview field falls back to raw
         _logger.exception("flat-field preview recompute failed (mode=%s)", mode)
         field = None
 

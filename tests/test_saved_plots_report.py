@@ -5,10 +5,10 @@ from types import SimpleNamespace
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.image as mpimg  # noqa: E402
-import numpy as np  # noqa: E402
+import matplotlib.image as mpimg
+import numpy as np
 
-from well_viewer.features.saved_plots._report import build_saved_plots_report  # noqa: E402
+from well_viewer.features.saved_plots._report import build_saved_plots_report
 
 
 def _rec(rid, title, tab, summary):

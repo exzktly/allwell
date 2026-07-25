@@ -33,13 +33,13 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal  # noqa: E402
-from PySide6.QtGui import (  # noqa: E402
+from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
     QColor, QConicalGradient, QPainter, QPainterPath, QPen,
 )
-from PySide6.QtWidgets import QSizePolicy, QWidget  # noqa: E402
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
-import theme  # noqa: E402
+import theme
 
 
 class ColorSwatchRow(QWidget):
@@ -174,7 +174,7 @@ class ColorSwatchRow(QWidget):
                 return i
         return -1
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() != Qt.LeftButton:
             return
         i = self._index_at(event.position().x(), event.position().y())
@@ -191,13 +191,13 @@ class ColorSwatchRow(QWidget):
         self.colorPicked.emit(QColor(c))
         _ = changed
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         i = self._index_at(event.position().x(), event.position().y())
         if i != self._hover:
             self._hover = i
             self.update()
 
-    def leaveEvent(self, _event) -> None:  # noqa: N802
+    def leaveEvent(self, _event) -> None:
         if self._hover != -1:
             self._hover = -1
             self.update()
@@ -259,7 +259,7 @@ class ColorSwatchRow(QWidget):
         p.drawLine(QPointF(cx - arm, cy), QPointF(cx + arm, cy))
         p.drawLine(QPointF(cx, cy - arm), QPointF(cx, cy + arm))
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         c = theme.Colors
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)

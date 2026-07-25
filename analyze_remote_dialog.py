@@ -593,7 +593,7 @@ class RemoteFormDialog(QDialog):
             try:
                 ok, profiles, detail = remote_config.query_jupyterhub_profiles(host, timeout=25)
                 result_q.put((ok, profiles, detail))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 result_q.put((False, [], f"error: {exc}"))
 
         threading.Thread(target=_runner, daemon=True).start()
@@ -686,7 +686,7 @@ class RemoteFormDialog(QDialog):
                     alias, key_path, timeout=15,
                 )
                 result_q.put(("ok" if ok else "fail", detail))
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 result_q.put(("fail", f"error: {exc}"))
 
         threading.Thread(target=_runner, daemon=True).start()
@@ -716,7 +716,7 @@ class RemoteFormDialog(QDialog):
         if geom is not None:
             self.restoreGeometry(geom)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
+    def closeEvent(self, event) -> None:  # Qt override
         self._settings().setValue("dialog/remote_form_geometry", self.saveGeometry())
         super().closeEvent(event)
 
@@ -975,7 +975,7 @@ class SSHKeyWizardDialog(QDialog):
     def _settings(self) -> QSettings:
         return QSettings("AllWell", "AllWellApp")
 
-    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
+    def closeEvent(self, event) -> None:  # Qt override
         self._settings().setValue(
             "dialog/ssh_key_wizard_geometry", self.saveGeometry(),
         )
@@ -1104,7 +1104,7 @@ class BootstrapLogDialog(QDialog):
                         pass
                 self._proc.wait()
                 self._log_q.put_nowait(("finished", self._proc.returncode))
-            except Exception as exc:  # noqa: BLE001 — surface to dialog
+            except Exception as exc:  # surface to dialog
                 self._log_q.put_nowait(("error", str(exc)))
 
         self._reader_thread = threading.Thread(target=_reader, daemon=True)
@@ -1176,7 +1176,7 @@ class BootstrapLogDialog(QDialog):
         if geom is not None:
             self.restoreGeometry(geom)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
+    def closeEvent(self, event) -> None:  # Qt override
         # If still running, cancel before closing — the user may have
         # hit the window close (X) button instead of Cancel.
         if self._proc is not None and self._exit_code is None:
@@ -1413,7 +1413,7 @@ class ManageRemotesDialog(QDialog):
         if geom is not None:
             self.restoreGeometry(geom)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 — Qt override
+    def closeEvent(self, event) -> None:  # Qt override
         self._settings().setValue(
             "dialog/manage_remotes_geometry", self.saveGeometry(),
         )

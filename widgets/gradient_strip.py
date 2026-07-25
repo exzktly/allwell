@@ -31,11 +31,11 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QRectF, QSize, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen  # noqa: E402
-from PySide6.QtWidgets import QSizePolicy, QWidget  # noqa: E402
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPen
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
-import theme  # noqa: E402
+import theme
 
 
 def _normalize_stops(stops) -> list[tuple[float, QColor]]:
@@ -123,7 +123,7 @@ class GradientStrip(QWidget):
         return QSize(24, max(8, round(self.fontMetrics().height() * 0.6)))
 
     # ── painting ─────────────────────────────────────────────────────────
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         c = theme.Colors
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)

@@ -44,7 +44,7 @@ class _NotesEdit(QPlainTextEdit):
         super().__init__(parent)
         self._on_commit = on_commit
 
-    def focusOutEvent(self, event) -> None:  # noqa: N802 (Qt override)
+    def focusOutEvent(self, event) -> None:  # Qt override
         super().focusOutEvent(event)
         try:
             self._on_commit()

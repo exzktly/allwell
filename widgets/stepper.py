@@ -23,13 +23,13 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QEvent, Qt, Signal  # noqa: E402
-from PySide6.QtGui import QDoubleValidator, QFontMetrics  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtGui import QDoubleValidator, QFontMetrics
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLineEdit, QSizePolicy, QToolButton, QVBoxLayout,
 )
 
-import theme  # noqa: E402
+import theme
 
 
 class Stepper(QFrame):
@@ -191,7 +191,7 @@ class Stepper(QFrame):
             v = self._value
         self.setValue(v)
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+    def eventFilter(self, obj, event) -> bool:
         # PySide6 occasionally dispatches non-QEvent arguments through
         # eventFilter (observed: a QStandardItem from a completer popup
         # being routed in place of the QEvent). Bail before any

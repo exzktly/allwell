@@ -32,19 +32,19 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal  # noqa: E402
-from PySide6.QtGui import (  # noqa: E402
+from PySide6.QtCore import QRectF, QSize, Qt, Signal
+from PySide6.QtGui import (
     QColor, QIntValidator, QLinearGradient, QPainter, QPen,
     QRegularExpressionValidator,
 )
-from PySide6.QtCore import QRegularExpression  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QRegularExpression
+from PySide6.QtWidgets import (
     QFormLayout, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets.color_swatch_row import ColorSwatchRow  # noqa: E402
-from widgets.popover import Popover  # noqa: E402
+import theme
+from widgets.color_swatch_row import ColorSwatchRow
+from widgets.popover import Popover
 
 
 def _clamp01(v: float) -> float:
@@ -88,28 +88,28 @@ class SvSquare(QWidget):
         n = max(120, round(self.fontMetrics().height() * 9))
         return QSize(n, n)
 
-    minimumSizeHint = lambda self: QSize(80, 80)  # noqa: E731
+    minimumSizeHint = lambda self: QSize(80, 80)
 
     def _pick_at(self, x: float, y: float) -> None:
         w, h = max(1, self.width()), max(1, self.height())
         self.setSv(x / w, 1.0 - y / h)
         self.svChanged.emit(self._s, self._v)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._pick_at(event.position().x(), event.position().y())
             event.accept()
             return
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         if event.buttons() & Qt.LeftButton:
             self._pick_at(event.position().x(), event.position().y())
             event.accept()
             return
         super().mouseMoveEvent(event)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect())
@@ -162,7 +162,7 @@ class HueStrip(QWidget):
         return QSize(max(14, round(self.fontMetrics().height() * 1.1)),
                      max(120, round(self.fontMetrics().height() * 9)))
 
-    minimumSizeHint = lambda self: QSize(12, 80)  # noqa: E731
+    minimumSizeHint = lambda self: QSize(12, 80)
 
     def _pick_at(self, y: float) -> None:
         h = max(1, self.height())
@@ -170,21 +170,21 @@ class HueStrip(QWidget):
         self.update()
         self.hueChanged.emit(self._hue)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self._pick_at(event.position().y())
             event.accept()
             return
         super().mousePressEvent(event)
 
-    def mouseMoveEvent(self, event) -> None:  # noqa: N802
+    def mouseMoveEvent(self, event) -> None:
         if event.buttons() & Qt.LeftButton:
             self._pick_at(event.position().y())
             event.accept()
             return
         super().mouseMoveEvent(event)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         rect = QRectF(self.rect())
@@ -414,7 +414,7 @@ class ColorPickerPopover(Popover):
         self._recents_row.setColors(self._recents)
         self.colorCommitted.emit(QColor(self._color))
 
-    def hideEvent(self, event) -> None:  # noqa: N802
+    def hideEvent(self, event) -> None:
         # dismissing the popover commits the current colour (if changed)
         self._commit()
         super().hideEvent(event)

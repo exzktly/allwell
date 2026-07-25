@@ -67,7 +67,7 @@ class NamedPageStack(QStackedWidget):
             names.append(next((n for n, wid in self._by_name.items() if wid is w), ""))
         self._names = names
 
-    def addPage(self, name: str, widget: QWidget) -> int:  # noqa: N802
+    def addPage(self, name: str, widget: QWidget) -> int:
         idx = self.addWidget(widget)
         self._by_name[name] = widget
         if name not in self._page_order:
@@ -75,7 +75,7 @@ class NamedPageStack(QStackedWidget):
         self._rebuild_names()
         return idx
 
-    def detachPage(self, name: str) -> "QWidget | None":  # noqa: N802
+    def detachPage(self, name: str) -> "QWidget | None":
         """Remove a page from the stack and return its widget (kept alive).
 
         Used by Split View to move a page into the side-by-side splitter. The
@@ -90,7 +90,7 @@ class NamedPageStack(QStackedWidget):
         self._rebuild_names()
         return w
 
-    def reattachPage(self, name: str, widget: QWidget) -> None:  # noqa: N802
+    def reattachPage(self, name: str, widget: QWidget) -> None:
         """Re-insert a previously detached page at its original relative slot."""
         insert_at = 0
         for nm in self._page_order:
@@ -104,23 +104,23 @@ class NamedPageStack(QStackedWidget):
             self._page_order.append(name)
         self._rebuild_names()
 
-    def setCurrentByName(self, name: str) -> bool:  # noqa: N802
+    def setCurrentByName(self, name: str) -> bool:
         w = self._by_name.get(name)
         if w is None:
             return False
         self.setCurrentWidget(w)
         return True
 
-    def currentName(self) -> str:  # noqa: N802
+    def currentName(self) -> str:
         idx = self.currentIndex()
         if 0 <= idx < len(self._names):
             return self._names[idx]
         return ""
 
-    def pageNames(self) -> list[str]:  # noqa: N802
+    def pageNames(self) -> list[str]:
         return list(self._names)
 
-    def nameOf(self, w: QWidget) -> str | None:  # noqa: N802
+    def nameOf(self, w: QWidget) -> str | None:
         idx = self.indexOf(w)
         if 0 <= idx < len(self._names):
             return self._names[idx]

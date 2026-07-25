@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication, QSizePolicy  # noqa: E402
+from PySide6.QtWidgets import QApplication, QSizePolicy
 
 
 @pytest.fixture(scope="module")

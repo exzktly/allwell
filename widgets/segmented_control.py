@@ -26,14 +26,14 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QSize, Qt, Signal  # noqa: E402
-from PySide6.QtGui import QIcon, QPainter  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QIcon, QPainter
+from PySide6.QtWidgets import (
     QButtonGroup, QHBoxLayout, QSizePolicy, QStyle, QStyleOptionToolButton,
     QToolButton, QWidget,
 )
 
-import theme  # noqa: E402
+import theme
 
 
 class _Segment(QToolButton):
@@ -54,7 +54,7 @@ class _Segment(QToolButton):
             ih = max(12, round(self.fontMetrics().height() * 0.95))
             self.setIconSize(QSize(ih, ih))
 
-    def minimumSizeHint(self):  # noqa: N802
+    def minimumSizeHint(self):
         # Force the parent layout to reserve room for the full text + icon
         # so segments never truncate. fm.horizontalAdvance includes kerning;
         # add the icon + spacing + padding the paintEvent uses.
@@ -67,7 +67,7 @@ class _Segment(QToolButton):
         return QSize(tw + iw + spacing + pad_h,
                      fm.height() + pad_v)
 
-    def paintEvent(self, _ev):  # noqa: N802
+    def paintEvent(self, _ev):
         """Paint the panel via the platform style, then draw the icon + text
         group centred horizontally in the button's content rect.
 

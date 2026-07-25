@@ -35,7 +35,7 @@ class _FlowHeightSync(QObject):
     regardless of whether the parent honours ``heightForWidth``.
     """
 
-    def eventFilter(self, obj, event) -> bool:  # noqa: N802 — Qt naming
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
         if isinstance(event, QEvent) and event.type() in (
             QEvent.Resize, QEvent.LayoutRequest,
         ):
@@ -104,18 +104,18 @@ class FlowLayout(QLayout):
         while self._items:
             self._items.pop()
 
-    def addItem(self, item) -> None:  # noqa: N802 (Qt override)
+    def addItem(self, item) -> None:  # Qt override
         self._items.append(item)
 
     def count(self) -> int:
         return len(self._items)
 
-    def itemAt(self, index: int):  # noqa: N802
+    def itemAt(self, index: int):
         if 0 <= index < len(self._items):
             return self._items[index]
         return None
 
-    def takeAt(self, index: int):  # noqa: N802
+    def takeAt(self, index: int):
         if 0 <= index < len(self._items):
             return self._items.pop(index)
         return None
@@ -125,39 +125,39 @@ class FlowLayout(QLayout):
     # rewriting its call sites. A flow layout left-packs and wraps, so a stretch
     # spacer is meaningless (no-op); fixed spacing and nested layouts flow as
     # ordinary items.
-    def addStretch(self, stretch: int = 0) -> None:  # noqa: N802
+    def addStretch(self, stretch: int = 0) -> None:
         return None
 
-    def addSpacing(self, size: int) -> None:  # noqa: N802
+    def addSpacing(self, size: int) -> None:
         from PySide6.QtWidgets import QSizePolicy, QSpacerItem
         self.addItem(QSpacerItem(int(size), 0,
                                  QSizePolicy.Fixed, QSizePolicy.Minimum))
 
-    def addLayout(self, layout, stretch: int = 0) -> None:  # noqa: N802
+    def addLayout(self, layout, stretch: int = 0) -> None:
         self.addItem(layout)
 
-    def addWidget(self, widget, *args) -> None:  # noqa: N802
+    def addWidget(self, widget, *args) -> None:
         # Tolerate the QBoxLayout ``addWidget(w, stretch, alignment)`` signature —
         # flow layouts ignore stretch/alignment, but accepting the extra args lets
         # a toolbar swap in without editing every call site.
         super().addWidget(widget)
 
-    def insertWidget(self, index: int, widget, *args) -> None:  # noqa: N802
+    def insertWidget(self, index: int, widget, *args) -> None:
         super().addWidget(widget)  # appended; move it to *index*
         if 0 <= index < len(self._items) - 1:
             self._items.insert(index, self._items.pop())
 
-    def setSpacing(self, spacing: int) -> None:  # noqa: N802
+    def setSpacing(self, spacing: int) -> None:
         self._h_space = int(spacing)
         self._v_space = int(spacing)
 
     # ── spacing ─────────────────────────────────────────────────────────────
-    def horizontalSpacing(self) -> int:  # noqa: N802
+    def horizontalSpacing(self) -> int:
         if self._h_space >= 0:
             return self._h_space
         return self._smart_spacing(QSizePolicy.PushButton, horizontal=True)
 
-    def verticalSpacing(self) -> int:  # noqa: N802
+    def verticalSpacing(self) -> int:
         if self._v_space >= 0:
             return self._v_space
         return self._smart_spacing(QSizePolicy.PushButton, horizontal=False)
@@ -177,23 +177,23 @@ class FlowLayout(QLayout):
         return parent.spacing()
 
     # ── geometry ────────────────────────────────────────────────────────────
-    def expandingDirections(self):  # noqa: N802
+    def expandingDirections(self):
         return Qt.Orientation(0)
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, width: int) -> int:  # noqa: N802
+    def heightForWidth(self, width: int) -> int:
         return self._do_layout(QRect(0, 0, width, 0), test_only=True)
 
-    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+    def setGeometry(self, rect: QRect) -> None:
         super().setGeometry(rect)
         self._do_layout(rect, test_only=False)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return self.minimumSize()
 
-    def minimumSize(self) -> QSize:  # noqa: N802
+    def minimumSize(self) -> QSize:
         size = QSize()
         for item in self._items:
             size = size.expandedTo(item.minimumSize())

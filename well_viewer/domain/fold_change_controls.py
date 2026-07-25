@@ -31,7 +31,7 @@ _EARLIEST_LABEL = "earliest (each member's first tp)"
 # module. They live there so the unit tests can import them without
 # pulling in PySide6; callers below use the same names as if they were
 # defined here.
-from well_viewer.domain.fold_change_scopes import (  # noqa: E402
+from well_viewer.domain.fold_change_scopes import (
     flush_dirty_scopes,  # noqa: F401 - re-exported for the tab-change handler
     get_scope as _get_scope,
     registered_scopes,

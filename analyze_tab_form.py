@@ -786,7 +786,7 @@ class AnalyzeTabFormMixin:
             return
         try:
             self._apply_pipeline_info(info, source=Path(path))
-        except Exception as exc:  # noqa: BLE001 — never crash the slot
+        except Exception as exc:  # never crash the slot
             QMessageBox.warning(self, "Partial load",
                                 f"Some fields could not be restored:\n{exc}")
 

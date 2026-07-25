@@ -127,7 +127,7 @@ def umap_project(X: np.ndarray, n_components: int = 2,
                  standardize_data: bool = True, seed: int = 0) -> np.ndarray:
     """UMAP 2-D embedding. Raises :class:`MethodUnavailable` if umap-learn absent."""
     try:
-        import umap  # noqa: F401  (availability probe + import)
+        import umap  # availability probe + import
     except Exception as exc:  # ImportError, or a broken numba/llvm install
         raise MethodUnavailable("umap-learn", "UMAP") from exc
     X = np.asarray(X, dtype=float)

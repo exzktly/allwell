@@ -13,9 +13,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import builder_view as B  # noqa: E402
-from well_viewer.features.image_browser.image_table import image_compose as IC  # noqa: E402
-from well_viewer.features.image_browser.image_table.state import (  # noqa: E402
+from well_viewer.features.image_browser.image_table import builder_view as B
+from well_viewer.features.image_browser.image_table import image_compose as IC
+from well_viewer.features.image_browser.image_table.state import (
     ChannelSpec, spec_to_state_fields,
 )
 

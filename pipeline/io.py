@@ -4,8 +4,11 @@ Extracted from ``process_microscopy.py`` so the "write outputs to disk" helpers
 live in one cohesive, Qt-free module: atomic image/text writes (tmp → fsync →
 rename, so an interrupted worker never leaves partial bytes a later zip-up step
 would pack into a corrupt archive), the per-well CSV writers, the completeness
-check, and the boundary overlay. ``process_microscopy`` re-exports every name so
-its many ``_safe_imwrite`` / ``write_csvs_per_well`` call sites are unchanged.
+check, the boundary overlay, and the scratch-base + staging-directory lifecycle
+(``scratch_base_for`` / ``remove_directory`` / the stale sweeps / the staging
+commit) that decides *which volume* all of that lands on.
+``process_microscopy`` re-exports every name so its many ``_safe_imwrite`` /
+``write_csvs_per_well`` / ``remove_directory`` call sites are unchanged.
 
 Depends only on numpy + tifffile/imageio/scikit-image + stdlib — no
 ``process_microscopy`` internals — so there is no import cycle.
@@ -13,6 +16,7 @@ Depends only on numpy + tifffile/imageio/scikit-image + stdlib — no
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import shutil
@@ -29,28 +33,220 @@ from skimage.segmentation import find_boundaries
 log = logging.getLogger("process_microscopy")
 
 
+# Default scratch location, under the user's home directory. Deliberately a
+# dedicated subdirectory rather than ``~`` itself: ``_sweep_stale_scratch_dirs``
+# globs ``_tmp_extract_*`` / ``_tmp_images_*`` under the scratch base and
+# *deletes* what it finds, so pointing the base at a directory the user also
+# keeps their own files in would be destructive. Everything below it is
+# transient per-run working state (it is NOT a cache — deleting it mid-run
+# discards the per-FOV checkpoints a restart resumes from).
+DEFAULT_SCRATCH_SUBDIR = Path(".allwell") / "scratch"
+
+
+def default_scratch_base() -> "Path | None":
+    """``~/.allwell/scratch``, created on demand, or None if unusable."""
+    try:
+        p = Path.home() / DEFAULT_SCRATCH_SUBDIR
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    except (OSError, RuntimeError):
+        # RuntimeError: Path.home() can't resolve a home directory at all.
+        return None
+
+
 def scratch_base_for(output_dir: Path) -> Path:
     """Directory that holds per-well working files (zip extraction + temp images).
 
-    Honors ``$ALLWELL_SCRATCH_DIR`` (the same redirectable-scratch env the GUI
-    sets from its "Scratch disk" field and the remote runner already uses) so
-    the temporary, GB-scale I/O can land on a roomy/fast volume instead of the
-    output drive. The override is created on demand; if it can't be created we
-    degrade to *output_dir* rather than failing the run. Unset → *output_dir*
-    (the historical location). Zip-mode temps are pure scratch — extracted /
-    written then deleted, never renamed — so a separate filesystem is safe.
+    Resolution order:
+
+    1. ``$ALLWELL_SCRATCH_DIR`` — the redirectable-scratch env the GUI sets from
+       its "Scratch disk" field and the remote runner already uses.
+    2. ``~/.allwell/scratch`` — the default (see :data:`DEFAULT_SCRATCH_SUBDIR`).
+    3. *output_dir* — last-resort fallback when neither of the above can be
+       created, so an unwritable home never fails the run outright.
+
+    **Why the home directory is the default.** This scratch carries the whole
+    run's transient I/O: every extracted input TIF, every intermediate image
+    (~6 per FOV-group, each written tmp → fsync → rename, so three filesystem
+    operations apiece), and a JSON checkpoint per FOV-group. It used to default
+    to *output_dir*, which put tens of thousands of file operations from every
+    worker process onto whatever volume the user chose for results. When that is
+    a network mount the load is enough to drop the session, and macOS's SMB
+    client does not re-open server-side handles across a reconnect — every
+    descriptor opened before the drop then fails with ``OSError: [Errno 9] Bad
+    file descriptor``, killing whichever wells had files open. Keeping the churn
+    on local storage leaves only the two per-well result writes (the CSV and the
+    ``<well>_out.zip``) on the network volume.
+
+    Both zip- and folder-mode temps tolerate a separate filesystem: nothing is
+    renamed across the boundary (folder mode's staging commit falls back to a
+    copy when the rename would be cross-device — see
+    :func:`_commit_staging_dir`).
     """
     override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
-    if not override:
-        return output_dir
+    if override:
+        try:
+            p = Path(override).expanduser()
+            p.mkdir(parents=True, exist_ok=True)
+            return p
+        except OSError as exc:
+            log.warning("Scratch dir %s unusable (%s); falling back.", override, exc)
+    home = default_scratch_base()
+    if home is not None:
+        return home
+    log.warning(
+        "Home scratch dir (~/%s) unusable; using the output dir %s for per-well "
+        "working files. On a network-mounted output dir this is the "
+        "configuration that causes 'Bad file descriptor' well failures — set "
+        "ALLWELL_SCRATCH_DIR (Analyze → Scratch disk) to a local path.",
+        DEFAULT_SCRATCH_SUBDIR, output_dir,
+    )
+    return output_dir
+
+
+# ---------------------------------------------------------------------------
+# Staging-directory lifecycle
+#
+# The per-well staging dirs live under the scratch base above, so their
+# create / sweep / commit lifecycle belongs next to it rather than in the
+# orchestrator. ``process_microscopy`` re-exports all four names, so its call
+# sites (and the remote worker) are unchanged.
+# ---------------------------------------------------------------------------
+
+def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> None:
+    """Remove *path* and all its contents, with retries for remote filesystems.
+
+    Networked / remote filesystems (SMB / NFS / AppleShare) routinely fail
+    ``shutil.rmtree`` on the first attempt because:
+
+    * The OS hasn't yet released file handles that backed recently-written
+      files (lazy close on the server side).
+    * macOS Finder reinjects ``.DS_Store`` sidecars and ``._<file>``
+      AppleDouble metadata into the directory while it's being deleted.
+    * Server-side indexers and antivirus scanners briefly hold scanned
+      files open.
+
+    The previous implementation logged a single warning and gave up,
+    leaving stale ``_tmp_extract_<well>`` / ``_tmp_images_<well>``
+    directories behind on every pipeline run. The retry loop here:
+
+    1. Strips the read-only bit on individual files that raise
+       ``PermissionError`` and retries that file.
+    2. Sleeps with a linear backoff between full ``rmtree`` attempts so
+       the kernel / server has time to release lazy handles.
+    3. Logs at WARNING only after every attempt fails — so a transient
+       remote-FS hiccup no longer pollutes the GUI log.
+    """
+    import stat as _stat
+
+    if not path.exists():
+        return
+
+    def _on_rm_error(func, target, exc_info):
+        # ``onerror`` runs per-file. PermissionError typically means a
+        # read-only attribute set (common on Windows / SMB shares); flip
+        # it and retry. Anything else: propagate so the outer attempt
+        # falls through to the retry/backoff path.
+        exc = exc_info[1] if exc_info else None
+        if isinstance(exc, PermissionError):
+            try:
+                os.chmod(target, _stat.S_IWRITE | _stat.S_IREAD)
+                func(target)
+                return
+            except OSError:
+                pass
+        if exc is not None:
+            raise exc
+        raise OSError(f"unknown rmtree error on {target!r}")
+
+    last_exc: Exception | None = None
+    for attempt in range(max(1, retries)):
+        try:
+            shutil.rmtree(path, onerror=_on_rm_error)
+            if attempt > 0:
+                log.info(
+                    "Removed %s after %d retry(ies) (remote-FS lazy release).",
+                    path, attempt,
+                )
+            else:
+                log.debug("Removed temporary directory: %s", path)
+            return
+        except Exception as exc:  # noqa: BLE001 — every Errno → keep trying
+            last_exc = exc
+            if attempt + 1 < retries:
+                time.sleep(backoff * (attempt + 1))
+
+    if last_exc is not None:
+        log.warning(
+            "Could not remove %s after %d attempts: %s — leftover files "
+            "can be removed manually.",
+            path, retries, last_exc,
+        )
+
+
+def _commit_staging_dir(tmp_images: Path, final_out: Path) -> None:
+    """Move the folder-mode staging dir into place as *final_out*.
+
+    A plain ``rename`` is the fast path and the only one that was possible when
+    the staging dir was pinned under ``output_dir``. Now that folder-mode
+    staging honours the scratch base (which defaults to ``~/.allwell/scratch``,
+    off the output volume), the two can live on different filesystems, where
+    ``rename`` raises ``EXDEV``. Fall back to a copy + remove in that case.
+
+    The copy is deliberately not atomic: the caller has already removed any
+    previous *final_out*, and a crash mid-copy leaves the well's per-FOV
+    checkpoints intact for ``--incremental`` to resume from.
+    """
     try:
-        p = Path(override).expanduser()
-        p.mkdir(parents=True, exist_ok=True)
-        return p
+        tmp_images.rename(final_out)
+        return
     except OSError as exc:
-        log.warning("Scratch dir %s unusable (%s); using output dir %s",
-                    override, exc, output_dir)
-        return output_dir
+        if exc.errno != errno.EXDEV:
+            raise
+    log.info(
+        "Well output staged on a different filesystem than %s; copying instead "
+        "of renaming.", final_out.parent,
+    )
+    shutil.copytree(tmp_images, final_out, dirs_exist_ok=True)
+    remove_directory(tmp_images)
+
+
+def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:
+    """Remove stale ``_tmp_*`` staging dirs from a previous crashed run under
+    *root*, but keep any ``_tmp_images_*`` dir holding ``.fov_*.done`` checkpoint
+    markers (v5.2.0) so the worker resumes from them. ``extra_extract`` also
+    sweeps the zip-mode ``_tmp_extract_*`` scratch (audit A10)."""
+    if extra_extract:
+        for _stale in sorted(root.glob("_tmp_extract_*")):
+            if _stale.is_dir():
+                log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+                remove_directory(_stale)
+    for _stale in sorted(root.glob("_tmp_images_*")):
+        if not _stale.is_dir():
+            continue
+        if any(_stale.glob(".fov_*.done")):
+            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
+            log.info(
+                "Keeping checkpoint dir %s (%d FOV(s) already done)",
+                _stale.name, n_done,
+            )
+            continue
+        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
+        remove_directory(_stale)
+
+
+def _sweep_stale_scratch_dirs_all(output_dir: Path, *, extra_extract: bool) -> None:
+    """Sweep stale staging dirs from both the scratch base and *output_dir*.
+
+    The scratch base is where staging lives now. ``output_dir`` is swept too
+    (when it differs) because runs from before the scratch default moved to
+    ``~/.allwell/scratch`` left their ``_tmp_images_*`` / ``_tmp_extract_*``
+    dirs there, and nothing else would ever clean them up.
+    """
+    base = scratch_base_for(output_dir)
+    _sweep_stale_scratch_dirs(base, extra_extract=extra_extract)
+    if base.resolve() != output_dir.resolve():
+        _sweep_stale_scratch_dirs(output_dir, extra_extract=extra_extract)
 
 
 def _fsync_path(path: Path) -> None:
@@ -96,6 +292,49 @@ def _free_bytes(path: Path) -> "int | None":
         return shutil.disk_usage(path.parent).free
     except OSError:
         return None
+
+
+def retry_write(fn, *, what: str, cleanup=None):
+    """Run *fn*, retrying on ``OSError`` with the ``_safe_imwrite`` backoff.
+
+    The image writer has been retry-shielded for a while; the per-well CSV and
+    the ``<well>_out.zip`` were not, so a transient filesystem fault on those
+    two writes failed the whole well with the bare errno. That is what surfaces
+    as ``OSError: [Errno 9] Bad file descriptor`` on a network-mounted output
+    dir: macOS's SMB client invalidates open handles when the session drops and
+    reconnects, and both of those writes happen on the output volume even when
+    the scratch churn has been moved off it.
+
+    *fn* must be **idempotent** — every caller stages to a ``__aw_tmp_`` file
+    and commits with ``os.replace``, so re-running it is safe. *cleanup* (if
+    given) removes the partial staging file between attempts.
+
+    Non-``OSError`` exceptions are never retried. Once the budget is exhausted
+    the failure propagates as an enriched ``OSError`` naming the target and the
+    attempt count, so the caller marks the well failed with an actionable
+    message instead of a bare errno.
+    """
+    for attempt in range(_WRITE_MAX_ATTEMPTS):
+        try:
+            return fn()
+        except OSError as exc:
+            if cleanup is not None:
+                cleanup()
+            if attempt + 1 >= _WRITE_MAX_ATTEMPTS:
+                raise OSError(
+                    f"Failed to write {what} after {_WRITE_MAX_ATTEMPTS} "
+                    f"attempts ({exc}). A repeated failure here usually means "
+                    f"the destination volume is unreliable under parallel load "
+                    f"— on a network mount (SMB/NFS) a dropped session "
+                    f"invalidates open file handles and every subsequent write "
+                    f"fails. Point the output at local storage, or reduce "
+                    f"--workers, and re-run with --incremental to resume."
+                ) from exc
+            log.warning(
+                "write %s failed (%s); retry %d/%d after backoff",
+                what, exc, attempt + 1, _WRITE_MAX_ATTEMPTS - 1,
+            )
+            time.sleep(_RETRY_BASE_DELAY_S * (2 ** attempt))
 
 
 def _safe_imwrite(out_path: "Path | str", data: "np.ndarray") -> None:
@@ -209,23 +448,42 @@ class _AtomicTextHandle:
         return self._fh
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # ``flush()`` and ``close()`` used to run unguarded here, so an OSError
+        # from either (an EBADF on a reconnected SMB mount is the common one)
+        # escaped straight out of the caller as a bare errno. Capture it
+        # instead: it must NOT be swallowed — a failed flush means the tmp file
+        # is short, and renaming that over the target would silently truncate
+        # the CSV — but it must not mask an exception already in flight either.
+        close_exc: "OSError | None" = None
         try:
             if self._fh is not None:
-                self._fh.flush()
                 try:
-                    os.fsync(self._fh.fileno())
-                except OSError:
-                    pass
-                self._fh.close()
+                    self._fh.flush()
+                    try:
+                        os.fsync(self._fh.fileno())
+                    except OSError:
+                        # fsync isn't supported on every filesystem; the replace
+                        # below is still atomic without it.
+                        pass
+                finally:
+                    try:
+                        self._fh.close()
+                    except OSError as exc:
+                        close_exc = exc
+        except OSError as exc:
+            close_exc = exc
         finally:
             self._fh = None
-        if exc_type is not None:
+
+        if exc_type is not None or close_exc is not None:
             try:
                 if self._tmp.exists():
                     self._tmp.unlink()
             except OSError:
                 pass
-            return False
+            if exc_type is not None:
+                return False        # propagate the caller's original exception
+            raise close_exc         # our own failure — surface it to the retry
         os.replace(str(self._tmp), str(self._out_path))
         return False
 
@@ -268,15 +526,20 @@ def _safe_well(label: str) -> str:
 def _write_single_csv(records: list[dict], out_path: Path) -> None:
     import csv
     fieldnames = list(records[0].keys())
+
     # Atomic write: tmp → fsync → rename. Without this a downstream consumer
     # (the GUI's CSV-loader, the Bar / Line plot tabs, or the next pipeline
     # run with --force) can pick up a half-written file when the worker is
     # interrupted or when the OS hasn't flushed the page cache before the
-    # follow-up rename / read.
-    with _safe_atomic_text_write(out_path) as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(records)
+    # follow-up rename / read. Retried because this is one of only two writes
+    # that must land on the (possibly network-mounted) output volume.
+    def _write() -> None:
+        with _safe_atomic_text_write(out_path) as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(records)
+
+    retry_write(_write, what=Path(out_path).name)
 
 
 def write_csvs_per_well(
@@ -388,12 +651,15 @@ def merge_records_into_csv(
             if col not in fieldnames:
                 fieldnames.append(col)
 
-    with _safe_atomic_text_write(path) as fh:
-        writer = csv.DictWriter(fh, fieldnames=fieldnames, restval="",
-                                extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(existing_rows)
-        writer.writerows(to_add)
+    def _write() -> None:
+        with _safe_atomic_text_write(path) as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames, restval="",
+                                    extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(existing_rows)
+            writer.writerows(to_add)
+
+    retry_write(_write, what=path.name)
     return len(to_add)
 
 
@@ -433,23 +699,34 @@ def merge_images_into_zip(out_zip: "Path | str", image_dir: "Path | str") -> int
 
     out_zip.parent.mkdir(parents=True, exist_ok=True)
     tmp_zip = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
-    try:
-        with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            if out_zip.exists():
-                with zipfile.ZipFile(out_zip, "r") as src:
-                    for name in src.namelist():
-                        zf.writestr(src.getinfo(name), src.read(name))
-            for p in to_add:
-                zf.write(p, arcname=p.name)
-        _fsync_path(tmp_zip)
-        os.replace(str(tmp_zip), str(out_zip))
-    except BaseException:
+
+    def _cleanup_tmp() -> None:
         try:
             if tmp_zip.exists():
                 tmp_zip.unlink()
         except OSError:
             pass
-        raise
+
+    def _build() -> None:
+        try:
+            with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                if out_zip.exists():
+                    with zipfile.ZipFile(out_zip, "r") as src:
+                        for name in src.namelist():
+                            zf.writestr(src.getinfo(name), src.read(name))
+                for p in to_add:
+                    zf.write(p, arcname=p.name)
+            _fsync_path(tmp_zip)
+            os.replace(str(tmp_zip), str(out_zip))
+        except BaseException:
+            # Non-OSError (e.g. KeyboardInterrupt) isn't retried, so clean up
+            # here too rather than relying on retry_write's cleanup hook.
+            _cleanup_tmp()
+            raise
+
+    # Retried for the same reason as the per-well CSV: this lands on the output
+    # volume, and staging to __aw_tmp_ + os.replace makes it safe to re-run.
+    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp)
     return len(to_add)
 
 

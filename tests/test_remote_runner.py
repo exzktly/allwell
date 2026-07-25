@@ -907,6 +907,40 @@ def test_remote_argv_swaps_input_output(host):
     assert "--no_save_tophat" not in remote
 
 
+def test_remote_argv_pins_scratch_to_the_remote_output_dir(host):
+    """The pipeline default moved to ``~/.allwell/scratch`` to keep a local
+    run's bulk I/O off a network-mounted output volume. On a cluster that
+    default is wrong — home is typically a small-quota NFS share — so the
+    remote argv pins scratch to the remote output dir, which is where it lived
+    before the default changed."""
+    runner = RemoteRunner(host)
+    local = [
+        "/usr/bin/python", "/local/pm.py",
+        "--input_dir", "/x", "--output_dir", "/y",
+    ]
+    remote = runner._build_remote_argv(  # noqa: SLF001
+        local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
+    )
+    assert "--scratch_dir=/r/out" in remote
+
+
+def test_remote_argv_drops_a_local_scratch_dir(host):
+    """A local scratch path is meaningless on the remote host and must never be
+    forwarded — in either the ``--scratch_dir X`` or ``--scratch_dir=X`` form."""
+    runner = RemoteRunner(host)
+    for local in (
+        ["/usr/bin/python", "/local/pm.py", "--input_dir", "/x",
+         "--scratch_dir", "/Volumes/LocalSSD/scratch", "--output_dir", "/y"],
+        ["/usr/bin/python", "/local/pm.py", "--input_dir", "/x",
+         "--scratch_dir=/Volumes/LocalSSD/scratch", "--output_dir", "/y"],
+    ):
+        remote = runner._build_remote_argv(  # noqa: SLF001
+            local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
+        )
+        assert not any("LocalSSD" in a for a in remote)
+        assert remote.count("--scratch_dir=/r/out") == 1
+
+
 def test_remote_argv_csv_only_appends_no_save_tophat(host):
     runner = RemoteRunner(host)
     local = [

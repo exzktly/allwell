@@ -148,14 +148,19 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # tmp -> fsync -> rename rationale.
 from pipeline.io import (  # noqa: E402,F401
     _AtomicTextHandle, _fsync_path,
+    _commit_staging_dir,
     _safe_atomic_text_write,
     _safe_imwrite,
     _safe_well,
+    _sweep_stale_scratch_dirs,
+    _sweep_stale_scratch_dirs_all,
     _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
     merge_images_into_zip,
     merge_records_into_csv,
+    remove_directory,
+    retry_write,
     save_overlay,
     scratch_base_for,
     write_csvs_per_well,
@@ -619,19 +624,31 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
     # uses: stage at <out_zip>.tmp, fsync, replace. Any caller that sees
     # *out_zip* gets either the complete archive or the previous one.
     tmp_zip = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
-    try:
-        with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for img_path in image_files:
-                zf.write(img_path, arcname=img_path.name)
-        _fsync_path(tmp_zip)
-        os.replace(str(tmp_zip), str(out_zip))
-    except BaseException:
+
+    def _cleanup_tmp() -> None:
         try:
             if tmp_zip.exists():
                 tmp_zip.unlink()
         except OSError:
             pass
-        raise
+
+    def _build() -> None:
+        try:
+            with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for img_path in image_files:
+                    zf.write(img_path, arcname=img_path.name)
+            _fsync_path(tmp_zip)
+            os.replace(str(tmp_zip), str(out_zip))
+        except BaseException:
+            _cleanup_tmp()
+            raise
+
+    # The out.zip is one of only two writes that must land on the output volume
+    # (the other is the per-well CSV), so it carries the same retry shield the
+    # image writer has always had — a transient fault here used to fail the
+    # whole well with a bare errno. Safe to re-run: staged to __aw_tmp_ and
+    # committed with os.replace.
+    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp)
 
     log.info(
         "Compressed %d image(s)  ->  %s", len(image_files), out_zip.name
@@ -652,76 +669,6 @@ def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int
     remove_directory(folder)
     return n
 
-
-def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> None:
-    """Remove *path* and all its contents, with retries for remote filesystems.
-
-    Networked / remote filesystems (SMB / NFS / AppleShare) routinely fail
-    ``shutil.rmtree`` on the first attempt because:
-
-    * The OS hasn't yet released file handles that backed recently-written
-      files (lazy close on the server side).
-    * macOS Finder reinjects ``.DS_Store`` sidecars and ``._<file>``
-      AppleDouble metadata into the directory while it's being deleted.
-    * Server-side indexers and antivirus scanners briefly hold scanned
-      files open.
-
-    The previous implementation logged a single warning and gave up,
-    leaving stale ``_tmp_extract_<well>`` / ``_tmp_images_<well>``
-    directories behind on every pipeline run. The retry loop here:
-
-    1. Strips the read-only bit on individual files that raise
-       ``PermissionError`` and retries that file.
-    2. Sleeps with a linear backoff between full ``rmtree`` attempts so
-       the kernel / server has time to release lazy handles.
-    3. Logs at WARNING only after every attempt fails — so a transient
-       remote-FS hiccup no longer pollutes the GUI log.
-    """
-    import stat as _stat
-
-    if not path.exists():
-        return
-
-    def _on_rm_error(func, target, exc_info):
-        # ``onerror`` runs per-file. PermissionError typically means a
-        # read-only attribute set (common on Windows / SMB shares); flip
-        # it and retry. Anything else: propagate so the outer attempt
-        # falls through to the retry/backoff path.
-        exc = exc_info[1] if exc_info else None
-        if isinstance(exc, PermissionError):
-            try:
-                os.chmod(target, _stat.S_IWRITE | _stat.S_IREAD)
-                func(target)
-                return
-            except OSError:
-                pass
-        if exc is not None:
-            raise exc
-        raise OSError(f"unknown rmtree error on {target!r}")
-
-    last_exc: Exception | None = None
-    for attempt in range(max(1, retries)):
-        try:
-            shutil.rmtree(path, onerror=_on_rm_error)
-            if attempt > 0:
-                log.info(
-                    "Removed %s after %d retry(ies) (remote-FS lazy release).",
-                    path, attempt,
-                )
-            else:
-                log.debug("Removed temporary directory: %s", path)
-            return
-        except Exception as exc:  # noqa: BLE001 — every Errno → keep trying
-            last_exc = exc
-            if attempt + 1 < retries:
-                time.sleep(backoff * (attempt + 1))
-
-    if last_exc is not None:
-        log.warning(
-            "Could not remove %s after %d attempts: %s — leftover files "
-            "can be removed manually.",
-            path, retries, last_exc,
-        )
 
 # ---------------------------------------------------------------------------
 # Filename schema helpers
@@ -3302,7 +3249,13 @@ def process_well_folder_task(
         schema = parse_schema(DEFAULT_SCHEMA)
     log.info("Well %s — starting (folder mode, pid %d)", well_label, os.getpid())
 
-    tmp_images = output_dir / f"_tmp_images_{well_label}"
+    # Folder-mode staging used to be pinned to ``output_dir`` (so the closing
+    # commit could be a same-filesystem rename), which meant every intermediate
+    # image landed on the output volume no matter what the user set the scratch
+    # disk to — the single biggest source of I/O on a network-mounted output
+    # dir. It now honours the scratch base like zip mode does;
+    # ``_commit_staging_dir`` handles the cross-filesystem case.
+    tmp_images = scratch_base_for(output_dir) / f"_tmp_images_{well_label}"
     # v5.2.0: preserve per-FOV checkpoints if any .fov_*.done markers
     # exist; otherwise wipe stale state. Same semantics as zip-mode.
     if tmp_images.exists():
@@ -3386,7 +3339,7 @@ def process_well_folder_task(
                 # Atomically rename staging dir to final output folder.
                 if final_out.exists():
                     remove_directory(final_out)
-                tmp_images.rename(final_out)
+                _commit_staging_dir(tmp_images, final_out)
                 log.info("Well %s: output folder -> %s", well_label, final_out.name)
 
                 n_out = compress_folder_images_to_zip_and_remove(final_out, out_zip)
@@ -3512,30 +3465,6 @@ def _unique_tokens_preserve_order(tokens: "list[str]") -> "list[str]":
 # ---------------------------------------------------------------------------
 # Zip-aware orchestration
 # ---------------------------------------------------------------------------
-
-def _sweep_stale_scratch_dirs(root: Path, *, extra_extract: bool) -> None:
-    """Remove stale ``_tmp_*`` staging dirs from a previous crashed run under
-    *root*, but keep any ``_tmp_images_*`` dir holding ``.fov_*.done`` checkpoint
-    markers (v5.2.0) so the worker resumes from them. ``extra_extract`` also
-    sweeps the zip-mode ``_tmp_extract_*`` scratch (audit A10)."""
-    if extra_extract:
-        for _stale in sorted(root.glob("_tmp_extract_*")):
-            if _stale.is_dir():
-                log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-                remove_directory(_stale)
-    for _stale in sorted(root.glob("_tmp_images_*")):
-        if not _stale.is_dir():
-            continue
-        if any(_stale.glob(".fov_*.done")):
-            n_done = sum(1 for _ in _stale.glob(".fov_*.done"))
-            log.info(
-                "Keeping checkpoint dir %s (%d FOV(s) already done)",
-                _stale.name, n_done,
-            )
-            continue
-        log.warning("Removing stale temporary directory from previous run: %s", _stale.name)
-        remove_directory(_stale)
-
 
 def _run_well_worker_pool(
     *,
@@ -3717,8 +3646,7 @@ def process_well_zips(
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
-        stale_sweep=lambda out: _sweep_stale_scratch_dirs(
-            scratch_base_for(out), extra_extract=True),
+        stale_sweep=lambda out: _sweep_stale_scratch_dirs_all(out, extra_extract=True),
         output_exists=lambda well: output_exists_for_well(output_dir, well, csv_prefix),
         submit_task=_submit,
     )
@@ -3768,9 +3696,10 @@ def process_well_folders(
         force=force, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Folder",
-        # Folder-mode staging (_tmp_images_*) lives directly under output_dir;
-        # there is no zip-extract scratch to sweep.
-        stale_sweep=lambda out: _sweep_stale_scratch_dirs(out, extra_extract=False),
+        # Folder-mode staging (_tmp_images_*) lives under the scratch base, same
+        # as zip mode; there is no zip-extract scratch to sweep. Legacy runs left
+        # their staging under output_dir, so sweep both when they differ.
+        stale_sweep=lambda out: _sweep_stale_scratch_dirs_all(out, extra_extract=False),
         output_exists=lambda well: output_exists_for_well_folder(
             output_dir, well, csv_prefix, compressed_output=True),
         submit_task=_submit,
@@ -4038,6 +3967,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Directory of images, per-well zip files, or per-well subfolders")
     p.add_argument("--output_dir", type=Path, default=Path("results"),
                    help="Destination for CSVs, masks, overlays, and output folders/zips")
+    p.add_argument("--scratch_dir", type=Path, default=None,
+                   help="Directory for per-well working files (zip extraction, "
+                        "intermediate images, FOV checkpoints). Overrides "
+                        "$ALLWELL_SCRATCH_DIR; both default to ~/.allwell/scratch. "
+                        "Keep this on fast LOCAL storage — pointing it at a "
+                        "network mount puts the run's bulk I/O on a volume whose "
+                        "dropped sessions surface as 'Bad file descriptor'.")
 
     p.add_argument("--nuclear_token", default="NIR",
                    help="Channel token identifying nuclear-channel files "
@@ -4316,6 +4252,12 @@ def main() -> None:
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
 
+    # Publish --scratch_dir through the env so the spawn-pool workers (which
+    # inherit os.environ but not argv) resolve the same scratch base. Must
+    # happen before the first scratch_base_for call.
+    if args.scratch_dir is not None:
+        os.environ["ALLWELL_SCRATCH_DIR"] = str(args.scratch_dir)
+
     if not input_dir.is_dir():
         parser.error(f"--input_dir does not exist or is not a directory: {input_dir}")
 
@@ -4457,6 +4399,12 @@ def main() -> None:
 
     log.info("Input    : %s", input_dir)
     log.info("Output   : %s", output_dir)
+    # Named explicitly because it decides where the run's bulk I/O lands. If it
+    # ever reads back as the output dir on a network mount, that is the
+    # configuration behind "Bad file descriptor" well failures.
+    _scratch_base = scratch_base_for(output_dir)
+    log.info("Scratch  : %s%s", _scratch_base,
+             "  (= output dir)" if _scratch_base == output_dir else "")
     log.info("CPUs     : %d total, %d available (1 reserved for main process)",
              cpu_count, available)
     log.info("Device   : %s", _device_str)

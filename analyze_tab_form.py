@@ -699,25 +699,31 @@ class AnalyzeTabFormMixin:
     def _build_scratch_section(self, parent: QWidget) -> None:
         """Scratch-disk picker — the very last option before the Run controls.
 
-        Per-well working files (zip extraction + intermediate images) are
-        written here; pointing it at a roomy/fast volume keeps the temporary,
-        GB-scale I/O off the output drive. Defaults to ``<input>/Temp`` and
-        tracks the input folder until the user overrides it.
+        Per-well working files (zip extraction + intermediate images + FOV
+        checkpoints) are written here. It defaults to ``~/.allwell/scratch``
+        (``pipeline.io.scratch_base_for``) and **no longer tracks the input
+        folder**: seeding it with ``<input>/Temp`` put the run's whole GB-scale
+        temporary I/O on the input volume, which is the configuration behind
+        "Bad file descriptor" well failures when that volume is a network mount
+        — a dropped SMB session invalidates every open handle. Keep this on
+        local storage.
         """
         sec = self._section(
             parent, "Scratch Disk",
             collapsible=True, collapsed=True,
             info="Where per-well working files (zip extraction + intermediate "
-                 "images) are written during a run. Defaults to <input>/Temp. "
-                 "Point it at a roomy/fast volume to keep temporary I/O off the "
-                 "output drive. Leave blank to use the output folder.",
+                 "images) are written during a run. Leave blank to use "
+                 "~/.allwell/scratch. Keep it on fast LOCAL storage — pointing "
+                 "it at a network drive (NAS / SMB share) puts the run's "
+                 "GB-scale temporary I/O on a volume whose dropped sessions "
+                 "make wells fail with 'Bad file descriptor'.",
         )
         pick = QWidget(sec)
         pl = QHBoxLayout(pick)
         pl.setContentsMargins(0, 0, 0, 4)
         pl.setSpacing(4)
         self._scratch_edit = QLineEdit(pick)
-        self._scratch_edit.setPlaceholderText("(defaults to <input>/Temp)")
+        self._scratch_edit.setPlaceholderText("(defaults to ~/.allwell/scratch)")
         self._scratch_edit.setMinimumWidth(0)
         self._scratch_edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         pl.addWidget(self._scratch_edit, 1)
@@ -727,11 +733,11 @@ class AnalyzeTabFormMixin:
         pl.addWidget(self._scratch_browse_btn)
         pl.addStretch(1)
         sec.layout().addWidget(pick)
-        # Typing / browsing pins the value; until then it follows the input dir.
+        # Typing / browsing pins the value; blank means the pipeline default
+        # (~/.allwell/scratch). The field no longer follows the input dir — see
+        # the docstring above for why that default was harmful.
         self._scratch_user_set = False
         self._scratch_edit.textEdited.connect(self._on_scratch_edited)
-        self._input_edit.textChanged.connect(lambda _=None: self._refresh_scratch_default())
-        self._refresh_scratch_default()
 
     def _on_scratch_edited(self, _text: str = "") -> None:
         self._scratch_user_set = True
@@ -746,16 +752,15 @@ class AnalyzeTabFormMixin:
             self._scratch_user_set = True
 
     def _refresh_scratch_default(self) -> None:
-        """Seed the scratch field with ``<input>/Temp`` until the user pins it."""
-        if not hasattr(self, "_scratch_edit") or self._scratch_user_set:
-            return
-        raw = self._input_edit.text().strip()
-        text = str(Path(raw) / "Temp") if raw else ""
-        blocked = self._scratch_edit.blockSignals(True)
-        try:
-            self._scratch_edit.setText(text)
-        finally:
-            self._scratch_edit.blockSignals(blocked)
+        """No-op: the scratch field is left blank so the pipeline default
+        (``~/.allwell/scratch``) applies.
+
+        It used to seed ``<input>/Temp``, which silently pinned every run's
+        temporary I/O to the input volume. Kept (rather than deleted) so any
+        out-of-tree caller stays working; it is no longer wired to the input
+        field.
+        """
+        return
 
     # ── Load a prior run's settings from its pipeline_info.json sidecar ───────
     def _open_pipeline_info(self) -> None:
@@ -906,7 +911,8 @@ class AnalyzeTabFormMixin:
         chk("_cpu_only_cb", d.get("cpu_only"))
         chk("_force_cb", d.get("force"))
 
-        # Scratch disk — pin it so the input-dir default can't overwrite it.
+        # Scratch disk — a recorded value pins the field; absent, it stays blank
+        # so the pipeline default (~/.allwell/scratch) applies.
         scratch = d.get("scratch_dir")
         if scratch and hasattr(self, "_scratch_edit"):
             self._scratch_edit.setText(str(scratch))

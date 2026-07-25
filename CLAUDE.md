@@ -169,6 +169,8 @@ the default branch yourself.
 
 **Scheduling your own check-ins is pre-authorized.** `send_later` (and the
 equivalent self-wakeup tools) needs no permission — standing grant, never ask.
+It is also allowlisted in `.claude/settings.json`, so the harness shouldn't
+prompt for it either.
 Use it freely to re-check a running CI job, a queued workflow, or an open PR,
 and re-arm it as often as the work needs. A silent re-arm is the correct move
 when nothing has changed: don't narrate a wake-up that found the job still

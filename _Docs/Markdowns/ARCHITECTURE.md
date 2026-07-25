@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.25.** This map describes the app as it stands today;
+**Reflects All-Well v8.8.26.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.25; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.26; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -2261,6 +2261,45 @@ not `tests/pytest.ini`. That matters: an ini under `tests/` is found by
 from the repo root (rootdir stays at the root), so markers, `filterwarnings`, and
 `testpaths` silently applied in one lane and not the other. A root config is
 discovered from either.
+
+### 10.5 End-to-end segmentation tests (`tests/test_segmentation_e2e.py`)
+
+One test per segmentation method the Analyze dropdown offers — `stardist_nuclei`,
+`stardist_seeded_watershed_cell`, `cellpose`, `cellpose_labelfree`,
+`classical_threshold` — each run through the **real Analyze tab**: a synthetic
+plate of schema-named TIFFs is written to a tmp dir, the form is filled the way
+an operator would fill it, `_run()` is called, and the Qt event loop is pumped
+until the `process_microscopy.py` subprocess the tab spawned exits. Nothing is
+mocked, so one test covers the grouping (zipper) phase, the subprocess launch,
+the log/progress plumbing, segmentation, quantification, per-well CSV assembly
+and output zipping. The assertions are on the artefacts that land in
+`raw/out/` (per-well CSV rows, `pipeline_info.json`, `_labels.tif` inside
+`<well>_out.zip`) plus the tab's completion contract (the "Processing Complete"
+banner and the `on_pipeline_complete` callback).
+
+Complementary to, not a replacement for, `test_segmentation_methods.py` /
+`test_labelfree_phase.py` (form state + CLI arg mapping, no run) and
+`test_pipeline_e2e.py` (`process_image_group` / `process_well_folder_task`
+directly, no GUI).
+
+Test images come from `tests/fixtures/synthetic_pipeline.write_synthetic_channels`,
+the multi-channel generalisation of `write_synthetic_fov`: every channel draws the
+same nuclei centres, with the kind (`nuclear` / `fluor` / `cytoplasm` / `phase`)
+picking disk radius and intensities, so cytoplasm and phase channels are
+registered with the nuclei the way a real acquisition is.
+
+Skips and cost. The module is marked `slow` (each test loads a segmentation
+model), so the fast lane never picks it up; run it on its own:
+`scripts/test.sh tests/test_segmentation_e2e.py -m ""`. The StarDist tests need
+TensorFlow + StarDist and the Cellpose tests need Torch + Cellpose *and* the
+model weights already cached under `~/.cellpose/models` (or
+`CELLPOSE_LOCAL_MODELS_PATH`) — Cellpose downloads them from cellpose.org on
+first use, which an offline or egress-restricted machine cannot do. Where any of
+that is missing the affected tests skip and `classical_threshold`, which needs
+nothing beyond scipy/skimage, still runs. Availability is probed with
+`importlib.util.find_spec`, never an import: TensorFlow and Torch cannot always
+share a process, and the pipeline keeps each run in its own subprocess precisely
+to avoid that.
 
 ---
 

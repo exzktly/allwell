@@ -15,7 +15,6 @@ step, not part of this gate.
 
 from __future__ import annotations
 
-from typing import Optional
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
@@ -35,7 +34,7 @@ def _num(text: str) -> float:
         return 0.0
 
 
-def _fmt(v: Optional[float]) -> str:
+def _fmt(v: float | None) -> str:
     return "" if v is None else f"{v:g}"
 
 

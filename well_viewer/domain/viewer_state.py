@@ -6,11 +6,11 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
 
 
 def make_schema_extractor(sep: str, fov_idx: int, tp_idx: int):
-    def _extract(stem: str) -> Tuple[str, str]:
+    def _extract(stem: str) -> tuple[str, str]:
         parts = stem.split(sep)
         fov = parts[fov_idx] if 0 <= fov_idx < len(parts) else "unknown"
         tp = parts[tp_idx] if 0 <= tp_idx < len(parts) else "unknown"
@@ -19,7 +19,7 @@ def make_schema_extractor(sep: str, fov_idx: int, tp_idx: int):
     return _extract
 
 
-def extract_well_token(label: str) -> Optional[str]:
+def extract_well_token(label: str) -> str | None:
     """Extract normalized well token from trailing label text.
 
     Example:
@@ -29,7 +29,7 @@ def extract_well_token(label: str) -> Optional[str]:
     return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else None
 
 
-def parse_rc(label: str) -> Tuple[Optional[str], Optional[str]]:
+def parse_rc(label: str) -> tuple[str | None, str | None]:
     """Split a well label into its (row-letter, zero-padded-column) sort key.
 
     ``"A1"`` / ``"measurements_a01"`` -> ``("A", "01")``; junk -> ``(None, None)``.
@@ -46,7 +46,7 @@ def read_pipeline_info(
     *,
     logger=None,
     check_parent: bool = True,
-) -> tuple[Callable[[str], Tuple[str, str]] | None, list[str], set[str], dict]:
+) -> tuple[Callable[[str], tuple[str, str]] | None, list[str], set[str], dict]:
     if logger is None:
         logger = logging.getLogger("well_viewer")
 
@@ -137,7 +137,7 @@ def read_pipeline_info(
     if fov_idx < 0:
         logger.info("Loaded pipeline_info from %s  sep=%r fov=<single> tp=%d", info_path, sep, tp_idx)
 
-        def _extract_single_fov(stem: str) -> Tuple[str, str]:
+        def _extract_single_fov(stem: str) -> tuple[str, str]:
             parts = stem.split(sep)
             tp = parts[tp_idx] if 0 <= tp_idx < len(parts) else "unknown"
             return "1", tp

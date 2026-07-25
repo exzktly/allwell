@@ -10,7 +10,7 @@ unchanged.
 from __future__ import annotations
 
 from pathlib import Path  # used by save dialogs
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
@@ -29,7 +29,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
 from well_viewer.features.image_browser.image_table.grid_layout import _axis_dim_values
 
 
-def _export_opts(ctx) -> Dict[str, Any]:
+def _export_opts(ctx) -> dict[str, Any]:
     """Return the image-table export option dict, seeding defaults on demand."""
     opts = getattr(ctx.state.image_table, "export_opts", None)
     if not isinstance(opts, dict):
@@ -152,7 +152,7 @@ def _max_pool_rgb(rgb, max_side: int):
     return out.astype(a.dtype)
 
 
-def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
+def _build_export_figure(ctx, *, cell_max_px: int | None = None):
     """Render the current image-table contents to a matplotlib Figure.
 
     Returns ``(fig, save_kwargs)`` where *save_kwargs* are the format-agnostic
@@ -196,7 +196,7 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     overlay_on = bool(getattr(ctx.state.image_table, "composite", False))
     overlay_chans = _axis_dim_values(ctx, "channel", collapse_overlay=False) if overlay_on else []
 
-    cache: Dict[Tuple[str, str, str], Dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
+    cache: dict[tuple[str, str, str], dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
     rendered = getattr(ctx.state.image_table, "last_render", None) or {}
     crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
     # Scale bar + identity labels are burned into the same RGB the live grid uses,
@@ -212,8 +212,8 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     # its gridspec cell, which makes the visible inter-row gap differ from
     # the inter-column gap. Sizing the cell to the actual image aspect
     # keeps the axes filling the cell so row/column spacing match.
-    img_h: Optional[int] = None
-    img_w: Optional[int] = None
+    img_h: int | None = None
+    img_w: int | None = None
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             arr = rendered.get((r, c))
@@ -322,7 +322,7 @@ def _build_export_figure(ctx, *, cell_max_px: Optional[int] = None):
     except Exception:
         fig.tight_layout()
 
-    save_kwargs: Dict[str, Any] = dict(
+    save_kwargs: dict[str, Any] = dict(
         bbox_inches="tight", pad_inches=pad_inches,
         facecolor=bg_face, transparent=transparent_bg,
     )

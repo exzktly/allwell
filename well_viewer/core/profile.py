@@ -36,7 +36,6 @@ import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 try:  # tomllib is stdlib on Python 3.11+; fall back to tomli on 3.10 (project pin).
     import tomllib
@@ -75,7 +74,7 @@ class Profile:
     """
 
     name: str = "full"
-    features: Optional[frozenset] = None
+    features: frozenset | None = None
     subtabs: dict = field(default_factory=dict)
 
     def includes(self, descriptor) -> bool:

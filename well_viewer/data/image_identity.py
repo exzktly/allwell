@@ -32,7 +32,8 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Mapping, Optional
+from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
 
 from util.well_token import canonical_well_label
 
@@ -117,7 +118,7 @@ ROLE_CATALOG: Mapping[Role, RoleSpec] = {
 }
 
 
-def role_for_kind(kind: str) -> Optional[Role]:
+def role_for_kind(kind: str) -> Role | None:
     """Map legacy ``kind`` strings (``"fluor_raw"``, ``"fluor_processed"``,
     ``"tophat"``, …) to ``Role``. Returns ``None`` if not recognised."""
     if not kind:
@@ -158,7 +159,7 @@ def role_output_filename(
 
 def classify_filename_role(
     name: str, *, fluor_token: str = "",
-) -> tuple[Optional[Role], str]:
+) -> tuple[Role | None, str]:
     """Strip the longest matching role suffix from *name* and return
     ``(role, stem_without_role_suffix)``. Channel-scoped variants are
     tried before the bare suffix when *fluor_token* is supplied.
@@ -214,33 +215,33 @@ class PipelineSchema:
     channels: tuple[str, ...] = ()
 
     @property
-    def well_idx(self) -> Optional[int]:
+    def well_idx(self) -> int | None:
         return self._index_of("well")
 
     @property
-    def channel_idx(self) -> Optional[int]:
+    def channel_idx(self) -> int | None:
         return self._index_of("channel")
 
     @property
-    def fov_idx(self) -> Optional[int]:
+    def fov_idx(self) -> int | None:
         return self._index_of("fov")
 
     @property
-    def tp_idx(self) -> Optional[int]:
+    def tp_idx(self) -> int | None:
         return self._index_of("timepoint")
 
     @property
     def has_fov(self) -> bool:
         return self.fov_idx is not None
 
-    def _index_of(self, name: str) -> Optional[int]:
+    def _index_of(self, name: str) -> int | None:
         for i, f in enumerate(self.fields):
             if f == name:
                 return i
         return None
 
 
-def load_schema(pipeline_info: Optional[Mapping[str, Any]]) -> PipelineSchema:
+def load_schema(pipeline_info: Mapping[str, Any] | None) -> PipelineSchema:
     """Build a :class:`PipelineSchema` from ``pipeline_info.json`` contents.
 
     Accepts both the ``schema_fields`` list and the legacy ``schema``
@@ -352,7 +353,7 @@ _TP_UNIT_RE = re.compile(
 _TP_TRAILING_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)$")
 
 
-def parse_timepoint_hours(value: Any) -> Optional[float]:
+def parse_timepoint_hours(value: Any) -> float | None:
     """Parse a timepoint token into fractional hours.
 
     Handles every form seen in the wild: ``"T01"``, ``"24"``, ``"24h"``,
@@ -410,7 +411,7 @@ def normalize_tp(value: Any) -> str:
     return f"{hours:g}"
 
 
-def tp_hours(value: Any) -> Optional[float]:
+def tp_hours(value: Any) -> float | None:
     """Optional numeric companion to :func:`normalize_tp` for arithmetic
     or sorting. Returns ``None`` for opaque labels."""
     return parse_timepoint_hours(value)
@@ -444,7 +445,7 @@ class ParsedName:
     stem: str
     schema: PipelineSchema
     fields: Mapping[str, str]
-    role: Optional[Role]
+    role: Role | None
     channel: str
     ext: str
 
@@ -498,7 +499,7 @@ def build_image_filename(
     *,
     fields: Mapping[str, str],
     schema: PipelineSchema,
-    role: Optional[Role] = None,
+    role: Role | None = None,
     channel: str = "",
     ext: str = "",
 ) -> str:
@@ -544,8 +545,8 @@ class CellKey:
         cls,
         row: Mapping[str, Any],
         *,
-        well: Optional[str] = None,
-    ) -> "CellKey":
+        well: str | None = None,
+    ) -> CellKey:
         """Build a :class:`CellKey` from one CSV row. Honours all the
         column-name aliases seen in real datasets (``FOV``/``fov``,
         ``tp``/``timepoint``/``time``/``time_h``/``timepoint_hours``,
@@ -576,9 +577,9 @@ class CellKey:
         cls,
         parsed: ParsedName,
         *,
-        well: Optional[str] = None,
+        well: str | None = None,
         nid: Any = "",
-    ) -> "CellKey":
+    ) -> CellKey:
         """Build a :class:`CellKey` from a :class:`ParsedName` (the
         result of :func:`parse_image_filename`) plus an externally-
         supplied nucleus ID. *well* overrides the parsed well field
@@ -595,7 +596,7 @@ class CellKey:
 def cell_keys_for_dataframe(
     df,
     *,
-    default_well: Optional[str] = None,
+    default_well: str | None = None,
 ):
     """Vectorised :meth:`CellKey.from_row`. Returns a pandas ``Series``
     of :class:`CellKey` aligned with ``df.index``. Used by the smFISH
@@ -605,7 +606,7 @@ def cell_keys_for_dataframe(
     if df is None or df.empty:
         return pd.Series([], dtype=object)
 
-    def _resolve_col(*names: str) -> Optional[str]:
+    def _resolve_col(*names: str) -> str | None:
         lowered = {str(c).lower(): c for c in df.columns}
         for n in names:
             if n in df.columns:

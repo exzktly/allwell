@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import matplotlib
 import numpy as np
@@ -35,7 +35,7 @@ from well_viewer.domain.viewer_state import parse_rc
 _logger = logging.getLogger(__name__)
 
 
-def timepoint_color_map(timepoints) -> Dict[float, Any]:
+def timepoint_color_map(timepoints) -> dict[float, Any]:
     """Map sorted timepoints → viridis RGBA — the per-cell + aggregate convention.
 
     Shared by ``collect_scatter_agg_data`` (one marker per well/timepoint) and
@@ -61,11 +61,11 @@ def collect_scatter_data(
     col_y: str,
     timepoints_h,
     *,
-    well_colors: List[str],
+    well_colors: list[str],
     fluor_gate_x: float = 0.0,
     fluor_gate_y: float = 0.0,
-    ratios: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Dict[str, Any]]:
+    ratios: dict[str, Any] | None = None,
+) -> dict[str, dict[str, Any]]:
     """Collect scatter plot data for the given column names and timepoint(s).
 
     ``timepoints_h`` accepts a single ``float`` (legacy) or a list of floats.
@@ -93,7 +93,7 @@ def collect_scatter_data(
         }
     """
 
-    scatter_data: Dict[str, Dict[str, Any]] = {}
+    scatter_data: dict[str, dict[str, Any]] = {}
 
     if ratios is None:
         ratios = ctx.state.channel.ratio_index or {}
@@ -111,7 +111,7 @@ def collect_scatter_data(
     is_count_x = column_gating_exempt(col_x)
     is_count_y = column_gating_exempt(col_y)
 
-    def _collect_well(well_label: str) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, list]]:
+    def _collect_well(well_label: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, list] | None:
         df = get_rows(ctx, well_label)
         if df is None or df.empty:
             return None
@@ -170,10 +170,10 @@ def collect_scatter_data(
         for group_idx, rset in enumerate(active_rsets):
             group_name = rset.name
             color = color_for_replicate_set(rset, ctx.state.selection.selections)  # decision #1: colour by well-position rank
-            xs: List[np.ndarray] = []
-            ys: List[np.ndarray] = []
-            tps: List[np.ndarray] = []
-            metadata: List[Tuple[str, str, str, int]] = []
+            xs: list[np.ndarray] = []
+            ys: list[np.ndarray] = []
+            tps: list[np.ndarray] = []
+            metadata: list[tuple[str, str, str, int]] = []
             # Per-well breakdown so the SVG renderer can emit one
             # Line2D per well (each becomes its own ``<g>`` group). The
             # whole-group ``x``/``y``/``metadata`` arrays stay too — the
@@ -254,10 +254,10 @@ def collect_scatter_agg_data(
     ctx,
     stat_x: str,  # e.g., "Mean Fluorescence GFP"
     stat_y: str,  # e.g., "Fraction On mCherry"
-    timepoints_h: List[float],
+    timepoints_h: list[float],
     *,
-    well_colors: List[str],
-) -> Dict[str, Dict[str, Any]]:
+    well_colors: list[str],
+) -> dict[str, dict[str, Any]]:
     """Collect aggregate scatter plot data by computing statistics for each replicate/well.
 
     Args:
@@ -278,13 +278,13 @@ def collect_scatter_agg_data(
             'label': 'label (t=Xh)'
         }
     """
-    scatter_data: Dict[str, Dict[str, Any]] = {}
+    scatter_data: dict[str, dict[str, Any]] = {}
 
     # Extract channel and metric type from statistic names. The legacy
     # "Mean Fluorescence GFP" stat string now optionally carries a
     # parenthesised property suffix ("Mean Fluorescence GFP (Total
     # Intensity)") so the agg renderer can pick a non-MFI column.
-    def parse_statistic(stat_str: str) -> Tuple[str, str, str]:
+    def parse_statistic(stat_str: str) -> tuple[str, str, str]:
         """Parse statistic strings.
 
         Returns ``(channel_or_label, metric, intensity_metric)`` where

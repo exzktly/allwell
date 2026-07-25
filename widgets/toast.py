@@ -92,7 +92,7 @@ class Toast(QWidget):
 
     @classmethod
     def show_message(cls, parent: QWidget | None, text: str, *,
-                     kind: str = "success", msec: int = 4000) -> "Toast":
+                     kind: str = "success", msec: int = 4000) -> Toast:
         app_qss = ""
         try:
             from PySide6.QtWidgets import QApplication

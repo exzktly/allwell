@@ -29,7 +29,7 @@ _FLATFIELD_SIGMA = FLATFIELD_SIGMA
 _FLATFIELD_FLOOR = FLATFIELD_FLOOR
 
 
-def normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
+def normalize_flatfield(field: np.ndarray) -> np.ndarray | None:
     """Normalize an illumination field to mean 1.0 so dividing by it preserves
     overall image scale. Returns None if the field is degenerate."""
     field = np.asarray(field, dtype=np.float32)
@@ -49,7 +49,7 @@ def normalize_flatfield(field: np.ndarray) -> "np.ndarray | None":
     return out.astype(np.float32)
 
 
-def estimate_gaussian_flatfield(image: np.ndarray, sigma: float = FLATFIELD_SIGMA) -> "np.ndarray | None":
+def estimate_gaussian_flatfield(image: np.ndarray, sigma: float = FLATFIELD_SIGMA) -> np.ndarray | None:
     """Estimate a smooth illumination field by heavily Gaussian-blurring *image*.
 
     Dividing the image by the returned mean-1 field flattens slow illumination
@@ -61,7 +61,7 @@ def estimate_gaussian_flatfield(image: np.ndarray, sigma: float = FLATFIELD_SIGM
     return normalize_flatfield(blurred)
 
 
-def estimate_basic_flatfield(stack, sigma: float = FLATFIELD_SIGMA) -> "np.ndarray | None":
+def estimate_basic_flatfield(stack, sigma: float = FLATFIELD_SIGMA) -> np.ndarray | None:
     """Pure-numpy BaSiC-style flat-field from a stack of single-channel images.
 
     Estimates the multiplicative illumination profile shared across the stack:
@@ -83,7 +83,7 @@ def estimate_basic_flatfield(stack, sigma: float = FLATFIELD_SIGMA) -> "np.ndarr
     return normalize_flatfield(gaussian_filter(median, sigma=float(sigma)))
 
 
-def apply_flatfield(image: np.ndarray, flatfield: "np.ndarray | None") -> np.ndarray:
+def apply_flatfield(image: np.ndarray, flatfield: np.ndarray | None) -> np.ndarray:
     """Divide *image* by a mean-1 *flatfield* (no-op when None or shape-mismatched).
 
     Returns float32; the mean-1 normalization keeps intensity magnitudes

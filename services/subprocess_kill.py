@@ -20,12 +20,11 @@ import os
 import signal
 import subprocess
 import threading
-from typing import Optional
 
 from util.aw_safe import swallowed
 
 
-def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
+def signal_subprocess(proc: subprocess.Popen | None) -> None:
     """Terminate ``proc`` and its whole process group.
 
     Safe to call when ``proc`` is None or already exited — both no-op.
@@ -48,7 +47,7 @@ def signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
         # A wrapper whose poll() itself fails → nothing we can safely signal.
         return
 
-    pgid: Optional[int] = None
+    pgid: int | None = None
     if os.name == "posix":
         try:
             pid = proc.pid

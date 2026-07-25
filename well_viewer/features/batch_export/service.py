@@ -76,7 +76,7 @@ def discard_staging(staging) -> None:
     shutil.rmtree(Path(staging), ignore_errors=True)
 
 
-def commit_staged_export(staging, out_dir, *, manifest_extra: "dict | None" = None) -> "list[str]":
+def commit_staged_export(staging, out_dir, *, manifest_extra: dict | None = None) -> list[str]:
     """Move every staged file into ``out_dir`` and write a manifest.
 
     Called only after a fully-successful run. Each staged file is ``os.replace``d

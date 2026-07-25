@@ -17,7 +17,6 @@ from well_viewer.domain.viewer_state import parse_rc
 
 import logging
 import math
-from typing import Dict, List, Optional
 
 _logger = logging.getLogger(__name__)
 
@@ -103,7 +102,7 @@ NO_SELECTION_MSG = (
 )
 
 
-def _pooled_rows(ctx, lbl: str, pool_groups: Optional[Dict[str, List[str]]]):
+def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None):
     """Return cells for ``lbl``. When ``pool_groups[lbl]`` exists, concat
     the per-well DataFrames of every well in the group; otherwise just
     return ``get_rows(ctx, lbl)`` unchanged."""
@@ -119,7 +118,7 @@ def _pooled_rows(ctx, lbl: str, pool_groups: Optional[Dict[str, List[str]]]):
     return get_rows(ctx, lbl)
 
 
-def _format_tp_title(target_ts: List[float], tp_str: str) -> str:
+def _format_tp_title(target_ts: list[float], tp_str: str) -> str:
     """Build the axis-title timepoint suffix for one or many tps."""
     if not target_ts:
         return ""
@@ -132,18 +131,18 @@ def draw_violin(
     ctx,
     ax_mean,
     ax_frac,
-    wells: List[str],
-    colors: List[str],
-    xlabels: List[str],
+    wells: list[str],
+    colors: list[str],
+    xlabels: list[str],
     target_t,
     tp_str: str,
     threshold: float,
     *,
-    xs: Optional[List[float]] = None,
-    group_keys: Optional[List[str]] = None,
-    cell_scale: Optional[Dict[str, float]] = None,
-    bw: Optional[float] = None,
-    pool_groups: Optional[Dict[str, List[str]]] = None,
+    xs: list[float] | None = None,
+    group_keys: list[str] | None = None,
+    cell_scale: dict[str, float] | None = None,
+    bw: float | None = None,
+    pool_groups: dict[str, list[str]] | None = None,
 ) -> None:
     """KDE-smoothed distribution per well/group.
 
@@ -182,7 +181,7 @@ def draw_violin(
         target_ts_per_col = [float(t) for t in target_t]
     else:
         target_ts_per_col = [float(target_t)] * n
-    frac_vals: List[float] = []
+    frac_vals: list[float] = []
     ratios = ctx.state.channel.ratio_index
 
     for i, (lbl, color) in enumerate(zip(wells, colors)):
@@ -270,7 +269,7 @@ def draw_violin(
     if group_keys:
         # Headers above the mean panel showing the cluster identity.
         cluster_x: dict = {}
-        cluster_order: List[str] = []
+        cluster_order: list[str] = []
         for gk, x in zip(group_keys, xs):
             gk = gk or ""
             if not gk:
@@ -306,17 +305,17 @@ def draw_beeswarm(
     ctx,
     ax_mean,
     ax_frac,
-    wells: List[str],
-    colors: List[str],
-    xlabels: List[str],
+    wells: list[str],
+    colors: list[str],
+    xlabels: list[str],
     target_t,
     tp_str: str,
     threshold: float,
     *,
-    xs: Optional[List[float]] = None,
-    group_keys: Optional[List[str]] = None,
-    cell_scale: Optional[Dict[str, float]] = None,
-    pool_groups: Optional[Dict[str, List[str]]] = None,
+    xs: list[float] | None = None,
+    group_keys: list[str] | None = None,
+    cell_scale: dict[str, float] | None = None,
+    pool_groups: dict[str, list[str]] | None = None,
 ) -> None:
     """One column per (well, timepoint), each cell a jittered point.
 
@@ -342,7 +341,7 @@ def draw_beeswarm(
         xi = xs[i] if i < len(xs) else i
         df = _pooled_rows(ctx, lbl, pool_groups)
         cell_vals = np.empty(0, dtype=float)
-        frac_val: Optional[float] = None
+        frac_val: float | None = None
         if df is not None and not df.empty:
             mask = df_included_mask(df).to_numpy(copy=True)
             if "timepoint_hours" in df.columns:
@@ -420,7 +419,7 @@ def draw_beeswarm(
         ax.set_xlim(xlim_lo, xlim_hi)
     if group_keys:
         cluster_x: dict = {}
-        cluster_order: List[str] = []
+        cluster_order: list[str] = []
         for gk, x in zip(group_keys, xs):
             gk = gk or ""
             if not gk:
@@ -521,7 +520,7 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     if not keys or len(keys) != len(xs):
         return
     x_by_key = {k: xs[i] for i, k in enumerate(keys)}
-    top_by_key: Dict[str, float] = {}
+    top_by_key: dict[str, float] = {}
     for it in items:
         val = getattr(it, val_attr, float("nan"))
         if getattr(it, has_attr, False) and not math.isnan(val):
@@ -533,7 +532,7 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # auto-seeded from the replicate sets share their names); fall back to a
     # WELLS match so a comparison still lands on the right bar when the
     # Statistics group and the bar's replicate set are named differently.
-    wells_to_key: Dict[frozenset, str] = {}
+    wells_to_key: dict[frozenset, str] = {}
     for rset in active_replicate_sets(ctx.state.selection.selections,
                                       ctx.state.dataset.well_paths):
         fw = frozenset(getattr(rset, "wells", []) or [])
@@ -600,7 +599,7 @@ def draw_grouped_bar_mode(
     ax_frac,
     ax_n,
     active_rsets,
-    target_ts: List[float],
+    target_ts: list[float],
     tp_str: str,
     threshold: float,
     band_lbl: str,
@@ -829,7 +828,7 @@ def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
     ctx.runtime.barplot.canvas.draw_idle()
 
 
-def resolve_bar_timepoints(ctx) -> List[tuple]:
+def resolve_bar_timepoints(ctx) -> list[tuple]:
     """Return the list of ``(float, str)`` timepoints currently selected.
 
     ``BarPlotState.tp_selections`` is authoritative once populated: an
@@ -841,7 +840,7 @@ def resolve_bar_timepoints(ctx) -> List[tuple]:
     """
     sels = ctx.state.bar.tp_selections if hasattr(ctx, "state") else None
     if isinstance(sels, dict) and sels:
-        out: List[tuple] = []
+        out: list[tuple] = []
         for tp_str, on in sels.items():
             if not on:
                 continue
@@ -861,7 +860,7 @@ def resolve_bar_timepoints(ctx) -> List[tuple]:
         return []
 
 
-def selected_bar_wells(ctx, active_rsets) -> List[str]:
+def selected_bar_wells(ctx, active_rsets) -> list[str]:
     if active_rsets:
         return []
     return sorted(
@@ -878,7 +877,7 @@ def draw_per_cell_bar_mode(
     ax_frac,
     ax_n=None,
     active_rsets,
-    target_ts: List[float],
+    target_ts: list[float],
     tp_str: str,
     threshold: float,
 ) -> bool:
@@ -904,11 +903,11 @@ def draw_per_cell_bar_mode(
     # cluster header (well-grouped layout) so it carries the full
     # disambiguating identity (e.g. "A01 [CTRL]"), while the per-bar tick
     # label stays short.
-    base_wells: List[str] = []
-    base_colors: List[str] = []
-    base_short: List[str] = []      # short well/rset label used per-bar
-    base_full: List[str] = []       # disambiguating label used in cluster headers
-    pool_groups: Optional[Dict[str, List[str]]] = None
+    base_wells: list[str] = []
+    base_colors: list[str] = []
+    base_short: list[str] = []      # short well/rset label used per-bar
+    base_full: list[str] = []       # disambiguating label used in cluster headers
+    pool_groups: dict[str, list[str]] | None = None
     if active_rsets and pool_reps:
         # One column per rset; cells pooled across the rset's wells. The
         # rset *name* becomes the "well" key passed downstream — draw_violin /
@@ -956,11 +955,11 @@ def draw_per_cell_bar_mode(
     # for. Labels stay single-line: cluster headers carry the primary
     # identity so per-bar labels only need to carry the secondary axis
     # (the variable that changes inside the cluster).
-    plot_wells: List[str] = []
-    plot_colors: List[str] = []
-    plot_labels: List[str] = []
-    plot_tps: List[float] = []
-    group_keys: List[str] = []
+    plot_wells: list[str] = []
+    plot_colors: list[str] = []
+    plot_labels: list[str] = []
+    plot_tps: list[float] = []
+    group_keys: list[str] = []
     multi_tp = len(target_ts) > 1
     if group_mode == "timepoint":
         for t in target_ts:
@@ -1047,15 +1046,15 @@ def draw_per_cell_bar_mode(
 def draw_per_well_n_bars(
     ctx,
     ax_n,
-    wells: List[str],
-    colors: List[str],
-    xlabels: List[str],
+    wells: list[str],
+    colors: list[str],
+    xlabels: list[str],
     target_t,
     threshold: float,
     *,
-    xs: Optional[List[float]] = None,
-    group_keys: Optional[List[str]] = None,
-    pool_groups: Optional[Dict[str, List[str]]] = None,
+    xs: list[float] | None = None,
+    group_keys: list[str] | None = None,
+    pool_groups: dict[str, list[str]] | None = None,
 ) -> None:
     """Render the events-above-threshold panel for per-cell view modes.
 

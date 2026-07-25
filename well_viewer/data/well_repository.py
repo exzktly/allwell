@@ -20,7 +20,7 @@ the frozen service-accessor surface.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -37,7 +37,7 @@ class WellRepository:
         self._ctx = ctx
 
     @property
-    def dataset(self) -> "DatasetState":
+    def dataset(self) -> DatasetState:
         """The underlying ``DatasetState`` aggregate root."""
         return self._ctx.state.dataset
 
@@ -46,23 +46,23 @@ class WellRepository:
         (delegates to :func:`data_loading.get_rows`)."""
         return get_rows(self._ctx, label)
 
-    def rows_or_none(self, label: str) -> Optional[pd.DataFrame]:
+    def rows_or_none(self, label: str) -> pd.DataFrame | None:
         """The cached frame for *label* if already loaded, else ``None`` — a
         cache-only lookup with **no** lazy load or projection (the explicit,
         named form of the direct ``dataset.cache.get(label)`` reads B3 routes
         through here)."""
         return self._ctx.state.dataset.cache.get(label)
 
-    def labels(self) -> "List[str]":
+    def labels(self) -> list[str]:
         """Well tokens known to the dataset (whether or not yet cached)."""
         return list(self._ctx.state.dataset.well_paths)
 
-    def all_timepoints(self) -> "List[float]":
+    def all_timepoints(self) -> list[float]:
         """Canonical numeric timepoint list (delegates to
         :func:`data_loading.get_all_timepoints`)."""
         return get_all_timepoints(self._ctx)
 
-    def all_fovs(self) -> "List[str]":
+    def all_fovs(self) -> list[str]:
         """Canonical FOV list off the dataset's derived cache."""
         return list(self._ctx.state.dataset.all_fovs_cache)
 

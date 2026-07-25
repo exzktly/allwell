@@ -15,7 +15,7 @@ and drive the Image Table tab:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -692,7 +692,7 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
 
     st = ctx.state.image_table
     st.auto_lut_by_channel = {}
-    pooled: Dict[str, list] = {}  # base_chan_lower -> [min, max]
+    pooled: dict[str, list] = {}  # base_chan_lower -> [min, max]
     for r, row in enumerate(cells):
         for cell in row:
             chan = cell["chan"]
@@ -762,7 +762,7 @@ def image_table_generate(ctx) -> None:
     if not isinstance(cache, dict):
         cache = {}
         ctx.state.image_table.image_cache = cache
-    rendered: Dict[Tuple[int, int], Any] = {}
+    rendered: dict[tuple[int, int], Any] = {}
     crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
     # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
     zoom = float(getattr(ctx.state.image_table, "zoom", 1.0) or 1.0)

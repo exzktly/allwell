@@ -17,7 +17,7 @@ import numpy as np
 
 # Per-worker Cellpose models, keyed by model type (cyto3/cyto2/cyto/nuclei), so a
 # run can choose a model without silently reusing another type's cache. Lazy.
-_CELLPOSE_MODELS: "dict[str, object]" = {}
+_CELLPOSE_MODELS: dict[str, object] = {}
 
 
 def _cellpose_model(model_type: str = "cyto3"):
@@ -47,7 +47,7 @@ def _segment_cellpose(
     diameter: float = 0.0,
     flow_threshold: float = 0.4,
     cellprob_threshold: float = 0.0,
-    nucleus_image: "np.ndarray | None" = None,
+    nucleus_image: np.ndarray | None = None,
 ) -> np.ndarray:
     """Segment *image* with Cellpose. Works on any channel (fluorescent or
     brightfield) — the caller chooses the input. ``diameter=0`` auto-estimates.

@@ -27,7 +27,6 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QGuiApplication
@@ -76,10 +75,10 @@ class RemoteFormDialog(QDialog):
 
     def __init__(
         self,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         *,
-        host: Optional[RemoteHost] = None,
-        existing_names: Optional[set[str]] = None,
+        host: RemoteHost | None = None,
+        existing_names: set[str] | None = None,
     ) -> None:
         super().__init__(parent)
         self._editing = host is not None
@@ -747,7 +746,7 @@ class SSHKeyWizardDialog(QDialog):
     dialog should record in ``ssh_key_path``.
     """
 
-    def __init__(self, parent: Optional[QWidget], *, ssh_alias: str) -> None:
+    def __init__(self, parent: QWidget | None, *, ssh_alias: str) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Setup SSH Key — {ssh_alias}")
         self.setModal(True)
@@ -1000,18 +999,18 @@ class BootstrapLogDialog(QDialog):
     # cleanly. Future refactor could share the queue class outright.
     finished_ok = Signal(int)  # exit code; 0 = success
 
-    def __init__(self, parent: Optional[QWidget], alias: str) -> None:
+    def __init__(self, parent: QWidget | None, alias: str) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Bootstrap {alias}")
         self.setModal(True)
         self.resize(720, 480)
 
         self._alias = alias
-        self._proc: Optional[subprocess.Popen] = None
-        self._reader_thread: Optional[threading.Thread] = None
+        self._proc: subprocess.Popen | None = None
+        self._reader_thread: threading.Thread | None = None
         self._log_q: queue.Queue = queue.Queue(maxsize=10000)
-        self._started_at: Optional[float] = None
-        self._exit_code: Optional[int] = None
+        self._started_at: float | None = None
+        self._exit_code: int | None = None
         self._finished_emitted = False
 
         layout = QVBoxLayout(self)
@@ -1202,7 +1201,7 @@ class ManageRemotesDialog(QDialog):
 
     remotes_changed = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Manage Remote Servers")
         self.setModal(True)
@@ -1289,7 +1288,7 @@ class ManageRemotesDialog(QDialog):
                     break
         self._refresh_button_state()
 
-    def _selected_name(self) -> Optional[str]:
+    def _selected_name(self) -> str | None:
         items = self._list.selectedItems()
         if not items:
             return None

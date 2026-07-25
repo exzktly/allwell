@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Optional
 
 from well_viewer.persistence import _doc
 from well_viewer.core.safe import swallowed
@@ -41,7 +40,7 @@ class SavedPlot:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "SavedPlot":
+    def from_dict(cls, d: dict) -> SavedPlot:
         return cls(
             id=str(d.get("id", "")),
             created_at=str(d.get("created_at", "")),
@@ -60,20 +59,20 @@ class SavedPlotsStore:
 
     def __init__(self) -> None:
         self.records: list[SavedPlot] = []
-        self._loaded_dir: Optional[Path] = None
+        self._loaded_dir: Path | None = None
 
     # ── disk paths ────────────────────────────────────────────────────────
     @staticmethod
-    def _data_dir(ctx) -> Optional[Path]:
+    def _data_dir(ctx) -> Path | None:
         d = getattr(ctx.state.dataset, "data_dir", None)
         return Path(d) if d else None
 
     @classmethod
-    def images_dir(cls, ctx) -> Optional[Path]:
+    def images_dir(cls, ctx) -> Path | None:
         d = cls._data_dir(ctx)
         return (d / _IMAGES_DIRNAME) if d is not None else None
 
-    def image_path(self, ctx, rec: SavedPlot) -> Optional[Path]:
+    def image_path(self, ctx, rec: SavedPlot) -> Path | None:
         idir = self.images_dir(ctx)
         return (idir / rec.png_filename) if idir is not None else None
 
@@ -166,7 +165,7 @@ class SavedPlotsStore:
         self.records = []
         self._persist(ctx)
 
-    def get(self, plot_id: str) -> Optional[SavedPlot]:
+    def get(self, plot_id: str) -> SavedPlot | None:
         return next((r for r in self.records if r.id == plot_id), None)
 
 

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 _LOGGER = logging.getLogger("allwell.swallowed")
 
@@ -41,7 +41,7 @@ def swallowed(
     note: str = "",
     *,
     level: int = logging.DEBUG,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> None:
     """Log the exception currently being handled, from inside an ``except``."""
     where = _caller_location(1)
@@ -53,7 +53,7 @@ def swallow(
     context: str = "",
     *,
     level: int = logging.DEBUG,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> Iterator[None]:
     """Context manager that suppresses + logs any :class:`Exception` in its body."""
     try:

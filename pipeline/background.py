@@ -41,7 +41,7 @@ BACKGROUND_METHODS = ("none", "top_hat", "sliding_disk", "fov_median", "empty_we
                       "robust_mesh", "fft_bandpass")
 
 
-def estimate_background_field(stack, sigma: "float | None" = None) -> "np.ndarray | None":
+def estimate_background_field(stack, sigma: float | None = None) -> np.ndarray | None:
     """Additive background field from a stack of (empty-well) single-channel
     images: the per-pixel **median** (robust to stray signal that moves between
     fields), Gaussian-smoothed. Unlike :func:`estimate_basic_flatfield` this
@@ -253,7 +253,7 @@ def _robust_grid_background(img: np.ndarray, box: int,
 
 
 def subtract_background(image, radius: int, method: str = "sliding_disk",
-                        bg_field: "np.ndarray | None" = None,
+                        bg_field: np.ndarray | None = None,
                         fft_small: float = 0.0,
                         mesh_ratio: float = 3.0,
                         mesh_sigma: float = 3.0) -> np.ndarray:

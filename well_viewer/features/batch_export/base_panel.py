@@ -7,7 +7,7 @@ import math
 import re
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -123,7 +123,7 @@ class BatchExportPanel(QWidget):
     def __init__(
         self,
         ctx,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         *,
         use_sidebar_groups: bool = False,
     ) -> None:
@@ -165,10 +165,10 @@ class BatchExportPanel(QWidget):
         # empty. Batch-export groups are export-specific, not the Sample-
         # Definition replicate sets — the user opts in to seeding from the app
         # via the "Sync from app" button or the Quick Setup menu.
-        self._groups: List[BarGroup] = self._groups_from_persistence()
+        self._groups: list[BarGroup] = self._groups_from_persistence()
         self._active_grp = 0 if self._groups else -1
         self._auto_named_group_ids: set[int] = set()
-        self._map_btns: Dict[str, _WellGridButton] = {}
+        self._map_btns: dict[str, _WellGridButton] = {}
         self._drag_adding = True
         self._drag_visited: set = set()
 
@@ -225,7 +225,7 @@ class BatchExportPanel(QWidget):
         super().resizeEvent(event)
         self.apply_split_orientation()
 
-    def apply_split_orientation(self, avail: "int | None" = None) -> None:
+    def apply_split_orientation(self, avail: int | None = None) -> None:
         """Side-by-side when the pane is wide enough for both panels, otherwise
         stacked vertically (plate map on top, OUTPUT SETTINGS below) so nothing is
         pushed off-edge.
@@ -361,7 +361,7 @@ class BatchExportPanel(QWidget):
         self._grp_scroll.setWidget(self._grp_inner)
         layout.addWidget(self._grp_scroll, 1)
 
-    def _tok_at(self, global_pos) -> Optional[str]:
+    def _tok_at(self, global_pos) -> str | None:
         for tok, btn in self._map_btns.items():
             if btn.isVisible() and btn.rect().contains(btn.mapFromGlobal(global_pos)):
                 return tok
@@ -474,7 +474,7 @@ class BatchExportPanel(QWidget):
         fc_row.addStretch(1)
         layout.addLayout(fc_row)
 
-    def _all_export_channels(self) -> List[str]:
+    def _all_export_channels(self) -> list[str]:
         """Fluorescence channels + ratio metrics available for batch export."""
         channels = list(self._ctx.state.channel.fluor_channels or [])
         if not channels:
@@ -577,7 +577,7 @@ class BatchExportPanel(QWidget):
                 chan.active_val_col = saved
 
     @contextmanager
-    def _app_group_scope(self, grp: "BarGroup"):
+    def _app_group_scope(self, grp: BarGroup):
         """Temporarily make the app's selection state describe just *grp*: one
         selection per replicate-set member, plus the group's solo wells as
         single-well selections.
@@ -712,7 +712,7 @@ class BatchExportPanel(QWidget):
         layout.addLayout(row)
         self._apply_export_profile_to_prefs(self._export_profile_value)
 
-    def _export_profile_names(self) -> List[str]:
+    def _export_profile_names(self) -> list[str]:
         names = _get_all_profile_names(self._ctx)
         return names or ["Custom"]
 
@@ -870,7 +870,7 @@ class BatchExportPanel(QWidget):
     def _tp_clear_all(self) -> None:
         self._tp_lb.clearSelection()
 
-    def _selected_tps(self) -> List[str]:
+    def _selected_tps(self) -> list[str]:
         return [it.text() for it in self._tp_lb.selectedItems()]
 
     _FC_NONE_LABEL = "—"
@@ -931,7 +931,7 @@ class BatchExportPanel(QWidget):
         combo = getattr(self, "_fc_ctrl_combo", None)
         if combo is None:
             return
-        members: List[str] = []
+        members: list[str] = []
         seen: set = set()
         for grp in self._groups_for_export() if hasattr(self, "_groups_for_export") else self._groups:
             for rset in grp.members:
@@ -985,7 +985,7 @@ class BatchExportPanel(QWidget):
         self._tp_lb.setMinimumHeight(120)
         layout.addWidget(self._tp_lb, 1)
 
-    def _active_group(self) -> Optional[BarGroup]:
+    def _active_group(self) -> BarGroup | None:
         if 0 <= self._active_grp < len(self._groups):
             return self._groups[self._active_grp]
         return None
@@ -997,7 +997,7 @@ class BatchExportPanel(QWidget):
             return "New Group"
         return ", ".join(labels)
 
-    def _refresh_auto_group_name(self, grp: Optional[BarGroup]) -> None:
+    def _refresh_auto_group_name(self, grp: BarGroup | None) -> None:
         if grp is None:
             return
         if id(grp) in self._auto_named_group_ids:
@@ -1053,7 +1053,7 @@ class BatchExportPanel(QWidget):
 
     def _refresh_map(self) -> None:
         avail = set(self._ctx.state.dataset.well_paths.keys())
-        tok_color: Dict[str, str] = {}
+        tok_color: dict[str, str] = {}
         for gi, grp in enumerate(self._groups):
             c = self._group_color(gi)
             for w in grp.wells:
@@ -1281,13 +1281,13 @@ class BatchExportPanel(QWidget):
         if not self._use_sidebar_groups:
             self._refresh_group_list()
 
-    def _groups_from_rep_sets(self) -> List[BarGroup]:
+    def _groups_from_rep_sets(self) -> list[BarGroup]:
         return [BarGroup(r.name, members=[r]) for r in _rep_sets_loaded(self._ctx)]
 
     # \u2500\u2500 Export-group persistence (persistence.json["export_groups"]) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    def _serialize_groups(self) -> List[dict]:
+    def _serialize_groups(self) -> list[dict]:
         """Plain-dict form of the current export groups for persistence.json."""
-        out: List[dict] = []
+        out: list[dict] = []
         for grp in self._groups:
             out.append({
                 "name": grp.name,
@@ -1297,7 +1297,7 @@ class BatchExportPanel(QWidget):
             })
         return out
 
-    def _deserialize_groups(self, grp_list) -> List[BarGroup]:
+    def _deserialize_groups(self, grp_list) -> list[BarGroup]:
         """Rebuild BarGroups from persisted dicts, matched to the live dataset.
 
         Group members are matched by replicate-set name against the currently
@@ -1306,7 +1306,7 @@ class BatchExportPanel(QWidget):
         referencing wells/groups that no longer exist."""
         rep_by_name = {r.name: r for r in _rep_sets_loaded(self._ctx)}
         paths = self._ctx.state.dataset.well_paths
-        new_groups: List[BarGroup] = []
+        new_groups: list[BarGroup] = []
         for item in grp_list or []:
             if not isinstance(item, dict):
                 continue
@@ -1322,7 +1322,7 @@ class BatchExportPanel(QWidget):
             new_groups.append(grp)
         return new_groups
 
-    def _groups_from_persistence(self) -> List[BarGroup]:
+    def _groups_from_persistence(self) -> list[BarGroup]:
         """Hydrate this panel's groups from the batch-export groups doc."""
         doc = self._ctx.runtime.batch_export.export_groups_doc or {}
         return self._deserialize_groups(doc.get(self._persist_key))
@@ -1365,7 +1365,7 @@ class BatchExportPanel(QWidget):
         finally:
             self._suppress_persist = False
 
-    def _resolve_out_dir(self) -> Optional[Path]:
+    def _resolve_out_dir(self) -> Path | None:
         val = self._out_dir_edit.text().strip()
         if val:
             p = Path(val)
@@ -1410,7 +1410,7 @@ class BatchExportPanel(QWidget):
         self._prog_bar.setMaximum(max(len(jobs), 1))
         self._prog_bar.setValue(0)
         self._run_btn.setEnabled(False)
-        errors: List[str] = []
+        errors: list[str] = []
         staging = new_staging_dir(out_dir)
         try:
             for step, job in enumerate(jobs, 1):
@@ -1481,7 +1481,7 @@ class BatchExportPanel(QWidget):
             ax.legend(loc="best", fontsize=legend_fontsize, framealpha=0.0, facecolor="none")
         self._save_figure(fig, fig_path, fmt)
 
-    def _groups_for_export(self) -> List[BarGroup]:
+    def _groups_for_export(self) -> list[BarGroup]:
         if self._use_sidebar_groups:
             return self._groups_from_rep_sets()
         return list(self._groups)
@@ -1522,7 +1522,7 @@ class BatchExportPanel(QWidget):
         fc_active = fc_vs_ctrl or fc_vs_t0
         used_stems: set = set()
 
-        def _run_group(grp: BarGroup, write_dir: Path) -> Optional[str]:
+        def _run_group(grp: BarGroup, write_dir: Path) -> str | None:
             safe = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
             # Uniquify so two groups whose names sanitise to the same stem don't
             # silently overwrite each other's CSV + figure.
@@ -1579,7 +1579,7 @@ class BatchExportPanel(QWidget):
                         fc_points_by_key = {s.key: s.points for s in series_fc}
                     else:
                         fc_points_by_key = {}
-                    rows_out: List[dict] = []
+                    rows_out: list[dict] = []
                     for series in series_raw:
                         if series.kind == "repset":
                             wells_str = ";".join(series.wells)
@@ -1652,7 +1652,7 @@ class BatchExportPanel(QWidget):
             out_dir=out_dir,
         )
 
-    def _log_sample_definitions_snapshot(self, groups_for_export: List[BarGroup]) -> None:
+    def _log_sample_definitions_snapshot(self, groups_for_export: list[BarGroup]) -> None:
         sels = list(self._ctx.state.selection.selections or [])
         sel_summary = [f"{s.get('name', '?')}={len(s.get('wells') or [])}w" for s in sels]
         export_summary = [f"{g.name}={len(g.wells)}w" for g in groups_for_export]
@@ -1665,7 +1665,7 @@ class BatchExportPanel(QWidget):
         self, grp: BarGroup, threshold: float, use_sem: bool, band_lbl: str,
         *,
         fc_state: tuple = (False, "", False),
-        val_col: Optional[str] = None,
+        val_col: str | None = None,
     ):
         """Render the batch line figure for *grp*, reusing the Line-Graphs tab's
         own renderer (``render_line_series``) so the figure is the SAME

@@ -57,7 +57,7 @@ def _disks(shape, centers, radius, bg, peak) -> np.ndarray:
 
 def write_synthetic_channels(
     out_dir: Path,
-    channels: "dict[str, str]",
+    channels: dict[str, str],
     *,
     experiment: str = "exp",
     well: str = "A01",
@@ -66,7 +66,7 @@ def write_synthetic_channels(
     shape=(256, 256),
     centers=DEFAULT_CENTERS,
     sep: str = "_",
-) -> "dict[str, Path]":
+) -> dict[str, Path]:
     """Write one schema-named TIFF per entry of *channels* and return
     ``{token: path}``.
 

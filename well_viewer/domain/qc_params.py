@@ -20,7 +20,7 @@ unit-tested without the app.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Optional
+from typing import Any
 
 # CSV columns the gate reads. ``area`` is always present as the base ``area_px``
 # measurement (``shape_area`` too when shape features are selected); ``solidity``
@@ -43,7 +43,7 @@ def _first_col(df, names):
     return None
 
 
-def _pos(v: Any) -> Optional[float]:
+def _pos(v: Any) -> float | None:
     """Coerce to a positive float bound, or ``None`` when unset.
 
     A 0 / negative / blank value means "no bound" — matching the Analyze QC
@@ -63,15 +63,15 @@ class QCParams:
     *Remove debris* toggle; the bounds are ``None`` when unset (no gate)."""
 
     enabled: bool = False
-    min_area: Optional[float] = None
-    max_area: Optional[float] = None
-    min_solidity: Optional[float] = None
-    max_region_area: Optional[float] = None
-    min_circularity: Optional[float] = None
-    max_circularity: Optional[float] = None
+    min_area: float | None = None
+    max_area: float | None = None
+    min_solidity: float | None = None
+    max_region_area: float | None = None
+    min_circularity: float | None = None
+    max_circularity: float | None = None
 
     # ── (de)serialization ────────────────────────────────────────────────
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": bool(self.enabled),
             "min_area": self.min_area,
@@ -83,7 +83,7 @@ class QCParams:
         }
 
     @classmethod
-    def from_dict(cls, d: Optional[Dict[str, Any]]) -> "QCParams":
+    def from_dict(cls, d: dict[str, Any] | None) -> QCParams:
         d = d or {}
         return cls(
             enabled=bool(d.get("enabled", False)),
@@ -96,7 +96,7 @@ class QCParams:
         )
 
     @classmethod
-    def from_pipeline_info(cls, info: Optional[Dict[str, Any]]) -> "QCParams":
+    def from_pipeline_info(cls, info: dict[str, Any] | None) -> QCParams:
         """Seed from a dataset's ``pipeline_info.json`` ``qc_options`` block so
         the QC view opens pre-populated with the thresholds used at run time.
 
@@ -122,7 +122,7 @@ class QCParams:
             max_circularity=_pos(qc.get("max_circularity")),
         )
 
-    def with_updates(self, **changes: Any) -> "QCParams":
+    def with_updates(self, **changes: Any) -> QCParams:
         # normalize numeric bounds through _pos so 0/"" become None
         for k in ("min_area", "max_area", "min_solidity", "max_region_area",
                   "min_circularity", "max_circularity"):

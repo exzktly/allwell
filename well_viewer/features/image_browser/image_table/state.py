@@ -15,7 +15,6 @@ Qt-free: imports only stdlib, so controllers can import it with no cycle (the
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 
 @dataclass
@@ -187,8 +186,8 @@ class ChannelSpec:
     render: str = "corrected"
     boundary: bool = False
     colormap: str = "Greys"
-    lut_min: Optional[float] = None
-    lut_max: Optional[float] = None
+    lut_min: float | None = None
+    lut_max: float | None = None
     log: bool = False
 
     def axis_token(self) -> str:
@@ -208,7 +207,7 @@ class ChannelSpec:
         }
 
     @classmethod
-    def from_dict(cls, d: Optional[dict]) -> "ChannelSpec":
+    def from_dict(cls, d: dict | None) -> ChannelSpec:
         d = d or {}
         return cls(
             channel=d.get("channel", ""), render=d.get("render", "corrected"),
@@ -221,13 +220,13 @@ class ChannelSpec:
 class Axis:
     """One shelf axis: a root facet dim (or None) with channels nested under it."""
 
-    root: Optional[str] = None
-    channels: List[ChannelSpec] = field(default_factory=list)
+    root: str | None = None
+    channels: list[ChannelSpec] = field(default_factory=list)
     overlay: bool = False
 
-    def dims(self) -> List[str]:
+    def dims(self) -> list[str]:
         """Ordered dims this axis contributes: root (outer) then 'channel' (inner)."""
-        out: List[str] = []
+        out: list[str] = []
         if self.root:
             out.append(self.root)
         if self.channels:
@@ -242,7 +241,7 @@ class TableSpec:
 
     rows: Axis = field(default_factory=Axis)
     cols: Axis = field(default_factory=Axis)
-    fixed: Dict[str, str] = field(default_factory=dict)
+    fixed: dict[str, str] = field(default_factory=dict)
     wrap: int = 0
     # Plate (96-well) mode: lay each well's image out in true plate positions —
     # rows = plate row (A–H), cols = plate column (1–12) — using the builder's first
@@ -250,9 +249,9 @@ class TableSpec:
     # ``spec_to_state_fields`` overrides the axes with the virtual well_row/well_col
     # dims regardless of what roots/channels sit in the zones.
     plate: bool = False
-    filters: Dict[str, set] = field(default_factory=dict)
+    filters: dict[str, set] = field(default_factory=dict)
 
-    def channel_axis(self) -> Optional[str]:
+    def channel_axis(self) -> str | None:
         if self.rows.channels:
             return "rows"
         if self.cols.channels:
@@ -266,7 +265,7 @@ def spec_to_state_fields(spec: TableSpec) -> dict:
     ax = spec.channel_axis()
     channels = (spec.rows.channels if ax == "rows"
                 else spec.cols.channels if ax == "cols" else [])
-    tokens: List[str] = []
+    tokens: list[str] = []
     channel_opts: dict = {}
     for cs in channels:
         tok = cs.axis_token()
@@ -303,7 +302,7 @@ def spec_to_state_fields(spec: TableSpec) -> dict:
     }
 
 
-def spec_from_state(state: "ImageTableState") -> TableSpec:
+def spec_from_state(state: ImageTableState) -> TableSpec:
     """Reconstruct the builder tree from the flattened state — inverse of
     ``spec_to_state_fields``, for restore + round-trip tests. Pure — no Qt."""
     opts = dict(getattr(state, "channel_opts", None) or {})
@@ -331,7 +330,7 @@ def spec_from_state(state: "ImageTableState") -> TableSpec:
     def axis_from(dims) -> Axis:
         dims = list(dims or [])
         root = next((d for d in dims if d in _ROOT_DIMS), None)
-        channels: List[ChannelSpec] = []
+        channels: list[ChannelSpec] = []
         if "channel" in dims:
             channels = [ChannelSpec.from_dict(opts[tok]) for tok in opts]
         return Axis(root=root, channels=channels, overlay=overlay if channels else False)

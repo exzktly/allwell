@@ -20,7 +20,8 @@ already shows a sub-region).
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QLabel, QPushButton, QRubberBand, QWidget
@@ -34,7 +35,7 @@ except Exception:  # pragma: no cover
 
 from well_viewer.core.ui_helpers import btn_secondary
 
-CropRect = Tuple[int, int, int, int]  # (y0, x0, y1, x1) in source pixels
+CropRect = tuple[int, int, int, int]  # (y0, x0, y1, x1) in source pixels
 
 
 class CropTool:
@@ -52,7 +53,7 @@ class CropTool:
 
     def __init__(
         self,
-        on_change: Optional[Callable[[], None]] = None,
+        on_change: Callable[[], None] | None = None,
         *,
         button_label: str = "Crop",
         reset_label: str = "Reset Crop",
@@ -63,18 +64,18 @@ class CropTool:
         self._reset_label = reset_label
         self._idle_status = idle_status
 
-        self._crop: Optional[CropRect] = None
+        self._crop: CropRect | None = None
         self._mode: bool = False
-        self._drag: Optional[Dict[str, Any]] = None
+        self._drag: dict[str, Any] | None = None
 
-        self._button: Optional[QPushButton] = None
-        self._reset_button: Optional[QPushButton] = None
-        self._status_label: Optional[QLabel] = None
+        self._button: QPushButton | None = None
+        self._reset_button: QPushButton | None = None
+        self._status_label: QLabel | None = None
 
     # ── public state ────────────────────────────────────────────────────────
 
     @property
-    def crop(self) -> Optional[CropRect]:
+    def crop(self) -> CropRect | None:
         return self._crop
 
     @property
@@ -85,7 +86,7 @@ class CropTool:
     def is_dragging(self) -> bool:
         return self._drag is not None
 
-    def set_crop(self, crop: Optional[CropRect], *, notify: bool = True) -> None:
+    def set_crop(self, crop: CropRect | None, *, notify: bool = True) -> None:
         self._crop = crop
         self._refresh_indicator()
         if notify:
@@ -146,7 +147,7 @@ class CropTool:
 
     def label_to_image_xy(
         self, label: QLabel, lx: int, ly: int,
-    ) -> Optional[Tuple[int, int]]:
+    ) -> tuple[int, int] | None:
         """Translate label-local pixels to source-image (y, x) pixels.
 
         Reads ``label._raw_arr`` (full source) and ``label._crop`` (any

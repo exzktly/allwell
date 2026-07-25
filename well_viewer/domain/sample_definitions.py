@@ -31,7 +31,8 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
+from collections.abc import Iterable
 
 from well_viewer.domain import selections_model as _sel_model
 
@@ -59,13 +60,13 @@ def _resolve_pipeline_info_path(out_dir: Path) -> Path:
 
 
 def build_sample_definitions_v2(
-    well_labels: Dict[str, str],
-    selections: Iterable[Dict[str, Any]],
-    current_id: Optional[str] = None,
+    well_labels: dict[str, str],
+    selections: Iterable[dict[str, Any]],
+    current_id: str | None = None,
     *,
     notes: str = "",
     plot_groups: Any = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Snapshot the unified ``selections`` state as a JSON-friendly v2 block.
 
     (Schema v2 — ``schema_version: 2`` + ``selections`` + ``current_id``; the
@@ -117,7 +118,7 @@ def _backup_pre_v2(info_path: Path) -> None:
 
 def save_to_pipeline_info(
     out_dir: Path,
-    sample_definitions: Dict[str, Any],
+    sample_definitions: dict[str, Any],
 ) -> Path:
     """Merge ``sample_definitions`` into the pipeline_info.json sidecar.
 
@@ -162,7 +163,7 @@ def save_to_pipeline_info(
     return info_path
 
 
-def read_sample_definitions(out_dir: Path) -> Optional[Dict[str, Any]]:
+def read_sample_definitions(out_dir: Path) -> dict[str, Any] | None:
     """Return the saved sample_definitions block, or None when absent."""
     info_path = _resolve_pipeline_info_path(out_dir)
     if not info_path.exists():

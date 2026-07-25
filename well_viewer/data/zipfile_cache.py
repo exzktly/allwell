@@ -28,7 +28,8 @@ import threading
 import zipfile
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, Optional, OrderedDict as TOrderedDict
+from collections import OrderedDict as TOrderedDict
+from collections.abc import Iterator
 from collections import OrderedDict
 from well_viewer.core.safe import swallowed
 
@@ -56,7 +57,7 @@ class ZipFileCache:
 
     def __init__(self, max_open: int = DEFAULT_MAX_OPEN) -> None:
         self._max_open = int(max_open)
-        self._entries: "TOrderedDict[Path, _Entry]" = OrderedDict()
+        self._entries: TOrderedDict[Path, _Entry] = OrderedDict()
         # Mutex for cache-level ops (insertion / eviction). Per-handle
         # operations use the entry's own lock.
         self._mutex = threading.Lock()
@@ -75,7 +76,7 @@ class ZipFileCache:
             except Exception:
                 swallowed()  # was: pass (silent except)
 
-    def _open_entry(self, path: Path) -> Optional[_Entry]:
+    def _open_entry(self, path: Path) -> _Entry | None:
         try:
             zf = zipfile.ZipFile(path, "r")
         except (OSError, zipfile.BadZipFile) as exc:
@@ -83,7 +84,7 @@ class ZipFileCache:
             return None
         return _Entry(zf, self._stat_mtime_ns(path))
 
-    def _get_or_open(self, path: Path) -> Optional[_Entry]:
+    def _get_or_open(self, path: Path) -> _Entry | None:
         """Return a cached entry for *path*, opening a fresh handle when
         the file has been modified since the cached one was opened.
         """
@@ -114,7 +115,7 @@ class ZipFileCache:
         return new_entry
 
     @contextmanager
-    def with_handle(self, path: Path) -> Iterator[Optional[zipfile.ZipFile]]:
+    def with_handle(self, path: Path) -> Iterator[zipfile.ZipFile | None]:
         """Yield a thread-safe, exclusively-held ZipFile for *path*.
 
         Yields ``None`` when the zip can't be opened (caller should
@@ -129,7 +130,7 @@ class ZipFileCache:
         with entry.lock:
             yield entry.zf
 
-    def invalidate(self, path: Optional[Path] = None) -> None:
+    def invalidate(self, path: Path | None = None) -> None:
         """Drop one (or all) cached handles. Call from load_controller on
         dataset swap so a new dataset's writes aren't read through a
         stale handle from the previous one."""
@@ -166,6 +167,6 @@ def with_zipfile(path: Path):
     return GLOBAL_CACHE.with_handle(path)
 
 
-def invalidate(path: Optional[Path] = None) -> None:
+def invalidate(path: Path | None = None) -> None:
     """Drop cached handle(s). See :meth:`ZipFileCache.invalidate`."""
     GLOBAL_CACHE.invalidate(path)

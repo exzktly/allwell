@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -94,7 +93,7 @@ class GatingWorker(QThread):
     finished_ok = Signal()
     failed = Signal(str)         # emitted with the error message on any crash
 
-    def __init__(self, ctx, parent: Optional[object] = None) -> None:
+    def __init__(self, ctx, parent: object | None = None) -> None:
         super().__init__(parent)
         self._ctx = ctx
         self._cancelled = False
@@ -1530,8 +1529,8 @@ def _cell_gating_show_opt_curve_popup(
     lo: float,
     hi: float,
     steps: int,
-    result: "ThreshFracOptimizationResult",
-    fc_kwargs: "dict | None" = None,
+    result: ThreshFracOptimizationResult,
+    fc_kwargs: dict | None = None,
 ) -> None:
     """Open (or refresh) a non-modal window plotting the optimizer's diff
     curve. Re-derives values_a, values_b, and the per-threshold fractions

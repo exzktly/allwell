@@ -30,7 +30,7 @@ import json
 import logging
 import math
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from well_viewer.persistence._io import atomic_write_json
 
@@ -70,14 +70,14 @@ def _is_default(value: float, default: float) -> bool:
 
 
 def build_gating_block(
-    fluor_gates: Dict[str, float],
-    thresh_frac_on: Dict[str, float],
-    scatter_gates: Optional[list] = None,
+    fluor_gates: dict[str, float],
+    thresh_frac_on: dict[str, float],
+    scatter_gates: list | None = None,
     use_scatter_gates: bool = False,
-    scatter_gate_choices_gating: Optional[list] = None,
-    scatter_gate_choices_thresh: Optional[list] = None,
+    scatter_gate_choices_gating: list | None = None,
+    scatter_gate_choices_thresh: list | None = None,
     use_scatter_thresh: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
     Returns an empty dict when every value is at its default; callers can
@@ -89,15 +89,15 @@ def build_gating_block(
     thresholds there is no "default" value to diff against, so the on-mode flag
     is the gate that keeps default state out of the sidecar.
     """
-    block: Dict[str, Any] = {}
-    fg_out: Dict[str, float] = {}
+    block: dict[str, Any] = {}
+    fg_out: dict[str, float] = {}
     for ch, val in (fluor_gates or {}).items():
         if not _is_default(val, DEFAULT_FLUOR_GATE):
             fg_out[str(ch)] = float(val)
     if fg_out:
         block["fluor_gates"] = fg_out
 
-    tfo_out: Dict[str, float] = {}
+    tfo_out: dict[str, float] = {}
     for ch, val in (thresh_frac_on or {}).items():
         if not _is_default(val, DEFAULT_THRESH_FRAC_ON):
             tfo_out[str(ch)] = float(val)
@@ -124,8 +124,8 @@ def build_gating_block(
 
 def save_gating_to_pipeline_info(
     out_dir: Path,
-    gating_block: Dict[str, Any],
-) -> Optional[Path]:
+    gating_block: dict[str, Any],
+) -> Path | None:
     """Merge ``gating_block`` into the pipeline_info.json sidecar.
 
     When ``gating_block`` is empty, removes any existing ``cell_gating``
@@ -164,7 +164,7 @@ def save_gating_to_pipeline_info(
     return info_path
 
 
-def read_gating_params(out_dir: Path) -> Optional[Dict[str, Any]]:
+def read_gating_params(out_dir: Path) -> dict[str, Any] | None:
     """Return the saved cell_gating block, or None when absent."""
     info_path = _resolve_pipeline_info_path(out_dir)
     if not info_path.exists():

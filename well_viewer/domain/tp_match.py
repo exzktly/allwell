@@ -26,7 +26,7 @@ def tp_close(a: float, b: float) -> bool:
     return abs(a - b) <= TP_REL_TOL * max(1.0, abs(a), abs(b))
 
 
-def tp_close_mask(values, target: float) -> "np.ndarray":
+def tp_close_mask(values, target: float) -> np.ndarray:
     """Boolean mask of which ``values`` match ``target`` within tolerance."""
     arr = np.asarray(values, dtype=float)
     tgt = float(target)

@@ -42,7 +42,7 @@ from __future__ import annotations
 import logging
 import random
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from collections.abc import Callable, Iterable
 
 import numpy as np
 
@@ -60,7 +60,7 @@ logger = logging.getLogger("well_viewer.data.auto_threshold")
 # ── Image loading ──────────────────────────────────────────────────────────
 
 
-def _open_image_at(ref) -> Optional[np.ndarray]:
+def _open_image_at(ref) -> np.ndarray | None:
     """Open an ``ImgRef`` (disk or zip member) as a 2-D numpy array."""
     if ref is None:
         return None
@@ -88,9 +88,9 @@ def _open_image_at(ref) -> Optional[np.ndarray]:
 # ── Walk the output dir ────────────────────────────────────────────────────
 
 
-def _iter_well_zips(out_dir: Path) -> List[Path]:
+def _iter_well_zips(out_dir: Path) -> list[Path]:
     """Return the ``<WELL>_out.zip`` files in *out_dir*, sorted by name."""
-    out: List[Path] = []
+    out: list[Path] = []
     for p in sorted(out_dir.glob("*_out.zip")):
         if p.name.startswith("."):
             continue
@@ -101,7 +101,7 @@ def _iter_well_zips(out_dir: Path) -> List[Path]:
 def _scan_well_images(
     zip_path: Path,
     fluor_token: str,
-    pipeline_info: Optional[dict],
+    pipeline_info: dict | None,
 ):
     """Wrapper around ``well_viewer.image_discovery.scan_zip_members`` that
     returns the mask + tophat_fluor dicts for one well + one channel."""
@@ -114,9 +114,9 @@ def _scan_well_images(
     return mask, tophat
 
 
-def _gather_via_zip(zip_path: Path, channels: List[str], pipeline_info):
+def _gather_via_zip(zip_path: Path, channels: list[str], pipeline_info):
     """Return ``{channel: (mask_refs, fluor_refs)}`` for one well zip."""
-    out: Dict[str, Tuple[dict, dict]] = {}
+    out: dict[str, tuple[dict, dict]] = {}
     for ch in channels:
         try:
             m, f = _scan_well_images(zip_path, ch, pipeline_info)
@@ -128,7 +128,7 @@ def _gather_via_zip(zip_path: Path, channels: List[str], pipeline_info):
     return out
 
 
-def _gather_via_find(target, channels: List[str], pipeline_info):
+def _gather_via_find(target, channels: list[str], pipeline_info):
     """Multi-layout discovery via :func:`find_well_images_and_masks`.
 
     ``target`` is ``(well_label, data_dir, in_dir)``.  Returns
@@ -137,7 +137,7 @@ def _gather_via_find(target, channels: List[str], pipeline_info):
     """
     well_label, data_dir, in_dir_path = target
     from well_viewer.data.image_discovery import find_well_images_and_masks
-    out: Dict[str, Tuple[dict, dict]] = {}
+    out: dict[str, tuple[dict, dict]] = {}
     for ch in channels:
         try:
             _g, _ov, mask, tophat = find_well_images_and_masks(
@@ -152,7 +152,7 @@ def _gather_via_find(target, channels: List[str], pipeline_info):
     return out
 
 
-def _read_pipeline_info(out_dir: Path) -> Optional[dict]:
+def _read_pipeline_info(out_dir: Path) -> dict | None:
     """Load ``pipeline_info.json`` from *out_dir* (or its parent) if present."""
     import json
     for candidate in (out_dir / "pipeline_info.json",
@@ -176,11 +176,11 @@ def compute_auto_thresholds(
     *,
     fluor_channels: Iterable[str],
     cells_per_image_cap: int = DEFAULT_CELLS_PER_IMAGE_CAP,
-    progress: Optional[Callable[[str], None]] = None,
-    rng_seed: Optional[int] = None,
-    well_labels: Optional[Iterable[str]] = None,
-    in_dir: Optional[Path] = None,
-) -> Dict[str, float]:
+    progress: Callable[[str], None] | None = None,
+    rng_seed: int | None = None,
+    well_labels: Iterable[str] | None = None,
+    in_dir: Path | None = None,
+) -> dict[str, float]:
     """Compute the auto-threshold per channel by Otsu on a per-cell + bg
     distribution sampled from the first / middle / last timepoint of every
     FOV in every loaded well.
@@ -218,14 +218,14 @@ def compute_auto_thresholds(
 
     pipeline_info = _read_pipeline_info(out_dir)
     rng = random.Random(rng_seed)
-    per_channel: Dict[str, List[float]] = {ch: [] for ch in channels}
+    per_channel: dict[str, list[float]] = {ch: [] for ch in channels}
     # Count decode attempts vs failures per channel (audit E9). ``_open_image_at``
     # swallows a decode error to DEBUG and returns None, so a channel whose
     # tophat images are largely unreadable would silently estimate its Otsu
     # threshold from a biased subset. We WARN in the summary when a meaningful
     # fraction was dropped.
-    per_channel_attempted: Dict[str, int] = {ch: 0 for ch in channels}
-    per_channel_decode_failed: Dict[str, int] = {ch: 0 for ch in channels}
+    per_channel_attempted: dict[str, int] = {ch: 0 for ch in channels}
+    per_channel_decode_failed: dict[str, int] = {ch: 0 for ch in channels}
 
     well_list = [str(w).strip() for w in (well_labels or []) if str(w).strip()]
     in_dir_path = Path(in_dir) if in_dir else None
@@ -235,7 +235,7 @@ def compute_auto_thresholds(
               f"({', '.join(well_list[:6])}{'…' if len(well_list) > 6 else ''}) "
               f"for channels: {', '.join(channels)}")
         _scan_one_well = _gather_via_find  # multi-layout discovery
-        targets: List = [(label, out_dir, in_dir_path) for label in well_list]
+        targets: list = [(label, out_dir, in_dir_path) for label in well_list]
         label_of = lambda t: t[0]
     else:
         well_zips = _iter_well_zips(out_dir)
@@ -296,7 +296,7 @@ def compute_auto_thresholds(
         _emit(f"Auto-threshold: completed well "
               f"{w_idx}/{len(targets)} ({label_of(target)})")
 
-    thresholds: Dict[str, float] = {}
+    thresholds: dict[str, float] = {}
     for ch in channels:
         attempted = per_channel_attempted.get(ch, 0)
         failed = per_channel_decode_failed.get(ch, 0)
@@ -337,9 +337,9 @@ def apply_auto_thresholds_to_pipeline_info(
     out_dir: Path,
     *,
     fluor_channels: Iterable[str],
-    progress: Optional[Callable[[str], None]] = None,
+    progress: Callable[[str], None] | None = None,
     overwrite_existing: bool = False,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Compute the auto-thresholds for *out_dir* and merge them into the
     ``pipeline_info.json`` cell-gating block.
 
@@ -379,7 +379,7 @@ def apply_auto_thresholds_to_pipeline_info(
     existing_choices_gating = existing.get("scatter_gate_choices_gating", _legacy_sel)
     existing_choices_thresh = existing.get("scatter_gate_choices_thresh", _legacy_sel)
 
-    written: Dict[str, float] = {}
+    written: dict[str, float] = {}
     for ch, thr in computed.items():
         if not overwrite_existing and ch in existing_tfo:
             continue

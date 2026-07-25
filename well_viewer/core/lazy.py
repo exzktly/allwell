@@ -15,7 +15,7 @@ reference, import function-locally instead.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 
 def lazy(module_path: str, attr: str) -> Callable:

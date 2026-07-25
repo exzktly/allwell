@@ -8,7 +8,7 @@ matplotlib export pipeline live in ``well_viewer.figure_export_editor``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (

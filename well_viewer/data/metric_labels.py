@@ -17,7 +17,6 @@ reach for, and owns the column-splitting + title-wording helpers below.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
 
 from well_viewer.domain.metric_registry import (
     METRICS,
@@ -44,7 +43,7 @@ SMFISH_SUFFIX = "_smfish_count"
 CALCULATED_VAL_LABEL = "Calculated Val"
 
 
-def split_metric_col(col: str) -> Optional[Tuple[str, str, str]]:
+def split_metric_col(col: str) -> tuple[str, str, str] | None:
     """Split ``<channel>_<metric_suffix>`` into ``(channel, metric_key, label)``.
 
     Returns ``None`` when *col* does not end in one of the known intensity
@@ -55,7 +54,7 @@ def split_metric_col(col: str) -> Optional[Tuple[str, str, str]]:
     if col.endswith(SMFISH_SUFFIX):
         ch = col[: -len(SMFISH_SUFFIX)]
         return ch, "smfish_count", f"{ch.upper()} (spots)"
-    for suf, key in zip(INTENSITY_SUFFIXES, INTENSITY_METRIC_KEYS):
+    for suf, key in zip(INTENSITY_SUFFIXES, INTENSITY_METRIC_KEYS, strict=True):
         if col.endswith(suf):
             ch = col[: -len(suf)]
             return ch, key, f"{ch.upper()} {METRIC_KEY_TO_LABEL[key]}"

@@ -16,7 +16,8 @@ bottom of the import graph — it does not reach up into ``features/``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 
 
 @dataclass(frozen=True)
@@ -36,10 +37,10 @@ class FoldChangeScope:
     ctrl_combo_attr: str
     baseline_combo_attr: str
     redraw: Callable[[Any], None]
-    tab_names: "tuple[str, ...]" = ()
+    tab_names: tuple[str, ...] = ()
 
 
-_REGISTERED_SCOPES: "dict[str, FoldChangeScope]" = {}
+_REGISTERED_SCOPES: dict[str, FoldChangeScope] = {}
 
 
 def register_fold_change_scope(scope: FoldChangeScope) -> None:
@@ -51,23 +52,23 @@ def register_fold_change_scope(scope: FoldChangeScope) -> None:
     _REGISTERED_SCOPES[scope.name] = scope
 
 
-def registered_scopes() -> "tuple[FoldChangeScope, ...]":
+def registered_scopes() -> tuple[FoldChangeScope, ...]:
     return tuple(_REGISTERED_SCOPES.values())
 
 
-def get_scope(name: str) -> "FoldChangeScope | None":
+def get_scope(name: str) -> FoldChangeScope | None:
     return _REGISTERED_SCOPES.get(name)
 
 
 # ── Dirty-tab management ────────────────────────────────────────────────────
 
 
-def _dirty_set(app) -> "set[str]":
+def _dirty_set(app) -> set[str]:
     """The set of scope names awaiting a deferred redraw — owned by PlotState."""
     return app._app_state.plot.fc_dirty_scopes
 
 
-def _visible_tab_names(app) -> "frozenset[str]":
+def _visible_tab_names(app) -> frozenset[str]:
     """Leaf tab names currently on screen.
 
     Prefers ``app._visible_centre_tabs`` (Split View shows two leaves at
@@ -95,7 +96,7 @@ def _visible_tab_names(app) -> "frozenset[str]":
     return frozenset()
 
 
-def visible_scope_names(app) -> "set[str]":
+def visible_scope_names(app) -> set[str]:
     """Names of every registered scope whose tab is currently visible.
 
     Normally a 0- or 1-element set; in Split View it can hold both a plot
@@ -107,7 +108,7 @@ def visible_scope_names(app) -> "set[str]":
     return {s.name for s in registered_scopes() if tabs.intersection(s.tab_names)}
 
 
-def current_scope_name(app) -> "str | None":
+def current_scope_name(app) -> str | None:
     """Name of a registered scope whose tab is currently visible (or ``None``).
 
     Retained for callers/tests that want a single scope; Split-View-aware

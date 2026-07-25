@@ -11,7 +11,6 @@ from well_viewer.features.image_browser.review_image.collect import review_row_k
 from well_viewer.core.ui_helpers import norm_timepoint
 
 import logging
-from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
@@ -88,8 +87,8 @@ def make_cell_thumb(ctx, rgb, desc) -> QWidget:
 
 # ── reading the filter/display widgets ───────────────────────────────────────
 
-def read_criteria(ctx) -> List[Criterion]:
-    out: List[Criterion] = []
+def read_criteria(ctx) -> list[Criterion]:
+    out: list[Criterion] = []
     for combo, lo_edit, hi_edit in (ctx.runtime.cell_browser.criteria_rows or []):
         col = combo.currentData()
         if not col:
@@ -98,9 +97,9 @@ def read_criteria(ctx) -> List[Criterion]:
     return out
 
 
-def read_sort_keys(ctx) -> List[SortKey]:
+def read_sort_keys(ctx) -> list[SortKey]:
     """Ordered sort keys from the sidebar's sort rows (first row = primary)."""
-    out: List[SortKey] = []
+    out: list[SortKey] = []
     for combo, dir_btn in (ctx.runtime.cell_browser.sort_rows or []):
         field = combo.currentData()
         if not field:
@@ -117,7 +116,7 @@ def read_timepoints(ctx):
     sel = getattr(ctx.runtime.cell_browser, "tp_selections", {}) or {}
     if not sel:
         return None  # no timepoint dimension → don't filter on it
-    out: List[float] = []
+    out: list[float] = []
     for tp_str, on in sel.items():
         if on:
             try:
@@ -136,7 +135,7 @@ def read_fovs(ctx):
     return [f for f, on in sel.items() if on]
 
 
-def read_channels(ctx) -> List[str]:
+def read_channels(ctx) -> list[str]:
     chips = getattr(ctx.runtime.cell_browser, "channel_chips", {}) or {}
     return [tok for tok, cb in chips.items() if cb.isChecked()]
 

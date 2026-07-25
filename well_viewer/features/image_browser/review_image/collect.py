@@ -12,7 +12,6 @@ matplotlib drawing stays in ``review_image/renderer``.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 import numpy as np
 import numpy as _np
@@ -32,7 +31,7 @@ _logger = logging.getLogger(__name__)
 _FLATFIELD_PREVIEW_MAX_SAMPLES = 8
 
 
-def review_row_keys_series(ctx, df: pd.DataFrame) -> Optional[pd.Series]:
+def review_row_keys_series(ctx, df: pd.DataFrame) -> pd.Series | None:
     """Vectorized counterpart of ``_review_row_keys`` for a DataFrame.
 
     Returns a ``Series`` of ``(fov, tp, nid)`` tuples aligned with
@@ -98,7 +97,7 @@ def _flatfield_qc(ctx, key: str, default: str = "") -> str:
     return str(qc.get(key, default) or default).strip()
 
 
-def _split_background_wells(value) -> "list[str]":
+def _split_background_wells(value) -> list[str]:
     """Parse a comma-separated ``background_well`` value into a deduped well list
     (case-insensitive). A single ``"H12"`` → ``["H12"]`` (back-compat)."""
     seen, out = set(), []
@@ -424,7 +423,7 @@ def review_build_threshold_map(
     return above_by_nid
 
 
-def apply_review_overrides_to_cache(ctx, label: Optional[str] = None) -> None:
+def apply_review_overrides_to_cache(ctx, label: str | None = None) -> None:
     """Project overrides onto cached row['Included'] so non-Review tabs see them.
 
     The override dict is the source of truth; this projects values onto the
@@ -524,7 +523,7 @@ def review_collect_timepoints(ctx, fov: str) -> list:
     return tp_values
 
 
-def review_load_rows(ctx, label: str) -> List[dict]:
+def review_load_rows(ctx, label: str) -> list[dict]:
     """Materialize the cached DataFrame for ``label`` as a list of row dicts.
 
     Used by the Review CSV table widget and the Review Image overlay

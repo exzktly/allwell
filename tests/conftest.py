@@ -26,7 +26,6 @@ os.environ.setdefault("MPLBACKEND", "Agg")
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 
 from dataclasses import dataclass, field
-from typing import Dict, List
 
 import pytest
 from well_viewer.domain.stats_compute import compute_rep_stats
@@ -55,8 +54,8 @@ class MockApp:
     list of AggPoints. The helpers compute aggregations / stats from that
     in-memory map. Replicate sets are described via ``selections``.
     """
-    per_well_pts: Dict[str, List[tuple]]
-    selections: List[dict] = field(default_factory=list)
+    per_well_pts: dict[str, list[tuple]]
+    selections: list[dict] = field(default_factory=list)
     fc_vs_control_on: bool = False
     fc_control_label: str = ""
     fc_vs_t0_on: bool = False
@@ -68,11 +67,11 @@ class MockApp:
 
     # Read by ``fold_change.fold_change_state`` etc.
     @property
-    def _well_paths(self) -> Dict[str, str]:
+    def _well_paths(self) -> dict[str, str]:
         return {w: w for w in self.per_well_pts}
 
     @property
-    def _selections(self) -> List[dict]:
+    def _selections(self) -> list[dict]:
         return self.selections
 
     @property
@@ -90,22 +89,22 @@ class MockApp:
     def _aggregate_well(self, label: str, *, threshold: float, use_sem: bool,
                         val_col: str,
                         fluor_gates, per_fov_spread: bool = False,
-                        tp_col: str = "timepoint_hours") -> List[tuple]:
+                        tp_col: str = "timepoint_hours") -> list[tuple]:
         return list(self.per_well_pts.get(label, []))
 
-    def _aggregate_group(self, wells: List[str], *, threshold: float,
+    def _aggregate_group(self, wells: list[str], *, threshold: float,
                          use_sem: bool, val_col: str, fluor_gates,
                          per_fov_spread: bool = False,
-                         tp_col: str = "timepoint_hours") -> List[tuple]:
+                         tp_col: str = "timepoint_hours") -> list[tuple]:
         # Pool-of-cells approximation: average means across wells per tp.
         # The mock doesn't keep per-cell granularity, so this collapses to
         # "mean of per-well means" — that's fine for fold_change tests
         # since they don't compare the two stats numerically.
-        by_t: Dict[float, List[float]] = {}
+        by_t: dict[float, list[float]] = {}
         for w in wells:
             for pt in self.per_well_pts.get(w, []):
                 by_t.setdefault(pt[0], []).append(pt[1])
-        out: List[tuple] = []
+        out: list[tuple] = []
         for t in sorted(by_t):
             means = by_t[t]
             avg = sum(means) / len(means) if means else float("nan")
@@ -115,8 +114,8 @@ class MockApp:
     def _compute_rep_stats(self, rset, target_t: float,
                            threshold: float, use_sem: bool) -> tuple:
         """Mean of per-well means + mean of per-well fracs at *target_t*."""
-        well_means: List[float] = []
-        well_fracs: List[float] = []
+        well_means: list[float] = []
+        well_fracs: list[float] = []
         for w in rset.wells:
             for pt in self.per_well_pts.get(w, []):
                 if abs(pt[0] - target_t) < 1e-3 * max(1.0, abs(pt[0]),

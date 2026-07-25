@@ -19,7 +19,7 @@ import types
 import services.remote_runner as rr
 
 
-def _bare_batched() -> "rr._BatchedRemoteProcess":
+def _bare_batched() -> rr._BatchedRemoteProcess:
     # Bypass the heavy __init__ (needs ssh config, staging, a Fetcher, …); we
     # only exercise wait()/_run_batches, so set just the attributes they touch.
     p = object.__new__(rr._BatchedRemoteProcess)

@@ -2,7 +2,6 @@ import os
 import sys
 import shutil
 import argparse
-from typing import List, Optional
 
 # ---------------------------------------------------------------------------
 # Schema constants (kept in sync with process_microscopy.py)
@@ -12,7 +11,7 @@ DEFAULT_SCHEMA  = "experiment:channel:well:fov:timepoint"
 DEFAULT_SEP     = "_"
 
 
-def parse_schema(schema_str: str) -> List[str]:
+def parse_schema(schema_str: str) -> list[str]:
     """Parse a colon-delimited schema string into a list of field names."""
     known = set(SCHEMA_FIELDS)
     return [
@@ -22,13 +21,13 @@ def parse_schema(schema_str: str) -> List[str]:
     ]
 
 
-def validate_schema(schema: List[str]) -> List[str]:
+def validate_schema(schema: list[str]) -> list[str]:
     """Return a list of human-readable validation errors. Empty list = OK.
 
     Mirrors process_microscopy.validate_schema so a CLI invocation of
     WellPlateZipper rejects the same bad schemas the GUI rejects.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     if "channel" not in schema:
         errors.append('Schema must include a "channel" field.')
     elif schema.count("channel") > 1:
@@ -74,11 +73,11 @@ def build_arg_parser():
     return parser
 
 
-def generate_wells() -> List[str]:
+def generate_wells() -> list[str]:
     return [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]
 
 
-def _well_index_from_schema(schema: List[str]) -> Optional[int]:
+def _well_index_from_schema(schema: list[str]) -> int | None:
     """Return the position index of the \"well\" field, or None if absent."""
     try:
         return schema.index("well")
@@ -88,9 +87,9 @@ def _well_index_from_schema(schema: List[str]) -> Optional[int]:
 
 def _extract_well_from_filename(
     fname: str,
-    schema: List[str],
+    schema: list[str],
     sep: str,
-) -> Optional[str]:
+) -> str | None:
     """
     Extract the well token from *fname* using the given schema.
 
@@ -112,7 +111,7 @@ def _extract_well_from_filename(
 def group_by_well(
     search_dir: str,
     recursive: bool,
-    schema: List[str],
+    schema: list[str],
     sep: str,
 ) -> dict:
     """Single pass through *search_dir*; return ``{well_label: [paths]}``.
@@ -153,7 +152,7 @@ def group_by_well(
 
 
 def folder_well(
-    well: str, files: List[str], output_dir: str,
+    well: str, files: list[str], output_dir: str,
     *, move: bool = False,
 ) -> None:
     """Place *files* into a per-well subfolder <output_dir>/<well>/.

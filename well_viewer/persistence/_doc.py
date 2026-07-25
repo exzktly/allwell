@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from well_viewer.persistence._io import atomic_write_json
 
@@ -36,7 +36,7 @@ LEGACY_SIDECARS: dict[str, str] = {
 }
 
 
-def path_for(state) -> Optional[Path]:
+def path_for(state) -> Path | None:
     if state.dataset.data_dir:
         return Path(state.dataset.data_dir) / PERSISTENCE_FILENAME
     return None

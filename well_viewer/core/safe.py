@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 import sys
 from contextlib import contextmanager
-from typing import Iterator, Optional
+from collections.abc import Iterator
 
 # Single well-known logger so swallowed failures are greppable under one name.
 _LOGGER = logging.getLogger("well_viewer.swallowed")
@@ -63,7 +63,7 @@ def swallowed(
     note: str = "",
     *,
     level: int = logging.DEBUG,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> None:
     """Log the exception currently being handled, from inside an ``except``.
 
@@ -81,7 +81,7 @@ def swallow(
     context: str = "",
     *,
     level: int = logging.DEBUG,
-    logger: Optional[logging.Logger] = None,
+    logger: logging.Logger | None = None,
 ) -> Iterator[None]:
     """Context manager that suppresses + logs any :class:`Exception` in its body.
 

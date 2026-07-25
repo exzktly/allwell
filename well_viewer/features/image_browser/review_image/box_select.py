@@ -14,7 +14,6 @@ stateless apart from those.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
 
 # A drag shorter than this many label-local pixels in either axis is a tap, not a
 # box — the caller decides what a tap means (single-cell click in delete mode,
@@ -61,7 +60,7 @@ def box_select_update(ctx, event) -> None:
     rb.setGeometry(QRect(x0, y0, w, h))
 
 
-def box_select_finish(ctx, event) -> Optional[Tuple[int, int, int, int]]:
+def box_select_finish(ctx, event) -> tuple[int, int, int, int] | None:
     """Finalize the drag and return ``(mx0, my0, mx1, my1)`` in mask-array pixel
     space, or ``None`` for a tap / too-small drag.
 

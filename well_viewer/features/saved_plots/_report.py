@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
 
 # Letter page in inches.
 _PAGE_W, _PAGE_H = 8.5, 11.0
@@ -34,7 +34,7 @@ def _cover_page(pdf, *, dataset_name: str, count: int) -> None:
     pdf.savefig(fig)
 
 
-def _plot_page(pdf, rec, *, image_path: "Path | None", summary: str) -> None:
+def _plot_page(pdf, rec, *, image_path: Path | None, summary: str) -> None:
     import matplotlib.image as mpimg
     from matplotlib.figure import Figure
 
@@ -84,8 +84,8 @@ def _plot_page(pdf, rec, *, image_path: "Path | None", summary: str) -> None:
 
 def build_saved_plots_report(
     records: Iterable,
-    image_path_for: Callable[[object], "Path | None"],
-    out_path: "str | Path",
+    image_path_for: Callable[[object], Path | None],
+    out_path: str | Path,
     *,
     dataset_name: str = "",
     summary_for: Callable[[object], str] | None = None,

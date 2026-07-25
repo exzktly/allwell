@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from well_viewer.domain.viewer_state import parse_rc
 
-from typing import Dict, List, Optional  # noqa: F401
 
 from well_viewer.features.image_browser.image_table.image_compose import (
     NUC_SEG_TOKEN,
@@ -23,7 +22,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
 )
 
 
-def _channel_options(ctx) -> List[str]:
+def _channel_options(ctx) -> list[str]:
     """All channel tokens available for selection (uppercase for display).
 
     Sourced from the canonical ``ctx.state.channel.fluor_channels`` /
@@ -37,7 +36,7 @@ def _channel_options(ctx) -> List[str]:
     Montage tab.
     """
     info = ctx.state.dataset.pipeline_info or {}
-    chans: List[str] = []
+    chans: list[str] = []
 
     fluor = list(ctx.state.channel.fluor_channels or [])
     if not fluor:
@@ -100,14 +99,14 @@ def _tp_sort_key(tp: str):
     return (h is None, h if h is not None else 0.0, str(tp))
 
 
-def _cache_column_tokens(ctx, column: str) -> List[str]:
+def _cache_column_tokens(ctx, column: str) -> list[str]:
     """Unique normalised tokens from ``column`` across every cached DataFrame.
 
     ``ctx.state.dataset.cache`` values are DataFrames since the pandas migration; iterating
     one with ``for row in df`` yields *column names*, not rows. Pull the column
     out vectorised instead — and skip frames that don't carry it at all.
     """
-    seen: List[str] = []
+    seen: list[str] = []
     cache = ctx.state.dataset.cache or {}
     for df in cache.values():
         if df is None or column not in getattr(df, "columns", ()):
@@ -119,9 +118,9 @@ def _cache_column_tokens(ctx, column: str) -> List[str]:
     return seen
 
 
-def _timepoint_options(ctx) -> List[str]:
+def _timepoint_options(ctx) -> list[str]:
     info = ctx.state.dataset.pipeline_info or {}
-    seen: List[str] = []
+    seen: list[str] = []
     for tp in (info.get("available_timepoints") or []):
         tok = _norm_token(tp)
         if tok and tok not in seen:
@@ -133,9 +132,9 @@ def _timepoint_options(ctx) -> List[str]:
     return sorted(_cache_column_tokens(ctx, "timepoint"), key=_tp_sort_key)
 
 
-def _fov_options(ctx) -> List[str]:
+def _fov_options(ctx) -> list[str]:
     info = ctx.state.dataset.pipeline_info or {}
-    seen: List[str] = []
+    seen: list[str] = []
     for fv in (info.get("available_fovs") or []):
         tok = _norm_token(fv)
         if tok and tok not in seen:
@@ -145,7 +144,7 @@ def _fov_options(ctx) -> List[str]:
     return _cache_column_tokens(ctx, "fov")
 
 
-def _well_options(ctx) -> List[str]:
+def _well_options(ctx) -> list[str]:
     return sorted(ctx.state.dataset.well_paths.keys(), key=parse_rc)
 
 
@@ -163,7 +162,7 @@ PLATE_COL_DIM = "well_col"
 PLATE_DIMS = (PLATE_ROW_DIM, PLATE_COL_DIM)
 
 
-def _selected_wells(ctx) -> List[str]:
+def _selected_wells(ctx) -> list[str]:
     """Wells the plate draws from — the sidebar plate selection, else every well.
 
     Sorted by ``parse_rc`` so rows/cols come out in plate order (A1, A2, … B1, …)."""
@@ -172,9 +171,9 @@ def _selected_wells(ctx) -> List[str]:
     return sel if sel else _well_options(ctx)
 
 
-def _well_row_options(ctx) -> List[str]:
+def _well_row_options(ctx) -> list[str]:
     """Distinct plate-row letters (A–H) among the selected wells, top→bottom."""
-    seen: List[str] = []
+    seen: list[str] = []
     for w in _selected_wells(ctx):
         r, _c = parse_rc(w)
         if r and r not in seen:
@@ -182,7 +181,7 @@ def _well_row_options(ctx) -> List[str]:
     return sorted(seen)
 
 
-def _well_col_options(ctx) -> List[str]:
+def _well_col_options(ctx) -> list[str]:
     """Distinct plate-column numbers ("1".."12") among the selected wells, ordered."""
     nums = set()
     for w in _selected_wells(ctx):
@@ -192,12 +191,12 @@ def _well_col_options(ctx) -> List[str]:
     return [str(n) for n in sorted(nums)]
 
 
-def plate_well_index(ctx) -> Dict[tuple, str]:
+def plate_well_index(ctx) -> dict[tuple, str]:
     """Map ``(row_letter, col_int)`` → the real well token, for well composition.
 
     Built from every dataset well (not just the selection) so a partial plate still
     resolves the positions it does cover."""
-    idx: Dict[tuple, str] = {}
+    idx: dict[tuple, str] = {}
     for w in _well_options(ctx):
         r, c = parse_rc(w)
         if r and c:
@@ -205,7 +204,7 @@ def plate_well_index(ctx) -> Dict[tuple, str]:
     return idx
 
 
-def compose_plate_well(vals: Dict[str, str], rc_index: Dict[tuple, str]) -> None:
+def compose_plate_well(vals: dict[str, str], rc_index: dict[tuple, str]) -> None:
     """Resolve a cell's plate row/col dims to the real ``well`` token, in place.
 
     Sets ``vals['well']`` to the matching well, or ``""`` when that plate position
@@ -229,7 +228,7 @@ def _overlay_active(ctx) -> bool:
     return bool(getattr(ctx.state.image_table, "composite", False))
 
 
-def _axis_dim_values(ctx, dim: str, *, collapse_overlay: bool = True) -> List[str]:
+def _axis_dim_values(ctx, dim: str, *, collapse_overlay: bool = True) -> list[str]:
     """Ordered value list a single dimension expands into, from live selections.
 
     Channel/well filter by ``active_channels``/``active_wells``; timepoint/fov
@@ -281,12 +280,12 @@ def _axis_dim_values(ctx, dim: str, *, collapse_overlay: bool = True) -> List[st
     return []
 
 
-def _axis_values(ctx, axis: str) -> List[str]:
+def _axis_values(ctx, axis: str) -> list[str]:
     """Back-compat single-dim wrapper around :func:`_axis_dim_values`."""
     return _axis_dim_values(ctx, axis)
 
 
-def _product_values(ctx, dims) -> List[tuple]:
+def _product_values(ctx, dims) -> list[tuple]:
     """Mixed-radix Cartesian product of *dims* (outer→inner order).
 
     Returns a list of value tuples aligned to *dims*. Empty *dims* → ``[()]`` (a
@@ -298,7 +297,7 @@ def _product_values(ctx, dims) -> List[tuple]:
     return [tuple(p) for p in itertools.product(*lists)]
 
 
-def _fixed_off_axis(ctx, on_axis: set) -> Dict[str, str]:
+def _fixed_off_axis(ctx, on_axis: set) -> dict[str, str]:
     """Pick a single held value for each dimension NOT on a row/col axis.
 
     Prefers the builder's held value (``state.fixed_vals``, set by the shelf's
@@ -338,7 +337,7 @@ def _current_axis(ctx, which: str) -> str:
                    "channel" if which == "row" else "timepoint")
 
 
-def _current_dims(ctx, which: str) -> List[str]:
+def _current_dims(ctx, which: str) -> list[str]:
     """Ordered dimension list for the row/col axis (outer→inner).
 
     State (``row_dims``/``col_dims``, kept in sync by the multi-dim picker) is the
@@ -349,7 +348,7 @@ def _current_dims(ctx, which: str) -> List[str]:
 
 
 def _layout_cell_values_nested(row_dims, col_dims, row_tuple, col_tuple,
-                               fixed) -> Dict[str, str]:
+                               fixed) -> dict[str, str]:
     """Per-cell dim values for a NESTED layout: off-axis dims held at *fixed*, the
     row dims set from *row_tuple* (aligned to *row_dims*) and col dims from
     *col_tuple*. The caller supplies the already-decoded product tuples
@@ -363,7 +362,7 @@ def _layout_cell_values_nested(row_dims, col_dims, row_tuple, col_tuple,
 
 
 def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c,
-                        *, n_row_vals=None, group_size=None) -> Dict[str, str]:
+                        *, n_row_vals=None, group_size=None) -> dict[str, str]:
     """Per-cell (well, channel, timepoint, fov) for the smart layout: off-axis
     dims held at *fixed*, the row axis driven by *r*, the col axis by *c*.
 
@@ -387,7 +386,7 @@ def _layout_cell_values(row_axis, col_axis, row_vals, col_vals, fixed, r, c,
     return vals
 
 
-def _all_dim_options(ctx, dim: str) -> List[str]:
+def _all_dim_options(ctx, dim: str) -> list[str]:
     """Every available value for a dimension (not selection-filtered)."""
     if dim == "channel":
         return _channel_options(ctx)
@@ -409,9 +408,9 @@ _DIM_KEY = {"well": "well", "channel": "chan",
             "timepoint": "tp", "fov": "fov"}
 
 
-def _snapshot_cells(ctx) -> List[List[Dict[str, str]]]:
+def _snapshot_cells(ctx) -> list[list[dict[str, str]]]:
     """Capture every cell's (well, channel, timepoint, fov) values."""
-    snap: List[List[Dict[str, str]]] = []
+    snap: list[list[dict[str, str]]] = []
     for row in (getattr(ctx.runtime.image_table, "cells", None) or []):
         snap.append([
             {dim: (cell.get(key) or "") for dim, key in _DIM_KEY.items()}
@@ -420,7 +419,7 @@ def _snapshot_cells(ctx) -> List[List[Dict[str, str]]]:
     return snap
 
 
-def _write_cell(cell, vals: Dict[str, str]) -> None:
+def _write_cell(cell, vals: dict[str, str]) -> None:
     for dim, key in _DIM_KEY.items():
         txt = vals.get(dim, "")
         if txt:

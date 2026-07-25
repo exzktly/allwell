@@ -56,7 +56,8 @@ implementation; that's fixed here.
 from __future__ import annotations
 
 import math
-from typing import Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from typing import NamedTuple
+from collections.abc import Callable
 from well_viewer.domain.stats_compute import compute_rep_stats
 from well_viewer.domain.stats_compute import compute_rep_per_fov_stats
 from well_viewer.domain.stats_compute import compute_rep_n_above
@@ -162,7 +163,7 @@ def _scale_pt(
     return tuple(new)
 
 
-def _grow(new: list, idx_a: int, idx_b: Optional[int]) -> None:
+def _grow(new: list, idx_a: int, idx_b: int | None) -> None:
     """Pad *new* with 0.0 so indices ``idx_a`` and ``idx_b`` are addressable."""
     need = idx_a if idx_b is None else max(idx_a, idx_b)
     while len(new) <= need:
@@ -170,7 +171,7 @@ def _grow(new: list, idx_a: int, idx_b: Optional[int]) -> None:
 
 
 def _scale_field(
-    pt: tuple, val_idx: int, spread_idx: Optional[int], factor: float, *,
+    pt: tuple, val_idx: int, spread_idx: int | None, factor: float, *,
     factor_rel_err_sq: float = 0.0,
 ) -> tuple:
     """Generic ``_scale_pt`` over an arbitrary ``(val_idx, spread_idx)`` field.
@@ -201,7 +202,7 @@ def _scale_field(
 
 
 def _subtract_field(
-    pt: tuple, val_idx: int, spread_idx: Optional[int], shift: float, *,
+    pt: tuple, val_idx: int, spread_idx: int | None, shift: float, *,
     shift_spread: float = 0.0,
 ) -> tuple:
     """Generic ``_subtract_pt`` over an arbitrary ``(val_idx, spread_idx)`` field."""
@@ -223,9 +224,9 @@ def _subtract_field(
 
 
 def _resolve_stat(
-    t: float, stats: Dict[float, Tuple[float, float]],
-    default: Tuple[float, float],
-) -> Tuple[float, float]:
+    t: float, stats: dict[float, tuple[float, float]],
+    default: tuple[float, float],
+) -> tuple[float, float]:
     """Resolve the ``(value, spread)`` for *t* in *stats* under relative tol."""
     if t in stats:
         return stats[t]
@@ -236,8 +237,8 @@ def _resolve_stat(
 
 
 def _series_at(
-    series: Dict[float, Tuple[float, float]], target_t: float,
-) -> Optional[Tuple[float, float]]:
+    series: dict[float, tuple[float, float]], target_t: float,
+) -> tuple[float, float] | None:
     """The ``(value, spread)`` a member's series carries at *target_t*.
 
     Matches an exact key first, then any key within the relative timepoint
@@ -256,8 +257,8 @@ def _series_at(
 
 
 def _series_baseline(
-    series: Dict[float, Tuple[float, float]], baseline_tp: Optional[float],
-) -> Optional[Tuple[float, float, float]]:
+    series: dict[float, tuple[float, float]], baseline_tp: float | None,
+) -> tuple[float, float, float] | None:
     """``(tp, value, spread)`` for a member's baseline timepoint.
 
     Prefers the sample at *baseline_tp* (under the relative tolerance) so a bar
@@ -280,8 +281,8 @@ def _series_baseline(
 
 
 def _field_baseline(
-    pts, val_idx: int, baseline_tp: Optional[float],
-) -> Tuple[Optional[float], float]:
+    pts, val_idx: int, baseline_tp: float | None,
+) -> tuple[float | None, float]:
     """``(baseline_val, baseline_spread_unused)`` for a field's vs-t0 step.
 
     Mirrors the mean baseline logic: prefer the point at *baseline_tp*, else the
@@ -309,9 +310,9 @@ def _field_baseline(
 
 
 def _normalize_field(
-    pts, *, val_idx: int, spread_idx: Optional[int],
-    control_stats: Optional[Dict[float, Tuple[float, float]]],
-    use_t0: bool, baseline_tp: Optional[float],
+    pts, *, val_idx: int, spread_idx: int | None,
+    control_stats: dict[float, tuple[float, float]] | None,
+    use_t0: bool, baseline_tp: float | None,
     op_ctrl: str, op_t0: str,
 ) -> list:
     """Apply vs-control + vs-t0 normalization to ONE AggPoint field.
@@ -360,9 +361,9 @@ def _normalize_field(
     return pts
 
 
-def pts_to_mean_by_t(pts) -> Dict[float, float]:
+def pts_to_mean_by_t(pts) -> dict[float, float]:
     """Build a ``{t: mean}`` dict from an AggPoint list, skipping NaN means."""
-    out: Dict[float, float] = {}
+    out: dict[float, float] = {}
     for pt in pts or ():
         t = float(pt[0])
         m = pt[1]
@@ -371,7 +372,7 @@ def pts_to_mean_by_t(pts) -> Dict[float, float]:
     return out
 
 
-def _match_control_mean(t: float, control_means: Dict[float, float]) -> Optional[float]:
+def _match_control_mean(t: float, control_means: dict[float, float]) -> float | None:
     """Resolve the control mean at timepoint *t* under relative tolerance.
 
     Uses a relative-tolerance match (``abs(a - b) < 1e-3 * max(1, |a|, |b|)``)
@@ -392,18 +393,18 @@ def _match_control_mean(t: float, control_means: Dict[float, float]) -> Optional
 def normalize_pts(
     pts,
     *,
-    control_means: Optional[Dict[float, float]] = None,
-    control_stats: Optional[Dict[float, Tuple[float, float]]] = None,
-    control_frac_stats: Optional[Dict[float, Tuple[float, float]]] = None,
-    control_n_stats: Optional[Dict[float, Tuple[float, float]]] = None,
+    control_means: dict[float, float] | None = None,
+    control_stats: dict[float, tuple[float, float]] | None = None,
+    control_frac_stats: dict[float, tuple[float, float]] | None = None,
+    control_n_stats: dict[float, tuple[float, float]] | None = None,
     normalize_frac_n: bool = False,
     n_per_fov: bool = False,
     use_t0: bool = False,
-    baseline_tp: Optional[float] = None,
+    baseline_tp: float | None = None,
     op: str = "ratio",
-    op_ctrl: Optional[str] = None,
-    op_t0: Optional[str] = None,
-    miss_sink: Optional[Set[float]] = None,
+    op_ctrl: str | None = None,
+    op_t0: str | None = None,
+    miss_sink: set[float] | None = None,
 ) -> list:
     """Apply optional vs-control and/or vs-t0 normalization to AggPoint list.
 
@@ -459,7 +460,7 @@ def normalize_pts(
 
     # Use control_stats when provided; fall back to control_means (with
     # zero spread per tp) for the legacy callers / tests.
-    effective_stats: Optional[Dict[float, Tuple[float, float]]] = None
+    effective_stats: dict[float, tuple[float, float]] | None = None
     if control_stats:
         effective_stats = control_stats
     elif control_means:
@@ -585,7 +586,7 @@ def normalize_pts(
 
 # ── State accessors / ctx integration ───────────────────────────────────────
 
-def fold_change_state(ctx) -> Tuple[bool, str, bool]:
+def fold_change_state(ctx) -> tuple[bool, str, bool]:
     """Return the active ``(vs_control_on, control_label, vs_t0_on)`` triple.
 
     Used by both the on-screen plot tabs and the per-tab CSV exporter so the
@@ -598,7 +599,7 @@ def fold_change_state(ctx) -> Tuple[bool, str, bool]:
     )
 
 
-def _pt_frac(pt) -> Tuple[Optional[float], float]:
+def _pt_frac(pt) -> tuple[float | None, float]:
     """Extract ``(frac, frac_spread)`` from an AggPoint, with NaN guarding."""
     if len(pt) < 4:
         return None, 0.0
@@ -611,8 +612,8 @@ def _pt_frac(pt) -> Tuple[Optional[float], float]:
 
 
 def baseline_from_points(
-    pts, baseline_tp: Optional[float] = None,
-) -> Tuple[Optional[float], float]:
+    pts, baseline_tp: float | None = None,
+) -> tuple[float | None, float]:
     """Pull the ``(mean, spread)`` baseline out of an AggPoint sequence.
 
     ``baseline_tp`` (when finite) picks the point at that timepoint;
@@ -654,8 +655,8 @@ def baseline_from_points(
 
 
 def baseline_from_points_resolved(
-    pts, baseline_tp: Optional[float] = None,
-) -> Tuple[Optional[float], Optional[float], float]:
+    pts, baseline_tp: float | None = None,
+) -> tuple[float | None, float | None, float]:
     """Like :func:`baseline_from_points` but also returns the resolved tp.
 
     Returns ``(tp, mean, spread)``. ``tp`` is ``None`` when no baseline
@@ -690,8 +691,8 @@ def baseline_from_points_resolved(
 
 
 def baseline_frac_from_points_resolved(
-    pts, baseline_tp: Optional[float] = None,
-) -> Tuple[Optional[float], Optional[float], float]:
+    pts, baseline_tp: float | None = None,
+) -> tuple[float | None, float | None, float]:
     """Frac counterpart of :func:`baseline_from_points_resolved` —
     returns ``(tp, frac, frac_spread)`` with ``tp=None`` for the no-match case."""
     if not pts:
@@ -713,8 +714,8 @@ def baseline_frac_from_points_resolved(
 
 
 def baseline_frac_from_points(
-    pts, baseline_tp: Optional[float] = None,
-) -> Tuple[Optional[float], float]:
+    pts, baseline_tp: float | None = None,
+) -> tuple[float | None, float]:
     """Pull the ``(frac, frac_spread)`` baseline out of an AggPoint sequence.
 
     Fraction-on counterpart of :func:`baseline_from_points`. Same fall-through
@@ -741,7 +742,7 @@ def baseline_frac_from_points(
     return None, 0.0
 
 
-def _pt_n_above(pt, per_fov_spread: bool = False) -> Tuple[float, float]:
+def _pt_n_above(pt, per_fov_spread: bool = False) -> tuple[float, float]:
     """Extract ``(n_above, n_above_spread)`` from an AggPoint."""
     if per_fov_spread:
         n = float(pt[7]) if len(pt) >= 8 else 0.0
@@ -752,8 +753,8 @@ def _pt_n_above(pt, per_fov_spread: bool = False) -> Tuple[float, float]:
 
 
 def baseline_n_from_points_resolved(
-    pts, *, per_fov_spread: bool = False, baseline_tp: Optional[float] = None,
-) -> Tuple[Optional[float], Optional[float], float]:
+    pts, *, per_fov_spread: bool = False, baseline_tp: float | None = None,
+) -> tuple[float | None, float | None, float]:
     """``(tp, n_above, n_above_spread)`` for the member's baseline tp.
 
     N-events counterpart of :func:`baseline_from_points_resolved`.
@@ -781,7 +782,7 @@ def member_n_series(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
+) -> dict[float, tuple[float, float]]:
     """``{t: (n_above, n_above_spread)}`` for a member.
 
     N-events counterpart of :func:`member_frac_series`. Same rset /
@@ -792,7 +793,7 @@ def member_n_series(
         return {}
     rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
-        tps: Set[float] = set()
+        tps: set[float] = set()
         for w in rset.wells:
             pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
@@ -802,7 +803,7 @@ def member_n_series(
             )
             for pt in pts:
                 tps.add(float(pt[0]))
-        out: Dict[float, Tuple[float, float]] = {}
+        out: dict[float, tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
                 _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
@@ -830,7 +831,7 @@ def control_n_at_for_bar(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Optional[Tuple[float, float]]:
+) -> tuple[float, float] | None:
     """``(n_above, n_above_spread)`` of the control at *target_t* for the
     bar's N-events panel. Returns ``None`` when the control can't be
     resolved or has no sample at *target_t*."""
@@ -847,8 +848,8 @@ def member_first_tp_n_resolved(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-    baseline_tp: Optional[float] = None,
-) -> Optional[Tuple[float, float, float]]:
+    baseline_tp: float | None = None,
+) -> tuple[float, float, float] | None:
     """``(tp, n_above, n_above_spread)`` for the member's baseline timepoint.
 
     N-events counterpart of :func:`member_first_tp_frac_resolved` with the
@@ -883,7 +884,7 @@ def parse_fc_order(ctx) -> str:
     return order if order in ("ctrl_first", "t0_first") else "ctrl_first"
 
 
-def parse_baseline_tp(ctx) -> Optional[float]:
+def parse_baseline_tp(ctx) -> float | None:
     """Resolve ``PlotState.fc_baseline_tp`` (a tp string) to a float.
 
     Returns ``None`` when no baseline tp is set, when the saved string
@@ -923,7 +924,7 @@ def fold_change_suffix(vs_control_on: bool, vs_t0_on: bool,
     ``"t=24h"``; falls back to ``"t0"``). Example:
     ``"  (fold change vs DMSO (ratio), vs t=0h (subtraction))"``.
     """
-    parts: List[str] = []
+    parts: list[str] = []
     if vs_control_on:
         lbl = f"vs {control_label}" if control_label else "vs control"
         parts.append(f"{lbl} ({_fc_op_word(op_ctrl)})")
@@ -956,7 +957,7 @@ def fold_change_suffix_for(ctx) -> str:
 _WELL_DISAMBIG_SUFFIX = " (well)"
 
 
-def resolve_control_wells(ctx, control_label: str) -> List[str]:
+def resolve_control_wells(ctx, control_label: str) -> list[str]:
     """Translate a control selection string into a list of loaded well tokens.
 
     Resolution order:
@@ -1033,7 +1034,7 @@ def member_mean_series(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[float, float]:
+) -> dict[float, float]:
     """``{t: mean}`` for a member (rep-set name or well token).
 
     Uses the SAME stat the bar / curve renderer uses for that kind of
@@ -1059,7 +1060,7 @@ def member_mean_series(
         # Collect the union of timepoints across the rep-set's wells.
         # We use the per-well agg (use_sem=False; spread isn't used here)
         # only to enumerate the timepoint axis.
-        tps: Set[float] = set()
+        tps: set[float] = set()
         for w in rset.wells:
             pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
@@ -1069,7 +1070,7 @@ def member_mean_series(
             )
             for pt in pts:
                 tps.add(float(pt[0]))
-        out: Dict[float, float] = {}
+        out: dict[float, float] = {}
         for t in tps:
             if per_fov_spread:
                 gm, *_ = compute_rep_per_fov_stats(ctx,
@@ -1101,7 +1102,7 @@ def control_mean_at_for_bar(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Optional[float]:
+) -> float | None:
     """Control mean at *target_t* using the same stat the bar plot uses.
 
     For a rep-set control: mean-of-per-well-means (or per-FOV pool when
@@ -1128,15 +1129,15 @@ class CellScaleSpec(NamedTuple):
     ratio denominator is non-finite/zero) — the caller renders a blank slot
     rather than misleading raw values.
     """
-    control_mean: Optional[float]
+    control_mean: float | None
     op_ctrl: str
-    t0_mean: Optional[float]
+    t0_mean: float | None
     op_t0: str
     order: str
     missing: bool
 
 
-def apply_cell_scale(vals, spec: Optional["CellScaleSpec"]):
+def apply_cell_scale(vals, spec: CellScaleSpec | None):
     """Apply *spec* to a 1-D array of per-cell values.
 
     Uses the same per-axis operator (``"ratio"`` → divide, ``"subtract"`` →
@@ -1172,12 +1173,12 @@ def apply_cell_scale(vals, spec: Optional["CellScaleSpec"]):
 
 
 def build_cell_scaling(
-    ctx, wells, *, fc_state: Tuple[bool, str, bool],
+    ctx, wells, *, fc_state: tuple[bool, str, bool],
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
     op_ctrl: str = "ratio", op_t0: str = "ratio",
-    order: str = "ctrl_first", baseline_tp: Optional[float] = None,
+    order: str = "ctrl_first", baseline_tp: float | None = None,
 ) -> Callable[[str, float], CellScaleSpec]:
     """Build a ``scale_for(well, tp) -> CellScaleSpec`` resolver for per-cell
     violin/beeswarm fold-change overlays.
@@ -1199,7 +1200,7 @@ def build_cell_scaling(
     fc_vs_ctrl, fc_ctrl_lbl, fc_vs_t0 = fc_state
 
     # t0 baseline is per-well and tp-independent — resolve once up front.
-    t0_by_well: Dict[str, Optional[float]] = {}
+    t0_by_well: dict[str, float | None] = {}
     if fc_vs_t0:
         for w in wells:
             t0_by_well[w] = member_baseline_value(
@@ -1208,9 +1209,9 @@ def build_cell_scaling(
                 per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
             )
 
-    control_cache: Dict[float, Optional[float]] = {}
+    control_cache: dict[float, float | None] = {}
 
-    def _control_at(tp: float) -> Optional[float]:
+    def _control_at(tp: float) -> float | None:
         if not (fc_vs_ctrl and fc_ctrl_lbl):
             return None
         if tp not in control_cache:
@@ -1223,14 +1224,14 @@ def build_cell_scaling(
 
     def scale_for(well: str, tp: float) -> CellScaleSpec:
         missing = False
-        cm: Optional[float] = None
+        cm: float | None = None
         if fc_vs_ctrl and fc_ctrl_lbl:
             cm = _control_at(float(tp))
             if cm is None:
                 missing = True
             elif op_ctrl == "ratio" and (not math.isfinite(cm) or cm == 0):
                 missing = True
-        t0: Optional[float] = None
+        t0: float | None = None
         if fc_vs_t0:
             t0 = t0_by_well.get(well)
             if t0 is None:
@@ -1251,11 +1252,11 @@ def build_cell_scaling(
 
 def member_baseline_value(
     ctx, label: str, *,
-    baseline_tp: Optional[float],
+    baseline_tp: float | None,
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Optional[float]:
+) -> float | None:
     """Member baseline honouring *baseline_tp* (audit S1).
 
     Picks the member's own mean at ``baseline_tp`` when set and sampled;
@@ -1287,7 +1288,7 @@ def member_first_tp_value(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Optional[float]:
+) -> float | None:
     """Earliest finite mean for a member (using the member's own stat).
 
     The t0 baseline counterpart to :func:`control_mean_at_for_bar`. Used
@@ -1313,7 +1314,7 @@ def member_stats_series(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
+) -> dict[float, tuple[float, float]]:
     """``{t: (mean, spread)}`` for a member — like :func:`member_mean_series`
     but also returns the spread so callers can propagate error properly.
 
@@ -1326,7 +1327,7 @@ def member_stats_series(
         return {}
     rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
-        tps: Set[float] = set()
+        tps: set[float] = set()
         for w in rset.wells:
             pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
@@ -1336,7 +1337,7 @@ def member_stats_series(
             )
             for pt in pts:
                 tps.add(float(pt[0]))
-        out: Dict[float, Tuple[float, float]] = {}
+        out: dict[float, tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
                 gm, gerr, *_ = compute_rep_per_fov_stats(ctx,
@@ -1377,7 +1378,7 @@ def member_frac_stats_series(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
+) -> dict[float, tuple[float, float]]:
     """``{t: (frac, frac_spread)}`` for a member — fraction-above-threshold + spread.
 
     Mirrors :func:`member_stats_series` but extracts the fraction field. The
@@ -1392,7 +1393,7 @@ def member_frac_stats_series(
         return {}
     rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
-        tps: Set[float] = set()
+        tps: set[float] = set()
         for w in rset.wells:
             pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
@@ -1401,7 +1402,7 @@ def member_frac_stats_series(
             )
             for pt in pts:
                 tps.add(float(pt[0]))
-        out: Dict[float, Tuple[float, float]] = {}
+        out: dict[float, tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
                 res = compute_rep_per_fov_stats(ctx, rset, t, threshold, use_sem)
@@ -1438,7 +1439,7 @@ def member_n_stats_series(
     threshold: float, val_col: str,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
+) -> dict[float, tuple[float, float]]:
     """``{t: (n, spread)}`` for a member — N-events denominator for the N panel.
 
     Returns the value in the SAME representation the N panel plots, selected by
@@ -1452,8 +1453,8 @@ def member_n_stats_series(
         return {}
     rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
-        out: Dict[float, Tuple[float, float]] = {}
-        tps: Set[float] = set()
+        out: dict[float, tuple[float, float]] = {}
+        tps: set[float] = set()
         for w in rset.wells:
             pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
@@ -1504,7 +1505,7 @@ def control_stats_at_for_bar(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Optional[Tuple[float, float]]:
+) -> tuple[float, float] | None:
     """``(mean, spread)`` of the control at *target_t* using the bar's stat.
 
     Stats-returning counterpart to :func:`control_mean_at_for_bar` —
@@ -1525,8 +1526,8 @@ def member_first_tp_stats(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-    baseline_tp: Optional[float] = None,
-) -> Optional[Tuple[float, float]]:
+    baseline_tp: float | None = None,
+) -> tuple[float, float] | None:
     """``(mean, spread)`` for the member's baseline timepoint.
 
     Returns the stats at ``baseline_tp`` when supplied (matched with a
@@ -1565,8 +1566,8 @@ def member_first_tp_stats_resolved(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-    baseline_tp: Optional[float] = None,
-) -> Optional[Tuple[float, float, float]]:
+    baseline_tp: float | None = None,
+) -> tuple[float, float, float] | None:
     """Like :func:`member_first_tp_stats` but also returns the resolved tp.
 
     Returns ``(tp, mean, spread)`` so the bar plot can look up the control's
@@ -1596,7 +1597,7 @@ def member_frac_series(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Dict[float, Tuple[float, float]]:
+) -> dict[float, tuple[float, float]]:
     """``{t: (frac, frac_spread)}`` for a member.
 
     Fraction-on counterpart of :func:`member_stats_series`. Same rset /
@@ -1607,7 +1608,7 @@ def member_frac_series(
         return {}
     rset = _label_to_replicate_set(ctx, label)
     if rset is not None:
-        tps: Set[float] = set()
+        tps: set[float] = set()
         for w in rset.wells:
             pts = aggregate_well(ctx,
                 w, threshold=threshold, use_sem=False,
@@ -1617,7 +1618,7 @@ def member_frac_series(
             )
             for pt in pts:
                 tps.add(float(pt[0]))
-        out: Dict[float, Tuple[float, float]] = {}
+        out: dict[float, tuple[float, float]] = {}
         for t in tps:
             if per_fov_spread:
                 _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
@@ -1654,7 +1655,7 @@ def control_frac_at_for_bar(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-) -> Optional[Tuple[float, float]]:
+) -> tuple[float, float] | None:
     """``(frac, frac_spread)`` of the control at *target_t* for the bar's frac
     panel. Returns ``None`` when the control can't be resolved or has no
     sample at *target_t*."""
@@ -1671,8 +1672,8 @@ def member_first_tp_frac_resolved(
     threshold: float, val_col: str, use_sem: bool,
     per_fov_spread: bool,
     fluor_gates,
-    baseline_tp: Optional[float] = None,
-) -> Optional[Tuple[float, float, float]]:
+    baseline_tp: float | None = None,
+) -> tuple[float, float, float] | None:
     """``(tp, frac, frac_spread)`` for the member's baseline timepoint —
     the frac counterpart of :func:`member_first_tp_stats_resolved`."""
     return _series_baseline(member_frac_series(
@@ -1685,8 +1686,8 @@ def member_first_tp_frac_resolved(
 
 # ── Bar-plot scaling ────────────────────────────────────────────────────────
 
-def _apply_axis(value: float, spread: float, d_mean: Optional[float],
-                d_spread: Optional[float], op: str) -> Tuple[float, float]:
+def _apply_axis(value: float, spread: float, d_mean: float | None,
+                d_spread: float | None, op: str) -> tuple[float, float]:
     """Apply a single FC axis to a (value, spread) pair.
 
     ``ratio`` divides; ``subtract`` subtracts. Variances combine in
@@ -1719,15 +1720,15 @@ def scale_bar_value(
     mean: float,
     spread: float,
     *,
-    control_mean: Optional[float] = None,
-    control_spread: Optional[float] = None,
-    t0_mean: Optional[float] = None,
-    t0_spread: Optional[float] = None,
+    control_mean: float | None = None,
+    control_spread: float | None = None,
+    t0_mean: float | None = None,
+    t0_spread: float | None = None,
     op: str = "ratio",
-    op_ctrl: Optional[str] = None,
-    op_t0: Optional[str] = None,
+    op_ctrl: str | None = None,
+    op_t0: str | None = None,
     order: str = "ctrl_first",
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Apply control and/or t0 normalization with error propagation.
 
     ``op_ctrl`` and ``op_t0`` select how each axis's denominator is
@@ -1766,7 +1767,7 @@ def scale_bar_value(
     return val, sp
 
 
-def first_tp_value(pts) -> Optional[float]:
+def first_tp_value(pts) -> float | None:
     """Return the mean of the earliest finite-mean AggPoint, or None."""
     if not pts:
         return None

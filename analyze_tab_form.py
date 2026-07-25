@@ -35,8 +35,11 @@ DEFAULT_SCHEMA = "experiment:channel:well:fov:timepoint"
 DEFAULT_SEP    = "_"
 
 _SCHEMA_LABELS = ("Experiment", "Channel", "Well", "FOV", "Timepoint", "— ignore —")
-_LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS))
-_FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS))
+# strict=: the two tuples are positionally paired, so a length mismatch is a
+# real bug — a dropped label would silently make a schema field unreachable in
+# the picker rather than raising.
+_LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
+_FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
 
 
 class AnalyzeTabFormMixin:
@@ -816,7 +819,7 @@ class AnalyzeTabFormMixin:
         }
         return {k: v for k, v in flat.items() if v is not None}
 
-    def _apply_pipeline_info(self, info: dict, *, source: "Path | None" = None) -> None:
+    def _apply_pipeline_info(self, info: dict, *, source: Path | None = None) -> None:
         d = self._pinfo_flat(info)
 
         def s(attr, val):

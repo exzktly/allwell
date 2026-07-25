@@ -644,7 +644,7 @@ def _image_table_view_state_io():
 # a feature.
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _features() -> "list[FeatureDescriptor]":
+def _features() -> list[FeatureDescriptor]:
     return [
         # ── Analysis ──────────────────────────────────────────────────────
         # "Plotting" is a bespoke composite container (built by
@@ -816,7 +816,7 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
                            if profile.includes(d))
 
 
-def attach_feature_state(state, registry: "FeatureRegistry | None" = None) -> None:
+def attach_feature_state(state, registry: FeatureRegistry | None = None) -> None:
     """Attach every feature-owned slice onto *state* (an ``AppState``).
 
     Called at app construction (and by test fixtures that build an ``AppState``

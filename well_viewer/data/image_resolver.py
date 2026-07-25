@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Callable, Mapping, Optional
+from collections.abc import Callable, Mapping
 
 
 OUTPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
@@ -153,7 +153,7 @@ def normalize_well_token(value: object) -> str:
     return f"{m.group(1).upper()}{int(m.group(2)):02d}"
 
 
-def find_well_subfolder_path(parent_dir: Path, well_token: object) -> Optional[Path]:
+def find_well_subfolder_path(parent_dir: Path, well_token: object) -> Path | None:
     """Find matching well folder path under *parent_dir* for A1/A01 token forms."""
     normalized_target = normalize_well_token(well_token)
     if not normalized_target:
@@ -202,7 +202,7 @@ def resolve_ref_by_fov_tp(
     fov_raw: str,
     tp_raw: str,
     norm_timepoint: Callable[[object], str],
-) -> Optional[object]:
+) -> object | None:
     """Resolve image ref by exact key, then normalized key."""
     exact = refs.get((fov_raw, tp_raw))
     if exact is not None:
@@ -309,7 +309,7 @@ def resolve_channel_frame_refs(
     return resolved
 
 
-def schema_fields(pipeline_info: Optional[dict]) -> list[str]:
+def schema_fields(pipeline_info: dict | None) -> list[str]:
     if not pipeline_info:
         return []
     fields = [
@@ -325,7 +325,7 @@ def schema_fields(pipeline_info: Optional[dict]) -> list[str]:
     return [f.strip() for f in schema.split(":") if f.strip()]
 
 
-def parse_stem_with_schema(stem: str, pipeline_info: Optional[dict]) -> dict[str, str]:
+def parse_stem_with_schema(stem: str, pipeline_info: dict | None) -> dict[str, str]:
     fields = schema_fields(pipeline_info)
     if not fields:
         return {}
@@ -334,7 +334,7 @@ def parse_stem_with_schema(stem: str, pipeline_info: Optional[dict]) -> dict[str
     return {field: (parts[i] if i < len(parts) else "") for i, field in enumerate(fields)}
 
 
-def compose_stem_from_schema(values: dict[str, str], pipeline_info: Optional[dict]) -> str:
+def compose_stem_from_schema(values: dict[str, str], pipeline_info: dict | None) -> str:
     fields = schema_fields(pipeline_info)
     if not fields:
         return ""
@@ -350,7 +350,7 @@ def compose_stem_from_schema(values: dict[str, str], pipeline_info: Optional[dic
 def resolve_filename_candidates(
     filename: str,
     *,
-    pipeline_info: Optional[dict],
+    pipeline_info: dict | None,
     target_channel: str = "",
     output_kind: str = "",
     filename_variants_fn: Callable[[str], list[str]] | None = None,

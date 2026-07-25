@@ -18,14 +18,13 @@ ARCHITECTURE §6.2.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 
 # A `[A-Ha-h]` row + 1- or 2-digit column with column ∈ [1, 12].
 _WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})")
 
 
-def canonical_well_label(token: str) -> Optional[str]:
+def canonical_well_label(token: str) -> str | None:
     """Return the canonical zero-padded uppercase form (e.g. ``"B03"``)
     for *token*, or ``None`` when *token* isn't a valid 96-well position.
 
@@ -50,14 +49,14 @@ def is_valid_well_name(token: str) -> bool:
     return canonical_well_label(token) is not None
 
 
-def split_background_wells(value) -> "list[str]":
+def split_background_wells(value) -> list[str]:
     """Parse the comma-separated background-well value into a clean, de-duped list.
 
     Accepts a single well (``"H12"``), a comma-separated string (``"H12, G12"``),
     or an already-split list. Order-preserving; case-insensitive de-dupe.
     """
     items = value if isinstance(value, (list, tuple)) else str(value or "").split(",")
-    out: "list[str]" = []
+    out: list[str] = []
     seen: set = set()
     for it in items:
         w = str(it or "").strip()

@@ -18,12 +18,12 @@ Qt-free: stdlib only.
 from __future__ import annotations
 
 import math
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from well_viewer.core.safe import swallowed
 
 
-def current_focus_tp(ctx) -> Optional[float]:
+def current_focus_tp(ctx) -> float | None:
     """The shared focus timepoint, or ``None`` when not yet chosen.
 
     A8-teardown T3: this leaf reads only typed state, so it takes ``ctx`` (not
@@ -43,7 +43,7 @@ def set_focus_tp(ctx, tp, *, emit: bool = True) -> None:
     zero residual.
     """
     try:
-        val: Optional[float] = None if tp is None else float(tp)
+        val: float | None = None if tp is None else float(tp)
     except (TypeError, ValueError):
         val = None
     if val == ctx.state.plot.focus_timepoint:
@@ -56,7 +56,7 @@ def set_focus_tp(ctx, tp, *, emit: bool = True) -> None:
             swallowed()
 
 
-def nearest_index(tps: Sequence[float], tp) -> Optional[int]:
+def nearest_index(tps: Sequence[float], tp) -> int | None:
     """Index of the timepoint in *tps* closest to *tp*, or ``None`` when *tps*
     is empty / *tp* is unset. Tolerates float drift between tabs."""
     if not tps or tp is None:

@@ -301,7 +301,7 @@ class RunDashboard(QWidget):
     def _has(self, stage: str, w: str) -> bool:
         return w in self._done.get(stage, ())
 
-    def _well_color(self, w: str) -> "str | None":
+    def _well_color(self, w: str) -> str | None:
         """Plate colour for a well, honouring the remote vs local lifecycle.
 
         Green means "done with the data on your machine": for a remote run that

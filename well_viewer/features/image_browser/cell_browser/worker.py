@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QObject, Signal
@@ -36,7 +36,7 @@ _CROP_PAD_PX = 18
 
 
 def resolve_channel_tint(channel: str, index: int,
-                         tint_map: Optional[Dict[str, tuple]] = None) -> tuple:
+                         tint_map: dict[str, tuple] | None = None) -> tuple:
     """Additive tint for a channel as an ``(r, g, b)`` 0..1 float tuple.
 
     An explicit per-channel override (the shared ``tint_by_channel``, 0–255)
@@ -49,7 +49,7 @@ def resolve_channel_tint(channel: str, index: int,
     return _CHANNEL_TINTS[index % len(_CHANNEL_TINTS)]
 
 
-def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> Optional[tuple]:
+def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> tuple | None:
     """Padded (r0, c0, r1, c1) bounding box of ``mask == nucleus_id``; None if absent."""
     ys, xs = np.where(mask_arr == nucleus_id)
     if ys.size == 0:
@@ -61,7 +61,7 @@ def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> Optional[tuple]:
     return r0, c0, r1, c1
 
 
-def _norm01(crop, bounds: Optional[tuple] = None) -> np.ndarray:
+def _norm01(crop, bounds: tuple | None = None) -> np.ndarray:
     """Scale a 2-D float crop to 0..1.
 
     With *bounds* ``(lo, hi)`` — the shared per-channel display LUT (S4) — clip
@@ -85,11 +85,11 @@ def _norm01(crop, bounds: Optional[tuple] = None) -> np.ndarray:
     return np.clip((a - lo) / (hi - lo), 0.0, 1.0)
 
 
-def compose_cell_rgb(ctx, desc: CellDescriptor, channels: List[str],
-                     show_boundaries: bool, cache: Dict,
-                     lut_by_channel: Optional[Dict[str, tuple]] = None,
-                     tint_by_channel: Optional[Dict[str, tuple]] = None,
-                     use_tophat: bool = False) -> Optional[np.ndarray]:
+def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
+                     show_boundaries: bool, cache: dict,
+                     lut_by_channel: dict[str, tuple] | None = None,
+                     tint_by_channel: dict[str, tuple] | None = None,
+                     use_tophat: bool = False) -> np.ndarray | None:
     """Multi-channel composite RGB (uint8) of one cell, or None if unrenderable.
 
     *cache* is a per-page dict so each FOV's mask + channel arrays load once.
@@ -184,8 +184,8 @@ class CellImageLoader(QObject):
         """
         self._latest_gen += 1
 
-    def load_page(self, descriptors: List[CellDescriptor], start_index: int,
-                  channels: List[str], show_boundaries: bool, gen: int,
+    def load_page(self, descriptors: list[CellDescriptor], start_index: int,
+                  channels: list[str], show_boundaries: bool, gen: int,
                   use_tophat: bool = False) -> None:
         """Spawn a daemon thread that composes *descriptors* and emits each."""
         self._latest_gen = gen
@@ -197,7 +197,7 @@ class CellImageLoader(QObject):
         tint_map = dict(_iv.tint_by_channel) if _iv is not None else {}
 
         def _run() -> None:
-            cache: Dict[str, Any] = {}
+            cache: dict[str, Any] = {}
             n = 0
             for offset, desc in enumerate(descriptors):
                 # A newer page (or a dataset swap that bumped the gen) has

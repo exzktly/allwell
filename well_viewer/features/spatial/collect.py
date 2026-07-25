@@ -12,7 +12,7 @@ per-well DataFrame source.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -41,10 +41,10 @@ def collect_spatial_frame(
     ctx,
     well_label: str,
     *,
-    timepoint: Optional[float] = None,
+    timepoint: float | None = None,
     metric_col: str = "",
     include_gate: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return the per-cell centroid + optional metric for a single well."""
     empty = {
         "points": np.empty((0, 2), dtype=float),
@@ -85,7 +85,7 @@ def collect_spatial_frame(
     if not mask.any():
         return {**empty, "timepoint": target}
 
-    metric_vals: Optional[np.ndarray] = None
+    metric_vals: np.ndarray | None = None
     if metric_col:
         ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
         try:
@@ -98,7 +98,7 @@ def collect_spatial_frame(
 
     idx = np.flatnonzero(mask)
     points = np.column_stack([col[idx], row[idx]])
-    metric_out: Optional[np.ndarray] = None
+    metric_out: np.ndarray | None = None
     if metric_vals is not None:
         metric_out = metric_vals[idx]
 
@@ -122,7 +122,7 @@ def _sample_loaded_df(ctx):
     return None
 
 
-def available_metric_columns(ctx) -> List[str]:
+def available_metric_columns(ctx) -> list[str]:
     """List CSV columns eligible for the metric picker.
 
     Discovers columns from the first loaded well's DataFrame — three families
@@ -140,7 +140,7 @@ def available_metric_columns(ctx) -> List[str]:
         return []
     present = set(df.columns)
 
-    out: List[str] = []
+    out: list[str] = []
 
     channels = list(getattr(ctx.state.channel, "fluor_channels", None) or [])
     if not channels:
@@ -169,7 +169,7 @@ def available_metric_columns(ctx) -> List[str]:
     return out
 
 
-def available_timepoints(ctx) -> List[float]:
+def available_timepoints(ctx) -> list[float]:
     """Unique finite ``timepoint_hours`` across every well in the cache.
 
     Pure ``ctx.state`` reader; empty when nothing has been loaded.
@@ -188,15 +188,15 @@ def available_timepoints(ctx) -> List[float]:
 
 def collect_summary_matrix(
     ctx,
-    wells: List[str],
-    timepoints: List[float],
+    wells: list[str],
+    timepoints: list[float],
     *,
     metric_col: str = "",
     colony_method: str = spc.METHOD_DBSCAN,
     eps_mult: float = 3.0,
     min_samples: int = 4,
     include_gate: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Walk the (well × timepoint) grid, compute a :class:`FrameSummary` per
     cell, and return a payload the renderer + CSV export both consume.
 
@@ -218,7 +218,7 @@ def collect_summary_matrix(
         - ``metric_col``: echo of the ICC metric column (for CSV headers).
     """
     import pandas as pd
-    valid_wells: List[str] = []
+    valid_wells: list[str] = []
     cache = getattr(ctx.state.dataset, "cache", None) or {}
     for w in wells:
         df = cache.get(w)
@@ -247,7 +247,7 @@ def collect_summary_matrix(
         row = pd.to_numeric(df[CENTROID_ROW_COL], errors="coerce").to_numpy()
         col = pd.to_numeric(df[CENTROID_COL_COL], errors="coerce").to_numpy()
         base_mask &= np.isfinite(row) & np.isfinite(col)
-        metric_vals: Optional[np.ndarray] = None
+        metric_vals: np.ndarray | None = None
         if metric_col:
             try:
                 metric_vals = np.asarray(
@@ -279,7 +279,7 @@ def collect_summary_matrix(
     }
 
 
-def summary_matrix_to_csv_rows(payload: Dict[str, Any]):
+def summary_matrix_to_csv_rows(payload: dict[str, Any]):
     """Flatten a ``collect_summary_matrix`` payload into per-(well,tp) rows.
 
     Each row is a dict keyed by ``well``, ``timepoint_hours``, and every

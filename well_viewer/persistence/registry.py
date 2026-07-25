@@ -16,7 +16,7 @@ Replaces the ~17 thin ``WellViewerApp._<domain>_{save,load}_to_data_dir`` /
 from __future__ import annotations
 
 import logging
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import QTimer
 
@@ -34,7 +34,7 @@ class PersistenceRegistry:
         self._pending: set[str] = set()
 
     def register(self, name: str, *, save: Callable,
-                 load: Optional[Callable] = None) -> None:
+                 load: Callable | None = None) -> None:
         """Register a domain's ``save(app)`` and optional ``load(app)``."""
         self._save[name] = save
         if load is not None:

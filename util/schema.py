@@ -23,7 +23,6 @@ the same reason ``util.well_token`` lives here. Listed in
 
 from __future__ import annotations
 
-from typing import List
 
 # The field names a schema token may take. Anything else parses to "ignore",
 # which is what keeps an older schema string forward-compatible when a new
@@ -34,7 +33,7 @@ DEFAULT_SCHEMA = "experiment:channel:well:fov:timepoint"
 DEFAULT_SEP = "_"
 
 
-def parse_schema(schema_str: str) -> List[str]:
+def parse_schema(schema_str: str) -> list[str]:
     """Parse a colon-delimited schema string into a list of field names.
 
     Unknown tokens become ``"ignore"`` rather than raising, so a schema string
@@ -52,14 +51,14 @@ def parse_schema(schema_str: str) -> List[str]:
     ]
 
 
-def validate_schema(schema: List[str]) -> List[str]:
+def validate_schema(schema: list[str]) -> list[str]:
     """Return human-readable error messages for *schema*; empty means valid.
 
     Two fields are load-bearing and must each appear exactly once: ``channel``
     (which measurement a file holds) and ``well`` (which plate position it came
     from). Everything else is optional or repeatable.
     """
-    errors: List[str] = []
+    errors: list[str] = []
     for field in ("channel", "well"):
         count = schema.count(field)
         if count != 1:

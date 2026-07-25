@@ -25,7 +25,7 @@ not eagerly pull heavy feature deps (TF / skimage / matplotlib-QtAgg).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
 
 
 @dataclass(frozen=True)
@@ -38,7 +38,7 @@ class PersistenceSpec:
 
     name: str
     save: Callable
-    load: Optional[Callable] = None
+    load: Callable | None = None
 
 
 @dataclass(frozen=True)
@@ -84,32 +84,32 @@ class FeatureDescriptor:
     group: str = ""                      # "Analysis" | "Images" | "Data"; "" = sub-leaf
     parent: str = ""                     # composite container a sub-leaf lives in
                                          # (e.g. "Plotting"); "" for top-level entries
-    build: Optional[Callable] = None     # build(ctx, frame) -> None
+    build: Callable | None = None     # build(ctx, frame) -> None
     lazy_only: bool = False              # skip the background drain; build on first click
     # State contribution (AppState import-inversion).
-    states: Tuple[StateSpec, ...] = ()
+    states: tuple[StateSpec, ...] = ()
     # Dispatch hooks (each: fn(app) -> None).
-    on_activate: Optional[Callable] = None
-    on_selection_changed: Optional[Callable] = None
-    on_channel_changed: Optional[Callable] = None
-    on_dataset_loaded: Optional[Callable] = None
+    on_activate: Callable | None = None
+    on_selection_changed: Callable | None = None
+    on_channel_changed: Callable | None = None
+    on_dataset_loaded: Callable | None = None
     # Feature-owned figure redraw. Lazy factory returning the redraw callable:
     # ``() -> ((ctx) -> None)``. Plot orchestration (redraw_app, tab activation)
     # looks the feature up by name and calls its ``redraw`` so ``core/`` never
     # imports the feature renderer (B1b / terminal-goal cond. 3).
-    redraw: Optional[Callable] = None
+    redraw: Callable | None = None
     # Persistence + fold-change contributions.
-    persistence: Tuple[PersistenceSpec, ...] = ()
-    fold_change_scope_factory: Optional[Callable] = None   # () -> FoldChangeScope
+    persistence: tuple[PersistenceSpec, ...] = ()
+    fold_change_scope_factory: Callable | None = None   # () -> FoldChangeScope
     # A feature that decorates every plot card (e.g. Saved Plots' "save to
     # gallery" hover button). Lazy: ``() -> ((ctx, card, tab_name) -> None)``.
     # Plot tabs apply all registered decorators, so they never name the feature.
-    plot_card_decorator: Optional[Callable] = None
+    plot_card_decorator: Callable | None = None
     # A feature that owns its own view-state (per-tab) serialization, so
     # ``persistence/view_state.py`` never names it. Lazy factory returning a
     # ``(snapshot, apply)`` pair: ``snapshot(ctx) -> dict`` (stored under the
     # descriptor name in the ``tabs`` block) and ``apply(ctx, state) -> None``.
-    view_state_io: Optional[Callable] = None
+    view_state_io: Callable | None = None
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
@@ -134,13 +134,13 @@ class FeatureRegistry:
         self._ordered.append(descriptor)
         self._by_name[descriptor.name] = descriptor
 
-    def get(self, name: str) -> Optional[FeatureDescriptor]:
+    def get(self, name: str) -> FeatureDescriptor | None:
         return self._by_name.get(name)
 
-    def all(self) -> "list[FeatureDescriptor]":
+    def all(self) -> list[FeatureDescriptor]:
         return list(self._ordered)
 
-    def top_level(self) -> "list[FeatureDescriptor]":
+    def top_level(self) -> list[FeatureDescriptor]:
         """Descriptors that own a top-level rail entry (have a group).
 
         The page-stack enumerates these; a descriptor with ``build=None`` (a
@@ -149,10 +149,10 @@ class FeatureRegistry:
         """
         return [d for d in self._ordered if d.group]
 
-    def in_group(self, group: str) -> "list[FeatureDescriptor]":
+    def in_group(self, group: str) -> list[FeatureDescriptor]:
         return [d for d in self.top_level() if d.group == group]
 
-    def with_hook(self, attr: str) -> "list[FeatureDescriptor]":
+    def with_hook(self, attr: str) -> list[FeatureDescriptor]:
         """Descriptors whose *attr* hook is set, in declaration order."""
         return [d for d in self._ordered if getattr(d, attr, None) is not None]
 
@@ -169,7 +169,7 @@ class FeatureRegistry:
         d.redraw()(ctx)
         return True
 
-    def sub_leaves(self, parent: str) -> "list[str]":
+    def sub_leaves(self, parent: str) -> list[str]:
         """Names of the sub-leaf descriptors under composite *parent*
         (e.g. ``"Plotting"`` → the plot sub-tab names), in declaration order.
 

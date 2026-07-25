@@ -20,7 +20,7 @@ from PySide6.QtGui import QImage, QPixmap
 from well_viewer.core.ui_helpers import lut_colormap_to_rgb
 
 
-def _boundary_mask(mask_arr, shape) -> "np.ndarray | None":
+def _boundary_mask(mask_arr, shape) -> np.ndarray | None:
     """Bool boundary of an int label array (padded-diff), or None if absent."""
     if mask_arr is None:
         return None

@@ -11,7 +11,7 @@ The encoding for a ratio "key" used in place of a CSV column name is
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
+from collections.abc import Iterable
 
 
 RATIO_PREFIX = "ratio:"
@@ -56,7 +56,7 @@ class RatioMetric:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "RatioMetric":
+    def from_dict(cls, data: dict) -> RatioMetric:
         return cls(
             name=str(data.get("name", "")).strip(),
             numerator_channel=str(data.get("numerator_channel", "")).strip().lower(),
@@ -77,14 +77,14 @@ def ratio_name_from_key(key: str) -> str:
     return ""
 
 
-def ratios_to_dict(ratios: Iterable[RatioMetric]) -> List[dict]:
+def ratios_to_dict(ratios: Iterable[RatioMetric]) -> list[dict]:
     return [r.to_dict() for r in ratios]
 
 
-def ratios_from_dict(data: object) -> List[RatioMetric]:
+def ratios_from_dict(data: object) -> list[RatioMetric]:
     if not isinstance(data, list):
         return []
-    out: List[RatioMetric] = []
+    out: list[RatioMetric] = []
     for entry in data:
         if not isinstance(entry, dict):
             continue
@@ -97,9 +97,9 @@ def ratios_from_dict(data: object) -> List[RatioMetric]:
     return out
 
 
-def build_ratio_index(ratios: Iterable[RatioMetric]) -> Dict[str, RatioMetric]:
+def build_ratio_index(ratios: Iterable[RatioMetric]) -> dict[str, RatioMetric]:
     """Return a dict keyed by the ``ratio:<name>`` form for fast lookups."""
-    out: Dict[str, RatioMetric] = {}
+    out: dict[str, RatioMetric] = {}
     for r in ratios:
         if r.name:
             out[r.key()] = r

@@ -16,7 +16,6 @@ from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -40,7 +39,7 @@ compute_gate_inclusion = _lazy(
     "well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
 
-def _scatter_selected_timepoints(ctx) -> Optional[List[float]]:
+def _scatter_selected_timepoints(ctx) -> list[float] | None:
     """The timepoints the per-cell scatter is currently drawn over, read from
     ``ctx.runtime.scatter.tp_selections`` (a ``{tp_str: bool}`` map).
 
@@ -53,7 +52,7 @@ def _scatter_selected_timepoints(ctx) -> Optional[List[float]]:
     sel = getattr(scatter_rt, "tp_selections", None) if scatter_rt is not None else None
     if not sel:
         return None
-    out: List[float] = []
+    out: list[float] = []
     for tp_str, on in sel.items():
         if on:
             try:
@@ -74,8 +73,8 @@ class Criterion:
     """
 
     column: str
-    lo: Optional[float] = None
-    hi: Optional[float] = None
+    lo: float | None = None
+    hi: float | None = None
 
 
 @dataclass(frozen=True)
@@ -108,11 +107,11 @@ class CellDescriptor:
     filename: str
     nucleus_id: str
     row_idx: int
-    centroid_row: Optional[float]
-    centroid_col: Optional[float]
+    centroid_row: float | None
+    centroid_col: float | None
     # Active-channel smFISH spot count for the caption (N9); None when the
     # label mode is off or the channel has no ``_smfish_count`` column.
-    spot_count: Optional[int] = None
+    spot_count: int | None = None
 
 
 def _sample_df(ctx):
@@ -127,7 +126,7 @@ def _sample_df(ctx):
     return None
 
 
-def cell_browser_channels(ctx) -> List[str]:
+def cell_browser_channels(ctx) -> list[str]:
     """Fluorescence channels for the Cell Browser chips.
 
     Prefers ``ctx.state.channel.fluor_channels`` (the ctx-wide detected
@@ -143,7 +142,7 @@ def cell_browser_channels(ctx) -> List[str]:
     return []
 
 
-def enumerate_properties(ctx) -> List[Tuple[str, str]]:
+def enumerate_properties(ctx) -> list[tuple[str, str]]:
     """Ordered ``[(column_or_ratiokey, label)]`` of every measured per-cell
     property available in the current dataset, for the criteria-property picker.
 
@@ -151,7 +150,7 @@ def enumerate_properties(ctx) -> List[Tuple[str, str]]:
     features, ratios. Empty when no dataset is loaded.
     """
     df = _sample_df(ctx)
-    out: List[Tuple[str, str]] = []
+    out: list[tuple[str, str]] = []
     if df is not None:
         for ch in detect_fluor_channels(df):
             for key in intensity_keys():
@@ -173,7 +172,7 @@ def enumerate_properties(ctx) -> List[Tuple[str, str]]:
         out.append((key, f"{label} (ratio)"))
     # Dedup preserving order.
     seen: set = set()
-    deduped: List[Tuple[str, str]] = []
+    deduped: list[tuple[str, str]] = []
     for col, lbl in out:
         if col not in seen:
             seen.add(col)
@@ -181,7 +180,7 @@ def enumerate_properties(ctx) -> List[Tuple[str, str]]:
     return deduped
 
 
-def sort_field_options(ctx) -> List[Tuple[str, str]]:
+def sort_field_options(ctx) -> list[tuple[str, str]]:
     """Ordered ``[(field, label)]`` for the sort-key picker.
 
     The intrinsic image dimensions (Well, plus Timepoint / FOV when the dataset
@@ -189,7 +188,7 @@ def sort_field_options(ctx) -> List[Tuple[str, str]]:
     a sort key can be any of well / timepoint / filter value / metric value.
     """
     df = _sample_df(ctx)
-    out: List[Tuple[str, str]] = [("well", "Well")]
+    out: list[tuple[str, str]] = [("well", "Well")]
     if df is not None:
         if "timepoint_hours" in df.columns or "timepoint" in df.columns:
             out.append(("timepoint", "Timepoint"))
@@ -217,7 +216,7 @@ def _is_missing(v) -> bool:
         return False
 
 
-def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
+def _passes_criteria(df, criteria: list[Criterion], ratios) -> np.ndarray:
     """Boolean mask over *df* of cells satisfying every criterion (AND).
 
     A criterion with both bounds unset is ignored. NaN values fail any set
@@ -237,7 +236,7 @@ def _passes_criteria(df, criteria: List[Criterion], ratios) -> np.ndarray:
     return mask
 
 
-def cell_browser_source_wells(ctx) -> List[str]:
+def cell_browser_source_wells(ctx) -> list[str]:
     """Wells the Cell Browser draws from — it MIRRORS what the plotting tabs draw.
 
     * **Group mode** (sample-definition groups exist): the union of the visible
@@ -258,7 +257,7 @@ def cell_browser_source_wells(ctx) -> List[str]:
     selections = getattr(sel, "selections", None)
     selected_wells = getattr(sel, "selected_wells", None) or ()
     if selections:
-        wells: List[str] = []
+        wells: list[str] = []
         seen: set = set()
         for rset in active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths):
             for w in rset.wells:
@@ -279,13 +278,13 @@ def cell_browser_source_wells(ctx) -> List[str]:
 
 def collect_cells(
     ctx,
-    criteria: List[Criterion],
-    timepoints: Optional[List[float]] = None,
-    fovs: Optional[List[str]] = None,
-    sort_keys: Optional[List[SortKey]] = None,
+    criteria: list[Criterion],
+    timepoints: list[float] | None = None,
+    fovs: list[str] | None = None,
+    sort_keys: list[SortKey] | None = None,
     *,
     live_sync: bool = False,
-) -> List[CellDescriptor]:
+) -> list[CellDescriptor]:
     """Ordered list of cells (across selected wells) matching *criteria* within
     the selected *timepoints* and *fovs*.
 
@@ -363,10 +362,10 @@ def collect_cells(
         if fov_set is not None and not fov_set:
             fov_set = None
 
-    out: List[CellDescriptor] = []
+    out: list[CellDescriptor] = []
     # One parallel value list per sort key (aligned with ``out``), filled per
     # well so the cross-well sort below has a value for every cell.
-    sort_cols: List[list] = [[] for _ in keys]
+    sort_cols: list[list] = [[] for _ in keys]
     # Source from the LIVE well selection (shared ctx state) in every mode,
     # including gate mode. The selection is global, so in Split View the Cell
     # Browser and the Scatter stay in sync — changing the wells on either pane
@@ -462,7 +461,7 @@ def collect_cells(
     return out
 
 
-def _apply_sort(ctx, out, keys: List[SortKey], sort_cols: List[list]):
+def _apply_sort(ctx, out, keys: list[SortKey], sort_cols: list[list]):
     """Stable multi-key sort of *out* by *keys* (sort_cols holds each key's
     per-cell value, aligned with *out*).
 

@@ -23,7 +23,8 @@ Deliberately Qt-free — it only holds references.
 
 from __future__ import annotations
 
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 
 class WidgetRegistry:

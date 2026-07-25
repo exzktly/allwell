@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
 
 
 class ReplicateSet:
-    def __init__(self, name: str, wells: Optional[List[str]] = None) -> None:
+    def __init__(self, name: str, wells: list[str] | None = None) -> None:
         self.name: str = name
-        self.wells: List[str] = list(wells or [])
+        self.wells: list[str] = list(wells or [])
 
     def __repr__(self) -> str:
         return f"ReplicateSet({self.name!r}, {self.wells!r})"
@@ -18,23 +17,23 @@ class BarGroup:
     def __init__(
         self,
         name: str,
-        members: Optional[List[ReplicateSet]] = None,
-        solo_wells: Optional[List[str]] = None,
+        members: list[ReplicateSet] | None = None,
+        solo_wells: list[str] | None = None,
         hidden: bool = False,
     ) -> None:
         self.name: str = name
-        self.members: List[ReplicateSet] = list(members or [])
-        self.solo_wells: List[str] = list(solo_wells or [])
+        self.members: list[ReplicateSet] = list(members or [])
+        self.solo_wells: list[str] = list(solo_wells or [])
         self.hidden: bool = hidden
 
     @property
-    def replicates(self) -> List[ReplicateSet]:
+    def replicates(self) -> list[ReplicateSet]:
         return self.members
 
     @property
-    def wells(self) -> List[str]:
+    def wells(self) -> list[str]:
         seen: set = set()
-        out: List[str] = []
+        out: list[str] = []
         for rset in self.members:
             for w in rset.wells:
                 if w not in seen:

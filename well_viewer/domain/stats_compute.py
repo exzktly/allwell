@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -77,7 +76,7 @@ class ReplicateStat:
         return self.mean
 
 
-def _norm_fov(df: "pd.DataFrame") -> np.ndarray:
+def _norm_fov(df: pd.DataFrame) -> np.ndarray:
     """Normalized FOV id per row (empty -> "1"), matching the plot aggregator."""
     if "fov" in df.columns:
         s = df["fov"].fillna("1").astype(str).str.strip().replace("", "1")
@@ -142,7 +141,7 @@ def _raw_extra(df, target_t, threshold, val_col, fluor_gates, ratios, on_col):
 
 
 def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
-              on_col) -> "Optional[ReplicateStat]":
+              on_col) -> ReplicateStat | None:
     """Build a ReplicateStat: mean/frac/n from the aggregator point *pts* (plot-
     identical, delegate-aware), median/mean_all from raw *df* when available."""
     pt = _point_at(pts, target_t)
@@ -157,7 +156,7 @@ def _rep_from(df, pts, target_t, threshold, val_col, fluor_gates, ratios,
 
 
 def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
-                          fluor_gates=None) -> "List[ReplicateStat]":
+                          fluor_gates=None) -> list[ReplicateStat]:
     """THE canonical producer of per-replicate summaries for a group at a
     timepoint. One record per replicate — per well, or per FOV (pooled across all
     of the group's wells) when ``replicate_unit`` is ``"fov"``; ``[]`` when there
@@ -173,7 +172,7 @@ def group_replicate_stats(ctx, wells, target_t, *, use_fov, val_col, threshold,
         fluor_gates = get_all_fluor_gates(ctx)
     ratios = ctx.state.channel.ratio_index
     on_col = _thresh_on_col(ctx)
-    reps: "List[ReplicateStat]" = []
+    reps: list[ReplicateStat] = []
     if unit == "well":
         for lbl in loaded:
             pts = aggregate_well(ctx, lbl, threshold=threshold, use_sem=False,
@@ -225,7 +224,7 @@ def _reduce_reps(reps, field: str, use_sem: bool) -> tuple[float, float]:
     return m, (sd / math.sqrt(n) if (use_sem and n > 1) else sd)
 
 
-def _thresh_on_col(ctx) -> Optional[str]:
+def _thresh_on_col(ctx) -> str | None:
     """Return ``"Gate_On"`` when scatter-gate *thresholding* is active (mode on
     and a gate selected), else ``None``.
 
@@ -283,7 +282,7 @@ def well_aggregate_stats(
     *,
     threshold: float,
     val_col: str,
-    fluor_gates: Dict[str, float],
+    fluor_gates: dict[str, float],
     use_sem: bool,
     per_fov_spread: bool = False,
 ) -> tuple[float, float, float, float]:
@@ -309,10 +308,10 @@ def well_aggregate_stats(
        independent replicates). Kept for reference / potential reuse — route
        new work through ``group_replicate_stats`` instead.
     """
-    well_means: List[float] = []
-    well_fracs: List[float] = []
-    fov_mean_spreads: List[float] = []
-    fov_frac_spreads: List[float] = []
+    well_means: list[float] = []
+    well_fracs: list[float] = []
+    fov_mean_spreads: list[float] = []
+    fov_frac_spreads: list[float] = []
     for lbl in wells:
         if lbl not in ctx.state.dataset.well_paths:
             continue
@@ -367,7 +366,7 @@ def well_aggregate_stats(
 
 def compute_rep_stats(
     ctx,
-    rset: "ReplicateSet",
+    rset: ReplicateSet,
     target_t: float,
     threshold: float,
     use_sem: bool,
@@ -406,7 +405,7 @@ def compute_rep_stats(
 
 def compute_rep_per_fov_stats(
     ctx,
-    rset: "ReplicateSet",
+    rset: ReplicateSet,
     target_t: float,
     threshold: float,
     use_sem: bool,
@@ -444,7 +443,7 @@ def compute_rep_per_fov_stats(
     return result
 
 
-def compute_rep_n_above(ctx, rset: "ReplicateSet", target_t: float) -> int:
+def compute_rep_n_above(ctx, rset: ReplicateSet, target_t: float) -> int:
     """Total events-above-threshold contributing to *rset* at *target_t*.
 
     Sums ``n_above`` (AggPoint index 4) across loaded wells of the set
@@ -478,7 +477,7 @@ def compute_rep_n_above(ctx, rset: "ReplicateSet", target_t: float) -> int:
     return total
 
 
-def compute_rep_n_above_stats(ctx, rset: "ReplicateSet", target_t: float,
+def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
                               use_sem: bool) -> tuple:
     """Mean and SD/SEM of events-above-threshold *across the set's wells*.
 
@@ -514,7 +513,7 @@ def aggregate_well(
     threshold: float,
     use_sem: bool,
     val_col: str,
-    fluor_gates: Optional[Dict[str, float]] = None,
+    fluor_gates: dict[str, float] | None = None,
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
 ):
@@ -556,11 +555,11 @@ def aggregate_well(
 
 def aggregate_group(
     ctx,
-    wells: List[str],
+    wells: list[str],
     threshold: float,
     use_sem: bool,
     val_col: str,
-    fluor_gates: Optional[Dict[str, float]] = None,
+    fluor_gates: dict[str, float] | None = None,
     per_fov_spread: bool = False,
     tp_col: str = "timepoint_hours",
 ):

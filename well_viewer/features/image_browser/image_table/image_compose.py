@@ -13,7 +13,6 @@ from __future__ import annotations
 from well_viewer.core.ui_helpers import norm_timepoint
 
 import logging
-from typing import Dict, List, Optional, Tuple
 
 from well_viewer.data.image_resolver import normalize_numeric_token
 from well_viewer.domain.tp_match import tp_close
@@ -21,7 +20,7 @@ from well_viewer.domain.tp_match import tp_close
 logger = logging.getLogger(__name__)
 
 
-LUT_COLORS: Dict[str, Optional[Tuple[float, float, float]]] = {
+LUT_COLORS: dict[str, tuple[float, float, float] | None] = {
     # Keys are mpl colormap names so the v2 LutSelector (which renders a real
     # gradient strip) can drive the picker. The value is the single (r,g,b)
     # tint applied to the grayscale fluorescence image for thumbnails; the
@@ -37,9 +36,9 @@ LUT_COLORS: Dict[str, Optional[Tuple[float, float, float]]] = {
     "Magenta": (1.0, 0.0, 1.0),
 }
 
-LUT_COLOR_NAMES: List[str] = list(LUT_COLORS.keys())
+LUT_COLOR_NAMES: list[str] = list(LUT_COLORS.keys())
 
-def _tint_from_colormap(name: str) -> Optional[Tuple[float, float, float]]:
+def _tint_from_colormap(name: str) -> tuple[float, float, float] | None:
     """Derive an (r, g, b) tint by sampling the colormap's high end.
 
     Used as a fallback when the user picks an mpl colormap that isn't in our
@@ -107,7 +106,7 @@ def _is_nuc_seg(chan: str) -> bool:
 # ``find_well_images_and_masks``.
 _norm_token = normalize_numeric_token
 
-def _numeric_token(value: object) -> Optional[float]:
+def _numeric_token(value: object) -> float | None:
     """Reduce a timepoint/FOV string to a numeric key for cache-key matching.
 
     Tries (in order):
@@ -134,7 +133,7 @@ def _numeric_token(value: object) -> Optional[float]:
     except ValueError:
         return None
 
-def _channel_opts_for(ctx, chan) -> Optional[dict]:
+def _channel_opts_for(ctx, chan) -> dict | None:
     """The builder's per-channel render spec for *chan*, or None.
 
     The root + nested-channels shelf stores each channel's render options
@@ -150,7 +149,7 @@ def _channel_opts_for(ctx, chan) -> Optional[dict]:
     return opts.get(chan) or opts.get(str(chan).strip().upper())
 
 
-def _shared_channel_lut_for(ctx, chan) -> Optional[Tuple[float, float]]:
+def _shared_channel_lut_for(ctx, chan) -> tuple[float, float] | None:
     """Shared per-channel brightness default (Review Image) for *chan*'s base."""
     image_view = getattr(ctx.state, "image_view", None)
     if image_view is None or not hasattr(image_view, "get_lut"):
@@ -158,7 +157,7 @@ def _shared_channel_lut_for(ctx, chan) -> Optional[Tuple[float, float]]:
     return image_view.get_lut(_binary_base(chan) if chan else chan)
 
 
-def _row_cmap_name(ctx, r: int, chan=None) -> Optional[str]:
+def _row_cmap_name(ctx, r: int, chan=None) -> str | None:
     """Return the mpl colormap name for row *r*, or None when the row is
     set to ``Greys`` (untinted grayscale fast path).
 
@@ -186,7 +185,7 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
     if mask_arr is None:
         return None
     if binary_mode == "threshold":
-        above_by_nid: Dict[int, bool] = {}
+        above_by_nid: dict[int, bool] = {}
         try:
             from well_viewer.features.image_browser.review_image.controller import (
                 review_build_threshold_map, review_norm_fov,
@@ -303,7 +302,7 @@ def _row_channel(ctx, row_idx: int) -> str:
     return (cells[row_idx][0].get("chan") or "").strip()
 
 
-def _shared_channel_lut(ctx, row_idx: int) -> Optional[Tuple[float, float]]:
+def _shared_channel_lut(ctx, row_idx: int) -> tuple[float, float] | None:
     """The shared per-channel display default for row *row_idx*'s channel (S4).
 
     Returns ``None`` when there's no shared default (then the row auto-fits as
@@ -315,7 +314,7 @@ def _shared_channel_lut(ctx, row_idx: int) -> Optional[Tuple[float, float]]:
     return image_view.get_lut(_row_channel(ctx, row_idx))
 
 
-def _auto_lut_for(ctx, chan) -> Optional[Tuple[float, float]]:
+def _auto_lut_for(ctx, chan) -> tuple[float, float] | None:
     """The pooled Auto-LUT window for *chan*'s base channel, or None.
 
     Populated once per Generate by the controller's pooling pass
@@ -327,7 +326,7 @@ def _auto_lut_for(ctx, chan) -> Optional[Tuple[float, float]]:
     return pooled.get(_binary_base(chan).strip().lower())
 
 
-def _parse_lut(ctx, row_idx: int, chan=None) -> Tuple[Optional[float], Optional[float]]:
+def _parse_lut(ctx, row_idx: int, chan=None) -> tuple[float | None, float | None]:
     """Read (lo, hi) for grid row *row_idx*; falls back to the shared per-channel
     default, then the pooled per-channel Auto window, else (None, None) for auto-fit.
 
@@ -359,7 +358,7 @@ def _parse_lut(ctx, row_idx: int, chan=None) -> Tuple[Optional[float], Optional[
     return pooled if pooled is not None else (None, None)
 
 
-def _row_display_opts(ctx, row_idx: int, chan=None) -> Tuple[bool, bool, str]:
+def _row_display_opts(ctx, row_idx: int, chan=None) -> tuple[bool, bool, str]:
     """Per-cell display toggles: ``(use_tophat, show_boundaries, binary_mode)``.
 
     Resolved from the channel's builder spec (``channel_opts[chan]``): the render
@@ -385,12 +384,12 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
 
 def _load_well_channel(
     ctx,
-    cache: Dict[Tuple[str, str, str], Dict],
+    cache: dict[tuple[str, str, str], dict],
     well: str,
     chan_lower: str,
     *,
     use_tophat: bool = False,
-) -> Dict:
+) -> dict:
     """Return the (fov, tp) → ImgRef dict for (well, channel), with caching.
 
     For the special ``"nuc+seg"`` virtual channel the returned dict is the
@@ -445,7 +444,7 @@ def _load_well_channel(
         cache.setdefault((well, chan_lower, "raw"), fluor)
     return result
 
-def _match_image_ref(images: Dict, fov: str, tp: str):
+def _match_image_ref(images: dict, fov: str, tp: str):
     """Resolve an image ref for ``(fov, tp)``; return ``(ref, kind)``.
 
     ``kind`` ∈ ``{"exact", "normalized", "numeric", ""}`` (``""`` = no match),
@@ -505,7 +504,7 @@ def _match_image_ref(images: Dict, fov: str, tp: str):
     return None, ""
 
 
-def _load_array(ctx, cache: Dict, well: str, chan_upper: str, tp: str, fov: str, *, use_tophat: bool = False):
+def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str, *, use_tophat: bool = False):
     """Load the float32 array for one (well, channel, timepoint, fov).
 
     The dropdown emits tokens normalized via ``_norm_token`` (``"1.0"`` →
@@ -697,7 +696,7 @@ def _render_threshold_binary(ctx, cache, well, chan, tp, fov, crop_tool, sz):
     mask_arr = _load_mask_array(ctx, cache, well, tp, fov)
     if mask_arr is None:
         return None
-    above_by_nid: Dict[int, bool] = {}
+    above_by_nid: dict[int, bool] = {}
     try:
         from well_viewer.features.image_browser.review_image.controller import (
             review_build_threshold_map, review_norm_fov,
@@ -898,14 +897,14 @@ def overlay_cell_rgb(ctx, cache, cell, r: int, crop_tool, channels):
 # cell_display_rgb, because overlay_cell_rgb calls that per channel and would stamp
 # the mark on every channel before blending.
 
-_CHROME_COLORS: Dict[str, Tuple[int, int, int]] = {
+_CHROME_COLORS: dict[str, tuple[int, int, int]] = {
     "white": (255, 255, 255), "black": (0, 0, 0), "yellow": (255, 255, 0),
     "cyan": (0, 255, 255), "magenta": (255, 0, 255), "red": (255, 0, 0),
     "green": (0, 255, 0),
 }
 
 
-def _chrome_rgb(name) -> Tuple[int, int, int]:
+def _chrome_rgb(name) -> tuple[int, int, int]:
     return _CHROME_COLORS.get(str(name or "white").strip().lower(), (255, 255, 255))
 
 

@@ -12,7 +12,6 @@ from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
 
-from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -320,7 +319,7 @@ def refresh_heatmap_timepoints(ctx) -> None:
 
 
 def _on_tp_changed(ctx) -> None:
-    tps: List[float] = list(ctx.state.heatmap.tp_values or [])
+    tps: list[float] = list(ctx.state.heatmap.tp_values or [])
     slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
     label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if not tps or slider is None:

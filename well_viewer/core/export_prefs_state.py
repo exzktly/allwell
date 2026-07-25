@@ -23,12 +23,11 @@ Qt-free: stdlib only.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
 
 
 @dataclass
 class ExportPrefsState:
     """Global publication-style prefs + the per-figure axis-view store."""
 
-    style_prefs: Optional[Dict] = None
-    axis_prefs: Dict = field(default_factory=dict)
+    style_prefs: dict | None = None
+    axis_prefs: dict = field(default_factory=dict)

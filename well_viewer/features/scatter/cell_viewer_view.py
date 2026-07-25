@@ -8,7 +8,7 @@ click/hover handlers there stay focused on canvas events.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
+from typing import Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
@@ -58,18 +58,18 @@ class ScatterCellViewer(QWidget):
         self.nuclear_id = nuclear_id
         self.row_idx = row_idx
 
-        self._cell_bounds: Optional[Tuple[int, int, int, int]] = None
+        self._cell_bounds: tuple[int, int, int, int] | None = None
         self._cell_images: dict[str, Optional] = {}
         self._cell_outline_mask = None
         self._current_channel = None
-        self._current_lut: Tuple[float, float] = (0.0, 100.0)
-        self._channel_luts: dict[str, Tuple[float, float]] = {}
+        self._current_lut: tuple[float, float] = (0.0, 100.0)
+        self._channel_luts: dict[str, tuple[float, float]] = {}
         # Image source: "raw" loads the raw input fluor frame; "corrected"
         # loads the pipeline's top-hat output (same notion the Review Image
         # tab calls "corrected"), falling back to raw when absent.
         self._image_source = "raw"
         self._debug_lines: list[str] = []
-        self._pixmap_cache: Optional[QPixmap] = None
+        self._pixmap_cache: QPixmap | None = None
 
         self._build_ui()
         self._load_cell_data()
@@ -592,7 +592,7 @@ class ScatterCellViewer(QWidget):
                 variants.append(candidate)
         return variants
 
-    def _get_cell_bounds(self, mask_arr, nuclear_id: int, padding_px: int = 0) -> Optional[Tuple[int, int, int, int]]:
+    def _get_cell_bounds(self, mask_arr, nuclear_id: int, padding_px: int = 0) -> tuple[int, int, int, int] | None:
         try:
             import numpy as np
 
@@ -1047,7 +1047,7 @@ class ScatterCellViewer(QWidget):
         else:
             self._img_label.setText("Failed to render image")
 
-    def _make_magnified_thumb(self, arr, sz_w: int, sz_h: int, lo, hi, outline_mask=None) -> Optional[QPixmap]:
+    def _make_magnified_thumb(self, arr, sz_w: int, sz_h: int, lo, hi, outline_mask=None) -> QPixmap | None:
         try:
             import numpy as np
 

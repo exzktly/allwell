@@ -25,7 +25,7 @@ builder for that page is run inline on the page-change event.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Dict, Set
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
@@ -75,7 +75,7 @@ class NamedPageStack(QStackedWidget):
         self._rebuild_names()
         return idx
 
-    def detachPage(self, name: str) -> "QWidget | None":
+    def detachPage(self, name: str) -> QWidget | None:
         """Remove a page from the stack and return its widget (kept alive).
 
         Used by Split View to move a page into the side-by-side splitter. The
@@ -148,7 +148,7 @@ def build_centre(win, parent: QWidget) -> None:
     # Map tab title -> deferred builder. Populated below; drained after the
     # window paints. The tab-change handler also calls into this map so a
     # user who clicks an un-built tab forces its builder to run inline.
-    pending: Dict[str, Callable[[], None]] = {}
+    pending: dict[str, Callable[[], None]] = {}
     win._centre_pending_builders = pending
 
     # Defined early so builder functions (including _build_plotting, which is
@@ -171,7 +171,7 @@ def build_centre(win, parent: QWidget) -> None:
     # Browser" is the unified image-review rail entry (Segmentation / Image
     # Table / Cell Browser / Playground sub-tabs) — its sub-tab bodies pull the
     # image-table loaders, so it (and each sub-tab inside it) builds on demand.
-    lazy_only: Set[str] = {d.name for d in win._features.top_level() if d.lazy_only}
+    lazy_only: set[str] = {d.name for d in win._features.top_level() if d.lazy_only}
     win._centre_lazy_only_titles = frozenset(lazy_only)
 
     # Pre-create stable widget handles so deferred builder closures can
@@ -209,7 +209,7 @@ def build_centre(win, parent: QWidget) -> None:
     # the groups loop so the builder closures can close over them, even
     # though those frames end up inside the nested "Plotting" QTabWidget
     # rather than directly in win._notebook.
-    tab_frames: Dict[str, QWidget] = {}
+    tab_frames: dict[str, QWidget] = {}
     for _t in _PLOT_SUBTABS:
         _f = QWidget()
         QVBoxLayout(_f).setContentsMargins(12, 0, 12, 12)

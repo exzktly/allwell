@@ -9,7 +9,6 @@ named colour values both sides reference.
 
 from __future__ import annotations
 
-from typing import Dict
 
 
 # ── Source of truth: the v2 dark palette ────────────────────────────────────
@@ -21,7 +20,7 @@ from typing import Dict
 # Publication-mode plot canvas, which is white-on-dark on purpose.
 from theme import Colors as _C
 
-def _build_dark_theme() -> Dict[str, str]:
+def _build_dark_theme() -> dict[str, str]:
     # Rebuilt on demand (not captured once) so a theme switch — which mutates
     # ``theme.Colors`` in place — is reflected by ``get_color()``. Registered as
     # a ``theme`` hook via :func:`refresh_from_theme` below.
@@ -69,7 +68,7 @@ def _build_dark_theme() -> Dict[str, str]:
     }
 
 
-_DARK_THEME: Dict[str, str] = _build_dark_theme()
+_DARK_THEME: dict[str, str] = _build_dark_theme()
 
 
 # Well palette — derived from the canonical tuple in the repo-root ``theme``
@@ -80,7 +79,7 @@ _DARK_THEME: Dict[str, str] = _build_dark_theme()
 # source tuple in ``theme.py``.
 from theme import WELL_COLORS_TUPLE as _WELL_COLORS_TUPLE
 
-_WELL_COLORS: Dict[str, str] = {
+_WELL_COLORS: dict[str, str] = {
     f"WELL_COLOR_{_i}": _hex
     for _i, _hex in enumerate(_WELL_COLORS_TUPLE, start=1)
 }
@@ -88,7 +87,7 @@ _WELL_COLORS: Dict[str, str] = {
 
 
 
-def get_theme_colors() -> Dict[str, str]:
+def get_theme_colors() -> dict[str, str]:
     d = dict(_DARK_THEME)
     d.update(_WELL_COLORS)
     return d
@@ -108,7 +107,7 @@ for _name, _value in _WELL_COLORS.items():
     globals()[_name] = _value
 
 
-def refresh_from_theme(_name: "str | None" = None) -> None:
+def refresh_from_theme(_name: str | None = None) -> None:
     """Re-derive the palette from the freshly-applied ``theme.Colors``.
 
     Registered as a ``theme.register_theme_hook`` so that after

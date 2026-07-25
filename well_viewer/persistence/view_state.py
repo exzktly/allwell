@@ -35,7 +35,7 @@ SCHEMA_VERSION = 1
 _MIGRATIONS: dict = {}
 
 
-def _migrate(state: dict, from_version) -> "dict | None":
+def _migrate(state: dict, from_version) -> dict | None:
     """Upgrade a saved ``view_state`` dict to :data:`SCHEMA_VERSION`.
 
     Returns the migrated dict (with ``schema_version`` stamped), or ``None`` when

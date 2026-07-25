@@ -25,7 +25,7 @@ import re
 import subprocess
 import threading
 from pathlib import Path
-from typing import Callable, Optional, Tuple
+from collections.abc import Callable
 
 from services.pipeline_service import build_pipeline_args, spawn_pipeline
 from services.remote_config import RemoteHost
@@ -126,14 +126,14 @@ class ProgressTracker:
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
 
-    def parse(self, line: str) -> list[Tuple[str, object]]:
+    def parse(self, line: str) -> list[tuple[str, object]]:
         """Return queue events for a single stdout line.
 
         Caller is expected to forward the events to its GUI queue. Returning a
         list (rather than enqueuing directly) keeps this method test-friendly
         and free of any dependency on the queue object.
         """
-        events: list[Tuple[str, object]] = []
+        events: list[tuple[str, object]] = []
         if line.startswith("[zipper]"):
             return events
         # The "Zip mode detected" warning is emitted up-front in
@@ -264,14 +264,14 @@ class PipelineRunner:
     _LOG_QUEUE_MAXSIZE = 10000
 
     def __init__(self) -> None:
-        self.log_q: "queue.Queue[Tuple[str, object]]" = queue.Queue(
+        self.log_q: queue.Queue[tuple[str, object]] = queue.Queue(
             maxsize=self._LOG_QUEUE_MAXSIZE,
         )
-        self._proc: Optional[subprocess.Popen] = None
+        self._proc: subprocess.Popen | None = None
         # The grouping-phase subprocess (WellPlateZipper). Tracked
         # separately so a Stop click during grouping cancels it instead
         # of waiting for it to finish before reaching the pipeline.
-        self._zipper_proc: Optional[subprocess.Popen] = None
+        self._zipper_proc: subprocess.Popen | None = None
         # Guards ``_proc``/``_zipper_proc`` across the worker thread (which
         # assigns them at launch) and the GUI thread (which reads them in
         # stop()). Without it a Stop click racing a subprocess launch could
@@ -280,8 +280,8 @@ class PipelineRunner:
         # _stop_requested and assigns _proc under this lock so the two are
         # atomic with respect to stop().
         self._proc_lock: threading.Lock = threading.Lock()
-        self._thread: Optional[threading.Thread] = None
-        self._last_output_dir: Optional[Path] = None
+        self._thread: threading.Thread | None = None
+        self._last_output_dir: Path | None = None
         self._log_overflow_warned: bool = False
         # Set on Stop; checked between the zipper phase and the pipeline
         # launch so a cancel during grouping doesn't slip through and
@@ -290,8 +290,8 @@ class PipelineRunner:
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
-        self._remote: Optional[RemoteHost] = None
-        self._remote_runner: Optional[RemoteRunner] = None
+        self._remote: RemoteHost | None = None
+        self._remote_runner: RemoteRunner | None = None
         self._output_filter: str = "full"
         # v5.2.11: default to "none" so a shared-machine remote never
         # has files deleted without the user explicitly opting in.
@@ -302,7 +302,7 @@ class PipelineRunner:
         self._dry_run_cleanup: bool = False
         self._selective_channels: bool = True
 
-    def _enqueue(self, event: "Tuple[str, object]") -> None:
+    def _enqueue(self, event: tuple[str, object]) -> None:
         """Non-blocking enqueue; drops the message on overflow with a
         one-shot warning rather than blocking the reader thread."""
         try:
@@ -325,7 +325,7 @@ class PipelineRunner:
         return self._proc is not None and self._proc.poll() is None
 
     @property
-    def last_output_dir(self) -> Optional[Path]:
+    def last_output_dir(self) -> Path | None:
         return self._last_output_dir
 
     def start(
@@ -333,8 +333,8 @@ class PipelineRunner:
         pipeline: Path,
         opts: dict,
         *,
-        resolve_dirs: Callable[..., Optional[Tuple[Path, Path]]],
-        remote: Optional[RemoteHost] = None,
+        resolve_dirs: Callable[..., tuple[Path, Path] | None],
+        remote: RemoteHost | None = None,
         output_filter: str = "full",
         cleanup_remote: str = "none",
         dry_run_cleanup: bool = False,
@@ -354,7 +354,7 @@ class PipelineRunner:
         they're ignored in local mode.
         """
         self._remote = remote
-        self._remote_runner: Optional[RemoteRunner] = (
+        self._remote_runner: RemoteRunner | None = (
             RemoteRunner(remote) if remote is not None else None
         )
         self._output_filter = output_filter
@@ -368,7 +368,7 @@ class PipelineRunner:
         )
         self._thread.start()
 
-    def _track_zipper_proc(self, proc: Optional[subprocess.Popen]) -> None:
+    def _track_zipper_proc(self, proc: subprocess.Popen | None) -> None:
         """Register / clear the grouping subprocess so ``stop()`` can
         signal it. Passed to ``resolve_input_output`` as ``proc_hook``."""
         with self._proc_lock:
@@ -424,7 +424,7 @@ class PipelineRunner:
                 swallowed()  # was: pass (silent except)
 
     @staticmethod
-    def _signal_subprocess(proc: Optional[subprocess.Popen]) -> None:
+    def _signal_subprocess(proc: subprocess.Popen | None) -> None:
         """Cross-platform pgid-aware SIGTERM with SIGKILL escalation.
 
         Thin wrapper around :func:`services.subprocess_kill.signal_subprocess`
@@ -439,7 +439,7 @@ class PipelineRunner:
         self,
         pipeline: Path,
         opts: dict,
-        resolve_dirs: Callable[..., Optional[Tuple[Path, Path]]],
+        resolve_dirs: Callable[..., tuple[Path, Path] | None],
     ) -> None:
         # Each run starts with a fresh "not cancelled" state.
         self._stop_requested.clear()

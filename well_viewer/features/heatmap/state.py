@@ -11,7 +11,7 @@ Qt-free: imports only stdlib.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -30,7 +30,7 @@ class HeatmapState:
     # Name of the active heat-map layout (``None`` ⇒ first / plate default).
     # Was the loose ``app._active_heatmap_layout_name`` — a poor fit for the
     # ``_heatmap_`` runtime prefix, so it lives here as typed state (A8).
-    active_layout_name: Optional[str] = None
+    active_layout_name: str | None = None
     # Fixed-scale colour limits + the selected colormap name. These were the
     # loose ``app._heatmap_vmin`` / ``_vmax`` / ``_cmap_name`` runtime stamps —
     # but they are *persisted* display settings (serialised per layout by
@@ -38,14 +38,14 @@ class HeatmapState:
     # in the never-serialised ``AppRuntime`` namespace (D-persist). ``vmin`` /
     # ``vmax`` are ``None`` until the user sets a Fixed range (``nan`` while a
     # field is blank); ``cmap_name`` mirrors the LUT selector for persistence.
-    vmin: Optional[float] = None
-    vmax: Optional[float] = None
+    vmin: float | None = None
+    vmax: float | None = None
     cmap_name: str = ""
     # Settings dict loaded from disk by ``load_from_data_dir`` and applied to the
     # (possibly not-yet-built) heat-map widgets by ``apply_persisted_settings``.
     # Was the loose ``app._heatmap_persisted_settings`` bridge; kept typed so the
     # persistence loader/applier thread it through ``ctx.state`` (D-persist).
-    persisted_settings: Optional[Dict[str, Any]] = field(default=None)
+    persisted_settings: dict[str, Any] | None = field(default=None)
     # Timepoint values for the current session (the slider's tick → hours map),
     # recomputed from the dataset each ``refresh_heatmap_timepoints``. **Session-
     # transient — never serialised** (``_collect_settings`` builds its dict

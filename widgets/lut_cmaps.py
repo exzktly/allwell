@@ -14,13 +14,12 @@ renderers can import it without inverting the package layering.
 
 from __future__ import annotations
 
-from typing import Dict, Tuple
 
 # Saturated single colours for the monochrome LUT names → black→colour ramp.
 # ``Greys`` is intentionally absent: it stays a plain greyscale (black→white) ramp,
 # handled by the callers' non-colormap fast path / the built-in ``Greys_r``.
 # Mirrors image_table/image_compose.py::LUT_COLORS (kept in sync by hand).
-LUT_MONO_COLORS: Dict[str, Tuple[float, float, float]] = {
+LUT_MONO_COLORS: dict[str, tuple[float, float, float]] = {
     "Reds":    (1.0, 0.0, 0.0),
     "Greens":  (0.0, 1.0, 0.0),
     "Blues":   (0.0, 0.0, 1.0),

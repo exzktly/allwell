@@ -23,7 +23,6 @@ Qt-free: imports only stdlib and the Qt-free domain model.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from well_viewer.domain.qc_params import QCParams
 
@@ -38,4 +37,4 @@ class QcState:
     when switching to a dataset that has no saved QC edits.
     """
 
-    params: Optional[QCParams] = None
+    params: QCParams | None = None

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import random
 import re
-from typing import Iterable, List, Optional, Tuple
+from collections.abc import Iterable
 
 import numpy as np
 
@@ -26,7 +26,7 @@ import numpy as np
 DEFAULT_CELLS_PER_IMAGE_CAP = 800
 
 
-def parse_tp_hours(tp: str) -> Optional[float]:
+def parse_tp_hours(tp: str) -> float | None:
     """Convert a timepoint string to hours.
 
     Recognises:
@@ -69,7 +69,7 @@ def parse_tp_hours(tp: str) -> Optional[float]:
     return None
 
 
-def pick_endpoint_timepoints(tps: Iterable[str]) -> List[str]:
+def pick_endpoint_timepoints(tps: Iterable[str]) -> list[str]:
     """Return up to three timepoints from *tps*: first, middle, last.
 
     Sorted chronologically using :func:`parse_tp_hours`; duplicates
@@ -84,7 +84,7 @@ def pick_endpoint_timepoints(tps: Iterable[str]) -> List[str]:
     if len(sorted_tps) <= 2:
         return list(sorted_tps)
     mid = sorted_tps[len(sorted_tps) // 2]
-    picked: List[str] = []
+    picked: list[str] = []
     for tp in (sorted_tps[0], mid, sorted_tps[-1]):
         if tp not in picked:
             picked.append(tp)
@@ -97,7 +97,7 @@ def sample_cell_and_bg(
     *,
     cap: int,
     rng: random.Random,
-) -> Tuple[List[float], List[float]]:
+) -> tuple[list[float], list[float]]:
     """Return ``(cell_means, bg_pixels)`` sampled from one image.
 
     For every distinct cell label in ``labels`` (excluding background

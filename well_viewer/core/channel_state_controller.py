@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import math  # noqa: F401 — keeps parity with the original method bodies
-from typing import List
 
 import numpy as np
 import pandas as pd
@@ -357,7 +356,7 @@ def update_channel_selector(ctx) -> None:
         set_combo_values(_ri_cb, review_labels)
     active_label = active_channel_label(ctx)
 
-    def _pick_valid(current: str, candidates: List[str], fallback_label: str) -> str:
+    def _pick_valid(current: str, candidates: list[str], fallback_label: str) -> str:
         if current in candidates and current != "—":
             return current
         if fallback_label in candidates and fallback_label != "—":

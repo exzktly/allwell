@@ -12,7 +12,6 @@ a redraw of all plots.
 
 from __future__ import annotations
 
-from typing import List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -32,7 +31,7 @@ from PySide6.QtWidgets import (
 from well_viewer.domain.ratio_models import RatioMetric
 
 
-_METRIC_CHOICES: List[str] = ["mean_intensity", "total_intensity", "max_intensity", "smfish_count"]
+_METRIC_CHOICES: list[str] = ["mean_intensity", "total_intensity", "max_intensity", "smfish_count"]
 
 
 class RatioMetricsPanel(QWidget):
@@ -127,7 +126,7 @@ class RatioMetricsPanel(QWidget):
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
-    def _channel_choices(self) -> List[str]:
+    def _channel_choices(self) -> list[str]:
         chans = list(self._app._app_state.channel.fluor_channels or [])
         if not chans:
             chans = ["gfp"]
@@ -206,8 +205,8 @@ class RatioMetricsPanel(QWidget):
         for r in rows:
             self._table.removeRow(r)
 
-    def _collect_ratios(self) -> List[RatioMetric]:
-        out: List[RatioMetric] = []
+    def _collect_ratios(self) -> list[RatioMetric]:
+        out: list[RatioMetric] = []
         seen_names: set = set()
         for row in range(self._table.rowCount()):
             name_w = self._table.cellWidget(row, 0)

@@ -8,7 +8,6 @@ from well_viewer.domain.viewer_state import parse_rc
 import logging
 import math
 import re
-from typing import List, Optional
 
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.core import debug_flags as debug_flags
@@ -80,11 +79,11 @@ def ordered_bar_keys(ctx) -> list:
 # ``barplot/collect.py`` (Qt-free layout math) and re-exported above.
 
 
-def cluster_centers(items: List[BarItem], xs: List[float]):
+def cluster_centers(items: list[BarItem], xs: list[float]):
     """Yield ``(gk, cx)`` for each non-empty cluster in encounter order.
     Public so the renderer can re-use the same iteration for footers."""
     cluster_x: dict = {}
-    cluster_order: List[str] = []
+    cluster_order: list[str] = []
     for it, x in zip(items, xs):
         gk = it.group_key or ""
         if not gk:
@@ -99,7 +98,7 @@ def cluster_centers(items: List[BarItem], xs: List[float]):
             yield gk, sum(positions) / len(positions)
 
 
-def _annotate_cluster_headers(items: List[BarItem], xs: List[float], ax) -> None:
+def _annotate_cluster_headers(items: list[BarItem], xs: list[float], ax) -> None:
     """Per-cluster label centred above the mean panel."""
     if not items or not xs:
         return
@@ -116,7 +115,7 @@ def render_bar_items(
     ax_mean,
     ax_frac,
     use_groups: bool,
-    items: List[BarItem],
+    items: list[BarItem],
     threshold: float,
     warn_color: str,
     border_color: str,
@@ -239,8 +238,8 @@ def render_bar_items(
     _HEADROOM = 1.08
 
     def _tops_lows(get_val, get_spread):
-        tops: List[float] = []
-        lows: List[float] = []
+        tops: list[float] = []
+        lows: list[float] = []
         for it in items:
             v = get_val(it)
             if v is None or not math.isfinite(v):
@@ -292,7 +291,7 @@ def render_bar_items(
 # canvas + axes) is owned by ``WellViewerApp``; these helpers only mutate
 # ``ctx.runtime.barplot.drag_state`` / ``ctx.state.plot.bar_order`` and trigger a redraw.
 
-def bar_event_xdata(ctx, event) -> Optional[float]:
+def bar_event_xdata(ctx, event) -> float | None:
     """Return data-x for a matplotlib MouseEvent over any bar axis."""
     ax = getattr(event, "inaxes", None)
     if ax is not ctx.widgets.get_or_none("_ax_bar_mean") and ax is not ctx.widgets.get_or_none("_ax_bar_frac") and ax is not ctx.widgets.get_or_none("_ax_bar_n"):
@@ -503,7 +502,7 @@ def toggle_violin(ctx) -> None:
 
 
 
-def rep_sets_active(ctx) -> "List[ReplicateSet]":
+def rep_sets_active(ctx) -> list[ReplicateSet]:
     """One ReplicateSet per visible (non-hidden) selection with ≥1 loaded
     well — these are exactly the traces drawn on the plots.
 

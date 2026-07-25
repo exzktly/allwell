@@ -17,7 +17,6 @@ every public name below, so call sites and playground importers are unchanged.
 
 from __future__ import annotations
 
-from typing import List
 
 from well_viewer.features.image_browser.image_table.state import spec_to_state_fields
 from well_viewer.features.image_browser.image_table.grid_layout import (
@@ -66,7 +65,7 @@ def _ctrl():
     return C
 
 
-def _build_nested_layout(ctx, row_dims: List[str], col_dims: List[str]) -> None:
+def _build_nested_layout(ctx, row_dims: list[str], col_dims: list[str]) -> None:
     """Build a grid whose rows and/or columns are the mixed-radix Cartesian
     product of an ordered dim list, so >2 dimensions vary at once (e.g.
     rows=[well, channel] × cols=[timepoint]). The flat single-axis path

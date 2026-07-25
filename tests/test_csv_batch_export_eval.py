@@ -103,7 +103,7 @@ def _parse_csv(text: str) -> list[dict]:
     return list(csv.DictReader(io.StringIO(text)))
 
 
-def _run_ontab_export(ctx, fn, tmp_path, name="out") -> "list[dict] | None":
+def _run_ontab_export(ctx, fn, tmp_path, name="out") -> list[dict] | None:
     """Run an on-tab export with the save dialog stubbed to *tmp_path*.
 
     Returns the parsed rows, or ``None`` when the exporter warned/aborted

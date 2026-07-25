@@ -31,9 +31,22 @@ def test_size_one_makes_solo_sets():
     assert [s.wells for s in sets] == [["A1"], ["A2"]]
 
 
-def test_typing_names_importable():
-    # The annotations referenced Dict/List/Optional with no import (latent
-    # NameError under get_type_hints). They must now resolve.
-    assert controller.Dict is not None
-    assert controller.List is not None
-    assert controller.Optional is not None
+def test_annotations_resolve():
+    """Every annotation in the module resolves — no latent ``NameError``.
+
+    This module once annotated with ``Dict`` / ``List`` / ``Optional`` and
+    imported none of them, which ``get_type_hints`` turns into a ``NameError``
+    at the first introspection. The check used to assert those three names were
+    importable, which was a proxy for the real invariant and stopped meaning
+    anything once the annotations moved to the builtin generics (``dict[...]``,
+    ``X | None``) that always resolve. It now asserts the invariant directly, so
+    it keeps working whichever spelling the annotations use.
+    """
+    import typing
+
+    for name, obj in vars(controller).items():
+        if not callable(obj) or getattr(obj, "__module__", None) != controller.__name__:
+            continue
+        if not getattr(obj, "__annotations__", None):
+            continue
+        typing.get_type_hints(obj)   # raises NameError on an unresolvable name

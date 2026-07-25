@@ -15,7 +15,7 @@ from __future__ import annotations
 import queue
 import time as _time
 from pathlib import Path
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
@@ -462,7 +462,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
                     "'Phase' (the brightfield image to segment).")
         return errors
 
-    def _background_well_validation_error(self) -> Optional[str]:
+    def _background_well_validation_error(self) -> str | None:
         """When empty_well drives flat-field and/or background, the background
         well must be specified and must exist in the input. Returns an error
         message to block the run, or None when the request is valid (or empty_well
@@ -744,7 +744,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             selective_channels=True,
         )
 
-    def _validate_run_request(self) -> Optional[Path]:
+    def _validate_run_request(self) -> Path | None:
         if not self._input_edit.text().strip():
             QMessageBox.critical(self, "Input Error", "No input folder selected.")
             return None

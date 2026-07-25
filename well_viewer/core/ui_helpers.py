@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any
+from collections.abc import Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
@@ -100,7 +101,7 @@ def set_widget_text(host, attr_name: str, text: str) -> None:
         w.setText(text)
 
 
-def set_combo_values(combo: object, values: List[str]) -> None:
+def set_combo_values(combo: object, values: list[str]) -> None:
     """Set combobox values for both Qt and legacy widget shims.
 
     Preserves the current selection when the new item list contains it, so a
@@ -127,7 +128,7 @@ def set_combo_values(combo: object, values: List[str]) -> None:
     combo["values"] = vals  # type: ignore[index]
 
 
-def set_combo_values_sectioned(combo: object, sections: List[Tuple[str, List[str]]]) -> None:
+def set_combo_values_sectioned(combo: object, sections: list[tuple[str, list[str]]]) -> None:
     """Populate *combo* with grouped values under non-selectable section headers.
 
     ``sections`` is a list of ``(header, values)``. A ``header`` of ``""`` emits
@@ -150,7 +151,7 @@ def set_combo_values_sectioned(combo: object, sections: List[Tuple[str, List[str
         block(True)
     try:
         combo.clear()
-        selectable: List[str] = []
+        selectable: list[str] = []
         for header, values in sections:
             vals = [str(v) for v in (values or [])]
             if not vals:
@@ -248,7 +249,7 @@ def build_section_header(
     parent: QWidget,
     title: str,
     *,
-    hint: Optional[str] = None,
+    hint: str | None = None,
     buttons: tuple = (),
     margins: tuple = (8, 4, 8, 4),
 ) -> QWidget:
@@ -340,8 +341,8 @@ def clear_layout(layout) -> None:
             clear_layout(child)
 
 
-def _btn(parent: Optional[QWidget], text: str, command: Optional[Callable[[], Any]],
-         variant: str, *, icon: Optional[str] = None) -> QPushButton:
+def _btn(parent: QWidget | None, text: str, command: Callable[[], Any] | None,
+         variant: str, *, icon: str | None = None) -> QPushButton:
     b = QPushButton(text, parent)
     b.setProperty("variant", variant)
     if icon:
@@ -357,12 +358,12 @@ def _btn(parent: Optional[QWidget], text: str, command: Optional[Callable[[], An
 
 
 def btn_primary(parent: QWidget, text: str, command, *, padx: int = 8, pady: int = 2,
-                icon: Optional[str] = None, **_kw) -> QPushButton:
+                icon: str | None = None, **_kw) -> QPushButton:
     return _btn(parent, text, command, "primary", icon=icon)
 
 
 def btn_secondary(parent: QWidget, text: str, command, *, padx: int = 6, pady: int = 2,
-                  icon: Optional[str] = None, **_kw) -> QPushButton:
+                  icon: str | None = None, **_kw) -> QPushButton:
     return _btn(parent, text, command, "secondary", icon=icon)
 
 
@@ -374,7 +375,7 @@ def btn_danger(parent: QWidget, text: str, command, *, padx: int = 4, **_kw) -> 
     return _btn(parent, text, command, "danger")
 
 
-def make_scrollable_canvas(parent: QWidget, **_kw) -> Tuple[QScrollArea, QWidget]:
+def make_scrollable_canvas(parent: QWidget, **_kw) -> tuple[QScrollArea, QWidget]:
     """Return (scroll_area, inner_widget). Caller lays widgets inside inner."""
     sa = QScrollArea(parent)
     sa.setWidgetResizable(True)
@@ -401,9 +402,9 @@ class _PlotDockHost(QWidget):
     that pass a width hint still update the dock's fixed width.
     """
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._overlay_dock: Optional[QWidget] = None
+        self._overlay_dock: QWidget | None = None
 
     def set_overlay_dock(self, dock: QWidget, width: int = 0) -> None:
         self._overlay_dock = dock
@@ -411,7 +412,7 @@ class _PlotDockHost(QWidget):
             dock.setFixedWidth(int(width))
 
 
-def make_plot_with_right_dock(parent: QWidget) -> Tuple[QWidget, QVBoxLayout, QWidget]:
+def make_plot_with_right_dock(parent: QWidget) -> tuple[QWidget, QVBoxLayout, QWidget]:
     """Build a plot area with a right-side dock as a layout sibling inside
     ``parent``.
 
@@ -598,7 +599,7 @@ def install_canvas_wheel_scroll(canvas, scroll_area) -> None:
 
 
 def ask_name_dialog(parent: QWidget, *, title: str, prompt: str, default: str,
-                    width: int = 30, strip: bool = True, **_kw) -> Optional[str]:
+                    width: int = 30, strip: bool = True, **_kw) -> str | None:
     text, ok = QInputDialog.getText(parent, title, prompt, QLineEdit.Normal, default)
     if not ok:
         return None
@@ -831,10 +832,10 @@ def apply_log_scale(arr, lo, hi):
 
 
 def make_fluor_thumb(arr, sz_w: int, sz_h: int,
-                     lo: Optional[float], hi: Optional[float],
+                     lo: float | None, hi: float | None,
                      crop=None,
-                     tint: Optional[Tuple[float, float, float]] = None,
-                     cmap: Optional[str] = None,
+                     tint: tuple[float, float, float] | None = None,
+                     cmap: str | None = None,
                      log_scale: bool = False):
     """Render a greyscale float32 array as a QPixmap with LUT [lo, hi].
 
@@ -902,8 +903,8 @@ def make_fluor_thumb(arr, sz_w: int, sz_h: int,
     return pm.scaled(int(sz_w), int(sz_h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
 
-def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
-                        hi: Optional[float] = None, cmap_name: str = "",
+def lut_colormap_to_rgb(arr, lo: float | None = None,
+                        hi: float | None = None, cmap_name: str = "",
                         log_scale: bool = False):
     """Map a 2-D array to an (H, W, 3) uint8 RGB via a [lo, hi] LUT window and an
     optional matplotlib colormap. ``lo``/``hi`` default to the array min/max;
@@ -936,7 +937,7 @@ def lut_colormap_to_rgb(arr, lo: Optional[float] = None,
 
 
 def make_overlay_thumb(arr, sz_w: int, sz_h: int,
-                       lo: Optional[float] = None, hi: Optional[float] = None,
+                       lo: float | None = None, hi: float | None = None,
                        crop=None):
     """Render a 2-D or 3-D array as a QPixmap scaled to (sz_w, sz_h).
 
@@ -986,7 +987,7 @@ def make_overlay_thumb(arr, sz_w: int, sz_h: int,
 
 # ── Small value / widget helpers ─────────────────────────────────────────────
 
-def safe_int_or_none(value: object) -> Optional[int]:
+def safe_int_or_none(value: object) -> int | None:
     """Best-effort coercion of ``value`` to int, returning None on failure."""
     if value is None:
         return None

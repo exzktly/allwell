@@ -94,7 +94,7 @@ def _active_tab(ctx) -> str:
         return ""
 
 
-def _visible_tabs(ctx) -> "list[str]":
+def _visible_tabs(ctx) -> list[str]:
     app = ctx.window  # transitional bridge (A3)
     """Leaf names of every centre tab on screen (Split View shows two).
 

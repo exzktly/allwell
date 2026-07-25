@@ -5,7 +5,6 @@ from __future__ import annotations
 import csv
 import re
 from pathlib import Path
-from typing import List, Optional
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -54,7 +53,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
     def __init__(
         self,
         ctx,
-        parent: Optional[QWidget] = None,
+        parent: QWidget | None = None,
         *,
         scatter_mode: str = "cells",
         use_sidebar_groups: bool = False,
@@ -270,12 +269,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
         finally:
             prop_cb.blockSignals(blocked)
 
-    def _scatter_channel_options(self) -> List[str]:
+    def _scatter_channel_options(self) -> list[str]:
         """Real fluor channels + ratio labels — same source the per-tab
         scatter plot uses so the batch UI tracks the plot tabs exactly."""
         channels = list(self._ctx.state.channel.fluor_channels) if self._ctx.state.channel.fluor_channels else ["gfp"]
-        options: List[str] = list(channels)
-        ratio_labels: List[str] = []
+        options: list[str] = list(channels)
+        ratio_labels: list[str] = []
         try:
             ratio_labels = [
                 _ratio_label_for(self._ctx, r)
@@ -393,7 +392,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         if not selected_tps:
             QMessageBox.warning(self, "No timepoint", "Select a valid timepoint.")
             return
-        timepoints: List[float] = []
+        timepoints: list[float] = []
         for tp_str in selected_tps:
             try:
                 timepoints.append(float(tp_str))
@@ -412,7 +411,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 grp, tp_h = job
                 return f"'{grp.name}' @ t={tp_h:.1f}h ({step}/{total})"
 
-            def _run_job(job, write_dir) -> Optional[str]:
+            def _run_job(job, write_dir) -> str | None:
                 grp, tp_h = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 safe_tp = f"{tp_h:.1f}".replace(".", "_")
@@ -431,7 +430,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 grp = job
                 return f"'{grp.name}' all selected tps ({step}/{total})"
 
-            def _run_job(job, write_dir) -> Optional[str]:
+            def _run_job(job, write_dir) -> str | None:
                 grp = job
                 safe_grp = re.sub(r"[^A-Za-z0-9_\-]", "_", grp.name)
                 stem = unique_export_stem(
@@ -454,7 +453,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
         col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
         col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
@@ -472,7 +471,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         try:
             from well_viewer.features.export.service import _well_labels_map, well_name_for
             _well_labels = _well_labels_map(self._ctx)
-            rows: List[dict] = []
+            rows: list[dict] = []
             for label, data in scatter_data.items():
                 for x, y, meta in zip(data["x"], data["y"], data["metadata"]):
                     well, filename, nuclear_id, _row_idx = meta
@@ -591,14 +590,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
             ax._aw_log_plus1 = True
             apply_axis_log_scale(ax, "y", True)
 
-    def _agg_axis_labels(self, stat_x: str, stat_y: str) -> "tuple[str, str]":
+    def _agg_axis_labels(self, stat_x: str, stat_y: str) -> tuple[str, str]:
         x_on = bool(getattr(self, "_sc_agg_xlog_cb", None) and self._sc_agg_xlog_cb.isChecked())
         y_on = bool(getattr(self, "_sc_agg_ylog_cb", None) and self._sc_agg_ylog_cb.isChecked())
         return stat_x + _log1p_axis_suffix(x_on), stat_y + _log1p_axis_suffix(y_on)
 
     def _run_scatter_agg_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
         stat_x = self._scatter_axis_stat(self._sc_agg_x_cb, self._sc_agg_metric_x_cb)
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
@@ -615,7 +614,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             )
             _well_labels = _well_labels_map(self._ctx)
             _well_paths = _well_paths_keys(self._ctx)
-            rows: List[dict] = []
+            rows: list[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")
                 rows.append({
@@ -661,12 +660,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
         return None
 
     def _run_scatter_cells_multi_tp_job(
-        self, grp: BarGroup, timepoints: List[float],
+        self, grp: BarGroup, timepoints: list[float],
         csv_path: Path, fig_path: Path, fmt: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_data as _collect_scatter_data
-        combined_rows: List[dict] = []
-        combined_series: List[tuple] = []
+        combined_rows: list[dict] = []
+        combined_series: list[tuple] = []
         for tp_h in sorted(timepoints):
             col_x = self._scatter_axis_col(self._sc_cells_x_cb, self._sc_cells_metric_x_cb)
             col_y = self._scatter_axis_col(self._sc_cells_y_cb, self._sc_cells_metric_y_cb)
@@ -729,9 +728,9 @@ class ScatterBatchExportPanel(BatchExportPanel):
         return None
 
     def _run_scatter_agg_multi_tp_job(
-        self, grp: BarGroup, timepoints: List[float],
+        self, grp: BarGroup, timepoints: list[float],
         csv_path: Path, fig_path: Path, fmt: str,
-    ) -> Optional[str]:
+    ) -> str | None:
         from well_viewer.features.scatter.controller import collect_scatter_agg_data as _collect_scatter_agg_data
         stat_x = self._scatter_axis_stat(self._sc_agg_x_cb, self._sc_agg_metric_x_cb)
         stat_y = self._scatter_axis_stat(self._sc_agg_y_cb, self._sc_agg_metric_y_cb)
@@ -748,7 +747,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
             )
             _well_labels = _well_labels_map(self._ctx)
             _well_paths = _well_paths_keys(self._ctx)
-            rows: List[dict] = []
+            rows: list[dict] = []
             for data in scatter_data.values():
                 lbl = data.get("label", "")
                 rows.append({

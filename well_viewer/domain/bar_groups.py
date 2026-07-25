@@ -10,14 +10,13 @@ backward compatibility (``well_viewer.features.barplot.controller``).
 from __future__ import annotations
 
 import re
-from typing import List, Optional, Tuple
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
 
 
 def bar_groups_to_dict(
-    rep_sets: List[ReplicateSet],
-    bar_groups: List[BarGroup],
+    rep_sets: list[ReplicateSet],
+    bar_groups: list[BarGroup],
     *,
     extract_well_token,
 ) -> dict:
@@ -35,18 +34,18 @@ def bar_groups_to_dict(
     return {"rep_sets": rep_list, "groups": grp_list}
 
 
-def bar_groups_from_data(data, *, tok_to_label: dict[str, str]) -> Tuple[List[ReplicateSet], List[BarGroup]]:
+def bar_groups_from_data(data, *, tok_to_label: dict[str, str]) -> tuple[list[ReplicateSet], list[BarGroup]]:
     def _norm(tok: str) -> str:
         tok = tok.strip().upper()
         m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
         return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
 
-    def _valid_tok(raw: str) -> Optional[str]:
+    def _valid_tok(raw: str) -> str | None:
         n = _norm(raw)
         return n if n in tok_to_label else None
 
-    rep_sets: List[ReplicateSet] = []
-    bar_groups: List[BarGroup] = []
+    rep_sets: list[ReplicateSet] = []
+    bar_groups: list[BarGroup] = []
 
     if not isinstance(data, dict):
         return rep_sets, bar_groups

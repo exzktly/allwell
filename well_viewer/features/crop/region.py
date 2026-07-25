@@ -19,7 +19,6 @@ unit-tested without the app.
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
 
 # Always-on centroid columns the pipeline emits for every cell
 # (``shape_features_core.ALWAYS_ON_KEYS``). ``centroid_col`` is the x pixel,
@@ -29,12 +28,12 @@ CENTROID_COL_COL = "shape_centroid_col"
 
 # (row0, col0, row1, col1) in source-mask pixels, normalized so row0<=row1,
 # col0<=col1.
-CropRegion = Tuple[int, int, int, int]
+CropRegion = tuple[int, int, int, int]
 
 
 def normalize_region(
     row0: float, col0: float, row1: float, col1: float,
-) -> Optional[CropRegion]:
+) -> CropRegion | None:
     """Return a sorted integer ``(row0, col0, row1, col1)`` region, or ``None``
     when the box is degenerate (zero area) so callers can treat it as "no crop".
     """
@@ -45,7 +44,7 @@ def normalize_region(
     return (r0, c0, r1, c1)
 
 
-def compute_crop_pass(df, region: Optional[CropRegion]):
+def compute_crop_pass(df, region: CropRegion | None):
     """Return an int Series (1 = centroid inside the crop, 0 = outside) for ``df``.
 
     Pure function of the frame's centroid columns and ``region``. Fail-open: when

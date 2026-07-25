@@ -9,7 +9,6 @@ matplotlib rendering, click handling, and combo wiring.
 from __future__ import annotations
 
 import logging
-from typing import List
 
 _logger = logging.getLogger(__name__)
 
@@ -46,7 +45,7 @@ def redraw_scatter(
     col_y: str,
     timepoints_h,
     *,
-    well_colors: List[str],
+    well_colors: list[str],
     fluor_gate_x: float = 0.0,
     fluor_gate_y: float = 0.0,
 ) -> None:
@@ -245,8 +244,8 @@ def _draw_scatter_agg_legends(ax_agg, scatter_data, marker_fg) -> None:
     from matplotlib.lines import Line2D
     from matplotlib.legend import Legend
 
-    wells: "dict[str, str]" = {}      # group_label -> marker
-    tps: "dict[float, Any]" = {}      # timepoint  -> colour
+    wells: dict[str, str] = {}      # group_label -> marker
+    tps: dict[float, Any] = {}      # timepoint  -> colour
     for data in scatter_data.values():
         glabel = data.get('group_label') or data.get('label', '')
         if glabel not in wells:
@@ -288,9 +287,9 @@ def redraw_scatter_agg(
     ctx,
     stat_x: str,
     stat_y: str,
-    timepoints_h: List[float],
+    timepoints_h: list[float],
     *,
-    well_colors: List[str],
+    well_colors: list[str],
 ) -> None:
     """Redraw aggregate scatter plot with statistics for multiple timepoints.
 
@@ -663,7 +662,7 @@ def update_scatter_menus(ctx) -> None:
 
     # Legacy stat-string combos — kept hidden but in sync so old
     # exporters and the save-figure helpers continue to work.
-    statistics: List[str] = []
+    statistics: list[str] = []
     for ch in channels:
         statistics.append(f"Mean Fluorescence {ch.upper()}")
         statistics.append(f"Fraction On {ch.upper()}")

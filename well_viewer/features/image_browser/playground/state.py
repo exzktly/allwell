@@ -22,10 +22,10 @@ class PlaygroundState:
     """Playground frame selection + method/params + reference fields + view."""
 
     # frame selection (match the image_table option helpers' tokens)
-    well: "str | None" = None
-    channel: "str | None" = None        # uppercase fluor token, e.g. "GFP"
-    timepoint: "str | None" = None
-    fov: "str | None" = None
+    well: str | None = None
+    channel: str | None = None        # uppercase fluor token, e.g. "GFP"
+    timepoint: str | None = None
+    fov: str | None = None
 
     # correction method selection (same values as the Analyze tab / pipeline)
     flatfield_mode: str = "none"        # FLATFIELD_MODES
@@ -36,10 +36,10 @@ class PlaygroundState:
     mesh_sigma: float = 3.0
 
     # reference-well models (empty_well / basic), keyed by lowercase channel token
-    background_well: "str | None" = None
+    background_well: str | None = None
     ff_field_by_chan: dict = field(default_factory=dict)   # token -> mean-1 field
     bg_field_by_chan: dict = field(default_factory=dict)   # token -> raw additive field
-    model_well: "str | None" = None     # which well the cached fields were built from
+    model_well: str | None = None     # which well the cached fields were built from
 
     # view
     source: str = "corrected"           # "raw" | "flatfield" | "corrected"
@@ -58,7 +58,7 @@ class PlaygroundState:
     # Frame-local binary threshold (intensity units). None ⇒ fall back to the
     # channel's app-wide ThreshFracOn as the default; editing it here NEVER
     # writes back to the app-wide cell-gating value.
-    threshold: "float | None" = None
+    threshold: float | None = None
     # QC size-based cleanup (px², 0 = no bound) — drops mask labels outside the
     # bounds from the overlay / binary, previewing the pipeline's debris gate.
     qc_min_area: float = 0.0

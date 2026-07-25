@@ -36,3 +36,8 @@ htmlcov/
 .pytest-report.xml
 .mplcache/
 .pytest-slow-reports/
+
+# Slow-lane JUnit reports under a SLOW_REPORT_DIR override — scripts/test_slow.sh
+# takes the directory from the environment, so a hand-run sweep lands outside the
+# default above and would otherwise show up as untracked.
+.slow-*/

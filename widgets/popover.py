@@ -36,13 +36,13 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt, Signal  # noqa: E402
-from PySide6.QtGui import QColor, QGuiApplication  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtWidgets import (
     QFrame, QGraphicsDropShadowEffect, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
+import theme
 
 
 class Popover(QWidget):
@@ -179,17 +179,17 @@ class Popover(QWidget):
 
     # ``Qt.Popup`` already closes on outside-click and Esc; mirror Esc for
     # robustness and emit the signals.
-    def keyPressEvent(self, event) -> None:  # noqa: N802
+    def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key_Escape:
             self.close()
             return
         super().keyPressEvent(event)
 
-    def showEvent(self, event) -> None:  # noqa: N802
+    def showEvent(self, event) -> None:
         super().showEvent(event)
         self.opened.emit()
 
-    def hideEvent(self, event) -> None:  # noqa: N802
+    def hideEvent(self, event) -> None:
         # Both ``Qt.Popup`` dismissal (outside-click / Esc) and an explicit
         # ``close()`` route through ``hide()`` → here. Emit ``closed`` once.
         super().hideEvent(event)

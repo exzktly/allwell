@@ -299,33 +299,6 @@ def _unique_name(name: Any, used: set) -> str:
     return f"{base} {i}"
 
 
-# ───────────────────────────────────────────────────────── replicate hygiene ──
-def _deoverlap_replicates(replicates: Any, *, allowed: Optional[set] = None) -> Optional[list[list[str]]]:
-    """Make ``replicates`` a partition (a well in ≤ 1 sub-list) ⊆ ``allowed``.
-
-    Returns ``None`` for an empty/absent input or when nothing survives.
-    """
-    if not replicates:
-        return None
-    seen: set = set()
-    out: list[list[str]] = []
-    for sub in replicates:
-        if not isinstance(sub, (list, tuple)):
-            continue
-        kept: list[str] = []
-        for w in sub:
-            t = _clean_token(w)
-            if t is None or t in seen:
-                continue
-            if allowed is not None and t not in allowed:
-                continue
-            seen.add(t)
-            kept.append(t)
-        if kept:
-            out.append(kept)
-    return out or None
-
-
 # ─────────────────────────────────────────────────────── building Selections ──
 def make_selection(*, name: Any, wells: Any, replicates: Any = None,
                    hidden: bool = False, color: Any = None, source: Any = "user",

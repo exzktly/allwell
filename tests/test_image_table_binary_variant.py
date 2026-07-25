@@ -14,11 +14,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
-from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C
+from well_viewer.features.image_browser.image_table.image_compose import (
     _binary_base, _binary_variant, _is_binary_variant,
 )
-from well_viewer.features.image_browser.image_table.state import ImageTableState  # noqa: E402
+from well_viewer.features.image_browser.image_table.state import ImageTableState
 
 
 def _fake_app(*, channels, active_channels=None):

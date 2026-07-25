@@ -18,9 +18,9 @@ pytest.importorskip("scipy")
 pytest.importorskip("skimage")
 pytest.importorskip("tifffile")
 
-import numpy as np  # noqa: E402
+import numpy as np
 
-from process_microscopy import _correct_image_group, parse_schema  # noqa: E402
+from process_microscopy import _correct_image_group, parse_schema
 
 _SCHEMA = parse_schema("experiment:channel:well:fov:timepoint")
 

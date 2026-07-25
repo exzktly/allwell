@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("matplotlib")
-import matplotlib  # noqa: E402
+import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from well_viewer.features.barplot.controller import BarItem, render_bar_items  # noqa: E402
+from well_viewer.features.barplot.controller import BarItem, render_bar_items
 
 
 def _item(key, mean, spread, frac, frac_spread, n_above, n_spread):

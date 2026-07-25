@@ -172,14 +172,6 @@ def sp_set_boundary_pct(ctx, value: float) -> None:
     _autocompute(ctx)
 
 
-def sp_set_show_hulls(ctx, on: bool) -> None:
-    st = _state(ctx)
-    if st is None:
-        return
-    st.show_hulls = bool(on)
-    _autocompute(ctx)
-
-
 def sp_set_summary_metric(ctx, key: str) -> None:
     """At Summary level, changing which FrameSummary field to project is a
     pure re-render (matrix already cached); nothing to recompute."""

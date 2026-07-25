@@ -14,13 +14,11 @@ Mirrors :mod:`well_viewer.features.qc.controller`.
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 from .region import CropRegion, compute_crop_pass, normalize_region
 from well_viewer.core.safe import swallowed
-
-_logger = logging.getLogger("well_viewer")
+from well_viewer.data.cache_projectors import project_verdict_column
 
 
 def get_crop_region(ctx) -> Optional[CropRegion]:
@@ -36,22 +34,20 @@ def apply_crop_to_cache(ctx, label: Optional[str] = None) -> None:
 
     With ``label`` given, only that well; otherwise every cached well. Writes an
     explicit all-pass column when there is no crop so the chokepoint stays
-    consistent across re-crops. Mirrors ``qc.controller.apply_qc_to_cache``.
+    consistent across re-crops. Shares the cache walk with
+    ``qc.controller.apply_qc_to_cache`` via
+    :func:`well_viewer.data.cache_projectors.project_verdict_column`.
 
     A8 residuals-ledger R1: takes ``ctx`` — region + row cache from typed state,
     so the crop projection is a pure ``ctx`` operation the row-fetch data service
     can call."""
     region = get_crop_region(ctx)
-    cache = ctx.state.dataset.cache
-    labels = [label] if label is not None else list(cache.keys())
-    for lbl in labels:
-        df = cache.get(lbl)
-        if df is None or df.empty:
-            continue
-        try:
-            df["Crop_Pass"] = compute_crop_pass(df, region).astype(int)
-        except Exception:  # never let the crop layer break the data path
-            _logger.exception("Crop: failed to compute Crop_Pass for well %s", lbl)
+    project_verdict_column(
+        ctx, label,
+        column="Crop_Pass",
+        verdict=lambda df: compute_crop_pass(df, region),
+        layer="Crop",
+    )
 
 
 def recompute_crop_all(ctx) -> None:

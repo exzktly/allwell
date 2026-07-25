@@ -224,10 +224,6 @@ def _default_spec(ctx):
     return spec
 
 
-def _channel_axis(spec) -> Optional[str]:
-    return spec.channel_axis()
-
-
 def _fixed_dims(spec) -> List[str]:
     return [d for d in _ROOT_DIMS if spec.rows.root != d and spec.cols.root != d]
 
@@ -419,12 +415,12 @@ class _Chip(QFrame):
         self._token = token
         self._press = None
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if e.button() == Qt.LeftButton:
             self._press = e.position().toPoint()
         super().mousePressEvent(e)
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         if self._press is None:
             return
         if (e.position().toPoint() - self._press).manhattanLength() < QApplication.startDragDistance():
@@ -462,19 +458,19 @@ class _DropZone(QFrame):
         tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
         return bool(self._accepts(tok))
 
-    def dragEnterEvent(self, e) -> None:  # noqa: N802
+    def dragEnterEvent(self, e) -> None:
         if self._ok(e):
             self._set_active(True)
             e.acceptProposedAction()
 
-    def dragMoveEvent(self, e) -> None:  # noqa: N802
+    def dragMoveEvent(self, e) -> None:
         if self._ok(e):
             e.acceptProposedAction()
 
-    def dragLeaveEvent(self, e) -> None:  # noqa: N802
+    def dragLeaveEvent(self, e) -> None:
         self._set_active(False)
 
-    def dropEvent(self, e) -> None:  # noqa: N802
+    def dropEvent(self, e) -> None:
         self._set_active(False)
         if self._ok(e):
             tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
@@ -1225,7 +1221,7 @@ class _StayOpenMenu(QMenu):
     ``stayOpen``, e.g. Select all / Select none) is clicked, so the user can tick
     several values in one pass. Other items and off-menu clicks close as usual."""
 
-    def mouseReleaseEvent(self, e):  # noqa: N802
+    def mouseReleaseEvent(self, e):
         act = self.activeAction()
         if act is not None and act.isEnabled() and (
                 act.isCheckable() or bool(act.property("stayOpen"))):

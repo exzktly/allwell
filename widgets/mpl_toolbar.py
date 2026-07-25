@@ -33,19 +33,19 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QPoint, Qt  # noqa: E402
-from PySide6.QtGui import QCursor  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QCursor
+from PySide6.QtWidgets import (
     QButtonGroup, QFrame, QHBoxLayout, QLabel, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets.icon_button import IconButton  # noqa: E402
+import theme
+from widgets.icon_button import IconButton
 
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
-    import matplotlib  # noqa: E402
+    import matplotlib
     matplotlib.use("QtAgg", force=False)
-    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as _NavToolbar  # noqa: E402
+    from matplotlib.backends.backend_qtagg import NavigationToolbar2QT as _NavToolbar
     _HAVE_MPL = True
 except Exception:  # pragma: no cover
     _HAVE_MPL = False
@@ -169,14 +169,14 @@ if _HAVE_MPL:
                 pass
             self.setStyleSheet(self._qss())
 
-        def closeEvent(self, event):  # noqa: N802 — Qt naming
+        def closeEvent(self, event):  # Qt naming
             self._detach_canvas()
             try:
                 super().closeEvent(event)
             except Exception:
                 pass
 
-        def deleteLater(self):  # noqa: N802 — Qt naming
+        def deleteLater(self):  # Qt naming
             self._detach_canvas()
             super().deleteLater()
 

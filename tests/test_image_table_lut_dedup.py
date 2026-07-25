@@ -11,10 +11,10 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table.state import (  # noqa: E402
+from well_viewer.features.image_browser.image_table.state import (
     Axis, ChannelSpec, TableSpec,
 )
-from well_viewer.features.image_browser.image_table.builder_view import (  # noqa: E402
+from well_viewer.features.image_browser.image_table.builder_view import (
     _table_channels,
 )
 

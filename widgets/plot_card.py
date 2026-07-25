@@ -32,27 +32,27 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QEvent, Qt, QTimer, Signal  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import QEvent, Qt, QTimer, Signal
+from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets.icon_button import IconButton  # noqa: E402
-from widgets.mpl_toolbar import MplToolbar  # noqa: E402
+import theme
+from widgets.icon_button import IconButton
+from widgets.mpl_toolbar import MplToolbar
 
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
-    import matplotlib  # noqa: E402
+    import matplotlib
     matplotlib.use("QtAgg", force=False)
     # Transparent legend backgrounds everywhere by default — legends sit over the
     # plot rather than masking it with an opaque panel. Individual call sites may
     # still override, but the app-wide default is transparent.
     matplotlib.rcParams["legend.framealpha"] = 0.0
     matplotlib.rcParams["legend.facecolor"] = "none"
-    from matplotlib.backends.backend_qtagg import (  # noqa: E402
+    from matplotlib.backends.backend_qtagg import (
         FigureCanvasQTAgg as _FigureCanvas, NavigationToolbar2QT as _NavToolbar,
     )
-    from matplotlib.figure import Figure as _Figure  # noqa: E402
+    from matplotlib.figure import Figure as _Figure
     _HAVE_MPL = True
 except Exception:  # pragma: no cover
     _HAVE_MPL = False
@@ -427,7 +427,7 @@ if _HAVE_MPL:
             try:
                 status = self._save_handler(png_bytes, label) or "Saved plot"
                 failed = False
-            except Exception as exc:  # noqa: BLE001 — surface to the user
+            except Exception as exc:  # surface to the user
                 status, failed = f"Save failed: {exc}", True
             try:
                 from widgets.toast import Toast

@@ -142,15 +142,6 @@ def _update_preview_impl(ctx, well_label: Optional[str]) -> None:
             len(fluor), len(tophat_fluor), len(overlay), len(mask),
         )
 
-    def _norm_fov(value: object) -> str:
-        raw = str(value or "").strip()
-        if not raw:
-            return ""
-        try:
-            return f"{float(raw):g}"
-        except Exception:
-            return raw
-
     def _fov_sort_key(token: str) -> tuple[int, float, str]:
         try:
             return (0, float(token), token)
@@ -162,7 +153,7 @@ def _update_preview_impl(ctx, well_label: Optional[str]) -> None:
             fov_norm
             for refs in (fluor, overlay, mask, tophat_fluor)
             for (fov, _tp) in refs.keys()
-            for fov_norm in [_norm_fov(fov)]
+            for fov_norm in [review_norm_fov(fov)]
             if fov_norm
         },
         key=_fov_sort_key,

@@ -171,7 +171,7 @@ def remove_directory(path: Path, *, retries: int = 4, backoff: float = 0.5) -> N
             else:
                 log.debug("Removed temporary directory: %s", path)
             return
-        except Exception as exc:  # noqa: BLE001 — every Errno → keep trying
+        except Exception as exc:  # every Errno → keep trying
             last_exc = exc
             if attempt + 1 < retries:
                 time.sleep(backoff * (attempt + 1))
@@ -586,7 +586,7 @@ _OUTPUT_IMAGE_EXTS = {".tif", ".tiff", ".png"}
 # client can share one implementation instead of hand-copying twins — importing
 # this module drags in numpy/tifffile/skimage, which the client must avoid.
 # Re-exported here so existing ``pipeline.io`` importers keep working.
-from pipeline.incremental_keys import (  # noqa: E402,F401  (re-export, audit A2)
+from pipeline.incremental_keys import (  # noqa: F401 (re-export, audit A2)
     fov_tp_from_name as _fov_tp_from_name,
     incremental_done_fov_keys,
     read_done_fov_keys,

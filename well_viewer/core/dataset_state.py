@@ -19,17 +19,11 @@ from typing import Callable
 import pandas as pd
 
 from well_viewer.data.data_loading import parse_timepoint_hours
+from well_viewer.data.image_resolver import normalize_numeric_token
 
-
-def _norm_fov(value: object) -> str:
-    """Normalise a raw FOV token — numeric strings collapse to ``%g`` form."""
-    raw = str(value or "").strip()
-    if not raw:
-        return ""
-    try:
-        return f"{float(raw):g}"
-    except ValueError:
-        return raw
+# Local alias for the shared numeric-token normaliser: a raw FOV token collapses
+# to ``%g`` form so ``1``, ``01`` and ``1.0`` index the same field of view.
+_norm_fov = normalize_numeric_token
 
 
 @dataclass

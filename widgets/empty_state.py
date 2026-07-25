@@ -19,13 +19,13 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
     QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets import icons  # noqa: E402
+import theme
+from widgets import icons
 
 
 class EmptyState(QWidget):
@@ -114,7 +114,7 @@ class EmptyState(QWidget):
             icons.make_pixmap(self._icon_name, "text_faint", px, dpr or 1.0)
         )
 
-    def showEvent(self, event):  # noqa: N802
+    def showEvent(self, event):
         self._refresh_glyph()
         super().showEvent(event)
 

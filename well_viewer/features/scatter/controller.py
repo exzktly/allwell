@@ -20,7 +20,7 @@ from well_viewer.domain.ratio_models import is_ratio_key
 from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
-from well_viewer.features.scatter.collect import (  # noqa: F401  (re-export)
+from well_viewer.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,
     collect_scatter_data,
     get_all_timepoints,
@@ -31,7 +31,7 @@ from well_viewer.features.scatter.gating import (
     render_scatter_points,
 )
 
-from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix  # noqa: E501
+from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 

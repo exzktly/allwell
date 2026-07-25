@@ -8,10 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 pytest.importorskip("PySide6")
-import numpy as np  # noqa: E402
-from PySide6.QtWidgets import QLineEdit  # noqa: E402
+import numpy as np
+from PySide6.QtWidgets import QLineEdit
 
-from well_viewer.features.image_browser.review_image.renderer import review_image_resolve_lut  # noqa: E402
+from well_viewer.features.image_browser.review_image.renderer import review_image_resolve_lut
 
 
 def _ctx(min_text, max_text):

@@ -26,25 +26,6 @@ _STAT_LABELS = {
 }
 
 
-def _compute_statistic_arr(
-    arr: np.ndarray, statistic: str, threshold: float
-) -> Optional[float]:
-    """Compute the per-bucket summary on a numpy array; ``arr`` may be empty."""
-    if arr.size == 0:
-        return None
-    if statistic == "fraction":
-        return float(np.mean(arr > threshold))
-    if statistic == "mean_all":
-        # No per-channel threshold filter — pool every included cell.
-        return float(arr.mean())
-    above = arr[arr > threshold]
-    if above.size == 0:
-        return None
-    if statistic == "median":
-        return float(np.median(above))
-    return float(above.mean())
-
-
 def collect_group_values(
     ctx,
     grp,

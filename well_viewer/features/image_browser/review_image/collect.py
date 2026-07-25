@@ -19,6 +19,7 @@ import numpy as _np
 import pandas as pd
 
 from well_viewer.data.data_loading import df_included_mask, get_rows, resolve_value_series
+from well_viewer.data.image_resolver import normalize_numeric_token
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_ref_by_fov_tp
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.ui_helpers import norm_timepoint
@@ -198,7 +199,7 @@ def flatfield_field_for(ctx, channel: str, fluor_arr, tp=None):
                         arrs.extend(_load_arrays_from_refs(
                             refs, limit=_FLATFIELD_PREVIEW_MAX_SAMPLES))
                 field = _ffc.estimate_basic_flatfield(arrs) if arrs else None
-    except Exception:  # noqa: BLE001 — a failed preview field falls back to raw
+    except Exception:  # a failed preview field falls back to raw
         _logger.exception("flat-field preview recompute failed (mode=%s)", mode)
         field = None
 
@@ -467,14 +468,6 @@ def apply_review_overrides_to_cache(ctx, label: Optional[str] = None) -> None:
 
 
 def review_row_keys(ctx, row: dict) -> Tuple[str, str, str]:
-    def _norm(v: object) -> str:
-        s = str(v or "").strip()
-        if not s:
-            return ""
-        try:
-            return f"{float(s):g}"
-        except Exception:
-            return s
     def _pick(*names: str) -> object:
         for name in names:
             if name in row:
@@ -486,9 +479,9 @@ def review_row_keys(ctx, row: dict) -> Tuple[str, str, str]:
                 return lowered[key]
         return ""
     return (
-        _norm(_pick("fov", "FOV")),
+        review_norm_fov(_pick("fov", "FOV")),
         norm_timepoint(ctx, _pick("timepoint", "tp", "time", "time_h", "timepoint_hours")),
-        _norm(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
+        review_norm_fov(_pick("nucleus_id", "nucleus id", "nucleusId", "nucleusID")),
     )
 
 
@@ -586,10 +579,13 @@ def review_effective_included(ctx, label: str, row: dict) -> str:
 
 
 def review_norm_fov(v: object) -> str:
-    s = str(v or "").strip()
-    if not s:
-        return ""
-    try:
-        return f"{float(s):g}"
-    except Exception:
-        return s
+    """The review side's name for the shared numeric-token normaliser.
+
+    FOV tokens reach the viewer from filenames, CSV columns and combo text, so
+    ``1``, ``01`` and ``1.0`` all denote the same field of view and have to
+    collapse to one key before anything compares them. That collapsing rule is
+    :func:`well_viewer.data.image_resolver.normalize_numeric_token`; this name
+    is kept because the image-table and review-image call sites are written
+    against it.
+    """
+    return normalize_numeric_token(v)

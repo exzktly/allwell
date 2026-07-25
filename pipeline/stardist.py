@@ -198,7 +198,7 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
                      float(np.nanmin(dist)), float(np.nanmax(dist)),
                      int((~np.isfinite(dist)).sum()),
                      tuple(np.shape(prob)), tuple(np.shape(dist)))
-        except Exception as exc:                                # noqa: BLE001
+        except Exception as exc:
             log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
 
     _t0 = time.perf_counter()

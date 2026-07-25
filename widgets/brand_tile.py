@@ -18,11 +18,11 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QRectF, QSize, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QPainter  # noqa: E402
-from PySide6.QtWidgets import QSizePolicy, QWidget  # noqa: E402
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QSizePolicy, QWidget
 
-import theme  # noqa: E402
+import theme
 
 
 class BrandTile(QWidget):
@@ -56,7 +56,7 @@ class BrandTile(QWidget):
 
     minimumSizeHint = sizeHint
 
-    def paintEvent(self, _event) -> None:  # noqa: N802
+    def paintEvent(self, _event) -> None:
         c = theme.Colors
         s = min(self.width(), self.height())
         ox = (self.width() - s) / 2.0

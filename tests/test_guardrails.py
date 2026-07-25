@@ -60,7 +60,13 @@ _HARD_FAIL = True
 # Phase 10 deleted the legacy __getattr__ widget forwarder; WidgetRegistry now
 # stamps registered widgets directly onto the bound app, so plain attribute
 # lookup resolves them and the forwarder is no longer needed.
-RUNTIME_APP_LINE_BUDGET = 1296
+# The redundancy audit deleted the 86 methods that no call site anywhere in the
+# repo — app, tests, or docs — still named. Nearly all were one-line delegation
+# shims left behind after the ctx migration rewired their callers to the
+# controller functions directly, so the shim survived with nothing pointing at
+# it. 199 methods → 113, and the imports they were the sole users of went with
+# them.
+RUNTIME_APP_LINE_BUDGET = 876
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,
@@ -69,12 +75,12 @@ RUNTIME_APP_LINE_BUDGET = 1296
 # (_plot_chan_cb, _review_image_chan_cb, _bar_tp_cb, _bar_swarm_cb,
 # _bar_violin_cb, _violin_bw_edit, _entry_edit, _cdf_xmin_edit, _cdf_xmax_edit,
 # _preview_fov_cb) — builders register them via WidgetRegistry. 23 → 13 actual.
-RUNTIME_APP_ATTR_BUDGET = 15
+RUNTIME_APP_ATTR_BUDGET = 13
 
 # Redundancy-metric ceilings (teardown-completion Phase 2). Each tracks a
 # concrete duplication the teardown consumes; like the budgets above they only
 # ratchet down. A PR that adds a parallel implementation trips one of these.
-RUNTIME_APP_GETATTR_BUDGET = 206        # defensive getattr/hasattr probes
+RUNTIME_APP_GETATTR_BUDGET = 5          # defensive getattr/hasattr probes
 RUNTIME_APP_PERSIST_WRAPPER_BUDGET = 0   # save/load persistence wrappers
 TAB_CTX_APP_UNWRAP_BUDGET = 0           # `app = ctx.app` unwraps in tabs/ (Phase 6+7 collapsed)
 

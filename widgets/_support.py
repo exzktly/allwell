@@ -14,9 +14,9 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-import theme  # noqa: E402  (after the sys.path fix above)
-from PySide6.QtCore import QEvent, QObject  # noqa: E402
-from PySide6.QtGui import QColor  # noqa: E402
+import theme  # after the sys.path fix above
+from PySide6.QtCore import QEvent, QObject
+from PySide6.QtGui import QColor
 
 __all__ = [
     "theme", "lerp_color", "with_alpha", "run_demo",
@@ -78,7 +78,7 @@ def install_qss_refresh(widget, qss_factory) -> None:
            load-time stalls of ~20s observed before the guard.
         """
 
-        def eventFilter(self, obj, event):  # noqa: N802 — Qt naming
+        def eventFilter(self, obj, event):  # Qt naming
             if not isinstance(event, QEvent):
                 return False
             if event.type() == QEvent.StyleChange:

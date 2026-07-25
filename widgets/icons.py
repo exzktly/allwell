@@ -18,11 +18,11 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QByteArray, Qt  # noqa: E402
-from PySide6.QtGui import QIcon, QPainter, QPixmap  # noqa: E402
-from PySide6.QtSvg import QSvgRenderer  # noqa: E402
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QIcon, QPainter, QPixmap
+from PySide6.QtSvg import QSvgRenderer
 
-import theme  # noqa: E402
+import theme
 
 # name -> inner SVG markup (everything between <svg> tags)
 _GLYPHS: dict[str, str] = {

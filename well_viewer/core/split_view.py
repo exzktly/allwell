@@ -219,7 +219,7 @@ class _SplitFocusWatcher(QObject):
         # only catches the exception, not the warning).
         self._connected = False
 
-    def on_focus_changed(self, _old, new) -> None:  # noqa: N802 (Qt slot)
+    def on_focus_changed(self, _old, new) -> None:  # Qt slot
         try:
             active = bool(self._app._ctx.runtime.split.active)
         except RuntimeError:

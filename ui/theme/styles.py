@@ -19,7 +19,7 @@ from typing import Dict
 # hex codes for the same surface. Plot-specific tokens (PLOT_BG / PLOT_GRD /
 # PLOT_SPN / PLOT_TXT) intentionally stay independent — those drive the
 # Publication-mode plot canvas, which is white-on-dark on purpose.
-from theme import Colors as _C  # noqa: E402
+from theme import Colors as _C
 
 def _build_dark_theme() -> Dict[str, str]:
     # Rebuilt on demand (not captured once) so a theme switch — which mutates
@@ -78,7 +78,7 @@ _DARK_THEME: Dict[str, str] = _build_dark_theme()
 # and ``well_viewer.plate_layout.WELL_COLORS``) reads the same 96 entries
 # in the same order. Adjusting the palette only requires editing the
 # source tuple in ``theme.py``.
-from theme import WELL_COLORS_TUPLE as _WELL_COLORS_TUPLE  # noqa: E402
+from theme import WELL_COLORS_TUPLE as _WELL_COLORS_TUPLE
 
 _WELL_COLORS: Dict[str, str] = {
     f"WELL_COLOR_{_i}": _hex
@@ -125,5 +125,5 @@ def refresh_from_theme(_name: "str | None" = None) -> None:
 
 
 # Keep get_color()/constants in sync when the app applies a non-default theme.
-import theme as _theme  # noqa: E402
+import theme as _theme
 _theme.register_theme_hook(refresh_from_theme)

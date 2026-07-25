@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("imageio")
 pytest.importorskip("tifffile")
 
-from pipeline.io import (  # noqa: E402
+from pipeline.io import (
     merge_images_into_zip,
     merge_records_into_csv,
     read_done_fov_keys,

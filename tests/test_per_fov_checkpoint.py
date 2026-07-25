@@ -25,7 +25,7 @@ import pytest
 pytest.importorskip("numpy")
 pytest.importorskip("tifffile")
 
-from process_microscopy import (  # noqa: E402
+from process_microscopy import (
     _FOV_CHECKPOINT_SCHEMA,
     _checkpoint_paths,
     _fov_stem,

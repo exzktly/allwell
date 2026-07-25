@@ -17,7 +17,6 @@ import logging
 
 from PySide6.QtWidgets import QHBoxLayout
 
-from well_viewer.core.safe import swallowed
 # Sub-tab body/sidebar builders are imported *inside* each branch of
 # ``build_image_browser_subtab`` (not at module scope) so that a build profile
 # which drops a sub-tab — physically excluding its module from the binary —
@@ -26,18 +25,6 @@ from well_viewer.core.safe import swallowed
 # build is a god-method reached through the core ``image_browser_subtab_app_bridge``.)
 
 _logger = logging.getLogger("well_viewer")
-
-
-def image_browser_current_subtab(win) -> str:
-    """Leaf name of the active Image Browser sub-tab ("" when none/unbuilt)."""
-    sub = win._ctx.runtime.image_browser.subtabs
-    if sub is None or sub.count() == 0:
-        return ""
-    try:
-        return sub.tabText(sub.currentIndex())
-    except Exception:
-        swallowed()
-        return ""
 
 
 def build_image_browser_subtab(ctx, idx: int) -> None:

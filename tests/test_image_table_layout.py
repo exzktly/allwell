@@ -7,7 +7,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C
 
 
 def _fake_app(*, wells, channels, active_wells=None, active_channels=None,

@@ -25,7 +25,7 @@ _logger = logging.getLogger(__name__)
 # ``bar_groups_to_dict`` / ``bar_groups_from_data`` are pure domain transforms;
 # they moved to ``well_viewer.domain.bar_groups`` so the domain layer can use
 # them without importing this feature. Re-exported here for existing callers.
-from well_viewer.domain.bar_groups import (  # noqa: E402,F401
+from well_viewer.domain.bar_groups import (  # noqa: F401
     bar_groups_from_data,
     bar_groups_to_dict,
 )
@@ -34,7 +34,7 @@ from well_viewer.domain.bar_groups import (  # noqa: E402,F401
 # renderer/state functions below still call ``collect_bar_items`` / ``BarItem``,
 # and external callers (runtime_app, batch_export, export.service, tests) import
 # these from here — so re-export them.
-from well_viewer.features.barplot.collect import (  # noqa: E402,F401
+from well_viewer.features.barplot.collect import (  # noqa: F401
     BarItem,
     FC_STATE_OFF,
     _bar_debug,

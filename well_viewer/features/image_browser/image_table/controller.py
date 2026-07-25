@@ -37,7 +37,7 @@ from well_viewer.core.channel_state_controller import set_thresh_frac_on
 # loading, mask/threshold rendering, RGB composer, overlay) lives in
 # ``image_compose``. Re-exported so call sites + external importers
 # (playground, grid_view) are unchanged.
-from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: F401
     LUT_COLORS,
     LUT_COLOR_NAMES,
     NUC_SEG_TOKEN,
@@ -74,7 +74,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
 )
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
-from well_viewer.features.image_browser.image_table import facet_view as _facet  # noqa: E402
+from well_viewer.features.image_browser.image_table import facet_view as _facet
 
 
 
@@ -142,7 +142,7 @@ def _rebuild_layout_for_well_change(ctx) -> None:
 # The layout/dimension layer (axis math, per-dim option lists, channel
 # enumeration, cell snapshot) lives in ``grid_layout``. Re-exported so call
 # sites + external importers (playground) are unchanged.
-from well_viewer.features.image_browser.image_table.grid_layout import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.grid_layout import (  # noqa: F401
     _DIM_KEY,
     _all_dim_options,
     _axis_dim_values,
@@ -234,7 +234,7 @@ def image_table_rebuild_grid(ctx) -> None:
 # and fill every cell, holding off-axis dims fixed) lives in ``build_layout.py``.
 # Re-exported here so call sites (tab_view, view_state restore, presets) and the
 # playground importer resolve the same names unchanged.
-from well_viewer.features.image_browser.image_table.build_layout import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.build_layout import (  # noqa: F401
     _AXIS_LABEL,
     _AXIS_MAX,
     _ROW_MAX,
@@ -896,7 +896,7 @@ def image_table_generate(ctx) -> None:
 
 # The export cluster (settings dialog, figure builder, PNG/SVG save+copy)
 # lives in ``export``. Re-exported so the tab_view toolbar wiring is unchanged.
-from well_viewer.features.image_browser.image_table.export import (  # noqa: E402,F401
+from well_viewer.features.image_browser.image_table.export import (  # noqa: F401
     _export_opts,
     image_table_open_export_settings,
     _build_export_figure,

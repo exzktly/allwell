@@ -10,8 +10,8 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.persistence import sample_definitions as sd  # noqa: E402
-from well_viewer.persistence.registry import build_persistence_registry  # noqa: E402
+from well_viewer.persistence import sample_definitions as sd
+from well_viewer.persistence.registry import build_persistence_registry
 
 
 def test_sample_definitions_registered_for_autosave():

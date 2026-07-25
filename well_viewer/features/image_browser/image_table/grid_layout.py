@@ -14,7 +14,7 @@ from well_viewer.domain.viewer_state import parse_rc
 
 from typing import Dict, List, Optional  # noqa: F401
 
-from well_viewer.features.image_browser.image_table.image_compose import (  # noqa: F401
+from well_viewer.features.image_browser.image_table.image_compose import (
     NUC_SEG_TOKEN,
     OVERLAY_CHAN,
     _binary_variant,

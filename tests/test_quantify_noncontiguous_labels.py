@@ -27,9 +27,9 @@ pytest.importorskip("scipy")
 pytest.importorskip("skimage")
 pytest.importorskip("tifffile")
 
-import numpy as np  # noqa: E402
+import numpy as np
 
-from process_microscopy import _quantify_image_group, parse_schema  # noqa: E402
+from process_microscopy import _quantify_image_group, parse_schema
 
 
 def _gapped_label_image():

@@ -44,7 +44,7 @@ class _AspectImage(QLabel):
         self.setMinimumWidth(1)
         self._apply()
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+    def resizeEvent(self, event) -> None:  # Qt override
         self._apply()
         super().resizeEvent(event)
 

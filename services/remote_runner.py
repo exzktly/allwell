@@ -2455,16 +2455,16 @@ class _BatchedRemoteProcess:
         # of that log line is still under investigation; if it turns
         # out to be cache-dir pollution we can switch later, with
         # evidence.
-        key = runner._cache.cache_key(zipped)  # noqa: SLF001
+        key = runner._cache.cache_key(zipped)
         run_id = "run-" + _compute_run_id(key, pipeline_argv)
-        remote_input = runner._cache.remote_dataset_dir(key)  # noqa: SLF001
+        remote_input = runner._cache.remote_dataset_dir(key)
         remote_output = (
             f"{runner.host.remote_staging_dir}/runs/{run_id}/out"
         )
         remote_pidfile = (
             f"{runner.host.remote_staging_dir}/runs/{run_id}/run.pid"
         )
-        runner._cache._ssh_run(  # noqa: SLF001
+        runner._cache._ssh_run(
             ["mkdir", "-p", remote_input, remote_output],
             check=True,
         )
@@ -2701,9 +2701,9 @@ class _BatchedRemoteProcess:
                     inner_progress: "Callable[[float], None] | None" = _scaled_progress
                 else:
                     inner_progress = None
-                sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(  # noqa: SLF001
+                sent_bytes, _elapsed, rc = self._runner._cache.upload_subset(
                     batch_zips,
-                    self._runner._run.remote_input_dir,  # noqa: SLF001
+                    self._runner._run.remote_input_dir,
                     log_fn=self._log,
                     progress_fn=inner_progress,
                     stop_event=self._stop,
@@ -2725,10 +2725,10 @@ class _BatchedRemoteProcess:
                 # once at startup and only sees the zips currently
                 # present (i.e. just this batch's, because the
                 # Fetcher cleaned out the previous one).
-                remote_argv = self._runner._build_remote_argv(  # noqa: SLF001
+                remote_argv = self._runner._build_remote_argv(
                     self._pipeline_argv,
-                    self._runner._run.remote_input_dir,  # noqa: SLF001
-                    self._runner._run.remote_output_dir,  # noqa: SLF001
+                    self._runner._run.remote_input_dir,
+                    self._runner._run.remote_output_dir,
                     self._output_filter,
                     self._zipped.mode,
                 )
@@ -2749,7 +2749,7 @@ class _BatchedRemoteProcess:
                 # node. No cache-hit fast path exists in batched mode.
                 remote_cmd = _compose_remote_cmd(
                     self._runner.host.compute_launcher,
-                    self._runner._run.remote_pidfile,  # noqa: SLF001
+                    self._runner._run.remote_pidfile,
                     remote_argv,
                     cache_hit=False,
                 )
@@ -2891,7 +2891,7 @@ class _BatchedRemoteProcess:
                 self._log(
                     "[remote] local auto-threshold pass produced no new defaults.\n"
                 )
-        except Exception as exc:  # noqa: BLE001 — informational, never fatal
+        except Exception as exc:  # informational, never fatal
             self._log(
                 f"[remote] warn: local auto-threshold pass failed: {exc}\n"
             )
@@ -3528,7 +3528,7 @@ class RemoteRunner:
         })
         mk_target = f"{self.host.remote_project_dir}"
         mkdirs = [f"{mk_target}/{d}" for d in remote_subdirs]
-        self._cache._ssh_run(  # noqa: SLF001
+        self._cache._ssh_run(
             ["mkdir", "-p", mk_target, *mkdirs],
             check=True,
         )
@@ -3699,7 +3699,7 @@ class RemoteRunner:
         remote_output = f"{self.host.remote_staging_dir}/runs/{run_id}/out"
         remote_pidfile = f"{self.host.remote_staging_dir}/runs/{run_id}/run.pid"
 
-        self._cache._ssh_run(  # noqa: SLF001 — short-circuit reuse of ssh helper
+        self._cache._ssh_run(  # short-circuit reuse of ssh helper
             ["mkdir", "-p", remote_output],
             check=True,
         )
@@ -3924,7 +3924,7 @@ class RemoteRunner:
         if dry_run:
             self._log_would_delete(run_dir, label=f"run dir {run.run_id}", log=log)
         else:
-            self._cache._ssh_run(  # noqa: SLF001
+            self._cache._ssh_run(
                 ["rm", "-rf", run_dir],
                 check=False,
             )
@@ -3938,7 +3938,7 @@ class RemoteRunner:
                     log=log,
                 )
             else:
-                self._cache._ssh_run(  # noqa: SLF001
+                self._cache._ssh_run(
                     ["rm", "-rf", cache_dir],
                     check=False,
                 )
@@ -3966,7 +3966,7 @@ class RemoteRunner:
             f"echo BYTES $_b; "
             f"echo FILES $_f"
         )
-        result = self._cache._ssh_script(script, check=False)  # noqa: SLF001
+        result = self._cache._ssh_script(script, check=False)
         out = (result.stdout if result is not None else "") or ""
         if "MISSING" in out:
             log(
@@ -4184,7 +4184,7 @@ class RemoteRunner:
         if run is None:
             return set()
         try:
-            listing = self._cache._ssh_script(  # noqa: SLF001
+            listing = self._cache._ssh_script(
                 f"ls -1 {run.remote_output_dir}/*_out.zip 2>/dev/null || true",
                 check=False,
             )
@@ -4281,7 +4281,7 @@ class RemoteRunner:
         if self._fetcher is not None:
             try:
                 self._fetcher.cancel()
-            except Exception:  # noqa: BLE001 — best-effort
+            except Exception:  # best-effort
                 swallowed()  # was: pass (silent except)
         if self._run is None:
             return

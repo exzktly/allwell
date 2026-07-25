@@ -27,7 +27,7 @@ SCRIPTS_DIR = REPO_ROOT / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import _bootstrap_lib as bl  # noqa: E402
+import _bootstrap_lib as bl
 
 
 # ── _ssh_run: -i flag handling (v5.2.2) ────────────────────────────────────

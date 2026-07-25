@@ -12,7 +12,7 @@ import pytest
 
 pytestmark = pytest.mark.qt
 
-from well_viewer.core.channel_state_controller import (  # noqa: E402
+from well_viewer.core.channel_state_controller import (
     set_active_channel,
     update_channel_selector,
 )

@@ -488,7 +488,7 @@ def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
             fill=False, edgecolor=GATE_COLOR, linewidth=1.2,
             linestyle="--", zorder=20,
         )
-        rect._scatter_gate_artist = True  # noqa: SLF001 (tag for our own use)
+        rect._scatter_gate_artist = True  # tag for our own use
         ax.add_patch(rect)
 
         # Corner handles advertise that the box is editable by dragging its
@@ -502,7 +502,7 @@ def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
                 marker="s", s=28, facecolors="white", edgecolors=GATE_COLOR,
                 linewidths=1.0, zorder=22,
             )
-            handles._scatter_gate_artist = True  # noqa: SLF001
+            handles._scatter_gate_artist = True
 
         rows = compute_gate_stats(scatter_data, gn, tps_list)
         # Lead the label with the gate's name so it matches the Cell Gating
@@ -530,7 +530,7 @@ def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
                 bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
                           edgecolor="none", alpha=0.7),
             )
-            ann._scatter_gate_artist = True  # noqa: SLF001
+            ann._scatter_gate_artist = True
             ann.set_clip_on(False)
 
 

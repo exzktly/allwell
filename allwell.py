@@ -27,7 +27,7 @@ _boot_diag.install_excepthook()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")
-from PySide6.QtCore import Qt, QTimer, Signal, QRectF
+from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -160,8 +160,6 @@ def _strip_install_help(md_text: str) -> str:
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
-    threshold_changed = Signal(float)
-
     def __init__(self, data_path: Path | None = None) -> None:
         super().__init__()
         self.setWindowTitle("All-Well")
@@ -170,7 +168,6 @@ class AllWellApp(QMainWindow):
 
         self._review: QWidget | None = None
         self._analyze: QWidget | None = None
-        self._cell_threshold = 0.0
 
         self._build_ui()
         self._install_shortcuts()
@@ -1101,7 +1098,7 @@ class AllWellApp(QMainWindow):
         app = self
 
         class _RingHandler(_logging.Handler):
-            def emit(self, record):  # noqa: N802
+            def emit(self, record):
                 try:
                     line = self.format(record)
                     ring.append(line)
@@ -1253,7 +1250,7 @@ class AllWellApp(QMainWindow):
         except Exception:
             swallowed()  # was: pass (silent except)
 
-    def closeEvent(self, event) -> None:  # noqa: N802
+    def closeEvent(self, event) -> None:
         self._save_window_state()
         if self._review is not None and hasattr(self._review, "_persistence"):
             try:
@@ -1280,25 +1277,6 @@ class AllWellApp(QMainWindow):
                 swallowed()
         super().closeEvent(event)
 
-    # ── Cross-tab threshold ───────────────────────────────────────────────
-    def get_cell_threshold(self) -> float:
-        if self._analyze is not None and getattr(self._analyze, "_cell_properties_tab", None) is not None:
-            try:
-                return float(self._analyze._cell_properties_tab.get_threshold())
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        return self._cell_threshold
-
-    def set_cell_threshold(self, value: float) -> None:
-        self._cell_threshold = float(value)
-        if self._analyze is not None and getattr(self._analyze, "_cell_properties_tab", None) is not None:
-            try:
-                self._analyze._cell_properties_tab.set_threshold(self._cell_threshold)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        self.threshold_changed.emit(self._cell_threshold)
-
-
 def _install_combobox_popup_widener() -> None:
     """Patch QComboBox.showPopup so the popup view sizes itself to the
     widest item text instead of inheriting the field's width — dropdown
@@ -1309,7 +1287,7 @@ def _install_combobox_popup_widener() -> None:
     QComboBox._aw_popup_widened = True
     _original_show = QComboBox.showPopup
 
-    def _wide_show(self) -> None:  # noqa: N802 — Qt API name
+    def _wide_show(self) -> None:  # Qt API name
         view = self.view()
         if view is not None:
             fm = view.fontMetrics()

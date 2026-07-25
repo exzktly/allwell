@@ -1185,7 +1185,7 @@ class _AutoThresholdWorker(QThread):
         self._well_labels = list(well_labels) if well_labels else []
         self._in_dir = in_dir
 
-    def run(self) -> None:  # noqa: D401 - QThread override
+    def run(self) -> None:  # QThread override
         # Stream traceback into the log drawer too — the previous "fail
         # silently with just an exception message" behaviour made it
         # impossible to tell *why* the button hung up.

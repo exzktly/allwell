@@ -72,6 +72,7 @@ from skimage.segmentation import watershed
 from util.well_token import (
     split_background_wells as _split_background_wells,
     background_well_key as _bg_well_key,
+    canonical_well_label as _canonical_well_label,
 )
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
@@ -101,8 +102,8 @@ def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
 # ``pipeline.stardist`` module (TensorFlow is imported lazily there; the model
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
-import pipeline.stardist as _stardist  # noqa: E402
-from pipeline.stardist import (  # noqa: E402,F401
+import pipeline.stardist as _stardist
+from pipeline.stardist import (
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
 )
@@ -146,7 +147,7 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # ``pipeline.io`` module. Re-exported so the many call sites here (and the
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
-from pipeline.io import (  # noqa: E402,F401
+from pipeline.io import (  # noqa: F401
     _AtomicTextHandle, _fsync_path,
     _commit_staging_dir,
     _safe_atomic_text_write,
@@ -227,7 +228,7 @@ def _dump_well_failure_trace(output_dir: Path, well_label: str, exc: BaseExcepti
             fh.write("\n")
             fh.write(_tb.format_exc())
         return err_path
-    except Exception:                # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -264,7 +265,7 @@ def _dump_fov_failure_trace(
             fh.write("\n")
             fh.write(_tb.format_exc())
         return err_path
-    except Exception:                # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -352,7 +353,7 @@ def _ensure_pipeline_io_ready() -> None:
             stream.write("")
             stream.flush()
             return True
-        except Exception:  # noqa: BLE001 — broken streams raise anything
+        except Exception:  # broken streams raise anything
             return False
 
     if not _probe(sys.stdout):
@@ -383,18 +384,16 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 96-well plate helpers
 # ---------------------------------------------------------------------------
-
-# Valid well names: A1/A01 – H12  (rows A-H, columns 1-12 or 01-12)
-_WELL_RE = re.compile(r"^([A-Ha-h])(\d{1,2})$")
-
-
-def is_valid_well_name(stem: str) -> bool:
-    """Return True if *stem* (filename without extension) is a valid 96-well position."""
-    m = _WELL_RE.match(stem)
-    if not m:
-        return False
-    col = int(m.group(2))
-    return 1 <= col <= 12
+#
+# The 96-well parser (A1/A01 – H12, rows A-H, columns 1-12) is
+# ``util.well_token.canonical_well_label``, imported above as
+# ``_canonical_well_label``. The pipeline used to carry its own regex plus an
+# is-valid wrapper, validate a name with one and then re-match it with the
+# other to build the canonical label. The two agreed on every token except one:
+# the canonicaliser strips surrounding whitespace and the pipeline's ``^…$``
+# match did not, so a directory or zip named ``"A1 "`` was a well to the
+# Analyze-side input resolver and not a well to the pipeline that then
+# processed the same folder. One parser, one answer, one parse per name.
 
 
 def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
@@ -412,10 +411,10 @@ def find_well_zips(input_dir: Path) -> list[tuple[str, Path]]:
         if p.name.startswith("."):
             log.debug("Skipping hidden file: %s", p.name)
             continue
-        if is_valid_well_name(p.stem):
-            # Normalise to upper-case, zero-padded column: a1 → A01
-            m = _WELL_RE.match(p.stem)
-            well = f"{m.group(1).upper()}{int(m.group(2)):02d}"
+        # Canonicalises to upper-case, zero-padded column (a1 → A01) and
+        # returns None for anything that is not a 96-well position.
+        well = _canonical_well_label(p.stem)
+        if well is not None:
             found.append((well, p))
         else:
             skipped.append(p)
@@ -447,23 +446,11 @@ def find_well_folders(input_dir: Path) -> list[tuple[str, Path]]:
     for p in entries:
         if not p.is_dir() or p.name.startswith(".") or p.name.startswith("_"):
             continue
-        if is_valid_well_name(p.name):
-            m = _WELL_RE.match(p.name)
-            well = f"{m.group(1).upper()}{int(m.group(2)):02d}"
+        well = _canonical_well_label(p.name)
+        if well is not None:
             found.append((well, p))
     log.info("Found %d well folder(s) in %s", len(found), input_dir)
     return sorted(found, key=lambda x: x[0])
-
-
-def _canonical_well_label(token: str) -> str | None:
-    """Return canonical 96-well label (e.g. B03) for *token*, or None if invalid.
-
-    Thin wrapper over :func:`util.well_token.canonical_well_label` so the
-    pipeline and the GUI tools (WellPlateZipper, analyze_tab,
-    services/input_resolution_service) all share one parser.
-    """
-    from util.well_token import canonical_well_label as _cwl
-    return _cwl(token)
 
 
 def organize_loose_tifs_into_well_folders(
@@ -866,7 +853,7 @@ def load_2d_gray(path: Path) -> np.ndarray:
 # Background-correction math moved to ``pipeline.background.py`` (a Qt-free
 # cohesive module). Re-exported here so ``pm.<name>`` call sites and the remote
 # worker are unchanged. See that module for the implementations.
-from pipeline.background import (  # noqa: E402,F401
+from pipeline.background import (  # noqa: F401
     BACKGROUND_METHODS,
     apply_tophat,
     combined_empty_well_correct,
@@ -1192,7 +1179,7 @@ FLATFIELD_MODES = ("none", "empty_well", "gaussian", "basic")
 # (the GUI recomputes them for the Segmentation tab's flat-field validation
 # view). Imported under the original names so the rest of this module is
 # unchanged.
-from pipeline.flatfield import (  # noqa: E402,F401
+from pipeline.flatfield import (  # noqa: F401
     _FLATFIELD_FLOOR,
     _FLATFIELD_SIGMA,
     _normalize_flatfield,
@@ -2594,7 +2581,7 @@ def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
     with _stardist_download_lock():
         try:
             return StarDist2D.from_pretrained(name)
-        except Exception as exc:                                 # noqa: BLE001
+        except Exception as exc:
             if not any(m in str(exc).lower() for m in _CORRUPT_MODEL_MARKERS):
                 raise
             removed = _purge_stardist_cache()
@@ -2689,7 +2676,7 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
         try:
             import os as _os2
             _os2.dup2(1, 2)
-            _sys2.stderr = _sys2.stdout                     # noqa: F841
+            _sys2.stderr = _sys2.stdout
             for _h in list(logging.getLogger().handlers):
                 if isinstance(_h, logging.StreamHandler):
                     _h.stream = _sys2.stdout
@@ -2996,7 +2983,7 @@ def _process_groups_in_worker(
         for nuclear_path, fluor_paths in groups:
             try:
                 all_records.extend(_process_or_resume(nuclear_path, fluor_paths))
-            except Exception as exc:           # noqa: BLE001
+            except Exception as exc:
                 _record_fov_failure(nuclear_path, exc)
             _fov_done += 1
             log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
@@ -3010,7 +2997,7 @@ def _process_groups_in_worker(
                 nuclear_path = future_map[fut]
                 try:
                     all_records.extend(fut.result())
-                except Exception as exc:       # noqa: BLE001
+                except Exception as exc:
                     _record_fov_failure(nuclear_path, exc)
                 _fov_done += 1
                 log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
@@ -3561,7 +3548,7 @@ def _run_well_worker_pool(
                 total_nuclei += len(records)
                 if failed:
                     partial_wells[well_label] = list(failed)
-            except Exception as exc:           # noqa: BLE001
+            except Exception as exc:
                 _report_worker_failure(well_label, output_dir, exc)
                 wells_failed_entirely.append(well_label)
 

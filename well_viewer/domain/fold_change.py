@@ -235,6 +235,50 @@ def _resolve_stat(
     return default
 
 
+def _series_at(
+    series: Dict[float, Tuple[float, float]], target_t: float,
+) -> Optional[Tuple[float, float]]:
+    """The ``(value, spread)`` a member's series carries at *target_t*.
+
+    Matches an exact key first, then any key within the relative timepoint
+    tolerance. Returns ``None`` when the series is empty or carries no sample
+    near *target_t* — the "control can't be resolved" case the bar-plot
+    ``control_*_at_for_bar`` wrappers report upward.
+    """
+    if not series:
+        return None
+    if target_t in series:
+        return series[target_t]
+    for ct, val in series.items():
+        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
+            return val
+    return None
+
+
+def _series_baseline(
+    series: Dict[float, Tuple[float, float]], baseline_tp: Optional[float],
+) -> Optional[Tuple[float, float, float]]:
+    """``(tp, value, spread)`` for a member's baseline timepoint.
+
+    Prefers the sample at *baseline_tp* (under the relative tolerance) so a bar
+    plot can look the control up at the SAME tp the member used — needed for
+    correct post-control baseline stacking when ops are mixed. Falls through to
+    the earliest timepoint when no baseline is given, when it is non-finite, or
+    when the series has no sample near it. Returns ``None`` only for an empty
+    series.
+    """
+    if not series:
+        return None
+    if baseline_tp is not None and math.isfinite(baseline_tp):
+        tgt = float(baseline_tp)
+        for t, vs in series.items():
+            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
+                return (float(t), vs[0], vs[1])
+    earliest = min(series)
+    vs = series[earliest]
+    return (float(earliest), vs[0], vs[1])
+
+
 def _field_baseline(
     pts, val_idx: int, baseline_tp: Optional[float],
 ) -> Tuple[Optional[float], float]:
@@ -790,20 +834,12 @@ def control_n_at_for_bar(
     """``(n_above, n_above_spread)`` of the control at *target_t* for the
     bar's N-events panel. Returns ``None`` when the control can't be
     resolved or has no sample at *target_t*."""
-    series = member_n_series(
+    return _series_at(member_n_series(
         ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if target_t in series:
-        return series[target_t]
-    for ct, val in series.items():
-        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
-            return val
-    return None
+    ), target_t)
 
 
 def member_first_tp_n_resolved(
@@ -818,35 +854,12 @@ def member_first_tp_n_resolved(
     N-events counterpart of :func:`member_first_tp_frac_resolved` with the
     same matched-tp + fall-through-to-earliest semantics.
     """
-    series = member_n_series(
+    return _series_baseline(member_n_series(
         ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, ns in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                return (float(t), ns[0], ns[1])
-    earliest = min(series)
-    ns = series[earliest]
-    return (float(earliest), ns[0], ns[1])
-
-
-def parse_fc_op(ctx) -> str:
-    """Return the user's chosen fold-change operator (``"ratio"`` or
-    ``"subtract"``). Defaults to ``"ratio"`` for back-compat with
-    ``PlotState`` snapshots that don't carry the field.
-
-    Legacy single-op accessor — returns the control-axis op. New callers
-    should use :func:`parse_fc_op_ctrl` / :func:`parse_fc_op_t0` to read
-    the per-axis ops independently.
-    """
-    op = getattr(ctx.state.plot, "fc_op", "ratio") or "ratio"
-    return op if op in ("ratio", "subtract") else "ratio"
+    ), baseline_tp)
 
 
 def parse_fc_op_ctrl(ctx) -> str:
@@ -1499,50 +1512,12 @@ def control_stats_at_for_bar(
     :func:`scale_bar_value`. Returns ``None`` when the control can't
     be resolved or has no sample at *target_t*.
     """
-    series = member_stats_series(
+    return _series_at(member_stats_series(
         ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if target_t in series:
-        return series[target_t]
-    for ct, val in series.items():
-        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
-            return val
-    return None
-
-
-def control_stats_at(
-    ctx, control_label: str, target_t: float, *,
-    threshold: float, val_col: str,
-    fluor_gates,
-) -> Optional[Tuple[float, float]]:
-    """``(mean, spread)`` of the pooled control at *target_t* (batch stat).
-
-    Pool-of-cells variant used by the batch bar exporter — matches the
-    batch numerator (also pool-of-cells via ``_aggregate_group``). The
-    plot-tab uses :func:`control_stats_at_for_bar` instead.
-    """
-    pts = control_pts_for_line(
-        ctx, control_label, threshold=threshold, val_col=val_col,
-        fluor_gates=fluor_gates,
-    )
-    if not pts:
-        return None
-    for pt in pts:
-        if abs(pt[0] - target_t) < _TP_REL_TOL * max(1.0, abs(pt[0]),
-                                                     abs(target_t)):
-            m = pt[1]
-            if isinstance(m, (int, float)) and math.isfinite(m):
-                s = pt[2] if len(pt) > 2 else 0.0
-                spread = float(s) if (
-                    isinstance(s, (int, float)) and math.isfinite(s)
-                ) else 0.0
-                return (float(m), spread)
-    return None
+    ), target_t)
 
 
 def member_first_tp_stats(
@@ -1599,22 +1574,12 @@ def member_first_tp_stats_resolved(
     post-control baseline stacking when ops are mixed (e.g. ratio-control
     + subtract-baseline). Returns ``None`` only for unknown / empty members.
     """
-    series = member_stats_series(
+    return _series_baseline(member_stats_series(
         ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, ms in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                return (float(t), ms[0], ms[1])
-    earliest = min(series)
-    ms = series[earliest]
-    return (float(earliest), ms[0], ms[1])
+    ), baseline_tp)
 
 
 # ── Bar-plot fraction-on FC helpers ─────────────────────────────────────────
@@ -1693,49 +1658,12 @@ def control_frac_at_for_bar(
     """``(frac, frac_spread)`` of the control at *target_t* for the bar's frac
     panel. Returns ``None`` when the control can't be resolved or has no
     sample at *target_t*."""
-    series = member_frac_series(
+    return _series_at(member_frac_series(
         ctx, control_label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if target_t in series:
-        return series[target_t]
-    for ct, val in series.items():
-        if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
-            return val
-    return None
-
-
-def member_first_tp_frac(
-    ctx, label: str, *,
-    threshold: float, val_col: str, use_sem: bool,
-    per_fov_spread: bool,
-    fluor_gates,
-    baseline_tp: Optional[float] = None,
-) -> Optional[Tuple[float, float]]:
-    """``(frac, frac_spread)`` for the member's baseline timepoint.
-
-    Fraction-on counterpart of :func:`member_first_tp_stats` with the same
-    matched-tp + fall-through-to-earliest semantics.
-    """
-    series = member_frac_series(
-        ctx, label,
-        threshold=threshold, val_col=val_col, use_sem=use_sem,
-        per_fov_spread=per_fov_spread,
-        fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, fs in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                return fs
-    earliest = min(series)
-    return series[earliest]
+    ), target_t)
 
 
 def member_first_tp_frac_resolved(
@@ -1747,22 +1675,12 @@ def member_first_tp_frac_resolved(
 ) -> Optional[Tuple[float, float, float]]:
     """``(tp, frac, frac_spread)`` for the member's baseline timepoint —
     the frac counterpart of :func:`member_first_tp_stats_resolved`."""
-    series = member_frac_series(
+    return _series_baseline(member_frac_series(
         ctx, label,
         threshold=threshold, val_col=val_col, use_sem=use_sem,
         per_fov_spread=per_fov_spread,
         fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, fs in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                return (float(t), fs[0], fs[1])
-    earliest = min(series)
-    fs = series[earliest]
-    return (float(earliest), fs[0], fs[1])
+    ), baseline_tp)
 
 
 # ── Bar-plot scaling ────────────────────────────────────────────────────────

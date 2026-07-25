@@ -250,7 +250,7 @@ def export_report_pdf(ctx) -> None:
             summary_for=lambda r: r.summary,
         )
         ctx.notify.set_status(f"Saved Plots report → {Path(dest).name} ({n} plots)")
-    except Exception as exc:  # noqa: BLE001 — surface to the user
+    except Exception as exc:  # surface to the user
         _logger.debug("saved_plots: report export failed", exc_info=True)
         ctx.notify.set_status(f"Report export failed: {exc}")
 

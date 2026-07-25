@@ -21,7 +21,7 @@ class _ResponsiveScroll(QScrollArea):
     viewport width is the true available width (the panel itself is pinned to its
     own wider side-by-side minimum with horizontal scroll off)."""
 
-    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+    def resizeEvent(self, event) -> None:  # Qt override
         super().resizeEvent(event)
         host = self.widget()
         if host is None:

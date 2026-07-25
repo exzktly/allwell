@@ -420,7 +420,7 @@ class PipelineRunner:
             try:
                 inner = getattr(proc, "_ssh", None) or proc
                 self._remote_runner.cancel(inner)
-            except Exception:  # noqa: BLE001 — best-effort kill
+            except Exception:  # best-effort kill
                 swallowed()  # was: pass (silent except)
 
     @staticmethod
@@ -549,7 +549,7 @@ class PipelineRunner:
                 self._enqueue(("done", "Pipeline completed successfully.\n"))
             else:
                 self._enqueue(("error", f"Pipeline exited with code {rc}.\n"))
-        except Exception as exc:  # noqa: BLE001 — surface any failure to the GUI
+        except Exception as exc:  # surface any failure to the GUI
             self._enqueue(("error", f"Failed to start pipeline: {exc}\n"))
 
     def _run_pipeline_remote(
@@ -690,7 +690,7 @@ class PipelineRunner:
                     "Remote pipeline finished but local verification failed; "
                     "remote files preserved for retry.\n",
                 ))
-        except Exception as exc:  # noqa: BLE001 — surface any failure to the GUI
+        except Exception as exc:  # surface any failure to the GUI
             self._enqueue(("error", f"Failed to run pipeline remotely: {exc}\n"))
         finally:
             # Always close any scheduler job this run spawned — on success,
@@ -703,7 +703,7 @@ class PipelineRunner:
                     self._remote_runner.close_remote_job(
                         log_fn=lambda m: self._enqueue(("line", m)),
                     )
-                except Exception:  # noqa: BLE001 — best-effort teardown
+                except Exception:  # best-effort teardown
                     swallowed("remote run: scheduler job close failed")
             if zipped is not None and zipped.cleanup is not None:
                 try:

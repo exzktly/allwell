@@ -46,12 +46,6 @@ class BarGroup:
                 seen.add(w)
         return out
 
-    def replicate_sets(self) -> List[List[str]]:
-        result = [rset.wells for rset in self.members if rset.wells]
-        for w in self.solo_wells:
-            result.append([w])
-        return result
-
     def __repr__(self) -> str:
         h = " [hidden]" if self.hidden else ""
         return f"BarGroup({self.name!r}, {len(self.members)} set(s){h})"

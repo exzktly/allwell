@@ -29,10 +29,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from process_microscopy import build_parser  # noqa: E402
-from services.pipeline_service import find_pipeline_script  # noqa: E402
-from services.remote_config import get_remote, load_remotes  # noqa: E402
-from services.remote_runner import (  # noqa: E402
+from process_microscopy import build_parser
+from services.pipeline_service import find_pipeline_script
+from services.remote_config import get_remote, load_remotes
+from services.remote_runner import (
     OutputFilter,
     RemoteRunner,
     stage_local_zips,
@@ -192,7 +192,7 @@ def main(argv: list[str] | None = None) -> int:
             rc = proc.wait()
         except KeyboardInterrupt:
             _log("\n[remote] interrupted — cancelling.\n")
-            runner.cancel(proc._ssh)  # noqa: SLF001 — explicit teardown
+            runner.cancel(proc._ssh)  # explicit teardown
             proc.terminate()
             rc = 130
 

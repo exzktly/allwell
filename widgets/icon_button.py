@@ -19,11 +19,11 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import QSize, Qt  # noqa: E402
-from PySide6.QtWidgets import QToolButton  # noqa: E402
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtWidgets import QToolButton
 
-import theme  # noqa: E402
-from widgets import icons  # noqa: E402
+import theme
+from widgets import icons
 
 
 class IconButton(QToolButton):
@@ -74,7 +74,7 @@ class IconButton(QToolButton):
         self.setIconSize(QSize(self._px, self._px))
 
     # Re-render at the right DPR if the window moves to another screen.
-    def showEvent(self, event):  # noqa: N802
+    def showEvent(self, event):
         self._refresh_icon()
         super().showEvent(event)
 

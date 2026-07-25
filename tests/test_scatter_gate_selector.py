@@ -15,9 +15,9 @@ from types import SimpleNamespace
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.pyplot as plt
 
-from well_viewer.features.scatter.gating import (  # noqa: E402
+from well_viewer.features.scatter.gating import (
     refresh_gate_selector,
     set_gate_draw_mode,
 )

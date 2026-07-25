@@ -30,7 +30,7 @@ from well_viewer.core.safe import swallowed
 # Pure data/query helpers live in review_image/collect.py (T4). The Qt event
 # handlers below + external callers (load_controller, the tab views) import
 # these from here, so re-export them.
-from well_viewer.features.image_browser.review_image.collect import (  # noqa: E402,F401
+from well_viewer.features.image_browser.review_image.collect import (  # noqa: F401
     _binary_gate_columns,
     _flatfield_qc,
     _load_arrays_from_refs,
@@ -62,7 +62,7 @@ def _guard_event(fn):
     def _wrapped(app, event, *args, **kwargs):
         try:
             return fn(app, event, *args, **kwargs)
-        except Exception:  # noqa: BLE001 — never let a click kill the app
+        except Exception:  # never let a click kill the app
             _logger.exception("review-image %s failed", getattr(fn, "__name__", fn))
             return None
 
@@ -250,7 +250,7 @@ def select_review_csv_row_for_cell(ctx, fov: str, tp: str, nucleus_id: str, logg
         ctx.notify.set_status(
             f"No exact Review CSV row match for nucleus {nucleus_n} at FOV {fov_n}, TP {tp_n}; showing fallback rows."
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.exception("Review-image -> Review CSV navigation failed")
         try:
             ctx.notify.set_status("Could not navigate to the Review CSV row (see log for details).")
@@ -271,7 +271,7 @@ def on_review_csv_row_double_click(ctx, item) -> None:
     """
     try:
         _on_review_csv_row_double_click_impl(ctx, item)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         import logging
         logging.getLogger("well_viewer").exception(
             "Review-CSV row double-click failed",
@@ -868,22 +868,13 @@ def _refresh_review_csv_rows_impl(ctx, rows: Optional[List[dict]] = None) -> Non
         for label in sels:
             rows.extend(review_load_rows(ctx, label))
 
-    def _norm(v: object) -> str:
-        s = str(v or "").strip()
-        if not s:
-            return ""
-        try:
-            return f"{float(s):g}"
-        except Exception:
-            return s
-
     fov_cb = w.get_or_none("_review_fov_cb")
     tp_cb = w.get_or_none("_review_tp_cb")
-    fov_sel = _norm(fov_cb.currentText()) if fov_cb is not None else ""
+    fov_sel = review_norm_fov(fov_cb.currentText()) if fov_cb is not None else ""
     tp_sel = norm_timepoint(ctx, tp_cb.currentText()) if tp_cb is not None else ""
     filtered = []
     for row in rows:
-        row_fov = _norm(row.get("fov", row.get("FOV", "")))
+        row_fov = review_norm_fov(row.get("fov", row.get("FOV", "")))
         row_tp = norm_timepoint(ctx, row.get("timepoint", row.get("tp", row.get("time", ""))))
         if fov_sel and row_fov != fov_sel:
             continue

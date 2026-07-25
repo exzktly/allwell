@@ -176,7 +176,7 @@ def rep_add(ctx) -> None:
 # A8 teardown: the display-label leaves now live in the domain layer (shared by
 # core / every plot renderer without a feature import). Re-exported here so the
 # god-method delegates + existing ``grouping.controller`` importers resolve.
-from well_viewer.domain.selections_model import (  # noqa: E402,F401
+from well_viewer.domain.selections_model import (  # noqa: F401
     replicate_display_label,
     well_display_label,
 )

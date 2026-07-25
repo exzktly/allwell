@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C
 
 
 def _cell(well, chan, tp="0", fov="1"):

@@ -25,14 +25,14 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import (  # noqa: E402
+from PySide6.QtCore import (
     Property, QEasingCurve, QPropertyAnimation, Qt, Signal,
 )
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-import theme  # noqa: E402
+import theme
 
 _QWIDGETSIZE_MAX = 16_777_215  # Qt's QWIDGETSIZE_MAX
 
@@ -76,7 +76,7 @@ class _SectionHeader(QWidget):
         if w is not None:
             self._value_layout.addWidget(w)
 
-    def mousePressEvent(self, event) -> None:  # noqa: N802
+    def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)

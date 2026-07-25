@@ -9,10 +9,10 @@ unchanged.
 
 from __future__ import annotations
 
-from pathlib import Path  # noqa: F401  (used by save dialogs)
-from typing import Any, Dict, Optional, Tuple  # noqa: F401
+from pathlib import Path  # used by save dialogs
+from typing import Any, Dict, Optional, Tuple
 
-from PySide6.QtWidgets import QFileDialog, QMessageBox  # noqa: F401
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from well_viewer.core.safe import swallowed
 

@@ -23,16 +23,16 @@ _ROOT = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
-from PySide6.QtCore import (  # noqa: E402
+from PySide6.QtCore import (
     QEasingCurve, QPointF, QPropertyAnimation, QTimer, Qt,
 )
-from PySide6.QtGui import QColor  # noqa: E402
-from PySide6.QtWidgets import (  # noqa: E402
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
     QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QWidget,
 )
 
-import theme  # noqa: E402
-from widgets.status_dot import StatusDot  # noqa: E402
+import theme
+from widgets.status_dot import StatusDot
 
 
 class Toast(QWidget):
@@ -140,7 +140,7 @@ class Toast(QWidget):
             pass
         self._fade.start()
 
-    def mousePressEvent(self, _event) -> None:  # noqa: N802
+    def mousePressEvent(self, _event) -> None:
         self._dismiss_timer.stop()
         self._fade_out()
 

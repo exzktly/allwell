@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional  # noqa: F401  (Any used in save_threshold)
+from typing import Any, Dict, Optional  # Any used in save_threshold
 
 from well_viewer.persistence._io import atomic_write_json
 

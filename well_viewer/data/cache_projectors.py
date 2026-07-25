@@ -14,12 +14,16 @@ registered at app construction by
 "core wires the feature callback at startup so the lower layer imports no
 feature" pattern as ``core/scope_registry.register_default_scopes``.
 
-Deliberately Qt-free and feature-free — it only holds callables.
+Deliberately Qt-free and feature-free — it only holds callables and the one
+shared walk (:func:`project_verdict_column`) that every projector performs.
 """
 
 from __future__ import annotations
 
-from typing import Callable, List
+import logging
+from typing import Callable, List, Optional
+
+_logger = logging.getLogger("well_viewer")
 
 # Registered projectors, applied in order to each freshly-loaded frame.
 _PROJECTORS: List[Callable] = []
@@ -39,3 +43,37 @@ def clear_cache_projectors() -> None:
 def iter_cache_projectors() -> "List[Callable]":
     """The registered projectors, in registration order."""
     return list(_PROJECTORS)
+
+
+def project_verdict_column(
+    ctx,
+    label: Optional[str],
+    *,
+    column: str,
+    verdict: Callable,
+    layer: str,
+) -> None:
+    """Write *column* onto cached well frame(s) from *verdict*.
+
+    The walk every inclusion-verdict projector performs: with *label* given,
+    only that well; otherwise every cached well. Empty and missing frames are
+    skipped. *verdict* is a ``(df) -> Series`` returning the per-row 0/1
+    decision, cast to int here so callers need not.
+
+    A projector must never take down the data path, so a frame whose columns
+    ``verdict`` cannot read is logged against *layer* and stepped over rather
+    than raised — the remaining wells still get their column. Fail-open is the
+    verdict functions' own job: they return all-pass when their inputs are
+    absent, so a frame that simply predates a feature still reads as included.
+    """
+    cache = ctx.state.dataset.cache
+    labels = [label] if label is not None else list(cache.keys())
+    for lbl in labels:
+        df = cache.get(lbl)
+        if df is None or df.empty:
+            continue
+        try:
+            df[column] = verdict(df).astype(int)
+        except Exception:
+            _logger.exception(
+                "%s: failed to compute %s for well %s", layer, column, lbl)

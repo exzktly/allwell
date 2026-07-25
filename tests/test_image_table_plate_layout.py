@@ -19,13 +19,13 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
-from well_viewer.features.image_browser.image_table.build_layout import (  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C
+from well_viewer.features.image_browser.image_table.build_layout import (
     image_table_apply_spec,
 )
-from well_viewer.features.image_browser.image_table import facet_view as F  # noqa: E402
-from well_viewer.features.image_browser.image_table import grid_layout as G  # noqa: E402
-from well_viewer.features.image_browser.image_table.state import (  # noqa: E402
+from well_viewer.features.image_browser.image_table import facet_view as F
+from well_viewer.features.image_browser.image_table import grid_layout as G
+from well_viewer.features.image_browser.image_table.state import (
     Axis, ChannelSpec, ImageTableState, TableSpec,
     spec_from_state, spec_to_state_fields,
 )

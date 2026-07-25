@@ -272,7 +272,7 @@ def apply_global_threshold_async(
                     completed += 1
                     try:
                         counts.update(future.result())
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:
                         logger.exception("smFISH global threshold failed for %s: %s", well, exc)
                     status_cb(f"Processed {well} ({completed}/{len(wells)})...")
                     if _cancelled():
@@ -318,7 +318,7 @@ def apply_global_threshold_async(
         # always gets a terminal signal.
         try:
             _run()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("smFISH Apply to All worker crashed")
             done_cb(f"Apply to All failed: {exc}")
 

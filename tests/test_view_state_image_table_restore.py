@@ -12,9 +12,9 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from well_viewer.persistence import view_state as vs  # noqa: E402
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
-from well_viewer.features.image_browser.image_table import view_state_io as vsio  # noqa: E402
+from well_viewer.persistence import view_state as vs
+from well_viewer.features.image_browser.image_table import controller as C
+from well_viewer.features.image_browser.image_table import view_state_io as vsio
 
 pytestmark = pytest.mark.qt
 

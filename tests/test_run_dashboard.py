@@ -5,9 +5,9 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication
 
-from services.pipeline_runner import ProgressTracker  # noqa: E402
+from services.pipeline_runner import ProgressTracker
 
 
 @pytest.fixture(scope="module")

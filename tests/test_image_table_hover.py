@@ -16,11 +16,11 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QEvent, QPoint, QPointF  # noqa: E402
-from PySide6.QtGui import QPixmap  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QToolTip  # noqa: E402
+from PySide6.QtCore import QEvent, QPoint, QPointF
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QApplication, QLabel, QToolTip
 
-from well_viewer.features.image_browser.image_table import controller as C  # noqa: E402
+from well_viewer.features.image_browser.image_table import controller as C
 
 _app = QApplication.instance() or QApplication([])
 

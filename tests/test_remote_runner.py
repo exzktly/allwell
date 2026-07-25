@@ -829,7 +829,7 @@ def test_list_remote_completed_wells_parses_out_zip_listing(runner_with_run, mon
             returncode=0,
         ),
     )
-    wells = runner_with_run._list_remote_completed_wells()  # noqa: SLF001
+    wells = runner_with_run._list_remote_completed_wells()
     assert wells == {"A01", "B02", "H12"}
 
 
@@ -839,7 +839,7 @@ def test_list_remote_completed_wells_handles_empty_dir(runner_with_run, monkeypa
         DatasetCache, "_ssh_script",
         lambda self, script, *, check: MagicMock(stdout="", returncode=0),
     )
-    assert runner_with_run._list_remote_completed_wells() == set()  # noqa: SLF001
+    assert runner_with_run._list_remote_completed_wells() == set()
 
 
 def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monkeypatch):
@@ -849,7 +849,7 @@ def test_list_remote_completed_wells_degrades_on_ssh_error(runner_with_run, monk
     def fail(self, script, *, check):
         raise OSError("ssh: no such file")
     monkeypatch.setattr(DatasetCache, "_ssh_script", fail)
-    assert runner_with_run._list_remote_completed_wells() == set()  # noqa: SLF001
+    assert runner_with_run._list_remote_completed_wells() == set()
 
 
 def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkeypatch, tmp_path):
@@ -871,7 +871,7 @@ def test_verify_manifest_uses_remote_listing_as_backstop(runner_with_run, monkey
         ),
     )
     log_lines: list[str] = []
-    missing = runner_with_run._verify_local_manifest(  # noqa: SLF001
+    missing = runner_with_run._verify_local_manifest(
         log=log_lines.append,
     )
     # A01 has its CSV (pre-created in the fixture). B02 doesn't —
@@ -892,7 +892,7 @@ def test_remote_argv_swaps_input_output(host):
         "--filename_schema", "experiment:channel:well:fov",
         "--filename_sep", "_",
     ]
-    remote = runner._build_remote_argv(  # noqa: SLF001
+    remote = runner._build_remote_argv(
         local, "/remote/in", "/remote/out",
         OutputFilter.FULL, LocalInputMode.ZIP,
     )
@@ -918,7 +918,7 @@ def test_remote_argv_pins_scratch_to_the_remote_output_dir(host):
         "/usr/bin/python", "/local/pm.py",
         "--input_dir", "/x", "--output_dir", "/y",
     ]
-    remote = runner._build_remote_argv(  # noqa: SLF001
+    remote = runner._build_remote_argv(
         local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
     )
     assert "--scratch_dir=/r/out" in remote
@@ -934,7 +934,7 @@ def test_remote_argv_drops_a_local_scratch_dir(host):
         ["/usr/bin/python", "/local/pm.py", "--input_dir", "/x",
          "--scratch_dir=/Volumes/LocalSSD/scratch", "--output_dir", "/y"],
     ):
-        remote = runner._build_remote_argv(  # noqa: SLF001
+        remote = runner._build_remote_argv(
             local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
         )
         assert not any("LocalSSD" in a for a in remote)
@@ -947,7 +947,7 @@ def test_remote_argv_csv_only_appends_no_save_tophat(host):
         "/usr/bin/python", "/local/pm.py",
         "--input_dir", "/x", "--output_dir", "/y",
     ]
-    remote = runner._build_remote_argv(  # noqa: SLF001
+    remote = runner._build_remote_argv(
         local, "/r/in", "/r/out", OutputFilter.CSV_ONLY, LocalInputMode.ZIP,
     )
     assert "--no_save_tophat" in remote
@@ -960,7 +960,7 @@ def test_remote_argv_respects_existing_no_save_tophat(host):
         "--input_dir", "/x", "--output_dir", "/y",
         "--no_save_tophat",
     ]
-    remote = runner._build_remote_argv(  # noqa: SLF001
+    remote = runner._build_remote_argv(
         local, "/r/in", "/r/out", OutputFilter.CSV_ONLY, LocalInputMode.ZIP,
     )
     # Exactly one --no_save_tophat, not two.
@@ -974,7 +974,7 @@ def test_remote_argv_appends_cpu_only_from_host(host):
         "/usr/bin/python", "/local/pm.py",
         "--input_dir", "/x", "--output_dir", "/y",
     ]
-    remote = runner._build_remote_argv(  # noqa: SLF001
+    remote = runner._build_remote_argv(
         local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
     )
     assert remote.count("--cpu_only") == 1
@@ -987,7 +987,7 @@ def test_remote_argv_appends_extra_args(host):
         "/usr/bin/python", "/local/pm.py",
         "--input_dir", "/x", "--output_dir", "/y",
     ]
-    remote = runner._build_remote_argv(  # noqa: SLF001
+    remote = runner._build_remote_argv(
         local, "/r/in", "/r/out", OutputFilter.FULL, LocalInputMode.ZIP,
     )
     assert remote[-2:] == ["--workers", "32"]
@@ -1404,7 +1404,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
             host, run, output_filter=OutputFilter.FULL,
             log_fn=lambda m: log_lines.append(m),
         )
-        fetcher._fetch_one("A01")  # noqa: SLF001
+        fetcher._fetch_one("A01")
         fetcher.cancel()
 
     blob = "".join(log_lines)
@@ -1443,7 +1443,7 @@ def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
             host, run, output_filter=OutputFilter.FULL,
             log_fn=lambda m: log_lines.append(m),
         )
-        fetcher._fetch_one("B02")  # noqa: SLF001
+        fetcher._fetch_one("B02")
         fetcher.cancel()
 
     blob = "".join(log_lines)
@@ -1471,7 +1471,7 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
         local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01", "B02"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
 
     (tmp_path / "measurements_A01.csv").write_text("col1,col2\n1,2\n")
     (tmp_path / "measurements_B02.csv").write_text("col1,col2\n3,4\n")
@@ -1479,7 +1479,7 @@ def test_verify_passes_when_all_csvs_and_zips_present(host, tmp_path):
     (tmp_path / "B02_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    missing = runner._verify_local_manifest(log=logs.append)
     assert missing == []
     assert any("all 2 wells" in m for m in logs)
 
@@ -1504,7 +1504,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
         local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01", "B02"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
 
     # Both CSVs present.
     (tmp_path / "measurements_A01.csv").write_text("ok\n")
@@ -1513,7 +1513,7 @@ def test_verify_flags_missing_out_zip_even_when_csv_is_present(host, tmp_path):
     (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    missing = runner._verify_local_manifest(log=logs.append)
     assert any("B02_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
@@ -1535,13 +1535,13 @@ def test_verify_skips_zip_check_when_csv_only_filter(host, tmp_path):
         output_filter=OutputFilter.CSV_ONLY,
     )
     run.expected_wells = {"A01"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
 
     (tmp_path / "measurements_A01.csv").write_text("ok\n")
     # No A01_out.zip — but CSV_ONLY user doesn't want it.
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    missing = runner._verify_local_manifest(log=logs.append)
     assert missing == []
 
 
@@ -1564,7 +1564,7 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
         local_input_mode=LocalInputMode.FOLDER,
     )
     run.expected_wells = {"A01", "B02"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
 
     (tmp_path / "measurements_A01.csv").write_text("ok\n")
     (tmp_path / "measurements_B02.csv").write_text("ok\n")
@@ -1572,7 +1572,7 @@ def test_verify_expects_out_zip_even_in_folder_mode(host, tmp_path):
     (tmp_path / "A01_out.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    missing = runner._verify_local_manifest(log=logs.append)
     assert any("B02" in m and "_out.zip" in m for m in missing)
     assert not any("A01" in m for m in missing)
 
@@ -1591,13 +1591,13 @@ def test_verify_reports_missing_csv(host, tmp_path):
         local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01", "B02"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
 
     (tmp_path / "measurements_A01.csv").write_text("col1\n")
     # B02 missing on purpose.
 
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    missing = runner._verify_local_manifest(log=logs.append)
     assert missing
     assert any("B02" in m for m in missing)
 
@@ -1616,11 +1616,11 @@ def test_verify_reports_empty_csv(host, tmp_path):
         local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
 
     (tmp_path / "measurements_A01.csv").write_text("")  # empty
     logs: list[str] = []
-    missing = runner._verify_local_manifest(log=logs.append)  # noqa: SLF001
+    missing = runner._verify_local_manifest(log=logs.append)
     assert missing == ["empty CSV for A01"]
 
 
@@ -1888,7 +1888,7 @@ def runner_with_run(host, tmp_path):
         local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
     (tmp_path / "x_A01.csv").write_text("ok\n")
     # v5.2.29: the verify step now also requires the per-well
     # out_zip / extracted folder when output_filter=FULL (the
@@ -2094,7 +2094,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     runner = runner_with_run
     # Delete the CSV the fixture created — verification must fail and
     # cleanup must NOT fire.
-    (runner_with_run._run.local_output_dir / "x_A01.csv").unlink()  # noqa: SLF001
+    (runner_with_run._run.local_output_dir / "x_A01.csv").unlink()
 
     calls: list[list[str]] = []
 
@@ -2669,7 +2669,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
         local_input_mode=LocalInputMode.ZIP,
     )
     run.expected_wells = {"A01"}
-    runner._run = run  # noqa: SLF001
+    runner._run = run
     (tmp_path / "x_A01.csv").write_text("ok\n")
 
     rm_calls = []
@@ -2808,10 +2808,10 @@ def test_scratch_dir_honors_env_override(tmp_path, monkeypatch):
     for a remote run."""
     from services import remote_runner as rr
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "scratch"))
-    base = rr._scratch_dir()  # noqa: SLF001
+    base = rr._scratch_dir()
     assert base == tmp_path / "scratch"
     assert base.is_dir()
-    d = rr._new_scratch_dir("allwell-stage-")  # noqa: SLF001
+    d = rr._new_scratch_dir("allwell-stage-")
     assert d.parent == base and d.name.startswith("allwell-stage-")
 
 
@@ -2822,7 +2822,7 @@ def test_scratch_dir_falls_back_when_override_unusable(tmp_path, monkeypatch):
     bad = tmp_path / "afile"
     bad.write_text("x")
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad / "nope"))
-    assert rr._scratch_dir() == Path(_t.gettempdir())  # noqa: SLF001
+    assert rr._scratch_dir() == Path(_t.gettempdir())
 
 
 def test_sweep_stale_scratch_removes_old_only(tmp_path, monkeypatch):

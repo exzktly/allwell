@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.29.** This map describes the app as it stands today;
+**Reflects All-Well v8.8.32.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.29; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.8.32; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -2257,6 +2257,23 @@ fixture (it doesn't help).
 4. **Long runs will be interrupted.** A single `pytest` invocation that takes many
    minutes is at risk of a container recycle. Keep each invocation short; if you
    need broad coverage, script several small invocations rather than one large one.
+5. **To run the whole slow lane, use `scripts/test_slow.sh`.** It applies rules 1,
+   2 and 4 for you: it discovers the lane from pytest's own `slow` marker (the
+   fixture closure in `conftest.py` is the only thing that knows the real
+   membership), runs it as many short pytest processes a couple of files each,
+   and aggregates the per-batch JUnit reports. A batch that dies before writing
+   its report fails the run — that is the OOM / C-level-hang signal, and it must
+   never read as success. `--shard I/N` deals the files out round-robin for a CI
+   matrix; `--batch 1` is the safest setting on a constrained machine.
+
+**The slow lane runs nightly, not on PRs** — `.github/workflows/slow-lane.yml`,
+six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate
+because it takes minutes rather than seconds and its per-test memory profile is
+fragile under parallel load. It exists because the ~270 tests it covers
+previously had *no* automated coverage anywhere: `tests/test_qc_reopen_apply.py`
+called a `ctx`-taking function with the raw app from the day that function
+migrated, and sat red indefinitely because nothing ran it. Run it by hand before
+merging anything that reshapes a feature package.
 
 **What the environment gives you that CI does not (and vice versa).** The two
 lanes are not the same machine, and the differences decide which failures you

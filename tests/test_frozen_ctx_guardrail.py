@@ -30,11 +30,31 @@ import ast
 from pathlib import Path
 
 _PKG = Path(__file__).resolve().parent.parent / "well_viewer"
+_TESTS = Path(__file__).resolve().parent
 _DYNATTR = {"getattr", "setattr", "hasattr"}
 
 
 def _py_files():
     return sorted(_PKG.rglob("*.py"))
+
+
+def _call_site_files():
+    """Files scanned for *call sites*: the package plus the test suite.
+
+    The suite has to be in scope. ``tests/test_qc_reopen_apply.py`` called
+    ``save_to_data_dir(app)`` from the day that function moved to ``ctx``, and
+    because ``ctx.window`` on a real ``WellViewerApp`` resolves to Qt's own
+    ``QWidget.window`` method rather than raising, the failure surfaced as an
+    ``AttributeError`` two frames later instead of at the boundary. The test
+    uses the ``loaded_app`` fixture, so it is marked ``slow`` and never ran in
+    CI — it sat red for months. This check is cheap and static, so it catches
+    that class in the fast lane no matter which lane the test itself lives in.
+
+    Function *definitions* still come from ``_py_files()`` only: a helper
+    defined inside a test module is local to it and says nothing about the
+    package's ctx contract.
+    """
+    return sorted(_PKG.rglob("*.py")) + sorted(_TESTS.rglob("*.py"))
 
 
 def _is_ctx_name(node: ast.AST) -> bool:
@@ -85,18 +105,40 @@ def _collect_free_func_first_params():
     return ctx_first, non_ctx_first
 
 
-def test_no_ctx_function_called_with_raw_app_or_self():
-    """A function whose first parameter is ``ctx`` must be called with a context,
-    never the raw ``app``/``self`` god-object. Only names that are *unambiguously*
-    ctx-first free functions (no same-named app/self-first free function exists)
-    are checked, to avoid cross-module name-collision false positives."""
-    ctx_first, non_ctx_first = _collect_free_func_first_params()
-    unambiguous = ctx_first - non_ctx_first
+# The fixtures that yield a real ``WellViewerApp``. A test that receives one of
+# these has an ``app`` for which ``app.window`` is Qt's ``QWidget.window`` method,
+# so handing it to a ctx function fails. A test that does *not* receive one built
+# its own ``SimpleNamespace`` mock, and those deliberately set ``app.window = app``
+# so the mock doubles as its own ctx — passing it is correct and must not be
+# flagged. That distinction is what keeps this check free of an allowlist.
+_REAL_APP_FIXTURES = {
+    "viewer_app", "loaded_app", "image_table_app",
+    "loaded_app_shape", "loaded_app_multifov",
+}
 
-    violations = []
-    for path in _py_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+
+def _uses_real_app_fixture(fn_node: ast.AST) -> bool:
+    args = fn_node.args
+    names = {a.arg for a in (*args.posonlyargs, *args.args, *args.kwonlyargs)}
+    return bool(names & _REAL_APP_FIXTURES)
+
+
+def _bad_ctx_calls(tree: ast.AST, unambiguous: set, *, only_real_app: bool):
+    """Yield ``(lineno, fn_name, arg_name)`` for ``foo(app)`` on a ctx function.
+
+    With *only_real_app*, a call is reported only when the function enclosing it
+    receives a real-app fixture — the test-suite rule described above.
+    """
+    scopes = [(tree, False)] if not only_real_app else []
+    if only_real_app:
         for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                scopes.append((node, _uses_real_app_fixture(node)))
+
+    for scope, is_real in scopes:
+        for node in ast.walk(scope):
+            if only_real_app and not is_real:
+                continue
             if not isinstance(node, ast.Call) or not node.args:
                 continue
             fn = node.func
@@ -109,9 +151,26 @@ def test_no_ctx_function_called_with_raw_app_or_self():
                 continue
             a0 = node.args[0]
             if isinstance(a0, ast.Name) and a0.id in {"app", "self"}:
-                violations.append(
-                    f"{path.relative_to(_PKG.parent)}:{node.lineno}  "
-                    f"{fn.id}({a0.id}) — pass {a0.id}._ctx")
+                yield node.lineno, fn.id, a0.id
+
+
+def test_no_ctx_function_called_with_raw_app_or_self():
+    """A function whose first parameter is ``ctx`` must be called with a context,
+    never the raw ``app``/``self`` god-object. Only names that are *unambiguously*
+    ctx-first free functions (no same-named app/self-first free function exists)
+    are checked, to avoid cross-module name-collision false positives."""
+    ctx_first, non_ctx_first = _collect_free_func_first_params()
+    unambiguous = ctx_first - non_ctx_first
+
+    violations = []
+    for path in _call_site_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        in_tests = path.is_relative_to(_TESTS)
+        for lineno, fn_name, arg in _bad_ctx_calls(
+                tree, unambiguous, only_real_app=in_tests):
+            violations.append(
+                f"{path.relative_to(_PKG.parent)}:{lineno}  "
+                f"{fn_name}({arg}) — pass {arg}._ctx")
     assert not violations, (
         "ctx-native function(s) called with the raw app/self handle "
         "(thread the context, e.g. app._ctx / self._ctx):\n  "

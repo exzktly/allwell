@@ -427,6 +427,9 @@ class AllWellApp(QMainWindow):
         - ⌘/ / Ctrl+/ — toggle the help drawer (matches the header ? button).
         - ⌘L / Ctrl+L — toggle the application log drawer (matches the
           status-bar log button).
+        - ⌘B / Ctrl+B — collapse / expand the left sidebar (matches the
+          top-bar panel button; drives whichever sidebar belongs to the
+          active mode).
         - ⌘W / Ctrl+W — close the window.
 
         Every shortcut here is surfaced somewhere in the chrome (statusbar
@@ -441,7 +444,20 @@ class AllWellApp(QMainWindow):
         QShortcut(QKeySequence("Ctrl+Right"), self, activated=self._tab_history_forward)
         QShortcut(QKeySequence("Ctrl+/"), self, activated=self._toggle_help_drawer)
         QShortcut(QKeySequence("Ctrl+L"), self, activated=self._toggle_log_drawer)
+        QShortcut(QKeySequence("Ctrl+B"), self, activated=self._toggle_sidebar)
         QShortcut(QKeySequence("Ctrl+W"), self, activated=self.close)
+
+    def _toggle_sidebar(self) -> None:
+        """Collapse / expand the left sidebar (⌘B), same path as the top-bar button.
+
+        Routed through the Review pane's proxy because
+        ``tab_controller.toggle_sidebar`` already drives whichever sidebar
+        belongs to the active mode — the Review rail in Review, the Analyze
+        tab's form sidebar in Analyze — so the shortcut works in both.
+        """
+        review = getattr(self, "_review", None)
+        if review is not None and hasattr(review, "_toggle_sidebar"):
+            review._toggle_sidebar()
 
     def _tab_history_back(self) -> None:
         review = getattr(self, "_review", None)
@@ -717,6 +733,10 @@ class AllWellApp(QMainWindow):
                 "<tt>⌘→</tt> / <tt>Ctrl+→</tt> — Forward to the next section "
                 "tab in history<br>"
                 "<tt>⌘/</tt> / <tt>Ctrl+/</tt> — Toggle this help drawer<br>"
+                "<tt>⌘L</tt> / <tt>Ctrl+L</tt> — Toggle the application log "
+                "drawer<br>"
+                "<tt>⌘B</tt> / <tt>Ctrl+B</tt> — Collapse / expand the left "
+                "sidebar<br>"
                 "<tt>⌘W</tt> / <tt>Ctrl+W</tt> — Close window</p>"
             )
 

@@ -1326,6 +1326,7 @@ architecture-specific and can't produce a universal binary.
 | `⌘→` / `Ctrl+→` | Forward through tab history |
 | `⌘/` / `Ctrl+/` | Open the help drawer |
 | `⌘L` / `Ctrl+L` | Open the application log drawer |
+| `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 
 The bottom status bar shows these chip-style hints at all times. The header

@@ -69,8 +69,10 @@ they're shell-wide:
   see §8.
 - **Help drawer + keyboard shortcuts** — `Ctrl+O` (open), `Ctrl+E` (export the
   active figure), `Ctrl+←`/`→` (tab history), `Ctrl+/` (help drawer), `Ctrl+L`
-  (log drawer), `Ctrl+W` (close). All are installed in
-  `AllWellApp._install_shortcuts`.
+  (log drawer), `Ctrl+B` (collapse the sidebar), `Ctrl+W` (close). All are
+  installed in `AllWellApp._install_shortcuts`, and
+  `tests/test_shortcut_advertising.py` holds them in sync with what the help
+  drawer and status bar advertise.
 - **Application Log drawer** — a bottom-edge, full-width `Drawer` opened by the
   status-bar log tray (`_log_btn`). Its ring handler attaches to the
   `well_viewer` logger (which sets `propagate = False`) at startup, so it
@@ -759,8 +761,7 @@ Statistics group editor is `features/stats/tab_view.build_stats_group_editor`. T
 and shown/hidden by `core/tab_controller.on_tab_change` based on the
 active tab.
 
-The top-bar collapse toggle (the panel button — there is no keyboard
-binding for it) routes through
+The top-bar collapse toggle (`Ctrl+B` / the panel button) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
 belongs to the current mode from one flag: the Review rail (`_sidebar_root`) in
 Review mode, and the Analyze tab's own form sidebar (`analyze_tab._left_sidebar`,

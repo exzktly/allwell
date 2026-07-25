@@ -130,7 +130,7 @@ function, remove its stale allowlist entry (the test fails until you do).
   never assume a figure exists.
 - **Plate selections are well-ID strings** (`set[str]`), app-wide state — a
   tab-local handler that clobbers `_selected_wells` leaks across tabs.
-- **End a redraw with** `features.export.style.apply_export_style_to_current(...)`
+- **End a redraw with** `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)`
   or the Properties sidebar's toggles get lost.
 - **`_Docs/Markdowns/` is small on purpose** — live reference docs only. Plans and
   status write-ups belong in git history / PRs, not new markdown files.

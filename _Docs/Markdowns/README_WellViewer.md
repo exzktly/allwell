@@ -1324,6 +1324,8 @@ architecture-specific and can't produce a universal binary.
 | `⌘E` / `Ctrl+E` | Export the active figure (drives the visible plot card's Save figure action) |
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
+| `⌘/` / `Ctrl+/` | Open the help drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer |
 | `⌘W` / `Ctrl+W` | Close window |
 
 The bottom status bar shows these chip-style hints at all times. The header

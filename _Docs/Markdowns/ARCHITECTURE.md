@@ -67,7 +67,10 @@ they're shell-wide:
   `AllWellApp._apply_stylesheet`. All chrome reads from it. The active theme is
   chosen once at startup (dev-facing `ALLWELL_THEME` env var / `--theme` flag) —
   see §8.
-- **Help drawer + keyboard shortcuts** (`Ctrl+O`, `Ctrl+E`, `Ctrl+←`/`→`).
+- **Help drawer + keyboard shortcuts** — `Ctrl+O` (open), `Ctrl+E` (export the
+  active figure), `Ctrl+←`/`→` (tab history), `Ctrl+/` (help drawer), `Ctrl+L`
+  (log drawer), `Ctrl+W` (close). All are installed in
+  `AllWellApp._install_shortcuts`.
 - **Application Log drawer** — a bottom-edge, full-width `Drawer` opened by the
   status-bar log tray (`_log_btn`). Its ring handler attaches to the
   `well_viewer` logger (which sets `propagate = False`) at startup, so it
@@ -107,10 +110,10 @@ allwell/
 ├── ui/theme/                    ← dark colour tokens (get_color + plot/well constants)
 ├── services/                    ← Analyze-side service modules
 ├── scripts/                     ← build_executable.sh, dev helpers
-├── _Docs/                       ← installer / requirements / icon SVGs
-├── Markdowns/                   ← live docs (this file + README_WellViewer.md)
-├── tests/                       ← pytest scaffold (pure-Python, no Qt)
-└── design/                      ← HTML mockups + screenshots — visual reference only
+├── _Docs/                       ← installer / requirements / visual-audit screenshots
+│   └── Markdowns/               ← live docs (this file, README_WellViewer.md, the roadmap)
+├── tests/                       ← pytest suite (+ tests/visual/ render harness)
+└── design/                      ← HTML mockups — visual reference only
 ```
 
 The `pipeline/` package (the Qt-free analysis-pipeline modules:
@@ -168,25 +171,36 @@ well_viewer/
 ├── runtime_app.py                 ← WellViewerApp composition root
 ├── viewer_context.py              ← ViewerContext DI bundle
 ├── core/                          ← cross-cutting infrastructure
-│   ├── app_state.py, event_bus.py
-│   ├── channel_state.py, dataset_state.py, plot_state.py, selection_state.py
+│   ├── app_state.py, event_bus.py, app_runtime.py, widget_registry.py
+│   ├── channel_state.py, dataset_state.py, plot_state.py, selection_state.py,
+│   │   cell_gating_state.py, export_prefs_state.py, image_view_state.py,
+│   │   qc_state.py, stats_cache_state.py   ← cross-cutting typed state slices
 │   ├── app_shell_view.py, centre_view.py, sidebar_view.py, status_view.py
 │   ├── split_view.py                 ← optional side-by-side double-pane view (one-line removable; §5.10)
-│   ├── widget_registry.py
-│   ├── bus_wiring.py, redraw_coordinator.py, scope_registry.py
+│   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
+│   ├── profile.py                    ← build-profile manifest loader (stdlib-only)
+│   ├── lazy.py                       ← call-time proxy so core never imports a feature
+│   ├── bus_wiring.py, redraw_coordinator.py, selection_coordinator.py,
+│   │   scope_registry.py, projector_registry.py
 │   ├── load_controller.py, tab_controller.py, selection_controller.py,
 │   │   channel_state_controller.py
-│   ├── plot_orchestrator.py, plot_style.py
-│   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs (N5)
-│   ├── ui_helpers.py, debug_flags.py
+│   ├── plot_orchestrator.py, plot_style.py, plot_toggles.py,
+│   │   plot_card_actions.py, figure_saver.py
+│   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
+│   ├── safe.py                       ← swallow()/swallowed() (GUI side; §15)
+│   ├── ui_helpers.py, notifications.py, dnd.py, app_fonts.py, debug_flags.py
 ├── data/                          ← IO + decode
 │   ├── data_loading.py, image_discovery.py, image_resolver.py,
-│   │   zipfile_cache.py, auto_threshold.py, crop_tool.py, metric_labels.py
+│   │   zipfile_cache.py, zip_members.py, auto_threshold.py, crop_tool.py,
+│   │   metric_labels.py, cache_projectors.py, well_repository.py
+│   ├── image_identity.py             ← single source of truth for filenames + CellKey
 ├── domain/                        ← Qt-free models + pure logic
 │   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
 │   ├── fold_change.py, fold_change_scopes.py, fold_change_controls.py
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
+│   ├── bar_groups.py, plot_groups.py, metric_registry.py, qc_params.py, tp_match.py
 │   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
+│   ├── spatial_compute.py            ← spatial/neighbourhood math (Qt-free)
 ├── features/                      ← one package per UI feature
 │   ├── barplot/      controller.py, renderer.py, tab_view.py
 │   ├── lineplot/     controller.py, tab_view.py
@@ -235,12 +249,17 @@ well_viewer/
 │   ├── preview/      controller.py, preview_view.py, panel_view.py
 │   ├── smfish/       controller.py, worker.py, tab_view.py
 │   ├── grouping/     controller.py, tab_view.py, label_grid_view.py,
-│   │                 label_editor_view.py, replicate_panel_view.py,
-│   │                 cell_gating_tab_view.py
+│   │                 replicate_panel_view.py, cell_gating_tab_view.py,
+│   │                 cell_gating_compute.py, pipeline_info_view.py
+│   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
+│   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py, _report.py
+│   ├── crop/         controller.py, region.py        ← support lib (always present)
+│   ├── qc/           controller.py, params.py, tab_view.py   ← support lib
 │   ├── export/       service.py, style.py, sidebar_view.py
-│   └── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
-│                     scatter_panel.py, _common.py, _line_series_runner.py,
-│                     well_grid_button.py
+│   ├── batch_export/ tab_view.py, base_panel.py, bar_panel.py,
+│   │                 scatter_panel.py, service.py, _common.py,
+│   │                 _line_series_runner.py, well_grid_button.py
+│   └── registry.py   ← the FEATURES list: the sole importer of features/* (§5.3)
 └── persistence/                   ← JSON read/write, debounced save registry
 ```
 
@@ -365,9 +384,11 @@ layers:
 │           for one tab / feature: controller(s), renderer(s) where    │
 │           applicable, local state, and the tab_view / panel_view    │
 │           modules that build its Qt widgets.                         │
-│         ── barplot, lineplot, scatter, distribution, heatmap, stats, │
-│            preview, review_image, smfish, image_table, grouping,    │
-│            export, batch_export                                      │
+│         ── barplot, lineplot, scatter, distribution, heatmap,       │
+│            stats, multivariate, spatial, image_browser (review_    │
+│            image / image_table / cell_browser / playground),        │
+│            smfish, review_csv, grouping, saved_plots, preview,      │
+│            crop, qc, export, batch_export                            │
 ├──────────────────────────────────────────────────────────────────────┤
 │  core/    ← Cross-cutting infrastructure, no single feature owns it. │
 │           ── shell views: app_shell_view, centre_view, sidebar_view, │
@@ -464,10 +485,12 @@ and registers every centre page. The current page-list:
 | Analysis | **Plotting** | Bar Plots / Line Graphs / Scatter Plot / Distribution / Heat Map |
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
+| Analysis | **Spatial** | — (neighbourhood / colony-level spatial analysis; §5.11) |
 | Images | **Image Browser** | Segmentation / Image Table / Cell Browser / Playground |
 | Images | **smFISH** | — |
 | Data | **Review CSV** | — |
 | Data | **Sample Definitions** | Cell Gating / Groups / Well Labels / Ratios / Pipeline Info / Notes |
+| Data | **Saved Plots** | — (the plot gallery; decorates every plot card with a "save to gallery" button) |
 | Data | **Batch Export** | — |
 
 **Plotting** is a `NamedPageStack`; **Image Browser** (`QTabWidget`: the unified
@@ -530,7 +553,7 @@ Core never imports a feature directly. Every feature is declared once as a
 `FeatureDescriptor` in the `FEATURES` list in `features/registry.py` — the
 **single sanctioned importer** of `well_viewer.features.*` (enforced by
 `tests/test_architecture_contracts.py::
-test_core_does_not_import_features_at_module_scope`). A descriptor bundles
+test_no_module_scope_imports_of_removable_features`). A descriptor bundles
 everything core used to hard-code:
 
 - `build(ctx, frame)` — the tab body (a lazy wrapper over `build_<name>_tab`);
@@ -731,12 +754,13 @@ still resolve.
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is
 `features/image_browser/image_table/picker_view.py`, the Sample-Definitions group editor
-is `features/grouping/view.py`, and the Statistics group editor is
-`features/stats/view.py`. They're stacked inside the same sidebar QWidget
+is `features/grouping/replicate_panel_view.build_replicate_panel`, and the
+Statistics group editor is `features/stats/tab_view.build_stats_group_editor`. They're stacked inside the same sidebar QWidget
 and shown/hidden by `core/tab_controller.on_tab_change` based on the
 active tab.
 
-The top-bar collapse toggle (`Ctrl+B` / the panel button) routes through
+The top-bar collapse toggle (the panel button — there is no keyboard
+binding for it) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
 belongs to the current mode from one flag: the Review rail (`_sidebar_root`) in
 Review mode, and the Analyze tab's own form sidebar (`analyze_tab._left_sidebar`,
@@ -789,7 +813,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. |
 | `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. Log-X/Log-Y is a **single per-figure axis pref** (`x_log` / `y_log`) that the on-plot checkboxes and the Properties-sidebar toggles both drive — they previously wrote two independent stores and the export pass clobbered the button. Log-Y histograms pass `log=log_y` straight into `ax.hist` rather than computing a density from 0 and log-scaling afterwards (which corrupted the bar heights). |
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. The replicate unit is the **one rule** `domain/stats_compute.replicate_unit` — shared with the bar/line error bars so the test's `n` and the plotted spread never disagree. In **FOV mode** every FOV **across all of a group's wells** is an independent replicate (`n` = total FOVs, pooled across wells); otherwise each well is one replicate. Pooling FOVs across wells is pseudo-replication (smaller p-values than a well-level test) — an explicitly chosen mode. |
-| `features/image_browser/image_table/controller.py` | Image Table grid: render-model assembly + Generate/export orchestration. The "turn cache + state into pixels" work is split into sibling modules it re-exports (so call sites and external importers are unchanged) and which `test_monolith_budgets.py` ratchets: `image_compose.py` (LUT palette + per-channel cmap/LUT resolution, array loading, mask/threshold rendering, the RGB cell composer `cell_display_rgb`, the boundary overlay, and the channel-overlay blender `overlay_cell_rgb`), `grid_layout.py` (axis/cell layout math + the per-dimension well/channel/FOV/timepoint option lists), `build_layout.py` (flat + nested grid assembly + `image_table_apply_spec`), and `facet_view.py` (faceted render placement — axis labels + group spacing). **Headless plain-data render model.** `ctx.runtime.image_table.cells` is a `rows × cols` grid of plain `{"well","chan","tp","fov"}` string dicts — the render contract, no Qt widgets. The renderer (`image_table_generate`), the layout math, the per-cell override popover (`grid_ops.py`), and `persistence/view_state.py` all read/write those strings directly; off-axis held values live on `state.fixed_vals` (read by `grid_layout._fixed_off_axis`) and grid size on `state.rows`/`state.cols`, so there are no held-value combos or grid-size spinners. A **grouped/tiled** well layout (`group_size`, 0 = off) bands each channel across multiple rows; it persists through `persistence/view_state.py` (`group_size` / `group_row_span`). **Builder shelf.** The **sole** authoring surface is `builder_view.py` — a root + nested-channels drag-and-drop tree: each axis gets a root (Well/Timepoint/FOV) with channels nested under it, each channel carrying its own render options (raw/corrected · mask · ≥thr · boundary · colormap/LUT) via a ⚙ menu; a derived **Fixed** panel auto-lists the off-axis roots with value pickers; a **Separate ↔ Overlay** switch (`state.composite`) collapses a root's channel axis to a single entry and additively blends every selected channel into each cell — "blend this root's channels into one cell" (the layout emits the `image_compose.OVERLAY_CHAN` sentinel as the sole channel value via `grid_layout._axis_dim_values`; `image_compose.overlay_cell_rgb` blends it in both the live grid and export, and the flag round-trips through `view_state`); wells come from the sidebar plate. The shelf edits a Qt-free `TableSpec` (`state.py`) and calls `build_layout.image_table_apply_spec`, which flattens it onto the existing `row_dims`/`col_dims`/`active_*`/`composite`/`group_size` state (+ a per-channel `channel_opts` block) and drives the layout + a debounced `image_table_generate`. Per-channel display is **position-independent**: the four `image_compose._row_*` helpers resolve options from `channel_opts` keyed by the cell's channel, and the live generate path is unified onto `cell_display_rgb` so the live grid, the channel-overlay blend, and export always agree. A ⚙ "≥threshold" reuses main's `"<CHAN> (binary)"` token. Per-cell tweaks come from right-clicking a rendered cell (`grid_ops.image_table_cell_override_menu`, which writes the cell dict). An earlier excision removed the old dropdown selector grid, the per-row LUT/Display table (`grid_view.py`, `lut_ops.py`, the `lut_row_map` sharing), and the Composite toggle button — all superseded by the shelf. **Plate (96-well) layout.** A **Plate A–H × 1–12** toggle in the shelf header lays each selected well's image out in true plate positions with correct axis labels, using two *virtual* layout dims — `well_row` (A–H) and `well_col` (1–12), enumerated from the plate selection in `grid_layout` (`_well_row_options` / `_well_col_options`). They never get their own render-model cell key: `grid_layout.compose_plate_well` resolves each `(row, col)` back to the real `well` token (blank when that position is absent), and `facet_view._cv` derives them back from the composed well so the A–H / 1–12 headers label every band — unlike the `group_size`/Wrap trick, whose facet headers only reflect the first band. It rides the existing single-dim `_build_nested_layout` path (`row_dims=["well_row"]`, `col_dims=["well_col"]`); the channel is held fixed (`TableSpec.plate` flag round-trips through `spec_to_state_fields` / `spec_from_state`), and it's mutually exclusive with Wrap *and* with channel Overlay (plate mode writes `composite=False`). |
+| `features/image_browser/image_table/controller.py` | Image Table grid: render-model assembly + Generate/export orchestration. The "turn cache + state into pixels" work is split into sibling modules it re-exports (so call sites and external importers are unchanged) and which `test_monolith_budgets.py` ratchets: `image_compose.py` (LUT palette + per-channel cmap/LUT resolution, array loading, mask/threshold rendering, the RGB cell composer `cell_display_rgb`, the boundary overlay, and the channel-overlay blender `overlay_cell_rgb`), `grid_layout.py` (axis/cell layout math + the per-dimension well/channel/FOV/timepoint option lists), `build_layout.py` (flat + nested grid assembly + `image_table_apply_spec`), and `facet_view.py` (faceted render placement — axis labels + group spacing). **Headless plain-data render model.** `ctx.runtime.image_table.cells` is a `rows × cols` grid of plain `{"well","chan","tp","fov"}` string dicts — the render contract, no Qt widgets. The renderer (`image_table_generate`), the layout math, the per-cell override popover (`grid_ops.py`), and `persistence/view_state.py` all read/write those strings directly; off-axis held values live on `state.fixed_vals` (read by `grid_layout._fixed_off_axis`) and grid size on `state.rows`/`state.cols`, so there are no held-value combos or grid-size spinners. A **grouped/tiled** well layout (`group_size`, 0 = off) bands each channel across multiple rows; it persists through `persistence/view_state.py` (`group_size` / `group_row_span`). **Builder shelf.** The **sole** authoring surface is `builder_view.py` — a root + nested-channels drag-and-drop tree: each axis gets a root (Well/Timepoint/FOV) with channels nested under it, each channel carrying its own render options (raw/corrected · mask · ≥thr · boundary · colormap/LUT) via a ⚙ menu; a derived **Fixed** panel auto-lists the off-axis roots with value pickers; a **Separate ↔ Overlay** switch (`state.composite`) collapses a root's channel axis to a single entry and additively blends every selected channel into each cell — "blend this root's channels into one cell" (the layout emits the `image_compose.OVERLAY_CHAN` sentinel as the sole channel value via `grid_layout._axis_dim_values`; `image_compose.overlay_cell_rgb` blends it in both the live grid and export, and the flag round-trips through `view_state`); wells come from the sidebar plate. The shelf edits a Qt-free `TableSpec` (`state.py`) and calls `build_layout.image_table_apply_spec`, which flattens it onto the existing `row_dims`/`col_dims`/`active_*`/`composite`/`group_size` state (+ a per-channel `channel_opts` block) and drives the layout + a debounced `image_table_generate`. Per-channel display is **position-independent**: the four `image_compose._row_*` helpers resolve options from `channel_opts` keyed by the cell's channel, and the live generate path is unified onto `cell_display_rgb` so the live grid, the channel-overlay blend, and export always agree. A ⚙ "≥threshold" reuses main's `"<CHAN> (binary)"` token. Per-cell tweaks come from right-clicking a rendered cell (`grid_ops.image_table_cell_override_menu`, which writes the cell dict). **Plate (96-well) layout.** A **Plate A–H × 1–12** toggle in the shelf header lays each selected well's image out in true plate positions with correct axis labels, using two *virtual* layout dims — `well_row` (A–H) and `well_col` (1–12), enumerated from the plate selection in `grid_layout` (`_well_row_options` / `_well_col_options`). They never get their own render-model cell key: `grid_layout.compose_plate_well` resolves each `(row, col)` back to the real `well` token (blank when that position is absent), and `facet_view._cv` derives them back from the composed well so the A–H / 1–12 headers label every band — unlike the `group_size`/Wrap trick, whose facet headers only reflect the first band. It rides the existing single-dim `_build_nested_layout` path (`row_dims=["well_row"]`, `col_dims=["well_col"]`); the channel is held fixed (`TableSpec.plate` flag round-trips through `spec_to_state_fields` / `spec_from_state`), and it's mutually exclusive with Wrap *and* with channel Overlay (plate mode writes `composite=False`). |
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The image pixel-value hover tooltip lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` and `role_output_filename` both consume it. (As of the §6.2 self-sufficiency fix this catalog is **reader-side only** — the pipeline writer, `process_microscopy.build_processed_output_path`, uses explicit `suffix=` strings rather than importing `well_viewer`. If catalog-driven *writing* is revived, move `ROLE_CATALOG` into a Qt-free `*_core` module first so the pipeline can import it without breaking the contract.) The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
@@ -1466,6 +1490,9 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
 | `input_resolution_service.py` | Validates the input folder shape (zip set vs flat). |
+| `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
+| `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
+| `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
 
 These modules deliberately have no Qt imports beyond what the Analyze tab
 itself uses — keeping them potentially reusable for a CLI driver.
@@ -1551,9 +1578,8 @@ Notable members worth knowing about by name:
 | `lut_cmaps.lut_cmap` | Qt-free resolver that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
 | `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. |
-| `TitleBar`, `WindowResizeGrips`, `_window_chrome` | Frameless-window chrome (currently disabled by default — see `_window_chrome.should_use_frameless`). |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |
-| `BrandTile`, `IconButton`, `StatusDot`, `KbdHint`, `SelectionChip`, `PillTabBar` | Misc small bits. |
+| `BrandTile`, `IconButton`, `StatusDot`, `KbdHint`, `SelectionChip` | Misc small bits. |
 
 If you find yourself building something that isn't All-Well-specific, write
 it as a new `widgets/<x>.py` module. Each widget gets a `__main__` block
@@ -1582,12 +1608,10 @@ The app has two complementary theme surfaces:
    palette is sourced from `theme.WELL_COLORS_TUPLE` so both surfaces hand out
    identical per-well colours.
 
-The earlier multi-theme machinery in `ui/theme/` (a `set_theme` switcher, the
-`build_stylesheet` Template driver, `ThemeManager`, the `FM_*` font tuples, and
-the `dark/light/amber/beige.qss` files) was unused dead code — the app only
-ever rendered the dark palette via `theme.qss()` — and was removed. The current
-theme registry (below) is the sanctioned replacement and lives in `theme.py`,
-not `ui/theme/`; there is **no `ui/theme/theme_manager.py`**.
+`ui/theme/` is colour tokens only: it holds `styles.py` and nothing else — no
+stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
+registry lives in `theme.py` (below), and `theme.qss()` is the one stylesheet
+builder.
 
 ### Selecting a theme
 
@@ -1733,10 +1757,13 @@ selectionDragFinished → WellViewerApp._on_sidebar_plate_drag_finished
               click handler → app._on_plate_sel_change()
         │
         ▼
-selection_controller.on_plate_sel_change(app)
-        ├── snapshots prev_sel / last_sel
-        └── _refresh_after_selection_change(app)
-              ├── dispatches by active tab name:
+selection_controller.on_plate_sel_change(ctx)
+        ├── commits the plate change (SelectionState diffs prev_sel → last_sel)
+        └── emits bus.selection_changed
+              └── SelectionRefreshCoordinator → apply_selection_refresh(ctx)
+                    ├── app._refresh_sidebar_map()
+                    └── _refresh_tab_view(ctx, tab) for each visible leaf
+                          ├── the feature's registry `on_selection_changed` hook:
               │     Bar Plots      → redraw_bars(app)
               │     Scatter Plot   → scatter_redraw_active(app)
               │     Review CSV     → app._refresh_review_csv()
@@ -1762,8 +1789,8 @@ selections (replicate sets / groups) defined, `_refresh_sidebar_map_now` puts
 the plate in `"passive"` mode on most tabs: per-well plate clicks are ignored
 and the plate paints group membership; clicks instead toggle a group's `hidden`
 flag (plotting tabs) or its visibility. The exceptions are
-`selection_controller._PER_WELL_TABS` = **Sample Definitions, Review CSV, Cell
-Browser** — these stay in `"select"` mode and honour `selected_wells` even with
+`selection_controller._PER_WELL_TAB_NAMES` = **Sample Definitions, Review CSV,
+Cell Browser** — these stay in `"select"` mode and honour `selected_wells` even with
 groups defined (the Cell Browser sources its gallery from `selected_wells`, so
 single replicate wells must be pickable there). Because the plate is passive in
 group mode, the plate's **corner all/none toggle** (only shown in `"select"`
@@ -2242,8 +2269,9 @@ fixture (it doesn't help).
 5. Add an icon to `_SECTION_ICONS` in `runtime_app.py` if you want it to
    appear in the rail nav.
 6. End your redraw with
-   `features.export.style.apply_export_style_to_current(app, fig, canvas)`
-   so the Properties sidebar's toggles apply.
+   `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)` so the
+   Properties sidebar's toggles apply. (`features.export.style` re-exports it
+   for older call sites.)
 
 ### 11.2 Add a sidebar widget for a specific tab
 
@@ -2319,8 +2347,8 @@ In order of probability:
    the current dataset's channel list and that the global ctxbar combo's
    current text matches `_active_channel.upper()`.
 2. **A controller didn't get the redraw entry-point call.** Check the
-   tab-name branches in
-   `selection_controller._refresh_after_selection_change`.
+   feature's `on_selection_changed` hook in `features/registry.py`, which
+   `selection_controller._refresh_tab_view` dispatches to.
 3. **The selection was painted but not committed.** Make sure the path that
    changed `_selected_wells` also called `app._on_plate_sel_change()` (the
    Select all / Select none buttons used to skip this).
@@ -2360,9 +2388,10 @@ builders never run from the background drain.
 
 ### 12.6 "The figure's Properties panel doesn't stick"
 
-Every figure-styling toggle writes into the shared dict
-`app._export_style_prefs` (see `figure_export_editor.py`). Every controller
-ends its redraw with `apply_export_style_to_current(app, fig, canvas)`.
+Every figure-styling toggle writes into the shared prefs dict
+(`core/export_prefs_state.py`, reached as `app._export_style_prefs`; the panel
+itself is `features/export/sidebar_view.py`). Every controller ends its redraw
+with `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)`.
 If a new redraw entry point you added is "losing" the user's toggles, it's
 missing that call at the end.
 
@@ -2401,16 +2430,17 @@ remains:
 |------|---------------|
 | `ARCHITECTURE.md` | This document — the developer-oriented architectural overview. |
 | `README_WellViewer.md` | User-facing README — install, run, troubleshoot. |
+| `GOD_OBJECT_REPOSITORY_ROADMAP.md` | Living plan for the god-object teardown + repository introduction; tracks the ratchet numbers as they come down. |
 
 The on-disk shape of `pipeline_info.json::sample_definitions` (the saved
 selections schema) is described in the `well_viewer/domain/selections_model.py`
 module docstring; that module is the live source of truth for the
 contract.
 
-`design/` (sibling of `Markdowns/`) holds the **non-Markdown** design
-artifacts — the HTML mockups (`mockup-decoded.html`,
-`All-Well Redesign v2 _standalone_.html`), screenshots, and decoded mockup
-assets — for visual reference only.
+`design/` (at the repo root) holds the **non-Markdown** design artifacts — the
+HTML mockups (`grey_theme_mockup.html`, `image_table_builder_mockup.html`) — for
+visual reference only. Rendered screenshots live under
+`_Docs/visual_audit/screenshots/`, produced by `tests/visual/render_views.py`.
 
 ---
 
@@ -2462,11 +2492,10 @@ assets — for visual reference only.
 - **Pipeline runs in a separate process.** Don't try to share Python
   objects between Analyze and the running pipeline; everything passes
   through argv → stdout text streaming → the dataset folder.
-- **`Markdowns/` is documentation, not code.** It is kept intentionally
-  small post-port (this file, the user README, the selections-model
-  contract, and the icons readme). The port-time plans and status updates
-  were removed once the port shipped; they remain in git history if
-  you ever need them.
+- **`_Docs/Markdowns/` is documentation, not code.** It is kept intentionally
+  small: this file, the user README, and the teardown roadmap. The
+  selections-model contract lives in its module docstring, not a separate doc.
+  Port-time plans and status write-ups stay in git history.
 
 If you read all the way to here and the structure still doesn't make sense,
 the right next move is to open `well_viewer/runtime_app.py` and scroll

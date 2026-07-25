@@ -63,3 +63,12 @@ def test_persistence_round_trip_through_slice(viewer_app, qtbot):
     assert app._app_state.heatmap.scale_mode == "Fixed"
     assert app._app_state.heatmap.repset_avg is True
     assert app._app_state.heatmap.log_scale is True
+
+    # Both the builder and apply_persisted_settings end in a redraw, which
+    # matplotlib's Qt backend services through ``draw_idle`` — a *queued* draw.
+    # That leaves work outstanding when the test body returns, and pytest-qt's
+    # post-test ``_process_events`` then runs it after the canvas's C++ object is
+    # gone ("Internal C++ object (FigureCanvasQTAgg) already deleted"). Let the
+    # queued draw settle while the canvas is still alive. ``canvas.draw()`` is
+    # not enough — it renders but does not cancel the pending timer.
+    qtbot.wait(1)

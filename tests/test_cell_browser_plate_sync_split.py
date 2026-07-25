@@ -91,7 +91,7 @@ def test_plate_click_toggles_group_in_split(loaded_app):
     _focus(app, "Plotting")
     assert wells[0] in cell_browser_source_wells(app._ctx)  # group visible → in gallery
 
-    sc.on_sidebar_plate_well_activated(app, wells[0])   # click the well → toggle group
+    sc.on_sidebar_plate_well_activated(app._ctx, wells[0])  # click the well → toggle group
     assert wells[0] not in cell_browser_source_wells(app._ctx)  # group hidden → gone
     assert app._app_state.selection.selected_wells == set()  # no per-well sel made
 
@@ -134,5 +134,5 @@ def test_inspecting_a_cell_does_not_rescope_wells(loaded_app):
     cells = collect_cells(app._ctx, [], live_sync=True)
     assert cells, "expected some cells to inspect"
     before = set(app._app_state.selection.selected_wells)
-    ctl.on_cell_clicked(app, cells[0])  # navigates to Segmentation; read-only for scope
+    ctl.on_cell_clicked(app._ctx, cells[0])  # navigates to Segmentation; read-only for scope
     assert app._app_state.selection.selected_wells == before

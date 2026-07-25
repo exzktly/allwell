@@ -15,7 +15,13 @@ paths:
 2. Calling a ctx-native function with the raw god-object — ``foo(app)`` /
    ``foo(self)`` where ``foo``'s first parameter is ``ctx``. Real fallout: the
    multivariate channel hook and the FOV-replicates toggle both handed ``app``
-   to a ctx function and blew up on ``app.state`` / ``app.runtime``.
+   to a ctx function and blew up on ``app.state`` / ``app.runtime``. The
+   module-qualified spelling ``sc.foo(app)`` counts too, whenever ``sc`` is a
+   first-party *module* alias bound in the same file — it resolves to the free
+   function just as unambiguously as the bare name. ``test_cell_browser_plate_
+   sync_split`` wrote both of its raw-app calls that way, so the qualified form
+   is not a corner case; one of them failed loudly, and the other was swallowed
+   by the callee's own ``try`` and left the test asserting nothing.
 
 These AST checks fail CI on either pattern so a future ctx conversion can't
 silently break a plot path again. Comments/docstrings are ignored (AST, not
@@ -123,12 +129,64 @@ def _uses_real_app_fixture(fn_node: ast.AST) -> bool:
     return bool(names & _REAL_APP_FIXTURES)
 
 
+# Package roots whose modules hold the free functions this check is about. A name
+# bound to one of them is a module handle, not an object.
+_MODULE_ROOTS = ("well_viewer", "util", "widgets", "services")
+
+
+def _module_aliases(tree: ast.AST) -> set:
+    """Names bound to a first-party *module* in this file.
+
+    ``import well_viewer.core.selection_controller as sc`` and ``from
+    well_viewer.core import selection_controller as sc`` both make ``sc`` a
+    module handle, so ``sc.foo(app)`` resolves to the free function ``foo`` as
+    unambiguously as a bare ``foo(app)`` does. Collecting the aliases per file is
+    what lets the call scan below cover the qualified form without mistaking a
+    method call for one.
+
+    ``from … import foo`` also lands here (binding the function itself, not a
+    module); harmless, since the scan only consults this set for *attribute*
+    calls and a function has no first-party sub-attributes to call.
+    """
+    aliases = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                if a.name.startswith(_MODULE_ROOTS):
+                    aliases.add(a.asname or a.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            if (node.module or "").startswith(_MODULE_ROOTS):
+                for a in node.names:
+                    aliases.add(a.asname or a.name)
+    return aliases
+
+
+def _called_free_func(node: ast.Call, unambiguous: set, aliases: set) -> str | None:
+    """The ctx-first free function *node* calls, or ``None``.
+
+    Two resolvable forms: the bare ``foo(app)``, and the module-qualified
+    ``sc.foo(app)`` where ``sc`` is a module alias bound in this file. Every
+    other attribute call — ``obj.foo(app)`` on a real object — is a method or a
+    stored callable (e.g. ``scope.redraw(app)``, where ``redraw`` is the scope's
+    own app-taking wrapper) and must not be conflated with a same-named free
+    function, so it stays exempt.
+    """
+    fn = node.func
+    if isinstance(fn, ast.Name):
+        return fn.id if fn.id in unambiguous else None
+    if (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name)
+            and fn.value.id in aliases and fn.attr in unambiguous):
+        return f"{fn.value.id}.{fn.attr}"
+    return None
+
+
 def _bad_ctx_calls(tree: ast.AST, unambiguous: set, *, only_real_app: bool):
     """Yield ``(lineno, fn_name, arg_name)`` for ``foo(app)`` on a ctx function.
 
     With *only_real_app*, a call is reported only when the function enclosing it
     receives a real-app fixture — the test-suite rule described above.
     """
+    aliases = _module_aliases(tree)
     scopes = [(tree, False)] if not only_real_app else []
     if only_real_app:
         for node in ast.walk(tree):
@@ -141,17 +199,12 @@ def _bad_ctx_calls(tree: ast.AST, unambiguous: set, *, only_real_app: bool):
                 continue
             if not isinstance(node, ast.Call) or not node.args:
                 continue
-            fn = node.func
-            # Only bare ``foo(app)`` calls resolve to the free function. An
-            # attribute call ``obj.foo(app)`` is a method / stored-callable
-            # invocation (e.g. ``scope.redraw(app)`` where ``redraw`` is the
-            # scope's own app-taking wrapper) and must not be conflated with a
-            # same-named free ctx function.
-            if not isinstance(fn, ast.Name) or fn.id not in unambiguous:
+            name = _called_free_func(node, unambiguous, aliases)
+            if name is None:
                 continue
             a0 = node.args[0]
             if isinstance(a0, ast.Name) and a0.id in {"app", "self"}:
-                yield node.lineno, fn.id, a0.id
+                yield node.lineno, name, a0.id
 
 
 def test_no_ctx_function_called_with_raw_app_or_self():

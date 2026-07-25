@@ -102,6 +102,34 @@ This trades away local pre-commit signal on purpose. Say plainly what you did an
 did not verify — "not run locally, CI will tell us" is the honest line, and it is
 never a substitute for reporting a failure you already know about.
 
+### Waiting on a long run
+
+Slow-lane runs take minutes to hours, so they go in the background — and the
+background is where two mistakes cost real time here.
+
+**Don't poll for completion.** A backgrounded run already notifies on exit; a
+separate waiter buys nothing and can outlive what it watched.
+
+**Never match processes by command-line string.** `pgrep -f PATTERN` /
+`pkill -f PATTERN` match *any* process whose argv contains PATTERN — including
+the shell running the command and any ancestor shell whose argv embeds it. So
+`until ! pgrep -f "test_foo"; do sleep 20; done` never exits (it matches itself),
+and `pkill -f "test_foo"` kills the run you just launched. The `[t]est_foo`
+bracket trick drops the immediate shell but not ancestors, so it is not a fix.
+Wait on a PID (`until ! kill -0 "$PID" 2>/dev/null`) or on an artifact the job
+writes, bound the loop, and kill by PID.
+
+**Keep scratch output out of the repo.** `SLOW_REPORT_DIR` and friends put JUnit
+XML wherever you point them; a `git add -A` then sweeps it into the commit, and
+adding a `.gitignore` rule afterwards cannot undo that. Read `git status` before
+staging.
+
+**Measure before attributing a cause.** A run killed by a timeout with no output
+looks the same whether it was slow, starved, or blocked forever on a modal
+dialog under the offscreen QPA (`ask_name_dialog` and friends — pytest's
+signal-based `--timeout` cannot interrupt Qt's C++ exec loop). Re-run it alone
+before explaining it.
+
 ## 3. Layout
 
 ```

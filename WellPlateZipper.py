@@ -4,39 +4,16 @@ import shutil
 import argparse
 
 # ---------------------------------------------------------------------------
-# Schema constants (kept in sync with process_microscopy.py)
+# Schema vocabulary + parser — shared with process_microscopy via util.schema so
+# the two entry points cannot drift. They previously kept separate copies whose
+# validate_schema reported the same verdict with different wording.
 # ---------------------------------------------------------------------------
-SCHEMA_FIELDS   = ("experiment", "channel", "well", "fov", "timepoint", "ignore")
-DEFAULT_SCHEMA  = "experiment:channel:well:fov:timepoint"
-DEFAULT_SEP     = "_"
-
-
-def parse_schema(schema_str: str) -> list[str]:
-    """Parse a colon-delimited schema string into a list of field names."""
-    known = set(SCHEMA_FIELDS)
-    return [
-        tok if tok in known else "ignore"
-        for tok in schema_str.strip().split(":")
-        if tok
-    ]
-
-
-def validate_schema(schema: list[str]) -> list[str]:
-    """Return a list of human-readable validation errors. Empty list = OK.
-
-    Mirrors process_microscopy.validate_schema so a CLI invocation of
-    WellPlateZipper rejects the same bad schemas the GUI rejects.
-    """
-    errors: list[str] = []
-    if "channel" not in schema:
-        errors.append('Schema must include a "channel" field.')
-    elif schema.count("channel") > 1:
-        errors.append('Schema must include "channel" exactly once.')
-    if "well" not in schema:
-        errors.append('Schema must include a "well" field.')
-    elif schema.count("well") > 1:
-        errors.append('Schema must include "well" exactly once.')
-    return errors
+from util.schema import (  # noqa: E402  (module-level, after the stdlib block)
+    DEFAULT_SCHEMA,
+    DEFAULT_SEP,
+    parse_schema,
+    validate_schema,
+)
 
 
 def build_arg_parser():

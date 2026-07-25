@@ -35,3 +35,4 @@ htmlcov/
 # CI fast-lane JUnit report (gates on this instead of the segfault-prone exit code)
 .pytest-report.xml
 .mplcache/
+.pytest-slow-reports/

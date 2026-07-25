@@ -231,51 +231,49 @@ PLOTTING_TABS = frozenset({
 _REP_MIRROR_TABS = PLOTTING_TABS | frozenset({"Spatial", "Multivariate"})
 
 
-def select_row(ctx, row: str) -> None:
+def _select_plate_line(ctx, value: str, rc_index: int) -> None:
+    """Toggle a whole plate row or column. *rc_index* picks which half of
+    ``_well_rc`` to match on — 0 for the row letter, 1 for the column number.
+
+    Two modes, and which one applies depends on whether replicate groups exist:
+
+    * **rep-mode** (groups defined) — a click toggles ``hidden`` on every group
+      crossing the line. Groups that don't touch it are untouched. This holds on
+      plotting and non-plotting tabs alike.
+    * **plain mode** — the line's wells are added to the selection unless all of
+      them are already in it, in which case they are removed. That asymmetry is
+      what makes a second click on a fully-selected row clear it.
+    """
     app = ctx.window  # transitional bridge (A3)
     if app._app_state.selection.selections:  # rep-mode
         crossing = [
             s for s in app._app_state.selection.selections
-            if any(_well_rc(ctx, w)[0] == row and w in app._app_state.dataset.well_paths
+            if any(_well_rc(ctx, w)[rc_index] == value
+                   and w in app._app_state.dataset.well_paths
                    for w in (s.get("wells") or []))
         ]
-        # In rep-mode (plotting and non-plotting tabs alike), a row click
-        # toggles ``hidden`` on every group crossing that row — groups
-        # that don't touch the row are untouched.
         if crossing:
             _set_groups_hidden(ctx, crossing)
         return
+
+    labels = [lbl for lbl in app._app_state.dataset.well_paths
+              if _well_rc(ctx, lbl)[rc_index] == value]
+    if not labels:
+        return
+    selected = app._app_state.selection.selected_wells
+    if any(lbl not in selected for lbl in labels):
+        selected.update(labels)
     else:
-        row_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(ctx, lbl)[0] == row]
-        if not row_labels:
-            return
-        if any(lbl not in app._app_state.selection.selected_wells for lbl in row_labels):
-            app._app_state.selection.selected_wells.update(row_labels)
-        else:
-            app._app_state.selection.selected_wells.difference_update(row_labels)
-        on_plate_sel_change(ctx)
+        selected.difference_update(labels)
+    on_plate_sel_change(ctx)
+
+
+def select_row(ctx, row: str) -> None:
+    _select_plate_line(ctx, row, 0)
 
 
 def select_col(ctx, col: str) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    if app._app_state.selection.selections:
-        crossing = [
-            s for s in app._app_state.selection.selections
-            if any(_well_rc(ctx, w)[1] == col and w in app._app_state.dataset.well_paths
-                   for w in (s.get("wells") or []))
-        ]
-        if crossing:
-            _set_groups_hidden(ctx, crossing)
-        return
-    else:
-        col_labels = [lbl for lbl in app._app_state.dataset.well_paths if _well_rc(ctx, lbl)[1] == col]
-        if not col_labels:
-            return
-        if any(lbl not in app._app_state.selection.selected_wells for lbl in col_labels):
-            app._app_state.selection.selected_wells.update(col_labels)
-        else:
-            app._app_state.selection.selected_wells.difference_update(col_labels)
-        on_plate_sel_change(ctx)
+    _select_plate_line(ctx, col, 1)
 
 
 def select_all(ctx) -> None:

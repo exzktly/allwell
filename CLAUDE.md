@@ -82,6 +82,20 @@ CI also tolerates a PySide6 teardown SIGSEGV by gating on the JUnit report
 instead of the exit code — a 139 after a green run is expected, a missing report
 is a real failure.
 
+**Run the suite only when asked.** Do not run `scripts/test.sh` — or install the
+test stack — as a reflex before each commit. Work lands as a series of commits on
+one PR, and a full lane per commit is wasted minutes. Commit, push, move on.
+
+Run it when: the user asks; you changed the test harness itself (`conftest.py`,
+`scripts/test.sh`, the pytest config, `requirements-dev.txt`); or CI went red and
+you are reproducing the failure. Otherwise **CI is the gate** — it runs on every
+push and supersedes its own in-flight runs, so a broken intermediate commit costs
+nothing but a red check you then fix.
+
+This trades away local pre-commit signal on purpose. Say plainly what you did and
+did not verify — "not run locally, CI will tell us" is the honest line, and it is
+never a substitute for reporting a failure you already know about.
+
 ## 3. Layout
 
 ```

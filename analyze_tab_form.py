@@ -28,11 +28,13 @@ from widgets.wrap_checkbox import WrapCheckBox
 import pipeline.shape_features as _sfc
 
 # ---------------------------------------------------------------------------
-# Schema vocabulary — kept in sync with process_microscopy.py
+# Schema vocabulary — shared with process_microscopy and WellPlateZipper via
+# util.schema, so the Analyze form's field picker offers exactly the tokens the
+# pipeline parses. This module previously kept its own copy "in sync with
+# process_microscopy.py" by hand, which is the arrangement util.schema exists
+# to replace.
 # ---------------------------------------------------------------------------
-SCHEMA_FIELDS  = ("experiment", "channel", "well", "fov", "timepoint", "ignore")
-DEFAULT_SCHEMA = "experiment:channel:well:fov:timepoint"
-DEFAULT_SEP    = "_"
+from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP
 
 _SCHEMA_LABELS = ("Experiment", "Channel", "Well", "FOV", "Timepoint", "— ignore —")
 _LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS))
@@ -246,7 +248,6 @@ class AnalyzeTabFormMixin:
         sec.layout().addWidget(fl_header)
 
         self._fluor_frame = QWidget(sec)
-        self._fluor_frame
         self._fluor_frame_layout = QVBoxLayout(self._fluor_frame)
         self._fluor_frame_layout.setContentsMargins(0, 0, 0, 0)
         self._fluor_frame_layout.setSpacing(2)
@@ -1048,7 +1049,6 @@ class AnalyzeTabFormMixin:
         self._refresh_remote_controls()
 
         btn_widget = QWidget(parent)
-        btn_widget
         bl = QHBoxLayout(btn_widget)
         bl.setContentsMargins(12, 10, 12, 10)
         bl.setSpacing(8)
@@ -1099,7 +1099,6 @@ class AnalyzeTabFormMixin:
         rl.setSpacing(0)
 
         hdr = QWidget(parent)
-        hdr
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(12, 6, 12, 6)
         hl.addWidget(QLabel("Pipeline Output", hdr))

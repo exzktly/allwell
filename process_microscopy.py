@@ -74,6 +74,13 @@ from util.well_token import (
     background_well_key as _bg_well_key,
     canonical_well_label as _canonical_well_label,
 )
+from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
+    SCHEMA_FIELDS,
+    DEFAULT_SCHEMA,
+    DEFAULT_SEP,
+    parse_schema,
+    validate_schema,
+)
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -661,56 +668,11 @@ def compress_folder_images_to_zip_and_remove(folder: Path, out_zip: Path) -> int
 # Filename schema helpers
 # ---------------------------------------------------------------------------
 
-#: Ordered list of recognised field names (the vocabulary for schema slots).
-SCHEMA_FIELDS = ("experiment", "channel", "well", "fov", "timepoint", "ignore")
-
-#: Default schema — matches the original hardcoded convention.
-DEFAULT_SCHEMA = "experiment:channel:well:fov:timepoint"
-DEFAULT_SEP    = "_"
+# The schema vocabulary and its parser live in ``util.schema`` — the single
+# source of truth shared with WellPlateZipper, which reads the same filenames in
+# its grouping pre-pass. Re-exported here because the pipeline's own call sites
+# and the tests import them from this module.
 DEFAULT_SEGMENTATION_METHOD = "stardist_nuclei"
-
-
-def parse_schema(schema_str: str) -> list[str]:
-    """
-    Parse a colon-delimited schema string into a list of field names.
-
-    Each token must be one of SCHEMA_FIELDS.  Unknown tokens are silently
-    replaced with "ignore" so that old schema strings remain forward-compatible
-    when new field names are added later.
-
-    Example:
-        "experiment:channel:well:fov:timepoint"
-        -> ["experiment", "channel", "well", "fov", "timepoint"]
-    """
-    known = set(SCHEMA_FIELDS)
-    return [
-        tok if tok in known else "ignore"
-        for tok in schema_str.strip().split(":")
-        if tok  # skip empty tokens from trailing colons etc.
-    ]
-
-
-def validate_schema(schema: list[str]) -> list[str]:
-    """
-    Return a list of human-readable error messages for *schema*.
-    An empty list means the schema is valid.
-
-    Rules:
-      • "channel" must appear exactly once.
-      • "well"    must appear exactly once.
-    """
-    errors: list[str] = []
-    if schema.count("channel") != 1:
-        errors.append(
-            f'"channel" must appear exactly once in the schema '
-            f'(found {schema.count("channel")}).'
-        )
-    if schema.count("well") != 1:
-        errors.append(
-            f'"well" must appear exactly once in the schema '
-            f'(found {schema.count("well")}).'
-        )
-    return errors
 
 
 # ---------------------------------------------------------------------------

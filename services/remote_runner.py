@@ -177,6 +177,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    "util/schema.py",
     "util/timepoint.py",
     "util/well_token.py",
     # The Qt-free ``pipeline`` package: analysis-domain modules (background math,

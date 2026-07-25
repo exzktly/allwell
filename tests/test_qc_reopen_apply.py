@@ -31,7 +31,11 @@ def test_qc_gate_applies_on_reopen(loaded_app, mini_dataset):
     gated = int(df_included_mask(app._get_rows(well)).sum())
     assert gated < before, "QC gate should exclude small cells"
 
-    save_to_data_dir(app)          # persist to disk (bypass the debounce)
+    # Persist to disk, bypassing the debounce. Takes ``ctx``, not the app —
+    # ``ctx.window`` is how it reaches the window, and on a real WellViewerApp
+    # that attribute is Qt's own ``QWidget.window`` method, so passing the app
+    # fails downstream instead of at the boundary.
+    save_to_data_dir(app._ctx)
     app._load_path(mini_dataset)   # reopen the dataset
 
     # The bounds must survive the reopen AND actually filter, without the user

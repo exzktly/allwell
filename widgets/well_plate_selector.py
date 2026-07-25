@@ -458,35 +458,30 @@ class _PlateGrid(QWidget):
             self._selected.pop(key, None)
         self._changed()
 
-    def toggle_row(self, row: int) -> None:
-        keys = [(row, c) for c in range(_N_COLS) if self._is_enabled((row, c))]
+    def _toggle_keys(self, keys) -> None:
+        """Toggle a whole line of cells: clear it when every enabled cell is
+        already selected, otherwise select them all. In single-select mode
+        "select them all" collapses to the first cell, since the widget may
+        only ever hold one."""
         if not keys:
             return
         if all(k in self._selected for k in keys):
             for k in keys:
                 self._selected.pop(k, None)
+        elif self._single_select:
+            self._selected = {keys[0]: 0}
         else:
-            if self._single_select:
-                self._selected = {keys[0]: 0}
-            else:
-                for k in keys:
-                    self._selected[k] = 0
+            for k in keys:
+                self._selected[k] = 0
         self._changed()
 
+    def toggle_row(self, row: int) -> None:
+        self._toggle_keys([(row, c) for c in range(_N_COLS)
+                           if self._is_enabled((row, c))])
+
     def toggle_col(self, col: int) -> None:
-        keys = [(r, col) for r in range(_N_ROWS) if self._is_enabled((r, col))]
-        if not keys:
-            return
-        if all(k in self._selected for k in keys):
-            for k in keys:
-                self._selected.pop(k, None)
-        else:
-            if self._single_select:
-                self._selected = {keys[0]: 0}
-            else:
-                for k in keys:
-                    self._selected[k] = 0
-        self._changed()
+        self._toggle_keys([(r, col) for r in range(_N_ROWS)
+                           if self._is_enabled((r, col))])
 
     def set_all(self, on: bool) -> None:
         if on:

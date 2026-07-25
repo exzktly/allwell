@@ -122,8 +122,9 @@ well_viewer/            Review pane — the bulk of the app
 widgets/                reusable Qt widgets, zero app coupling
 theme.py, ui/theme/     design tokens + QSS (never hardcode colours)
 profiles/*.toml         build profiles (feature subsets)
-tests/                  ~307 test files, incl. the guardrails
-_Docs/Markdowns/        ARCHITECTURE.md + README_WellViewer.md (the only live docs)
+tests/                  ~315 test files, incl. the guardrails
+_Docs/Markdowns/        the three live docs — ARCHITECTURE.md, README_WellViewer.md,
+                        GOD_OBJECT_REPOSITORY_ROADMAP.md
 ```
 
 Where new code goes: pipeline work → `process_microscopy.py` / `pipeline/`; a new
@@ -180,8 +181,12 @@ function, remove its stale allowlist entry (the test fails until you do).
   tab-local handler that clobbers `_selected_wells` leaks across tabs.
 - **End a redraw with** `core.plot_style.apply_export_style_to_current(ctx, fig, canvas)`
   or the Properties sidebar's toggles get lost.
-- **`_Docs/Markdowns/` is small on purpose** — live reference docs only. Plans and
-  status write-ups belong in git history / PRs, not new markdown files.
+- **`_Docs/Markdowns/` is small on purpose** — three live documents and no more:
+  `ARCHITECTURE.md` (the structural map), `README_WellViewer.md` (the user manual),
+  and `GOD_OBJECT_REPOSITORY_ROADMAP.md` (the teardown plan, which is a live
+  tracking document because its ratchet numbers are asserted by
+  `tests/test_guardrails.py`). One-off plans and status write-ups belong in git
+  history / PRs, not new markdown files.
 
 ## 6. Session defaults — docs and PRs
 

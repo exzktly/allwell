@@ -106,6 +106,8 @@ allwell/
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, WellPlateZipper, analyze_tab and
 │   │                              input_resolution_service all parse well names through it)
+│   ├── schema.py               ← filename-schema vocabulary + parse/validate
+│   │                              (shared by process_microscopy and WellPlateZipper)
 │   ├── timepoint.py            ← timepoint token → hours + the shared sort key
 │   │                              (pipeline, services and well_viewer all use it)
 │   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
@@ -2259,6 +2261,23 @@ fixture (it doesn't help).
 4. **Long runs will be interrupted.** A single `pytest` invocation that takes many
    minutes is at risk of a container recycle. Keep each invocation short; if you
    need broad coverage, script several small invocations rather than one large one.
+5. **To run the whole slow lane, use `scripts/test_slow.sh`.** It applies rules 1,
+   2 and 4 for you: it discovers the lane from pytest's own `slow` marker (the
+   fixture closure in `conftest.py` is the only thing that knows the real
+   membership), runs it as many short pytest processes a couple of files each,
+   and aggregates the per-batch JUnit reports. A batch that dies before writing
+   its report fails the run — that is the OOM / C-level-hang signal, and it must
+   never read as success. `--shard I/N` deals the files out round-robin for a CI
+   matrix; `--batch 1` is the safest setting on a constrained machine.
+
+**The slow lane runs nightly, not on PRs** — `.github/workflows/slow-lane.yml`,
+six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate
+because it takes minutes rather than seconds and its per-test memory profile is
+fragile under parallel load. It exists because the ~270 tests it covers
+previously had *no* automated coverage anywhere: `tests/test_qc_reopen_apply.py`
+called a `ctx`-taking function with the raw app from the day that function
+migrated, and sat red indefinitely because nothing ran it. Run it by hand before
+merging anything that reshapes a feature package.
 
 **What the environment gives you that CI does not (and vice versa).** The two
 lanes are not the same machine, and the differences decide which failures you

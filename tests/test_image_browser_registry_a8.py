@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QWidget
 
 from well_viewer.features.image_browser.image_table.tab_view import build_image_table_tab
 from well_viewer.features.image_browser.cell_browser.tab_view import build_cell_browser_tab
+from tests.widget_registry_helpers import assert_handles_registered as _check
 
 # The builder shelf owns authoring; the render model is headless plain data, so
 # the old per-cell selector grid / per-row LUT table / grid-size + held-value
@@ -37,11 +38,6 @@ _CELL_BROWSER = (
 )
 
 
-def _check(app, names):
-    for name in names:
-        assert app._widget_registry.has(name), f"{name} not registered"
-        assert getattr(app, name, None) is not None, f"{name} not on app"
-        assert getattr(app, name) is app._widget_registry.get(name)
 
 
 def test_image_table_build_registers_handles(viewer_app, qtbot):

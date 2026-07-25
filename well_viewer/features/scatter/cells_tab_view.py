@@ -6,10 +6,9 @@ from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
 )
 
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QLabel, QMenu, QPushButton, QVBoxLayout,
-    QWidget, QWidgetAction,
+    QComboBox, QLabel, QPushButton, QVBoxLayout,
+    QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
@@ -17,6 +16,7 @@ from well_viewer.core.ui_helpers import (
     make_popover_button, make_plot_view_switcher)
 from widgets.flow_layout import FlowLayout, flow_group
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
+from well_viewer.features.scatter.tp_selector_view import open_timepoint_selector
 from well_viewer.features.scatter.controller import on_scatter_axis_change
 from well_viewer.features.scatter.controller import update_scatter_tp_selection_display
 from functools import partial
@@ -220,51 +220,11 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
 
 def _open_timepoint_selector(ctx) -> None:
-    """Pop up a QMenu of checkboxes below the per-cell Timepoints button.
-
-    Mirrors the aggregate scatter's multi-tp picker so a single config
-    pattern covers both tabs.
-    """
-    tp_selections = ctx.runtime.scatter.tp_selections
-    btn = ctx.widgets.get_or_none("_scatter_tp_button")
-    menu = QMenu(btn)
-
-    checkboxes: dict[str, QCheckBox] = {}
-    for tp_str in sorted(tp_selections.keys(), key=float):
-        cb = QCheckBox(tp_str, menu)
-        cb.setChecked(bool(tp_selections[tp_str]))
-        checkboxes[tp_str] = cb
-
-        def _make_handler(tp=tp_str, checkbox=cb):
-            def on_toggled(checked: bool) -> None:
-                tp_selections[tp] = bool(checked)
-                update_scatter_tp_selection_display(ctx)
-                redraw_scatter_orchestrate(ctx)
-            return on_toggled
-
-        cb.toggled.connect(_make_handler())
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
-
-    menu.addSeparator()
-
-    def _set_all(value: bool) -> None:
-        for tp_str, cb in checkboxes.items():
-            cb.blockSignals(True)
-            try:
-                cb.setChecked(value)
-            finally:
-                cb.blockSignals(False)
-            tp_selections[tp_str] = value
-        update_scatter_tp_selection_display(ctx)
-        redraw_scatter_orchestrate(ctx)
-
-    all_action = QAction("All", menu)
-    all_action.triggered.connect(lambda _=False: _set_all(True))
-    menu.addAction(all_action)
-    none_action = QAction("None", menu)
-    none_action.triggered.connect(lambda _=False: _set_all(False))
-    menu.addAction(none_action)
-
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+    """Pop up the per-cell scatter's multi-timepoint picker."""
+    open_timepoint_selector(
+        ctx,
+        selections=ctx.runtime.scatter.tp_selections,
+        button_name="_scatter_tp_button",
+        refresh_display=update_scatter_tp_selection_display,
+        redraw=redraw_scatter_orchestrate,
+    )

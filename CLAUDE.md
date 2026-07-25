@@ -246,7 +246,10 @@ fails on any version reference outside the two sanctioned current-release sites.
 pushing with `git push -u origin <branch>`, and opening a pull request — don't
 wait to be asked. Follow the repo's PR template if one exists. Then keep the PR
 green: watch CI, fix what your diff broke, and resolve merge conflicts against
-the default branch yourself.
+the default branch yourself. Resolve them by editing the conflict markers —
+`git checkout --ours/--theirs <file>` takes the *whole* file from one side, so on
+a doc that conflicts only on the version line it silently discards your prose
+edits elsewhere in it. If you do use it, re-apply and verify what it dropped.
 
 **Keep the PR summary current.** The body describes the branch as it stands
 now, not what you set out to do. Every push that adds, drops, or changes scope

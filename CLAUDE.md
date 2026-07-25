@@ -167,6 +167,13 @@ wait to be asked. Follow the repo's PR template if one exists. Then keep the PR
 green: watch CI, fix what your diff broke, and resolve merge conflicts against
 the default branch yourself.
 
+**Scheduling your own check-ins is pre-authorized.** `send_later` (and the
+equivalent self-wakeup tools) needs no permission — standing grant, never ask.
+Use it freely to re-check a running CI job, a queued workflow, or an open PR,
+and re-arm it as often as the work needs. A silent re-arm is the correct move
+when nothing has changed: don't narrate a wake-up that found the job still
+running.
+
 **The only version claims in the docs** are the current-release ones:
 `version.py::__version__` is where the app version lives (the title-bar pill and
 the PyInstaller spec read it), and bumping it means updating the "Reflects

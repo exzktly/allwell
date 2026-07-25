@@ -484,13 +484,10 @@ def review_row_keys(ctx, row: dict) -> Tuple[str, str, str]:
     )
 
 
-def _review_tp_sort_key(tp: str):
-    """Numeric-then-lexical sort key for a normalised timepoint token."""
-    from well_viewer.data.data_loading import parse_timepoint_hours
-    parsed = parse_timepoint_hours(str(tp))
-    if parsed is not None:
-        return (0, parsed, str(tp))
-    return (1, 0.0, str(tp))
+# Timepoint ordering is shared app-wide — see util.timepoint.sort_key. The old
+# local copy returned 0/1 where the shared one returns False/True; those sort
+# identically, so the ordering is unchanged.
+from util.timepoint import sort_key as _review_tp_sort_key
 
 
 def review_collect_timepoints(ctx, fov: str) -> list:

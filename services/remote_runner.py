@@ -62,6 +62,7 @@ from services.remote_config import (
 # Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
 # This module import must stay imaging-stack-free; incremental_keys is csv/
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
+from util.timepoint import sort_key as tp_sort_key
 from pipeline.incremental_keys import (
     fov_tp_from_name,
     read_done_fov_keys,
@@ -177,6 +178,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "util/__init__.py",
     "util/aw_safe.py",
     "util/schema.py",
+    "util/timepoint.py",
     "util/well_token.py",
     # The Qt-free ``pipeline`` package: analysis-domain modules (background math,
     # auto-threshold, flat-field, shape-feature catalog) + the Cellpose/StarDist
@@ -1192,26 +1194,15 @@ def _scan_output_fov_tps(
 
 
 def _tp_sort_key(tok: str):
-    """Best-effort hours value for ordering a timepoint token (DDdHHhMMm / unit /
-    bare number / trailing number); unparseable tokens sort last. Mirrors
-    process_microscopy._parse_timepoint_hours closely enough for dropdown order."""
-    s = str(tok or "").strip()
-    h: float | None = None
-    m = re.fullmatch(r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?", s, re.IGNORECASE)
-    if m and any(m.groups()):
-        h = int(m.group(1) or 0) * 24.0 + int(m.group(2) or 0) + int(m.group(3) or 0) / 60.0
-    if h is None:
-        m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([hdm])\w*", s, re.IGNORECASE)
-        if m:
-            v, u = float(m.group(1)), m.group(2).lower()
-            h = v if u == "h" else v * 24.0 if u == "d" else v / 60.0
-    if h is None:
-        try:
-            h = float(s)
-        except ValueError:
-            m = re.search(r"(\d+(?:\.\d+)?)$", s)
-            h = float(m.group(1)) if m else None
-    return (h is None, h if h is not None else 0.0, s)
+    r"""Chronological sort key for a timepoint token; unparseable tokens last.
+
+    Delegates to :func:`util.timepoint.sort_key`. This used to inline its own
+    parser — ``services/`` may not import ``well_viewer`` (ARCHITECTURE §6.2),
+    so it could not share the viewer's — and the two drifted: a trailing ``\w*``
+    in the unit pattern made it read ``"2hpCh"`` as two hours. ``util`` is
+    stdlib-only, so it is importable from here and the divergence goes away.
+    """
+    return tp_sort_key(tok)
 
 
 def _fov_sort_key(tok: str):

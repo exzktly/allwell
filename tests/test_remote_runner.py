@@ -1638,10 +1638,11 @@ def test_required_files_list_is_what_we_promised():
     assert _REQUIRED_REMOTE_FILES == (
         "process_microscopy.py",
         # General Qt-free utilities (well-token parsing, filename-schema
-        # parsing, logged-swallow).
+        # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
         "util/schema.py",
+        "util/timepoint.py",
         "util/well_token.py",
         # The Qt-free ``pipeline`` package (analysis-domain modules +
         # segmenters/writers), re-imported at module top level.

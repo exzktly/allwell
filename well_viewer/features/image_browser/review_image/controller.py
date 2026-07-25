@@ -19,7 +19,8 @@ from well_viewer.features.image_browser.review_image.box_select import (
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import norm_timepoint
-from well_viewer.data.data_loading import get_rows, parse_timepoint_hours
+from util.timepoint import sort_key as tp_sort_key
+from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 import numpy as _np
@@ -828,7 +829,7 @@ def _refresh_review_csv_impl(ctx) -> None:
             continue
         seen_tps.add(norm_tp)
         tps.append(norm_tp)
-    tps.sort(key=lambda tp: (parse_timepoint_hours(tp) is None, parse_timepoint_hours(tp) or 0.0, tp))
+    tps.sort(key=tp_sort_key)
     _set_combo_values(fov_cb, fovs)
     _set_combo_values(tp_cb, tps)
     if fovs and fov_cb.currentText() not in fovs:

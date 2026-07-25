@@ -134,7 +134,7 @@ from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values  #
 
 
 from well_viewer.data.data_loading import (
-    load_well_csv, parse_timepoint_hours,
+    load_well_csv,
 )
 from well_viewer.domain.ratio_models import RatioMetric
 
@@ -697,13 +697,6 @@ class WellViewerApp(QWidget):
     def _norm_timepoint(self, value: object) -> str: return norm_timepoint(self._ctx, value)
 
     def _review_row_keys(self, row: dict) -> tuple[str, str, str]: return review_row_keys(self._ctx, row)
-
-    @staticmethod
-    def _review_tp_sort_key(tp: str) -> tuple[int, float, str]:
-        parsed = parse_timepoint_hours(str(tp))
-        if parsed is not None:
-            return (0, parsed, str(tp))
-        return (1, 0.0, str(tp))
 
     # ── Review Image color customization ──────────────────────────────────
 

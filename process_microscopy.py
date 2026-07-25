@@ -54,7 +54,6 @@ import contextlib
 import json
 import logging
 import os
-import re
 import shutil
 import time
 import zipfile
@@ -69,6 +68,7 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
+from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
     split_background_wells as _split_background_wells,
     background_well_key as _bg_well_key,
@@ -680,59 +680,23 @@ DEFAULT_SEGMENTATION_METHOD = "stardist_nuclei"
 # ---------------------------------------------------------------------------
 
 def _parse_timepoint_hours(tp: str) -> float:
+    """Convert a timepoint string to fractional hours; ``nan`` when unparseable.
+
+    A ``nan``-returning adapter over :func:`util.timepoint.parse_hours`, which
+    is the shared implementation and returns ``None``. The ``nan`` sentinel is
+    kept because this module's callers are written against it — notably the
+    ``h != h`` tests that decide raw-passthrough and sort-last — and because a
+    float return keeps ``timepoint_hours`` a float column with no ``None`` to
+    special-case on the way into the CSV.
+
+    One consequence worth knowing: the literal token ``"nan"`` parses to
+    ``nan`` too, so this return value cannot distinguish "the token said nan"
+    from "I could not read the token". Both current callers treat them the
+    same, but a new caller that must tell them apart should call
+    ``util.timepoint.parse_hours`` and test for ``None``.
     """
-    Convert a timepoint string to fractional hours.
-    Returns float("nan") when the string cannot be parsed at all.
-
-    Formats tried in order:
-      1. DDdHHhMMm  e.g. "02d04h30m" -> 52.5  (full or partial components)
-      2. Standalone unit suffix  e.g. "48h" -> 48.0, "2d" -> 48.0, "30m" -> 0.5
-      3. Pure number  e.g. "48" or "1.5" -> treated as hours
-      4. Prefixed ordinal  e.g. "T01", "t3", "day2", "D02" -> ordinal value
-         (strip leading non-digit chars, use the numeric part as a plain
-          index so relative ordering is preserved)
-    """
-    s = tp.strip()
-    if not s:
-        return float("nan")
-
-    # 1. Full DDdHHhMMm (all components optional, but at least one required)
-    m = re.fullmatch(
-        r"(?:(\d{1,4})d)?(?:(\d{1,2})h)?(?:(\d{1,2})m)?",
-        s, re.IGNORECASE,
-    )
-    if m and any(m.groups()):
-        days  = int(m.group(1) or 0)
-        hours = int(m.group(2) or 0)
-        mins  = int(m.group(3) or 0)
-        return days * 24.0 + hours + mins / 60.0
-
-    # 2. Standalone unit: "48h", "2d", "30m", "90min"
-    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*(h(?:ours?)?|d(?:ays?)?|m(?:in(?:utes?)?)?)",
-                     s, re.IGNORECASE)
-    if m:
-        val  = float(m.group(1))
-        unit = m.group(2)[0].lower()
-        if unit == "h":
-            return val
-        if unit == "d":
-            return val * 24.0
-        if unit == "m":
-            return val / 60.0
-
-    # 3. Pure number (treat as hours)
-    try:
-        return float(s)
-    except ValueError:
-        pass
-
-    # 4. Prefixed ordinal: strip leading non-digit characters, keep the number.
-    #    e.g. "T01" -> 1.0, "day02" -> 2.0, "tp_3" -> 3.0
-    m = re.search(r"(\d+(?:\.\d+)?)$", s)
-    if m:
-        return float(m.group(1))
-
-    return float("nan")
+    hours = _tp_parse_hours(tp)
+    return float("nan") if hours is None else hours
 
 
 def parse_filename(
@@ -3768,13 +3732,9 @@ def _collect_available_timepoints(
     filename_schema: str,
     filename_sep: str,
 ) -> list[str]:
-    def _sort_key(tp: str):
-        h = _parse_timepoint_hours(tp)
-        return (
-            h != h,  # NaN sentinel sorts last (_parse_timepoint_hours -> float)
-            (h if h == h else 0.0),
-            tp,
-        )
+    # Shared with the viewer and the remote runner so a dropdown, a plot axis
+    # and this listing cannot order the same tokens differently.
+    _sort_key = _tp_sort_key
     return _collect_available_schema_values(
         input_dir,
         filename_schema=filename_schema,

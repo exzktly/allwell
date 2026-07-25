@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from well_viewer.core.channel_state_controller import on_metric_selected
-
-from well_viewer.core.channel_state_controller import on_plot_channel_selected
-
-from well_viewer.features.barplot.controller import (bar_reset_order, open_bar_timepoint_selector, toggle_bar_group_mode, toggle_bar_pool_replicates, toggle_swarm, toggle_violin, on_bar_drag_press, on_bar_drag_release)
+from well_viewer.core.channel_state_controller import (
+    on_metric_selected, on_plot_channel_selected,
+)
 
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure,
@@ -23,15 +21,17 @@ from well_viewer.core.ui_helpers import (
     make_plot_with_right_dock, make_plot_view_switcher)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
+    on_bar_drag_motion,
+    on_bar_drag_press,
+    on_bar_drag_release,
     open_bar_timepoint_selector,
     toggle_bar_group_mode,
     toggle_bar_pool_replicates,
+    toggle_swarm,
+    toggle_violin,
 )
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
-from well_viewer.features.barplot.controller import on_bar_drag_press
-from well_viewer.features.barplot.controller import on_bar_drag_motion
-from well_viewer.features.barplot.controller import on_bar_drag_release
 from well_viewer.features.export.service import export_bar_plot_data
 from ui.theme import ACCENT
 

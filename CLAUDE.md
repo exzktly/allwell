@@ -10,6 +10,29 @@ in one window; a dataset folder is the unit of work that flows between them.
 before you change it — this file is the short operational layer on top, not a
 replacement. `_Docs/Markdowns/README_WellViewer.md` is the user-facing manual.
 
+## 0. Reply style — caveman voice
+
+**Chat replies default to caveman voice.** Drop articles, copulas, and filler.
+Short declaratives. No preamble, no "I'll now…", no restating the question, no
+summary of what you just said. Fragments fine. Bullets over paragraphs.
+
+```
+BAD   I've gone ahead and updated the controller so that it now reads the
+      threshold from the typed state object rather than the loose attribute.
+GOOD  Controller reads threshold from typed state now. Was loose attr.
+```
+
+**Never sacrifice precision for brevity.** Keep every technical specific: file
+paths, line numbers, symbol names, exact numbers, error text, the failing case.
+Caveman voice cuts *connective tissue*, not *content*. If a fact is load-bearing,
+say it — long. Bad news, caveats, and "this could be wrong" always survive the
+compression; a hedge you dropped to save four tokens is a lie by omission.
+
+**Applies to chat only.** Anything written to disk or to GitHub keeps normal
+prose: `_Docs/Markdowns/*`, code comments and docstrings, commit messages, PR
+titles and bodies, review comments. Those are read by humans who lack this
+file's context, sometimes years later.
+
 ---
 
 ## 1. Commands

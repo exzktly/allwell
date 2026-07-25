@@ -10,13 +10,11 @@ so re-gating QC can never clobber hand-curated include/exclude edits.
 
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
 from .params import QCParams, compute_qc_pass
 from well_viewer.core.safe import swallowed
-
-_logger = logging.getLogger("well_viewer")
+from well_viewer.data.cache_projectors import project_verdict_column
 
 
 def get_qc_params(ctx) -> QCParams:
@@ -39,22 +37,20 @@ def apply_qc_to_cache(ctx, label: Optional[str] = None) -> None:
 
     With ``label`` given, only that well; otherwise every cached well. A no-op
     cheap pass when the gate is inactive (writes ``QC_Pass = 1`` so the chokepoint
-    sees an explicit all-pass and stays consistent across re-gates).
+    sees an explicit all-pass and stays consistent across re-gates). Shares the
+    cache walk with ``crop.controller.apply_crop_to_cache`` via
+    :func:`well_viewer.data.cache_projectors.project_verdict_column`.
 
     A8 residuals-ledger R1: takes ``ctx`` — the params and the row cache both
     come from typed state, so the QC projection is a pure ``ctx`` operation the
     row-fetch data service can call."""
     params = get_qc_params(ctx)
-    cache = ctx.state.dataset.cache
-    labels = [label] if label is not None else list(cache.keys())
-    for lbl in labels:
-        df = cache.get(lbl)
-        if df is None or df.empty:
-            continue
-        try:
-            df["QC_Pass"] = compute_qc_pass(df, params).astype(int)
-        except Exception:  # never let QC break the data path
-            _logger.exception("QC: failed to compute QC_Pass for well %s", lbl)
+    project_verdict_column(
+        ctx, label,
+        column="QC_Pass",
+        verdict=lambda df: compute_qc_pass(df, params),
+        layer="QC",
+    )
 
 
 def recompute_qc_all(ctx) -> None:

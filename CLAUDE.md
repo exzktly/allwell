@@ -135,18 +135,44 @@ function, remove its stale allowlist entry (the test fails until you do).
 - **`_Docs/Markdowns/` is small on purpose** — live reference docs only. Plans and
   status write-ups belong in git history / PRs, not new markdown files.
 
-## 6. Releases and doc sync
+## 6. Session defaults — docs and PRs
 
-`version.py::__version__` is the only place the app version lives (the title-bar
-pill and the PyInstaller spec both read it). Bumping it **requires** updating the
-prose sites in ARCHITECTURE.md ("Reflects All-Well vX.Y.Z", the "v8.4 → vX.Y.Z
-line" range, the `version.py` directory-map entry) and the `AllWell-X.Y.Z.app`
-names in README_WellViewer.md — `tests/test_doc_version_sync.py` fails otherwise.
-Inline `(vX.Y.Z)` feature markers in ARCHITECTURE.md are historical; leave them
-alone.
+These are defaults, not optional extras. Do them without being asked; only skip
+one if the user says so.
 
-When you change structure, **update the relevant ARCHITECTURE.md section** rather
-than appending a version note — it is a map for making changes, not a changelog.
+**Update the docs with every change.** A session that changes behaviour or
+structure updates, in the same commit series:
+
+- **`_Docs/Markdowns/ARCHITECTURE.md`** — whenever you add, move, remove, or
+  rewire anything structural: a module, a feature package, a contract, a
+  convention, a data flow, a guardrail. Edit the section that already covers the
+  area; add a section only for genuinely new ground.
+- **`_Docs/Markdowns/README_WellViewer.md`** — whenever user-visible behaviour
+  changes: a new tab or control, a changed workflow, new install/run steps, new
+  CLI flags, changed outputs.
+
+If a change touches neither, say so in the PR body rather than silently skipping.
+
+**ARCHITECTURE.md is a running description, never a changelog.** It states what
+is true *now*. Do not write "new in vX.Y.Z", `(v8.7.2)` markers, "was changed
+to", "previously did X", or any other note of *when* something arrived — that
+history lives in `git log`, `git blame`, and the PRs. When behaviour changes,
+**rewrite the prose to describe the new behaviour** instead of appending a note
+beside the old one. `tests/test_doc_version_sync.py::test_no_introduced_in_version_markers`
+fails on any version reference outside the two sanctioned current-release sites.
+
+**Open a PR by default.** Finish a task by committing to the session branch,
+pushing with `git push -u origin <branch>`, and opening a pull request — don't
+wait to be asked. Follow the repo's PR template if one exists. Then keep the PR
+green: watch CI, fix what your diff broke, and resolve merge conflicts against
+the default branch yourself.
+
+**The only version claims in the docs** are the current-release ones:
+`version.py::__version__` is where the app version lives (the title-bar pill and
+the PyInstaller spec read it), and bumping it means updating the "Reflects
+All-Well vX.Y.Z" header and the `version.py` directory-map entry in
+ARCHITECTURE.md plus the `AllWell-X.Y.Z.app` names in README_WellViewer.md.
+`tests/test_doc_version_sync.py` pins exactly those.
 
 ## 7. Debugging entry points
 

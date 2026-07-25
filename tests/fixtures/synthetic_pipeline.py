@@ -25,6 +25,25 @@ NUCLEAR_BG = 80.0
 NUCLEAR_PEAK = 3000.0
 FLUOR_BG = 200.0
 FLUOR_PEAK = 800.0
+# Cytoplasm: a larger disk concentric with each nucleus, so seeded watershed has
+# a cell body to grow the nuclear seeds into.
+CYTO_RADIUS = 22
+CYTO_BG = 120.0
+CYTO_PEAK = 1400.0
+# Phase / brightfield: cells are *darker* than the field, the way a transmitted
+# -light image looks, so the label-free segmenter sees a plausible input.
+PHASE_BG = 2200.0
+PHASE_PEAK = 700.0
+
+# Channel kinds understood by :func:`write_synthetic_channels`. The kind picks
+# the disk radius + intensities; the token (the name in the filename) is chosen
+# by the caller.
+CHANNEL_KINDS = {
+    "nuclear":   (DEFAULT_RADIUS, NUCLEAR_BG, NUCLEAR_PEAK),
+    "fluor":     (DEFAULT_RADIUS, FLUOR_BG, FLUOR_PEAK),
+    "cytoplasm": (CYTO_RADIUS, CYTO_BG, CYTO_PEAK),
+    "phase":     (CYTO_RADIUS, PHASE_BG, PHASE_PEAK),
+}
 
 
 def _disks(shape, centers, radius, bg, peak) -> np.ndarray:
@@ -34,6 +53,48 @@ def _disks(shape, centers, radius, bg, peak) -> np.ndarray:
     for cy, cx in centers:
         img[((yy - cy) ** 2 + (xx - cx) ** 2) <= radius ** 2] = float(peak)
     return img
+
+
+def write_synthetic_channels(
+    out_dir: Path,
+    channels: "dict[str, str]",
+    *,
+    experiment: str = "exp",
+    well: str = "A01",
+    fov: str = "1",
+    timepoint: str = "0",
+    shape=(256, 256),
+    centers=DEFAULT_CENTERS,
+    sep: str = "_",
+) -> "dict[str, Path]":
+    """Write one schema-named TIFF per entry of *channels* and return
+    ``{token: path}``.
+
+    *channels* maps a channel token (the string that lands in the filename, e.g.
+    ``"DAPI"``) to one of the kinds in :data:`CHANNEL_KINDS`. Every channel draws
+    the same nuclei centres, so the images are registered with each other the way
+    real multi-channel acquisitions are: the cytoplasm and phase kinds simply use
+    a larger disk than the nuclear/fluor kinds.
+
+    This is the multi-channel generalisation of :func:`write_synthetic_fov`,
+    which stays as the two-channel (nuclear + fluor) shorthand.
+    """
+    import tifffile
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, Path] = {}
+    for token, kind in channels.items():
+        try:
+            radius, bg, peak = CHANNEL_KINDS[kind]
+        except KeyError:
+            raise ValueError(
+                f"unknown channel kind {kind!r}; expected one of {sorted(CHANNEL_KINDS)}"
+            ) from None
+        path = out_dir / (sep.join([experiment, token, well, fov, timepoint]) + ".tif")
+        tifffile.imwrite(path, _disks(shape, centers, radius, bg, peak))
+        written[token] = path
+    return written
 
 
 def write_synthetic_fov(

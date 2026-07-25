@@ -1625,7 +1625,8 @@ per-widget rewiring**.
 - `theme.THEMES` maps a name → sparse override bundle. Built-ins:
   `blue` (the default; the class values are its palette) and
   `grey` (a **colour-only** variant — neutral charcoal-grey chrome, azure
-  accent, near-black plot canvas, yellow version-pill text via `Colors.brand_fg`).
+  accent, near-black plot canvas). The version pill reads the `Colors.brand` /
+  `Colors.brand_fg` tokens and is transparent with white text in both themes.
   Both share the flat, tight control feel: the `Radii`/`Metrics` defaults
   (small radii + crisp `control_border` + compact padding) are app-wide, so the
   `grey` bundle overrides only `Colors`. (Its look was designed against

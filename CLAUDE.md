@@ -221,12 +221,18 @@ not a log.
 
 **Scheduling your own check-ins is pre-authorized.** `send_later` (and the
 equivalent self-wakeup tools) needs no permission — standing grant, never ask.
-It is also allowlisted in `.claude/settings.json`, so the harness shouldn't
-prompt for it either.
+Cancelling one you no longer need (`delete_trigger`) is part of the same grant.
+Both are allowlisted in `.claude/settings.json`, under every spelling of the
+MCP server name the session may use, so the harness shouldn't prompt either.
 Use it freely to re-check a running CI job, a queued workflow, or an open PR,
 and re-arm it as often as the work needs. A silent re-arm is the correct move
 when nothing has changed: don't narrate a wake-up that found the job still
-running.
+running. Delete the trigger once the work it watched is finished — a merged PR
+does not need an hourly wake-up.
+
+Project settings only apply once the harness trusts them; a remote session that
+still prompts is loading none of the file. The fix there is the same allowlist in
+the user-level `~/.claude/settings.json`, which needs no trust step.
 
 **Every PR bumps the version.** No exceptions — a PR that ships anything ships
 a new version. Patch (`8.8.24` → `8.8.25`) for fixes, docs, tooling, and small

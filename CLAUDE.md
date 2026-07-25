@@ -190,6 +190,16 @@ wait to be asked. Follow the repo's PR template if one exists. Then keep the PR
 green: watch CI, fix what your diff broke, and resolve merge conflicts against
 the default branch yourself.
 
+**Keep the PR summary current.** The body describes the branch as it stands
+now, not what you set out to do. Every push that adds, drops, or changes scope
+means editing the description in the same breath — new commits, a reverted
+approach, a follow-up fix, a fresh test, a version bump. Treat a stale summary
+as a broken build: a reviewer who reads it and finds different code in the diff
+has lost the ability to trust any of it. Same voice rule as the docs — normal
+prose, written for someone who has not read this conversation. Rewrite the
+affected section rather than appending "EDIT:" notes; the body is a description,
+not a log.
+
 **Scheduling your own check-ins is pre-authorized.** `send_later` (and the
 equivalent self-wakeup tools) needs no permission — standing grant, never ask.
 It is also allowlisted in `.claude/settings.json`, so the harness shouldn't

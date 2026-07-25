@@ -39,7 +39,7 @@ _FACET_FACTORS = (("well", "Well"), ("timepoint", "Timepoint"), ("group", "Group
 _AGGS = ("mean", "median", "count", "std")
 
 
-from widgets.flow_layout import FlowLayout
+from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
 def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -99,6 +99,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     save_btn.clicked.connect(lambda _=False: _save_figure(ctx))
     r1.addWidget(save_btn)
     layout.addWidget(row1)
+    sync_flow_height(row1)   # reserve the wrapped height (see sync_flow_height)
 
     # ── controls row 2: per-mode options + timepoint ─────────────────────────
     row2 = QWidget(parent)
@@ -227,16 +228,20 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
 
     r2.addStretch(1)
 
-    # Timepoint filter — shared across modes.
-    r2.addWidget(QLabel("Timepoint:", row2))
+    # Timepoint filter — shared across modes. Label and combo go in as ONE
+    # ``flow_group`` item: added separately they are two flow items, and the row
+    # wraps between them the moment the per-mode option group ahead of them is a
+    # wide one (Faceting), stranding "Timepoint:" at the end of one line and its
+    # combo at the start of the next.
     tp_cb = QComboBox(row2)
     tp_cb.addItem("All timepoints", None)
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
             ctx, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
     reg.register("_mv_tp_cb", tp_cb)
-    r2.addWidget(tp_cb)
+    r2.addWidget(flow_group(row2, "Timepoint:", tp_cb))
     layout.addWidget(row2)
+    sync_flow_height(row2)   # Faceting's option group wraps this row at narrow widths
 
     # ── the figure ───────────────────────────────────────────────────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)

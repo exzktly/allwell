@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QWidget
 
 from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
 from well_viewer.features.scatter.agg_tab_view import build_scatter_agg_tab
+from tests.widget_registry_helpers import assert_handles_registered as _check
 
 _CELLS = (
     "_scatter_export_dock", "_scatter_ch_x_cb", "_scatter_ch_x_var",
@@ -36,11 +37,6 @@ _AGG = (
 )
 
 
-def _check(app, names):
-    for name in names:
-        assert app._widget_registry.has(name), f"{name} not registered"
-        assert getattr(app, name, None) is not None, f"{name} not on app"
-        assert getattr(app, name) is app._widget_registry.get(name)
 
 
 def test_cells_build_registers_handles(viewer_app, qtbot):

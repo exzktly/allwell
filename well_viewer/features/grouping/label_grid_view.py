@@ -268,8 +268,9 @@ class LabelGrid(QWidget):
         self._sync_header_actives()
         self.selectionChanged.emit(self.selectedTokens())
 
-    def _toggle_row(self, r: int) -> None:
-        tokens = [f"{_ROW_LETTERS[r]}{c + 1:02d}" for c in range(_N_COLS)]
+    def _toggle_tokens(self, tokens) -> None:
+        """Toggle a whole line of wells: clear it when every enabled well in the
+        line is already selected, otherwise select them all."""
         if self._enabled is not None:
             tokens = [t for t in tokens if t in self._enabled]
         all_on = bool(tokens) and all(t in self._selected for t in tokens)
@@ -282,19 +283,11 @@ class LabelGrid(QWidget):
         self._sync_header_actives()
         self.selectionChanged.emit(self.selectedTokens())
 
+    def _toggle_row(self, r: int) -> None:
+        self._toggle_tokens([f"{_ROW_LETTERS[r]}{c + 1:02d}" for c in range(_N_COLS)])
+
     def _toggle_column(self, c: int) -> None:
-        tokens = [f"{_ROW_LETTERS[r]}{c + 1:02d}" for r in range(_N_ROWS)]
-        if self._enabled is not None:
-            tokens = [t for t in tokens if t in self._enabled]
-        all_on = bool(tokens) and all(t in self._selected for t in tokens)
-        for t in tokens:
-            if all_on:
-                self._selected.discard(t)
-            else:
-                self._selected.add(t)
-            self._cells[t].setSelected(t in self._selected)
-        self._sync_header_actives()
-        self.selectionChanged.emit(self.selectedTokens())
+        self._toggle_tokens([f"{_ROW_LETTERS[r]}{c + 1:02d}" for r in range(_N_ROWS)])
 
     def _sync_header_actives(self) -> None:
         for r, rh in enumerate(self._row_hdrs):

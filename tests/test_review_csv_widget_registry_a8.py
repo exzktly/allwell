@@ -15,6 +15,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QWidget
 
 from well_viewer.features.review_csv.tab_view import build_review_csv_tab
+from tests.widget_registry_helpers import assert_handles_registered
 
 _HANDLES = (
     "_review_well_lbl", "_review_fov_cb", "_review_tp_cb",
@@ -28,13 +29,7 @@ def test_build_registers_handles_and_stamps_app(viewer_app, qtbot):
     qtbot.addWidget(parent)      # keep the parent (and its children) alive
     build_review_csv_tab(app._ctx, parent)
 
-    for name in _HANDLES:
-        # Registered in the WidgetRegistry…
-        assert app._widget_registry.has(name), f"{name} not registered"
-        # …and stamped onto the app so legacy `app._review_*` readers resolve.
-        assert getattr(app, name, None) is not None, f"{name} not on app"
-        # …and they're the same object.
-        assert getattr(app, name) is app._widget_registry.get(name)
+    assert_handles_registered(app, _HANDLES)
 
 
 def test_refresh_reader_resolves_after_registry_build(viewer_app, qtbot):

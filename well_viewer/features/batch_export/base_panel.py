@@ -716,15 +716,6 @@ class BatchExportPanel(QWidget):
         names = _get_all_profile_names(self._ctx)
         return names or ["Custom"]
 
-    def _refresh_export_profile_choices(self) -> None:
-        names = self._export_profile_names()
-        self._profile_combo.blockSignals(True)
-        self._profile_combo.clear()
-        self._profile_combo.addItems(names)
-        current = self._export_profile_value if self._export_profile_value in names else "Custom"
-        self._profile_combo.setCurrentText(current)
-        self._profile_combo.blockSignals(False)
-
     def _apply_export_profile_to_prefs(self, profile_name: str) -> None:
         from well_viewer.features.export.style import (
             EXPORT_PROFILES,
@@ -978,10 +969,6 @@ class BatchExportPanel(QWidget):
             str(self._fc_control_label or ""),
             bool(self._fc_vs_t0_on),
         )
-
-    def _fc_active(self) -> bool:
-        v, _, t0 = self._fc_state()
-        return v or t0
 
     def _build_timepoints_section(self, layout: QVBoxLayout) -> None:
         """TIMEPOINTS header + multi-select list (shared by Bar/Scatter)."""

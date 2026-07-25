@@ -7,8 +7,8 @@ from typing import Any, Callable, List, Optional, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QFrame, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+    QApplication, QFrame, QHBoxLayout,
+    QInputDialog, QLabel, QLineEdit, QPushButton,
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.data.data_loading import parse_timepoint_hours
@@ -994,24 +994,6 @@ def safe_int_or_none(value: object) -> Optional[int]:
         return int(float(str(value).strip()))
     except (TypeError, ValueError):
         return None
-
-
-def wells_multiselect_listbox(parent, available, preselect=None) -> QListWidget:
-    """Return a QListWidget of *available* well labels with multi-selection."""
-    lb = QListWidget(parent)
-    lb.setSelectionMode(QAbstractItemView.MultiSelection)
-    preset = set(preselect or ())
-    for w in available:
-        item = QListWidgetItem(w)
-        lb.addItem(item)
-        if w in preset:
-            item.setSelected(True)
-    return lb
-
-
-def selected_list_values(lb) -> list:
-    """Return the current selected item text list from a QListWidget."""
-    return [lb.item(i).text() for i in range(lb.count()) if lb.item(i).isSelected()]
 
 
 def mute_color(hex_color: str, factor: float = 0.5) -> str:

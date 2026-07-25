@@ -27,7 +27,7 @@ _boot_diag.install_excepthook()
 _boot_diag.boot(f"start pid={__import__('os').getpid()} python={sys.version.split()[0]} platform={sys.platform}")
 
 _boot_diag.boot("importing PySide6 (Qt DLLs) …")
-from PySide6.QtCore import Qt, QTimer, Signal, QRectF
+from PySide6.QtCore import Qt, QTimer, QRectF
 from PySide6.QtGui import QBrush, QColor, QIcon, QPainter, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QApplication, QFileDialog, QFrame, QHBoxLayout, QLabel, QMainWindow,
@@ -160,8 +160,6 @@ def _strip_install_help(md_text: str) -> str:
 class AllWellApp(QMainWindow):
     """Root window containing the Review and Analyze notebook tabs."""
 
-    threshold_changed = Signal(float)
-
     def __init__(self, data_path: Path | None = None) -> None:
         super().__init__()
         self.setWindowTitle("All-Well")
@@ -170,7 +168,6 @@ class AllWellApp(QMainWindow):
 
         self._review: QWidget | None = None
         self._analyze: QWidget | None = None
-        self._cell_threshold = 0.0
 
         self._build_ui()
         self._install_shortcuts()
@@ -1279,25 +1276,6 @@ class AllWellApp(QMainWindow):
             except Exception:
                 swallowed()
         super().closeEvent(event)
-
-    # ── Cross-tab threshold ───────────────────────────────────────────────
-    def get_cell_threshold(self) -> float:
-        if self._analyze is not None and getattr(self._analyze, "_cell_properties_tab", None) is not None:
-            try:
-                return float(self._analyze._cell_properties_tab.get_threshold())
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        return self._cell_threshold
-
-    def set_cell_threshold(self, value: float) -> None:
-        self._cell_threshold = float(value)
-        if self._analyze is not None and getattr(self._analyze, "_cell_properties_tab", None) is not None:
-            try:
-                self._analyze._cell_properties_tab.set_threshold(self._cell_threshold)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        self.threshold_changed.emit(self._cell_threshold)
-
 
 def _install_combobox_popup_widener() -> None:
     """Patch QComboBox.showPopup so the popup view sizes itself to the

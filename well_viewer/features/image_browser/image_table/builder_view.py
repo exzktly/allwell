@@ -224,10 +224,6 @@ def _default_spec(ctx):
     return spec
 
 
-def _channel_axis(spec) -> Optional[str]:
-    return spec.channel_axis()
-
-
 def _fixed_dims(spec) -> List[str]:
     return [d for d in _ROOT_DIMS if spec.rows.root != d and spec.cols.root != d]
 

@@ -629,13 +629,6 @@ def _finite_median(arr: np.ndarray) -> float:
     return float(np.median(finite))
 
 
-def _finite_mean(arr: np.ndarray) -> float:
-    finite = arr[np.isfinite(arr)] if arr is not None else np.array([])
-    if finite.size == 0:
-        return float("nan")
-    return float(np.mean(finite))
-
-
 def summarise_frame(
     points: np.ndarray,
     metric: np.ndarray | None = None,

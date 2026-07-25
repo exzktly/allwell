@@ -751,17 +751,6 @@ class AnalyzeTabFormMixin:
             self._scratch_edit.setText(d)
             self._scratch_user_set = True
 
-    def _refresh_scratch_default(self) -> None:
-        """No-op: the scratch field is left blank so the pipeline default
-        (``~/.allwell/scratch``) applies.
-
-        It used to seed ``<input>/Temp``, which silently pinned every run's
-        temporary I/O to the input volume. Kept (rather than deleted) so any
-        out-of-tree caller stays working; it is no longer wired to the input
-        field.
-        """
-        return
-
     # ── Load a prior run's settings from its pipeline_info.json sidecar ───────
     def _open_pipeline_info(self) -> None:
         """Pick a pipeline_info.json and repopulate every form field from it."""

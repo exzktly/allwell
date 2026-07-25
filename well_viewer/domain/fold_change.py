@@ -836,19 +836,6 @@ def member_first_tp_n_resolved(
     return (float(earliest), ns[0], ns[1])
 
 
-def parse_fc_op(ctx) -> str:
-    """Return the user's chosen fold-change operator (``"ratio"`` or
-    ``"subtract"``). Defaults to ``"ratio"`` for back-compat with
-    ``PlotState`` snapshots that don't carry the field.
-
-    Legacy single-op accessor — returns the control-axis op. New callers
-    should use :func:`parse_fc_op_ctrl` / :func:`parse_fc_op_t0` to read
-    the per-axis ops independently.
-    """
-    op = getattr(ctx.state.plot, "fc_op", "ratio") or "ratio"
-    return op if op in ("ratio", "subtract") else "ratio"
-
-
 def parse_fc_op_ctrl(ctx) -> str:
     """Return the user's chosen vs-control operator (``"ratio"`` or
     ``"subtract"``)."""
@@ -1515,36 +1502,6 @@ def control_stats_at_for_bar(
     return None
 
 
-def control_stats_at(
-    ctx, control_label: str, target_t: float, *,
-    threshold: float, val_col: str,
-    fluor_gates,
-) -> Optional[Tuple[float, float]]:
-    """``(mean, spread)`` of the pooled control at *target_t* (batch stat).
-
-    Pool-of-cells variant used by the batch bar exporter — matches the
-    batch numerator (also pool-of-cells via ``_aggregate_group``). The
-    plot-tab uses :func:`control_stats_at_for_bar` instead.
-    """
-    pts = control_pts_for_line(
-        ctx, control_label, threshold=threshold, val_col=val_col,
-        fluor_gates=fluor_gates,
-    )
-    if not pts:
-        return None
-    for pt in pts:
-        if abs(pt[0] - target_t) < _TP_REL_TOL * max(1.0, abs(pt[0]),
-                                                     abs(target_t)):
-            m = pt[1]
-            if isinstance(m, (int, float)) and math.isfinite(m):
-                s = pt[2] if len(pt) > 2 else 0.0
-                spread = float(s) if (
-                    isinstance(s, (int, float)) and math.isfinite(s)
-                ) else 0.0
-                return (float(m), spread)
-    return None
-
-
 def member_first_tp_stats(
     ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
@@ -1707,35 +1664,6 @@ def control_frac_at_for_bar(
         if abs(ct - target_t) < _TP_REL_TOL * max(1.0, abs(ct), abs(target_t)):
             return val
     return None
-
-
-def member_first_tp_frac(
-    ctx, label: str, *,
-    threshold: float, val_col: str, use_sem: bool,
-    per_fov_spread: bool,
-    fluor_gates,
-    baseline_tp: Optional[float] = None,
-) -> Optional[Tuple[float, float]]:
-    """``(frac, frac_spread)`` for the member's baseline timepoint.
-
-    Fraction-on counterpart of :func:`member_first_tp_stats` with the same
-    matched-tp + fall-through-to-earliest semantics.
-    """
-    series = member_frac_series(
-        ctx, label,
-        threshold=threshold, val_col=val_col, use_sem=use_sem,
-        per_fov_spread=per_fov_spread,
-        fluor_gates=fluor_gates,
-    )
-    if not series:
-        return None
-    if baseline_tp is not None and math.isfinite(baseline_tp):
-        tgt = float(baseline_tp)
-        for t, fs in series.items():
-            if abs(t - tgt) <= _TP_REL_TOL * max(1.0, abs(t), abs(tgt)):
-                return fs
-    earliest = min(series)
-    return series[earliest]
 
 
 def member_first_tp_frac_resolved(

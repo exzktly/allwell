@@ -909,18 +909,12 @@ for _cname, _bundle in THEMES.items():
             if _attr not in _slot:
                 _slot[_attr] = getattr(_cls, _attr)
 
-_ACTIVE_THEME = DEFAULT_THEME
 _THEME_HOOKS: list = []
 
 
 def available_themes() -> tuple:
     """Names of the registered themes (``ALLWELL_THEME`` accepts any of these)."""
     return tuple(THEMES.keys())
-
-
-def active_theme() -> str:
-    """Name of the currently-applied theme."""
-    return _ACTIVE_THEME
 
 
 def register_theme_hook(fn):
@@ -942,7 +936,6 @@ def apply_theme(name: str) -> str:
     the bundle, so calls are idempotent and switching between themes is clean.
     Fires the registered post-apply hooks. Raises ``KeyError`` for unknown names.
     """
-    global _ACTIVE_THEME
     if name not in THEMES:
         raise KeyError(f"unknown theme {name!r}; choose from {available_themes()}")
     # 1) restore defaults for anything any theme might have changed
@@ -955,7 +948,6 @@ def apply_theme(name: str) -> str:
         _cls = _THEMEABLE_CLASSES[_cname]
         for _attr, _val in _attrs.items():
             setattr(_cls, _attr, _val)
-    _ACTIVE_THEME = name
     for _hook in list(_THEME_HOOKS):
         try:
             _hook(name)

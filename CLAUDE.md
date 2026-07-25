@@ -199,6 +199,18 @@ and re-arm it as often as the work needs. A silent re-arm is the correct move
 when nothing has changed: don't narrate a wake-up that found the job still
 running.
 
+**Every PR bumps the version.** No exceptions — a PR that ships anything ships
+a new version. Patch (`8.8.24` → `8.8.25`) for fixes, docs, tooling, and small
+features; minor for a new tab or a workflow change users must relearn; major is
+a human's call, never yours. Bump once per PR, not once per commit: if the
+branch already carries a bump that isn't on the default branch yet, edit that
+number instead of adding another. Check with
+`git diff origin/main -- version.py` before bumping.
+
+Bumping means four sites, all in one commit — `version.py`, the two
+ARCHITECTURE.md claims, and the README's `AllWell-X.Y.Z.app` names.
+`tests/test_doc_version_sync.py` fails if they disagree.
+
 **The only version claims in the docs** are the current-release ones:
 `version.py::__version__` is where the app version lives (the title-bar pill and
 the PyInstaller spec read it), and bumping it means updating the "Reflects

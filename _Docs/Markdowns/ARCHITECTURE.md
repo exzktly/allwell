@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.8.35.** This map describes the app as it stands today;
+**Reflects All-Well v8.9.0.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.8.35; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.9.0; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -2599,7 +2599,20 @@ contract.
 `design/` (at the repo root) holds the **non-Markdown** design artifacts — the
 HTML mockups (`grey_theme_mockup.html`, `image_table_builder_mockup.html`) — for
 visual reference only. Rendered screenshots live under
-`_Docs/visual_audit/screenshots/`, produced by `tests/visual/render_views.py`.
+`_Docs/visual_audit/screenshots/`, produced by `tests/visual/render_views.py` —
+a generated directory, git-ignored, so a re-run does not show up as two dozen
+modified binaries.
+
+That script builds the real `AllWellApp` off-screen against the `mini_dataset`
+fixture and walks every rail entry, inner sub-tab, mode and dialog. Two things
+it has to get right, because both have silently cost it coverage: it drives
+controllers with the frozen `ViewerContext` (`rev._ctx`), never the window —
+passing the window resolves `ctx.window` to `QWidget.window`, a bound method, and
+the first controller attribute access raises; and a tab whose alternate views are
+a `SegmentedControl` rather than an inner `QTabWidget` needs its own capture pass,
+since the generic `_capture_inner` walker cannot see them. Multivariate is the
+case in point — its four analysis modes swap different option groups into the
+control row, so only a per-mode pass exercises the one that makes the row wrap.
 
 ---
 

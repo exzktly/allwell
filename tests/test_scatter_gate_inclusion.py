@@ -140,9 +140,7 @@ def test_gate_only_shown_on_its_own_axes():
 
 def test_selected_scatter_gates_honours_choice():
     """Each layer's multi-select picks a set of names independently; None = all."""
-    from well_viewer.features.grouping.cell_gating_tab_view import (
-        cell_gating_selected_scatter_gates,
-    )
+    from well_viewer.features.grouping.cell_gating.controller import cell_gating_selected_scatter_gates
     g1 = {"x0": 0, "y0": 0, "x1": 1, "y1": 1, "name": "Gate 1"}
     g2 = {"x0": 2, "y0": 2, "x1": 3, "y1": 3, "name": "Gate 2"}
     g3 = {"x0": 4, "y0": 4, "x1": 5, "y1": 5, "name": "Gate 3"}
@@ -268,7 +266,7 @@ def test_gate_pass_absent_is_all_pass():
 def test_toggling_a_layer_enables_its_gates_button(qtbot, monkeypatch):
     """Ticking a mode's checkbox must enable that layer's Gates button live (not
     only after a tab re-entry) — regression for the button staying inactive."""
-    import well_viewer.features.grouping.cell_gating_tab_view as cg
+    import well_viewer.features.grouping.cell_gating.controller as cg
     from PySide6.QtWidgets import QCheckBox, QPushButton
 
     monkeypatch.setattr(cg, "cell_gating_start_gating_worker", lambda ctx: None)

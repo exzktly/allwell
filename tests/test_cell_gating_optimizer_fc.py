@@ -4,9 +4,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from well_viewer.features.grouping.cell_gating_tab_view import (
+from well_viewer.features.grouping.cell_gating.gating_compute import (
     _optimize_thresh_frac_on_between_wells,
-    _scan_fc_fractions,
+    scan_fc_fractions,
 )
 
 
@@ -20,7 +20,7 @@ def test_scan_fc_off_matches_raw_fraction_gap():
     th = np.linspace(0, 10, 11)
     a = np.array([0, 1, 2, 8, 9, 10], float)
     b = np.array([0, 0, 0, 0, 0, 1], float)
-    fa, fb, diffs = _scan_fc_fractions(th, a, b)
+    fa, fb, diffs = scan_fc_fractions(th, a, b)
     # raw fraction-on at threshold 0: A=5/6, B=1/6
     assert fa[0] == np.count_nonzero(a > 0) / a.size
     assert fb[0] == np.count_nonzero(b > 0) / b.size
@@ -39,8 +39,8 @@ def test_scan_fc_vs_control_ratio_is_scale_invariant_where_control_on():
     a = np.array([5, 6, 7, 8, 9, 10], float)
     b = np.array([0, 1, 2, 3, 4, 5], float)
     ctrl = np.array([10, 10, 10, 10], float)  # frac-on = 1.0 across th in [0,8]
-    _fa_raw, _fb_raw, d_raw = _scan_fc_fractions(th, a, b)
-    _fa, _fb, diffs = _scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="ratio")
+    _fa_raw, _fb_raw, d_raw = scan_fc_fractions(th, a, b)
+    _fa, _fb, diffs = scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="ratio")
     assert np.all(np.isfinite(diffs))
     assert np.allclose(d_raw, diffs)
 
@@ -53,8 +53,8 @@ def test_scan_fc_vs_baseline_reshapes_the_metric():
     b = np.array([0, 1, 2, 3, 4, 5], float)
     base_a = np.array([8, 9, 10], float)
     base_b = np.array([0, 0, 1], float)
-    _fa_raw, _fb_raw, d_raw = _scan_fc_fractions(th, a, b)
-    _fa, _fb, diffs = _scan_fc_fractions(
+    _fa_raw, _fb_raw, d_raw = scan_fc_fractions(th, a, b)
+    _fa, _fb, diffs = scan_fc_fractions(
         th, a, b, base_values_a=base_a, base_values_b=base_b, op_t0="ratio")
     assert np.all(np.isfinite(diffs))
     assert not np.allclose(d_raw, diffs)
@@ -66,7 +66,7 @@ def test_scan_fc_subtract_control_matches_scale_bar_value():
     a = np.array([10.0, 10.0], float)  # frac-on = 1.0 at t=0, 0.5 at t=5
     b = np.array([0.0, 0.0], float)
     ctrl = np.array([10.0, 0.0], float)  # frac = 1.0 at every t>... actually >0 → 0.5
-    fa, fb, _ = _scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="subtract")
+    fa, fb, _ = scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="subtract")
     # Cross-check the first threshold against scale_bar_value directly.
     fctrl0 = np.count_nonzero(ctrl > 0.0) / ctrl.size
     expect_a0, _ = scale_bar_value(1.0, 0.0, control_mean=fctrl0, op_ctrl="subtract")
@@ -97,14 +97,14 @@ def test_scan_fc_subtract_control_metric_not_inverted():
     a = np.array([5, 5, 5, 5], dtype=float)   # on across the whole range
     b = np.array([3, 3, 3, 3], dtype=float)   # drops off at t=3
     ctrl = np.array([10, 10, 10, 10], dtype=float)  # control on everywhere
-    fa, fb, diffs = _scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="subtract")
+    fa, fb, diffs = scan_fc_fractions(th, a, b, ctrl_values=ctrl, op_ctrl="subtract")
     assert np.all(np.isfinite(diffs)) and np.all(diffs >= 0)
     assert diffs.max() > 0                     # not crushed to all-zero
     assert int(np.argmax(diffs)) == 3          # separation peak, not index 0
 
 
 def test_opt_curve_ylim_expands_for_out_of_range_curves():
-    from well_viewer.features.grouping.cell_gating_tab_view import _opt_curve_ylim
+    from well_viewer.features.grouping.cell_gating.gating_compute import _opt_curve_ylim
 
     # Raw fraction-on case keeps the familiar [0, 1] frame.
     lo, hi = _opt_curve_ylim(np.array([0.0, 0.5, 1.0]), np.array([0.0, 0.2]),

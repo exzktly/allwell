@@ -505,7 +505,7 @@ def _kick_off_gating_after_load(ctx) -> None:
     use_scatter = app._app_state.cell_gating.use_scatter_gates
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
     if has_non_default_gate or use_scatter or use_thresh:
-        from well_viewer.features.grouping.cell_gating_tab_view import cell_gating_start_gating_worker
+        from well_viewer.features.grouping.cell_gating.controller import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(ctx)
 
 

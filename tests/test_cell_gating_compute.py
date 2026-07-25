@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from well_viewer.features.grouping.cell_gating_compute import (
+from well_viewer.features.grouping.cell_gating.gating_compute import (
     ThreshFracOptimizationResult,
     apply_fluor_gating,
     fraction_on_for_threshold,

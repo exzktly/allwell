@@ -1,29 +1,28 @@
-"""Cell Gating tab builder (Qt port).
+"""Cell Gating behaviour: the gating workers, the threshold optimizers, the
+scatter-gate plumbing, and the handlers the persistence layer re-fires.
 
-Public surface (matches the convention used by every other
-``tabs/*_tab_view.py``):
+Everything here is orchestration over ``ctx`` — it reads and writes the typed
+``ctx.state.cell_gating`` slice, drives the two ``QThread`` workers, and pushes
+results at the widgets the tab built. It imports the drawing layers
+(:mod:`renderer`, :mod:`opt_curve_view`) and the pure math
+(:mod:`gating_compute`); it never imports :mod:`tab_view`, which imports *it*.
 
-* :func:`build_cell_gating_tab` — construct the UI inside *parent*;
-  stash widget refs and tab state on ``app._cell_gating_*``.
+Public surface (unchanged by the module split — these are the names the core
+controllers, the feature registry, and the persistence layer call):
+
 * :func:`cell_gating_load_cell_areas` — repopulate cell-area + per-channel
   fluorescence CDFs from the currently-selected wells.
 * :func:`cell_gating_load_threshold_frac_on` — push the typed slice's
   ThreshFracOn values onto the line-edits.
 * :func:`cell_gating_get_fluor_gate(ctx, channel)` /
   :func:`cell_gating_get_thresh_frac_on(ctx, channel)` — read the current
-  threshold for *channel* from the typed ``CellGatingState`` slice (R6);
-  the line-edits are the input surface, not the source of truth.
+  threshold for *channel* from the typed ``CellGatingState`` slice (R6); the
+  line-edits are the input surface, not the source of truth.
 * :func:`cell_gating_on_gating_change` /
-  :func:`cell_gating_on_threshold_frac_on_change` — re-fired by the
-  persistence layer when defaults are restored.
+  :func:`cell_gating_on_threshold_frac_on_change` — re-fired by the persistence
+  layer when defaults are restored.
 * :func:`cell_gating_start_gating_worker` — kick off the background
   ``GatingWorker`` after a programmatic load.
-* :func:`cell_gating_update_theme` — repaint figure facecolor after a
-  theme change (currently a stub since light theme is parked).
-
-The original implementation lived in ``well_viewer/cell_gating_tab.py``
-as a ``CellGatingTab`` QWidget subclass. Phase 15.1 flattened it onto
-this builder + module-level helper shape to match every other tab.
 """
 
 from __future__ import annotations
@@ -34,55 +33,43 @@ import time
 import numpy as np
 import pandas as pd
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
-    QVBoxLayout, QWidget,
-)
+from PySide6.QtCore import QThread, Signal
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
 
-from ui.theme import get_color
-from widgets.flow_layout import FlowLayout, flow_group
 from well_viewer.core import debug_flags as _debug_flags
-from well_viewer.core.ui_helpers import (
-    build_hline_separator,
-    build_section_header,
-    install_canvas_wheel_scroll,
-)
-from well_viewer.data.data_loading import get_rows
-from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     ratio_label_for,
     refresh_thresh_frac_quick_edit,
 )
-from well_viewer.core.plot_orchestrator import redraw_app
-from well_viewer.core.selection_controller import invalidate_stats_cache
-from well_viewer.features.qc.tab_view import build_qc_gate_controls
-from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
-# Lazy so Cell Gating imports without Image Browser / scatter present (keeps both
-# deletable); resolves on first call.
-apply_review_overrides_to_cache = _lazy("well_viewer.features.image_browser.review_image.controller", "apply_review_overrides_to_cache")
-compute_gate_inclusion = _lazy("well_viewer.features.scatter.gating", "compute_gate_inclusion")
-
-# Pure domain compute lives in cell_gating_compute (audit A3). ``_scan_fc_fractions``
-# keeps its old private name here as an alias so existing importers/tests resolve.
-from well_viewer.features.grouping.cell_gating_compute import (
-    ThreshFracOptimizationResult,
+from well_viewer.core.plot_orchestrator import redraw_app
+from well_viewer.core.safe import swallowed
+from well_viewer.core.selection_controller import invalidate_stats_cache
+from well_viewer.data.data_loading import get_rows
+from well_viewer.domain.selections_model import active_replicate_sets
+from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.features.grouping.cell_gating.gating_compute import (
     _cell_gating_first_frame_rows,
     _cell_gating_valid_rows,
     _distinct_timepoints,
     _earliest_timepoint,
     _gate_geom_sig,
-    _opt_curve_ylim,
     _optimize_thresh_frac_on_between_wells,
     _timepoint_label,
     _valid_values_for_channel,
     apply_fluor_gating,
-    scan_fc_fractions as _scan_fc_fractions,
 )
+from well_viewer.features.grouping.cell_gating.opt_curve_view import (
+    _cell_gating_show_opt_curve_popup,
+)
+from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
 
+# Lazy so Cell Gating imports without Image Browser present (keeps both
+# deletable); resolves on first call.
+apply_review_overrides_to_cache = _lazy(
+    "well_viewer.features.image_browser.review_image.controller",
+    "apply_review_overrides_to_cache")
 
 logger = logging.getLogger("well_viewer.gating_worker")
 
@@ -210,432 +197,7 @@ class GatingWorker(QThread):
             self.finished_ok.emit()
 
 
-# ── builder ───────────────────────────────────────────────────────────────
-
-
-def build_cell_gating_tab(ctx, parent: QWidget) -> None:
-    """Build the Cell Gating tab inside *parent*.
-
-    State and widget handles are attached to the app under the
-    ``_cell_gating_*`` prefix.
-    """
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-
-    # A8 burn-down: Qt widget handles go through the WidgetRegistry (``ctx.widgets``),
-    # which stamps ``app._cell_gating_*`` so the controller's legacy readers resolve.
-    # The (many) non-widget state fields + optimizer choices stay on the app.
-    reg = ctx.widgets
-
-    reg.register("_cell_gating_frame", parent)
-    ctx.runtime.cell_gating.cell_areas = []
-    # {channel_key → QLineEdit} widget maps — containers of widget handles, so
-    # they go through the registry (stamps the legacy app attr for the many
-    # hasattr/getattr probes). The gate *values* live on the typed
-    # ctx.state.cell_gating slice (R6); these edits are the input surface.
-    reg.register("_cell_gating_fluor_gate_edits", {})
-    reg.register("_cell_gating_thresh_frac_edits", {})
-    ctx.runtime.cell_gating.fluor_data = {}
-    ctx.runtime.cell_gating.ratio_data = {}
-    ctx.runtime.cell_gating.ax = None
-    ctx.runtime.cell_gating.axes_stack = []
-    ctx.runtime.cell_gating.worker = None
-    # Scatter-gate inclusion mode: when on, the Scatter Plot's rectangular gates
-    # define Included instead of the per-channel FluorGating. The gating and
-    # thresholding layers each pick their OWN set of gates (a set of names, or
-    # None ⇒ all gates, which auto-includes gates drawn later).
-    # Epic-cellgating: the flags + per-layer gate selections are typed state on
-    # ``ctx.state.cell_gating`` (defaults: False / None), so no seeding is needed
-    # here — the checkboxes below read the slice.
-
-    # The tab stacks a tall column of gating controls *above* the CDF plot and
-    # the optimizer panel. On shorter windows that column squeezed the plot down
-    # to a sliver (the CDFs were clipped to their top edge). Host the whole tab
-    # in one vertical scroll area and give the plot a real minimum height: the
-    # CDFs always render full-size, and anything that overflows a short window is
-    # reachable by scrolling instead of collapsing the plot.
-    outer_layout = parent.layout()
-    if outer_layout is None:
-        outer_layout = QVBoxLayout(parent)
-        parent.setLayout(outer_layout)
-    outer_layout.setContentsMargins(0, 0, 0, 0)
-    outer_scroll = QScrollArea(parent)
-    outer_scroll.setWidgetResizable(True)
-    outer_scroll.setFrameShape(QFrame.NoFrame)
-    outer_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-    outer_layout.addWidget(outer_scroll)
-    content = QWidget()
-    outer_scroll.setWidget(content)
-    # Section builders below append to ``root``; point it at the scrollable
-    # content so the existing ``root.addWidget(...)`` calls need no changes.
-    root = QVBoxLayout(content)
-    root.setContentsMargins(12, 12, 12, 12)
-
-    control_frame = QWidget(parent)
-    control_frame.setObjectName("TabCtrl")
-    cf_layout = QVBoxLayout(control_frame)
-    cf_layout.setContentsMargins(6, 6, 6, 6)
-
-    # QC debris gate — the fundamental inclusion layer. It is ALWAYS applied
-    # (QC_Pass at the df_included_mask chokepoint), composing with FluorGating
-    # and the scatter gates below, so it leads the tab. Editing here re-flags the
-    # whole dataset live and refreshes the Segmentation overlay.
-    cf_layout.addWidget(build_section_header(
-        control_frame, "QC debris gate (always applied)",
-        hint="Size / solidity debris gating — a fundamental layer applied to "
-             "every cell, on top of the FluorGating thresholds and any scatter "
-             "gates below.",
-    ))
-    try:
-        cf_layout.addWidget(build_qc_gate_controls(ctx, control_frame))
-    except Exception:
-        swallowed()  # QC controls are best-effort; never block the tab build
-
-    cf_layout.addWidget(build_hline_separator(control_frame))
-    cf_layout.addWidget(build_section_header(
-        control_frame, "FluorGating (Cell Inclusion)",
-    ))
-
-    # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
-    # mean fluorescence intensity, regardless of which Property the user
-    # picks in the plotting ctxbar.
-    mfi_note = QLabel(
-        "Note: FluorGating (cell inclusion) and ThreshFracOn cuts are "
-        "applied against per-cell mean fluorescence intensity (MFI) only, "
-        "independent of the Property selected for plots, stats, and exports.",
-        control_frame,
-    )
-    mfi_note.setObjectName("Muted")
-    mfi_note.setWordWrap(True)
-    cf_layout.addWidget(mfi_note)
-
-    # Scatter-gate inclusion. The user draws named rectangular gates on the
-    # Scatter Plot tab; ticking this replaces the FluorGating intensity floors,
-    # and the dropdown picks which gate filters (or all of them, unioned).
-    from PySide6.QtWidgets import QCheckBox as _QCheckBox, QPushButton as _QPushButton
-    sg_row = QWidget(control_frame)
-    sg_layout = QHBoxLayout(sg_row)
-    sg_layout.setContentsMargins(0, 0, 0, 0)
-    use_sg_cb = _QCheckBox(
-        "Use scatter-plot gates for cell inclusion (replaces FluorGating)",
-        sg_row,
-    )
-    use_sg_cb.setChecked(bool(ctx.state.cell_gating.use_scatter_gates))
-    use_sg_cb.setToolTip(
-        "Define the Included population from the named rectangular gates drawn "
-        "on the Scatter Plot tab instead of the per-channel intensity "
-        "thresholds. Pick which gate filters with the dropdown. Gates are saved "
-        "with the dataset."
-    )
-    use_sg_cb.toggled.connect(
-        lambda _on: cell_gating_on_use_scatter_gates_change(ctx)
-    )
-    reg.register("_cell_gating_use_scatter_gates_cb", use_sg_cb)
-    sg_layout.addWidget(use_sg_cb)
-    sg_layout.addSpacing(8)
-    sg_layout.addWidget(QLabel("Gates:", sg_row))
-    gating_btn = _QPushButton("All gates", sg_row)
-    gating_btn.setMinimumWidth(150)
-    gating_btn.setToolTip(
-        "Which scatter gates define the Included population (union of the "
-        "checked gates). Independent of the fraction-on selection below."
-    )
-    gating_btn.clicked.connect(
-        lambda _=False: _open_gate_filter_menu(ctx, "gating")
-    )
-    reg.register("_cell_gating_gating_gate_btn", gating_btn)
-    sg_layout.addWidget(gating_btn)
-    sg_layout.addStretch(1)
-    cf_layout.addWidget(sg_row)
-
-    # Thresholding mode — independent of the gating checkbox above, with its OWN
-    # gate selection: instead of removing cells, counts cells inside the chosen
-    # gate(s) as "on" for fraction-on stats (replaces ThreshFracOn).
-    th_row = QWidget(control_frame)
-    th_layout = QHBoxLayout(th_row)
-    th_layout.setContentsMargins(0, 0, 0, 0)
-    use_th_cb = _QCheckBox(
-        "Use scatter gate for fraction-on (thresholding, replaces ThreshFracOn)",
-        th_row,
-    )
-    use_th_cb.setChecked(bool(ctx.state.cell_gating.use_scatter_thresh))
-    use_th_cb.setToolTip(
-        "Define the 'on' population for fraction-on stats as the cells inside "
-        "the selected gate(s), instead of cells above the per-channel "
-        "ThreshFracOn cutoff. Independent of cell inclusion — no cells removed."
-    )
-    use_th_cb.toggled.connect(
-        lambda _on: cell_gating_on_use_scatter_thresh_change(ctx)
-    )
-    reg.register("_cell_gating_use_scatter_thresh_cb", use_th_cb)
-    th_layout.addWidget(use_th_cb)
-    th_layout.addSpacing(8)
-    th_layout.addWidget(QLabel("Gates:", th_row))
-    thresh_btn = _QPushButton("All gates", th_row)
-    thresh_btn.setMinimumWidth(150)
-    thresh_btn.setToolTip(
-        "Which scatter gates define the fraction-on 'on' population (union of "
-        "the checked gates). Independent of the inclusion selection above."
-    )
-    thresh_btn.clicked.connect(
-        lambda _=False: _open_gate_filter_menu(ctx, "thresh")
-    )
-    reg.register("_cell_gating_thresh_gate_btn", thresh_btn)
-    th_layout.addWidget(thresh_btn)
-    th_layout.addStretch(1)
-    cf_layout.addWidget(th_row)
-
-    reg.register("_cell_gating_gate_summary", QLabel("", control_frame))
-    ctx.widgets.get("_cell_gating_gate_summary").setObjectName("Muted")
-    ctx.widgets.get("_cell_gating_gate_summary").setWordWrap(True)
-    cf_layout.addWidget(ctx.widgets.get("_cell_gating_gate_summary"))
-    # The scatter gating module fires this whenever a gate is drawn / edited /
-    # cleared on the Scatter Plot tab: refresh the summary AND recompute Included
-    # immediately so every other view tracks the gates without waiting for a tab
-    # switch. (Safe now that the per-cell scatter never filters itself by the
-    # gates — see df_included_mask(include_gate=False).)
-    ctx.runtime.scatter.gates_changed_cb = lambda: cell_gating_sync_scatter_gates(ctx)
-    _cell_gating_refresh_gate_filter(ctx)
-    _cell_gating_refresh_gate_summary(ctx)
-    _cell_gating_apply_scatter_gate_mode(ctx)
-
-    # Auto-threshold all channels: runs the same Otsu pass the pipeline's
-    # final stage executes (well_viewer.auto_threshold) and writes the
-    # results into the ThreshFracOn edits for every loaded channel — it
-    # is the fraction-on cut used in downstream plots, NOT the per-cell
-    # FluorGating inclusion threshold. Status messages stream to the log
-    # drawer via the standard logger. Sits in its own row directly above
-    # the per-channel FluorGating / ThreshFracOn table it modifies, so it
-    # never floats away from the controls it acts on.
-    cf_layout.addWidget(build_hline_separator(control_frame))
-    cf_layout.addWidget(build_section_header(
-        control_frame, "ThreshFracOn (Fraction-On Cut)",
-        hint="Per-channel cut used for fraction-on in downstream plots / stats "
-             "(separate from the FluorGating inclusion thresholds above).",
-    ))
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    auto_row = QWidget(control_frame)
-    auto_row_layout = QHBoxLayout(auto_row)
-    auto_row_layout.setContentsMargins(0, 0, 0, 0)
-    auto_btn = _QPushButton("Auto-threshold all channels (ThreshFracOn)", auto_row)
-    auto_btn.setProperty("variant", "secondary")
-    auto_btn.setToolTip(
-        "Compute a default ThreshFracOn cut per channel via Otsu on "
-        "a per-cell + matched-background-pixel distribution sampled from "
-        "the first, middle, and last timepoint of every FOV. The "
-        "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
-        "Progress + per-channel results are written to the log drawer."
-    )
-    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx))
-    auto_row_layout.addWidget(auto_btn)
-    auto_row_layout.addStretch(1)
-    reg.register("_cell_gating_auto_btn", auto_btn)
-    cf_layout.addWidget(auto_row)
-
-    reg.register("_cell_gating_scroll", QScrollArea(control_frame))
-    ctx.widgets.get("_cell_gating_scroll").setWidgetResizable(True)
-    ctx.widgets.get("_cell_gating_scroll").setFrameShape(QFrame.NoFrame)
-    ctx.widgets.get("_cell_gating_scroll").setFixedHeight(120)
-    reg.register("_cell_gating_inner", QWidget())
-    QVBoxLayout(ctx.widgets.get("_cell_gating_inner"))
-    ctx.widgets.get("_cell_gating_scroll").setWidget(ctx.widgets.get("_cell_gating_inner"))
-    cf_layout.addWidget(ctx.widgets.get("_cell_gating_scroll"))
-    root.addWidget(control_frame)
-
-    # CDF plot area
-    reg.register("_cell_gating_figure", Figure(figsize=(8, 5), dpi=100))
-    reg.register("_cell_gating_canvas", FigureCanvas(ctx.widgets.get("_cell_gating_figure")))
-
-    reg.register("_cell_gating_plot_scroll", QScrollArea(parent))
-    ctx.widgets.get("_cell_gating_plot_scroll").setWidgetResizable(True)
-    ctx.widgets.get("_cell_gating_plot_scroll").setFrameShape(QFrame.NoFrame)
-    ctx.widgets.get("_cell_gating_plot_scroll").setWidget(ctx.widgets.get("_cell_gating_canvas"))
-    # Floor the plot height so the gating controls above can never squeeze the
-    # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
-    ctx.widgets.get("_cell_gating_plot_scroll").setMinimumHeight(420)
-    install_canvas_wheel_scroll(ctx.widgets.get("_cell_gating_canvas"), ctx.widgets.get("_cell_gating_plot_scroll"))
-
-    from widgets.mpl_toolbar import MplToolbar
-    reg.register("_cell_gating_toolbar", MplToolbar(ctx.widgets.get("_cell_gating_canvas"), parent))
-
-    reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
-    ctx.widgets.get("_cell_gating_status_label").setObjectName("Muted")
-    root.addWidget(ctx.widgets.get("_cell_gating_status_label"))
-
-    opt_panel = QWidget(parent)
-    opt_layout = QVBoxLayout(opt_panel)
-    opt_layout.setContentsMargins(0, 4, 0, 0)
-    opt_layout.addWidget(build_hline_separator(opt_panel))
-    opt_layout.addWidget(build_section_header(
-        opt_panel, "Optimize ThreshFracOn between two wells",
-    ))
-    opt_row = QWidget(opt_panel)
-    # FlowLayout + flow_group: each label stays glued to its control, and the row
-    # wraps onto extra lines at narrow width instead of clipping controls off-edge.
-    opt_row_layout = FlowLayout(opt_row, h_spacing=6, v_spacing=4)
-    opt_row_layout.setContentsMargins(0, 0, 0, 0)
-    opt_channel = reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
-    opt_channel.setMinimumWidth(140)
-    opt_row_layout.addWidget(flow_group(opt_row, "Channel:", opt_channel))
-    opt_well_a = reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
-    opt_well_a.setMinimumWidth(90)
-    opt_row_layout.addWidget(flow_group(opt_row, "Well A:", opt_well_a))
-    opt_well_b = reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
-    opt_well_b.setMinimumWidth(90)
-    opt_row_layout.addWidget(flow_group(opt_row, "Well B:", opt_well_b))
-    opt_tp = reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
-    opt_tp.setMinimumWidth(110)
-    opt_tp.setToolTip(
-        "Restrict the fraction-on comparison to one timepoint, or pool all "
-        "timepoints. Pooling across timepoints where the wells are both 'off' "
-        "early dilutes the difference, so picking the relevant timepoint gives a "
-        "sharper threshold."
-    )
-    opt_row_layout.addWidget(flow_group(opt_row, "Timepoint:", opt_tp))
-    opt_min = reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
-    opt_min.setFixedWidth(80)
-    opt_row_layout.addWidget(flow_group(opt_row, "Min:", opt_min))
-    opt_max = reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
-    opt_max.setFixedWidth(80)
-    opt_row_layout.addWidget(flow_group(opt_row, "Max:", opt_max))
-    opt_steps = reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
-    opt_steps.setFixedWidth(64)
-    opt_steps.setToolTip(
-        "Number of thresholds scanned across the Min–Max range, evenly "
-        "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
-        "thresholds (every 1 unit across a 0–100 range). Higher values "
-        "give a finer scan at the cost of a little compute."
-    )
-    opt_row_layout.addWidget(flow_group(opt_row, "# Points:", opt_steps))
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
-    opt_btn.setProperty("variant", "secondary")
-    opt_btn.setToolTip(
-        "Scan # Points thresholds between Min and Max for the selected "
-        "channel, compute fraction-on in Well A and Well B at each "
-        "threshold, then apply the threshold that maximizes their "
-        "relative fraction-on gap, |Δ| / max(fa, fb)."
-    )
-    opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx))
-    reg.register("_cell_gating_opt_btn", opt_btn)
-    opt_row_layout.addWidget(opt_btn)
-    opt_row_layout.addStretch(1)
-    opt_layout.addWidget(opt_row)
-
-    # Optional fold-change row: optimise over a fold-change-adjusted fraction-on
-    # (the same vs-control / vs-t0 normalisation the plot tabs use), so the
-    # threshold that best separates A and B is chosen on the *normalised* metric.
-    # These controls are INDEPENDENT of the plotting tabs' fold-change state —
-    # they live only here and are read at optimise time, so configuring them
-    # never disturbs the Bar / Line plots.
-    fc_row = QWidget(opt_panel)
-    fc_row_layout = FlowLayout(fc_row, h_spacing=6, v_spacing=4)
-    fc_row_layout.setContentsMargins(0, 0, 0, 0)
-    fc_control = reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
-    fc_control.setMinimumWidth(120)
-    fc_control.setToolTip(
-        "Divide (or subtract) each well's fraction-on by a control well / "
-        "replicate set's fraction-on at the same scanned threshold. \"—\" "
-        "optimises over the raw fraction-on (the original behaviour).\n\n"
-        "Note: with the Ratio operator a shared control cancels in the "
-        "relative gap, so it only narrows the scan to where the control still "
-        "has signal — use Subtract, or a Baseline, to actually reshape the "
-        "A-vs-B separation."
-    )
-    fc_ctrl_op = reg.register("_cell_gating_opt_fc_ctrl_op_combo", QComboBox(fc_row))
-    fc_ctrl_op.addItem("Ratio", "ratio")
-    fc_ctrl_op.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(flow_group(fc_row, "Fold change —  Control:", fc_control, fc_ctrl_op))
-    fc_baseline = reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
-    fc_baseline.setMinimumWidth(110)
-    fc_baseline.setToolTip(
-        "Divide (or subtract) each well's fraction-on by its own fraction-on at "
-        "a baseline timepoint. \"t0\" uses each well's earliest timepoint."
-    )
-    fc_t0_op = reg.register("_cell_gating_opt_fc_t0_op_combo", QComboBox(fc_row))
-    fc_t0_op.addItem("Ratio", "ratio")
-    fc_t0_op.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(flow_group(fc_row, "Baseline:", fc_baseline, fc_t0_op))
-    fc_order = reg.register("_cell_gating_opt_fc_order_combo", QComboBox(fc_row))
-    fc_order.addItem("Control first", "ctrl_first")
-    fc_order.addItem("Baseline first", "t0_first")
-    fc_row_layout.addWidget(flow_group(fc_row, "Order:", fc_order))
-    fc_row_layout.addStretch(1)
-    opt_layout.addWidget(fc_row)
-
-    # Changing the channel or either well re-derives the available timepoints and
-    # auto-fills Min/Max from the data range (so the scan actually spans the
-    # values — the hardcoded 0–100 default sits below typical MFI data, which is
-    # why a fresh Optimize used to return the range minimum). Changing only the
-    # timepoint just re-derives the range.
-    for _combo in (
-        ctx.widgets.get("_cell_gating_opt_channel_combo"),
-        ctx.widgets.get("_cell_gating_opt_well_a_combo"),
-        ctx.widgets.get("_cell_gating_opt_well_b_combo"),
-    ):
-        _combo.currentIndexChanged.connect(
-            lambda _idx=0: _cell_gating_on_opt_scope_changed(ctx)
-        )
-    ctx.widgets.get("_cell_gating_opt_timepoint_combo").currentIndexChanged.connect(
-        lambda _idx=0: _cell_gating_autofill_opt_range(ctx)
-    )
-    opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
-        "Choose two wells and a threshold range, then optimize.",
-        opt_panel,
-    ))
-    opt_result_label.setObjectName("Muted")
-    opt_result_label.setWordWrap(True)
-    opt_layout.addWidget(opt_result_label)
-    root.addWidget(opt_panel)
-
-    # CDFs anchor the bottom of the tab — controls + optimizer sit above,
-    # CDFs (with their toolbar) are the visual readout the user reads while
-    # tuning those controls, so we put them last.
-    root.addWidget(build_hline_separator(parent))
-    root.addWidget(build_section_header(
-        parent, "Cumulative distributions (CDF)",
-    ))
-    root.addWidget(ctx.widgets.get("_cell_gating_plot_scroll"))
-    root.addWidget(ctx.widgets.get("_cell_gating_toolbar"))
-
-    _cell_gating_refresh_optimizer_controls(ctx)
-
-    # Paint the themed empty state now so the canvas is never a bare white
-    # block before a dataset loads (it only gets painted on data otherwise).
-    _cell_gating_plot_cdf(ctx)
-
-
 # ── public API ────────────────────────────────────────────────────────────
-
-
-def build_cell_gating_subtab(ctx) -> None:
-    """Build the Cell Gating sub-tab content if it hasn't been built yet.
-
-    Called on first sub-tab activation and from persistence when persisted
-    thresholds need to be applied immediately. Idempotent.
-    """
-    if bool(ctx.runtime.cell_gating.subtab_built):
-        return
-    frame = ctx.runtime.cell_gating.subtab_frame
-    if frame is None:
-        return
-    try:
-        build_cell_gating_tab(ctx, frame)
-        if ctx.state.dataset.well_paths:
-            try:
-                from well_viewer.persistence.cell_gating import (
-                    load_from_pipeline_info,
-                )
-                cell_gating_load_cell_areas(ctx)
-                load_from_pipeline_info(ctx)
-                cell_gating_load_threshold_frac_on(ctx)
-            except Exception:
-                logger.exception("Cell Gating post-build sync failed")
-    except Exception:
-        logger.exception("Cell Gating sub-tab build failed")
-    finally:
-        ctx.runtime.cell_gating.subtab_built = True
-
 
 def cell_gating_load_cell_areas(ctx) -> None:
     """Repopulate cell-area + per-channel fluorescence CDFs from selected wells."""
@@ -910,55 +472,6 @@ def _cell_gating_set_gate_choices(ctx, mode: str, choices) -> None:
     if _cell_gating_scatter_mode_on(ctx):
         ctx.runtime.cell_gating.last_gate_sig = _scatter_gate_signature(ctx)
         cell_gating_start_gating_worker(ctx)
-
-
-def _open_gate_filter_menu(ctx, mode: str) -> None:
-    """Pop up a checkbox menu under *mode*'s Gates button (multi-select).
-
-    Mirrors the scatter timepoint picker: one checkbox per named gate plus
-    All / None actions. Checking several combines them (union)."""
-    from PySide6.QtGui import QAction
-    from PySide6.QtWidgets import QCheckBox, QMenu, QWidgetAction
-
-    btn = getattr(ctx.runtime.cell_gating, _GATE_BUTTON_ATTR[mode], None)
-    if btn is None:
-        return
-    names = _cell_gating_gate_names(ctx)
-    choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
-    selected = set(names) if choices is None else set(choices)
-
-    menu = QMenu(btn)
-    if not names:
-        empty = QAction("No gates drawn yet", menu)
-        empty.setEnabled(False)
-        menu.addAction(empty)
-    for nm in names:
-        cb = QCheckBox(nm, menu)
-        cb.setChecked(nm in selected)
-
-        def _make(name=nm):
-            def _on(checked: bool) -> None:
-                cur = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
-                cur = set(names) if cur is None else set(cur)
-                cur.add(name) if checked else cur.discard(name)
-                _cell_gating_set_gate_choices(ctx, mode, cur)
-            return _on
-
-        cb.toggled.connect(_make())
-        wa = QWidgetAction(menu)
-        wa.setDefaultWidget(cb)
-        menu.addAction(wa)
-    if names:
-        menu.addSeparator()
-        all_a = QAction("All", menu)
-        all_a.triggered.connect(
-            lambda _=False: _cell_gating_set_gate_choices(ctx, mode, None))
-        menu.addAction(all_a)
-        none_a = QAction("None", menu)
-        none_a.triggered.connect(
-            lambda _=False: _cell_gating_set_gate_choices(ctx, mode, set()))
-        menu.addAction(none_a)
-    menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
 
 
 def _cell_gating_gate_button_text(ctx, mode: str) -> str:
@@ -1487,120 +1000,6 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
         swallowed("cell gating: optimizer curve popup failed")
 
 
-def _cell_gating_show_opt_curve_popup(
-    ctx,
-    *,
-    channel_key: str,
-    well_a: str,
-    well_b: str,
-    timepoint,
-    lo: float,
-    hi: float,
-    steps: int,
-    result: ThreshFracOptimizationResult,
-    fc_kwargs: dict | None = None,
-) -> None:
-    """Open (or refresh) a non-modal window plotting the optimizer's diff
-    curve. Re-derives values_a, values_b, and the per-threshold fractions
-    locally (through the SAME fold-change scan the optimizer uses) so the
-    plotted curve matches the metric ``argmax`` ran on.
-
-    The window stays open across consecutive Optimize clicks — subsequent
-    clicks just repaint the existing axes, so the user can iterate on
-    wells / timepoints / range and watch the curve update.
-    """
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-    from matplotlib.figure import Figure
-
-    ratios = getattr(ctx.state.channel, "ratio_index", None) or {}
-    values_a = _valid_values_for_channel(
-        get_rows(ctx, well_a), channel_key, ratios, timepoint,
-    )
-    values_b = _valid_values_for_channel(
-        get_rows(ctx, well_b), channel_key, ratios, timepoint,
-    )
-    thresholds = np.linspace(lo, hi, int(steps))
-    # Use the SAME scan the optimizer ran (raw, or fold-change-adjusted) so the
-    # popup curve is exactly the metric argmax operated on.
-    frac_a, frac_b, diffs = _scan_fc_fractions(
-        thresholds, values_a, values_b, **(fc_kwargs or {}),
-    )
-
-    popup = ctx.runtime.cell_gating.opt_curve_popup
-    if popup is None or not popup.isVisible():
-        popup = QDialog(ctx.runtime.cell_gating.frame or ctx.window)
-        popup.setWindowTitle("Optimizer curve")
-        popup.resize(820, 460)
-        layout = QVBoxLayout(popup)
-        layout.setContentsMargins(8, 8, 8, 8)
-        fig = Figure(figsize=(7.8, 4.4), dpi=100)
-        canvas = FigureCanvas(fig)
-        layout.addWidget(canvas)
-        # Wire the matplotlib toolbar so the user can pan/zoom/save the
-        # curve while keeping the popup non-modal.
-        from widgets.mpl_toolbar import MplToolbar
-        toolbar = MplToolbar(canvas, popup)
-        layout.addWidget(toolbar)
-        popup.finished.connect(
-            lambda _r: setattr(ctx.runtime.cell_gating, "opt_curve_popup", None)
-        )
-        popup._fig = fig
-        popup._canvas = canvas
-        ctx.runtime.cell_gating.opt_curve_popup = popup
-        popup.show()
-
-    fig = popup._fig
-    fig.clear()
-    bg_panel = get_color("BG_PANEL")
-    txt_pri = get_color("TXT_PRI")
-    txt_mut = get_color("TXT_MUT")
-    accent = get_color("ACCENT")
-    fig.patch.set_facecolor(bg_panel)
-    ax = fig.add_subplot(111)
-    ax.set_facecolor(bg_panel)
-    for spine in ax.spines.values():
-        spine.set_color(txt_mut)
-    ax.tick_params(colors=txt_mut)
-
-    ax.plot(thresholds, frac_a, color="#4FC3F7", lw=1.4,
-            label=f"fraction-on({well_a})")
-    ax.plot(thresholds, frac_b, color="#FF8A65", lw=1.4,
-            label=f"fraction-on({well_b})")
-    ax.plot(thresholds, diffs, color=accent, lw=1.8,
-            label="|Δ| / max(|fa|, |fb|)")
-    ax.axvline(
-        result.threshold, color=txt_pri, lw=1.2, ls="--",
-        label=f"chosen threshold = {result.threshold:.4g}",
-    )
-    ax.set_xlim(float(thresholds[0]), float(thresholds[-1]))
-    ax.set_ylim(*_opt_curve_ylim(frac_a, frac_b, diffs))
-    ax.set_xlabel(f"Threshold ({channel_key})", color=txt_pri)
-    ax.set_ylabel("Fraction-on / relative gap", color=txt_pri)
-    tp_note = "" if timepoint is None else f" @ {_timepoint_label(timepoint)}"
-    ax.set_title(
-        f"{channel_key}: {well_a} vs {well_b}{tp_note} "
-        f"— scan {lo:g}…{hi:g}, {int(steps)} points",
-        color=txt_pri, fontsize=11,
-    )
-    leg = ax.legend(loc="upper right", framealpha=0.0, facecolor="none", fontsize=9)
-    if leg is not None:
-        for txt in leg.get_texts():
-            txt.set_color(txt_pri)
-    fig.tight_layout()
-    popup._canvas.draw_idle()
-    popup.raise_()
-    popup.activateWindow()
-
-
-def cell_gating_update_theme(ctx) -> None:
-    fig = ctx.runtime.cell_gating.figure
-    if fig is not None:
-        fig.set_facecolor(get_color("BG_APP"))
-    if (ctx.runtime.cell_gating.cell_areas
-            or ctx.runtime.cell_gating.fluor_data):
-        _cell_gating_plot_cdf(ctx)
-
-
 # ── internal helpers ──────────────────────────────────────────────────────
 
 
@@ -1897,153 +1296,6 @@ def _cell_gating_source_wells(ctx) -> list[str]:
     return sorted(selected, key=parse_rc)
 
 
-def _focus_cdf_xaxis(ax, vals) -> None:
-    """Clamp the x-axis to the data range (+ small pad) so a gate line at 0 —
-    or far outside the data — doesn't stretch the axis and cram the CDF against
-    one edge. Called after the gate axvline so it has the final say."""
-    if len(vals) == 0:
-        return
-    lo = float(np.min(vals))
-    hi = float(np.max(vals))
-    pad = (hi - lo) * 0.04 if hi > lo else (abs(hi) * 0.05 or 1.0)
-    ax.set_xlim(lo - pad, hi + pad)
-
-
-def _cell_gating_plot_cdf(ctx) -> None:
-    ratio_data = ctx.runtime.cell_gating.ratio_data or {}
-    if (not ctx.runtime.cell_gating.cell_areas
-            and not ctx.runtime.cell_gating.fluor_data
-            and not ratio_data):
-        # No data — paint a themed empty state instead of leaving the default
-        # white matplotlib canvas (a giant white block against the dark app).
-        fig = ctx.runtime.cell_gating.figure
-        if fig is not None:
-            fig.clf()
-            fig.set_facecolor(get_color("BG_APP"))
-            ax = fig.add_subplot(111, facecolor=get_color("BG_PANEL"))
-            ax.set_axis_off()
-            ax.text(
-                0.5, 0.5,
-                "No dataset loaded.\nOpen a results folder to view cell-gating "
-                "distributions.",
-                transform=ax.transAxes, ha="center", va="center",
-                color=get_color("TXT_MUT"), fontsize=11, wrap=True,
-            )
-            canvas = ctx.runtime.cell_gating.canvas
-            if canvas is not None:
-                canvas.draw_idle()
-        return
-
-    bg_app = get_color("BG_APP")
-    bg_panel = get_color("BG_PANEL")
-    txt_pri = get_color("TXT_PRI")
-    txt_mut = get_color("TXT_MUT")
-    accent = get_color("ACCENT")
-    warn = get_color("WARN")
-
-    fig = ctx.runtime.cell_gating.figure
-    fig.clf()
-    fig.set_facecolor(bg_app)
-
-    n_plots = 1 + len(ctx.runtime.cell_gating.fluor_data) + len(ratio_data)
-    n_cols = 1 if n_plots == 1 else 2
-    n_rows = (n_plots + n_cols - 1) // n_cols
-    plot_height_per_row = 3.8
-    fig_height = max(5.0, n_rows * plot_height_per_row)
-
-    axes = []
-    for i in range(n_plots):
-        ax = fig.add_subplot(n_rows, n_cols, i + 1, facecolor=bg_panel)
-        axes.append(ax)
-
-    if ctx.runtime.cell_gating.cell_areas:
-        areas = np.array(sorted(ctx.runtime.cell_gating.cell_areas))
-        cdf = np.arange(1, len(areas) + 1) / len(areas)
-        axes[0].plot(areas, cdf, linewidth=2, color=accent, alpha=0.8)
-        axes[0].fill_between(areas, cdf, alpha=0.2, color=accent)
-        axes[0].set_xlabel("Cell Area (pixels)", color=txt_pri, fontsize=9)
-        axes[0].set_ylabel("Cumulative Probability", color=txt_pri, fontsize=9)
-        axes[0].set_title("Cell Area Distribution", color=txt_pri,
-                          fontsize=10, fontweight="bold")
-        axes[0].grid(True, alpha=0.2, color=txt_mut)
-        axes[0].tick_params(colors=txt_mut, labelsize=8)
-
-        # Mark the QC layer's min-area gate (cell-area gating is QC-owned now).
-        try:
-            from well_viewer.features.qc.controller import get_qc_params
-            _qc_min = get_qc_params(ctx).min_area
-            if _qc_min is not None:
-                axes[0].axvline(x=float(_qc_min), color=warn,
-                                linestyle="--", linewidth=2, alpha=0.7)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-        _focus_cdf_xaxis(axes[0], areas)
-
-    colors = [accent, "#FF9500", "#FF3B30", "#34C759"]
-    next_idx = 1
-    for channel, values in sorted(ctx.runtime.cell_gating.fluor_data.items()):
-        if next_idx >= len(axes):
-            break
-        ax = axes[next_idx]
-        color = colors[next_idx % len(colors)]
-        vals = np.array(sorted(values))
-        if vals.size == 0:
-            continue  # empty channel → no CDF (audit S8; avoids 0/0)
-        cdf = np.arange(1, len(vals) + 1) / len(vals)
-        ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
-        ax.fill_between(vals, cdf, alpha=0.2, color=color)
-        ax.set_xlabel(f"{channel.upper()} Intensity", color=txt_pri, fontsize=9)
-        ax.set_ylabel("Cumulative Probability", color=txt_pri, fontsize=9)
-        ax.set_title(f"{channel.upper()} Distribution", color=txt_pri,
-                     fontsize=10, fontweight="bold")
-        ax.grid(True, alpha=0.2, color=txt_mut)
-        ax.tick_params(colors=txt_mut, labelsize=8)
-
-        fluor_gate = ctx.state.cell_gating.fluor_gates.get(channel)
-        if fluor_gate is not None:
-            ax.axvline(x=float(fluor_gate), color=warn,
-                       linestyle="--", linewidth=2, alpha=0.7)
-        else:
-            swallowed("cell gating CDF: no fluor-gate line (channel not in slice)")
-        _focus_cdf_xaxis(ax, vals)
-        next_idx += 1
-
-    for ratio_label, values in sorted(ratio_data.items()):
-        if next_idx >= len(axes):
-            break
-        ax = axes[next_idx]
-        color = colors[next_idx % len(colors)]
-        vals = np.array(sorted(values))
-        if vals.size == 0:
-            continue  # empty channel → no CDF (audit S8; avoids 0/0)
-        cdf = np.arange(1, len(vals) + 1) / len(vals)
-        ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
-        ax.fill_between(vals, cdf, alpha=0.2, color=color)
-        ax.set_xlabel(f"{ratio_label} ratio", color=txt_pri, fontsize=9)
-        ax.set_ylabel("Cumulative Probability", color=txt_pri, fontsize=9)
-        ax.set_title(f"{ratio_label} Distribution", color=txt_pri,
-                     fontsize=10, fontweight="bold")
-        ax.grid(True, alpha=0.2, color=txt_mut)
-        ax.tick_params(colors=txt_mut, labelsize=8)
-        _focus_cdf_xaxis(ax, vals)
-        next_idx += 1
-
-    ctx.runtime.cell_gating.ax = axes[0]
-
-    if not ctx.runtime.cell_gating.axes_stack:
-        limits = [(ax.get_xlim(), ax.get_ylim()) for ax in axes]
-        ctx.runtime.cell_gating.axes_stack.append(limits)
-
-    fig.tight_layout(pad=1.3)
-    ctx.runtime.cell_gating.canvas.draw_idle()
-
-    # Constrain height only; width is driven by the scroll area's
-    # setWidgetResizable(True) so the canvas fills the viewport.
-    dpi = fig.get_dpi()
-    fig_h_px = max(1, int(fig_height * dpi))
-    ctx.runtime.cell_gating.canvas.setMinimumHeight(fig_h_px)
-
-
 def _cell_gating_on_progress(ctx, current: int, total: int) -> None:
     bar = ctx.widgets.get_or_none("_progress_bar")
     if bar is None:
@@ -2082,5 +1334,3 @@ def _cell_gating_persist_params(ctx) -> None:
         save_to_pipeline_info(ctx)
     except Exception:
         logger.exception("Failed to save gating params to pipeline_info.json")
-
-

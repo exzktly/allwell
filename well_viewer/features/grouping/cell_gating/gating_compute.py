@@ -1,10 +1,9 @@
-"""Pure domain compute for Cell Gating (audit A3).
+"""Pure domain compute for the Cell Gating package.
 
-Extracted from ``cell_gating_tab_view.py`` (a 2400-line "view" that had numpy /
-pandas domain logic embedded in it). Everything here is Qt-free and app-free:
-DataFrames / numpy arrays in, results out — so it is unit-testable without a GUI
-fixture. The view keeps the widget wiring and the QThread shells; those now call
-these functions.
+Everything here is Qt-free and app-free: DataFrames / numpy arrays in, results
+out — so it is unit-testable without a GUI fixture. The package's other modules
+(the tab builder, the controller and its QThread shells, the renderer) all sit
+above this one and call into it; nothing here imports them.
 
 Two clusters live here:
 
@@ -28,8 +27,8 @@ from well_viewer.core.lazy import lazy as _lazy
 
 # Lazy so this pure-compute module imports without eagerly pulling the scatter
 # feature (keeps both deletable and avoids a features import cycle); resolves on
-# first call. Mirrors the same binding cell_gating_tab_view uses — a module-level
-# _lazy assignment, not a function-local feature import.
+# first call — a module-level _lazy assignment, not a function-local feature
+# import.
 compute_gate_inclusion = _lazy("well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
 
@@ -198,10 +197,9 @@ def scan_fc_fractions(
 
 # ── Cell-gating row/timepoint selection + the two-well optimiser ──────────────
 #
-# Relocated from ``cell_gating_tab_view``: pure DataFrame/array work with no Qt
-# and no ``ctx``, which is what this module is for. The view had grown them
-# inline alongside the widget wiring, so they could only be exercised through a
-# full-app fixture despite depending on nothing but their arguments.
+# Pure DataFrame/array work with no Qt and no ``ctx``, which is what this module
+# is for: these depend on nothing but their arguments, so they are exercised
+# directly rather than through a full-app fixture.
 
 
 def _cell_gating_valid_mask(frame_df):

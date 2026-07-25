@@ -277,7 +277,7 @@ def clear_all(ctx) -> None:
     fluor_edits = ctx.widgets.get_or_none("_cell_gating_fluor_gate_edits")
     if fluor_edits is not None:
         try:
-            from well_viewer.features.grouping.cell_gating_tab_view import (
+            from well_viewer.features.grouping.cell_gating.controller import (
                 cell_gating_on_gating_change,
                 cell_gating_on_threshold_frac_on_change,
             )

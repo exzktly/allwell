@@ -179,9 +179,7 @@ def _activate_image_table(ctx) -> None:
 
 def _activate_sample_definitions(ctx) -> None:
     from well_viewer.core.selection_controller import groups_centre_refresh
-    from well_viewer.features.grouping.cell_gating_tab_view import (
-        cell_gating_sync_scatter_gates,
-    )
+    from well_viewer.features.grouping.cell_gating.controller import cell_gating_sync_scatter_gates
     ctx.widgets.get("_sidebar_sample_frame").setVisible(True)
     groups_centre_refresh(ctx)
     # Cell Gating leads this tab; pick up any scatter gates drawn since the
@@ -263,8 +261,9 @@ def _activate_smfish(ctx) -> None:
 
 
 def _activate_cell_gating(ctx) -> None:
-    from well_viewer.features.grouping.cell_gating_tab_view import (
-        cell_gating_load_cell_areas, cell_gating_sync_scatter_gates,
+    from well_viewer.features.grouping.cell_gating.controller import (
+        cell_gating_load_cell_areas,
+        cell_gating_sync_scatter_gates,
     )
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
     ctx.coordinator.refresh_sidebar_map()
@@ -517,9 +516,7 @@ def _sel_sample_definitions(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
     # Cell Gating is a sub-tab here; refresh its CDF if the user has opened it.
     if hasattr(app, "_cell_gating_fluor_gate_edits"):
-        from well_viewer.features.grouping.cell_gating_tab_view import (
-            cell_gating_load_cell_areas,
-        )
+        from well_viewer.features.grouping.cell_gating.controller import cell_gating_load_cell_areas
         cell_gating_load_cell_areas(ctx)
 
 

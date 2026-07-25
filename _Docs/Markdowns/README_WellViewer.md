@@ -1296,13 +1296,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.24.app`
-for the full app, or `dist/AllWell-8.8.24-<profile>.app` for a subset (e.g.
-`AllWell-8.8.24-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.8.25.app`
+for the full app, or `dist/AllWell-8.8.25-<profile>.app` for a subset (e.g.
+`AllWell-8.8.25-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.8.24.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.8.25.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):
@@ -1324,6 +1324,9 @@ architecture-specific and can't produce a universal binary.
 | `⌘E` / `Ctrl+E` | Export the active figure (drives the visible plot card's Save figure action) |
 | `⌘←` / `Ctrl+←` | Back through tab history |
 | `⌘→` / `Ctrl+→` | Forward through tab history |
+| `⌘/` / `Ctrl+/` | Open the help drawer |
+| `⌘L` / `Ctrl+L` | Open the application log drawer |
+| `⌘B` / `Ctrl+B` | Collapse / expand the left sidebar (same as the top-bar panel button) |
 | `⌘W` / `Ctrl+W` | Close window |
 
 The bottom status bar shows these chip-style hints at all times. The header

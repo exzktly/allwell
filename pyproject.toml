@@ -14,6 +14,25 @@
 # test (tests/test_no_silent_except.py), added alongside the `swallow`
 # helper in well_viewer/core/safe.py.
 
+# ── pytest ───────────────────────────────────────────────────────────────────
+# Lives here rather than in tests/pytest.ini so BOTH invocations load the same
+# config. With the ini under tests/, `pytest tests/` found it (rootdir=tests/)
+# while CI's bare `python -m pytest` did not (rootdir=repo root) — so markers
+# went unregistered and filterwarnings/testpaths were inert in CI only. A config
+# file at the root is discovered from either.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v"
+markers = [
+    "qt: test constructs Qt objects; needs the offscreen platform",
+    "slow: heavy test (e.g. real StarDist model load + inference); deselect with -m \"not slow\"",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
+
 [tool.ruff]
 target-version = "py310"
 line-length = 100

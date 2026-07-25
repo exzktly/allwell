@@ -1,21 +1,45 @@
-# Test/CI dependencies. Deliberately the *lightweight* stack only — the heavy
-# ML stack (tensorflow/torch/stardist/cellpose) is NOT needed to run the suite:
-# the segmentation/pipeline tests mock or degrade gracefully without it. See
-# .github/workflows/ci.yml.
+# Test/CI dependencies.
+#
+# Two rules govern this file:
+#
+# 1. NO heavy ML stack. tensorflow/torch/stardist/cellpose are deliberately
+#    absent — the segmentation/pipeline tests mock them or degrade gracefully.
+#    Consequence: the `importorskip("stardist")` / `importorskip("tensorflow")`
+#    tests SKIP in CI. A green CI run has not exercised them.
+#
+# 2. PIN to the versions the app actually ships against (_Docs/requirements.txt
+#    and _Docs/requirements-remote.txt). These were lower bounds (`numpy>=1.20`,
+#    `pandas>=1.3`, …), which pip resolves to the newest release — so CI was
+#    testing against numpy 2.x / pandas 3.x while the app runs numpy 1.24 /
+#    pandas 2.2. Two major versions of drift, on the exact libraries the
+#    data-loading and stats layers sit on. Any failure that gap produced was a
+#    CI artifact; any bug it masked was real and unseen.
+#
+# numpy's band mirrors the mamba constraint in _Docs/requirements.txt
+# (`"numpy>=1.24,<1.25"`) and is the binding pin — TF 2.13 and StarDist hold it
+# there. scipy / scikit-image / matplotlib are capped only so pip cannot resolve
+# a numpy-2-only wheel above it. Resolution and a full fast-lane run were
+# verified on Python 3.11 (CI's version) before this landed.
+#
+# See .github/workflows/ci.yml and scripts/test.sh.
+
+# ── Test harness ─────────────────────────────────────────────────────────────
 pytest>=7.0
 pytest-qt>=4.2
 pytest-mock>=3.10
 pytest-timeout>=2.1
 pytest-cov>=4.0
-PySide6>=6.5
-numpy>=1.20
-pandas>=1.3
-matplotlib>=3.5
+
+# ── Runtime stack — pinned to match the shipped app ──────────────────────────
+PySide6==6.7.3
+numpy>=1.24,<1.25
+pandas==2.2.3
+matplotlib>=3.5,<3.10
 pillow>=9.0
 
 # Imported at module-load time by the pure-pipeline modules (process_microscopy
 # imports tifffile for its codec side effects; flatfield/QC use scipy + skimage).
-tifffile>=2023.7
-scipy>=1.9
-scikit-image>=0.20
+tifffile==2023.9.26
+scipy>=1.9,<1.14
+scikit-image>=0.20,<0.25
 imageio>=2.30

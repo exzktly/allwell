@@ -286,6 +286,69 @@ def mock_app():
     return MockApp(per_well_pts=pts, selections=selections)
 
 
+# ── No modal dialogs, ever ───────────────────────────────────────────────────
+#
+# A modal Qt dialog under the offscreen QPA waits for a click that will never
+# come. That is not a slow test — it is an unkillable one: the block happens
+# inside Qt's C++ event loop, where pytest's signal-based ``--timeout`` cannot
+# reach it. The run can then only end at ``scripts/test_slow.sh``'s wall-clock
+# ceiling, which kills the process before pytest writes its JUnit report, so a
+# whole batch reports as failed, its innocent batch-mate goes down with it, and
+# the rest of the hanging file never runs at all.
+#
+# ``tests/test_sample_def_autosave.py`` did exactly this by calling
+# ``labels_apply_affix`` (which prompts through ``ask_name_dialog``) unpatched,
+# and it went unnoticed for as long as the slow lane went unrun. The app has ~65
+# such entry points, so relying on nobody ever reaching one is not a plan.
+#
+# So every dialog opener raises instead. A test that means to exercise a dialog
+# path patches the specific call itself — its ``monkeypatch`` is applied after
+# this fixture and wins. Everything else gets a named, instant failure that
+# points at the call site, instead of a hang nobody can attribute.
+
+_MODAL_CALLS = (
+    ("PySide6.QtWidgets", "QMessageBox",
+     ("question", "warning", "information", "critical", "about", "aboutQt")),
+    ("PySide6.QtWidgets", "QInputDialog",
+     ("getText", "getInt", "getDouble", "getItem", "getMultiLineText")),
+    ("PySide6.QtWidgets", "QFileDialog",
+     ("getOpenFileName", "getOpenFileNames", "getSaveFileName",
+      "getExistingDirectory")),
+    ("PySide6.QtWidgets", "QColorDialog", ("getColor",)),
+    ("PySide6.QtWidgets", "QFontDialog", ("getFont",)),
+    ("PySide6.QtWidgets", "QDialog", ("exec", "exec_")),
+)
+
+
+class ModalDialogInTest(AssertionError):
+    """A test reached a modal dialog. See the note above ``_MODAL_CALLS``."""
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_dialogs(monkeypatch):
+    pytest.importorskip("PySide6")
+    import importlib
+
+    for mod_name, cls_name, methods in _MODAL_CALLS:
+        try:
+            cls = getattr(importlib.import_module(mod_name), cls_name)
+        except (ImportError, AttributeError):  # pragma: no cover - Qt build skew
+            continue
+        for method in methods:
+            if not hasattr(cls, method):
+                continue
+
+            def _blocked(*_a, _c=cls_name, _m=method, **_kw):
+                raise ModalDialogInTest(
+                    f"{_c}.{_m}() opened a modal dialog. Under the offscreen QPA "
+                    "it would block forever and pytest's signal timeout cannot "
+                    "interrupt it. Patch this call in the test with the answer "
+                    "the user would give (see tests/conftest.py::_no_modal_dialogs)."
+                )
+
+            monkeypatch.setattr(cls, method, _blocked, raising=False)
+
+
 # ── Headless Qt fixtures ─────────────────────────────────────────────────────
 #
 # These construct a real ``WellViewerApp`` on the offscreen Qt platform. They

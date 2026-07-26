@@ -19,7 +19,7 @@ def test_scatter_axes_round_trip(loaded_app):
 
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     on_tab_change(app._ctx)
 
     items = _selectable(app._scatter_ch_x_cb)
@@ -36,7 +36,7 @@ def test_scatter_axes_round_trip(loaded_app):
     app._scatter_ch_x_cb.setCurrentText(items[0])
     app._scatter_ch_y_cb.setCurrentText(items[0])
     vs.restore(app._ctx, snap)
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     app._notebook.setCurrentByName("Plotting")
     app._plotting_notebook.setCurrentByName("Scatter Plot")
     on_tab_change(app._ctx)
@@ -51,7 +51,7 @@ def test_scatter_metric_round_trip(loaded_app):
 
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     on_tab_change(app._ctx)
 
     mx = _selectable(app._scatter_metric_x_cb)
@@ -67,7 +67,7 @@ def test_scatter_metric_round_trip(loaded_app):
     app._scatter_metric_x_cb.setCurrentText(mx[0])
     app._scatter_metric_y_cb.setCurrentText(mx[0])
     vs.restore(app._ctx, snap)
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     app._notebook.setCurrentByName("Plotting")
     app._plotting_notebook.setCurrentByName("Scatter Plot")
     on_tab_change(app._ctx)
@@ -82,7 +82,7 @@ def test_scatter_agg_round_trip(loaded_app):
 
     assert app._notebook.setCurrentByName("Plotting")
     assert app._plotting_notebook.setCurrentByName("Scatter Plot")
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     on_tab_change(app._ctx)
 
     cb = getattr(app, "_scatter_agg_ch_x_cb", None)
@@ -98,7 +98,7 @@ def test_scatter_agg_round_trip(loaded_app):
 
     cb.setCurrentText(items[0])
     vs.restore(app._ctx, snap)
-    app._tab_last_tab_name = "Line Graphs"
+    app._ctx.runtime.tab.last_tab_name = "Line Graphs"
     app._notebook.setCurrentByName("Plotting")
     app._plotting_notebook.setCurrentByName("Scatter Plot")
     on_tab_change(app._ctx)

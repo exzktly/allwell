@@ -1186,6 +1186,11 @@ actually looks like at the single-cell level.
 - **Controls** — the sidebar **criteria** filter (per-metric ranges) plus
   timepoint / FOV pickers; centre-row **channel toggles**, a **boundary**
   toggle, a **page size**, and **Load next** (the gallery fills incrementally).
+- **From scatter gate.** Ticking this sources the gallery from the gate(s) drawn
+  on the Scatter Plot instead of the criteria — so the criteria rows and
+  **+ Add criterion** grey out, with a line saying why. The setting sticks until
+  you untick it, which is worth knowing if you come back later and find the
+  criteria editor inert.
 - **Optimal use** — pair it with the Scatter Plot in Split View: gate a
   population on the scatter and watch the matching cells populate the gallery.
 

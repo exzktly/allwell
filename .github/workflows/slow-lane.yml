@@ -32,7 +32,11 @@ jobs:
   slow:
     name: pytest (slow lane) ${{ matrix.shard }}/6
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A shard runs ~14 of the 82 files, and app construction dominates: the
+    # heaviest single batch measured ~12 minutes on its own. 75 leaves a shard
+    # that draws two expensive batches room to finish rather than being cut off
+    # mid-run, which would report as a failure.
+    timeout-minutes: 75
     strategy:
       # One shard's failure should not cancel the others — we want the full
       # picture from a nightly run, not the first casualty.

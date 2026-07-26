@@ -80,6 +80,45 @@ def test_add_current_prefers_the_triggering_drawers_name_field(qapp, monkeypatch
     assert registry_edit.text() == "MAIN"
 
 
+def _persistence_fake_app(tmp_path, plot_groups):
+    from types import SimpleNamespace
+
+    from well_viewer.core.dataset_state import DatasetState
+    from well_viewer.core.selection_state import SelectionState
+
+    app = SimpleNamespace(
+        _app_state=SimpleNamespace(
+            dataset=DatasetState(data_dir=tmp_path),
+            selection=SelectionState(plot_groups=list(plot_groups)),
+        ),
+    )
+    app.window = app; app.state = app._app_state  # mock is its own ctx (B4)
+    app._app_state.dataset.well_paths = {
+        "A01": tmp_path / "A01.csv", "A02": tmp_path / "A02.csv",
+    }
+    app._ctx = SimpleNamespace(app=app, state=app._app_state)
+    return app
+
+
+def test_load_keeps_pipeline_info_groups_when_the_doc_has_no_section(tmp_path):
+    """A dataset can carry Plot Groups in pipeline_info.json and no
+    persistence.json section (folder copied without the sidecar). The
+    sample-definitions hydrator runs first; this loader must not wipe it."""
+    from well_viewer.persistence import plot_groups as persist
+
+    app = _persistence_fake_app(
+        tmp_path,
+        [{"id": "pg1", "name": "From pipeline_info", "wells": ["A01", "A02"]}],
+    )
+    assert not (tmp_path / "persistence.json").exists()
+
+    persist.load_from_data_dir(app)
+
+    assert app._app_state.selection.plot_groups == [
+        {"id": "pg1", "name": "From pipeline_info", "wells": ["A01", "A02"]}
+    ]
+
+
 def test_plot_groups_persistence_round_trip(tmp_path):
     from types import SimpleNamespace
 

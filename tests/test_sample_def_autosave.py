@@ -57,14 +57,25 @@ def test_edit_autosaves_without_clicking_save(loaded_app, mini_dataset):
     assert "AutoSaveProbe" in names
 
 
-def test_label_edit_schedules_autosave(loaded_app):
+def test_label_edit_schedules_autosave(loaded_app, monkeypatch):
     app = loaded_app
     app._persistence._pending.discard("sample_definitions")
     # Mutating a well label through the affix helper should queue a save.
     app._app_state.selection.selected_wells = set(
         list(app._app_state.dataset.well_paths.keys())[:1]
     )
+    from well_viewer.core import ui_helpers
     from well_viewer.core.selection_controller import labels_apply_affix
+
+    # labels_apply_affix prompts for the affix text through ask_name_dialog,
+    # which is a modal QInputDialog. Under the offscreen QPA there is nobody to
+    # dismiss it, so calling the helper unpatched blocks forever inside Qt's C++
+    # exec loop — where pytest's signal-based --timeout cannot reach it, taking
+    # the whole batch down with no JUnit report. Supply the text the user would
+    # have typed; an empty/cancelled answer is an early return that queues no
+    # save, so it has to be non-empty for the assertion below to mean anything.
+    monkeypatch.setattr(ui_helpers, "ask_name_dialog",
+                        lambda *a, **k: "pfx_", raising=True)
     labels_apply_affix(app._ctx, where="prefix")
     # Either it queued a save, or (no wells selected) it didn't crash; assert the
     # common case where a well was available.

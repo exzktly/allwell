@@ -96,7 +96,7 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV
 # belongs — _collect_run_options, _background_well_validation_error, and the
 # module-level field parsers (_safe_qc_float / _safe_seg_float / _INT_FIELDS /
 # _numeric_option_errors). They read the form's widgets; the tab only hosts them.
-ANALYZE_TAB_BUDGET = 1063
+ANALYZE_TAB_BUDGET = 1061
 
 # analyze_tab_form.py carried no budget while analyze_tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it

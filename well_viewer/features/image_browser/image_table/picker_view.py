@@ -11,6 +11,7 @@ from PySide6.QtCore import Qt
 
 from well_viewer.core.safe import swallowed
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from well_viewer.features.image_browser.image_table.controller import image_table_active_wells
 from well_viewer.features.image_browser.image_table.controller import image_table_clear_active
 from well_viewer.features.image_browser.image_table.controller import image_table_refresh_picker
 from well_viewer.features.image_browser.image_table.controller import image_table_select_all
@@ -102,8 +103,16 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     from well_viewer.core.sidebar_view import build_plot_groups_drawer
     # build_plot_groups_drawer is a shared core sidebar builder; it takes ctx
     # (drawer registry on ctx.runtime.plot_groups, widgets via ctx.widgets).
+    #
+    # It also takes the reader for "the current selection", because that differs
+    # per sidebar: the plate above is this tab's own selector and writes
+    # ``state.image_table.active_wells``, never ``selection.selected_wells``.
+    # Without passing it, Add here saved the *plotting* sidebar's selection —
+    # whatever was chosen on another tab — instead of the wells the user had just
+    # clicked right above the button.
     plot_groups_section = build_plot_groups_drawer(
         ctx, parent, include_add_controls=True,
+        wells_source=lambda: image_table_active_wells(ctx),
     )
     layout.addWidget(plot_groups_section)
 

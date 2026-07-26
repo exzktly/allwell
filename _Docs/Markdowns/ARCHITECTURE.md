@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.9.1.** This map describes the app as it stands today;
+**Reflects All-Well v8.9.2.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.9.1; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.9.2; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -771,15 +771,47 @@ functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
-The same module builds the **Plot Groups** drawer. Loading a group writes the
-saved wells through `set_selected_wells`, then reconciles replicate visibility
-through the pure `plot_group_visibility_plan`: in replicate mode the plotting
-tabs draw one trace per *visible* replicate set and never read
-`selection.selected_wells`, so a load that only wrote that store changed nothing
-on screen. Every set the group's wells touch is shown, the rest hidden, and
-wells belonging to no set become `active_solo_wells`. This is visibility only —
-no replicate set's membership is edited, so Plot Groups still never mutate
-Sample Definitions.
+The same module builds the **Plot Groups** drawer. Both halves of the drawer —
+capturing a group and loading one — branch on which mode the sidebar plate is
+in, because the two modes keep "the current selection" in different stores.
+
+What a new group captures depends on which sidebar's Add was pressed, so
+`build_plot_groups_drawer` takes a `wells_source` callable and each caller
+supplies its own. The default is `_wells_for_new_plot_group`, the plotting
+sidebar's plate: in group-visibility mode (replicate sets defined and no
+well-editing pane on screen, the same condition
+`selection_controller._plate_passive_in_group_mode` resolves) the plate paints
+set visibility and clicks toggle a set's `hidden` flag, so what is on screen is
+the union of every visible set's wells plus `active_solo_wells` — the same
+active set the plots draw from. `selection.selected_wells` is not consulted in
+that mode at all: nothing keeps it current there, so it holds whatever a
+per-well tab or an earlier Plot Group load last wrote. In per-well mode the
+plate *is* a well selector and `selected_wells` is the answer.
+
+The Image Table's sidebar passes `image_table_active_wells` instead, because its
+picker is a second, independent selector — it ignores replicate sets and writes
+`state.image_table.active_wells`, never `selection.selected_wells`. Threading
+the reader in from the caller keeps core out of the business of knowing where a
+feature's sidebar keeps its wells; branching inside the builder would have meant
+core naming a feature's state.
+
+Loading a group writes the saved wells through `set_selected_wells` — per-well
+tabs and the Image Table read them from there — then reconciles replicate
+visibility through the pure `plot_group_visibility_plan`, because in replicate
+mode the plotting tabs draw one trace per *visible* replicate set and never read
+`selection.selected_wells`. Every set the group's wells touch is shown, the rest
+hidden, and wells belonging to no set become `active_solo_wells`. This is
+visibility only — no replicate set's membership is edited, so Plot Groups never
+mutate Sample Definitions.
+
+Plot Groups have two homes on disk: the `plot_groups` section of
+`persistence.json` (written on every drawer edit) and a copy inside the
+`sample_definitions` block of `pipeline_info.json` (written whenever sample
+definitions autosave). The `pipeline_info.json` hydrator runs first on load and
+`persistence/plot_groups.load_from_data_dir` runs second; an *absent*
+`persistence.json` section leaves the hydrated groups in place rather than
+clearing them, so a folder shared or copied without the sidecar keeps its
+groups.
 
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is
@@ -839,7 +871,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/lineplot/controller.py` | Line Graphs: redraw the 3-stacked-subplot figure. |
 | `features/barplot/{controller,renderer}.py` | Bar Plots: redraw + bar-draw math (split because batch export reuses the math). |
 | `features/scatter/{controller,callbacks}.py` | Scatter Plot (cells + aggregate). The per-axis fluor-gate (`fluor_gate_x` / `fluor_gate_y`) is bypassed when an axis column ends with `_smfish_count` — the gate is a fluorescence-intensity floor and would strip every integer-count cell on a count axis. The mixed-axis case (one count, one intensity) still gates the intensity axis. The interactive rectangular gates live in `scatter/gating.py` (a documented naming exception): each box is stamped at draw time with its axis metric columns (`x_col`/`y_col`) and a `name` (auto-assigned `Gate N`, shown on the plot, editable in the Properties sidebar's gate list via `rename_gate`), so beyond the on-plot "% inside" labels its `compute_gate_inclusion` (matplotlib-free, reuses `_in_gate` + `resolve_value_series`) lets the Cell Gating tab turn the selected gate(s) into the `Gate_Pass` inclusion layer. The gating (inclusion) and thresholding (fraction-on) layers each have their OWN *Gates* multi-select checkbox menu, so they can be configured independently (`cell_gating_selected_scatter_gates(ctx, mode)`); each selection is a set of names on the typed slice, `ctx.state.cell_gating.gating_choices` / `.thresh_choices` (`None` ⇒ all gates, auto-including ones drawn later). Each box's stamped `x_col`/`y_col` also drive on-axes rendering: `gating.draw_gates` / `gate_edge_at` only show and hit-test a gate when `ctx.runtime.scatter.axes_cols` (the columns currently on the axes, recorded by `paint_gates`) match it — a gate drawn on a different X/Y pair is hidden, since its box coords are meaningless there. Drawing / editing / clearing a gate fans out through `gating._notify_gates_changed` to the callback the Cell Gating tab registers on `ctx.runtime.scatter.gates_changed_cb` (`cell_gating_sync_scatter_gates`), which refreshes the pickers and recomputes inclusion immediately (signature-guarded); the per-cell scatter itself opts out of `Gate_Pass` so its cloud never shrinks under its own gates. A second, independent Cell Gating toggle applies the same selected gate as a **fraction-on threshold** instead of (or as well as) inclusion: the worker writes a per-cell `Gate_On` column and `aggregate_with_threshold_df(on_col="Gate_On")` (selected via `stats_compute._thresh_on_col`) makes gate membership the "on" population for fraction-on, replacing the `value > ThreshFracOn` cutoff. The per-cell tab's **Color by time** toggle (`_scatter_color_by_tp`) colours each point by its timepoint instead of by well identity (one `Line2D` per well-timepoint in a shared viridis scale from `collect.timepoint_color_map`, which the aggregate scatter reuses); it overrides density shading, and with >1 well selected it forces the "Separate axes" stacked layout (`_render_scatter_faceted`) so each well's time-coloured cloud gets its own panel. |
-| `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. A canvas click selects the cell's wells; Shift adds and Ctrl toggles. `_event_modifiers` resolves those from the Qt `QMouseEvent` behind `event.guiEvent` — PySide6 hands back a `KeyboardModifier` flag object that `int()` rejects, so the bits are read through `.value` — and falls back to matplotlib's own `event.key` when no GUI event is attached. `features/heatmap/sidebar_view.py` holds the layout editor; its **Auto-populate from selection** plans cells through the pure `_autopopulate_cells`, which reads whichever store the plate's current mode expresses the selection in — `selection.selections` in replicate mode (one cell per *visible* set, holding all of that set's loaded wells) and `selection.selected_wells` in plain mode (one cell per well, in plate order). Reading only the latter laid out whatever stale individual wells were left in it whenever replicate groups were defined, since replicate mode leaves that store empty. |
+| `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. A canvas click selects the cell's wells; Shift adds and Ctrl toggles. `_event_modifiers` resolves those from the Qt `QMouseEvent` behind `event.guiEvent` — PySide6 hands back a `KeyboardModifier` flag object that `int()` rejects, so the bits are read through `.value` — and falls back to matplotlib's own `event.key` when no GUI event is attached. `features/heatmap/sidebar_view.py` holds the layout editor; its **Auto-populate from selection** plans cells through the pure `_autopopulate_cells`, which reads whichever store the plate's current mode expresses the selection in — `selection.selections` in replicate mode and `selection.selected_wells` in plain mode (one cell per well, in plate order). Reading only the latter laid out whatever stale individual wells were left in it whenever replicate groups were defined, since replicate mode leaves that store empty. In replicate mode the shape of the plan then follows `heatmap.repset_avg`, which is what decides whether a cell means a set or a well: on, one cell per *visible* set holding all of its loaded wells; off, one cell per member well in plate order. A cell holding several wells renders as `A01+3` (members in the tooltip) with its well token in `_CELL_TOKEN_ROLE`, so the summary never reaches the model, and a drag moves the cell's whole well list rather than the single token the drag carried. |
 | `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. Log-X/Log-Y is a **single per-figure axis pref** (`x_log` / `y_log`) that the on-plot checkboxes and the Properties-sidebar toggles both drive — they previously wrote two independent stores and the export pass clobbered the button. Log-Y histograms pass `log=log_y` straight into `ax.hist` rather than computing a density from 0 and log-scaling afterwards (which corrupted the bar heights). |
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. The replicate unit is the **one rule** `domain/stats_compute.replicate_unit` — shared with the bar/line error bars so the test's `n` and the plotted spread never disagree. In **FOV mode** every FOV **across all of a group's wells** is an independent replicate (`n` = total FOVs, pooled across wells); otherwise each well is one replicate. Pooling FOVs across wells is pseudo-replication (smaller p-values than a well-level test) — an explicitly chosen mode. |
 | `features/image_browser/image_table/controller.py` | Image Table grid: render-model assembly + Generate/export orchestration. The "turn cache + state into pixels" work is split into sibling modules it re-exports (so call sites and external importers are unchanged) and which `test_monolith_budgets.py` ratchets: `image_compose.py` (LUT palette + per-channel cmap/LUT resolution, array loading, mask/threshold rendering, the RGB cell composer `cell_display_rgb`, the boundary overlay, and the channel-overlay blender `overlay_cell_rgb`), `grid_layout.py` (axis/cell layout math + the per-dimension well/channel/FOV/timepoint option lists), `build_layout.py` (flat + nested grid assembly + `image_table_apply_spec`), and `facet_view.py` (faceted render placement — axis labels + group spacing). **Headless plain-data render model.** `ctx.runtime.image_table.cells` is a `rows × cols` grid of plain `{"well","chan","tp","fov"}` string dicts — the render contract, no Qt widgets. The renderer (`image_table_generate`), the layout math, the per-cell override popover (`grid_ops.py`), and `persistence/view_state.py` all read/write those strings directly; off-axis held values live on `state.fixed_vals` (read by `grid_layout._fixed_off_axis`) and grid size on `state.rows`/`state.cols`, so there are no held-value combos or grid-size spinners. A **grouped/tiled** well layout (`group_size`, 0 = off) bands each channel across multiple rows; it persists through `persistence/view_state.py` (`group_size` / `group_row_span`). **Builder shelf.** The **sole** authoring surface is `builder_view.py` — a root + nested-channels drag-and-drop tree: each axis gets a root (Well/Timepoint/FOV) with channels nested under it, each channel carrying its own render options (raw/corrected · mask · ≥thr · boundary · colormap/LUT) via a ⚙ menu; a derived **Fixed** panel auto-lists the off-axis roots with value pickers; a **Separate ↔ Overlay** switch (`state.composite`) collapses a root's channel axis to a single entry and additively blends every selected channel into each cell — "blend this root's channels into one cell" (the layout emits the `image_compose.OVERLAY_CHAN` sentinel as the sole channel value via `grid_layout._axis_dim_values`; `image_compose.overlay_cell_rgb` blends it in both the live grid and export, and the flag round-trips through `view_state`); wells come from the sidebar plate. The shelf edits a Qt-free `TableSpec` (`state.py`) and calls `build_layout.image_table_apply_spec`, which flattens it onto the existing `row_dims`/`col_dims`/`active_*`/`composite`/`group_size` state (+ a per-channel `channel_opts` block) and drives the layout + a debounced `image_table_generate`. Per-channel display is **position-independent**: the four `image_compose._row_*` helpers resolve options from `channel_opts` keyed by the cell's channel, and the live generate path is unified onto `cell_display_rgb` so the live grid, the channel-overlay blend, and export always agree. A ⚙ "≥threshold" reuses main's `"<CHAN> (binary)"` token. Per-cell tweaks come from right-clicking a rendered cell (`grid_ops.image_table_cell_override_menu`, which writes the cell dict). **Plate (96-well) layout.** A **Plate A–H × 1–12** toggle in the shelf header lays each selected well's image out in true plate positions with correct axis labels, using two *virtual* layout dims — `well_row` (A–H) and `well_col` (1–12), enumerated from the plate selection in `grid_layout` (`_well_row_options` / `_well_col_options`). They never get their own render-model cell key: `grid_layout.compose_plate_well` resolves each `(row, col)` back to the real `well` token (blank when that position is absent), and `facet_view._cv` derives them back from the composed well so the A–H / 1–12 headers label every band — unlike the `group_size`/Wrap trick, whose facet headers only reflect the first band. It rides the existing single-dim `_build_nested_layout` path (`row_dims=["well_row"]`, `col_dims=["well_col"]`); the channel is held fixed (`TableSpec.plate` flag round-trips through `spec_to_state_fields` / `spec_from_state`), and it's mutually exclusive with Wrap *and* with channel Overlay (plate mode writes `composite=False`). |

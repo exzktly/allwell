@@ -588,13 +588,17 @@ tabs and is what every plot / aggregate / export consumes.
   current well selection under a name so you can reload it in one click. Plot
   Groups are *plotting selections only* — not replicate sets or stats groups —
   and loading one drives both the plate selection and, where a tab keeps its
-  own well set, that tab's set too. The Image Table sidebar mirrors the drawer
-  read-only, so a saved set can drive the image grid as well. When Sample
+  own well set, that tab's set too. The Image Table sidebar carries the same
+  drawer, so a saved set can drive the image grid as well — and **Add** there
+  saves the wells picked on the Image Table's own plate, which is a separate
+  selector from the one on the plotting sidebar. When Sample
   Definition groups are defined, the plots draw one trace per *visible*
-  replicate set rather than per well, so loading a Plot Group there shows every
-  set the group touches and hides the rest — any well the group names that
-  belongs to no set is carried alongside them. Only visibility changes; no
-  replicate set's membership is edited.
+  replicate set rather than per well, and the drawer follows suit in both
+  directions: **Add** saves every set that is currently shown (plus any solo
+  wells), however many that is, and loading the group shows exactly those sets
+  again and hides the rest — any well the group names that belongs to no set is
+  carried alongside them. Only visibility changes; no replicate set's membership
+  is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
   Click into a pane to focus it — the focused pane drives the sidebar and the
@@ -814,11 +818,18 @@ place cells in a grid that mirrors your plate or your experimental design.
   cell to select its wells; **Shift**-click adds to the selection and
   **Ctrl**-click (**Cmd** on macOS) toggles individual wells in and out.
 - **Auto-populate from selection** fills the grid from whichever selection is
-  live. With Sample Definition groups defined it lays out **one cell per visible
-  replicate set**, each holding all of that set's loaded wells, so the heat map
-  shows one value per set. With no groups defined it lays out one cell per
-  selected well, in plate order. Either way the grid grows (up to 32×32) if the
-  selection needs more cells than it currently has.
+  live, and with Sample Definition groups defined the **Rep-set avg** toggle
+  decides what a cell stands for:
+  - *Rep-set avg on* — **one cell per visible replicate set**, holding all of
+    that set's loaded wells, so the heat map shows one averaged value per set.
+    A multi-well cell shows as `A01+3` in the layout editor (hover for the full
+    membership) and moves as a unit when dragged.
+  - *Rep-set avg off* — **one cell per well**, in plate order, across every
+    visible set. The map is per-well, so the grid is too.
+
+  With no groups defined it lays out one cell per selected well, in plate order.
+  Either way the grid grows (up to 32×32) if the selection needs more cells than
+  it currently has.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then scrub the
   timepoint slider to watch the metric evolve.
@@ -1354,13 +1365,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.1.app`
-for the full app, or `dist/AllWell-8.9.1-<profile>.app` for a subset (e.g.
-`AllWell-8.9.1-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.2.app`
+for the full app, or `dist/AllWell-8.9.2-<profile>.app` for a subset (e.g.
+`AllWell-8.9.2-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.9.1.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.9.2.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

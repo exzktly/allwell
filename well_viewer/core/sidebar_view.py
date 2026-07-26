@@ -146,7 +146,8 @@ def build_sidebar(win, parent: QWidget) -> None:
     win._plot_groups_refresh = lambda: refresh_plot_groups_sidebar(win._ctx)
 
 
-def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True):
+def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
+                             wells_source=None):
     """Build a Plot Groups quick-load drawer and register it for refresh.
 
     Returns a ``CollapsibleSection`` widget the caller adds to its layout.
@@ -162,6 +163,16 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True):
     ``include_add_controls=False`` omits the "name + Add" row, useful for
     secondary drawers (e.g. Image Table's) where the user only wants to
     pick from existing groups, not author new ones.
+
+    ``wells_source`` is a zero-argument callable returning the wells **this**
+    drawer's Add should capture. A sidebar whose plate is not the shared one
+    passes its own — the Image Table's picker keeps its selection in
+    ``ctx.state.image_table.active_wells`` and deliberately ignores replicate
+    sets, so a drawer sitting under it must read that store rather than the
+    plotting sidebar's. Defaults to the plotting sidebar's plate selection
+    (:func:`_wells_for_new_plot_group`). Core has no business knowing what a
+    feature's sidebar keeps its wells in, so the knowledge travels in from the
+    caller rather than being branched on here.
     """
     from widgets.collapsible_section import CollapsibleSection
 
@@ -187,7 +198,8 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True):
         # single shared ``_plot_group_name_edit`` registry key — each Add reads the
         # name typed into its own drawer.
         add_btn.clicked.connect(
-            lambda _=False, ne=name_edit: _plot_groups_add_current(ctx, ne))
+            lambda _=False, ne=name_edit, ws=wells_source:
+                _plot_groups_add_current(ctx, ne, wells_source=ws))
         nr.addWidget(add_btn)
         section.addWidget(name_row)
         # Back-compat: the original main-sidebar API exposed these directly
@@ -299,10 +311,21 @@ def _wells_for_new_plot_group(ctx) -> list[str]:
     return sorted(raw, key=parse_rc)
 
 
-def _plot_groups_add_current(ctx, name_edit=None) -> None:
-    wells = _wells_for_new_plot_group(ctx)
+def _plot_groups_add_current(ctx, name_edit=None, *, wells_source=None) -> None:
+    """Save the current selection as a Plot Group.
+
+    ``wells_source`` is the triggering drawer's own selection reader (see
+    :func:`build_plot_groups_drawer`); without one this is the plotting
+    sidebar's plate.
+    """
+    wells = (list(wells_source()) if callable(wells_source)
+             else _wells_for_new_plot_group(ctx))
     if not wells:
-        ctx.notify.set_status("Select wells (or show a group) before adding a Plot Group.")
+        ctx.notify.set_status(
+            "Select wells on the plate above before adding a Plot Group."
+            if callable(wells_source) else
+            "Select wells (or show a group) before adding a Plot Group."
+        )
         return
     # Prefer the drawer that triggered this (its own name field); fall back to the
     # shared registry key for any other caller.

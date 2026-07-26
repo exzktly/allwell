@@ -91,15 +91,28 @@ from well_viewer.features.image_browser.image_table import facet_view as _facet
 # ── Sidebar picker ───────────────────────────────────────────────────────────
 
 
+def image_table_active_wells(ctx) -> list[str]:
+    """The tab's active wells, loaded ones only, in plate order.
+
+    The Image Table's picker is its own selector — it keeps its wells in
+    ``state.image_table.active_wells`` and ignores replicate sets — so anything
+    reading "what is selected here" (the plate repaint, the Plot Groups drawer
+    that sits under it) has to come through this rather than the shared
+    ``selection.selected_wells``.
+    """
+    return sorted(
+        (w for w in ctx.state.image_table.active_wells
+         if w in ctx.state.dataset.well_paths),
+        key=parse_rc,
+    )
+
+
 def image_table_refresh_picker(ctx) -> None:
     """Push the active-well set onto the sidebar plate and update the count label."""
     plate = ctx.runtime.image_table.sidebar_plate
     if plate is not None:
         plate.setEnabledWells(list(ctx.state.dataset.well_paths.keys()))
-        active = sorted(
-            (w for w in ctx.state.image_table.active_wells if w in ctx.state.dataset.well_paths),
-            key=parse_rc,
-        )
+        active = image_table_active_wells(ctx)
         # Tint each well its canonical plate-rank colour so the picker matches
         # the main sidebar / plots ("the plate is the legend") instead of the
         # widget's selection-order fallback palette.

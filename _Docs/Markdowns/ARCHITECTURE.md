@@ -775,16 +775,25 @@ The same module builds the **Plot Groups** drawer. Both halves of the drawer —
 capturing a group and loading one — branch on which mode the sidebar plate is
 in, because the two modes keep "the current selection" in different stores.
 
-`_wells_for_new_plot_group` decides what a new group captures. In
-group-visibility mode (replicate sets defined and no well-editing pane on
-screen, the same condition `selection_controller._plate_passive_in_group_mode`
-resolves) the plate paints set visibility and clicks toggle a set's `hidden`
-flag, so what is on screen is the union of every visible set's wells plus
-`active_solo_wells` — the same active set the plots draw from.
-`selection.selected_wells` is not consulted in that mode at all: nothing keeps
-it current there, so it holds whatever a per-well tab or an earlier Plot Group
-load last wrote. In per-well mode the plate *is* a well selector and
-`selected_wells` is the answer.
+What a new group captures depends on which sidebar's Add was pressed, so
+`build_plot_groups_drawer` takes a `wells_source` callable and each caller
+supplies its own. The default is `_wells_for_new_plot_group`, the plotting
+sidebar's plate: in group-visibility mode (replicate sets defined and no
+well-editing pane on screen, the same condition
+`selection_controller._plate_passive_in_group_mode` resolves) the plate paints
+set visibility and clicks toggle a set's `hidden` flag, so what is on screen is
+the union of every visible set's wells plus `active_solo_wells` — the same
+active set the plots draw from. `selection.selected_wells` is not consulted in
+that mode at all: nothing keeps it current there, so it holds whatever a
+per-well tab or an earlier Plot Group load last wrote. In per-well mode the
+plate *is* a well selector and `selected_wells` is the answer.
+
+The Image Table's sidebar passes `image_table_active_wells` instead, because its
+picker is a second, independent selector — it ignores replicate sets and writes
+`state.image_table.active_wells`, never `selection.selected_wells`. Threading
+the reader in from the caller keeps core out of the business of knowing where a
+feature's sidebar keeps its wells; branching inside the builder would have meant
+core naming a feature's state.
 
 Loading a group writes the saved wells through `set_selected_wells` — per-well
 tabs and the Image Table read them from there — then reconciles replicate

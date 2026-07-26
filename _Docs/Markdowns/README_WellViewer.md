@@ -588,8 +588,10 @@ tabs and is what every plot / aggregate / export consumes.
   current well selection under a name so you can reload it in one click. Plot
   Groups are *plotting selections only* — not replicate sets or stats groups —
   and loading one drives both the plate selection and, where a tab keeps its
-  own well set, that tab's set too. The Image Table sidebar mirrors the drawer
-  read-only, so a saved set can drive the image grid as well. When Sample
+  own well set, that tab's set too. The Image Table sidebar carries the same
+  drawer, so a saved set can drive the image grid as well — and **Add** there
+  saves the wells picked on the Image Table's own plate, which is a separate
+  selector from the one on the plotting sidebar. When Sample
   Definition groups are defined, the plots draw one trace per *visible*
   replicate set rather than per well, and the drawer follows suit in both
   directions: **Add** saves every set that is currently shown (plus any solo

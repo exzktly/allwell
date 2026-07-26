@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.9.1.** This map describes the app as it stands today;
+**Reflects All-Well v8.9.2.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.9.1; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.9.2; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -771,15 +771,38 @@ functions (`on_sidebar_plate_selection_changed`, `…_drag_finished`,
 to those functions, kept so the sidebar's `signal.connect(app._on_…)` wires
 still resolve.
 
-The same module builds the **Plot Groups** drawer. Loading a group writes the
-saved wells through `set_selected_wells`, then reconciles replicate visibility
-through the pure `plot_group_visibility_plan`: in replicate mode the plotting
-tabs draw one trace per *visible* replicate set and never read
-`selection.selected_wells`, so a load that only wrote that store changed nothing
-on screen. Every set the group's wells touch is shown, the rest hidden, and
-wells belonging to no set become `active_solo_wells`. This is visibility only —
-no replicate set's membership is edited, so Plot Groups still never mutate
-Sample Definitions.
+The same module builds the **Plot Groups** drawer. Both halves of the drawer —
+capturing a group and loading one — branch on which mode the sidebar plate is
+in, because the two modes keep "the current selection" in different stores.
+
+`_wells_for_new_plot_group` decides what a new group captures. In
+group-visibility mode (replicate sets defined and no well-editing pane on
+screen, the same condition `selection_controller._plate_passive_in_group_mode`
+resolves) the plate paints set visibility and clicks toggle a set's `hidden`
+flag, so what is on screen is the union of every visible set's wells plus
+`active_solo_wells` — the same active set the plots draw from.
+`selection.selected_wells` is not consulted in that mode at all: nothing keeps
+it current there, so it holds whatever a per-well tab or an earlier Plot Group
+load last wrote. In per-well mode the plate *is* a well selector and
+`selected_wells` is the answer.
+
+Loading a group writes the saved wells through `set_selected_wells` — per-well
+tabs and the Image Table read them from there — then reconciles replicate
+visibility through the pure `plot_group_visibility_plan`, because in replicate
+mode the plotting tabs draw one trace per *visible* replicate set and never read
+`selection.selected_wells`. Every set the group's wells touch is shown, the rest
+hidden, and wells belonging to no set become `active_solo_wells`. This is
+visibility only — no replicate set's membership is edited, so Plot Groups never
+mutate Sample Definitions.
+
+Plot Groups have two homes on disk: the `plot_groups` section of
+`persistence.json` (written on every drawer edit) and a copy inside the
+`sample_definitions` block of `pipeline_info.json` (written whenever sample
+definitions autosave). The `pipeline_info.json` hydrator runs first on load and
+`persistence/plot_groups.load_from_data_dir` runs second; an *absent*
+`persistence.json` section leaves the hydrated groups in place rather than
+clearing them, so a folder shared or copied without the sidecar keeps its
+groups.
 
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is

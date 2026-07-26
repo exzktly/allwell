@@ -26,8 +26,19 @@ def save_to_data_dir(ctx) -> None:
 
 def load_from_data_dir(ctx) -> None:
     app = ctx.window  # transitional bridge (B4)
-    """Load persisted Plot Groups and refresh the sidebar list if it exists."""
+    """Load persisted Plot Groups and refresh the sidebar list if it exists.
+
+    Plot Groups have a second home: the ``sample_definitions`` block in
+    ``pipeline_info.json`` carries a copy, and its hydrator runs just before
+    this one. A dataset can arrive with that block but no ``persistence.json``
+    section — a folder shared or copied without the sidecar, or one whose
+    groups were only ever written by the Sample Definitions Save button. So an
+    absent section means "nothing to say here" and leaves the hydrated groups
+    alone; only a section that is actually present replaces them.
+    """
     raw = _doc.get_section(ctx, SECTION)
+    if raw is None:
+        raw = app._app_state.selection.plot_groups or []
     loaded = app._app_state.dataset.well_paths.keys()
     groups = filter_loaded_wells(validate_repair_plot_groups(raw), loaded)
     app._app_state.selection.plot_groups = groups

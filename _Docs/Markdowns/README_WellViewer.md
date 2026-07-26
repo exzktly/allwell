@@ -591,10 +591,12 @@ tabs and is what every plot / aggregate / export consumes.
   own well set, that tab's set too. The Image Table sidebar mirrors the drawer
   read-only, so a saved set can drive the image grid as well. When Sample
   Definition groups are defined, the plots draw one trace per *visible*
-  replicate set rather than per well, so loading a Plot Group there shows every
-  set the group touches and hides the rest — any well the group names that
-  belongs to no set is carried alongside them. Only visibility changes; no
-  replicate set's membership is edited.
+  replicate set rather than per well, and the drawer follows suit in both
+  directions: **Add** saves every set that is currently shown (plus any solo
+  wells), however many that is, and loading the group shows exactly those sets
+  again and hides the rest — any well the group names that belongs to no set is
+  carried alongside them. Only visibility changes; no replicate set's membership
+  is edited.
 - **Split View** — the **Split** toggle in the top bar puts two *different*
   centre tabs side-by-side, both live (e.g. Scatter Plot beside Cell Browser).
   Click into a pane to focus it — the focused pane drives the sidebar and the
@@ -1354,13 +1356,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.1.app`
-for the full app, or `dist/AllWell-8.9.1-<profile>.app` for a subset (e.g.
-`AllWell-8.9.1-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.2.app`
+for the full app, or `dist/AllWell-8.9.2-<profile>.app` for a subset (e.g.
+`AllWell-8.9.2-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.9.1.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.9.2.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

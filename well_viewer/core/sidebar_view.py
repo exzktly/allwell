@@ -242,29 +242,60 @@ def _plot_groups_schedule_save(ctx) -> None:
         p.schedule_save("plot_groups")
 
 
+def _group_visibility_mode(ctx) -> bool:
+    """Whether the sidebar plate is painting *group visibility* right now.
+
+    Mirrors ``selection_controller._plate_passive_in_group_mode``: replicate
+    sets exist and no well-editing pane (Sample Definitions / Review CSV) is on
+    screen, so clicks toggle a set's ``hidden`` flag instead of selecting wells.
+    Falls back to "replicate sets exist" when the shell isn't reachable — the
+    lightweight ``ctx`` used by headless callers and unit tests has no window.
+    """
+    if not ctx.state.selection.selections:
+        return False
+    try:
+        from well_viewer.core.selection_controller import _plate_passive_in_group_mode
+        return bool(_plate_passive_in_group_mode(ctx))
+    except Exception:
+        _logger.debug(
+            "plot_groups: plate-mode probe failed; assuming group-visibility mode",
+            exc_info=True,
+        )
+        return True
+
+
 def _wells_for_new_plot_group(ctx) -> list[str]:
     """The well set a new Plot Group should capture, sorted by plate position.
 
-    Prefers the raw plate selection (``selected_wells``). But once replicate
-    sets exist the sidebar plate runs in passive *group-visibility* mode on
-    plotting tabs — clicks toggle a group's ``hidden`` flag instead of selecting
-    wells, so ``selected_wells`` is empty. In that mode the "current selection"
-    for plotting is exactly the union of every visible (non-hidden) group's
-    wells plus any active solo wells (mirrors the rep-mode "active set" the plots
-    use, see ``selection_controller``). Falling back to that lets "Add Plot
-    Group" save whatever is currently on screen — the feature was previously
-    unusable whenever any replicate set was defined.
+    Which store holds "the current selection" depends on the mode the sidebar
+    plate is in, so the capture has to branch on the same condition the plate
+    does:
+
+    * **group-visibility mode** (replicate sets defined, no well-editing pane on
+      screen) — the plate paints set visibility and clicks toggle a set's
+      ``hidden`` flag. What is on screen is exactly the union of every visible
+      (non-hidden) set's wells plus any active solo wells: the same "active set"
+      the plotting tabs draw from (see ``selection_controller``).
+      ``selected_wells`` is not consulted at all here, because nothing in this
+      mode keeps it current — it holds whatever a per-well tab, or an earlier
+      Plot Group load, last wrote. Reading it first meant that once any well
+      landed there, "Add Plot Group" saved that stale set instead of the sets
+      the user could see, so a group covering several replicate sets came back
+      as one.
+    * **per-well mode** — the plate is a well selector and ``selected_wells`` is
+      the selection the user made.
     """
     sel = ctx.state.selection
-    raw = set(sel.selected_wells or set())
-    if not raw and sel.selections:
+    if _group_visibility_mode(ctx):
         loaded = ctx.state.dataset.well_paths
         raw = {
             w
-            for s in sel.selections if not s.get("hidden")
+            for s in sel.selections if isinstance(s, dict) and not s.get("hidden")
             for w in (s.get("wells") or []) if w in loaded
         }
         raw |= {w for w in (sel.active_solo_wells or set()) if w in loaded}
+    else:
+        raw = set(sel.selected_wells or set())
     return sorted(raw, key=parse_rc)
 
 

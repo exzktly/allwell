@@ -89,3 +89,43 @@ def events_per_fov_title(metric_key: str, band_lbl: str) -> str:
 def events_total_title(metric_key: str) -> str:
     """Title for the per-timepoint total events axis."""
     return "Events above threshold (N)"
+
+
+def value_column_label(col: str) -> str:
+    """Human-readable name for any scatter/plot value column.
+
+    Handles all three kinds a value column can be: a ``<channel>_<metric>``
+    intensity or count column (``"gfp_mean_intensity"`` → ``"GFP Mean
+    Intensity"``), a ratio key (``"ratio:GFP/MCHERRY"`` → ``"GFP/MCHERRY"``),
+    and a shape/morphology column (``"shape_area"`` → its catalogue label).
+    Anything unrecognised comes back unchanged, so a caller can always show the
+    result rather than deciding whether it got one.
+    """
+    text = str(col or "").strip()
+    if not text:
+        return ""
+    from well_viewer.domain.ratio_models import is_ratio_key, ratio_name_from_key
+    if is_ratio_key(text):
+        return ratio_name_from_key(text)
+    from pipeline.shape_features import is_shape_column, label_for as _shape_label_for
+    if is_shape_column(text):
+        return _shape_label_for(text) or text
+    parts = split_metric_col(text)
+    return parts[2] if parts else text
+
+
+def gate_axes_label(x_col: str | None, y_col: str | None) -> str:
+    """``"x: <label>  ·  y: <label>"`` for a scatter gate's stored axes.
+
+    A gate is a rectangle in one specific (x, y) metric pair, recorded on the
+    gate as ``x_col`` / ``y_col`` when it was drawn — so it keeps filtering on
+    those columns after the axis combos move on. The gate list shows this so
+    the user can tell which pair each gate belongs to. Returns ``""`` when
+    neither axis was recorded (a gate from an older session), so the caller can
+    simply omit the line.
+    """
+    x_label = value_column_label(x_col or "")
+    y_label = value_column_label(y_col or "")
+    if not x_label and not y_label:
+        return ""
+    return f"x: {x_label or '—'}  ·  y: {y_label or '—'}"

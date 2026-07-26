@@ -381,9 +381,15 @@ def redraw_scatter_agg(
                 alpha=0.7,
             )
             # Tag the data line so the export-style hook can't add a
-            # connecting line between aggregate points.
+            # connecting line between aggregate points, and can't overwrite the
+            # marker shape either: shape *is* the well/group identity here, and
+            # the legend below is keyed on it. Without the second tag every
+            # point took the Marker-style pref's shape (default "o", which is
+            # also the first well's) while the legend kept showing one distinct
+            # shape per well.
             try:
                 container.lines[0]._scatter_only_artist = True
+                container.lines[0]._aw_marker_is_data = True
             except Exception:
                 swallowed()  # was: pass (silent except)
 

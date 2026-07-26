@@ -784,7 +784,9 @@ time**, by timepoint.
   (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
   (SEM / SD) on the points.
 - **Gates (definition).** Each gate you draw is auto-named (`Gate 1`, `Gate 2`,
-  …), shown on the plot, and renameable in Properties. Gates become selectable
+  …), shown on the plot, and renameable in Properties — where each entry also
+  states the x and y metrics that gate was drawn on, so a list built up across
+  several axis pairs stays readable. Gates become selectable
   **cell-inclusion** or **fraction-on** filters on the [Cell Gating](#cell-gating)
   tab, on whichever metric axes they were drawn. They are saved with the
   dataset and reload with it.
@@ -1074,7 +1076,12 @@ reviewing and curating individual cells.
   inside it (applied dataset-wide across every FOV/timepoint/channel/well),
   with **Reset** to restore every cell and **Clear crop** to remove just the
   box; click-drag to pan and scroll to zoom (zoom is kept when you switch
-  wells); a **Raw / Flat-field / Corrected** source toggle; LUT + colormap +
+  wells). **Zoom controls** sit on the control row — **−** and **+** step
+  through the zoom levels, **Fit** returns to the whole image, and the readout
+  between them shows the current factor, where 100% is fit-to-window. It tracks
+  every way the view can change, including the scroll wheel and the zoom that
+  happens when you double-click a Review CSV row. Also on the row: a
+  **Raw / Flat-field / Corrected** source toggle; LUT + colormap +
   binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).

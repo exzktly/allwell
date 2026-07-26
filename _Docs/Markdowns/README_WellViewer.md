@@ -237,8 +237,11 @@ To produce a distributable Windows bundle (optional — only if you want
 .\scripts\build_executable.ps1 -Clean
 ```
 
-The output is `dist\AllWell\AllWell.exe`. The spec's macOS `.app`
-`BUNDLE` step is a no-op off macOS, so no `AllWell.app` is produced.
+The output is `dist\AllWell-<version>\AllWell.exe`, where `<version>` is
+the string in `version.py` (a feature-subset build built with
+`$env:ALLWELL_PROFILE` appends the profile name too). The spec's macOS
+`.app` `BUNDLE` step is a no-op off macOS, so no `AllWell.app` is
+produced.
 
 ---
 

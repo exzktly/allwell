@@ -121,7 +121,7 @@ allwell/
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
 ├── ui/theme/                    ← dark colour tokens (get_color + plot/well constants)
 ├── services/                    ← Analyze-side service modules
-├── scripts/                     ← build_executable.sh, dev helpers
+├── scripts/                     ← build_executable.sh / .ps1, dev helpers
 ├── _Docs/                       ← installer / requirements / visual-audit screenshots
 │   └── Markdowns/               ← live docs (this file, README_WellViewer.md, the roadmap)
 ├── tests/                       ← pytest suite (+ tests/visual/ render harness)
@@ -2367,6 +2367,14 @@ calls inside its domain; off by default.
 - **Source run:** `python allwell.py [--data_dir …]`.
 - **macOS .app:** `_Docs/_Installation/build_all_well.sh` (mamba env +
   PyInstaller), spec at `_Docs/_Installation/all_well.spec`.
+- **Windows .exe:** `scripts\build_executable.ps1 [-Clean]` — the PowerShell
+  twin of `scripts/build_executable.sh`, driving the same spec. It invokes
+  `python -m PyInstaller` rather than the `pyinstaller.exe` shim (not reliably
+  on PATH from a fresh Miniforge Prompt) and reads the same `ALLWELL_PROFILE` /
+  `ALLWELL_THEME` / `ALLWELL_WITH_TRACKING` environment switches. Output is
+  `dist\AllWell-<version>\AllWell.exe`; the spec's `BUNDLE` step is a macOS-only
+  no-op, so no `.app` is produced. Both scripts resolve the bundle folder they
+  report through `bundle_name()` (§5.3) instead of a hardcoded path.
 - **Feature-subset binary:** `ALLWELL_PROFILE=<name> scripts/build_executable.sh`
   builds a binary containing only that profile's features, with excluded
   features' source and unique heavy deps dropped from the bundle and the profile
@@ -2935,7 +2943,7 @@ codesign --force --deep --sign - /Applications/AllWell.app
 **The app opens and immediately closes.** — Run the bundle from a terminal to
 see the actual error:
 ```sh
-dist/AllWell.app/Contents/MacOS/AllWell 2>&1 | head -100
+dist/AllWell-<version>.app/Contents/MacOS/AllWell 2>&1 | head -100
 ```
 
 **`No module named 'pkg_resources'`.** — `setuptools` was upgraded past v70 in

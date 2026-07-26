@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.core import debug_flags as debug_flags
+from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.stats_compute import group_replicate_stats, _reduce_reps
 from well_viewer.domain.metric_registry import column_gating_exempt
@@ -54,32 +55,58 @@ def timepoint_color_map(timepoints) -> dict[float, Any]:
 # for the existing ``scatter.collect`` / ``scatter.controller`` import paths.
 from well_viewer.data.data_loading import get_all_timepoints  # noqa: F401
 
+# Lazy: ``gating`` imports ``timepoint_color_map`` from this module, so a
+# module-scope import back would cycle. Same binding style the Cell Gating
+# compute layer uses for this very function — both sides run the one shared
+# membership test, so "inside a gate" means the same thing everywhere.
+compute_gate_inclusion = _lazy("well_viewer.features.scatter.gating",
+                               "compute_gate_inclusion")
+
 
 def scatter_points_gated(ctx) -> bool:
     """True when the per-cell scatter should plot only cells inside the gates.
 
-    Three conditions, all required:
+    Two conditions:
 
-    * the tab's **Apply gates to points** toggle is on;
-    * the Cell Gating tab is actually gating by scatter gates — otherwise
-      ``Gate_Pass`` is all-1 (``gating_compute.apply_fluor_gating`` neutralises
-      it in intensity mode) and filtering would be a silent no-op;
+    * the tab's **Apply gates** toggle is on;
     * no gate is being drawn or edge-dragged right now.
 
-    That last clause is not a nicety. Releasing a freshly drawn gate fans out
+    That second clause is not a nicety. Releasing a freshly drawn gate fans out
     through ``_notify_gates_changed`` → the gating worker → a scatter redraw, so
     with the filter live every point outside the new box would vanish the
     instant it was drawn — leaving nothing to judge the gate against, nothing to
     drag its edge back out over, and the ``RectangleSelector`` rebuilding under
     the cursor. While drawing or editing, the full cloud stays.
+
+    Deliberately *not* conditioned on the Cell Gating tab's ``use_scatter_gates``.
+    This filter is computed here, from the boxes this plot is drawing (see
+    :func:`gates_for_axes`), so it neither needs nor consults that tab's state —
+    and tying it to a second switch was one more way for the plot to disagree
+    with itself. Filtering here changes nothing about what any other view counts.
     """
     if not bool(ctx.state.scatter.apply_gates_to_points):
-        return False
-    if not bool(ctx.state.cell_gating.use_scatter_gates):
         return False
     if bool(ctx.runtime.scatter.gate_draw_mode):
         return False
     return ctx.runtime.scatter.gate_edit is None
+
+
+def gates_for_axes(ctx, col_x: str, col_y: str) -> list:
+    """The stored gates that can be evaluated against the axes on screen.
+
+    A gate's box is in the data space of its own ``x_col``/``y_col`` and means
+    nothing on another pair, so only a matching pair is returned — the same rule
+    ``gating._gate_on_current_axes`` applies when deciding what to *draw*, which
+    is what keeps the filter and the boxes talking about the same gates.
+
+    A gate whose columns were never stamped is **excluded**, where the drawing
+    rule keeps it ("can't tell, don't hide"). The two differ on purpose:
+    ``compute_gate_inclusion`` skips an unstamped gate, so treating it as
+    matching here would contribute an all-false mask and blank the plot. A box
+    drawn but not filtering is a far better failure than an empty cloud.
+    """
+    return [g for g in (ctx.state.cell_gating.scatter_gates or [])
+            if g.get("x_col") == col_x and g.get("y_col") == col_y]
 
 
 def gate_filter_title_suffix(ctx) -> str:
@@ -102,7 +129,7 @@ def collect_scatter_data(
     fluor_gate_x: float = 0.0,
     fluor_gate_y: float = 0.0,
     ratios: dict[str, Any] | None = None,
-    include_gate: bool = False,
+    gates: list | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Collect scatter plot data for the given column names and timepoint(s).
 
@@ -121,12 +148,16 @@ def collect_scatter_data(
         well_colors: List of color strings for coloring groups/wells
         fluor_gate_x: FluorGating threshold for X channel; cells below are excluded
         fluor_gate_y: FluorGating threshold for Y channel; cells below are excluded
-        include_gate: honour the scatter-gate inclusion layer (``Gate_Pass``).
-            Defaults to ``False`` — the per-cell scatter is where the gates are
-            drawn, so it shows the full cloud with the boxes over it unless the
-            user opts in via the tab's "Apply gates to points" toggle. Every
-            other caller (batch export, the CSV export service) leaves it off so
-            a batch job can never inherit the live tab's choice.
+        gates: keep only cells inside these gate boxes (union). ``None`` /
+            empty — the default, and what every caller other than the live tab
+            passes — draws the full cloud with the boxes over it, which is the
+            point of the plot the gates are drawn on. Membership is computed
+            here from the geometry rather than read off the ``Gate_Pass``
+            column: that column is written by the Cell Gating worker,
+            asynchronously and against *its own* gate selection, so it can
+            describe a different set of boxes than the ones on screen. Pass the
+            gates this plot is drawing (``gates_for_axes``) and the two cannot
+            drift apart.
 
     Returns:
         Dict mapping group/well name → {
@@ -161,11 +192,14 @@ def collect_scatter_data(
             return None
         if "timepoint_hours" not in df.columns or "area_px" not in df.columns:
             return None
-        # The per-cell scatter is where the gates are drawn, so by default it
-        # keeps the full cloud with the boxes over it (``include_gate=False``)
+        # The Gate_Pass layer stays off here: the per-cell scatter is where the
+        # gates are drawn, so it shows the full cloud with the boxes over it
         # while every other view filters via df_included_mask. The tab's
-        # "Apply gates to points" toggle opts in — see scatter_points_gated.
-        mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
+        # "Apply gates" toggle filters through ``gates`` below instead — against
+        # the boxes on screen, not against a column another tab's worker wrote.
+        mask = df_included_mask(df, include_gate=False).to_numpy(copy=True)
+        if gates:
+            mask &= compute_gate_inclusion(df, gates, ratios)
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             finite = np.isfinite(tp)

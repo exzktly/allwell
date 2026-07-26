@@ -867,6 +867,14 @@ def redraw_gates_only(ctx) -> None:
                         artist.remove()
                     except Exception:
                         swallowed()
+        # ``artist.remove()`` does not shrink ``ax.dataLim`` but ``add_patch``
+        # grows it, so without this the data extent accumulates the union of
+        # every position the box passes through and the view creeps wider the
+        # longer you drag. Recompute it from the artists that remain.
+        try:
+            ax.relim()
+        except Exception:
+            swallowed()
         draw_gates(ctx, ax, scatter_data, tps_list, ink, handles=handles)
     canvas = ctx.widgets.get_or_none("_scatter_canvas")
     if canvas is not None:

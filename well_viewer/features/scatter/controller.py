@@ -23,6 +23,7 @@ from well_viewer.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,
     collect_scatter_data,
     gate_filter_title_suffix,
+    gates_for_axes,
     get_all_timepoints,
     scatter_points_gated,
 )
@@ -122,7 +123,7 @@ def redraw_scatter(
         well_colors=well_colors,
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
-        include_gate=scatter_points_gated(ctx),
+        gates=gates_for_axes(ctx, col_x, col_y) if scatter_points_gated(ctx) else None,
     )
 
     # Stack one group per panel (>1 group) when Layout is "Separate axes", or

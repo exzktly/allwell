@@ -498,6 +498,17 @@ A cell counts only when it is manually kept **and** it passes QC.
 └── (transient tmp_<well>/  ← deleted on success)
 ```
 
+Every archive the app writes — the `<well>_out.zip` results and the
+`in/<WELL>.zip` inputs the Analyze tab packs for you — is built alongside its
+final name as `__aw_tmp_<name>.pid<N>`, checked, and only then moved into place.
+A run you kill (or a network share that drops) mid-write therefore leaves a
+`__aw_tmp_…` file you can delete, never a half-written `<WELL>.zip`. A well with
+no images to pack gets no archive at all rather than an empty one: an empty ZIP
+is the file macOS refuses to open with *"Unable to expand … it is in an
+unsupported format."* If you do hit that message on a `<WELL>.zip`, the archive
+was truncated or emptied outside the app — delete it and re-run that well from
+the original TIFs.
+
 ---
 
 ## Review mode — exploring results
@@ -1354,13 +1365,13 @@ _Docs/_Installation/build_all_well.sh
 ```
 
 The finished bundle is named for its version, so a full build and a thin
-feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.1.app`
-for the full app, or `dist/AllWell-8.9.1-<profile>.app` for a subset (e.g.
-`AllWell-8.9.1-thin.app`). The internal executable stays `AllWell`, so
+feature-subset build are distinguishable at a glance: `dist/AllWell-8.9.2.app`
+for the full app, or `dist/AllWell-8.9.2-<profile>.app` for a subset (e.g.
+`AllWell-8.9.2-thin.app`). The internal executable stays `AllWell`, so
 launching is unchanged. To distribute it:
 
 ```sh
-cd dist && zip -r AllWell-mac.zip AllWell-8.9.1.app
+cd dist && zip -r AllWell-mac.zip AllWell-8.9.2.app
 ```
 
 For a Universal binary (Intel + Apple Silicon in one bundle):

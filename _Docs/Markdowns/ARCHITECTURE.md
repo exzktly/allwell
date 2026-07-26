@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.9.1.** This map describes the app as it stands today;
+**Reflects All-Well v8.9.2.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.9.1; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.9.2; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -111,7 +111,9 @@ allwell/
 │   │                              (shared by process_microscopy and WellPlateZipper)
 │   ├── timepoint.py            ← timepoint token → hours + the shared sort key
 │   │                              (pipeline, services and well_viewer all use it)
-│   └── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
+│   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
+│   └── zip_write.py            ← atomic_zip(): the one verified writer for the
+│                                  per-well archives (pipeline, services, remote)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
@@ -128,7 +130,8 @@ allwell/
 The `pipeline/` package (the Qt-free analysis-pipeline modules:
 `pipeline.auto_threshold`, `pipeline.background`, `pipeline.flatfield`,
 `pipeline.shape_features`, `pipeline.cellpose`, `pipeline.stardist`,
-`pipeline.io`) and the `util/` package (`util.well_token`, `util.aw_safe`)
+`pipeline.io`) and the `util/` package (`util.well_token`, `util.aw_safe`,
+`util.zip_write`)
 are *deliberately at repo root* (not under `well_viewer/`): the pipeline
 contract forbids `well_viewer` / `widgets` / Qt imports, so anything both the
 pipeline and the GUI need to agree on has to live in a Qt-free module the
@@ -1630,6 +1633,32 @@ retry-with-backoff shield `_safe_imwrite` has always had, via
 of the whole well. `_AtomicTextHandle.__exit__` guards its `flush()`/`close()`
 (previously unguarded, the direct source of the bare errno) and aborts the
 commit rather than renaming a short file over a good CSV.
+
+**Well archives are published, not written in place.** Every per-well archive —
+the `in/<WELL>.zip` inputs and the `out/<well>_out.zip` outputs — is built
+through `util.zip_write.atomic_zip`, the single writer shared by
+`process_microscopy.compress_images_to_zip`, `pipeline.io.merge_images_into_zip`,
+`input_resolution_service` (the mixed-input consolidation and the loose-image
+append) and `remote_runner` (upload staging and the two upload-filter rewrites).
+It stages at `__aw_tmp_<name>.pid<N>`, fsyncs, re-reads the staged file's central
+directory to confirm it holds exactly the members that were written, and only
+then `os.replace`s it into position and fsyncs the parent directory. Two
+invariants come out of that, and both matter because users open these archives
+by hand as often as All-Well opens them:
+
+- *A published archive is readable.* A run killed mid-write — or a share that
+  drops — leaves the staging file, never a truncated `<WELL>.zip`.
+- *A published archive has members.* A zero-member zip is structurally valid, so
+  Python and `unzip` read it as an empty archive, but macOS Archive Utility
+  refuses to expand it ("*it is in an unsupported format*") and the pipeline
+  reads it as a well whose images vanished. `atomic_zip` raises `ZipWriteError`
+  rather than publish one, so callers with nothing to pack must not create the
+  file: a well folder with no TIFs is left alone by the consolidation step, and
+  a well that produced no output images gets no `<well>_out.zip`.
+
+The reading side stays tolerant — a `<WELL>.zip` that won't open is skipped by
+the samplers and surfaces as a failed well from the worker pool — but nothing
+All-Well writes should ever land in that state.
 
 **Remote is pinned, not defaulted.** `remote_runner._build_remote_argv` emits an
 explicit `--scratch_dir=<remote_output>` and drops any local `--scratch_dir`, so

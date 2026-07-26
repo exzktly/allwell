@@ -1644,6 +1644,9 @@ def test_required_files_list_is_what_we_promised():
         "util/schema.py",
         "util/timepoint.py",
         "util/well_token.py",
+        # Atomic + verified per-well archive publication (util.zip_write),
+        # imported by process_microscopy and pipeline.io.
+        "util/zip_write.py",
         # The Qt-free ``pipeline`` package (analysis-domain modules +
         # segmenters/writers), re-imported at module top level.
         "pipeline/__init__.py",

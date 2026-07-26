@@ -29,6 +29,8 @@ import imageio.v3 as iio
 from tifffile import imwrite
 from skimage.segmentation import find_boundaries
 
+from util.zip_write import atomic_zip, fsync_path, staging_path
+
 # Log under the pipeline logger name so worker-log output is unchanged.
 log = logging.getLogger("process_microscopy")
 
@@ -249,22 +251,11 @@ def _sweep_stale_scratch_dirs_all(output_dir: Path, *, extra_extract: bool) -> N
         _sweep_stale_scratch_dirs(output_dir, extra_extract=extra_extract)
 
 
-def _fsync_path(path: Path) -> None:
-    """Open *path* read-only and fsync; ignore filesystems that don't support it."""
-    try:
-        fd = os.open(str(path), os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        try:
-            os.fsync(fd)
-        except OSError:
-            pass
-    finally:
-        try:
-            os.close(fd)
-        except OSError:
-            pass
+# One definition of "make these bytes durable", shared with the well-archive
+# writer in ``util.zip_write`` (which the pipeline, ``services`` and the GUI all
+# go through). Kept under the private name the image/CSV writers below have
+# always called.
+_fsync_path = fsync_path
 
 
 # Retry budget for the image write. ``tifffile`` writes the pixel buffer with
@@ -669,9 +660,10 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
     Members already present in the zip win on an arcname collision (matches the
     "keep existing, skip incoming" rule used elsewhere), so re-running is a
     no-op. Existing members are copied across into a fresh archive and the write
-    is atomic (tmp → fsync → rename) — the same crash-safety contract as
-    ``compress_images_to_zip``, since zip append-mode is not crash-safe. When the
-    target doesn't exist this is a plain fresh compress. Returns images added.
+    goes through :func:`util.zip_write.atomic_zip` — the same crash-safety
+    contract as ``compress_images_to_zip``, since zip append-mode is not
+    crash-safe. When the target doesn't exist this is a plain fresh compress.
+    Returns images added.
     """
     out_zip = Path(out_zip)
     image_dir = Path(image_dir)
@@ -694,11 +686,15 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
             existing_names = set()
 
     to_add = [p for p in images if p.name not in existing_names]
-    if not to_add and out_zip.exists():
+    if not to_add:
+        # Nothing new. When the zip already exists this is the "re-running is a
+        # no-op" case; when it doesn't, the well simply produced no images and
+        # must not leave behind a member-less archive (unexpandable in Finder,
+        # and indistinguishable from a well whose images were lost).
         return 0
 
     out_zip.parent.mkdir(parents=True, exist_ok=True)
-    tmp_zip = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
+    tmp_zip = staging_path(out_zip)
 
     def _cleanup_tmp() -> None:
         try:
@@ -709,15 +705,13 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
 
     def _build() -> None:
         try:
-            with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            with atomic_zip(out_zip) as zf:
                 if out_zip.exists():
                     with zipfile.ZipFile(out_zip, "r") as src:
                         for name in src.namelist():
                             zf.writestr(src.getinfo(name), src.read(name))
                 for p in to_add:
                     zf.write(p, arcname=p.name)
-            _fsync_path(tmp_zip)
-            os.replace(str(tmp_zip), str(out_zip))
         except BaseException:
             # Non-OSError (e.g. KeyboardInterrupt) isn't retried, so clean up
             # here too rather than relying on retry_write's cleanup hook.

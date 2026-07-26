@@ -498,6 +498,17 @@ A cell counts only when it is manually kept **and** it passes QC.
 └── (transient tmp_<well>/  ← deleted on success)
 ```
 
+Every archive the app writes — the `<well>_out.zip` results and the
+`in/<WELL>.zip` inputs the Analyze tab packs for you — is built alongside its
+final name as `__aw_tmp_<name>.pid<N>`, checked, and only then moved into place.
+A run you kill (or a network share that drops) mid-write therefore leaves a
+`__aw_tmp_…` file you can delete, never a half-written `<WELL>.zip`. A well with
+no images to pack gets no archive at all rather than an empty one: an empty ZIP
+is the file macOS refuses to open with *"Unable to expand … it is in an
+unsupported format."* If you do hit that message on a `<WELL>.zip`, the archive
+was truncated or emptied outside the app — delete it and re-run that well from
+the original TIFs.
+
 ---
 
 ## Review mode — exploring results

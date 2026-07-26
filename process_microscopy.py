@@ -81,6 +81,7 @@ from util.schema import (  # noqa: F401  (re-exported for call sites and tests)
     parse_schema,
     validate_schema,
 )
+from util.zip_write import atomic_zip, staging_path
 
 # StarDist and csbdeep (which import TensorFlow) are intentionally NOT imported
 # here at module level.  They are imported inside _worker_init, after the
@@ -615,9 +616,10 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
 
     out_zip.parent.mkdir(parents=True, exist_ok=True)
     # Build the zip via the same atomic-rename pattern the imwrite helper
-    # uses: stage at <out_zip>.tmp, fsync, replace. Any caller that sees
-    # *out_zip* gets either the complete archive or the previous one.
-    tmp_zip = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
+    # uses: stage at __aw_tmp_<out_zip>.pid<N>, fsync, verify, replace. Any
+    # caller that sees *out_zip* gets either the complete archive or the
+    # previous one — see util.zip_write.
+    tmp_zip = staging_path(out_zip)
 
     def _cleanup_tmp() -> None:
         try:
@@ -628,11 +630,9 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
 
     def _build() -> None:
         try:
-            with zipfile.ZipFile(tmp_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            with atomic_zip(out_zip) as zf:
                 for img_path in image_files:
                     zf.write(img_path, arcname=img_path.name)
-            _fsync_path(tmp_zip)
-            os.replace(str(tmp_zip), str(out_zip))
         except BaseException:
             _cleanup_tmp()
             raise

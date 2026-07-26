@@ -53,7 +53,9 @@ def test_reset_layout_restores_defaults(monkeypatch):
     st.group_size, st.group_row_span = 3, 2
     st.active_wells = {"A01"}
     st.active_channels = {"GFP"}
-    st.active_timepoints = {"6"}
+    # Dirty this to the *earliest* timepoint so the assertion below proves the
+    # reset chose the last one, rather than passing because it left the value be.
+    st.active_timepoints = {"0"}
     st.active_fovs = {"2"}
 
     calls = []
@@ -67,7 +69,11 @@ def test_reset_layout_restores_defaults(monkeypatch):
     assert (st.rows, st.cols) == (2, 3)
     assert (st.group_size, st.group_row_span) == (0, 0)
     assert st.active_wells == set() and st.active_channels == set()
-    assert st.active_timepoints == set() and st.active_fovs == set()
+    # Not "all" (an empty set): timepoint is the default *column* axis, so
+    # selecting every one of them multiplies the opening grid by the length of
+    # the run. Fresh state starts on the last timepoint; the picker adds the rest.
+    assert st.active_timepoints == {"6"}, "reset should select the last timepoint only"
+    assert st.active_fovs == set()
     # rebuilds the empty selector + refreshes the sidebar
     assert "grid" in calls and "picker" in calls
 

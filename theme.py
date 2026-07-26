@@ -641,13 +641,14 @@ QCheckBox::indicator, QRadioButton::indicator {{
     height: 16px;
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
-    /* ``width`` is the *content* width, so the drawn box is 18px once the 1px
-       border is added on each side — but a platform style is free to offset the
-       label from the declared 16px. Reserving the margin here widens the slot
-       the indicator owns without changing the box that gets painted, so the
-       label always clears it even where that offset runs short (the Heat Map's
-       "Rep-set avg" box printing over its own label on macOS). */
-    margin-right: 4px;
+    /* No margin here. ``spacing`` above is the single source of the
+       indicator↔label gap; a margin on top of it stacks, so the gap became
+       spacing + margin everywhere — visible as over-padded rows, and as dead
+       space in front of the label of a *text-less* indicator, which is exactly
+       what the ``padding`` comment above says not to do (the WrapCheckBox
+       composite is built from one). It was added to compensate for a platform
+       style offsetting the label short of the declared width; a fixed constant
+       cannot do that, because the shortfall is per-style and per-context. */
 }}
 QCheckBox::indicator {{
     border-radius: {r.xs}px;

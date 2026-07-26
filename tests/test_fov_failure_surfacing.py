@@ -91,4 +91,38 @@ def test_process_groups_without_errors_dir_still_reports(tmp_path, monkeypatch):
     ("  seg B3: predict_instances 3.1s", "INFO"),
 ])
 def test_classify_log_line_surfaces_failures(line, expected):
+    """Lines with no level of their own still fall back to keyword heuristics."""
     assert classify_log_line(line) == expected
+
+
+# ``process_microscopy`` logs "%(asctime)s  %(levelname)-8s  %(message)s", and
+# workers insert "[worker N]" after the level. When the line states its severity
+# there is nothing to infer — and inferring anyway got it wrong in both
+# directions, most visibly on the end-of-run summary, which is logged at INFO
+# and whose *column labels* contain the word "failed".
+_SUMMARY = (
+    "Total wells : 5  |  processed : 5  |  skipped : 0  |  nuclei : 30071  |  "
+    "wells failed (no output) : 0  |  wells partial : 0  |  FOV-groups failed : 0"
+)
+
+
+@pytest.mark.parametrize("line,expected", [
+    (f"2026-07-26 08:34:13,214  INFO      {_SUMMARY}", "INFO"),
+    ("2026-07-26 08:34:13,214  INFO      [worker 4321]  Well A01 — done.", "INFO"),
+    ("2026-07-26 08:34:13,214  WARNING   Wells that failed entirely:", "WARNING"),
+    ("2026-07-26 08:34:13,214  ERROR     FAILED well A03: boom", "ERROR"),
+    ("2026-07-26 08:34:13,214  CRITICAL  meltdown", "ERROR"),
+    ("2026-07-26 08:34:13,214  DEBUG     tile 3 of 9", "INFO"),
+])
+def test_classify_log_line_trusts_the_emitted_level(line, expected):
+    assert classify_log_line(line) == expected
+
+
+def test_summary_line_is_not_an_error():
+    """The regression this guards: a clean run whose summary rendered red.
+
+    Every count in it is zero, and it is logged at INFO — but "failed" appears
+    twice as a column label, which a substring test read as a failure.
+    """
+    assert "failed" in _SUMMARY
+    assert classify_log_line(f"2026-07-26 08:34:13,214  INFO      {_SUMMARY}") == "INFO"

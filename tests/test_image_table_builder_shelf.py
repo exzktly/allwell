@@ -41,10 +41,14 @@ def _fake_ctx(*, wells, channels, timepoints=None, fovs=None):
 
 # ── builder_view spec mutations ─────────────────────────────────────────────
 
-def test_default_spec_is_channels_rows_times_cols():
+def test_default_spec_is_wells_then_channels_rows_times_timepoint_cols():
+    """Fresh tab: wells down the rows with their channels nested underneath,
+    timepoints across the columns."""
     ctx = _fake_ctx(wells=["A01"], channels=["gfp", "rfp"], timepoints=["T01", "T02"])
     spec = B.builder_spec(ctx)
+    assert spec.rows.root == "well"
     assert spec.rows.channels and [c.channel for c in spec.rows.channels] == ["GFP", "RFP"]
+    assert spec.rows.dims() == ["well", "channel"]   # root outer, channel inner
     assert spec.cols.root == "timepoint"
     assert spec.channel_axis() == "rows"
 
@@ -52,15 +56,18 @@ def test_default_spec_is_channels_rows_times_cols():
 def test_move_facet_and_fixed_derivation():
     ctx = _fake_ctx(wells=["A01", "A02"], channels=["gfp"], timepoints=["T01"], fovs=["1", "2"])
     spec = B.builder_spec(ctx)
-    # Fixed = every root dim not on an axis. Timepoint is the cols root by default,
-    # so Fixed holds Well + FOV.
-    assert set(B._fixed_dims(spec)) == {"well", "fov"}
-    B._move_facet(ctx, spec, "well", "rows")   # Well becomes the Rows root
+    # Fixed = every root dim not on an axis. The default puts Well on the rows
+    # root (channels nested under it) and Timepoint on the cols root, so FOV is
+    # the only dim left to pin.
     assert spec.rows.root == "well"
-    assert "well" not in B._fixed_dims(spec)
-    B._move_facet(ctx, spec, "well", "fixed")  # ×-ing it returns it to Fixed
+    assert spec.cols.root == "timepoint"
+    assert set(B._fixed_dims(spec)) == {"fov"}
+    B._move_facet(ctx, spec, "well", "fixed")  # ×-ing it returns Well to Fixed
     assert spec.rows.root is None
     assert "well" in B._fixed_dims(spec)
+    B._move_facet(ctx, spec, "well", "rows")   # and back onto the Rows root
+    assert spec.rows.root == "well"
+    assert "well" not in B._fixed_dims(spec)
 
 
 def test_add_remove_channel_and_cohere():

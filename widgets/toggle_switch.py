@@ -42,7 +42,13 @@ class ToggleSwitch(QCheckBox):
         # Neutralise the stock indicator + spacing; everything is custom-painted.
         self.setStyleSheet(
             "QCheckBox#ToggleSwitch { spacing: 0px; background: transparent; }"
-            "QCheckBox#ToggleSwitch::indicator { width: 0px; height: 0px; }"
+            # Reset the border and margin too, not just the size. The app sheet
+            # styles every ``QCheckBox::indicator``, and a widget sheet only
+            # overrides the properties it names — declaring width/height alone
+            # left the inherited border and margin in place, so a switch that
+            # asked for a zero-size indicator still reserved a slot for one.
+            "QCheckBox#ToggleSwitch::indicator {"
+            " width: 0px; height: 0px; border: none; margin: 0px; }"
         )
         self.setChecked(bool(checked))
         self._pos = 1.0 if self.isChecked() else 0.0

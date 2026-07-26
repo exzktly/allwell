@@ -28,6 +28,7 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _layout_cell_values,
     _layout_cell_values_nested,
     _product_values,
+    _timepoint_options,
     compose_plate_well,
     plate_well_index,
 )
@@ -329,6 +330,17 @@ _DEFAULT_ROWS = 2
 _DEFAULT_COLS = 3
 
 
+def _last_timepoint_set(ctx) -> set:
+    """``{last timepoint}``, or empty when the dataset has none (which the
+    filters read as "all" — correct, since there is nothing to narrow).
+
+    ``_timepoint_options`` returns the run's timepoints already ordered by the
+    shared ``util.timepoint`` sort key, so the last element is the latest.
+    """
+    opts = _timepoint_options(ctx)
+    return {opts[-1]} if opts else set()
+
+
 def _reset_layout_state(ctx) -> None:
     """Restore the builder/layout state to fresh-tab defaults — no widget side
     effects (no picker refresh / grid rebuild / status). Shared by the "Reset
@@ -348,7 +360,12 @@ def _reset_layout_state(ctx) -> None:
     st.group_row_span = 0
     st.active_wells = set()
     st.active_channels = set()
-    st.active_timepoints = set()
+    # An empty filter set means "all" (grid_layout._filtered_values), and
+    # timepoint is the *column* axis by default — so leaving it empty opens the
+    # tab with one column per timepoint in the run, multiplying the grid by the
+    # length of the experiment before the user has chosen anything. Start on the
+    # last timepoint; the picker adds the rest.
+    st.active_timepoints = _last_timepoint_set(ctx)
     st.active_fovs = set()
     st.fixed_vals = {}
 

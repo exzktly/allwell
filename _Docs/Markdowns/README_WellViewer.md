@@ -1079,6 +1079,11 @@ channel for every well).
 
 - **Needs** — image ZIPs present, and a well set (drive it from the plate
   picker, or save/pick a **Plot Group** in this sidebar's Plot Groups panel).
+- **Opens as** — **Rows = Wells › Channels** (each well's channels nested under
+  it), **Columns = Timepoint**, and FOV pinned under **Fixed**. Only the **last**
+  timepoint is selected: timepoints are the column axis, so selecting the whole
+  run would multiply the grid by its length before you have chosen anything. Add
+  the rest from the Timepoint picker.
 - **Build with the shelf** — the top **Build** shelf is a drag-and-drop tree.
   Drag a **channel** from the **Channels** tray onto the **Rows** or **Columns**
   zone; drag a **root** dimension (Well / Timepoint / FOV) onto a zone to make that

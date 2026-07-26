@@ -43,8 +43,14 @@ def _ctx(cells_fig, agg_fig, *, style_prefs=None):
 def test_the_two_scoped_families_are_disjoint_and_combined():
     assert not (AXIS_SCOPED_PREF_KEYS & MARK_SCOPED_PREF_KEYS)
     assert FIGURE_SCOPED_PREF_KEYS == AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
-    # Every scoped key must have a neutral default to fall back to.
-    for key in FIGURE_SCOPED_PREF_KEYS:
+
+
+def test_every_mark_key_has_a_neutral_default():
+    """A mark key with no default would read as ``None`` on a fresh figure and
+    reach matplotlib as one. (``axis_buckets`` is the deliberate exception in
+    the axis family — it is bookkeeping, has no default, and every reader spells
+    it ``prefs.get("axis_buckets") or {}``.)"""
+    for key in MARK_SCOPED_PREF_KEYS:
         assert key in DEFAULT_EXPORT_STYLE_PREFS, key
 
 

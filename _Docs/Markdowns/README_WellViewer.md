@@ -778,18 +778,20 @@ time**, by timepoint.
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis
   dropdowns. A **Timepoints** multi-select (`Select Timepoints`) restricts the
   frames drawn.
-- **Per-cell controls** — X-axis / Y-axis / Channel pickers; **Layout**
-  (*Overlay* all wells on one axis, or *Separate axes* one panel per well);
-  **Color by time** (one well → a single cloud's trajectory; several wells →
-  auto-stacked one panel per well so the time-coloured clouds don't overlap);
-  **Apply gates** (below); **Show gates**; **draw rectangular gates** by
-  dragging on the canvas.
-- **Apply gates.** This plot is the one place that shows the *whole* cloud even
+- **Per-cell controls** — X-axis / Y-axis / Channel pickers inline, with
+  **Layout** (*Overlay* all wells on one axis, or *Separate axes* one panel per
+  well), **Color by time** (one well → a single cloud's trajectory; several
+  wells → auto-stacked one panel per well so the time-coloured clouds don't
+  overlap) and **Apply gates** (below) together under **Display ▾**. **Show
+  gates** is in the Properties sidebar; **draw rectangular gates** by dragging
+  on the canvas.
+- **Apply gates** (under **Display ▾**). This plot is the one place that shows the *whole* cloud even
   when your gates are filtering everything else — that is deliberate, because
   you draw the gates here and need to see what falls outside them to judge or
   resize a box. Switch **Apply gates** on to plot only the cells inside the
   boxes shown here; the title gains a `· gate-filtered` tag so a copied or saved
-  figure says which it is. It filters against the boxes on screen, so it always
+  figure says which it is — and so a filter left on inside a popover still
+  announces itself. It filters against the boxes on screen, so it always
   agrees with what you are looking at, and it needs nothing switched on
   elsewhere. Two things to know: it is a *view* filter — it changes nothing
   about which cells other tabs count, which is the Cell Gating tab's job — and

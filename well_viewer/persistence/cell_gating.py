@@ -97,6 +97,27 @@ def apply_gating_block(ctx, block) -> bool:
     return applied
 
 
+def clear_from_pipeline_info(ctx) -> None:
+    """Reset the live gating slice and drop the sidecar's ``cell_gating`` block.
+
+    The title bar's "Reset all saved state" action deletes ``persistence.json``,
+    but the fluorescence gates, ThreshFracOn cutoffs, and the drawn scatter
+    gates are not stored there — they live in ``pipeline_info.json`` so they
+    travel with the dataset. Deleting the one file therefore left every gate in
+    place, and the reload restored them from the sidecar as if nothing had
+    happened. This clears both halves: the slice first (so nothing in the reload
+    can write the old values back), then the sidecar block. Pipeline-owned keys
+    in the sidecar are untouched.
+    """
+    from well_viewer.domain.gating_state import save_gating_to_pipeline_info
+
+    restore_gating_block(ctx, {})
+    data_dir = ctx.state.dataset.data_dir
+    if data_dir:
+        # An empty block removes the key outright — see save_gating_to_pipeline_info.
+        save_gating_to_pipeline_info(data_dir, {})
+
+
 def restore_gating_block(ctx, block) -> None:
     """Reset the live gating slice to defaults, apply *block*, and recompute the
     Included population (kicks the gating worker).

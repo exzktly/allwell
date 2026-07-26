@@ -1011,14 +1011,32 @@ class AllWellApp(QMainWindow):
             "Reset all saved state?",
             "This deletes ALL saved view/analysis state for this dataset — "
             "selections, per-row LUTs, crop regions, plot groups, heatmap "
-            "layouts, cell overrides, ratios, and QC params — then reloads it "
-            "fresh.\n\nYour data files and sample-definition labels are left "
-            "untouched. This cannot be undone.\n\nContinue?",
+            "layouts, cell overrides, ratios, QC params, the cell-gating "
+            "thresholds and drawn scatter gates, and the saved smFISH "
+            "thresholds — then reloads it fresh.\n\nYour data files and "
+            "sample-definition labels are left untouched. This cannot be "
+            "undone.\n\nContinue?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if resp != QMessageBox.Yes:
             return
+        # Cell gating (fluor gates, ThreshFracOn, drawn scatter gates) and the
+        # smFISH thresholds live in pipeline_info.json, not persistence.json, so
+        # they travel with the dataset. Deleting persistence.json alone left them
+        # in place and the reload restored them from the sidecar — the reset
+        # looked like it had skipped the gates. Clear those blocks first, so the
+        # reload below can't write the old values back.
+        try:
+            from well_viewer.persistence import cell_gating as _persist_gating
+            _persist_gating.clear_from_pipeline_info(review._ctx)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        try:
+            from well_viewer.persistence import smfish as _persist_smfish
+            _persist_smfish.clear_thresholds(review._ctx)
+        except Exception:
+            swallowed()  # was: pass (silent except)
         try:
             from well_viewer.persistence import _doc as _persist_doc
             _persist_doc.delete(review)

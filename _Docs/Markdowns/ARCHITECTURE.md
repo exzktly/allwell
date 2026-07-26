@@ -997,9 +997,20 @@ A second header button (`trash-2`, top-right next to the Presentation/plot
 screen↔publication toggle) does a **full** reset: `_doc.delete(app)` deletes the
 whole `persistence.json` (every section above) and clears the in-memory cache,
 then `AllWellApp._on_reset_saves_clicked` reloads the dataset fresh. It's the
-"my saved state is wedged" escape hatch; the dataset's own files —including
-`pipeline_info.json` (sample-definition labels) — are left intact. The handler
-is synchronous, so no debounced save can race between the delete and the reload.
+"my saved state is wedged" escape hatch.
+
+`persistence.json` is not the whole of the user's state, though, so the handler
+clears the sidecar's user-curated blocks first: `persistence.cell_gating.clear_from_pipeline_info`
+(fluorescence gates, ThreshFracOn cutoffs, the drawn scatter gates and their
+per-layer selections) and `persistence.smfish.clear_thresholds`. Those blocks
+live in `pipeline_info.json` so they travel with the dataset, which meant a
+reset that only deleted `persistence.json` left every gate standing and the
+reload restored them from the sidecar as if the reset had skipped them. Each
+helper resets the live typed slice *before* touching the file, so nothing in the
+reload can write the old values back. The pipeline's own keys in the sidecar —
+including the sample-definition labels — are left intact, as are the dataset's
+data files. The handler is synchronous, so no debounced save can race between
+the delete and the reload.
 
 ### 5.8 The Export Style sidebar
 

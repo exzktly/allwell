@@ -61,6 +61,39 @@ def _read_block(out_dir: Path) -> dict[str, float]:
     return out
 
 
+def clear_thresholds(ctx) -> bool:
+    """Drop the whole ``smfish_thresholds`` block from pipeline_info.json.
+
+    Used by the title bar's "Reset all saved state" action: the thresholds are
+    user-curated analysis state like everything else that action clears, but
+    they live in the pipeline sidecar rather than ``persistence.json``, so
+    deleting that file alone left them behind. Also drops the in-memory cache so
+    the reload doesn't write them straight back. Returns ``True`` when a block
+    was actually removed. Pipeline-owned keys in the sidecar are untouched.
+    """
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
+    ctx.runtime.smfish.thresholds_saved = {}
+    if not data_dir:
+        return False
+    info_path = _resolve_pipeline_info_path(Path(data_dir))
+    if not info_path.exists():
+        return False
+    try:
+        existing = json.loads(info_path.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        _logger.warning("Could not read %s: %s", info_path, exc)
+        return False
+    if not isinstance(existing, dict) or _SMFISH_THRESHOLDS_KEY not in existing:
+        return False
+    existing.pop(_SMFISH_THRESHOLDS_KEY, None)
+    try:
+        atomic_write_json(info_path, existing)
+    except OSError as exc:
+        _logger.warning("Could not write %s: %s", info_path, exc)
+        return False
+    return True
+
+
 def save_threshold(ctx, channel: str, threshold: float) -> None:
     """Persist the last-applied threshold for *channel* under
     ``smfish_thresholds`` in pipeline_info.json. Called from

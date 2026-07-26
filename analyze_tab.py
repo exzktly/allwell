@@ -20,7 +20,7 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -146,13 +146,11 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        rule = QFrame(self)
-        rule.setFrameShape(QFrame.HLine)
-        rule.setObjectName("HRule")
-        outer.addWidget(rule)
-
+        # No rule across the top — the shell already draws the hairline under
+        # the topbar (app_shell_view's ``_top_sep``) and this pane mounts
+        # straight beneath it. Handle width is likewise the theme's
+        # (``QSplitter::handle``), so this divider matches Review's.
         splitter = QSplitter(Qt.Horizontal, self)
-        splitter.setHandleWidth(5)
         outer.addWidget(splitter, 1)
 
         # Left — scrollable form

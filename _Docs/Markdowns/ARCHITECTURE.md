@@ -10,7 +10,7 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.9.2.** This map describes the app as it stands today;
+**Reflects All-Well v8.9.3.** This map describes the app as it stands today;
 the version string itself is centralized in the repo-root `version.py` (§3) and
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
@@ -88,7 +88,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.9.2; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (v8.9.3; read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -1790,6 +1790,28 @@ When you add a colour or size:
 - For plot styling, the Analyze tab, or anything reading via
   `get_color()`: add to `ui/theme/styles._build_dark_theme()`.
 - **Do not** hardcode hex / px values inline.
+
+### Dividers
+
+Every hairline in the app — the rule under the topbar, the rules between
+Analyze's form sections, the vertical rules inside the run dashboard — is a
+`QFrame` carrying one of four opt-in names, all matched by a single rule in
+`theme.qss()`: `#Separator` (the Review shell's name), `#HRule` / `#VRule`
+(the Analyze pane's and `widgets/run_dashboard.py`'s), and the
+`hline`/`vline` dynamic properties. They all paint `Colors.border_subtle` with
+`border: none`, and `#HRule` / `#VRule` are pinned to one pixel in the QSS so a
+caller need not also call `setFixedHeight(1)`.
+
+The `border: none` is the load-bearing part. A `QFrame` whose shape is
+`HLine`/`VLine` otherwise paints Qt's default etched line, which is derived
+from the widget palette rather than the theme and reads as a near-white bar on
+the dark surfaces. Give a new divider one of the four names; never leave a bare
+`setFrameShape(QFrame.HLine)` unnamed.
+
+The sidebar│centre divider is the `QSplitter` handle, styled by
+`QSplitter::handle` (also `border_subtle`, 6 px). Leave the width to the
+stylesheet — a `setHandleWidth` call on an individual splitter makes that one
+divider a different weight from the rest.
 
 The publication-export plot surface uses `theme.CPub` and feeds the
 target figure's axes (`figure.facecolor`, `axes.facecolor`, etc.) when

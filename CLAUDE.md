@@ -38,6 +38,7 @@ file's context, sometimes years later.
 ## 1. Commands
 
 ```bash
+scripts/preflight.sh                           # lint + fast lane + tree check, before pushing
 python allwell.py [--data_dir <folder>]        # run the app from source
 ALLWELL_PROFILE=thin python allwell.py         # run a feature subset (profiles/*.toml)
 python process_microscopy.py --input_dir … --output_dir …   # pipeline only, no GUI deps
@@ -179,6 +180,9 @@ enforces it.
 | Core never imports a feature at module scope — `features/registry.py` is the sole importer | `test_architecture_contracts.py`, `test_guardrails.py` |
 | No `ctx.app`; features reach the shell only via frozen `ViewerContext` accessors | `test_ctx_app_burndown.py` (`CTX_APP_BUDGET = 0`) |
 | No silent `except Exception: pass` anywhere | `test_no_silent_except.py` |
+| A test never names an `app._attr` that exists nowhere in the app | `test_stale_app_attrs.py` |
+| No modal dialog reached from a test (it blocks forever offscreen, and pytest's signal timeout can't interrupt Qt's C++ exec loop) | autouse `_no_modal_dialogs` in `tests/conftest.py` |
+| The docs state no version literal — `version.py` is the only one | `test_doc_version_sync.py` |
 | File line budgets + per-function cyclomatic complexity (threshold 40) | `test_monolith_budgets.py`, `test_complexity_ratchet.py` |
 | `runtime_app.py` line/attr budgets, no new loose `self._*` | `test_guardrails.py` |
 | Any feature is one-line removable (and deletable from disk) | `test_feature_removal.py`, `test_feature_profile.py` |
@@ -284,16 +288,17 @@ branch already carries a bump that isn't on the default branch yet, edit that
 number instead of adding another. Check with
 `git diff origin/main -- version.py` before bumping.
 
-Bumping means four sites, all in one commit — `version.py`, the two
-ARCHITECTURE.md claims, and the README's `AllWell-X.Y.Z.app` names.
-`tests/test_doc_version_sync.py` fails if they disagree.
+Bumping means **one line** — `version.py::__version__`, which the title-bar pill
+and the PyInstaller spec read. The docs state no version at all; they write
+`<version>` and point at `version.py`, and
+`tests/test_doc_version_sync.py` fails on any version literal outside a short
+allowlist of third-party pins. That is deliberate: with more than one branch
+open at a time — the normal state here — a version repeated in four files
+collides in four files on every rebase, and resolving those conflicts is itself
+a way to lose unrelated prose from the same file.
 
-**The only version claims in the docs** are the current-release ones:
-`version.py::__version__` is where the app version lives (the title-bar pill and
-the PyInstaller spec read it), and bumping it means updating the "Reflects
-All-Well vX.Y.Z" header and the `version.py` directory-map entry in
-ARCHITECTURE.md plus the `AllWell-X.Y.Z.app` names in README_WellViewer.md.
-`tests/test_doc_version_sync.py` pins exactly those.
+ARCHITECTURE.md still must not say *when* something landed, either — no
+`(vX.Y.Z)` markers, no "new in". Same test.
 
 ## 7. Debugging entry points
 

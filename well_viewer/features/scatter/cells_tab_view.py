@@ -142,6 +142,40 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
 
     color_by_tp_btn.clicked.connect(_toggle_color_by_tp)
     _disp_lay.addWidget(color_by_tp_btn)
+
+    # "Apply gates to points" — inline on the control row, not in Display ▾:
+    # this decides which cells are plotted, not how they look, and a filter the
+    # user can forget about needs to be visible without opening a popover.
+    # Default off: the per-cell scatter is where gates are drawn, so it shows
+    # the full cloud with the boxes over it (see collect.scatter_points_gated).
+    apply_gates_btn = reg.register(
+        "_scatter_apply_gates_btn", QPushButton("Apply gates: Off", ctrl))
+    apply_gates_btn.setProperty("variant", "toggle")
+    apply_gates_btn.setCheckable(True)
+    apply_gates_btn.setToolTip(
+        "Plot only the cells inside the scatter gates the Cell Gating tab uses "
+        "for inclusion.\n"
+        "Off (default): the full cloud, with the gate boxes drawn over it, so "
+        "you can see and resize what you selected.\n"
+        "Every other tab always filters by the gates.")
+
+    def _toggle_apply_gates(checked: bool) -> None:
+        on = bool(checked)
+        ctx.state.scatter.apply_gates_to_points = on
+        apply_gates_btn.setText("Apply gates: On" if on else "Apply gates: Off")
+        # Turning it on while the Cell Gating tab is still using intensity
+        # thresholds is a silent no-op — Gate_Pass is all-1 in that mode — and
+        # that exact silence is what made the gates look broken in the first
+        # place. Name the checkbox that makes it do something.
+        if on and not bool(ctx.state.cell_gating.use_scatter_gates):
+            ctx.notify.set_status(
+                "Apply gates is on, but Cell Gating is still using FluorGating "
+                "thresholds — tick “Use scatter-plot gates for cell inclusion” "
+                "on the Cell Gating tab for this to filter anything.")
+        redraw_scatter_orchestrate(ctx)
+
+    apply_gates_btn.clicked.connect(_toggle_apply_gates)
+    cl.addWidget(apply_gates_btn)
     # Rectangular-gate state (drawn via the Properties sidebar's Gates section):
     # a list of {x0,y0,x1,y1} data-space boxes, the arm flag, and the live
     # matplotlib RectangleSelector (rebuilt after each redraw).

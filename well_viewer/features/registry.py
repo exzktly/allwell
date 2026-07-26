@@ -263,6 +263,7 @@ def _activate_smfish(ctx) -> None:
 def _activate_cell_gating(ctx) -> None:
     from well_viewer.features.grouping.cell_gating.controller import (
         cell_gating_load_cell_areas,
+        cell_gating_refresh_included_count,
         cell_gating_sync_scatter_gates,
     )
     ctx.widgets.get("_sidebar_main_frame").setVisible(True)
@@ -270,6 +271,11 @@ def _activate_cell_gating(ctx) -> None:
     if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         cell_gating_load_cell_areas(ctx)
         cell_gating_sync_scatter_gates(ctx)
+        # Catch-all for the inclusion readout: the crop region, manual per-cell
+        # deletes, and a cold load whose gates are all at their defaults (which
+        # skips the gating pass entirely) all move the count without running the
+        # worker. Recomputing on tab entry means none of them needs its own hook.
+        cell_gating_refresh_included_count(ctx)
 
 
 def _activate_cell_browser(ctx) -> None:

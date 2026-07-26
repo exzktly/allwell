@@ -98,7 +98,7 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre", "view_state", "tab", "grouping", "playground")
+                 "centre", "view_state", "tab", "grouping", "playground", "qc")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -178,6 +178,15 @@ class AppRuntime:
         # Bound-method handles (live objects), never serialized — resolved through
         # the ``_stats_`` prefix so the ctx-native builder names no god-object.
         object.__setattr__(self, "stats", _FeatureRuntime(s, "_stats_"))
+        # QC layer notification seam (prefix ``_qc_``):
+        # ``ctx.runtime.qc.changed_cb`` is a live callback the QC recompute
+        # fires after rewriting ``QC_Pass``, so a listener can refresh without
+        # QC naming it — the Cell Gating tab registers for it to keep its
+        # inclusion readout current. Deliberately generic: QC imports nothing
+        # from its listeners, and a listener's absence leaves it ``None``.
+        # (The shared store means ``ctx.runtime.qc.gate_widgets`` also aliases
+        # the registered ``_qc_gate_widgets`` dict — same prefix, by design.)
+        object.__setattr__(self, "qc", _FeatureRuntime(s, "_qc_"))
         # Plot Groups quick-load drawers (a shared *core* sidebar widget, not a
         # removable feature): ``ctx.runtime.plot_groups.drawers`` <->
         # ``app._plot_groups_drawers`` — the list of registered drawer dicts that

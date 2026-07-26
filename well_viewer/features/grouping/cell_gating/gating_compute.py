@@ -41,6 +41,65 @@ from well_viewer.core.lazy import lazy as _lazy
 compute_gate_inclusion = _lazy("well_viewer.features.scatter.gating", "compute_gate_inclusion")
 
 
+# ── Inclusion counts (the Cell Gating tab's readout) ─────────────────────────
+
+def inclusion_counts(frames) -> tuple[int, int, int]:
+    """``(included, total, qc_failed)`` across *frames*.
+
+    ``included`` is the **composed** inclusion every plot, statistic and export
+    consumes — ``df_included_mask``'s AND of manual curation, the QC debris
+    gate, the crop region, and the cell-gating / scatter-gate layer. It is
+    deliberately not ``GatingWorker``'s own tally: that counts the gating layer
+    alone, so pairing it with a QC number produces a line whose figures do not
+    reconcile (most QC failures sit *inside* the gating layer's "kept" count).
+
+    ``qc_failed`` is a diagnostic alongside, not a disjoint bucket — a cell can
+    fail QC and be excluded by gating at once. Frames missing a verdict column
+    are treated as all-pass there, matching ``df_included_mask``.
+
+    Pure: DataFrames in, three ints out. ``None`` / empty frames are skipped.
+    """
+    from well_viewer.data.data_loading import df_included_mask
+
+    included = total = qc_failed = 0
+    for df in frames or ():
+        if df is None or getattr(df, "empty", True):
+            continue
+        total += len(df)
+        included += int(df_included_mask(df).sum())
+        if "QC_Pass" in df.columns:
+            qc = pd.to_numeric(df["QC_Pass"], errors="coerce").fillna(1)
+            qc_failed += int((qc == 0).sum())
+    return included, total, qc_failed
+
+
+def format_inclusion_counts(
+    included: int,
+    total: int,
+    qc_failed: int,
+    *,
+    pending: bool = False,
+    failed: bool = False,
+) -> str:
+    """The Cell Gating tab's one-line readout, or ``""`` when no data is loaded.
+
+    Blank rather than a row of zeros on an empty dataset — the same convention
+    the QC row above it uses. ``pending`` marks the line while a gating pass is
+    in flight (the numbers shown are the previous pass's, so they must not read
+    as authoritative); ``failed`` marks numbers that describe settings which
+    were never applied.
+    """
+    if total <= 0:
+        return ""
+    text = (f"Included for analysis: {included:,} / {total:,} cells"
+            f"  ·  {qc_failed:,} failed QC")
+    if pending:
+        return f"{text}  ·  updating…"
+    if failed:
+        return f"{text}  ·  last gating pass failed"
+    return text
+
+
 # ── Per-well fluorescence gating (GatingWorker core) ─────────────────────────
 def apply_fluor_gating(
     df,

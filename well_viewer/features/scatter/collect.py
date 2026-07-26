@@ -55,6 +55,43 @@ def timepoint_color_map(timepoints) -> dict[float, Any]:
 from well_viewer.data.data_loading import get_all_timepoints  # noqa: F401
 
 
+def scatter_points_gated(ctx) -> bool:
+    """True when the per-cell scatter should plot only cells inside the gates.
+
+    Three conditions, all required:
+
+    * the tab's **Apply gates to points** toggle is on;
+    * the Cell Gating tab is actually gating by scatter gates — otherwise
+      ``Gate_Pass`` is all-1 (``gating_compute.apply_fluor_gating`` neutralises
+      it in intensity mode) and filtering would be a silent no-op;
+    * no gate is being drawn or edge-dragged right now.
+
+    That last clause is not a nicety. Releasing a freshly drawn gate fans out
+    through ``_notify_gates_changed`` → the gating worker → a scatter redraw, so
+    with the filter live every point outside the new box would vanish the
+    instant it was drawn — leaving nothing to judge the gate against, nothing to
+    drag its edge back out over, and the ``RectangleSelector`` rebuilding under
+    the cursor. While drawing or editing, the full cloud stays.
+    """
+    if not bool(ctx.state.scatter.apply_gates_to_points):
+        return False
+    if not bool(ctx.state.cell_gating.use_scatter_gates):
+        return False
+    if bool(ctx.runtime.scatter.gate_draw_mode):
+        return False
+    return ctx.runtime.scatter.gate_edit is None
+
+
+def gate_filter_title_suffix(ctx) -> str:
+    """Axes-title tag marking a gate-filtered cloud, else ``""``.
+
+    The toggle changes *which cells are plotted*, so a figure copied or saved
+    out of this tab has to carry that fact with it — the on-screen toggle does
+    not travel into an SVG.
+    """
+    return " · gate-filtered" if scatter_points_gated(ctx) else ""
+
+
 def collect_scatter_data(
     ctx,
     col_x: str,
@@ -65,6 +102,7 @@ def collect_scatter_data(
     fluor_gate_x: float = 0.0,
     fluor_gate_y: float = 0.0,
     ratios: dict[str, Any] | None = None,
+    include_gate: bool = False,
 ) -> dict[str, dict[str, Any]]:
     """Collect scatter plot data for the given column names and timepoint(s).
 
@@ -83,6 +121,12 @@ def collect_scatter_data(
         well_colors: List of color strings for coloring groups/wells
         fluor_gate_x: FluorGating threshold for X channel; cells below are excluded
         fluor_gate_y: FluorGating threshold for Y channel; cells below are excluded
+        include_gate: honour the scatter-gate inclusion layer (``Gate_Pass``).
+            Defaults to ``False`` — the per-cell scatter is where the gates are
+            drawn, so it shows the full cloud with the boxes over it unless the
+            user opts in via the tab's "Apply gates to points" toggle. Every
+            other caller (batch export, the CSV export service) leaves it off so
+            a batch job can never inherit the live tab's choice.
 
     Returns:
         Dict mapping group/well name → {
@@ -117,9 +161,11 @@ def collect_scatter_data(
             return None
         if "timepoint_hours" not in df.columns or "area_px" not in df.columns:
             return None
-        # Full cloud + gates on the per-cell scatter: don't filter by the gates
-        # drawn here (Gate_Pass). All other views honour it via df_included_mask.
-        mask = df_included_mask(df, include_gate=False).to_numpy(copy=True)
+        # The per-cell scatter is where the gates are drawn, so by default it
+        # keeps the full cloud with the boxes over it (``include_gate=False``)
+        # while every other view filters via df_included_mask. The tab's
+        # "Apply gates to points" toggle opts in — see scatter_points_gated.
+        mask = df_included_mask(df, include_gate=include_gate).to_numpy(copy=True)
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").to_numpy()
         with np.errstate(invalid="ignore"):
             finite = np.isfinite(tp)

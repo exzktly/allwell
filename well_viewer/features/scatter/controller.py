@@ -22,7 +22,9 @@ from well_viewer.core.plot_style import apply_export_style_to_current, style_leg
 from well_viewer.features.scatter.collect import (  # re-export
     collect_scatter_agg_data,
     collect_scatter_data,
+    gate_filter_title_suffix,
     get_all_timepoints,
+    scatter_points_gated,
 )
 from well_viewer.features.scatter.gating import (
     paint_gates,
@@ -120,6 +122,7 @@ def redraw_scatter(
         well_colors=well_colors,
         fluor_gate_x=fluor_gate_x,
         fluor_gate_y=fluor_gate_y,
+        include_gate=scatter_points_gated(ctx),
     )
 
     # Stack one group per panel (>1 group) when Layout is "Separate axes", or
@@ -170,7 +173,8 @@ def redraw_scatter(
     else:
         tp_tag = f" (t={min(tps_list):g}h–{max(tps_list):g}h, {len(tps_list)} tps)"
     ax_scatter.set_title(
-        f"Scatter: {_col_label(col_x)} vs {_col_label(col_y)}{tp_tag}",
+        f"Scatter: {_col_label(col_x)} vs {_col_label(col_y)}{tp_tag}"
+        f"{gate_filter_title_suffix(ctx)}",
         color=_title_fg,
     )
     ax_scatter.grid(True, alpha=0.3, color=_grid)

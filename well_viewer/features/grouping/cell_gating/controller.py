@@ -59,6 +59,8 @@ from well_viewer.features.grouping.cell_gating.gating_compute import (
     _timepoint_label,
     _valid_values_for_channel,
     apply_fluor_gating,
+    format_inclusion_counts,
+    inclusion_counts,
 )
 from well_viewer.features.grouping.cell_gating.opt_curve_view import (
     _cell_gating_show_opt_curve_popup,
@@ -526,6 +528,33 @@ def _cell_gating_refresh_gate_filter(ctx) -> None:
             btn.setEnabled(bool(getattr(ctx.state.cell_gating, _GATE_MODE_ACTIVE_ATTR[mode], False)))
 
 
+def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
+                                       failed: bool = False) -> None:
+    """Repaint the tab's "Included for analysis" line from the row cache.
+
+    Recomputed rather than fed from ``GatingWorker``'s own tally, for two
+    reasons. The worker does not always run — a dataset whose gates are all at
+    their defaults skips the pass entirely on load (see
+    ``load_controller._kick_off_gating_after_load``), which would leave a
+    worker-fed label blank on the commonest path. And its tally counts the
+    gating layer alone, which cannot be put on one line with a QC number
+    without the two failing to reconcile. Reading ``df_included_mask`` gives the
+    population every plot and export actually uses.
+
+    The walk is four vectorised comparisons per cached well — cheaper than the
+    ``qc_excluded_count`` pass this tab already runs on every debounced QC
+    keystroke. No-ops until the label exists.
+    """
+    lbl = ctx.runtime.cell_gating.included_count
+    if lbl is None:
+        return
+    included, total, qc_failed = inclusion_counts(
+        (ctx.state.dataset.cache or {}).values())
+    ctx.runtime.cell_gating.last_counts = (included, total, qc_failed)
+    lbl.setText(format_inclusion_counts(
+        included, total, qc_failed, pending=pending, failed=failed))
+
+
 def _cell_gating_scatter_mode_on(ctx) -> bool:
     """True when either scatter-gate layer (gating or thresholding) is active —
     both consume the selected gate, so the dropdown is relevant for either."""
@@ -556,9 +585,11 @@ def cell_gating_sync_scatter_gates(ctx) -> None:
     backstop. Refresh the summary label always; when scatter-gate inclusion is on
     and the gate set changed since the last pass (signature-guarded so repeat
     calls are cheap), re-run the gating worker so every other plot/stat/export
-    reflects the new gates. The per-cell scatter keeps the full cloud regardless
-    (``df_included_mask(include_gate=False)``), so recomputing on every change is
-    safe — the gated cluster's own points never vanish from under the gate.
+    reflects the new gates. Recomputing on every change is safe for the per-cell
+    scatter, which keeps the full cloud by default and — through
+    ``collect.scatter_points_gated`` — suppresses its opt-in gate filter while a
+    gate is being drawn or edge-dragged, so the gated cluster's own points never
+    vanish from under the box being drawn.
     """
     if not ctx.runtime.cell_gating.use_scatter_gates_cb is not None:
         return  # tab not built yet
@@ -666,6 +697,10 @@ def cell_gating_start_gating_worker(ctx) -> None:
         bar.setRange(0, max(1, len(ctx.state.dataset.well_paths)))
         bar.setValue(0)
         bar.show()
+    # Mark the counts in-flight. A cancelled pass emits no terminal signal, but
+    # every cancel above is immediately followed by this restart, so the marker
+    # is always re-armed and never strands the label on a stale number.
+    cell_gating_refresh_included_count(ctx, pending=True)
     worker.start()
 
 
@@ -1337,6 +1372,7 @@ def _cell_gating_on_finished(ctx) -> None:
     # or crop layer moving underneath, say), and a stale aggregate is invisible
     # — the plot simply redraws the old numbers.
     invalidate_stats_cache(ctx)
+    cell_gating_refresh_included_count(ctx)
     redraw_app(ctx)
 
 
@@ -1348,6 +1384,9 @@ def _cell_gating_on_failed(ctx, msg: str) -> None:
         bar.setValue(0)
         bar.hide()
     logger.error("Cell gating failed: %s", msg)
+    # Mark the counts as describing settings that were never applied, rather
+    # than leaving a confident-looking number behind a failed pass.
+    cell_gating_refresh_included_count(ctx, failed=True)
     try:
         ctx.notify.set_status(f"Cell gating failed: {msg}")
     except Exception:

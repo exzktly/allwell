@@ -218,9 +218,10 @@ def df_included_mask(df: pd.DataFrame, *, include_gate: bool = True) -> pd.Serie
     others. ``QC_Pass`` / ``Crop_Pass`` / ``Gate_Pass`` are optional: when absent
     (no such layer / older data) each is treated as all-pass.
 
-    ``include_gate=False`` drops the ``Gate_Pass`` layer so the per-cell scatter
-    plot — where the gates are drawn — keeps showing the full cloud (and the
-    gates over it) rather than filtering itself by its own gates.
+    ``include_gate=False`` drops the ``Gate_Pass`` layer. The per-cell scatter —
+    where the gates are drawn — passes it by default, so it keeps showing the
+    full cloud with the gates over it rather than filtering itself by its own
+    gates; its "Apply gates" toggle opts back in.
     """
     if "Included" not in df.columns:
         mask = pd.Series(True, index=df.index)

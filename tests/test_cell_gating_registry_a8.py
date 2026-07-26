@@ -20,7 +20,8 @@ from tests.widget_registry_helpers import assert_handles_registered
 _HANDLES = (
     "_cell_gating_frame", "_cell_gating_use_scatter_gates_cb", "_cell_gating_gating_gate_btn",
     "_cell_gating_use_scatter_thresh_cb", "_cell_gating_thresh_gate_btn",
-    "_cell_gating_gate_summary", "_cell_gating_auto_btn", "_cell_gating_scroll",
+    "_cell_gating_gate_summary", "_cell_gating_included_count",
+    "_cell_gating_auto_btn", "_cell_gating_scroll",
     "_cell_gating_inner", "_cell_gating_figure", "_cell_gating_canvas",
     "_cell_gating_plot_scroll", "_cell_gating_toolbar", "_cell_gating_status_label",
     "_cell_gating_opt_channel_combo", "_cell_gating_opt_well_a_combo",

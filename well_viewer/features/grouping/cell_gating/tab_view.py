@@ -44,6 +44,7 @@ from well_viewer.features.grouping.cell_gating.controller import (
     cell_gating_on_use_scatter_gates_change,
     cell_gating_on_use_scatter_thresh_change,
     cell_gating_optimize_thresh_frac_on,
+    cell_gating_refresh_included_count,
     cell_gating_sync_scatter_gates,
     logger,
 )
@@ -228,15 +229,36 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.widgets.get("_cell_gating_gate_summary").setObjectName("Muted")
     ctx.widgets.get("_cell_gating_gate_summary").setWordWrap(True)
     cf_layout.addWidget(ctx.widgets.get("_cell_gating_gate_summary"))
+
+    # Live inclusion readout, directly under the controls that move it.
+    reg.register("_cell_gating_included_count", QLabel("", control_frame))
+    _count_lbl = ctx.widgets.get("_cell_gating_included_count")
+    _count_lbl.setObjectName("Muted")
+    _count_lbl.setWordWrap(True)
+    _count_lbl.setToolTip(
+        "Cells passing every inclusion layer — manual curation, the QC debris "
+        "gate, the crop region, and the cell-gating / scatter-gate layer — "
+        "across all loaded wells (not just the selected ones the curves below "
+        "show). Fraction-on cutoffs (ThreshFracOn) do not change this number: "
+        "they define which included cells count as 'on', not which cells count."
+    )
+    cf_layout.addWidget(_count_lbl)
+    # QC edits rewrite QC_Pass without running the gating pass, and the QC
+    # controls sit on this very tab — so the readout has to follow them too.
+    # QC fires a feature-agnostic callback; this tab is what registers for it,
+    # so neither feature names the other and both stay one-line removable.
+    ctx.runtime.qc.changed_cb = lambda: cell_gating_refresh_included_count(ctx)
     # The scatter gating module fires this whenever a gate is drawn / edited /
     # cleared on the Scatter Plot tab: refresh the summary AND recompute Included
     # immediately so every other view tracks the gates without waiting for a tab
-    # switch. (Safe now that the per-cell scatter never filters itself by the
-    # gates — see df_included_mask(include_gate=False).)
+    # switch. (Safe: the per-cell scatter shows the full cloud by default, and
+    # its opt-in "Apply gates" filter is suppressed mid-draw — see
+    # scatter.collect.scatter_points_gated.)
     ctx.runtime.scatter.gates_changed_cb = lambda: cell_gating_sync_scatter_gates(ctx)
     _cell_gating_refresh_gate_filter(ctx)
     _cell_gating_refresh_gate_summary(ctx)
     _cell_gating_apply_scatter_gate_mode(ctx)
+    cell_gating_refresh_included_count(ctx)
 
     # Auto-threshold all channels: runs the same Otsu pass the pipeline's
     # final stage executes (well_viewer.auto_threshold) and writes the

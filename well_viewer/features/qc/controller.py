@@ -64,6 +64,16 @@ def recompute_qc_all(ctx) -> None:
         invalidate_stats_cache(ctx)  # clears stats cache + bumps override_version
     except Exception:
         swallowed()  # was: pass (silent except)
+    # QC_Pass just moved, which moves the composed inclusion every other layer
+    # reads. Tell whoever registered without naming them — the Cell Gating tab
+    # stamps this to keep its inclusion readout honest, and its absence (or the
+    # feature's) simply leaves the callback None.
+    cb = ctx.runtime.qc.changed_cb
+    if callable(cb):
+        try:
+            cb()
+        except Exception:
+            swallowed()  # a listener must never break the QC recompute
 
 
 def set_qc_params(ctx, params: QCParams) -> None:

@@ -262,10 +262,14 @@ class ScatterBatchExportPanel(BatchExportPanel):
                 model = prop_cb.model()
                 item = model.item(sm_idx) if model is not None else None
                 if item is not None:
-                    smf_ok = channel in (
-                        self._ctx.state.channel.smfish_channels or []
+                    # Case-insensitive: this combo holds the displayed label
+                    # ("GFP") while ``smfish_channels`` holds normalised tokens.
+                    from well_viewer.domain.metric_registry import (
+                        channel_supports_smfish,
                     )
-                    item.setEnabled(smf_ok)
+                    item.setEnabled(channel_supports_smfish(
+                        channel, self._ctx.state.channel.smfish_channels,
+                    ))
         finally:
             prop_cb.blockSignals(blocked)
 

@@ -1227,7 +1227,9 @@ Operates on **one well at a time** (spot detection is per-frame).
 per-nucleus rows behind every plot.
 
 - **Controls** — the **Well** picker; column filtering; **double-click a row**
-  to jump to that cell in the Segmentation tab.
+  to jump to that cell in the Segmentation tab. The jump switches wells for
+  you: the row's well becomes the Segmentation sidebar's selected well, and the
+  view opens on that cell's field of view and timepoint, zoomed to the nucleus.
 - **Optimal use** — sanity-check outliers: filter to a suspicious metric range,
   then double-click into Segmentation to see the actual cell.
 

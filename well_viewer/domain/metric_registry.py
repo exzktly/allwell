@@ -98,3 +98,22 @@ def column_gating_exempt(col: str) -> bool:
     # same "not an intensity → don't fluor-gate" property.
     from pipeline.shape_features import is_shape_column
     return is_shape_column(col)
+
+
+def channel_supports_smfish(channel_entry: str, smfish_channels) -> bool:
+    """True when *channel_entry* names one of the dataset's smFISH channels.
+
+    Every Property combo greys out ``smFISH Count`` for channels that carry no
+    ``<channel>_smfish_count`` column, and each combo asks this question about
+    whatever string its own channel dropdown holds. Those strings disagree on
+    case: the global combo passes the normalised token (``"gfp"``) while the
+    scatter, stats, and batch-export combos pass the *displayed* label
+    (``"GFP"``), because their dropdowns are built from upper-cased channel
+    names. ``smfish_channels`` is always normalised, so a raw ``in`` test left
+    smFISH Count permanently disabled on the upper-case side. Case-fold both
+    ends here, once, rather than at each call site.
+    """
+    if not channel_entry:
+        return False
+    target = str(channel_entry).strip().lower()
+    return any(str(c).strip().lower() == target for c in (smfish_channels or ()))

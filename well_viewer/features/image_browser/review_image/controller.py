@@ -319,6 +319,15 @@ def _on_review_csv_row_double_click_impl(ctx, item) -> None:
     ctx.state.preview.selected_well = key
     update_preview_ctx(ctx, key)
 
+    # Re-sync the Segmentation sidebar's well picker — the plate widget and its
+    # "Selected: …" label. The sub-tab activation above already refreshed the
+    # picker, but that ran before this well was chosen, so without a second pass
+    # the jump lands on the right image with the sidebar still reading "No well
+    # selected" and no well lit on the plate.
+    refresh_picker = getattr(ctx.window, "_refresh_preview_picker", None)
+    if callable(refresh_picker):
+        refresh_picker()
+
     # _preview_fov_var drives refresh_review_image; force the target FOV
     # before repopulating the TP menu. The combo only exists once the
     # Segmentation tab's preview panel has been built — guard for the

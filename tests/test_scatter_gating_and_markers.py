@@ -262,6 +262,22 @@ def test_ratio_channels_still_resolve_through_the_ratio_prefix():
     assert cell_gating_get_fluor_gate(ctx, "ratio:GFP/MCHERRY") == 10.0
 
 
+def test_resolver_tolerates_a_slice_carrying_only_one_map():
+    """The review-image and plotting leaves' unit tests stand the slice up as a
+    minimal namespace with just the map they need; the resolver must not demand
+    both."""
+    from well_viewer.features.grouping.cell_gating.controller import (
+        cell_gating_get_thresh_frac_on,
+    )
+
+    partial = SimpleNamespace(
+        state=SimpleNamespace(cell_gating=SimpleNamespace(thresh_frac_on={"gfp": 42.0})),
+    )
+
+    assert cell_gating_get_thresh_frac_on(partial, "gfp") == 42.0
+    assert cell_gating_get_thresh_frac_on(partial, "GFP") == 42.0
+
+
 def test_an_unknown_channel_still_reports_the_gate_as_off():
     from well_viewer.features.grouping.cell_gating.controller import (
         cell_gating_get_fluor_gate,

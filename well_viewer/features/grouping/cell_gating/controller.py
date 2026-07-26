@@ -358,8 +358,12 @@ def _cell_gating_resolve_key(ctx, channel: str) -> str:
     cg = ctx.state.cell_gating
     # Both maps are keyed alike and are populated together, but either can be
     # the only one filled in (a gate edited before a threshold, a partial
-    # persisted block), so consult the union rather than one of them.
-    known = list(cg.thresh_frac_on) + list(cg.fluor_gates)
+    # persisted block), so consult the union rather than one of them. Read them
+    # defensively: this resolver is reached from the review-image and plotting
+    # leaves, whose unit tests stand the slice up as a minimal namespace
+    # carrying only the map that leaf needs.
+    known = list(getattr(cg, "thresh_frac_on", None) or ())
+    known += list(getattr(cg, "fluor_gates", None) or ())
     if channel in known:
         return channel
     candidate = f"ratio:{channel}"

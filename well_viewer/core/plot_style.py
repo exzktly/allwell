@@ -280,6 +280,26 @@ AXIS_SCOPED_PREF_KEYS = frozenset({
     "x_log", "y_log", "axis_buckets", "axis_target",
 })
 
+# Mark styling is per-figure too, for the same reason but a different argument:
+# the right mark size is a property of what the plot *draws*, not of the
+# publication. Five aggregate points want an 8pt marker; a per-cell cloud of
+# 50,000 cells wants 2pt. Sharing one value meant styling the Scatter tab's
+# aggregate sub-tab restyled its per-cell sub-tab (and the line and bar plots)
+# into illegibility. Typography, grid, legend and ticks stay shared, so one
+# setting still gives a whole figure set a consistent look for a paper.
+#
+# Unlike the axis keys, an unset mark key falls back to the *global* value
+# before the neutral default (see :class:`_FigurePrefs`). That keeps a mark
+# style saved before this split applying everywhere it used to, until the user
+# edits a figure and gives that figure its own value.
+MARK_SCOPED_PREF_KEYS = frozenset({
+    "line_width", "line_style",
+    "marker_size", "marker_style", "marker_edge_width",
+})
+
+#: Every key stored per figure rather than app-wide.
+FIGURE_SCOPED_PREF_KEYS = AXIS_SCOPED_PREF_KEYS | MARK_SCOPED_PREF_KEYS
+
 # Stable per-figure keys (survive figure recreation across sessions, unlike
 # ``id(fig)``) so the per-figure axis prefs can persist.
 _FIG_PREF_KEY_MAP = (
@@ -311,11 +331,21 @@ def _ensure_axis_prefs_store(ctx) -> dict:
 class _FigurePrefs(MutableMapping):
     """Read/write view over one figure's prefs.
 
-    Axis-scoped keys (:data:`AXIS_SCOPED_PREF_KEYS`) route to the figure's own
-    dict; everything else routes to the shared global style. Reads of an unset
-    axis key fall back to the neutral default (never the global dict), so a
-    value set on one figure can never bleed into another. Behaves like a plain
-    ``dict`` for every existing call site (``[]``/``get``/``in``/``dict(...)``).
+    Figure-scoped keys (:data:`FIGURE_SCOPED_PREF_KEYS`) route to the figure's
+    own dict; everything else routes to the shared global style. Writes to a
+    scoped key never touch the global dict, so styling one figure cannot restyle
+    another. The two scoped families differ in what an *unset* key reads as:
+
+    * axis keys (limits / log / bucket bookkeeping) fall back to the neutral
+      default and never consult the global dict — a limit typed on one figure is
+      meaningless on another, so it must not be visible there;
+    * mark keys fall back to the global value first. Nothing writes those
+      globals any more, so in practice that is the value saved before marks
+      became per-figure: it keeps applying to every figure the user has not yet
+      restyled, instead of silently reverting to the stock 5pt circle.
+
+    Behaves like a plain ``dict`` for every existing call site
+    (``[]``/``get``/``in``/``dict(...)``).
     """
 
     __slots__ = ("_global", "_axis")
@@ -325,20 +355,22 @@ class _FigurePrefs(MutableMapping):
         self._axis = axis_prefs
 
     def __getitem__(self, key):
-        if key in AXIS_SCOPED_PREF_KEYS:
+        if key in FIGURE_SCOPED_PREF_KEYS:
             if key in self._axis:
                 return self._axis[key]
+            if key in MARK_SCOPED_PREF_KEYS and key in self._global:
+                return self._global[key]
             return DEFAULT_EXPORT_STYLE_PREFS.get(key)
         return self._global[key]
 
     def __setitem__(self, key, value) -> None:
-        if key in AXIS_SCOPED_PREF_KEYS:
+        if key in FIGURE_SCOPED_PREF_KEYS:
             self._axis[key] = value
         else:
             self._global[key] = value
 
     def __delitem__(self, key) -> None:
-        if key in AXIS_SCOPED_PREF_KEYS:
+        if key in FIGURE_SCOPED_PREF_KEYS:
             self._axis.pop(key, None)
         else:
             self._global.pop(key, None)
@@ -346,10 +378,10 @@ class _FigurePrefs(MutableMapping):
     def __iter__(self):
         seen = set()
         for k in self._global:
-            if k not in AXIS_SCOPED_PREF_KEYS:
+            if k not in FIGURE_SCOPED_PREF_KEYS:
                 seen.add(k)
                 yield k
-        for k in AXIS_SCOPED_PREF_KEYS:
+        for k in FIGURE_SCOPED_PREF_KEYS:
             if k not in seen:
                 yield k
 
@@ -358,8 +390,9 @@ class _FigurePrefs(MutableMapping):
 
 
 def figure_prefs(ctx, fig):
-    """A :class:`_FigurePrefs` view for *fig* — global style + that figure's
-    own axis limits / log scaling. A8 teardown: takes ``ctx``."""
+    """A :class:`_FigurePrefs` view for *fig* — the shared publication style
+    (typography, grid, legend, ticks) plus that figure's own axis limits, log
+    scaling, and mark styling. A8 teardown: takes ``ctx``."""
     global_prefs = _ensure_export_style_prefs(ctx)
     store = _ensure_axis_prefs_store(ctx)
     axis = store.setdefault(figure_pref_key(ctx, fig), {})
@@ -735,8 +768,9 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
 
 
 def apply_export_style_to_current(ctx, fig, canvas=None) -> None:
-    # Per-figure view (global style + *this* figure's axis limits / log scaling)
-    # so axis settings never leak across tabs. A8 teardown: takes ``ctx``.
+    # Per-figure view (shared publication style + *this* figure's axis limits,
+    # log scaling and mark styling) so neither leaks across tabs. A8 teardown:
+    # takes ``ctx``.
     prefs = figure_prefs(ctx, fig)
     apply_export_style_prefs(fig, prefs)
     if canvas is not None:

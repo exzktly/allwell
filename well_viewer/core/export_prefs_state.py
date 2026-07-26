@@ -15,7 +15,10 @@ attributes and lets the export-style application path read prefs from
 ``plot_style._ensure_export_style_prefs``, which fills it from
 ``DEFAULT_EXPORT_STYLE_PREFS``) so the save path can tell "never touched" from
 "explicitly emptied" exactly as the old ``getattr(app, …, None)`` did.
-``axis_prefs`` is a ``{fig_key: {pref: value}}`` per-figure store.
+``axis_prefs`` is a ``{fig_key: {pref: value}}`` per-figure store. It holds the
+mark styling (line width/style, marker size/style/edge width) as well as the
+axis view — see ``plot_style.FIGURE_SCOPED_PREF_KEYS``; the name predates the
+mark keys joining it.
 
 Qt-free: stdlib only.
 """

@@ -10,10 +10,12 @@ when the Heat Map tab is active — see
 
 State of truth: ``app._heatmap_layouts``. The sidebar maintains exactly
 one layout named ``SIDEBAR_LAYOUT_NAME`` and synchronises the table
-widget to its ``cells`` dict on every change. Each cell holds at most
-one well token in this UI; the underlying model still permits
-multi-well cells, which remain accessible to programmatic / future
-editor uses.
+widget to its ``cells`` dict on every change. Dragging a well in puts
+that one well in a cell, but a cell can hold several — "Auto-populate
+from selection" builds one cell per replicate set when **Rep-set avg**
+is on. Those cells show as ``A01+3`` (the members in the tooltip) and
+move as a unit; the well token behind a cell is carried in
+``_CELL_TOKEN_ROLE`` so the summary text never reaches the model.
 """
 
 from __future__ import annotations
@@ -47,6 +49,35 @@ from well_viewer.core.dnd import WELL_MIME  # shared drag/drop token
 
 
 # ── Drag-aware widgets ───────────────────────────────────────────────────────
+
+# A cell's displayed text is not always its well token: a cell holding a whole
+# replicate set is summarised as ``A01+3`` (see :func:`_cell_display`). The token
+# a drag carries — and the one a double-click clears — is kept beside the text in
+# this role so the summary never leaks into the model.
+_CELL_TOKEN_ROLE = Qt.UserRole + 1
+
+
+def _cell_display(wells: list[str]) -> str:
+    """Cell text for *wells*: the token itself, or ``A01+3`` for a set.
+
+    Rendering only ``wells[0]`` made every extra member invisible, so a cell
+    auto-populated from a replicate set read as if the rest had been dropped.
+    Mirrors the annotation the heat map itself draws on a multi-well cell.
+    """
+    if not wells:
+        return ""
+    if len(wells) == 1:
+        return wells[0]
+    return f"{wells[0]}+{len(wells) - 1}"
+
+
+def _cell_token(item) -> str:
+    """The well token a table item stands for (never its ``A01+3`` summary)."""
+    token = item.data(_CELL_TOKEN_ROLE)
+    if token:
+        return str(token).strip()
+    return (item.text() or "").strip()
+
 
 class _LayoutTable(QTableWidget):
     """The R×C grid. Drag source AND drop sink for well tokens."""
@@ -84,7 +115,7 @@ class _LayoutTable(QTableWidget):
         item = self.currentItem()
         if item is None:
             return
-        token = (item.text() or "").strip()
+        token = _cell_token(item)
         if not token:
             return
         mime = QMimeData()
@@ -139,7 +170,7 @@ class _LayoutTable(QTableWidget):
             super().mouseDoubleClickEvent(event)
             return
         item = self.item(idx.row(), idx.column())
-        token = (item.text() if item else "").strip()
+        token = _cell_token(item) if item is not None else ""
         if token:
             self._on_clear_cell(idx.row(), idx.column())
             return
@@ -339,9 +370,12 @@ def refresh_heatmap_layout_sidebar(ctx) -> None:
         table.setVerticalHeaderLabels(row_labels[: layout.rows])
         for r in range(layout.rows):
             for c in range(layout.cols):
-                wells = layout.cells.get((r, c), [])
+                wells = list(layout.cells.get((r, c), []))
                 token = wells[0] if wells else ""
-                item = QTableWidgetItem(token)
+                item = QTableWidgetItem(_cell_display(wells))
+                item.setData(_CELL_TOKEN_ROLE, token)
+                if len(wells) > 1:
+                    item.setToolTip(", ".join(wells))
                 item.setTextAlignment(Qt.AlignCenter)
                 # Every cell accepts drops (so the user can drop wells from
                 # the sidebar plate into empty cells too — previously empty
@@ -382,6 +416,12 @@ def _on_drop_event(ctx, kind: str, rc: tuple[int, int] | None, token: str) -> No
     """Handle a successful drop. Updates state and re-renders both widgets."""
     layout = _ensure_sidebar_layout(ctx)
     src = _find_cell_for_token(layout, token)
+    # A cell can hold a whole replicate set (auto-populate builds those when
+    # Rep-set avg is on), and the drag only carries its first well. Moving a
+    # cell moves everything in it — assigning the bare token would silently drop
+    # the rest of the set. A drag from the plate palette has no source cell, so
+    # there the token is the whole payload.
+    moving = list(layout.cells.get(src, [])) if src is not None else [token]
     if kind == "palette":
         if src is not None:
             layout.assign(src[0], src[1], [])
@@ -392,7 +432,7 @@ def _on_drop_event(ctx, kind: str, rc: tuple[int, int] | None, token: str) -> No
         existing = list(layout.cells.get((target_r, target_c), []))
         if src is not None and src != (target_r, target_c):
             layout.assign(src[0], src[1], existing)  # tenant goes back to source
-        layout.assign(target_r, target_c, [token])
+        layout.assign(target_r, target_c, moving)
     _persist_and_redraw(ctx)
     refresh_heatmap_layout_sidebar(ctx)
 
@@ -405,6 +445,18 @@ def _clear_cell(ctx, r: int, c: int) -> None:
         refresh_heatmap_layout_sidebar(ctx)
 
 
+def _sorted_by_plate(ctx, wells) -> list[str]:
+    """*wells* in plate order (A01, A02, …), tolerating an unparseable token."""
+    src = list(wells)
+    parse_rc = getattr(ctx.window, "_parse_rc", None) if hasattr(ctx, "window") else None
+    if callable(parse_rc):
+        try:
+            return sorted(src, key=parse_rc)
+        except Exception:
+            swallowed("heatmap: plate-order sort; falling back to token order")
+    return sorted(src)
+
+
 def _autopopulate_cells(ctx) -> list[list[str]]:
     """The list of cells "Auto-populate from selection" should build, in order.
 
@@ -414,9 +466,17 @@ def _autopopulate_cells(ctx) -> list[list[str]]:
     * **replicate mode** (Sample Definition groups defined) — the selection
       lives in ``selection.selections`` and ``selected_wells`` is empty or stale,
       so reading the latter produced a grid of whichever individual wells
-      happened to be left in it. Each *visible* replicate set becomes ONE cell
-      holding all of its loaded wells, which is what makes the heat map show one
-      value per set rather than one per well.
+      happened to be left in it. The *visible* replicate sets are the selection;
+      how they are laid out follows the **Rep-set avg** toggle, because that is
+      what decides whether a cell means a set or a well:
+
+      - checked — each set becomes ONE cell holding all of its loaded wells, so
+        the map shows one averaged value per set.
+      - unchecked — every well of every visible set becomes its own cell, in
+        plate order. Grouping them anyway put a whole set in one cell, which the
+        sidebar grid can only render as its first well and the map drew as a
+        pooled mean — the toggle looked like it did nothing and the other
+        members looked dropped.
     * **plain mode** — each individually selected well becomes its own cell, in
       plate order.
     """
@@ -428,20 +488,16 @@ def _autopopulate_cells(ctx) -> list[list[str]]:
         loaded = ctx.state.dataset.well_paths
         cells = [[w for w in (getattr(rs, "wells", None) or []) if w in loaded]
                  for rs in rep_sets]
-        return [wells for wells in cells if wells]
+        cells = [wells for wells in cells if wells]
+        if bool(ctx.state.heatmap.repset_avg):
+            return cells
+        return [[w] for w in _sorted_by_plate(ctx, dict.fromkeys(
+            w for wells in cells for w in wells))]
 
     selected = list(ctx.state.selection.selected_wells or [])
     if not selected:
         return []
-    parse_rc = getattr(ctx.window, "_parse_rc", None)
-    if callable(parse_rc):
-        try:
-            wells = sorted(selected, key=parse_rc)
-        except Exception:
-            wells = sorted(selected)
-    else:
-        wells = sorted(selected)
-    return [[w] for w in wells]
+    return [[w] for w in _sorted_by_plate(ctx, selected)]
 
 
 def _on_autopopulate(ctx) -> None:

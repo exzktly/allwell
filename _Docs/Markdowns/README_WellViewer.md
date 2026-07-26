@@ -816,11 +816,18 @@ place cells in a grid that mirrors your plate or your experimental design.
   cell to select its wells; **Shift**-click adds to the selection and
   **Ctrl**-click (**Cmd** on macOS) toggles individual wells in and out.
 - **Auto-populate from selection** fills the grid from whichever selection is
-  live. With Sample Definition groups defined it lays out **one cell per visible
-  replicate set**, each holding all of that set's loaded wells, so the heat map
-  shows one value per set. With no groups defined it lays out one cell per
-  selected well, in plate order. Either way the grid grows (up to 32×32) if the
-  selection needs more cells than it currently has.
+  live, and with Sample Definition groups defined the **Rep-set avg** toggle
+  decides what a cell stands for:
+  - *Rep-set avg on* — **one cell per visible replicate set**, holding all of
+    that set's loaded wells, so the heat map shows one averaged value per set.
+    A multi-well cell shows as `A01+3` in the layout editor (hover for the full
+    membership) and moves as a unit when dragged.
+  - *Rep-set avg off* — **one cell per well**, in plate order, across every
+    visible set. The map is per-well, so the grid is too.
+
+  With no groups defined it lays out one cell per selected well, in plate order.
+  Either way the grid grows (up to 32×32) if the selection needs more cells than
+  it currently has.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
   **Scale** to *Fixed* vmin/vmax so frames are comparable, then scrub the
   timepoint slider to watch the metric evolve.

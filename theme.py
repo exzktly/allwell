@@ -621,6 +621,13 @@ QCheckBox::indicator, QRadioButton::indicator {{
     height: 16px;
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
+    /* ``width`` is the *content* width, so the drawn box is 18px once the 1px
+       border is added on each side — but a platform style is free to offset the
+       label from the declared 16px. Reserving the margin here widens the slot
+       the indicator owns without changing the box that gets painted, so the
+       label always clears it even where that offset runs short (the Heat Map's
+       "Rep-set avg" box printing over its own label on macOS). */
+    margin-right: 4px;
 }}
 QCheckBox::indicator {{
     border-radius: {r.xs}px;

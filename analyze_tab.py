@@ -146,13 +146,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # No rule across the top: the shell already draws the hairline under
-        # the topbar (app_shell_view's ``_top_sep``), and this pane mounts
-        # directly beneath it. A second rule here stacked into a 2-px band that
-        # Review, sharing the same topbar, never showed.
-        # Handle width is left to the theme (``QSplitter::handle`` in
-        # theme.qss) so the sidebar│centre divider is the same weight here as
-        # the one Review draws.
+        # No rule across the top — the shell already draws the hairline under
+        # the topbar (app_shell_view's ``_top_sep``) and this pane mounts
+        # straight beneath it. Handle width is likewise the theme's
+        # (``QSplitter::handle``), so this divider matches Review's.
         splitter = QSplitter(Qt.Horizontal, self)
         outer.addWidget(splitter, 1)
 

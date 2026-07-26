@@ -20,7 +20,7 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -146,13 +146,14 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        rule = QFrame(self)
-        rule.setFrameShape(QFrame.HLine)
-        rule.setObjectName("HRule")
-        outer.addWidget(rule)
-
+        # No rule across the top: the shell already draws the hairline under
+        # the topbar (app_shell_view's ``_top_sep``), and this pane mounts
+        # directly beneath it. A second rule here stacked into a 2-px band that
+        # Review, sharing the same topbar, never showed.
+        # Handle width is left to the theme (``QSplitter::handle`` in
+        # theme.qss) so the sidebar│centre divider is the same weight here as
+        # the one Review draws.
         splitter = QSplitter(Qt.Horizontal, self)
-        splitter.setHandleWidth(5)
         outer.addWidget(splitter, 1)
 
         # Left — scrollable form

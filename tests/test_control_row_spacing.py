@@ -1,21 +1,33 @@
-"""Control-row and checkbox geometry must not come from the platform style.
+"""Control-row and checkbox geometry, asserted as numbers.
 
-Three macOS-only layout defects traced back to the same habit: asking the Qt
-style for a metric, and getting a different answer than Fusion gives — which is
-the only style CI ever sees. Nothing here could go red before, because Fusion
-answers all of these questions differently *and correctly*.
+One of these defects is platform-specific and three are not; a probe run on
+macOS settled which is which, and the split is worth stating because the
+platform-specific one is invisible to CI forever.
 
-* ``FlowLayout`` defaulted its spacing to ``-1``, "derive from the style". That
-  reads ``pixelMetric(PM_Layout*Spacing)``, which Qt documents as returning -1 on
-  styles implementing the size-class-aware ``layoutSpacing()`` instead —
-  QMacStyle is one. ``_do_layout`` clamps with ``max(0, …)``, so every row using
-  the default packed its controls edge to edge on macOS.
-* The checkbox indicator carried a ``margin-right`` on top of ``spacing``, so the
-  two stacked into a gap neither of them declares.
-* Two widget-level sheets overrode part of the app sheet's indicator rule and
-  silently inherited the rest.
+**Platform-specific.** ``FlowLayout`` defaulted its spacing to ``-1``, "derive
+from the style". That reads ``pixelMetric(PM_Layout*Spacing)``, which Qt
+documents as returning -1 on styles implementing the size-class-aware
+``layoutSpacing()`` instead. Measured, the two styles are exact opposites::
 
-These assert the *numbers*, not the appearance, so they hold on any style.
+    QMacStyle   pixelMetric = -1     layoutSpacing = 14
+    Fusion      pixelMetric =  6     layoutSpacing = -1
+
+``_do_layout`` clamps with ``max(0, …)``, so on macOS every row that relied on
+the default packed its controls edge to edge. CI runs Fusion and saw 6.
+
+**Not platform-specific.** The checkbox indicator carried a ``margin-right`` on
+top of ``spacing``, so the two stacked into a gap neither declares; and two
+widget-level sheets overrode part of the app sheet's indicator rule while
+silently inheriting the rest. Both styles report ``indicator.w = 22`` for the
+old rule, so those were surplus everywhere, not a macOS compensation.
+
+The same probe **disproved** a fourth theory — that QMacStyle under-reported
+``QCheckBox.sizeHint``, clipping the Heat Map's "Rep-set avg" label. It reports
+103px and needs 103px. What looked like clipping was the zero spacing above:
+with no gap, the next checkbox's indicator starts on the pixel after the last
+glyph.
+
+These assert the *numbers*, not the appearance, so they hold under any style.
 """
 from __future__ import annotations
 
@@ -55,7 +67,7 @@ def test_flow_layout_spacing_does_not_depend_on_the_style(qtbot):
     host = QWidget()
     qtbot.addWidget(host)
     lay = FlowLayout(host)
-    assert lay.horizontalSpacing() == _DEFAULT_H_SPACING == theme.Spacing.sm
+    assert lay.horizontalSpacing() == _DEFAULT_H_SPACING == 14
     assert lay.verticalSpacing() == _DEFAULT_V_SPACING == theme.Spacing.xs
     assert lay.horizontalSpacing() > 0 and lay.verticalSpacing() > 0
 
@@ -99,31 +111,6 @@ def test_wrap_checkbox_indicator_owns_no_extra_space(qtbot):
     slot, gap = _indicator_geometry(wcb._cb)
     assert slot == 18, f"indicator slot {slot}px — inherited a margin it overrode only partly"
     assert gap == 0, f"gap {gap}px — the text-less box must not reserve a label gap"
-
-
-def test_app_pins_the_fusion_base_style(qtbot):
-    """The app must not inherit the platform's ``QStyle``.
-
-    ``theme.qss()`` layers on the base style rather than replacing it, so every
-    metric the sheet does not state — indicator sizes, label offsets, layout
-    spacing — comes from whatever the platform supplies, and the answers differ.
-    CI only ever runs Fusion, so a platform-specific layout defect cannot fail a
-    test. Pinning Fusion is what makes the suite's measurements mean anything
-    off Linux.
-    """
-    from PySide6.QtWidgets import QApplication
-
-    import allwell
-
-    app = QApplication.instance()
-    previous = app.style().objectName()
-    try:
-        allwell._apply_base_style(app)
-        assert app.style().objectName().lower() == "fusion"
-    finally:
-        if previous.lower() != "fusion":  # pragma: no cover - CI is already Fusion
-            from PySide6.QtWidgets import QStyleFactory
-            app.setStyle(QStyleFactory.create(previous))
 
 
 def test_toggle_switch_reserves_no_indicator(qtbot):

@@ -112,19 +112,29 @@ def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
     return box
 
 
-# Control-row spacing, from the design-system scale (theme.Spacing) rather than
-# from the platform style.
+# Control-row spacing. Fixed values, deliberately not derived from the style.
 #
-# It used to default to -1, "derive from the style", as in the Qt example. That
+# The default used to be -1, "derive from the style", as in the Qt example. That
 # asks ``QStyle::pixelMetric(PM_LayoutHorizontalSpacing)``, which Qt documents as
 # returning -1 on styles that implement the size-class-aware
-# ``QStyle::layoutSpacing()`` instead — QMacStyle is one of them. ``_do_layout``
-# then clamps with ``max(0, …)``, so on macOS every row that relied on the
-# default packed its controls edge to edge with no gap at all, while Fusion
-# (Linux, and therefore CI) answered 6 and looked fine. The app now pins Fusion
-# everywhere (``allwell._apply_base_style``), but a layout primitive should not
-# depend on that holding.
-_DEFAULT_H_SPACING = theme.Spacing.sm   # 8
+# ``QStyle::layoutSpacing()`` instead. Measured, the two styles are exact
+# opposites — QMacStyle answers ``layoutSpacing`` and returns -1 from
+# ``pixelMetric``; Fusion does the reverse::
+#
+#     QMacStyle   pixelMetric = -1     layoutSpacing = 14
+#     Fusion      pixelMetric =  6     layoutSpacing = -1
+#
+# ``_do_layout`` clamps with ``max(0, …)``, so on macOS every row that relied on
+# the default packed its controls edge to edge, while Fusion (Linux, and
+# therefore CI) answered 6 and looked fine.
+#
+# 14 is not on the ``theme.Spacing`` scale (4 / 8 / 12 / 16) and is not meant to
+# be: it is the number QMacStyle reports for a button row, adopted for every
+# platform because it is the one measured against a real control row rather than
+# chosen. Don't "correct" it onto the token scale. The vertical default stays on
+# the scale — wrapped rows want to sit closer than side-by-side controls, and 4
+# is what every explicit call site used before this became the default.
+_DEFAULT_H_SPACING = 14
 _DEFAULT_V_SPACING = theme.Spacing.xs   # 4
 
 

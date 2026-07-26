@@ -191,6 +191,10 @@ def _root_values(ctx, dim: str) -> list[str]:
 
 
 def _default_value(ctx, dim: str) -> str:
+    """The value a Fixed root is pinned to when nothing has been chosen — the
+    first of its options. For FOV that is the first FOV in the run, which is what
+    the fresh-tab default pins so the opening grid shows one field of view rather
+    than multiplying by all of them."""
     vals = _root_values(ctx, dim)
     return vals[0] if vals else ""
 

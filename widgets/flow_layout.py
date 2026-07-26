@@ -16,6 +16,7 @@ No All-Well coupling — a plain reusable widget (belongs in ``widgets/``).
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QMargins, QObject, QPoint, QRect, QSize, Qt
+import theme
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLayout, QSizePolicy, QStyle, QWidget,
 )
@@ -111,9 +112,8 @@ def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
     return box
 
 
-# The control-row spacing every explicit caller in the app already passes
-# (``FlowLayout(row, h_spacing=6, v_spacing=4)``). It is the default here so the
-# rows that *don't* pass it look the same as the ones that do.
+# Control-row spacing, from the design-system scale (theme.Spacing) rather than
+# from the platform style.
 #
 # It used to default to -1, "derive from the style", as in the Qt example. That
 # asks ``QStyle::pixelMetric(PM_LayoutHorizontalSpacing)``, which Qt documents as
@@ -121,9 +121,11 @@ def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
 # ``QStyle::layoutSpacing()`` instead — QMacStyle is one of them. ``_do_layout``
 # then clamps with ``max(0, …)``, so on macOS every row that relied on the
 # default packed its controls edge to edge with no gap at all, while Fusion
-# (Linux, and therefore CI) answered 6 and looked fine.
-_DEFAULT_H_SPACING = 6
-_DEFAULT_V_SPACING = 4
+# (Linux, and therefore CI) answered 6 and looked fine. The app now pins Fusion
+# everywhere (``allwell._apply_base_style``), but a layout primitive should not
+# depend on that holding.
+_DEFAULT_H_SPACING = theme.Spacing.sm   # 8
+_DEFAULT_V_SPACING = theme.Spacing.xs   # 4
 
 
 class FlowLayout(QLayout):

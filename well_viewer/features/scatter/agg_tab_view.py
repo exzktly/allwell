@@ -45,7 +45,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     ctrl.setObjectName("TabCtrl")
     # FlowLayout so the control row wraps rather than clipping when Split View
     # narrows the pane (see cells_tab_view for the same treatment).
-    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
     # Per-axis channel + property selectors mirror the cells scatter tab.

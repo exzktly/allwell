@@ -1277,6 +1277,38 @@ class AllWellApp(QMainWindow):
                 swallowed()
         super().closeEvent(event)
 
+def _apply_base_style(app) -> None:
+    """Pin the base widget style to Fusion on every platform.
+
+    Everything All-Well draws is styled by ``theme.qss()``, but a stylesheet does
+    not replace the underlying ``QStyle`` — it layers on one. Qt resolves the
+    metrics the sheet does not state (indicator sizes, label offsets, layout
+    spacing) from whatever style the platform supplies, so the same QSS laid out
+    differently per platform:
+
+    * ``QStyle::pixelMetric(PM_Layout*Spacing)`` answers on Fusion and returns -1
+      on QMacStyle, which implements the size-class-aware ``layoutSpacing()``
+      instead — control rows deriving their spacing from it collapsed to no gap
+      at all on macOS.
+    * ``QCheckBox`` label offsets and size hints come from the base style, so a
+      stylesheet-declared indicator width and the space actually reserved for it
+      agreed on Fusion and not on macOS, clipping labels mid-word.
+
+    CI only ever runs Fusion, so none of that could be caught by a test. Pinning
+    the style makes every platform lay out the way the stylesheet was written and
+    the test suite measures. It also affects the handful of controls the QSS
+    does not style (scrollbar arrows, focus rings, native menu chrome), which is
+    the deliberate trade: one consistent look everywhere over a per-platform one
+    that only one platform is verified against.
+    """
+    from PySide6.QtWidgets import QStyleFactory
+    style = QStyleFactory.create("Fusion")
+    if style is not None:
+        app.setStyle(style)
+    else:  # pragma: no cover - Fusion ships with every Qt build
+        _boot_diag.boot("Fusion style unavailable; keeping the platform default")
+
+
 def _install_combobox_popup_widener() -> None:
     """Patch QComboBox.showPopup so the popup view sizes itself to the
     widest item text instead of inheriting the field's width — dropdown
@@ -1354,6 +1386,7 @@ def main() -> None:
     _boot_diag.boot("creating QApplication (loads Qt platform plugin) …")
     app = QApplication.instance() or QApplication(sys.argv)
     _boot_diag.boot("QApplication created OK")
+    _apply_base_style(app)
     _install_combobox_popup_widener()
     # Collapse both font-family tokens to single resolvable names so Qt's
     # QSS parser doesn't walk alias tables and warn at startup

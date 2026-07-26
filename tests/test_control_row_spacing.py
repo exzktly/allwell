@@ -55,8 +55,8 @@ def test_flow_layout_spacing_does_not_depend_on_the_style(qtbot):
     host = QWidget()
     qtbot.addWidget(host)
     lay = FlowLayout(host)
-    assert lay.horizontalSpacing() == _DEFAULT_H_SPACING
-    assert lay.verticalSpacing() == _DEFAULT_V_SPACING
+    assert lay.horizontalSpacing() == _DEFAULT_H_SPACING == theme.Spacing.sm
+    assert lay.verticalSpacing() == _DEFAULT_V_SPACING == theme.Spacing.xs
     assert lay.horizontalSpacing() > 0 and lay.verticalSpacing() > 0
 
 
@@ -99,6 +99,31 @@ def test_wrap_checkbox_indicator_owns_no_extra_space(qtbot):
     slot, gap = _indicator_geometry(wcb._cb)
     assert slot == 18, f"indicator slot {slot}px — inherited a margin it overrode only partly"
     assert gap == 0, f"gap {gap}px — the text-less box must not reserve a label gap"
+
+
+def test_app_pins_the_fusion_base_style(qtbot):
+    """The app must not inherit the platform's ``QStyle``.
+
+    ``theme.qss()`` layers on the base style rather than replacing it, so every
+    metric the sheet does not state — indicator sizes, label offsets, layout
+    spacing — comes from whatever the platform supplies, and the answers differ.
+    CI only ever runs Fusion, so a platform-specific layout defect cannot fail a
+    test. Pinning Fusion is what makes the suite's measurements mean anything
+    off Linux.
+    """
+    from PySide6.QtWidgets import QApplication
+
+    import allwell
+
+    app = QApplication.instance()
+    previous = app.style().objectName()
+    try:
+        allwell._apply_base_style(app)
+        assert app.style().objectName().lower() == "fusion"
+    finally:
+        if previous.lower() != "fusion":  # pragma: no cover - CI is already Fusion
+            from PySide6.QtWidgets import QStyleFactory
+            app.setStyle(QStyleFactory.create(previous))
 
 
 def test_toggle_switch_reserves_no_indicator(qtbot):

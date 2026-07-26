@@ -52,7 +52,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # FlowLayout (not QHBoxLayout) so this control row wraps onto extra lines
     # instead of clipping its right-most controls when Split View halves the
     # pane width — nothing becomes unreachable.
-    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
     # Per-axis channel + property selectors. The scatter tab overrides

@@ -56,7 +56,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     ctrl.setObjectName("TabCtrl")
     # FlowLayout so this control row wraps rather than clipping when Split View
     # narrows the pane. Secondary display toggles are grouped behind "Display ▾".
-    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
 
     cl.addWidget(QLabel("Channels:", ctrl))

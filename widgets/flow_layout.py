@@ -16,6 +16,7 @@ No All-Well coupling — a plain reusable widget (belongs in ``widgets/``).
 from __future__ import annotations
 
 from PySide6.QtCore import QEvent, QMargins, QObject, QPoint, QRect, QSize, Qt
+import theme
 from PySide6.QtWidgets import (
     QHBoxLayout, QLabel, QLayout, QSizePolicy, QStyle, QWidget,
 )
@@ -111,16 +112,45 @@ def flow_group(parent: QWidget | None, *items, spacing: int = 4) -> QWidget:
     return box
 
 
+# Control-row spacing. Fixed values, deliberately not derived from the style.
+#
+# The default used to be -1, "derive from the style", as in the Qt example. That
+# asks ``QStyle::pixelMetric(PM_LayoutHorizontalSpacing)``, which Qt documents as
+# returning -1 on styles that implement the size-class-aware
+# ``QStyle::layoutSpacing()`` instead. Measured, the two styles are exact
+# opposites — QMacStyle answers ``layoutSpacing`` and returns -1 from
+# ``pixelMetric``; Fusion does the reverse::
+#
+#     QMacStyle   pixelMetric = -1     layoutSpacing = 14
+#     Fusion      pixelMetric =  6     layoutSpacing = -1
+#
+# ``_do_layout`` clamps with ``max(0, …)``, so on macOS every row that relied on
+# the default packed its controls edge to edge, while Fusion (Linux, and
+# therefore CI) answered 6 and looked fine.
+#
+# 14 is not on the ``theme.Spacing`` scale (4 / 8 / 12 / 16) and is not meant to
+# be: it is the number QMacStyle reports for a button row, adopted for every
+# platform because it is the one measured against a real control row rather than
+# chosen. Don't "correct" it onto the token scale. The vertical default stays on
+# the scale — wrapped rows want to sit closer than side-by-side controls, and 4
+# is what every explicit call site used before this became the default.
+_DEFAULT_H_SPACING = 14
+_DEFAULT_V_SPACING = theme.Spacing.xs   # 4
+
+
 class FlowLayout(QLayout):
     """Left-to-right layout that wraps to the next line on overflow.
 
-    ``h_spacing`` / ``v_spacing`` default to ``-1`` (derive from the style /
-    parent spacing), matching the Qt example. Pass explicit pixel values for a
-    tighter or looser grid.
+    ``h_spacing`` / ``v_spacing`` default to the app's control-row spacing. Pass
+    explicit pixel values for a tighter or looser grid, or ``-1`` to derive them
+    from the style (see :meth:`_smart_spacing` — only do that if a platform-native
+    metric is genuinely what you want).
     """
 
     def __init__(self, parent: QWidget | None = None,
-                 margin: int = 0, h_spacing: int = -1, v_spacing: int = -1) -> None:
+                 margin: int = 0,
+                 h_spacing: int = _DEFAULT_H_SPACING,
+                 v_spacing: int = _DEFAULT_V_SPACING) -> None:
         super().__init__(parent)
         self._items: list = []
         self._h_space = h_spacing
@@ -203,18 +233,34 @@ class FlowLayout(QLayout):
         return self._smart_spacing(QSizePolicy.PushButton, horizontal=False)
 
     def _smart_spacing(self, ctrl_type, *, horizontal: bool) -> int:
+        """Spacing derived from the platform style. Only reached when a caller
+        passed ``-1`` explicitly.
+
+        Two style APIs answer this and no style implements both: Fusion answers
+        ``pixelMetric(PM_Layout*Spacing)`` and returns -1 from ``layoutSpacing``;
+        QMacStyle does the reverse, because its spacing depends on the control's
+        size class. Ask each in turn rather than trusting either, or a whole
+        platform ends up with no spacing at all.
+        """
         parent = self.parent()
         if parent is None:
             return -1
-        if parent.isWidgetType():
-            style = parent.style()
-            # PySide6 exposes PixelMetric as a scoped enum on the QStyle class,
-            # not as attributes on the style *instance* — ``style.PM_*`` raises
-            # AttributeError. (Only reached when no explicit spacing was passed.)
-            metric = (QStyle.PixelMetric.PM_LayoutHorizontalSpacing if horizontal
-                      else QStyle.PixelMetric.PM_LayoutVerticalSpacing)
-            return style.pixelMetric(metric, None, parent)
-        return parent.spacing()
+        if not parent.isWidgetType():
+            return parent.spacing()
+        style = parent.style()
+        # PySide6 exposes PixelMetric as a scoped enum on the QStyle class,
+        # not as attributes on the style *instance* — ``style.PM_*`` raises
+        # AttributeError.
+        metric = (QStyle.PixelMetric.PM_LayoutHorizontalSpacing if horizontal
+                  else QStyle.PixelMetric.PM_LayoutVerticalSpacing)
+        space = style.pixelMetric(metric, None, parent)
+        if space >= 0:
+            return space
+        orientation = Qt.Horizontal if horizontal else Qt.Vertical
+        space = style.layoutSpacing(ctrl_type, ctrl_type, orientation, None, parent)
+        if space >= 0:
+            return space
+        return _DEFAULT_H_SPACING if horizontal else _DEFAULT_V_SPACING
 
     # ── geometry ────────────────────────────────────────────────────────────
     def expandingDirections(self):

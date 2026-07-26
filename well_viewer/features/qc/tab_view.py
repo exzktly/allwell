@@ -50,7 +50,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     Segmentation refresh through their ctx-native entry points.
     """
     row = QWidget(parent)
-    hl = FlowLayout(row, h_spacing=6, v_spacing=4)
+    hl = FlowLayout(row)
     hl.setContentsMargins(8, 2, 8, 2)
 
     params = get_qc_params(ctx)

@@ -326,7 +326,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # FlowLayout so the strip wraps instead of clipping the Export/Zoom cluster
     # when Split View narrows the pane.
     action_row = QWidget(inner)
-    tr = FlowLayout(action_row, h_spacing=6, v_spacing=4)
+    tr = FlowLayout(action_row)
     tr.setContentsMargins(0, 0, 0, 0)
 
     def _generate(_=None) -> None:

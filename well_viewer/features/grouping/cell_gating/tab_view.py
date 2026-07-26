@@ -311,7 +311,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_row = QWidget(opt_panel)
     # FlowLayout + flow_group: each label stays glued to its control, and the row
     # wraps onto extra lines at narrow width instead of clipping controls off-edge.
-    opt_row_layout = FlowLayout(opt_row, h_spacing=6, v_spacing=4)
+    opt_row_layout = FlowLayout(opt_row)
     opt_row_layout.setContentsMargins(0, 0, 0, 0)
     opt_channel = reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
     opt_channel.setMinimumWidth(140)
@@ -368,7 +368,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # they live only here and are read at optimise time, so configuring them
     # never disturbs the Bar / Line plots.
     fc_row = QWidget(opt_panel)
-    fc_row_layout = FlowLayout(fc_row, h_spacing=6, v_spacing=4)
+    fc_row_layout = FlowLayout(fc_row)
     fc_row_layout.setContentsMargins(0, 0, 0, 0)
     fc_control = reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
     fc_control.setMinimumWidth(120)

@@ -38,8 +38,35 @@ from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallowed
 
 
+# ``process_microscopy`` logs as "%(asctime)s  %(levelname)-8s  %(message)s"
+# (workers add "[worker N]" after the level), so most lines state their own
+# severity and there is nothing to infer. Anchored at the start so a level word
+# appearing inside a *message* can't be mistaken for the line's own level.
+_RE_LOG_LEVEL = re.compile(
+    r"^\S+\s+\S+\s+(DEBUG|INFO|WARNING|ERROR|CRITICAL)\b")
+
+_LEVEL_TO_TAG = {
+    "DEBUG": "INFO", "INFO": "INFO", "WARNING": "WARNING",
+    "ERROR": "ERROR", "CRITICAL": "ERROR",
+}
+
+
 def classify_log_line(line: str) -> str:
-    """Return the severity tag for a single pipeline stdout line."""
+    """Return the severity tag for a single pipeline stdout line.
+
+    Trust the line's own ``levelname`` when it has one. The heuristics below are
+    for the lines that don't: bare subprocess stderr, Python tracebacks, and the
+    zipper's ``[zipper]`` output.
+
+    Inferring severity from keywords is unreliable in the other direction too —
+    the end-of-run summary is logged at INFO and reads "wells failed (no output)
+    : 0 … FOV-groups failed : 0", so a substring test for "failed" painted a
+    clean run's summary red. Those are column labels, not a verdict.
+    """
+    m = _RE_LOG_LEVEL.match(line)
+    if m:
+        return _LEVEL_TO_TAG[m.group(1)]
+
     ll = line.lower()
     # "failed" catches the per-FOV-group "FAILED <fov> …" line and the run
     # failure summaries — otherwise a failure whose message lacks the substring

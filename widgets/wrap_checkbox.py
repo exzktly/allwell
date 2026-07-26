@@ -31,9 +31,14 @@ class WrapCheckBox(QWidget):
         self._cb.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         # A text-less checkbox still reserves the indicator↔label ``spacing`` gap,
         # leaving dead space between the box and this composite's own wrapped
-        # label. Zero it so the label sits right after the indicator (the 6px gap
-        # below is the only separation).
-        self._cb.setStyleSheet("QCheckBox { spacing: 0px; }")
+        # label. Zero both that and any inherited indicator margin, so the 6px
+        # layout gap below is genuinely the only separation — the app sheet
+        # styles every ``QCheckBox::indicator``, and a widget sheet overrides
+        # only the properties it names.
+        self._cb.setStyleSheet(
+            "QCheckBox { spacing: 0px; }"
+            "QCheckBox::indicator { margin: 0px; }"
+        )
         lay.addWidget(self._cb, 0, Qt.AlignTop)
         self._lbl = QLabel(text, self)
         self._lbl.setWordWrap(True)

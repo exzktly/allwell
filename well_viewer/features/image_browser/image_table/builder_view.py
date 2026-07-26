@@ -191,6 +191,10 @@ def _root_values(ctx, dim: str) -> list[str]:
 
 
 def _default_value(ctx, dim: str) -> str:
+    """The value a Fixed root is pinned to when nothing has been chosen — the
+    first of its options. For FOV that is the first FOV in the run, which is what
+    the fresh-tab default pins so the opening grid shows one field of view rather
+    than multiplying by all of them."""
     vals = _root_values(ctx, dim)
     return vals[0] if vals else ""
 
@@ -205,15 +209,27 @@ def builder_spec(ctx):
 
 
 def _default_spec(ctx):
-    """Reconstruct from state if it already describes a table, else the classic
-    Channels-down-rows × Timepoints-across default."""
+    """Reconstruct from state if it already describes a table, else the
+    fresh-tab default: **wells down the rows with each well's channels nested
+    under it, timepoints across the columns, FOV pinned**.
+
+    Rows are ``well`` with the channels nested inside (``Axis.root`` outer,
+    ``Axis.channels`` inner) rather than channels alone, so opening the tab
+    shows the plate you loaded rather than a single well's channels.
+
+    Only the **last** timepoint is selected. The column axis is timepoint, so
+    selecting all of them would multiply the grid by the length of the run — a
+    96-well plate with 3 channels and 12 timepoints is 288 rows × 12 columns of
+    decoded images before the user has touched anything. The last timepoint is
+    the one worth seeing first, and the picker adds the rest.
+    """
     st = ctx.state.image_table
     if st.row_dims or st.col_dims:
         return spec_from_state(st)
     chans = _base_channels(ctx)
     spec = spec_from_state(st)  # empty axes + current filters
     if chans:
-        spec.rows = Axis(root=None, channels=[
+        spec.rows = Axis(root="well", channels=[
             ChannelSpec(c, "corrected", colormap=_default_colormap_for(ctx, c))
             for c in chans])
         if _timepoint_options(ctx):

@@ -80,7 +80,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # FlowLayout so this dense control row wraps onto extra lines instead of
     # clipping its right-most controls (zoom / stage selector) when Split View
     # halves the pane width — the reported "options collapsed and not visible".
-    cl = FlowLayout(ctrl, h_spacing=6, v_spacing=4)
+    cl = FlowLayout(ctrl)
     cl.setContentsMargins(10, 6, 10, 6)
     cl.addWidget(reg.register("_review_image_well_lbl", QLabel("No well selected", ctrl)))
 

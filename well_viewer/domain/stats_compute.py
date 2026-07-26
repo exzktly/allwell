@@ -254,25 +254,48 @@ def _thresh_on_col(ctx) -> str | None:
 
 
 def _gate_cache_sig(ctx):
-    """Signature of the scatter-gate on-population state for the stats cache.
+    """Signature of the scatter-gate state for the stats cache — both layers.
 
-    ``threshold`` alone does not capture gate-based fraction-on: when scatter-gate
-    thresholding is active, the on-population is *gate membership*, so a gate
-    resize/rename changes the computed fraction/n without changing ``threshold``.
-    Folding the active gates' full definition into the cache key stops a gate
-    edit from returning a stale cached statistic (audit S4). Returns ``None`` in
-    plain threshold mode, leaving the existing keys byte-identical there.
+    Neither layer is captured by the rest of the key:
+
+    * **Thresholding.** ``threshold`` alone does not capture gate-based
+      fraction-on: when scatter-gate thresholding is active the on-population is
+      gate *membership*, so a gate resize/rename changes the computed fraction/n
+      without changing ``threshold`` (audit S4).
+    * **Inclusion.** "Use scatter gates" replaces the per-channel FluorGating
+      floors: the worker sets ``Included=1`` and puts membership in
+      ``Gate_Pass``. The key already folds in ``fluor_gates``, but those values
+      do not move when the checkbox is toggled — so every cached statistic came
+      back unchanged and ticking the box appeared to do nothing, while editing a
+      numeric threshold (which does move ``fluor_gates``) worked. Note the flag
+      matters even with no gates drawn: mode-on-no-gates still bypasses the
+      intensity floors, so it is not the same population as mode-off.
+
+    Returns ``None`` when neither layer is active, leaving the keys of a plain
+    threshold-mode session byte-identical.
     """
-    if _thresh_on_col(ctx) is None:
+    thresh_col = _thresh_on_col(ctx)
+    include_by_gate = bool(ctx.state.cell_gating.use_scatter_gates)
+    if thresh_col is None and not include_by_gate:
         return None
     gates = ctx.state.cell_gating.scatter_gates or []
-    choices = ctx.state.cell_gating.thresh_choices
     try:
         gates_key = json.dumps(gates, sort_keys=True, default=str)
     except (TypeError, ValueError):
         gates_key = repr(gates)
-    choices_key = None if choices is None else tuple(sorted(map(str, choices)))
-    return ("Gate_On", choices_key, gates_key)
+
+    def _choices_key(choices):
+        return None if choices is None else tuple(sorted(map(str, choices)))
+
+    # Leading element stays ``"Gate_On"`` whenever thresholding is active, so a
+    # reader (and the existing test) can tell the layers apart at a glance.
+    return (
+        thresh_col or "Gate_Pass",
+        _choices_key(ctx.state.cell_gating.thresh_choices) if thresh_col else None,
+        include_by_gate,
+        _choices_key(ctx.state.cell_gating.gating_choices) if include_by_gate else None,
+        gates_key,
+    )
 
 
 def well_aggregate_stats(

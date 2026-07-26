@@ -69,6 +69,7 @@ from pipeline.incremental_keys import (
     read_done_fov_keys_from_zip,
 )
 from util.aw_safe import swallowed
+from util.zip_write import atomic_zip
 
 
 def _scratch_dir() -> Path:
@@ -180,6 +181,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "util/schema.py",
     "util/timepoint.py",
     "util/well_token.py",
+    # Atomic + verified publication of the per-well archives, imported by
+    # process_microscopy and pipeline.io — without it the remote run aborts
+    # before it compresses its first well.
+    "util/zip_write.py",
     # The Qt-free ``pipeline`` package: analysis-domain modules (background math,
     # auto-threshold, flat-field, shape-feature catalog) + the Cellpose/StarDist
     # segmenters and atomic writers. process_microscopy re-imports it at module
@@ -755,12 +760,11 @@ def _required_tokens(
 def _zip_well_folder(folder: Path, out_zip: Path) -> int:
     """Atomically zip the TIFs in ``folder`` to ``out_zip``.
 
-    Uses the same ``__aw_tmp_*.pidNNN`` rename pattern as
-    ``process_microscopy.compress_folder_images_to_zip_and_remove`` so
-    a future inspection can tell a partial v5.2.21 mixed-mode resume
-    apart from a partial local-pipeline compression. Returns the
-    number of TIFs zipped (0 → folder had no images, caller should
-    skip).
+    Goes through :func:`util.zip_write.atomic_zip`, so it uses the same
+    ``__aw_tmp_*.pidNNN`` staging name as
+    ``process_microscopy.compress_folder_images_to_zip_and_remove`` and
+    publishes only a verified archive. Returns the number of TIFs zipped
+    (0 → folder had no images, caller should skip).
     """
     tifs = sorted(
         p for p in folder.iterdir()
@@ -768,19 +772,9 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
     )
     if not tifs:
         return 0
-    tmp = out_zip.with_name(f"__aw_tmp_{out_zip.name}.pid{os.getpid()}")
-    try:
-        with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for t in tifs:
-                zf.write(t, arcname=t.name)
-        tmp.replace(out_zip)
-    except BaseException:
-        try:
-            if tmp.exists():
-                tmp.unlink()
-        except OSError:
-            pass
-        raise
+    with atomic_zip(out_zip) as zf:
+        for t in tifs:
+            zf.write(t, arcname=t.name)
     return len(tifs)
 
 
@@ -1005,18 +999,14 @@ def _filter_channels_in_staging(
         # Re-write the zip with only the kept members.
         t0 = time.monotonic()
         size_before = wz.stat().st_size
-        tmp = wz.with_suffix(".zip.tmp")
-        with zipfile.ZipFile(wz, "r") as src, zipfile.ZipFile(
-            tmp, "w", compression=zipfile.ZIP_DEFLATED
-        ) as dst:
-            for member, keep in zip(members, keep_mask):
-                if keep:
-                    dst.writestr(src.getinfo(member), src.read(member))
-        # Read the size from the temp before replace — one stat
-        # syscall instead of two, and avoids any race where another
-        # process might mutate `wz` between rename and stat.
-        size_after = tmp.stat().st_size
-        tmp.replace(wz)
+        # The read handle is closed inside the atomic_zip block: publication
+        # renames over `wz`, which Windows refuses while a handle is open.
+        with atomic_zip(wz) as dst:
+            with zipfile.ZipFile(wz, "r") as src:
+                for member, keep in zip(members, keep_mask):
+                    if keep:
+                        dst.writestr(src.getinfo(member), src.read(member))
+        size_after = wz.stat().st_size
         rewrote += 1
         if log_fn:
             mb_in = size_before / (1024 * 1024)
@@ -1131,13 +1121,11 @@ def _filter_new_fovs_in_staging(
         if len(keep) == len(members):
             survivors.append(wz)  # nothing of this well's input is done yet
             continue
-        tmp = wz.with_suffix(".zip.tmp")
-        with zipfile.ZipFile(wz, "r") as src, zipfile.ZipFile(
-            tmp, "w", compression=zipfile.ZIP_DEFLATED
-        ) as dst:
-            for m in keep:
-                dst.writestr(src.getinfo(m), src.read(m))
-        tmp.replace(wz)
+        # Read handle closed before publication — see the filter pass above.
+        with atomic_zip(wz) as dst:
+            with zipfile.ZipFile(wz, "r") as src:
+                for m in keep:
+                    dst.writestr(src.getinfo(m), src.read(m))
         survivors.append(wz)
         if log_fn:
             log_fn(

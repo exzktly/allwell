@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 from collections.abc import Callable
 from util.aw_safe import swallowed
+from util.zip_write import atomic_zip
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
@@ -359,23 +360,13 @@ def append_loose_images_to_zips(
         if not new_files:
             continue
 
-        tmp = target.with_name(f"__aw_tmp_{well}.zip.pid{os.getpid()}")
-        try:
-            with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                if target.exists():
-                    with zipfile.ZipFile(target, "r") as src:
-                        for name in src.namelist():
-                            zf.writestr(src.getinfo(name), src.read(name))
-                for f in new_files:
-                    zf.write(f, arcname=f.name)
-            os.replace(str(tmp), str(target))
-        except BaseException:
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-            raise
+        with atomic_zip(target) as zf:
+            if target.exists():
+                with zipfile.ZipFile(target, "r") as src:
+                    for name in src.namelist():
+                        zf.writestr(src.getinfo(name), src.read(name))
+            for f in new_files:
+                zf.write(f, arcname=f.name)
 
         created = "created" if not existing else "updated"
         # Durable in the zip now — remove the loose sources.
@@ -571,8 +562,10 @@ def _consolidate_mixed_to_zips(
     folder-only wells would be silently dropped. This zips each well folder that
     has no matching zip yet (atomic tmp→rename) and removes the now-redundant
     folder, mirroring the remote ``_stage_mixed_mode`` behaviour. Folders for
-    wells that already have a zip are left untouched (the zip wins). No-op unless
-    the dir is genuinely mixed. Returns True iff it zipped at least one folder.
+    wells that already have a zip are left untouched (the zip wins), as are
+    folders holding no TIFs at all — packing one would publish a member-less
+    ``<WELL>.zip``. No-op unless the dir is genuinely mixed. Returns True iff it
+    zipped at least one folder.
     """
     from util.well_token import canonical_well_label
 
@@ -602,29 +595,32 @@ def _consolidate_mixed_to_zips(
             f"{len(leftover)} bare well folder(s)) — zipping the leftover "
             f"folder(s) so every well is processed.\n"
         )
+    zipped_any = False
     for well, well_dir in sorted(leftover.items()):
         target = folder / f"{well}.zip"
         tifs = sorted(
             p for p in well_dir.iterdir()
             if p.is_file() and p.suffix.lower() in (".tif", ".tiff")
         )
-        tmp = target.with_name(f"__aw_tmp_{well}.zip.pid{os.getpid()}")
-        try:
-            with zipfile.ZipFile(tmp, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for t in tifs:
-                    zf.write(t, arcname=t.name)
-            os.replace(str(tmp), str(target))
-        except BaseException:
-            try:
-                if tmp.exists():
-                    tmp.unlink()
-            except OSError:
-                pass
-            raise
+        if not tifs:
+            # Nothing to pack. Writing the archive anyway would publish a
+            # member-less <WELL>.zip — which macOS refuses to expand and the
+            # pipeline reads as a well whose images vanished — and deleting the
+            # folder would destroy whatever non-TIF content it does hold.
+            if log_fn:
+                log_fn(
+                    f"[zipper]   {well}: folder holds no TIFs — left as-is "
+                    "(no zip written)\n"
+                )
+            continue
+        with atomic_zip(target) as zf:
+            for t in tifs:
+                zf.write(t, arcname=t.name)
         shutil.rmtree(well_dir, ignore_errors=True)
+        zipped_any = True
         if log_fn:
             log_fn(f"[zipper]   {well}: folder → {well}.zip ({len(tifs)} file(s))\n")
-    return True
+    return zipped_any
 
 
 def _group_loose_tifs_in_place(

@@ -1017,18 +1017,36 @@ the delete and the reload.
 Each plot tab pre-allocates a right-side dock via
 `make_plot_with_right_dock(parent)`. The dock is hidden by default and a
 **Properties** button on the tab's controls row toggles it. When opened, the
-dock hosts an `ExportStyleSidebar` (from
-`features/export/sidebar_view.py`) backed by a single per-app dict
-(`app._export_style_prefs`). The widget binds to that dict via
-`_bind_getter_setter`, so changes flow:
+dock hosts an `ExportStyleSidebar` (from `features/export/sidebar_view.py`)
+backed by a `plot_style.figure_prefs(ctx, fig)` view. The widget binds to that
+view via `_bind_getter_setter`, so changes flow:
 
 ```
-Properties widget → app._export_style_prefs
+Properties widget → figure_prefs(ctx, fig)  ── shared style ─→ export_prefs.style_prefs
+                        │                   └─ scoped keys ──→ export_prefs.axis_prefs[fig_key]
                         ↓
                   apply_export_style_prefs(fig, prefs)
                         ↓
                   canvas.draw_idle()
 ```
+
+**What is shared and what is per figure.** Typography, grid, legend and ticks
+are deliberately app-wide: one setting gives a whole figure set a consistent
+look for a paper. Two families are per figure instead, keyed by
+`figure_pref_key` (`line` / `bar` / `scatter_cells` / `scatter_agg` / `heatmap`
+/ `distribution`) — see `plot_style.FIGURE_SCOPED_PREF_KEYS`:
+
+- `AXIS_SCOPED_PREF_KEYS` — limits, log scaling, and the per-axis bucket
+  bookkeeping. A bar chart's y-limit means nothing on the scatter tab, so an
+  unset axis key reads the neutral default and never consults the shared dict.
+- `MARK_SCOPED_PREF_KEYS` — line width/style and marker size/style/edge width.
+  The right mark size is a property of what the plot draws: five aggregate
+  points want an 8pt marker, a 50,000-cell per-cell cloud wants 2pt, and
+  sharing one value meant restyling the Scatter tab's aggregate sub-tab
+  restyled its per-cell sub-tab into illegibility. Unlike the axis keys, an
+  unset mark key falls back to the shared dict before the default — nothing
+  writes those globals now, so that is the value saved before marks became
+  per-figure, and it keeps applying until the user gives a figure its own.
 
 `features/export/style.py` owns the prefs dict + the apply pipeline. Every
 redraw path ends with a call to

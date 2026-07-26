@@ -636,12 +636,15 @@ Every plot tab carries the same action buttons on its controls row:
 - **Properties** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale, layout engine, and an
-  export-profile picker. Axis **limits** and **log-scale** are scoped to the
-  one plot; global publication style (fonts, line/marker, grid, legend) is
-  shared across tabs. On the Bar Plots tab (a Value / Fraction / Events panel
-  stack) axis limits are stored **per panel**, so a limit set on the Fraction or
-  Events panel sticks instead of that panel auto-scaling. Settings persist
-  across redraws.
+  export-profile picker. Axis **limits**, **log-scale** and the **line / marker
+  styling** are scoped to the one plot — the Scatter tab's Per-cell points and
+  Per-well aggregate are separate plots here, so sizing markers for five
+  aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
+  grid, legend and ticks stay shared** across tabs, so one setting still gives
+  a whole figure set a consistent look. On the Bar Plots tab (a Value /
+  Fraction / Events panel stack) axis limits are stored **per panel**, so a
+  limit set on the Fraction or Events panel sticks instead of that panel
+  auto-scaling. Settings persist across redraws.
 
 #### Fold-change normalization
 

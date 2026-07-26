@@ -70,4 +70,12 @@ jobs:
         with:
           name: slow-lane-reports-shard-${{ matrix.shard }}
           path: .pytest-slow-reports/
+          # The report directory is dot-prefixed, so every path under it counts
+          # as hidden and upload-artifact@v4 skips it by default — the run then
+          # logs "No files were found" and uploads nothing, which is exactly the
+          # diagnostic material you need when the nightly comes back red.
+          include-hidden-files: true
+          # A shard that produced no report at all is a real signal (the batch
+          # crashed before writing one), so warn rather than fail the step —
+          # scripts/test_slow.sh has already failed the run for that.
           if-no-files-found: warn

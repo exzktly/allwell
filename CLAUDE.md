@@ -288,6 +288,14 @@ branch already carries a bump that isn't on the default branch yet, edit that
 number instead of adding another. Check with
 `git diff origin/main -- version.py` before bumping.
 
+Re-check that diff immediately before the merge, not just when you first bump.
+Two branches that independently pick the same next number do **not** conflict on
+`version.py` — the two sides are byte-identical, so git merges them silently and
+both pull requests ship under one version. The number being free when you chose
+it is no guarantee it is still free when you land, so a branch that has been open
+while anything else merged needs the value re-read against `origin/main` and
+bumped again if it has been taken.
+
 Bumping means **one line** — `version.py::__version__`, which the title-bar pill
 and the PyInstaller spec read. The docs state no version at all; they write
 `<version>` and point at `version.py`, and

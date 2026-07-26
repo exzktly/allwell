@@ -347,13 +347,33 @@ def _cell_gating_resolve_key(ctx, channel: str) -> str:
     after a ratio switch) or the full ``ratio:`` key — resolve to whichever
     form actually exists in the typed slice so the user's edit is honoured.
 
+    Matching is case-insensitive. The rows are keyed by the normalised channel
+    token (``"gfp"``), but several callers hand over the channel as their
+    dropdown *displays* it — the scatter tab derives ``ch_x_base`` from the
+    upper-cased axis label, for one. A case-sensitive lookup missed, returned
+    the default (0.0 = gate off), and the Cell Gating tab's fluorescence gate
+    silently did nothing on those plots.
+
     A8 teardown: pure ``ctx.state.cell_gating`` (post-R6), so it takes ``ctx``."""
-    known = ctx.state.cell_gating.thresh_frac_on
+    cg = ctx.state.cell_gating
+    # Both maps are keyed alike and are populated together, but either can be
+    # the only one filled in (a gate edited before a threshold, a partial
+    # persisted block), so consult the union rather than one of them. Read them
+    # defensively: this resolver is reached from the review-image and plotting
+    # leaves, whose unit tests stand the slice up as a minimal namespace
+    # carrying only the map that leaf needs.
+    known = list(getattr(cg, "thresh_frac_on", None) or ())
+    known += list(getattr(cg, "fluor_gates", None) or ())
     if channel in known:
         return channel
     candidate = f"ratio:{channel}"
     if candidate in known:
         return candidate
+    folded = str(channel).strip().lower()
+    ratio_folded = f"ratio:{folded}"
+    for key in known:
+        if str(key).strip().lower() in (folded, ratio_folded):
+            return key
     return channel
 
 

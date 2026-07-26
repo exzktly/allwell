@@ -8,9 +8,9 @@
 #   scripts/build_executable.sh
 #
 # The output lands in ./dist/ and carries the app version (and profile name for a
-# feature subset), e.g. ``dist/AllWell-8.8.8.app`` on macOS or the folder bundle
-# ``dist/AllWell-8.8.8/`` on Linux / Windows; a thin build is
-# ``dist/AllWell-8.8.8-thin[.app]``. The name is computed by the .spec from
+# feature subset), e.g. ``dist/AllWell-<version>.app`` on macOS or the folder
+# bundle ``dist/AllWell-<version>/`` on Linux / Windows; a thin build is
+# ``dist/AllWell-<version>-thin[.app]``. The name is computed by the .spec from
 # version.py + ALLWELL_PROFILE (scripts/profile_build.bundle_name).
 #
 # Pass ``--clean`` as the first argument to wipe build/ and dist/ before
@@ -62,15 +62,23 @@ fi
 echo "Running PyInstaller against $SPEC_FILE ..."
 pyinstaller "$SPEC_FILE" --noconfirm --log-level "${ALLWELL_LOG_LEVEL:-INFO}"
 
-# The bundle name is versioned (+ profile), so discover it rather than hardcode.
+# The bundle name is versioned (+ profile), so ask the same helper the spec used
+# (scripts/profile_build.bundle_name) what to look for. Globbing dist/AllWell-*
+# would also match the bundles of earlier versions left behind by a build without
+# --clean, and report one of those as "complete".
+_bundle_name="$(python3 -c "import os, sys; sys.path[:0] = ['.', 'scripts']; from profile_build import bundle_name; from version import __version__; print(bundle_name(__version__, os.environ.get('ALLWELL_PROFILE', '')))" || true)"
+if [[ -z "$_bundle_name" ]]; then
+    echo "ERROR: PyInstaller succeeded but the expected bundle name could not be resolved" >&2
+    echo "       from version.py / scripts/profile_build.py. Check dist/ by hand." >&2
+    exit 1
+fi
+
 # Prefer the macOS .app; fall back to the Linux/Windows onedir folder.
-_app_bundle="$(ls -d dist/AllWell-*.app 2>/dev/null | head -n1 || true)"
-_dir_bundle="$(ls -d dist/AllWell-*/ 2>/dev/null | grep -v '\.app/$' | head -n1 || true)"
-if [[ -n "$_app_bundle" && -d "$_app_bundle" ]]; then
-    echo "✓ Build complete: $_app_bundle"
-elif [[ -n "$_dir_bundle" && -d "$_dir_bundle" ]]; then
-    echo "✓ Build complete: $_dir_bundle"
+if [[ -d "dist/${_bundle_name}.app" ]]; then
+    echo "✓ Build complete: dist/${_bundle_name}.app"
+elif [[ -d "dist/${_bundle_name}" ]]; then
+    echo "✓ Build complete: dist/${_bundle_name}/"
 else
-    echo "ERROR: build finished but no dist/AllWell-*.app or dist/AllWell-*/ bundle was produced." >&2
+    echo "ERROR: build finished but neither dist/${_bundle_name}.app nor dist/${_bundle_name}/ was produced." >&2
     exit 1
 fi

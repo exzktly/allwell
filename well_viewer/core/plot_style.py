@@ -522,7 +522,15 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
             if line_style and line_style != "keep" and not scatter_only:
                 ln.set_linestyle(line_style if line_style != "none" else "None")
             if marker_style and marker_style != "keep":
-                ln.set_marker(marker_style if marker_style != "none" else "None")
+                # ``_aw_marker_is_data``: renderers that encode a variable in the
+                # marker *shape* opt out of the shape override while still
+                # honouring size / open-vs-filled. The aggregate scatter gives
+                # each well its own shape and draws a legend keyed on those
+                # shapes — stamping one pref shape over every point collapsed
+                # them all onto the first well's marker while the legend went on
+                # advertising five different ones.
+                if not getattr(ln, "_aw_marker_is_data", False):
+                    ln.set_marker(marker_style if marker_style != "none" else "None")
                 # Force both edge and face explicitly. Some renderers
                 # (e.g. scatter cells) construct the line with
                 # ``markeredgecolor='none'`` for a clean filled-only

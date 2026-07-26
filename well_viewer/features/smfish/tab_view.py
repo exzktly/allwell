@@ -52,15 +52,16 @@ class _WorkerBridge(QObject):
     The worker's daemon thread has no Qt event loop, so anything that
     touches widgets — including ``QTimer.singleShot(0, …)`` — must
     cross threads via a queued ``Signal``. ``status`` / ``done`` update
-    the status label; ``after_csv`` carries the post-write callback
-    that refreshes the dataset cache, recalculates the threshold, and
-    shows the completion message. Without this signal the after-csv
-    work silently dropped on the floor (timer created in a thread with
-    no event loop never fires) and the UI showed stale counts until
-    the app was restarted.
+    the status label; ``progress`` drives the shared status-row progress
+    bar; ``after_csv`` carries the post-write callback that refreshes the
+    dataset cache, recalculates the threshold, and shows the completion
+    message. Without this signal the after-csv work silently dropped on
+    the floor (timer created in a thread with no event loop never fires)
+    and the UI showed stale counts until the app was restarted.
     """
     status = Signal(str)
     done = Signal(str)
+    progress = Signal(int, int)
     after_csv = Signal(object)
 
 
@@ -112,6 +113,8 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     bridge = _WorkerBridge(parent)
     bridge.status.connect(lambda text: _smfish_set_status(ctx, text))
     bridge.done.connect(lambda text: _smfish_set_status(ctx, text))
+    bridge.done.connect(lambda _text: _smfish_hide_progress(ctx))
+    bridge.progress.connect(lambda done, total: _smfish_step_progress(ctx, done, total))
     # The bridge lives on the GUI thread, so any callable emitted from
     # the worker thread runs here when the signal is delivered. This is
     # the only safe way to schedule widget-touching work from the
@@ -376,6 +379,41 @@ def _smfish_on_channel_changed(ctx) -> None:
 
 def _smfish_set_status(ctx, text: str) -> None:
     ctx.runtime.smfish.status_label.setText(text)
+
+
+# Apply to All reuses the status-row progress bar that a dataset load drives,
+# so the two long operations in the app report themselves the same way. The
+# three helpers below are the only place this tab touches that widget, and all
+# of them run on the GUI thread — the worker reaches them through
+# ``_WorkerBridge.progress`` / ``.done``, never directly.
+
+def _smfish_show_progress(ctx, total: int) -> None:
+    bar = ctx.widgets.get_or_none("_progress_bar")
+    if bar is None:
+        return
+    bar.setRange(0, max(1, total))
+    bar.setValue(0)
+    bar.show()
+
+
+def _smfish_step_progress(ctx, done: int, total: int) -> None:
+    bar = ctx.widgets.get_or_none("_progress_bar")
+    if bar is None:
+        return
+    # The worker reports two passes (count, then CSV write) against the same
+    # well count, so re-assert the range: the second pass restarts at 0 and a
+    # cancelled first pass can leave a stale maximum behind.
+    if bar.maximum() != max(1, total):
+        bar.setRange(0, max(1, total))
+    bar.setValue(done)
+
+
+def _smfish_hide_progress(ctx) -> None:
+    bar = ctx.widgets.get_or_none("_progress_bar")
+    if bar is None:
+        return
+    bar.setValue(0)
+    bar.hide()
 
 
 def _smfish_toggle_overlays(ctx) -> None:
@@ -799,6 +837,11 @@ def _smfish_apply_to_all(ctx) -> None:
         ctx.runtime.smfish.bridge.done.emit(msg)
 
     ctx.runtime.smfish.apply_running = True
+    # Determinate bar over the wells about to be processed, shown before the
+    # worker starts so the click has immediate feedback even if the first well
+    # takes seconds to decode. Hidden again by the ``done`` bridge signal, which
+    # fires on success, cancel, and failure alike.
+    _smfish_show_progress(ctx, len(ctx.runtime.smfish.well_to_zip))
     # well_to_csv is the same map the app's loader populated, so the
     # writer hits the exact files the rest of the app reads from — no
     # silent glob mismatches on datasets whose CSVs are named e.g.
@@ -812,6 +855,10 @@ def _smfish_apply_to_all(ctx) -> None:
         fov_tp_extractor=ctx.runtime.smfish.fov_tp_extractor,
         status_cb=ctx.runtime.smfish.bridge.status.emit,
         done_cb=_done,
+        # Same reason as after_csv below: the worker thread has no event loop,
+        # so the bar can only be touched from the GUI thread the bridge's
+        # queued signal delivers on.
+        progress_cb=ctx.runtime.smfish.bridge.progress.emit,
         # Route the after-csv callback through the bridge so it runs on
         # the GUI thread, not the worker daemon thread. Calling _after_csv
         # directly here would leave QTimer.singleShot + widget access in

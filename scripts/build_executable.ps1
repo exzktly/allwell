@@ -21,9 +21,16 @@
 #   $env:ALLWELL_WITH_TRACKING = '1'
 #   .\scripts\build_executable.ps1 -Clean
 #
+# The other two build-time switches the spec reads from the environment work
+# the same way here as on macOS/Linux:
+#   $env:ALLWELL_PROFILE = 'thin'    # feature subset, from profiles\thin.toml
+#   $env:ALLWELL_THEME   = 'grey'    # baked soft default theme (runtime-overridable)
+#
 # Output:
-#   dist\AllWell\AllWell.exe    (the spec's BUNDLE step is a macOS-only
-#                               no-op off macOS; no AllWell.app is produced).
+#   dist\AllWell-<version>[-<profile>]\AllWell.exe
+# The bundle folder carries the app version from version.py, plus the profile
+# name for a feature subset. The spec's BUNDLE step is a macOS-only no-op off
+# macOS, so no AllWell.app is produced.
 
 param(
     [switch]$Clean
@@ -76,6 +83,12 @@ Write-Host "Running PyInstaller against $specFile ..."
 if ($env:ALLWELL_WITH_TRACKING -and $env:ALLWELL_WITH_TRACKING -ne '0') {
     Write-Host '  (ALLWELL_WITH_TRACKING set - bundling tracking/training stack)'
 }
+if ($env:ALLWELL_PROFILE -and $env:ALLWELL_PROFILE -ne 'full') {
+    Write-Host "  (ALLWELL_PROFILE=$env:ALLWELL_PROFILE - building a feature subset)"
+}
+if ($env:ALLWELL_THEME) {
+    Write-Host "  (ALLWELL_THEME=$env:ALLWELL_THEME - baking as the default theme; runtime-overridable)"
+}
 $logLevel = if ($env:ALLWELL_LOG_LEVEL) { $env:ALLWELL_LOG_LEVEL } else { 'INFO' }
 & $pythonCmd @pyArgs -m PyInstaller $specFile --noconfirm --log-level $logLevel
 if ($LASTEXITCODE -ne 0) {
@@ -83,11 +96,24 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-if (Test-Path 'dist\AllWell\AllWell.exe') {
-    Write-Host 'Build complete: dist\AllWell\AllWell.exe'
-} elseif (Test-Path 'dist\AllWell') {
-    Write-Host 'Build complete: dist\AllWell\'
+# The bundle folder is named AllWell-<version>[-<profile>], so ask the same
+# helper the spec used (scripts\profile_build.py::bundle_name) what to look for
+# rather than hardcoding a path that goes stale on the next version bump. This
+# also names the right folder on an incremental build, where dist\ still holds
+# the bundles of earlier versions.
+$bundleName = & $pythonCmd @pyArgs -c "import os, sys; sys.path[:0] = ['.', 'scripts']; from profile_build import bundle_name; from version import __version__; print(bundle_name(__version__, os.environ.get('ALLWELL_PROFILE', '')))"
+if ($LASTEXITCODE -ne 0 -or -not $bundleName) {
+    Write-Error "PyInstaller succeeded but the expected bundle name could not be resolved from version.py / scripts\profile_build.py. Check dist\ by hand."
+    exit 1
+}
+$bundleDir = Join-Path 'dist' $bundleName.Trim()
+$exePath   = Join-Path $bundleDir 'AllWell.exe'
+
+if (Test-Path $exePath) {
+    Write-Host "Build complete: $exePath"
+} elseif (Test-Path $bundleDir) {
+    Write-Host "Build complete: $bundleDir"
 } else {
-    Write-Error 'build finished but dist\AllWell\ was not produced.'
+    Write-Error "build finished but $bundleDir was not produced."
     exit 1
 }

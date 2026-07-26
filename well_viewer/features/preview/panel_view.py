@@ -113,6 +113,28 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     rt.tp_var = tp_menu
     rt.tp_cb = tp_menu  # alias for review_image_controller
 
+    # ── Zoom — inline on the control row ────────────────────────────────
+    # Zoom is a constant-use control while reviewing segmentation, so it sits on
+    # the strip itself rather than inside a popover. The readout shows the
+    # current factor relative to fit-to-window (100% = Fit) and tracks every
+    # zoom path — buttons, scroll wheel, and the jump-to-nucleus zoom the
+    # Review-CSV double-click performs — because the renderer refreshes it on
+    # each display pass. The FlowLayout wraps this group when the pane is narrow.
+    cl.addWidget(QLabel("Zoom:", ctrl))
+    zoom_out_btn = btn_card(ctrl, "−", lambda: review_image_zoom_step(ctx, -1))
+    zoom_out_btn.setToolTip("Zoom out (scroll wheel works on the image too)")
+    cl.addWidget(zoom_out_btn)
+    zoom_lbl = reg.register("_review_image_zoom_lbl", QLabel("100%", ctrl))
+    zoom_lbl.setObjectName("Muted")
+    zoom_lbl.setToolTip("Current zoom, relative to fit-to-window (100% = Fit)")
+    cl.addWidget(zoom_lbl)
+    zoom_in_btn = btn_card(ctrl, "+", lambda: review_image_zoom_step(ctx, +1))
+    zoom_in_btn.setToolTip("Zoom in (scroll wheel works on the image too)")
+    cl.addWidget(zoom_in_btn)
+    zoom_fit_btn = btn_secondary(ctrl, "Fit", lambda: review_image_zoom_fit(ctx))
+    zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
+    cl.addWidget(zoom_fit_btn)
+
     from PySide6.QtWidgets import QPushButton
     delete_btn = QPushButton("Delete Cell", ctrl)
     rt.delete_btn = delete_btn
@@ -190,15 +212,8 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     stage_lay.addWidget(source_seg)
     view_lay.addWidget(stage_row)
 
-    zoom_row = QWidget(view_panel)
-    zoom_lay = QHBoxLayout(zoom_row)
-    zoom_lay.setContentsMargins(0, 0, 0, 0)
-    zoom_lay.setSpacing(6)
-    zoom_lay.addWidget(QLabel("Zoom:", zoom_row))
-    zoom_lay.addWidget(btn_secondary(zoom_row, "Fit", lambda: review_image_zoom_fit(ctx)))
-    zoom_lay.addWidget(btn_card(zoom_row, "−", lambda: review_image_zoom_step(ctx, -1)))
-    zoom_lay.addWidget(btn_card(zoom_row, "+", lambda: review_image_zoom_step(ctx, +1)))
-    view_lay.addWidget(zoom_row)
+    # Zoom lives inline on the control row above, not here — it is used far too
+    # often to sit two clicks deep inside a popover.
 
     from PySide6.QtWidgets import QPushButton as _QPushButton
     outline_btn = _QPushButton("Outline: On", view_panel)

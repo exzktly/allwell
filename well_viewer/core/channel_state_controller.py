@@ -32,6 +32,7 @@ from well_viewer.data.data_loading import (
     merge_fluor_channels,
     normalize_channel_tokens,
 )
+from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.ratio_models import build_ratio_index, is_ratio_key, ratio_name_from_key
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
@@ -93,13 +94,22 @@ def recalculate_threshold(ctx) -> None:
     # Populate the available shape-feature columns before the dropdown is built
     # so they appear in the "Shape Features" section.
     ctx.state.channel.shape_features = detect_shape_features(sample_df)
-    update_channel_selector(ctx)
 
-    # Update smFISH channels, then let ChannelState re-assert its invariants:
-    # drop a stale smfish_count metric the new channel can't support, and
-    # re-derive the value column (a no-op while a ratio is active).
+    # The smFISH channel set has to be current *before* update_channel_selector
+    # runs: that call ends in refresh_metric_combo_for_channel, which greys out
+    # the "smFISH Count" item for any channel not in this set. Assigning it
+    # afterwards left the item disabled against freshly-detected smFISH columns
+    # until something else re-ran the refresh — so after a pipeline run (or an
+    # Apply Global Threshold, which recalculates through here once the count
+    # columns exist) the user had to change the channel and change it back
+    # before smFISH Count could be picked.
     channel_state = ctx.state.channel
     channel_state.smfish_channels = set(normalize_channel_tokens(detected_smfish))
+    update_channel_selector(ctx)
+
+    # Let ChannelState re-assert its invariants: drop a stale smfish_count
+    # metric the new channel can't support, and re-derive the value column
+    # (a no-op while a ratio is active).
     channel_state.normalize_metric()
     channel_state.sync_val_col()
 
@@ -676,11 +686,14 @@ def populate_metric_combo(
             model = cb.model()
             item = model.item(sm_idx) if model is not None else None
             if item is not None:
-                smf_ok = (
-                    smfish_channel is not None
-                    and smfish_channel in channel.smfish_channels
+                # Case-insensitive by way of the shared helper: the scatter and
+                # stats combos pass the displayed label ("GFP") where this one
+                # passes the normalised token ("gfp"), and a raw ``in`` test
+                # against the normalised set greyed smFISH Count out for good on
+                # the upper-case side.
+                item.setEnabled(
+                    channel_supports_smfish(smfish_channel or "", channel.smfish_channels)
                 )
-                item.setEnabled(smf_ok)
     finally:
         cb.blockSignals(blocked)
 

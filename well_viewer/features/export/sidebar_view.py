@@ -45,6 +45,7 @@ redraw_distribution = _lazy("well_viewer.features.distribution.controller", "red
 clear_gates = _lazy("well_viewer.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
+from well_viewer.data.metric_labels import gate_axes_label
 from well_viewer.core.safe import swallowed
 
 
@@ -1179,6 +1180,20 @@ class ExportStyleSidebar(QWidget):
                         _e.setText(str(cur[_i].get("name") or ""))
             edit.editingFinished.connect(_commit)
             layout.addWidget(edit)
+            # Caption the axes the gate was drawn against. A gate is a rectangle
+            # in one specific (x, y) metric pair — the same box means something
+            # different once the axis combos move — so the list has to say which
+            # pair, not just the gate's name.
+            axes_text = gate_axes_label(gate.get("x_col"), gate.get("y_col"))
+            if axes_text:
+                axes_lbl = QLabel(axes_text)
+                axes_lbl.setObjectName("Muted")
+                axes_lbl.setWordWrap(True)
+                axes_lbl.setToolTip(
+                    "The x and y metrics this gate was drawn on. It filters "
+                    "cells by those columns whatever the plot currently shows."
+                )
+                layout.addWidget(axes_lbl)
 
     def _on_clear_gates(self) -> None:
         clear_gates(self._app._ctx)

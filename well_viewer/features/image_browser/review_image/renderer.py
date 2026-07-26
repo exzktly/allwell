@@ -672,11 +672,27 @@ def render_review_image_display(ctx, *, pan_only: bool = False) -> None:
         vp = canvas.viewport()
         if vp is not None:
             vp.repaint()
+    refresh_review_image_zoom_label(ctx)
     if _debug_flags.review_image_channel_switch_debug_enabled():
         _logger.debug(
             "[RI-CHSW step 7] render_review_image_display done img=%sx%s shown=%sx%s scale=%.4f rebuild=%s",
             iw, ih, nw, nh, scale, rebuild,
         )
+
+
+def refresh_review_image_zoom_label(ctx) -> None:
+    """Sync the Segmentation control row's zoom readout with the view state.
+
+    Called from the one place every zoom path funnels through — the display
+    render — so the buttons, the scroll wheel, and the jump-to-nucleus zoom all
+    keep the readout honest without each having to remember to update it. The
+    label is absent until the Segmentation panel builds, and in profiles that
+    ship no Segmentation tab at all, hence the ``get_or_none``.
+    """
+    lbl = ctx.widgets.get_or_none("_review_image_zoom_lbl")
+    if lbl is None:
+        return
+    lbl.setText(f"{float(ctx.state.review_image.zoom) * 100:.0f}%")
 
 
 def review_image_resolve_lut(ctx, arr) -> Tuple[float, float]:

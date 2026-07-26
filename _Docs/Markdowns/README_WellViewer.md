@@ -237,8 +237,11 @@ To produce a distributable Windows bundle (optional — only if you want
 .\scripts\build_executable.ps1 -Clean
 ```
 
-The output is `dist\AllWell\AllWell.exe`. The spec's macOS `.app`
-`BUNDLE` step is a no-op off macOS, so no `AllWell.app` is produced.
+The output is `dist\AllWell-<version>\AllWell.exe`, where `<version>` is
+the string in `version.py` (a feature-subset build built with
+`$env:ALLWELL_PROFILE` appends the profile name too). The spec's macOS
+`.app` `BUNDLE` step is a no-op off macOS, so no `AllWell.app` is
+produced.
 
 ---
 
@@ -781,7 +784,9 @@ time**, by timepoint.
   (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
   (SEM / SD) on the points.
 - **Gates (definition).** Each gate you draw is auto-named (`Gate 1`, `Gate 2`,
-  …), shown on the plot, and renameable in Properties. Gates become selectable
+  …), shown on the plot, and renameable in Properties — where each entry also
+  states the x and y metrics that gate was drawn on, so a list built up across
+  several axis pairs stays readable. Gates become selectable
   **cell-inclusion** or **fraction-on** filters on the [Cell Gating](#cell-gating)
   tab, on whichever metric axes they were drawn. They are saved with the
   dataset and reload with it.
@@ -1071,7 +1076,12 @@ reviewing and curating individual cells.
   inside it (applied dataset-wide across every FOV/timepoint/channel/well),
   with **Reset** to restore every cell and **Clear crop** to remove just the
   box; click-drag to pan and scroll to zoom (zoom is kept when you switch
-  wells); a **Raw / Flat-field / Corrected** source toggle; LUT + colormap +
+  wells). **Zoom controls** sit on the control row — **−** and **+** step
+  through the zoom levels, **Fit** returns to the whole image, and the readout
+  between them shows the current factor, where 100% is fit-to-window. It tracks
+  every way the view can change, including the scroll wheel and the zoom that
+  happens when you double-click a Review CSV row. Also on the row: a
+  **Raw / Flat-field / Corrected** source toggle; LUT + colormap +
   binary + mask-overlay controls; the QC debris gate. **Hover** a nucleus to
   read its pixel value, cell id, and **mean fluorescence (MFI)** for the current
   channel (the same per-cell readout the Image Table shows).
@@ -1176,6 +1186,11 @@ actually looks like at the single-cell level.
 - **Controls** — the sidebar **criteria** filter (per-metric ranges) plus
   timepoint / FOV pickers; centre-row **channel toggles**, a **boundary**
   toggle, a **page size**, and **Load next** (the gallery fills incrementally).
+- **From scatter gate.** Ticking this sources the gallery from the gate(s) drawn
+  on the Scatter Plot instead of the criteria — so the criteria rows and
+  **+ Add criterion** grey out, with a line saying why. The setting sticks until
+  you untick it, which is worth knowing if you come back later and find the
+  criteria editor inert.
 - **Optimal use** — pair it with the Scatter Plot in Split View: gate a
   population on the scatter and watch the matching cells populate the gallery.
 
@@ -1208,6 +1223,13 @@ Operates on **one well at a time** (spot detection is per-frame).
   collapses the view to a single well.
 - **Controls** — the detection parameters + threshold sweep; **Apply to All**
   to push one threshold across the whole dataset.
+- **Apply to All progress** — the run counts spots in every well, then writes
+  the counts into the per-well CSVs. Both passes drive the progress bar in the
+  status row at the bottom of the window — the same bar a dataset load uses —
+  alongside a per-well message on the tab's own status line. The bar clears
+  when the run finishes, is cancelled, or fails. The app stays usable while it
+  runs; switching datasets mid-run cancels it rather than writing counts into
+  the wrong folder.
 - **Optimal use** — sweep the threshold on one representative well, confirm the
   spot overlay, then Apply to All.
 
@@ -1217,7 +1239,9 @@ Operates on **one well at a time** (spot detection is per-frame).
 per-nucleus rows behind every plot.
 
 - **Controls** — the **Well** picker; column filtering; **double-click a row**
-  to jump to that cell in the Segmentation tab.
+  to jump to that cell in the Segmentation tab. The jump switches wells for
+  you: the row's well becomes the Segmentation sidebar's selected well, and the
+  view opens on that cell's field of view and timepoint, zoomed to the nucleus.
 - **Optimal use** — sanity-check outliers: filter to a suspicious metric range,
   then double-click into Segmentation to see the actual cell.
 

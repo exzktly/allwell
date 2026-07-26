@@ -102,6 +102,18 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     lay.addWidget(add_btn)
     ctx.runtime.cell_browser.add_criterion_btn = add_btn
 
+    # Why the criteria editor above is greyed out. "From scatter gate" is a
+    # sticky choice — it survives tab switches and dataset loads — so without
+    # this line a user who ticked it earlier meets a permanently dead
+    # "+ Add criterion" button with nothing on screen explaining it.
+    criteria_off_hint = QLabel(
+        "Criteria are ignored while “From scatter gate” is on.", parent)
+    criteria_off_hint.setObjectName("Muted")
+    criteria_off_hint.setWordWrap(True)
+    criteria_off_hint.setVisible(False)
+    lay.addWidget(criteria_off_hint)
+    ctx.runtime.cell_browser.criteria_off_hint = criteria_off_hint
+
     # ── timepoint / FOV multi-select ─────────────────────────────────────────
     ctx.runtime.cell_browser.tp_selections = {}
     ctx.runtime.cell_browser.fov_selections = {}
@@ -175,13 +187,17 @@ def _on_gate_mode_toggled(ctx, on: bool) -> None:
 
 
 def _set_criteria_enabled(ctx, on: bool) -> None:
-    """Enable/disable the criteria editor (rows + add button)."""
+    """Enable/disable the criteria editor (rows + add button), and show the
+    reason while it is off."""
     host = getattr(ctx.runtime.cell_browser, "criteria_rows_host", None)
     if host is not None:
         host.setEnabled(on)
     btn = getattr(ctx.runtime.cell_browser, "add_criterion_btn", None)
     if btn is not None:
         btn.setEnabled(on)
+    hint = getattr(ctx.runtime.cell_browser, "criteria_off_hint", None)
+    if hint is not None:
+        hint.setVisible(not on)
 
 
 def _gate_names(ctx) -> list:

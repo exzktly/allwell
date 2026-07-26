@@ -25,9 +25,13 @@ class ScatterState:
     ``mode`` — ``"cells"`` (per-cell points) or ``"aggregate"`` (per-well
     aggregate) sub-tab. ``color_by_tp`` — colour per-cell points by timepoint.
     ``gates_hidden`` — hide the gate overlays (inverse of the sidebar
-    "Show gates" toggle).
+    "Show gates" toggle). ``apply_gates_to_points`` — plot only the cells inside
+    the scatter gates, instead of the full cloud with the gates drawn over it
+    (the per-cell scatter is the one view that does not filter by its own gates
+    unless asked; default off keeps that).
     """
 
     mode: str = "cells"
     color_by_tp: bool = False
     gates_hidden: bool = False
+    apply_gates_to_points: bool = False

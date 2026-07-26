@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.features.scatter.collect import gate_filter_title_suffix
 from well_viewer.features.scatter.gating import (
     paint_gates, refresh_gate_selector, render_scatter_points,
 )
@@ -149,7 +150,11 @@ def _render_scatter_faceted(ctx, scatter_data, col_x, col_y, tps_list) -> None:
         # in-gate %. Handles only on the top panel — the one the edge-drag
         # editor is bound to (_ax_scatter); a drag there repaints them all.
         gate_entries.append((ax, {label: data}, tps_list, _muted_fg, ax is axes[0]))
-    axes[-1].set_xlabel(xlabel)
+    # The stacked panels carry no titles (each is identified by its legend), so
+    # the gate-filtered tag rides the one shared label at the foot of the stack.
+    # It has to appear somewhere: the toggle changes which cells are plotted,
+    # and a figure saved out of here must say so without the on-screen control.
+    axes[-1].set_xlabel(xlabel + gate_filter_title_suffix(ctx))
     paint_gates(ctx, gate_entries, cols=(col_x, col_y))
 
     # Editing the gate on the top panel mirrors to the panels below. Click- and

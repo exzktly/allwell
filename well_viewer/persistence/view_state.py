@@ -295,6 +295,7 @@ def _snapshot_scatter(ctx) -> dict:
             out["mode"] = str(_sc.mode)
         out["color_by_tp"] = bool(_sc.color_by_tp)
         out["gates_hidden"] = bool(_sc.gates_hidden)
+        out["apply_gates_to_points"] = bool(_sc.apply_gates_to_points)
     # Per-timepoint multi-select checkboxes for each sub-tab (the dataset-wide
     # timepoint filter the user can toggle). Mirrors the Bar tab's
     # ``timepoint_selections`` round-trip.
@@ -785,6 +786,17 @@ def _apply_scatter(ctx, state: dict) -> None:
                     swallowed()
         if "gates_hidden" in state:
             _sc.gates_hidden = bool(state["gates_hidden"])
+        if "apply_gates_to_points" in state:
+            _sc.apply_gates_to_points = bool(state["apply_gates_to_points"])
+            btn = ctx.widgets.get_or_none("_scatter_apply_gates_btn")
+            if btn is not None:
+                try:
+                    btn.setChecked(_sc.apply_gates_to_points)
+                    btn.setText(
+                        "Apply gates: On" if _sc.apply_gates_to_points
+                        else "Apply gates: Off")
+                except Exception:
+                    swallowed()
     mode = state.get("mode")
     set_mode = ctx.runtime.scatter.set_mode
     if mode and callable(set_mode):

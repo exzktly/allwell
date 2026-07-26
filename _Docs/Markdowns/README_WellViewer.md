@@ -782,7 +782,18 @@ time**, by timepoint.
   (*Overlay* all wells on one axis, or *Separate axes* one panel per well);
   **Color by time** (one well → a single cloud's trajectory; several wells →
   auto-stacked one panel per well so the time-coloured clouds don't overlap);
-  **Show gates**; **draw rectangular gates** by dragging on the canvas.
+  **Apply gates** (below); **Show gates**; **draw rectangular gates** by
+  dragging on the canvas.
+- **Apply gates.** This plot is the one place that shows the *whole* cloud even
+  when your gates are filtering everything else — that is deliberate, because
+  you draw the gates here and need to see what falls outside them to judge or
+  resize a box. Switch **Apply gates** on to plot only the gated population
+  instead; the title gains a `· gate-filtered` tag so a copied or saved figure
+  says which it is. Two things it will not do: it stays inert until *Use
+  scatter-plot gates for cell inclusion* is ticked on the Cell Gating tab (with
+  that off, the gates filter nothing anywhere, and the status bar says so when
+  you try), and it steps aside while you are drawing or resizing a gate, so the
+  cloud you are aiming at cannot vanish mid-drag.
 - **Aggregate controls** — X-axis / Y-axis pickers over aggregate metrics
   (e.g. *Mean Fluorescence*, *Fraction above threshold*) with an **error band**
   (SEM / SD) on the points.
@@ -795,7 +806,9 @@ time**, by timepoint.
   dataset and reload with it.
 - **Optimal use** — draw a gate around a population of interest, then open Cell
   Gating and tick *Use scatter-plot gates* to make that gate define which cells
-  count in every plot, statistic, and export.
+  count in every plot, statistic, and export. Watch the **Included for analysis**
+  count there to confirm it took effect, then come back and switch **Apply
+  gates** on to see the surviving population on the scatter itself.
 
 ### Distribution
 
@@ -1275,6 +1288,17 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
   on a fold-change-adjusted fraction-on.
 - Inclusion and fraction-on have **independent** gate pickers, so you can gate
   on one set of gates and compute fraction-on from a different set.
+- **Included for analysis** — a live count under the gate controls, e.g.
+  `Included for analysis: 12,345 / 20,000 cells  ·  1,204 failed QC`. The first
+  number is the population every plot, statistic, and export actually uses, so
+  it is the quickest way to confirm a gate did something; the total is every
+  segmented object across all loaded wells (not just the selected ones the
+  curves below show). The QC figure is a diagnostic alongside, not a separate
+  slice — a cell can fail QC *and* be gated out. It updates as you edit
+  thresholds, toggle the scatter-gate modes, or change the QC gate, and reads
+  `updating…` while a pass is running. ThreshFracOn deliberately does not move
+  it: that cutoff decides which included cells count as *on*, not which cells
+  count.
 - **Optimal use** — set the QC gate first, auto-threshold to get baseline
   ThreshFracOn values, then use Optimize on the one channel that separates your
   conditions.

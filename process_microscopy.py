@@ -3502,7 +3502,13 @@ def _run_well_worker_pool(
         log.info("%s mode complete. %d skipped.", mode_label, n_skipped)
         return []
 
-    _ensure_stardist_runtime_deps()
+    # Only the StarDist methods need csbdeep / stardist importable. Cellpose and
+    # classical_threshold runs must not be blocked by a preflight for a
+    # segmenter they never load — on a machine without the StarDist stack, an
+    # unconditional check fails the run outright.
+    if shared_kwargs_template.get(
+            "segmentation_method", DEFAULT_SEGMENTATION_METHOD) in _STARDIST_METHODS:
+        _ensure_stardist_runtime_deps()
 
     if incremental:
         log.info("Incremental: %d well(s) total — merging only new FOV-groups.",

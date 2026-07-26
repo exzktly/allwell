@@ -10,8 +10,9 @@ The current code reflects an iterative port from a Tk prototype to a Qt
 desktop app (PySide6). Some of the structural decisions only make sense once
 you know that — they're called out where relevant.
 
-**Reflects All-Well v8.9.3.** This map describes the app as it stands today;
-the version string itself is centralized in the repo-root `version.py` (§3) and
+**This map describes the app as it stands today**, at whatever version the
+repo-root `version.py` currently carries — the version string lives there and
+nowhere else (§3), so this file never has to be edited for a release. It is
 surfaced on the title-bar version pill. Bump `version.py` on a release — nothing
 else carries the app version. This document is **not** a changelog: it never
 records which release a feature landed in (see *Change history* at the end).
@@ -88,7 +89,7 @@ they're shell-wide:
 ```
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
-├── version.py                   ← single source of truth for the app version (v8.9.3; read by the pill + the PyInstaller spec)
+├── version.py                   ← single source of truth for the app version (read by the pill + the PyInstaller spec)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -669,7 +670,7 @@ the pipeline side too). It applies at three levels, all sharing the one
   (Multivariate). The pure decision math is `scripts/profile_build.py`, which
   also owns `bundle_name(version, profile)` — the unit-tested helper that names
   the output `AllWell-{version}` for the full app or `AllWell-{version}-{profile}`
-  for a subset (e.g. `AllWell-8.8.9-thin`), so a full build and a thin build are
+  for a subset (e.g. `AllWell-<version>-thin`), so a full build and a thin build are
   distinguishable by name. `all_well.spec` uses it for the
   COLLECT/BUNDLE output name and the macOS `CFBundleDisplayName`, while keeping
   the internal executable name `AllWell` so `CFBundleExecutable` and the
@@ -2362,6 +2363,22 @@ you're in before you type the command.
   `pytest_collection_modifyitems` auto-marks these `slow`, precisely so the fast
   lane skips them.
 
+**Before pushing, `scripts/preflight.sh`** runs ruff, the fast lane, and a
+working-tree check in one pass (`--quick` skips the fast lane). The tree check is
+the non-obvious one: it fails on *untracked* files, because a hand-run job's
+scratch output is what `git add -A` sweeps into a commit — that is how a sweep's
+JUnit reports once reached `main`.
+
+**No test may reach a modal dialog.** An `autouse` fixture in `conftest.py`
+replaces every `QMessageBox` / `QInputDialog` / `QFileDialog` / `QColorDialog` /
+`QFontDialog` opener and `QDialog.exec` with one that raises. Offscreen, a modal
+dialog waits for a click that never comes, inside Qt's C++ event loop where
+pytest's signal-based `--timeout` cannot reach it — so the run can only die at
+the batch wall-clock ceiling, before pytest writes its JUnit report, taking a
+whole batch down and skipping the rest of the hanging file. A test that means to
+exercise a dialog path patches that specific call itself; its `monkeypatch` is
+applied later and wins.
+
 **Why the full-app tests are dangerous in bulk.** Constructing the app builds
 ~1,800 QObjects wired together with signal→bound-method connections
 (`signal.connect(app._method)`), closures that capture `app`, and child widgets
@@ -2406,6 +2423,14 @@ fixture (it doesn't help).
    its report fails the run — that is the OOM / C-level-hang signal, and it must
    never read as success. `--shard I/N` deals the files out round-robin for a CI
    matrix; `--batch 1` is the safest setting on a constrained machine.
+
+   Two ceilings guard a batch, and they do different jobs. `--timeout=300`
+   (signal-based) catches a hung *test*. `SLOW_BATCH_TIMEOUT` (default 1800s) is
+   the wall-clock backstop for a C-level hang inside Qt, which ignores signals.
+   Keep the second one generous: app construction dominates this lane — the
+   heaviest pair, `test_multivariate_tab` + `test_playground` (29 tests), takes
+   ~12 minutes with the machine to itself and passes — and a batch cut off here
+   writes no report, so too tight a ceiling reports green tests as a failure.
 
 **The slow lane runs nightly, not on PRs** — `.github/workflows/slow-lane.yml`,
 six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate

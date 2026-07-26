@@ -32,7 +32,15 @@ SHARD_INDEX=1
 SHARD_TOTAL=1
 # Wall-clock ceiling per batch. pytest's own --timeout uses a signal, which a
 # C-level hang inside Qt will not honour; this is the backstop that does.
-BATCH_TIMEOUT="${SLOW_BATCH_TIMEOUT:-600}"
+#
+# It has to sit well above what a legitimately slow batch costs, because a batch
+# killed here writes no report and so reads as a failure. Every test in this lane
+# builds a real WellViewerApp, which dominates its runtime: the heaviest observed
+# pair (test_multivariate_tab + test_playground, 29 tests) takes ~12 minutes with
+# the machine to itself and passes. Per-test hangs are already covered by
+# --timeout=300 below, so this only has to catch the signal-proof C-level case —
+# which means erring high costs nothing and erring low fails green batches.
+BATCH_TIMEOUT="${SLOW_BATCH_TIMEOUT:-1800}"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

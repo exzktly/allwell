@@ -1330,6 +1330,13 @@ def _cell_gating_on_finished(ctx) -> None:
     if bar is not None:
         bar.setValue(0)
         bar.hide()
+    # The pass just rewrote Included / Gate_Pass / Gate_On on every cached row
+    # frame, so any group statistic computed from them is stale by definition.
+    # Belt to the cache key's braces: the key folds in the gate state, but it
+    # cannot know about a rewrite that leaves the key's inputs untouched (a QC
+    # or crop layer moving underneath, say), and a stale aggregate is invisible
+    # — the plot simply redraws the old numbers.
+    invalidate_stats_cache(ctx)
     redraw_app(ctx)
 
 

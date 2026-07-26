@@ -1,11 +1,11 @@
-"""Regression: creating a Plot Group must work in group (passive-plate) mode.
+"""Creating a Plot Group in group (passive-plate) mode captures what is on screen.
 
 Once replicate sets exist, the sidebar plate on a plotting tab runs in passive
-group-visibility mode — clicks toggle a group's ``hidden`` flag, so
-``selected_wells`` stays empty. The Plot Groups "Add" action used to read only
-``selected_wells`` and fail with "Select wells before adding a Plot Group",
-making the feature unusable whenever any replicate set was defined. The fix
-(``_wells_for_new_plot_group``) falls back to the visible-group wells.
+group-visibility mode — clicks toggle a set's ``hidden`` flag rather than
+selecting wells. ``selected_wells`` is not part of that mode: nothing keeps it
+current, so it holds whatever a per-well tab (or an earlier Plot Group load)
+last wrote there. ``_wells_for_new_plot_group`` therefore reads the visible
+sets, not ``selected_wells``, whenever the plate is in group-visibility mode.
 """
 from __future__ import annotations
 
@@ -17,6 +17,9 @@ from well_viewer.core.sidebar_view import _wells_for_new_plot_group
 def _ctx(*, selected=(), selections=(), solo=(), loaded=None):
     # ctx-shaped fake: ``_wells_for_new_plot_group`` reads typed state off
     # ``ctx.state`` (A8 teardown — the helper is ctx-native, no god-object).
+    # It has no ``window``, so the plate-mode probe can't reach the shell and
+    # the helper assumes group-visibility mode whenever replicate sets exist —
+    # which is the mode every case below is about.
     if loaded is None:
         loaded = {f"{r}{c:02d}": None for r in "AB" for c in range(1, 4)}
     state = SimpleNamespace(
@@ -35,8 +38,8 @@ def test_active_plate_uses_raw_selection():
     assert _wells_for_new_plot_group(ctx) == ["A01", "A02"]
 
 
-def test_passive_mode_falls_back_to_visible_group_wells():
-    # No raw selection (passive plate) + two visible groups → union of their wells.
+def test_passive_mode_uses_visible_group_wells():
+    # Passive plate + two visible groups → union of their wells.
     ctx = _ctx(
         selections=[
             {"name": "G1", "hidden": False, "wells": ["A01", "A02"]},
@@ -44,6 +47,40 @@ def test_passive_mode_falls_back_to_visible_group_wells():
         ],
     )
     assert _wells_for_new_plot_group(ctx) == ["A01", "A02", "B01"]
+
+
+def test_every_visible_group_is_captured_despite_a_stale_selection():
+    """Regression: a leftover ``selected_wells`` must not shadow the visible sets.
+
+    Loading a Plot Group writes its wells to ``selected_wells`` (per-well tabs
+    and the Image Table need them there). On a plotting tab the plate is passive,
+    so that store then sits stale while the user clicks more sets visible. The
+    capture used to prefer it, so saving a group that spanned three replicate
+    sets stored only the one set the previous load had left behind — and
+    reloading it brought back that one set.
+    """
+    ctx = _ctx(
+        selected={"A01", "A02"},   # stale: what a previous "load G1" wrote
+        selections=[
+            {"name": "G1", "hidden": False, "wells": ["A01", "A02"]},
+            {"name": "G2", "hidden": False, "wells": ["B01", "B02"]},
+            {"name": "G3", "hidden": False, "wells": ["A03"]},
+        ],
+    )
+    assert _wells_for_new_plot_group(ctx) == ["A01", "A02", "A03", "B01", "B02"]
+
+
+def test_a_stale_selection_does_not_resurrect_hidden_groups():
+    """Only the sets the user can see are saved, even when the stale selection
+    names wells from a hidden one."""
+    ctx = _ctx(
+        selected={"A01", "A02"},   # G1's wells, but G1 is hidden now
+        selections=[
+            {"name": "G1", "hidden": True, "wells": ["A01", "A02"]},
+            {"name": "G2", "hidden": False, "wells": ["B01"]},
+        ],
+    )
+    assert _wells_for_new_plot_group(ctx) == ["B01"]
 
 
 def test_hidden_groups_are_excluded():

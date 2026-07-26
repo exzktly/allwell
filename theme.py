@@ -322,9 +322,29 @@ QFrame#Titlebar {{
     background-color: {c.titlebar};
     border-bottom: 1px solid {c.border_subtle};
 }}
-QFrame[hline="true"], QFrame[vline="true"], QFrame#Separator {{
+/* Divider hairlines. Every divider in the app funnels through this rule so a
+   rule drawn in one pane can never read differently from the same rule in
+   another. ``HRule`` / ``VRule`` are the Analyze pane's and the run
+   dashboard's names for the same thing; ``Separator`` is the Review shell's.
+   Without an explicit ``border: none`` a QFrame carrying HLine/VLine paints
+   Qt's default etched line, which ignores the theme entirely and reads as a
+   near-white bar on the dark surfaces. The min/max sizing pins the painted
+   band to a single pixel: once the border is gone the frame has no intrinsic
+   thickness of its own, and callers that set HLine/VLine without also calling
+   ``setFixedHeight(1)`` would otherwise stretch to whatever the layout hands
+   them. */
+QFrame[hline="true"], QFrame[vline="true"], QFrame#Separator,
+QFrame#HRule, QFrame#VRule {{
     background-color: {c.border_subtle};
     border: none;
+}}
+QFrame#HRule {{
+    min-height: 1px;
+    max-height: 1px;
+}}
+QFrame#VRule {{
+    min-width: 1px;
+    max-width: 1px;
 }}
 
 /* ── Labels ──────────────────────────────────────────────────────────── */
@@ -621,6 +641,13 @@ QCheckBox::indicator, QRadioButton::indicator {{
     height: 16px;
     background-color: {c.panel_elevated};
     border: 1px solid {c.border};
+    /* ``width`` is the *content* width, so the drawn box is 18px once the 1px
+       border is added on each side — but a platform style is free to offset the
+       label from the declared 16px. Reserving the margin here widens the slot
+       the indicator owns without changing the box that gets painted, so the
+       label always clears it even where that offset runs short (the Heat Map's
+       "Rep-set avg" box printing over its own label on macOS). */
+    margin-right: 4px;
 }}
 QCheckBox::indicator {{
     border-radius: {r.xs}px;

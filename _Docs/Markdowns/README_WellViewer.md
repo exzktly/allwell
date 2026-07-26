@@ -1211,6 +1211,13 @@ Operates on **one well at a time** (spot detection is per-frame).
   collapses the view to a single well.
 - **Controls** — the detection parameters + threshold sweep; **Apply to All**
   to push one threshold across the whole dataset.
+- **Apply to All progress** — the run counts spots in every well, then writes
+  the counts into the per-well CSVs. Both passes drive the progress bar in the
+  status row at the bottom of the window — the same bar a dataset load uses —
+  alongside a per-well message on the tab's own status line. The bar clears
+  when the run finishes, is cancelled, or fails. The app stays usable while it
+  runs; switching datasets mid-run cancels it rather than writing counts into
+  the wrong folder.
 - **Optimal use** — sweep the threshold on one representative well, confirm the
   spot overlay, then Apply to All.
 

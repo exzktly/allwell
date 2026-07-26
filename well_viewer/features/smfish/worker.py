@@ -133,6 +133,7 @@ def _write_counts_to_csvs(
     column: str,
     well_to_csv: dict[str, Path] | None = None,
     should_abort: Callable[[], bool] | None = None,
+    progress_cb: Callable[[int, int], None] | None = None,
 ) -> int:
     """Write the counts column into each well's CSV.
 
@@ -140,9 +141,18 @@ def _write_counts_to_csvs(
     iteration so a dataset swap / cancel that lands *mid-loop* stops further
     writes into the now-wrong dataset (audit E19: the identity check only ran
     once, before the loop). Returns the number of wells actually written.
+
+    ``progress_cb`` receives ``(wells_visited, total_wells)`` after each
+    iteration so the caller can drive a determinate progress bar. It counts
+    wells *visited*, not wells written — a skipped or unresolvable CSV still
+    advances the bar, because the bar tracks how far through the loop we are.
     """
+    ordered = sorted(well_to_zip)
+    total = len(ordered)
+    if progress_cb is not None:
+        progress_cb(0, total)
     written = 0
-    for well in sorted(well_to_zip):
+    for visited, well in enumerate(ordered, 1):
         if should_abort is not None and should_abort():
             logger.warning(
                 "smFISH apply-global: dataset changed or run cancelled mid-write "
@@ -150,61 +160,68 @@ def _write_counts_to_csvs(
                 "dataset.", written,
             )
             break
-        csv_path = _resolve_csv_path(well, well_to_csv, out_dir)
-        if csv_path is None:
-            continue
-        df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
-        df = _drop_case_equivalent_columns(df, column)
-
-        # Build lookup keys via the single source of truth — CellKey applies
-        # the same well/fov/tp/nid normalisation chain the producer side
-        # uses, so the (well, fov, tp, nid) tuples in `counts` and the CSV
-        # lookup keys are constructed by the same code path.
-        cell_keys = cell_keys_for_dataframe(df, default_well=well)
-        keys = [ck.as_tuple() for ck in cell_keys]
-        df[column] = [str(counts.get(k, 0)) for k in keys]
-
-        # Diagnostic: when every lookup misses we'd otherwise silently
-        # write a column of zeros and only the file mtime would change.
-        # Surface this so the next drift mode (e.g. nucleus_id format,
-        # tp parser drift) reports itself without code-reading.
-        matched = sum(1 for k in keys if k in counts)
-        if matched == 0 and len(keys) > 0 and len(counts) > 0:
-            sample_csv = keys[:3]
-            sample_counts = list(counts.keys())[:3]
-            logger.warning(
-                "smFISH apply-global: %s wrote 0 matched rows out of %d for "
-                "column %r. Sample CSV lookup keys=%s ; sample counts keys=%s "
-                "— likely a (fov, timepoint, nucleus_id) format drift between "
-                "the per-well CSV and the *_out.zip filenames.",
-                csv_path.name, len(keys), column, sample_csv, sample_counts,
-            )
-
-        # Atomic write — a concurrent Review-CSV read or a crash mid-write
-        # must not be able to observe a truncated CSV. PermissionError
-        # is wrapped per-well so one locked file (Excel, AV, OneDrive)
-        # doesn't kill the rest of the run; the user still gets a clear
-        # WARN naming the well + the underlying cause.
+        # The bar advances on every exit from this iteration — including the
+        # `continue`s below — so a run with unresolvable or locked CSVs still
+        # finishes with a full bar instead of one stuck short of its maximum.
         try:
-            atomic_write_text(csv_path, df.to_csv(index=False))
-        except PermissionError as exc:
-            logger.warning(
-                "smFISH apply-global: could not write %s — %s. The "
-                "atomic-write helper retried for ~3s and the file is "
-                "still locked; likely Excel / a viewer has the CSV open, "
-                "or antivirus is mid-scan. Other wells will still be "
-                "written. Close the file and retry Apply Global Threshold.",
-                csv_path, exc,
-            )
-            continue
-        except OSError as exc:
-            logger.warning(
-                "smFISH apply-global: write failed for %s — %s. "
-                "Skipping this well; other wells will still be written.",
-                csv_path, exc,
-            )
-            continue
-        written += 1
+            csv_path = _resolve_csv_path(well, well_to_csv, out_dir)
+            if csv_path is None:
+                continue
+            df = pd.read_csv(csv_path, dtype=str, keep_default_na=False)
+            df = _drop_case_equivalent_columns(df, column)
+
+            # Build lookup keys via the single source of truth — CellKey applies
+            # the same well/fov/tp/nid normalisation chain the producer side
+            # uses, so the (well, fov, tp, nid) tuples in `counts` and the CSV
+            # lookup keys are constructed by the same code path.
+            cell_keys = cell_keys_for_dataframe(df, default_well=well)
+            keys = [ck.as_tuple() for ck in cell_keys]
+            df[column] = [str(counts.get(k, 0)) for k in keys]
+
+            # Diagnostic: when every lookup misses we'd otherwise silently
+            # write a column of zeros and only the file mtime would change.
+            # Surface this so the next drift mode (e.g. nucleus_id format,
+            # tp parser drift) reports itself without code-reading.
+            matched = sum(1 for k in keys if k in counts)
+            if matched == 0 and len(keys) > 0 and len(counts) > 0:
+                sample_csv = keys[:3]
+                sample_counts = list(counts.keys())[:3]
+                logger.warning(
+                    "smFISH apply-global: %s wrote 0 matched rows out of %d for "
+                    "column %r. Sample CSV lookup keys=%s ; sample counts keys=%s "
+                    "— likely a (fov, timepoint, nucleus_id) format drift between "
+                    "the per-well CSV and the *_out.zip filenames.",
+                    csv_path.name, len(keys), column, sample_csv, sample_counts,
+                )
+
+            # Atomic write — a concurrent Review-CSV read or a crash mid-write
+            # must not be able to observe a truncated CSV. PermissionError
+            # is wrapped per-well so one locked file (Excel, AV, OneDrive)
+            # doesn't kill the rest of the run; the user still gets a clear
+            # WARN naming the well + the underlying cause.
+            try:
+                atomic_write_text(csv_path, df.to_csv(index=False))
+            except PermissionError as exc:
+                logger.warning(
+                    "smFISH apply-global: could not write %s — %s. The "
+                    "atomic-write helper retried for ~3s and the file is "
+                    "still locked; likely Excel / a viewer has the CSV open, "
+                    "or antivirus is mid-scan. Other wells will still be "
+                    "written. Close the file and retry Apply Global Threshold.",
+                    csv_path, exc,
+                )
+                continue
+            except OSError as exc:
+                logger.warning(
+                    "smFISH apply-global: write failed for %s — %s. "
+                    "Skipping this well; other wells will still be written.",
+                    csv_path, exc,
+                )
+                continue
+            written += 1
+        finally:
+            if progress_cb is not None:
+                progress_cb(visited, total)
     return written
 
 
@@ -218,12 +235,20 @@ def apply_global_threshold_async(
     fov_tp_extractor,
     status_cb: Callable[[str], None],
     done_cb: Callable[[str], None],
+    progress_cb: Callable[[int, int], None] | None = None,
     after_csv_cb: Callable[[], None] | None = None,
     cancel_event: threading.Event | None = None,
     expected_data_dir: Path | None = None,
     well_to_csv: dict[str, Path] | None = None,
 ) -> threading.Thread:
     """Launch the apply-to-all worker on a daemon thread.
+
+    ``progress_cb`` receives ``(done, total)`` for a determinate progress
+    bar: once per well as the counting pass completes, then a second pass
+    over the CSV-write loop (which re-reports from ``0`` against the same
+    total). Like every other callback here it fires on the worker thread,
+    so the caller must marshal it onto the GUI thread before it touches a
+    widget.
 
     ``cancel_event`` (when supplied) is polled between wells and before
     the write loop so a Cancel button / dataset-swap / app-shutdown can
@@ -244,7 +269,11 @@ def apply_global_threshold_async(
 
     def _run() -> None:
         if not channel:
-            status_cb("Select channel and ensure one well is selected.")
+            # Terminal signal, not just a status line: ``done_cb`` is what
+            # clears the caller's busy flag and hides the progress bar. A bare
+            # ``status_cb`` + return left the tab believing a run was still in
+            # flight, so every later click was rejected as "already running".
+            done_cb("Select channel and ensure one well is selected.")
             return
         counts: dict[tuple[str, str, str, str], int] = {}
         wells = sorted(well_to_zip.items())
@@ -254,6 +283,8 @@ def apply_global_threshold_async(
                 f"Applying global threshold across {len(wells)} wells using {max_workers} workers..."
             )
             completed = 0
+            if progress_cb is not None:
+                progress_cb(0, len(wells))
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_well = {
                     executor.submit(
@@ -275,6 +306,8 @@ def apply_global_threshold_async(
                     except Exception as exc:
                         logger.exception("smFISH global threshold failed for %s: %s", well, exc)
                     status_cb(f"Processed {well} ({completed}/{len(wells)})...")
+                    if progress_cb is not None:
+                        progress_cb(completed, len(wells))
                     if _cancelled():
                         status_cb("Apply to All cancelled.")
                         done_cb("Apply to All cancelled before CSV write.")
@@ -302,9 +335,11 @@ def apply_global_threshold_async(
         def _abort_write() -> bool:
             return _cancelled() or expected != out_dir or not out_dir.exists()
 
+        status_cb(f"Writing counts into {len(well_to_zip)} well CSV(s)...")
         _write_counts_to_csvs(
             out_dir, well_to_zip, counts, column, well_to_csv,
             should_abort=_abort_write,
+            progress_cb=progress_cb,
         )
         if after_csv_cb is not None:
             after_csv_cb()

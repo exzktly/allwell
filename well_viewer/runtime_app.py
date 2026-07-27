@@ -180,7 +180,7 @@ col_for_scatter_axis, col_for_scatter_entry, scatter_axis_metric_key, refresh_sc
 from well_viewer.core.selection_controller import sel_by_id, sel_add, sel_set_hidden, sel_set_composition, sel_select, groups_centre_refresh, rebuild_all, sel_color, refresh_sidebar_map_now, plate_commit_deferred, set_selected_wells, invalidate_stats_cache
 stats_active_group, stats_collect_group_values_shim, stats_active_channel_entry, stats_active_val_col, stats_active_threshold, stats_active_statistic, stats_run_shim, stats_draw_ks_cdf_shim, on_stats_property_change = _lazy_names("well_viewer.features.stats.controller", "stats_active_group", "stats_collect_group_values_shim", "stats_active_channel_entry", "stats_active_val_col", "stats_active_threshold", "stats_active_statistic", "stats_run_shim", "stats_draw_ks_cdf_shim", "on_stats_property_change")
 from well_viewer.core import tab_controller as _tabctl
-from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, toggle_sidebar, visible_centre_tabs, is_tab_visible
+from well_viewer.core.tab_controller import on_central_pane_changed, build_centre_shim, sync_section_nav_from_notebook, tab_history_back, tab_history_forward, current_centre_tab, sync_heatmap_well_drag_mode, toggle_sidebar, visible_centre_tabs, is_tab_visible, pane_mode
 from well_viewer.core.ui_helpers import apply_theme, mute_color, norm_timepoint, toast, show_progress, step_progress, toggle_log
 from well_viewer.core.centre_view import drain_pending_centre_builders
 from well_viewer.core.plot_toggles import toggle_sem, toggle_fov_replicates, refresh_fov_btn_state
@@ -388,30 +388,38 @@ class WellViewerApp(QWidget):
     modeChanged = Signal(str)   # emitted with "review" or "analyze"
 
     def mountAnalyzePane(self, widget) -> None:
-        """Mount *widget* as the Analyze peer of the centre stack.
+        """Mount *widget* as the Analyze peer of the centre stack (index 1).
 
-        The mockup keeps the left rail (with the mode-seg, section nav,
-        and plate) visible in both modes; hosting Analyze inside this
-        widget's central stack is what makes that possible without
-        hoisting the sidebar out into allwell.
-        """
+        Hosting it here keeps Review's left rail visible in both modes;
+        ``apply_sidebar_visibility`` drives the pane's own sidebar via the
+        registered ``_analyze_pane`` handle."""
+        self._widget_registry.register("_analyze_pane", widget)
+        self._mount_secondary_pane(widget, 1)
+
+    def mountDatasetsPane(self, widget) -> None:
+        """Mount *widget* as the Datasets peer of the centre stack (index 2)."""
+        self._widget_registry.register("_datasets_pane", widget)
+        self._mount_secondary_pane(widget, 2)
+
+    def _mount_secondary_pane(self, widget, index: int) -> None:
+        # Panes mount in order (Review=0, Analyze=1, Datasets=2): a fresh mount
+        # appends, a re-mount replaces only the pane already at that index.
         stack = getattr(self, "_central_pane_stack", None)
         if stack is None:
             return
-        # Replace any previously-mounted analyze pane.
-        while stack.count() > 1:
-            old = stack.widget(1)
+        if stack.count() > index:
+            old = stack.widget(index)
             stack.removeWidget(old)
             old.setParent(None)
-        stack.addWidget(widget)
-        # Remembered so apply_sidebar_visibility can drive its left sidebar.
-        self._analyze_pane = widget
+            stack.insertWidget(index, widget)
+        else:
+            stack.addWidget(widget)
 
     def currentMode(self) -> str:
         stack = getattr(self, "_central_pane_stack", None)
         if stack is None:
             return "review"
-        return "analyze" if stack.currentIndex() == 1 else "review"
+        return pane_mode(stack.currentIndex())
 
     def _on_central_pane_changed(self, idx: int) -> None: return on_central_pane_changed(self._ctx, idx)
 

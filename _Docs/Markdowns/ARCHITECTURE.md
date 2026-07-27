@@ -47,19 +47,35 @@ flows from Analyze (writes it) to Review (reads it).
 
 ---
 
-## 2. The two-mode shell
+## 2. The three-mode shell
 
 The application root (`AllWellApp` in `allwell.py`) owns a title bar and a
-central pane stack. The central stack has two pages:
+central pane stack. The central stack has three pages:
 
 | Pane | Mode | Implemented by | Source file |
 |------|------|----------------|-------------|
 | Page 0 | **Review** | `WellViewerApp(QWidget)` | `well_viewer/runtime_app.py` |
 | Page 1 | **Analyze** | `AnalyzeTab(QWidget)` | `analyze_tab.py` |
+| Page 2 | **Datasets** | `DatasetsTab(QWidget)` | `datasets_tab.py` |
 
-The title bar's `SegmentedControl` (`Review` / `Analyze`) drives the stack.
-Both panes are constructed eagerly at startup so switching back and forth is
-instant; widget trees inside them build lazily on first use (see §5.4).
+The title bar's `SegmentedControl` (`Review` / `Analyze` / `Datasets`) drives the
+stack; segment index maps straight to stack index. The stack lives inside
+`WellViewerApp` (`_central_pane_stack`) so Review's left rail stays put; Analyze
+and Datasets are mounted onto it by `WellViewerApp.mountAnalyzePane` /
+`mountDatasetsPane` (both go through `_mount_secondary_pane`, which places a pane
+at its fixed index — Analyze=1, Datasets=2 — without clobbering the others). The
+index↔name mapping is the single tuple `tab_controller.PANE_MODES`
+(`("review", "analyze", "datasets")`), read by `currentMode`,
+`on_central_pane_changed`, and the titlebar seg handlers. All three panes are
+constructed eagerly at startup so switching is instant; widget trees inside them
+build lazily on first use (see §5.4).
+
+Both Review and Datasets carry a left sidebar; Datasets' is a plain page
+navigator (a `RailNav` over a `NamedPageStack`, no well picker), which is why the
+Datasets pane owns its own `_left_sidebar` the way `AnalyzeTab` does. The
+collapse toggle drives whichever sidebar belongs to the active mode, through
+`tab_controller.apply_sidebar_visibility`. The Datasets pane itself is described
+in §6b.
 
 A handful of things live on the application root rather than per-pane because
 they're shell-wide:
@@ -93,6 +109,9 @@ allwell/
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
+├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
+├── datasets/                    ← Qt-free dataset operations + their feature views
+│   └── concatenate/            ← Concatenate datasets feature (compute/apply/worker/view/controller)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
@@ -830,9 +849,10 @@ active tab.
 The top-bar collapse toggle (`Ctrl+B` / the panel button) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
 belongs to the current mode from one flag: the Review rail (`_sidebar_root`) in
-Review mode, and the Analyze tab's own form sidebar (`analyze_tab._left_sidebar`,
-reached via `app._analyze_pane`) in Analyze mode — so the same button collapses
-the left panel symmetrically in both modes.
+Review mode, and each secondary pane's own `_left_sidebar` (the Analyze form
+sidebar via `app._analyze_pane`, the Datasets page rail via `app._datasets_pane`)
+in its mode — so the same button collapses the left panel symmetrically in every
+mode.
 
 ### 5.5 Controllers
 
@@ -1839,6 +1859,52 @@ them against a stub conda and a scratch `HOME` — the create-or-stop decision i
 the part that strands users when it is wrong, and an ssh call hides it. The stub
 refuses `conda create` over an existing prefix the way conda does; without that,
 tests of this behaviour pass against the broken script too.
+
+---
+
+## 6b. The Datasets side
+
+The Datasets pane (`datasets_tab.py`) is the third top-level mode. Structurally
+it mirrors `AnalyzeTab`: a self-contained `QWidget` whose left `_left_sidebar` is
+a `RailNav` page navigator (no well picker) over a `NamedPageStack`, with one
+page per feature. Features are declared in one local tuple (`_FEATURES`) — a
+`_Feature(name, icon, build)` per entry — so adding a Datasets feature is a
+one-line change, without pulling in Review's well/selection-scoped
+`FeatureRegistry`/`ViewerContext` machinery. The rail's `currentChanged` drives
+`NamedPageStack.setCurrentByName`.
+
+The one feature today is **Concatenate datasets** (`datasets/concatenate/`),
+which appends one dataset's timepoints after another's. Two datasets of the same
+plate, imaged in separate sessions, are stitched into one longer timelapse:
+dataset 2's timepoints are relabelled to continue after dataset 1's last
+timepoint, and the union of both datasets' wells is written to a fresh
+destination folder (both originals untouched).
+
+The package splits along the standard suffix contract, and deliberately keeps
+everything that isn't Qt out of the two `QThread`/view modules so the whole merge
+is unit-testable without the app (`tests/test_concatenate_compute.py`):
+
+| Module | Role |
+|--------|------|
+| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method), computes the timepoint remap, enumerates wells, and returns a `MergePlan`. |
+| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with remapped timepoint tokens, stitches shared wells (dataset 1 rows then dataset 2's remapped rows; CSV columns unioned like `pipeline/io.merge_records_into_csv`), and writes the merged sidecar. Progress via a `log` callback. |
+| `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals. |
+| `view.py` | `ConcatenatePage(QWidget)` — three folder fields (dataset 1, dataset 2, destination; the Analyze folder-picker pattern) over a status window, plus an "Open merged dataset in Review" button revealed on success. Pure view; emits `runRequested` / `openInReviewRequested`. |
+| `controller.py` | `ConcatenateController` — wires the page to the worker and streams progress into the status window. |
+
+**The timepoint rule.** Timepoints are hour-valued labels read through
+`util.timepoint.parse_hours`. Dataset 2's first timepoint is relabelled to
+`ds1_last + ds1_interval`, where `ds1_interval` is the median gap between dataset
+1's sorted unique timepoints; every other dataset-2 timepoint keeps its relative
+spacing (one additive hour offset). New labels render `f"{hours:g}h"`, which
+round-trips through `parse_hours` and stays chronologically after every dataset-1
+label. A single-timepoint dataset 1 (no interval) or a non-time timepoint label
+is refused with a user-facing message in the status window.
+
+On success the page offers to open the merged dataset in Review, routed through
+`DatasetsTab._open_in_review → AllWellApp._open_dataset_in_review`, which loads
+the destination root into Review and switches to it — the same path
+`_on_analyze_pipeline_complete` uses.
 
 ---
 
@@ -2938,7 +3004,7 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
 
 | Term | Meaning |
 |------|---------|
-| **Pane** | One of the two top-level pages: Review or Analyze. |
+| **Pane** | One of the three top-level pages: Review, Analyze, or Datasets. |
 | **Tab** | A centre-stack page inside the Review pane (Plotting, Statistics, …). |
 | **Sub-tab** | A leaf page inside a parent tab (e.g. Plotting → Line Graphs). |
 | **Sidebar** | The left rail in the Review pane. Hosts the rail nav + the well picker + per-tab control panels. |

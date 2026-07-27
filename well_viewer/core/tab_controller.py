@@ -12,6 +12,16 @@ from well_viewer.core.lazy import lazy as _lazy
 
 _logger = logging.getLogger("well_viewer.runtime_app")
 
+# Central-pane stack order, shared with runtime_app / allwell so the index↔name
+# mapping lives in one place. Review is always index 0; Analyze and Datasets are
+# mounted after it in this order (see WellViewerApp.mount*Pane).
+PANE_MODES = ("review", "analyze", "datasets")
+
+
+def pane_mode(idx: int) -> str:
+    """The mode name for a central-pane stack index (out-of-range → review)."""
+    return PANE_MODES[idx] if 0 <= idx < len(PANE_MODES) else "review"
+
 # The review-image (Segmentation) panel builder is a feature-layer god-method
 # (~30 app-bound method lambdas); bind it as a lazy proxy so this core module
 # names no feature at import time (a ``lazy(...)`` call is not an import
@@ -420,11 +430,14 @@ def apply_sidebar_visibility(ctx) -> None:
     sidebar = getattr(app, "_sidebar_root", None)
     if sidebar is not None:
         sidebar.setVisible(mode == "review" and not collapsed)
-    # The Analyze tab hosts its own left form sidebar; the same toggle hides it.
-    analyze = getattr(app, "_analyze_pane", None)
-    analyze_sb = getattr(analyze, "_left_sidebar", None)
-    if analyze_sb is not None:
-        analyze_sb.setVisible(not collapsed)
+    # The Analyze and Datasets panes each host their own left sidebar (only ever
+    # visible when their pane is the current stack page); the same toggle hides
+    # whichever is showing.
+    for attr in ("_analyze_pane", "_datasets_pane"):
+        pane = getattr(app, attr, None)
+        pane_sb = getattr(pane, "_left_sidebar", None)
+        if pane_sb is not None:
+            pane_sb.setVisible(not collapsed)
 
 
 def toggle_sidebar(ctx) -> None:
@@ -453,7 +466,7 @@ def on_central_pane_changed(ctx, idx: int) -> None:
     # Mode-seg lives in allwell's titlebar; emit modeChanged so the
     # shell can re-sync its own seg without poking widgets here. (Split View
     # listens to modeChanged to tear itself down — see split_view.install.)
-    mode = "analyze" if idx == 1 else "review"
+    mode = pane_mode(idx)
     # Hide the section / well-picker sidebar when Analyze is active —
     # it carries Review-only affordances. Show it again on Review (unless
     # the user has collapsed it). Both rules live in apply_sidebar_visibility.

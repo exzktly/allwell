@@ -46,7 +46,9 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
-6. [Filename schema](#filename-schema)
+6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
+   - [Concatenate datasets](#concatenate-datasets)
+7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
 9. [Building the macOS bundle](#building-the-macos-bundle)
@@ -67,6 +69,10 @@ to add features, how to debug, and build / environment troubleshooting), see
   table for thumbnail comparison, a per-FOV segmentation reviewer with cell
   editing, an smFISH spot-detection view, pairwise statistics, batch export
   to CSV + figures.
+- **Datasets tab.** Dataset-level operations that work on whole folders rather
+  than one plate at a time. Its first tool, **Concatenate datasets**, appends one
+  dataset's timepoints after another's — for when the same plate was imaged in
+  two separate sessions and you want one continuous timelapse.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
   it. The hand-off is automatic when an Analyze run completes successfully.
 - **Persistence baked in.** Channel-threshold defaults, saved selections,
@@ -1397,6 +1403,52 @@ sample name** (their Well Label) rather than the raw well token, and line-graph
 batch panels carry the **timepoint ticks and x-axis label on every time panel**.
 Building a batch no longer writes to the dataset on every click — the panel edits
 are held and saved once.
+
+---
+
+## Datasets mode — dataset-level tools
+
+Switch to **Datasets** with the title-bar segmented control (the third segment,
+beside Review and Analyze). Unlike Review there is no plate/well picker — the left
+sidebar is just a list of dataset-level tools. There is one tool today.
+
+### Concatenate datasets
+
+Use this when the *same plate* was imaged in two separate sessions and you want a
+single continuous timelapse instead of two datasets. It appends **dataset 2**
+onto **dataset 1**, shifting dataset 2's timepoints so they carry on after dataset
+1's last one.
+
+How it works:
+
+1. Pick three folders:
+   - **Dataset 1** — the base (earlier timepoints). A dataset folder is one that
+     contains both an `in/` and an `out/` folder.
+   - **Dataset 2** — the session that comes after (its timepoints get shifted).
+   - **Destination** — a new, empty folder. Both originals are left untouched.
+2. Press **Concatenate**. Progress streams into the status window below the
+   folder fields.
+3. On success, click **Open merged dataset in Review** to load the result
+   straight into Review.
+
+What it does to the data:
+
+- **Timepoints.** Dataset 2's first timepoint is relabelled to *dataset 1's last
+  timepoint + dataset 1's imaging interval* (the typical gap between its
+  timepoints), and the rest of dataset 2 keeps its spacing. So if dataset 1 runs
+  `0, 24h, 48h` and dataset 2 runs `0, 24h`, dataset 2 becomes `72h, 96h` and the
+  merged dataset runs `0, 24h, 48h, 72h, 96h`.
+- **Wells.** The union of both datasets' wells is written. A well in both is
+  stitched (dataset 1's rows, then dataset 2's shifted rows); a well in only one
+  is copied across.
+- **Everything else** — measurement CSVs, per-well QC-image zips, raw input
+  images, and `pipeline_info.json` — is merged accordingly, with dataset 2's
+  timepoint labels rewritten throughout.
+
+It refuses (with an explanation in the status window) when the two datasets
+weren't analysed the same way (different filename schema, channels' positions, or
+segmentation method), when a timepoint can't be read as a time, or when dataset 1
+has only a single timepoint (so there's no interval to continue).
 
 ---
 

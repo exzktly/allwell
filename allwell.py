@@ -194,6 +194,7 @@ class AllWellApp(QMainWindow):
 
     def _build_ui(self) -> None:
         from analyze_tab import AnalyzeTab
+        from datasets_tab import DatasetsTab
         from well_viewer import WellViewerApp
 
         root = QWidget(objectName="AppRoot")
@@ -239,11 +240,13 @@ class AllWellApp(QMainWindow):
         dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
         _eye_icon = _icons.make_icon("eye", 14, dpr=dpr or 1.0)
         _slider_icon = _icons.make_icon("sliders-horizontal", 14, dpr=dpr or 1.0)
+        _boxes_icon = _icons.make_icon("boxes", 14, dpr=dpr or 1.0)
         self._mode_seg = _SegmentedControl()
         self._mode_seg.addSegment("Review", icon=_eye_icon, data="review")
         self._mode_seg.addSegment("Analyze", icon=_slider_icon, data="analyze")
+        self._mode_seg.addSegment("Datasets", icon=_boxes_icon, data="datasets")
         self._mode_seg.currentChanged.connect(self._on_titlebar_mode_seg)
-        self._mode_seg.setFixedWidth(220)
+        self._mode_seg.setFixedWidth(330)
         hl.addWidget(self._mode_seg)
 
         hl.addStretch(1)
@@ -356,6 +359,16 @@ class AllWellApp(QMainWindow):
             on_pipeline_complete=self._on_analyze_pipeline_complete,
         )
         self._review.mountAnalyzePane(self._analyze)
+
+        # Datasets pane — third top-level mode. Its own left rail lists the
+        # dataset-level features (currently just Concatenate); it has no well
+        # picker. A completed concatenation can hand its output straight to
+        # Review via _open_dataset_in_review.
+        self._datasets = DatasetsTab(
+            parent=None,
+            on_open_in_review=self._open_dataset_in_review,
+        )
+        self._review.mountDatasetsPane(self._datasets)
 
         # Status bar v2: status / kbd hints / Log tray IconButton.
         from widgets.kbd_hint import KbdHint as _KbdHint
@@ -939,18 +952,22 @@ class AllWellApp(QMainWindow):
 
     # ── Phase 10 / 11 handlers ───────────────────────────────────────────
     def _on_titlebar_mode_seg(self, idx: int) -> None:
-        """Titlebar mode-seg → WellViewerApp's central pane stack."""
+        """Titlebar mode-seg → WellViewerApp's central pane stack.
+
+        Segment order (Review, Analyze, Datasets) matches the central-pane stack
+        index order, so the segment index maps straight through.
+        """
         review = getattr(self, "_review", None)
         if review is None:
             return
-        target = 1 if idx == 1 else 0
         stack = getattr(review, "_central_pane_stack", None)
-        if stack is not None and stack.currentIndex() != target:
-            stack.setCurrentIndex(target)
+        if stack is not None and 0 <= idx < stack.count() and stack.currentIndex() != idx:
+            stack.setCurrentIndex(idx)
 
     def _on_review_mode_changed(self, mode: str) -> None:
         """Mirror WellViewerApp's mode change into the titlebar seg + status."""
-        idx = 1 if mode == "analyze" else 0
+        from well_viewer.core.tab_controller import PANE_MODES
+        idx = PANE_MODES.index(mode) if mode in PANE_MODES else 0
         seg = getattr(self, "_mode_seg", None)
         if seg is not None and seg.currentIndex() != idx:
             blocked = seg.blockSignals(True)
@@ -1195,8 +1212,9 @@ class AllWellApp(QMainWindow):
     def _on_tab_change(self, idx: int) -> None:
         if self._review is None:
             return
-        # QStackedWidget has no tabText — index 0 is Review, 1 is Analyze
-        # (matches the order they were added to self._nb and to the mode-seg).
+        # QStackedWidget has no tabText — index 0 is Review, 1 is Analyze,
+        # 2 is Datasets (matches the order they were added to self._nb and to
+        # the mode-seg).
         if idx == 0:
             QTimer.singleShot(50, self._nudge_review)
         # WellViewerApp's own mode-seg syncs via its _on_central_pane_changed;
@@ -1208,6 +1226,14 @@ class AllWellApp(QMainWindow):
         dataset_path = output_dir
         if output_dir.name.lower() == "out" and (output_dir.parent / "in").is_dir():
             dataset_path = output_dir.parent
+        self._nb.setCurrentIndex(0)
+        QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
+        self._update_dataset_chip(dataset_path)
+
+    def _open_dataset_in_review(self, dataset_path: Path) -> None:
+        """Load a dataset root into Review and switch to it (from Datasets)."""
+        if self._review is None:
+            return
         self._nb.setCurrentIndex(0)
         QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
         self._update_dataset_chip(dataset_path)
@@ -1285,6 +1311,14 @@ class AllWellApp(QMainWindow):
         # local subprocess / remote SLURM allocation + scratch (audit L1). Also
         # stops the log poller re-arming (L2).
         _stop_analyze_runner(self._analyze)
+        # Datasets pane is also a child widget: stop any in-flight concatenate
+        # worker before teardown so a mid-run quit doesn't leave a live thread.
+        datasets = getattr(self, "_datasets", None)
+        if datasets is not None and hasattr(datasets, "shutdown"):
+            try:
+                datasets.shutdown()
+            except Exception:
+                swallowed()
         # Review pane is also a child widget: signal its smFISH worker to abort
         # and disconnect the app-global focus watcher on close (audit L3/L4).
         if self._review is not None:

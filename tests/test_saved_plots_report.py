@@ -54,17 +54,23 @@ def test_downsample_dpi_caps_longest_side():
     assert _downsample_dpi(300, 100.0, 100.0, floor=60) == 60
 
 
-def test_max_pool_rgb_preserves_sparse_bright_signal():
-    from well_viewer.features.image_browser.image_table.export import _max_pool_rgb
+def test_area_pool_rgb_averages_each_block():
+    """The gallery snapshot must read at the live grid's brightness.
 
-    # A single bright 2×2 spot on black — the fluorescence case that plain
-    # area-averaging washes out.
+    The live thumbnail hands its RGB to Qt's smooth transform, which area-averages,
+    so the pre-shrink here averages too. Peak-preserving pooling dilates sparse
+    fluorescence and made the saved image brighter than the table it came from.
+    """
+    from well_viewer.features.image_browser.image_table.export import _area_pool_rgb
+
+    # A single bright 2×2 spot on black, pooled 5× → one block of 25 pixels holds
+    # the 4 bright ones, so the block averages to 4/25 of full scale.
     rgb = np.zeros((100, 100, 3), np.uint8)
     rgb[10:12, 10:12] = 255
-    out = _max_pool_rgb(rgb, 20)  # ~5× shrink
+    out = _area_pool_rgb(rgb, 20)  # ~5× shrink
     assert max(out.shape[:2]) <= 20
-    assert int(out.max()) == 255  # peak preserved (averaging would crush it)
+    assert int(out.max()) == round(255 * 4 / 25)
     # No-op when already within budget.
     small = np.zeros((10, 10, 3), np.uint8)
-    assert _max_pool_rgb(small, 20) is small
+    assert _area_pool_rgb(small, 20) is small
 

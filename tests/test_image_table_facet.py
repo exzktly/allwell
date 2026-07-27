@@ -100,3 +100,7 @@ def test_facet_plan_nested_columns_group_space():
     assert plan.spacer_cols == [2]                            # gap between the well column groups
     assert plan.first_row == 2                               # two top label rows (well over tp)
     assert any(grp for (*_x, grp) in plan.top)               # a spanning well group label
+    # Both extents are published so a renderer can size the grid without
+    # re-deriving it from the label / spacer counts.
+    assert plan.bottom_row == max(plan.grid_row_of) + 1
+    assert plan.bottom_col == max(plan.grid_col_of) + 1

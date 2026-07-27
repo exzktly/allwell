@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from well_viewer.core.safe import swallowed
 
+from well_viewer.features.image_browser.image_table import renderer as _renderer
 from well_viewer.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
     _load_array,
@@ -35,8 +36,10 @@ def _export_opts(ctx) -> dict[str, Any]:
     if not isinstance(opts, dict):
         opts = {
             "pad_inches": 0.10,    # outer margin around the saved figure
-            "cell_pad": 0.50,      # tight_layout w_pad / h_pad between cells
-            "show_titles": True,
+            "cell_pad": 0.50,      # gap between adjacent grid slots
+            # Off by default: the exported figure carries the same row/column axis
+            # labels the grid shows, which identify every cell already.
+            "show_titles": False,
             "title_fontsize": 7,
             "dpi": 300,
             "transparent_bg": True,
@@ -72,13 +75,17 @@ def image_table_open_export_settings(ctx) -> None:
     cell_spin.setDecimals(2)
     cell_spin.setValue(float(opts.get("cell_pad", 0.50)))
     cell_spin.setToolTip(
-        "Gap between adjacent cells (passed to tight_layout as w_pad / h_pad)."
+        "Gap between adjacent cells and label strips, as a fraction of the font size."
     )
     form.addRow("Cell gap:", cell_spin)
 
     titles_cb = QCheckBox(dlg)
-    titles_cb.setChecked(bool(opts.get("show_titles", True)))
-    titles_cb.setToolTip("Show the well/channel/timepoint label above each image.")
+    titles_cb.setChecked(bool(opts.get("show_titles", False)))
+    titles_cb.setToolTip(
+        "Repeat the well/channel/timepoint label above every image. The exported "
+        "figure already carries the grid's row and column axis labels, so this is "
+        "off unless you want the per-cell titles as well."
+    )
     form.addRow("Show titles:", titles_cb)
 
     title_size_spin = QSpinBox(dlg)
@@ -118,15 +125,15 @@ def image_table_open_export_settings(ctx) -> None:
     })
 
 
-def _max_pool_rgb(rgb, max_side: int):
-    """Shrink an (H,W,3+) uint8 image so its longest side ≤ *max_side*, keeping
-    the **brightest** pixel of each block (by luminance).
+def _area_pool_rgb(rgb, max_side: int):
+    """Shrink an (H,W,3+) uint8 image so its longest side ≤ *max_side*, averaging
+    each block.
 
-    Plain area-averaging (matplotlib's default when an imshow'd image is drawn
-    smaller than native) collapses sparse bright-on-dark fluorescence — the few
-    bright pixels get averaged with their dark neighbours and the contrast washes
-    out. Max-luminance pooling preserves the peak signal (and the true colour of
-    that peak pixel), so a downsampled grid still reads like the live view.
+    Area-averaging is what the live thumbnail already does — ``make_overlay_thumb``
+    hands the RGB to Qt's smooth transform — so pooling the same way is what keeps a
+    saved snapshot reading at the grid's brightness. Peak-preserving alternatives
+    (taking each block's brightest pixel) dilate sparse fluorescence and make the
+    saved image visibly brighter and denser than the table it came from.
     """
     import numpy as _np
 
@@ -146,10 +153,50 @@ def _max_pool_rgb(rgb, max_side: int):
     H, W, C = a.shape
     nbh, nbw = H // k, W // k
     blocks = a.reshape(nbh, k, nbw, k, C).transpose(0, 2, 1, 3, 4).reshape(nbh, nbw, k * k, C)
-    lum = blocks[..., :3].astype(_np.float32) @ _np.array([0.299, 0.587, 0.114], _np.float32)
-    idx = lum.argmax(axis=2)  # brightest pixel per block
-    out = _np.take_along_axis(blocks, idx[..., None, None], axis=2)[:, :, 0, :]
-    return out.astype(a.dtype)
+    out = blocks.astype(_np.float32).mean(axis=2)
+    return _np.clip(_np.rint(out), 0, 255).astype(a.dtype)
+
+
+def _facet_plan_for_export(ctx, cells):
+    """The facet plan the exported figure mirrors, or ``None`` for a plain grid.
+
+    ``None`` when the plan can't be computed, in which case the figure falls back to
+    a uniform grid — the axis labels are chrome, and losing them beats failing the
+    whole export.
+    """
+    from well_viewer.features.image_browser.image_table import facet_view as _facet
+
+    try:
+        return _facet.plan_facets(ctx, cells)
+    except Exception:
+        swallowed()  # chrome is decoration; never block an export on it
+        return None
+
+
+def _export_grid(fig_factory, plan, n_rows: int, n_cols: int, *,
+                 cell_w: float, cell_h: float, pad_in: float):
+    """``(fig, gridspec, slot_of)`` for the export grid.
+
+    *slot_of* maps a logical ``(row, col)`` to the gridspec key its cell axes
+    occupies — the facet plan's placement when there is one (leaving room for the
+    label strips and the inter-group gaps), the plain ``(row, col)`` otherwise.
+    """
+    if plan is None:
+        fig = fig_factory((max(2.4, n_cols * cell_w), max(2.4, n_rows * cell_h)))
+        total_w, total_h = n_cols * cell_w, n_rows * cell_h
+        gs = fig.add_gridspec(
+            n_rows, n_cols, left=0.0, right=1.0, bottom=0.0, top=1.0,
+            wspace=(pad_in * n_cols / total_w) if total_w > 0 else 0.0,
+            hspace=(pad_in * n_rows / total_h) if total_h > 0 else 0.0,
+        )
+        return fig, gs, (lambda r, c: (r, c))
+
+    fig = fig_factory(_renderer.facet_figsize(
+        plan, n_rows, n_cols, cell_w_in=cell_w, cell_h_in=cell_h, pad_in=pad_in))
+    gs = _renderer.make_facet_gridspec(
+        fig, plan, n_rows, n_cols,
+        cell_w_in=cell_w, cell_h_in=cell_h, pad_in=pad_in)
+    return fig, gs, (lambda r, c: (plan.grid_row_of[r], plan.grid_col_of[c]))
 
 
 def _build_export_figure(ctx, *, cell_max_px: int | None = None):
@@ -161,9 +208,13 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
     is nothing to render (no cells, missing matplotlib/numpy).
 
     ``cell_max_px`` (gallery-save path only) pre-shrinks each cell to that
-    longest-side pixel budget via brightness-preserving max-pooling + nearest
-    interpolation, so a small saved snapshot keeps its contrast (see
-    :func:`_max_pool_rgb`). ``None`` (file export / clipboard) renders full-res.
+    longest-side pixel budget (see :func:`_area_pool_rgb`), bounding the memory a
+    96-cell plate of full-resolution RGB would otherwise take. ``None`` (file export
+    / clipboard) renders full-res.
+
+    Placement and labelling mirror the live grid: the same ``plan_facets`` output
+    that lays out the Qt widgets drives the gridspec here, and ``renderer.py`` draws
+    the plan's axis labels, group strips and corner label onto the figure.
     """
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
     if not cells:
@@ -183,13 +234,16 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
     opts = _export_opts(ctx)
     pad_inches = float(opts.get("pad_inches", 0.10))
     cell_pad = float(opts.get("cell_pad", 0.50))
-    show_titles = bool(opts.get("show_titles", True))
+    show_titles = bool(opts.get("show_titles", False))
     title_fontsize = int(opts.get("title_fontsize", 7))
     dpi = int(opts.get("dpi", 300))
     transparent_bg = bool(opts.get("transparent_bg", True))
 
-    rows = int(getattr(ctx.state.image_table, "rows", len(cells)) or len(cells))
-    cols = int(getattr(ctx.state.image_table, "cols", len(cells[0])) or len(cells[0]))
+    # Shape comes from the cells themselves, not ``state.rows`` / ``state.cols``:
+    # the facet plan indexes off ``cells``, so a stale state value would place a
+    # cell outside the grid it was planned for.
+    rows = len(cells)
+    cols = max((len(row) for row in cells), default=0)
     # Overlay: the channel axis has collapsed to the OVERLAY_CHAN sentinel and each
     # such cell blends every selected channel (matching the live grid). Resolve the
     # channel set once, off the collapse.
@@ -244,16 +298,20 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
     # Reserve extra inches per row for the per-axes title when enabled.
     if show_titles:
         cell_h += 0.2
-    fig = Figure(
-        figsize=(max(2.4, cols * cell_w), max(2.4, rows * cell_h)),
-        dpi=dpi,
-        facecolor=bg_face,
-    )
-    fig.patch.set_alpha(0.0 if transparent_bg else 1.0)
+
+    def _make_figure(size):
+        f = Figure(figsize=size, dpi=dpi, facecolor=bg_face)
+        f.patch.set_alpha(0.0 if transparent_bg else 1.0)
+        return f
+
+    pad_in = _renderer.cell_pad_inches(cell_pad)
+    plan = _facet_plan_for_export(ctx, cells)
+    fig, gs, slot_of = _export_grid(_make_figure, plan, rows, cols,
+                                    cell_w=cell_w, cell_h=cell_h, pad_in=pad_in)
 
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
-            ax = fig.add_subplot(rows, cols, r * cols + c + 1)
+            ax = fig.add_subplot(gs[slot_of(r, c)])
             ax.set_facecolor("none" if transparent_bg else "white")
             well = cell["well"]
             chan = cell["chan"]
@@ -278,8 +336,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
                 rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr) \
                     if arr is not None else None
 
-            # Burn the scale bar / label into the source-res RGB (before any
-            # gallery downscale, so the white bar/text survive max-pooling).
+            # Burn the scale bar / label into the source-res RGB, before any
+            # gallery downscale, so the bar and text scale with the pixels.
             if rgb is not None:
                 ck = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
                 if ck:
@@ -287,10 +345,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
 
             if rgb is not None:
                 if cell_max_px:
-                    rgb = _max_pool_rgb(rgb, cell_max_px)
-                    ax.imshow(rgb, aspect="equal", interpolation="nearest")
-                else:
-                    ax.imshow(rgb, aspect="equal")
+                    rgb = _area_pool_rgb(rgb, cell_max_px)
+                ax.imshow(rgb, aspect="equal")
             else:
                 ax.text(
                     0.5, 0.5, "(no image)",
@@ -317,10 +373,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
             for spine in ax.spines.values():
                 spine.set_visible(False)
 
-    try:
-        fig.tight_layout(w_pad=cell_pad, h_pad=cell_pad)
-    except Exception:
-        fig.tight_layout()
+    if plan is not None:
+        _renderer.draw_facet_labels(fig, gs, plan)
 
     save_kwargs: dict[str, Any] = dict(
         bbox_inches="tight", pad_inches=pad_inches,
@@ -421,9 +475,9 @@ def image_table_save_to_gallery(ctx) -> None:
     """
     import io
 
-    # Pre-shrink each cell with brightness-preserving max-pooling so the small
-    # saved snapshot keeps its contrast (plain dpi downscaling area-averages and
-    # washes out sparse fluorescence).
+    # Pre-shrink each cell to bound the memory a full-resolution grid would take.
+    # The pooling averages each block, exactly as the live thumbnail's smooth scale
+    # does, so the saved snapshot reads at the same brightness as the grid.
     fig, save_kwargs = _build_export_figure(ctx, cell_max_px=320)
     if fig is None:
         ctx.notify.set_status("Image table is empty — nothing to save.")

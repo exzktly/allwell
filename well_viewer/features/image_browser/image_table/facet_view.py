@@ -120,7 +120,7 @@ class FacetPlan:
 
     __slots__ = ("grid_row_of", "grid_col_of", "spacer_rows", "spacer_cols",
                  "top", "left", "corner", "first_row", "first_col", "bottom_row",
-                 "row_gap", "col_gap", "label_pt", "group_pt")
+                 "bottom_col", "row_gap", "col_gap", "label_pt", "group_pt")
 
     def __init__(self) -> None:
         self.grid_row_of: list[int] = []
@@ -133,7 +133,10 @@ class FacetPlan:
         self.corner: str = ""
         self.first_row = 0
         self.first_col = 0
+        # One past the last grid row / column the plan occupies — the extents a
+        # renderer needs to size a grid that includes the label and spacer slots.
         self.bottom_row = 0
+        self.bottom_col = 0
         self.row_gap = _GROUP_GAP
         self.col_gap = _GROUP_GAP
         self.label_pt = _LABEL_PT
@@ -190,7 +193,7 @@ def plan_facets(ctx, cells) -> FacetPlan | None:
     plan.grid_row_of, plan.grid_col_of = grid_row_of, grid_col_of
     plan.spacer_rows, plan.spacer_cols = spacer_rows, spacer_cols
     plan.first_row, plan.first_col = tl, rl
-    plan.bottom_row = next_row
+    plan.bottom_row, plan.bottom_col = next_row, next_col
     plan.row_gap = max(0, int(getattr(st, "row_group_gap", _GROUP_GAP)))
     plan.col_gap = max(0, int(getattr(st, "col_group_gap", _GROUP_GAP)))
     plan.label_pt = max(6, int(getattr(st, "label_font_pt", _LABEL_PT)))

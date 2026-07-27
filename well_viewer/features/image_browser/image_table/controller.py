@@ -687,7 +687,13 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
         if rgb is not None and chrome_kwargs:
             rgb = draw_cell_chrome(rgb, **chrome_kwargs)
-        pix = make_overlay_thumb(rgb, sz, sz) if rgb is not None else None
+        # Pin the window to the full 0..255 byte range (as the overlay branch
+        # above does). ``cell_display_rgb`` has already applied the channel's LUT
+        # and colormap, so letting make_overlay_thumb auto-fit its own min/max
+        # would re-stretch a finished image — visibly so on a colormap whose ends
+        # aren't black and white (viridis bottoms out around 68, tops out at 253),
+        # where the live thumbnail then disagreed with the exported cell.
+        pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
     return pix, arr, True
 
 

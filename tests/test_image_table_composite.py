@@ -121,6 +121,11 @@ def test_export_figure_reflects_collapsed_overlay(image_table_app):
     from well_viewer.features.image_browser.image_table import controller as C
     from well_viewer.features.image_browser.image_table import builder_view as B
     from well_viewer.features.image_browser.image_table.export import _build_export_figure
+    from well_viewer.features.image_browser.image_table.renderer import FACET_GID
+
+    def _cell_axes(fig):
+        # The figure also carries the facet label strips; count only image cells.
+        return [a for a in fig.axes if a.get_gid() != FACET_GID]
 
     app = image_table_app
     ctx = app._ctx
@@ -137,11 +142,11 @@ def test_export_figure_reflects_collapsed_overlay(image_table_app):
     sep_cells = ctx.runtime.image_table.cells
     n_rows, n_cols = len(sep_cells), len(sep_cells[0])
     fig, _ = _build_export_figure(ctx)
-    assert len(fig.axes) == n_rows * n_cols
+    assert len(_cell_axes(fig)) == n_rows * n_cols
 
     # Overlay: the channel axis collapses to a single blended row.
     ax.overlay = True
     B._apply_now(ctx)
     C.image_table_generate(ctx)
     fig, _ = _build_export_figure(ctx)
-    assert len(fig.axes) == 1 * n_cols
+    assert len(_cell_axes(fig)) == 1 * n_cols

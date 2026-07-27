@@ -1467,8 +1467,37 @@ def _conda_run_prefix_for(selector: EnvSelector) -> list[str]:
             "-p" if kind == "prefix" else "-n", value]
 
 
+# Shell helpers for locating and validating a conda env on the remote. Shared
+# with ``scripts/_bootstrap_lib.py`` so the runner's pre-launch check and the
+# bootstrap's create-or-skip decision cannot disagree about whether an
+# environment exists — the state where they *did* disagree is the one that
+# stranded users (see :func:`_conda_env_guard`).
+#
+# Validity is conda's own test, ``is_conda_environment()``: a prefix is an
+# environment iff it holds ``conda-meta/history``. A directory without that file
+# is not an environment no matter what it contains, and conda refuses both to
+# run in it and to create over it.
+CONDA_ENV_SHELL_HELPERS = r"""
+aw_env_prefix() {
+    conda env list 2>/dev/null | awk -v n="$1" '$1 == n { print $NF }' | head -1
+}
+aw_env_is_valid() {
+    [ -n "$1" ] && [ -f "$1/conda-meta/history" ]
+}
+aw_env_stale_dir() {
+    for _c in "$HOME/.conda/envs/$1" "$(conda info --base 2>/dev/null)/envs/$1"; do
+        if [ -d "$_c" ] && [ ! -f "$_c/conda-meta/history" ]; then
+            printf '%s\n' "$_c"
+            return 0
+        fi
+    done
+    return 1
+}
+"""
+
+
 def _conda_env_guard(selector: EnvSelector) -> str:
-    """Bash that aborts with an actionable message if *selector* names no env.
+    """Bash that aborts with an actionable message if *selector* has no usable env.
 
     Without this the run reaches ``conda run`` and dies on conda's own
     ``EnvironmentLocationNotFound: not a conda environment: <path>`` — a line
@@ -1476,6 +1505,18 @@ def _conda_env_guard(selector: EnvSelector) -> str:
     bootstrap the host. It is also indistinguishable, in a scrolling log, from
     an error the *pipeline* raised, which sends the diagnosis to the wrong
     machine entirely.
+
+    Two states have to be told apart, because the fix differs and conda's own
+    message conflates them:
+
+    *No environment.* The host was never bootstrapped. Bootstrap it.
+
+    *A directory that is not an environment.* Something exists at the prefix but
+    holds no ``conda-meta/history`` — an env creation that failed part-way,
+    which on a cluster is most often a full home-directory quota. This is the
+    worse state: conda will neither run in it nor ``conda create`` over it, so
+    the run fails *and* a plain re-bootstrap fails behind it. The message names
+    the directory, because that is the thing that has to go.
 
     The check runs on the remote, immediately before the pipeline launches, so
     on a scheduler-backed host it runs **inside the allocation** — the compute
@@ -1485,22 +1526,46 @@ def _conda_env_guard(selector: EnvSelector) -> str:
     kind, value = selector
     value_q = _remote_quote(value)
     if kind == "prefix":
-        found = f'[ -x {value_q}/bin/python ]'
+        # The prefix is given, so there is nothing to look up: it either is an
+        # environment, is a directory that is not one, or is absent.
+        resolve = (
+            f'AW_PREFIX={value_q}; '
+            f'AW_STALE=""; '
+            f'if [ -d "$AW_PREFIX" ] && ! aw_env_is_valid "$AW_PREFIX"; then '
+            f'AW_STALE="$AW_PREFIX"; fi'
+        )
         what = f'conda env prefix {value}'
         # No double quotes anywhere in these strings: they are interpolated
         # into a double-quoted bash ``echo``, where a stray " ends the string
         # and the message arrives mangled (or the shell fails to parse it).
-        fix = ('Set this hosts Remote python to the env python, or run '
-               'Analyze -> Remotes -> Bootstrap to create the env.')
+        missing_fix = ('Set this hosts Remote python to the env python, or run '
+                       'Analyze -> Remotes -> Bootstrap to create the env.')
     else:
-        found = (f'conda env list 2>/dev/null | awk \'{{print $1}}\' '
-                 f'| grep -qx {value_q}')
+        resolve = (
+            f'AW_PREFIX="$(aw_env_prefix {value_q})"; '
+            f'AW_STALE="$(aw_env_stale_dir {value_q} || true)"'
+        )
         what = f"conda env {value}"
-        fix = ('Run Analyze -> Remotes -> Bootstrap for this host to create '
-               'it, or set Remote python to an existing env python.')
+        missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
+                       'create it, or set Remote python to an existing env '
+                       'python.')
+    stale_fix = ('Fix: remove that directory and re-run Analyze -> Remotes -> '
+                 'Bootstrap, which rebuilds the env from scratch.')
     return (
-        f'if ! {found}; then '
-        f'echo "[remote] ERROR: {what} not found on $(hostname)." >&2; '
+        f'{CONDA_ENV_SHELL_HELPERS} '
+        f'{resolve}; '
+        f'if ! aw_env_is_valid "$AW_PREFIX"; then '
+        f'echo "[remote] ERROR: {what} is not usable on $(hostname)." >&2; '
+        f'if [ -n "$AW_STALE" ]; then '
+        f'echo "[remote] $AW_STALE exists but is not a conda environment '
+        f'(no conda-meta/history)." >&2; '
+        f'echo "[remote] An env creation failed part-way — on a cluster a full '
+        f'home-directory quota is the usual cause. conda will neither run in '
+        f'it nor create over it." >&2; '
+        f'echo "[remote] {stale_fix}" >&2; '
+        f'else '
+        f'echo "[remote] {missing_fix}" >&2; '
+        f'fi; '
         f'echo "[remote] conda base: $(conda info --base 2>/dev/null || '
         f'echo unknown)" >&2; '
         f'echo "[remote] environments conda can see:" >&2; '
@@ -1509,7 +1574,6 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         # middle of a labelled block reads like local output, which is the
         # confusion the whole guard exists to remove.
         f"conda env list 2>/dev/null | sed 's/^/[remote]   /' >&2 || true; "
-        f'echo "[remote] {fix}" >&2; '
         f'exit 127; '
         f'fi'
     )

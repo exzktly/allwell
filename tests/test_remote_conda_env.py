@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -137,8 +138,8 @@ def test_the_guard_checks_the_configured_prefix_not_the_default_name():
         "", _PIDFILE, _ARGV, cache_hit=False,
         env_selector=("prefix", "/opt/conda/envs/myenv"),
     )
-    assert "[ -x /opt/conda/envs/myenv/bin/python ]" in cmd
-    assert "grep -qx allwell" not in cmd
+    assert 'AW_PREFIX=/opt/conda/envs/myenv' in cmd
+    assert "aw_env_prefix allwell" not in cmd
 
 
 # ── the message the user actually reads ─────────────────────────────────────
@@ -147,34 +148,49 @@ _NEEDS_BASH = pytest.mark.skipif(
     shutil.which("bash") is None, reason="needs a POSIX shell to run the guard")
 
 
-_FAKE_CONDA = """#!/bin/sh
-case "$1 $2" in
-  "info --base") echo /opt/conda ;;
-  "env list")
-    echo "# conda environments:"
-    echo "#"
-    echo "base                  *  /opt/conda"
-    ;;
-esac
-"""
+def _stub_conda(bin_dir: Path, *, envs: dict[str, str]) -> None:
+    """A stub ``conda`` answering the two queries the guard makes.
+
+    The guard's output depends on what conda reports, so the test has to own
+    that side. Reading whatever conda the machine happens to have made an
+    earlier version of these tests pass locally (no conda → empty listing) and
+    fail on a CI runner that ships one, which says nothing about the code.
+    """
+    rows = "\n".join(f'  echo "{n}   {pfx}"' for n, pfx in envs.items())
+    (bin_dir / "conda").write_text(
+        "#!/bin/sh\n"
+        'case "$1 $2" in\n'
+        '  "info --base") echo /opt/conda ;;\n'
+        '  "env list") echo "# conda environments:"\n'
+        f"{rows or '  true'} ;;\n"
+        "esac\n"
+    )
+    (bin_dir / "conda").chmod(0o755)
+
+
+def _make_env(prefix: Path, *, valid: bool) -> Path:
+    """Create an env prefix. *valid* writes ``conda-meta/history`` — conda's own
+    test for "this is an environment"; without it conda will neither run in the
+    directory nor create over it."""
+    (prefix / "bin").mkdir(parents=True, exist_ok=True)
+    (prefix / "bin" / "python").write_text("#!/bin/sh\n")
+    (prefix / "bin" / "python").chmod(0o755)
+    if valid:
+        (prefix / "conda-meta").mkdir(exist_ok=True)
+        (prefix / "conda-meta" / "history").touch()
+    return prefix
 
 
 @pytest.fixture
-def conda_on_path(tmp_path, monkeypatch):
-    """A stub ``conda`` that answers the two queries the guard makes.
-
-    The guard's output depends on what conda reports, so the test has to own
-    that side. Reading whatever conda the machine happens to have made this
-    pass locally (no conda installed → empty listing) and fail on CI (a real
-    conda → a real listing), which says nothing about the code.
-    """
+def remote_home(tmp_path, monkeypatch):
+    """A scratch ``HOME`` and a stub ``conda`` on ``PATH``."""
+    home = tmp_path / "home"
     binder = tmp_path / "bin"
+    home.mkdir()
     binder.mkdir()
-    conda = binder / "conda"
-    conda.write_text(_FAKE_CONDA)
-    conda.chmod(0o755)
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("PATH", f"{binder}:/usr/bin:/bin")
-    return binder
+    return home, binder
 
 
 def _run_guard(selector) -> subprocess.CompletedProcess:
@@ -190,8 +206,11 @@ def _run_guard(selector) -> subprocess.CompletedProcess:
     ("prefix", "/definitely/not/an/env"),
 ])
 def test_a_missing_env_aborts_with_a_labelled_actionable_message(
-    selector, conda_on_path,
+    selector, remote_home,
 ):
+    _, binder = remote_home
+    _stub_conda(binder, envs={"base": "/opt/conda"})
+
     r = _run_guard(selector)
     assert r.returncode == 127
     assert "REACHED-PIPELINE" not in r.stdout
@@ -199,20 +218,51 @@ def test_a_missing_env_aborts_with_a_labelled_actionable_message(
     # environment listing, which is conda's own output.
     lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
     assert lines and all(ln.startswith("[remote]") for ln in lines), r.stderr
-    # …names what is missing, what conda knows, and how to fix it.
-    assert "not found on" in r.stderr
+    # …names what is wrong, what conda knows, and how to fix it.
+    assert "is not usable on" in r.stderr
     assert "conda base: /opt/conda" in r.stderr
     assert "[remote]   base" in r.stderr
     assert "Bootstrap" in r.stderr
+    # Nothing is there, so it must NOT be described as a leftover directory.
+    assert "is not a conda environment" not in r.stderr
 
 
 @_NEEDS_BASH
-def test_an_env_that_exists_passes_through_to_the_pipeline(tmp_path, conda_on_path):
-    env = tmp_path / "envs" / "aw"
-    (env / "bin").mkdir(parents=True)
-    py = env / "bin" / "python"
-    py.write_text("#!/bin/sh\n")
-    py.chmod(0o755)
+def test_a_half_created_env_is_named_as_the_thing_to_remove(remote_home):
+    """The reported case: ``$HOME/.conda/envs/allwell`` exists but holds no
+    ``conda-meta/history``. conda reports only ``EnvironmentLocationNotFound``,
+    which reads as "absent" — but the directory is present, it is what blocks
+    ``conda create`` from repairing the env, and it is what has to go."""
+    home, binder = remote_home
+    _stub_conda(binder, envs={"base": "/opt/conda"})
+    stale = _make_env(home / ".conda" / "envs" / "allwell", valid=False)
+
+    r = _run_guard(("name", "allwell"))
+    assert r.returncode == 127
+    assert str(stale) in r.stderr
+    assert "is not a conda environment" in r.stderr
+    assert "quota" in r.stderr          # the usual cause, named
+    assert "remove that directory" in r.stderr
+    lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
+    assert all(ln.startswith("[remote]") for ln in lines), r.stderr
+
+
+@_NEEDS_BASH
+def test_a_half_created_prefix_is_named_too(remote_home, tmp_path):
+    _, binder = remote_home
+    _stub_conda(binder, envs={"base": "/opt/conda"})
+    stale = _make_env(tmp_path / "envs" / "myenv", valid=False)
+
+    r = _run_guard(("prefix", str(stale)))
+    assert r.returncode == 127
+    assert "is not a conda environment" in r.stderr
+
+
+@_NEEDS_BASH
+def test_an_env_that_exists_passes_through_to_the_pipeline(remote_home, tmp_path):
+    _, binder = remote_home
+    _stub_conda(binder, envs={"base": "/opt/conda"})
+    env = _make_env(tmp_path / "envs" / "aw", valid=True)
 
     r = _run_guard(("prefix", str(env)))
     assert r.returncode == 0
@@ -221,21 +271,14 @@ def test_an_env_that_exists_passes_through_to_the_pipeline(tmp_path, conda_on_pa
 
 @_NEEDS_BASH
 def test_a_named_env_conda_lists_passes_through_to_the_pipeline(
-    tmp_path, monkeypatch,
+    remote_home, tmp_path,
 ):
     """The name selector's happy path: the guard's check has to agree with the
     resolution ``conda run -n`` will do a moment later, or it would block runs
     that would have worked."""
-    binder = tmp_path / "bin"
-    binder.mkdir()
-    conda = binder / "conda"
-    conda.write_text(
-        '#!/bin/sh\n'
-        '[ "$1 $2" = "env list" ] && printf "%s\\n" '
-        '"# conda environments:" "base   /opt/conda" "allwell   /opt/conda/envs/allwell"\n'
-    )
-    conda.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{binder}:/usr/bin:/bin")
+    _, binder = remote_home
+    env = _make_env(tmp_path / "envs" / "allwell", valid=True)
+    _stub_conda(binder, envs={"base": "/opt/conda", "allwell": str(env)})
 
     r = _run_guard(("name", "allwell"))
     assert r.returncode == 0

@@ -1660,7 +1660,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 |--------|------|
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into a small table-driven emitter to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). |
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). |
-| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. |
+| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `scripts/_bootstrap_lib.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
 | `input_resolution_service.py` | Validates the input folder shape (zip set vs flat). |
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
@@ -1785,6 +1785,50 @@ configured staging area.
 The run logs its resolved scratch base on the `Scratch  :` line; if that ever
 reads back as the output dir on a network mount, that is the failure
 configuration.
+
+### 6.6 The remote conda environment, and one definition of "it exists"
+
+A remote run needs exactly one thing installed on the host: a conda environment
+holding the pipeline's dependencies. Two pieces of code care whether it is
+there — `remote_runner`'s pre-launch guard, and `scripts/_bootstrap_lib.py`,
+which creates it — and they answer with the same shell,
+`remote_runner.CONDA_ENV_SHELL_HELPERS` (`aw_env_prefix` / `aw_env_is_valid` /
+`aw_env_stale_dir`). That sharing is the point of the module-level constant:
+when the two disagreed, the disagreement had no way out.
+
+**Validity is conda's own test.** A prefix is an environment iff it holds
+`conda-meta/history`. The bootstrap used to ask a different question — "is the
+name in `conda env list`" — and the gap between the two is a real state on a
+cluster: a `conda create` that dies part-way (a full home-directory quota is the
+usual cause) leaves a directory at the prefix with no `conda-meta/history`.
+conda will neither run in that directory nor create over it, so every run failed
+with `EnvironmentLocationNotFound: not a conda environment: <prefix>` *and*
+every re-bootstrap failed behind it with `prefix already exists`. Nothing the
+user could reach from the app repaired it.
+
+Both sides now handle it, and the split of responsibility is deliberate:
+
+- The **guard** distinguishes "no environment" from "a directory that is not an
+  environment" and names the directory, because that is the thing that has to
+  go. It never deletes anything: a run is not the time to modify the host.
+- The **bootstrap** repairs it. A prefix that is provably not an environment is
+  removed and rebuilt, guarded by a `*/envs/<name>` shape check so an unexpected
+  path from conda can never turn the repair into an arbitrary `rm -rf`. A
+  *valid* env is still left alone — replacing one of those is what `--force` is
+  for.
+
+**Where the env actually lives.** `conda create -n allwell` lands in the first
+writable envs dir, which on a host with a pre-existing system conda (an HPC
+module, `/opt/conda`) is `~/.conda/envs/allwell` and not under `~/miniforge3`.
+`--force` resolves the prefix through conda before removing it; removing
+`~/miniforge3` alone left the env untouched, which made the flag's own promise
+("use when the remote env is suspected corrupt") false on exactly the hosts
+most likely to need it.
+
+The scripts are built by `env_setup_script()` / `force_clean_script()` rather
+than inline in the ssh callers, so `tests/test_bootstrap_env_repair.py` can run
+them against a stub conda and a scratch `HOME` — the create-or-repair decision
+is the part that strands users when it is wrong, and an ssh call hides it.
 
 ---
 
@@ -3141,11 +3185,17 @@ back. The copy retries, and the exhausted-budget message names the mount. Copy
 the plate to local storage and point All-Well at that copy.
 
 **A remote run dies immediately with `EnvironmentLocationNotFound: not a conda
-environment`.** — The pipeline's conda env doesn't exist where the run looked
-for it. The run log names the env it chose (`[remote] conda env: name allwell`
-or `prefix <path>`) and, when the env is missing, the guard prints the host,
-conda's base, and every env conda can see. Two causes:
+environment`.** — The pipeline's conda env isn't usable where the run looked for
+it. The run log names the env it chose (`[remote] conda env: name allwell` or
+`prefix <path>`), and the guard prints the host, conda's base, and every env
+conda can see. Three causes, and the guard says which:
 
+- *A directory exists at the prefix but is not an environment* (no
+  `conda-meta/history`) — an env creation that died part-way, usually a full
+  home-directory quota. The guard names the directory. Re-run Analyze → Remotes
+  → *Bootstrap*: it removes the broken prefix and rebuilds. (Before that repair
+  existed, this state was a dead end — the run failed and the re-bootstrap
+  failed behind it on `prefix already exists`. See §6.6.)
 - *The host was never bootstrapped*, or its env was removed. Run Analyze →
   Remotes → *Bootstrap* for that host.
 - *The host's `remote_python` points at an env that isn't there.* The field is
@@ -3155,6 +3205,10 @@ conda's base, and every env conda can see. Two causes:
 A value that isn't shaped like `<env>/bin/python` cannot name an environment;
 the runner keeps the name selector and says so on a `[remote] warn:` line
 rather than guessing at a prefix.
+
+**Bootstrap fails with `CondaValueError: prefix already exists`.** — The same
+half-created directory, on a build that predates the repair. Remove the prefix
+the message names and re-run Bootstrap.
 
 **Auto-threshold reports `timepoint unknown`.** — `pipeline_info.json` doesn't
 have a schema that names a `tp` or `timepoint` field. Re-run the pipeline with

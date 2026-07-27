@@ -219,17 +219,22 @@ def test_locate_conda_sh_snippet_handles_both_paths():
 
 def test_locate_conda_sh_snippet_is_used_by_setup_scripts():
     """Regression guard: the install / activate paths must use the
-    shared discovery snippet, not hard-coded $HOME/miniforge3."""
-    # Read the source of the relevant functions.
+    shared discovery snippet, not hard-coded $HOME/miniforge3.
+
+    Asserted against the *generated script* for the env setup, not the source
+    text of the function that ships it — the script is built by
+    ``env_setup_script()`` so it can be tested against a stub conda, and what
+    matters is that the discovery snippet reaches the remote either way.
+    """
     import inspect
-    setup_src = inspect.getsource(bl.ensure_env_and_staging)
+    setup_script = bl.env_setup_script()
     pip_src = inspect.getsource(bl.install_pip_deps)
-    # Both should reference the discovery snippet.
-    assert "_LOCATE_CONDA_SH" in setup_src
+    # Both should carry the discovery snippet.
+    assert bl._LOCATE_CONDA_SH in setup_script
     assert "_LOCATE_CONDA_SH" in pip_src
     # And neither should still hard-code the source line (which used
     # to live in the heredoc body before v5.2.4).
-    assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in setup_src
+    assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in setup_script
     assert 'source "$HOME/miniforge3/etc/profile.d/conda.sh"' not in pip_src
 
 

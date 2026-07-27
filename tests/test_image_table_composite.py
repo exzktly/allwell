@@ -96,21 +96,28 @@ def test_overlay_collapses_channel_axis_and_marks_cells(image_table_app):
     n_channels = len(ax.channels)
     assert n_channels >= 2, "need multiple channels to exercise the overlay"
 
-    # Separate: one row per channel, no sentinel cells.
+    # Separate: every channel gets its own row, no sentinel cells.
     ax.overlay = False
     B._apply_now(ctx)
     sep = ctx.runtime.image_table.cells
-    assert len(sep) == n_channels
     assert all(cell["chan"] != OVERLAY_CHAN for row in sep for cell in row)
     assert ctx.state.image_table.composite is False
 
-    # Overlay: the channel axis collapses to ONE blended row of sentinel cells.
+    # Overlay: the channel axis collapses — the rows it contributed become one
+    # blended row of sentinel cells.
     ax.overlay = True
     B._apply_now(ctx)
     ovl = ctx.runtime.image_table.cells
-    assert len(ovl) == 1
     assert all(cell["chan"] == OVERLAY_CHAN for row in ovl for cell in row)
     assert ctx.state.image_table.composite is True
+
+    # The collapse is stated as a ratio, not as absolute row counts: the channel
+    # axis may be nested under another dimension (the table opens on
+    # Rows = Wells › Channels), so "one row" only held while channels were the
+    # sole row dimension. Dividing out n_channels holds under either layout, and
+    # still fails loudly if the axis stops collapsing at all.
+    assert len(ovl) * n_channels == len(sep)
+    assert len(ovl[0]) == len(sep[0])          # the column axis is untouched
 
     # Generate must not raise on the collapsed grid.
     C.image_table_generate(ctx)
@@ -134,8 +141,10 @@ def test_export_figure_reflects_collapsed_overlay(image_table_app):
     spec = B.builder_spec(ctx)
     ax_name = spec.channel_axis() or "rows"
     ax = getattr(spec, ax_name)
+    n_channels = len(ax.channels)
+    assert n_channels >= 2, "need multiple channels to exercise the overlay"
 
-    # Separate: N channel rows × M timepoint columns.
+    # Separate: the exported figure has one cell axes per grid cell.
     ax.overlay = False
     B._apply_now(ctx)
     C.image_table_generate(ctx)
@@ -144,9 +153,14 @@ def test_export_figure_reflects_collapsed_overlay(image_table_app):
     fig, _ = _build_export_figure(ctx)
     assert len(_cell_axes(fig)) == n_rows * n_cols
 
-    # Overlay: the channel axis collapses to a single blended row.
+    # Overlay: the channel axis collapses, and the figure follows the collapsed
+    # grid. Counted off the render model rather than a literal row count, since
+    # the channel axis can be nested under another dimension.
     ax.overlay = True
     B._apply_now(ctx)
     C.image_table_generate(ctx)
+    ovl_cells = ctx.runtime.image_table.cells
+    assert len(ovl_cells) * n_channels == n_rows      # the collapse happened
+    assert len(ovl_cells[0]) == n_cols                # columns untouched
     fig, _ = _build_export_figure(ctx)
-    assert len(_cell_axes(fig)) == 1 * n_cols
+    assert len(_cell_axes(fig)) == len(ovl_cells) * n_cols

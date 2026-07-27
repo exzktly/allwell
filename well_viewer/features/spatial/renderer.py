@@ -211,6 +211,7 @@ def _render_spatial_map(ax, payload, st) -> None:
             sc = ax.scatter(pts[:, 0], pts[:, 1], c=colours, s=8,
                             cmap="viridis", edgecolors="none")
             cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
+            setattr(cbar.ax, "_aw_colorbar", True)
             cbar.set_label(payload.get("intra_colour_label", "r / R"),
                            color=_tokens(ax)[2], fontsize=8)
         if st.show_hulls:
@@ -219,6 +220,7 @@ def _render_spatial_map(ax, payload, st) -> None:
         sc = ax.scatter(pts[:, 0], pts[:, 1], c=metric, s=8,
                         cmap="viridis", edgecolors="none")
         cbar = ax.figure.colorbar(sc, ax=ax, shrink=0.8, pad=0.02)
+        setattr(cbar.ax, "_aw_colorbar", True)
         cbar.set_label(payload.get("metric_col", ""), color=_tokens(ax)[2],
                        fontsize=8)
         if st.show_hulls and level == sp_state.LEVEL_COLONY:
@@ -525,6 +527,7 @@ def _render_summary_heatmap(fig, matrix, wells, tps, label, units) -> None:
     ax.set_yticks(range(len(wells)))
     ax.set_yticklabels(wells)
     cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+    setattr(cbar.ax, "_aw_colorbar", True)
     cbar_label = f"{label} ({units})" if units else label
     cbar.set_label(cbar_label, color=_tokens(ax)[2], fontsize=8)
 

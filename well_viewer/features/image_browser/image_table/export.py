@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from well_viewer.core.safe import swallowed
 
+from well_viewer.features.image_browser.image_table import facet_view as _facet
 from well_viewer.features.image_browser.image_table import renderer as _renderer
 from well_viewer.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
@@ -164,8 +165,6 @@ def _facet_plan_for_export(ctx, cells):
     a uniform grid — the axis labels are chrome, and losing them beats failing the
     whole export.
     """
-    from well_viewer.features.image_browser.image_table import facet_view as _facet
-
     try:
         return _facet.plan_facets(ctx, cells)
     except Exception:

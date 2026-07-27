@@ -483,6 +483,14 @@ def redraw_heatmap(ctx) -> None:
             norm = LogNorm(vmin=log_vmin, vmax=log_vmax)
             # Mask non-positive entries so LogNorm doesn't choke.
             masked = np.ma.masked_where(~np.isfinite(masked.filled(np.nan)) | (masked.filled(np.nan) <= 0), masked)
+        else:
+            # No usable positive range — a blank grid, one distinct value, or a
+            # Fixed vmin at or below zero. Say so: rendering linear in silence
+            # looks identical to the toggle having no effect at all.
+            ctx.notify.set_status(
+                "Heat Map: log scale needs two or more distinct positive values — "
+                "showing the linear colour scale."
+            )
 
     ax.clear()
     ax.set_facecolor(_bg)  # ax.clear() resets to white; re-apply the theme bg
@@ -534,7 +542,8 @@ def redraw_heatmap(ctx) -> None:
                 _lbl.set_color("#DC2626")
                 _lbl.set_fontweight("bold")
 
-    # Cell text annotations.
+    # Cell text annotations. Resolve the user's number format once, not per cell.
+    value_fmt = _cell_value_format(ctx, fig)
     for (r, c), wells in cell_well_index.items():
         v = arr[r, c]
         if not math.isfinite(v):
@@ -552,7 +561,7 @@ def redraw_heatmap(ctx) -> None:
             fontsize=6, color="black", alpha=0.8,
         )
         ax.text(
-            c, r - 0.05, _format_cell_value(v, metric),
+            c, r - 0.05, _format_cell_value(v, metric, value_fmt),
             ha="center", va="center",
             fontsize=8, color="black",
         )
@@ -580,6 +589,11 @@ def redraw_heatmap(ctx) -> None:
         try:
             cax.cla()
             ctx.runtime.heatmap.colorbar = fig.colorbar(im, cax=cax)
+            # Opt the bar out of the export-style pass's axis handling: its scale
+            # and ticks come from ``im``'s norm, so under Log scale that pass
+            # would otherwise reset the log ticks it just installed. ``cla()``
+            # drops the attribute, so re-stamp it on every redraw.
+            setattr(cax, "_aw_colorbar", True)
             ctx.runtime.heatmap.colorbar.set_label(_metric_axis_label(metric, ctx),
                                                    fontsize=8, color=_muted_fg)
             cax.tick_params(colors=_muted_fg, labelsize=7)
@@ -595,6 +609,7 @@ def redraw_heatmap(ctx) -> None:
                 swallowed()  # was: pass (silent except)
         try:
             ctx.runtime.heatmap.colorbar = fig.colorbar(im, ax=ax, fraction=0.04, pad=0.03)
+            setattr(ctx.runtime.heatmap.colorbar.ax, "_aw_colorbar", True)
             ctx.runtime.heatmap.colorbar.set_label(_metric_axis_label(metric, ctx),
                                                    fontsize=8, color=_muted_fg)
             ctx.runtime.heatmap.colorbar.ax.tick_params(colors=_muted_fg, labelsize=7)
@@ -622,9 +637,23 @@ def redraw_heatmap(ctx) -> None:
     canvas.draw_idle()
 
 
-def _format_cell_value(v: float, metric: str) -> str:
+def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:
+    """The number drawn in (and reported under the cursor for) one grid cell.
+
+    *fmt* is the user's printf-style format from the Properties panel — ``"%.2f"``,
+    ``"%.1e"``, ``"%d"``. An empty *fmt* keeps the automatic choice, which reads the
+    metric and the magnitude: counts are whole numbers, fractions get two places,
+    and intensities scale their precision to their size. A format that can't render
+    the value (a bad conversion, or ``%d`` against something non-finite) falls back
+    to that automatic choice rather than dropping the number.
+    """
     if not math.isfinite(v):
         return ""
+    if fmt:
+        try:
+            return fmt % v
+        except (TypeError, ValueError):
+            pass  # unusable format → the automatic choice below
     if metric == METRIC_COUNT:
         return f"{int(round(v))}"
     if metric == METRIC_FRACTION:
@@ -634,6 +663,16 @@ def _format_cell_value(v: float, metric: str) -> str:
     if abs(v) >= 1:
         return f"{v:.2f}"
     return f"{v:.3g}"
+
+
+def _cell_value_format(ctx, fig) -> str:
+    """The Properties panel's printf format for this heat map's cell numbers."""
+    try:
+        from well_viewer.core.plot_style import figure_prefs
+        return str(figure_prefs(ctx, fig).get("heatmap_value_format", "") or "")
+    except Exception:
+        swallowed()  # a missing pref must never stop the grid drawing
+        return ""
 
 
 def _metric_axis_label(metric: str, ctx) -> str:
@@ -741,7 +780,10 @@ def on_heatmap_motion(ctx, event) -> None:
             v = arr[rc[0], rc[1]] if arr is not None else float("nan")
             sample = ",".join(wells[:3]) + ("…" if len(wells) > 3 else "")
             metric = _selected_metric(ctx)
-            status_lbl.setText(f"{sample}: {_format_cell_value(v, metric)}")
+            # Same format as the drawn cell, so the readout matches what's under
+            # the cursor rather than showing a differently-rounded number.
+            fmt = _cell_value_format(ctx, ctx.widgets.get_or_none("_heatmap_fig"))
+            status_lbl.setText(f"{sample}: {_format_cell_value(v, metric, fmt)}")
 
 
 # ── Row/col label drag-to-reorder ────────────────────────────────────────────

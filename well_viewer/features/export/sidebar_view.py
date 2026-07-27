@@ -42,6 +42,7 @@ redraw_bars = _lazy("well_viewer.features.barplot.renderer", "redraw_bars")
 redraw_scatter_agg_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_agg_orchestrate")
 redraw_scatter_orchestrate = _lazy("well_viewer.features.scatter.controller", "redraw_scatter_orchestrate")
 redraw_distribution = _lazy("well_viewer.features.distribution.controller", "redraw_distribution")
+redraw_heatmap = _lazy("well_viewer.features.heatmap.controller", "redraw_heatmap")
 clear_gates = _lazy("well_viewer.features.scatter.gating", "clear_gates")
 rename_gate = _lazy("well_viewer.features.scatter.gating", "rename_gate")
 set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw_mode")
@@ -312,6 +313,26 @@ class ExportStyleSidebar(QWidget):
             # Keep the gate-count label + name list live when a gate is drawn on
             # the plot (gating.py calls this after appending/clearing a gate).
             self._app._ctx.runtime.scatter.gate_count_cb = self._refresh_gate_count
+
+        # ── Heat Map: the number drawn in each cell ─────────────────────────
+        if self._is_heatmap_fig():
+            s_cells = section("Cell values", expanded=True)
+            fmt_edit = QLineEdit(str(self._prefs.get("heatmap_value_format", "")))
+            fmt_edit.setPlaceholderText("%.2f")
+            fmt_edit.setToolTip(
+                "printf-style format for the number in each cell — %.2f for two "
+                "decimals, %.1e for scientific notation, %d for a whole number. "
+                "Leave blank to pick a format from the metric and the magnitude."
+            )
+            # Manual getter/setter (no key= auto-wire): this changes the text of
+            # the cell annotations, which only the heat-map renderer creates, and
+            # the auto-wire path restyles the existing figure without redrawing.
+            self._getters["heatmap_value_format"] = fmt_edit.text
+            self._setters["heatmap_value_format"] = (
+                lambda v, w=fmt_edit: w.setText(str(v or ""))
+            )
+            fmt_edit.editingFinished.connect(self._on_cell_format_changed)
+            add_row(s_cells, "Value format", fmt_edit)
 
         # File format selector intentionally omitted — the Save As… dialog
         # offers PDF / SVG / EPS / PNG via the file filter, so picking the
@@ -1101,6 +1122,25 @@ class ExportStyleSidebar(QWidget):
         """True only for the per-cell scatter figure (density + gates apply there)."""
         return getattr(self._app, "_scatter_fig", None) is self._fig
 
+    def _is_heatmap_fig(self) -> bool:
+        """True only for the Heat Map figure (the cell-value format applies there)."""
+        return getattr(self._app, "_heatmap_fig", None) is self._fig
+
+    def _on_cell_format_changed(self) -> None:
+        """Persist the Heat Map cell format, then redraw.
+
+        The format decides the *text* of the per-cell annotations, which only the
+        heat-map renderer writes, so a restyle of the existing figure would leave
+        the old numbers on screen.
+        """
+        if self._updating:
+            return
+        try:
+            self._persist()
+            self._redraw_bound_figure()
+        except Exception:
+            swallowed()  # a formatting edit must never raise out of the handler
+
     def _gate_count_text(self) -> str:
         n = len(self._app._app_state.cell_gating.scatter_gates or [])
         return f"{n} gate(s)"
@@ -1273,6 +1313,9 @@ class ExportStyleSidebar(QWidget):
                 return
             if getattr(app, "_distribution_fig", None) is self._fig:
                 redraw_distribution(app._ctx)
+                return
+            if getattr(app, "_heatmap_fig", None) is self._fig:
+                redraw_heatmap(app._ctx)
                 return
             app._redraw()
         except Exception:

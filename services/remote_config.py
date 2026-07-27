@@ -59,6 +59,20 @@ except ImportError:  # pragma: no cover
 
 _DEFAULT_CONFIG_PATH = Path("~/.config/allwell/remotes.toml")
 
+#: Placeholder shown for ``remote_python`` when the host has not set one.
+#:
+#: It is a *hint about the usual layout*, not a fact about the host: the
+#: bootstrap creates the ``allwell`` env inside whichever conda it found, which
+#: on a machine with a pre-existing system conda (an HPC module, ``/opt/conda``)
+#: is nowhere near ``~/miniforge3``. That is why the runner resolves the env
+#: through ``conda run`` by name when the field is left at this value, and only
+#: treats it as a real path once the user has set it to something else — see
+#: ``services.remote_runner._conda_env_selector``.
+DEFAULT_REMOTE_PYTHON = "~/miniforge3/envs/allwell/bin/python"
+
+#: Name of the conda env the bootstrap creates on a remote host.
+DEFAULT_CONDA_ENV = "allwell"
+
 
 @dataclass(frozen=True)
 class RemoteHost:
@@ -74,7 +88,7 @@ class RemoteHost:
     ssh_alias: str
     remote_project_dir: str = "~/allwell"
     remote_staging_dir: str = "~/.allwell-staging"
-    remote_python: str = "~/miniforge3/envs/allwell/bin/python"
+    remote_python: str = DEFAULT_REMOTE_PYTHON
     cpu_only: bool = False
     extra_args: tuple[str, ...] = field(default_factory=tuple)
     cache_budget_gb: int = 200

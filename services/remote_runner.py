@@ -49,10 +49,12 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from collections.abc import Callable, Iterable
 
 from services.remote_config import (
+    DEFAULT_CONDA_ENV,
+    DEFAULT_REMOTE_PYTHON,
     RemoteHost,
     resolve_rsync_binary,
     resolve_ssh_for_rsync,
@@ -1406,11 +1408,107 @@ _CONDA_ACTIVATE_SNIPPET = (
 )
 
 
-def _conda_run_prefix(env_name: str = "allwell") -> list[str]:
+def _conda_run_prefix(env_name: str = DEFAULT_CONDA_ENV) -> list[str]:
     """Argv prefix that runs the following command inside conda env
     ``env_name``. ``--no-capture-output`` makes stdout/stderr stream
     through unchanged so the existing progress parser keeps working."""
     return ["conda", "run", "--no-capture-output", "-n", env_name]
+
+
+# How the pipeline's conda environment is named on the remote: either by env
+# *name* (``conda run -n allwell``, resolved through conda's own envs dirs) or
+# by absolute *prefix* (``conda run -p /path/to/env``).
+EnvSelector = tuple[str, str]
+
+DEFAULT_ENV_SELECTOR: EnvSelector = ("name", DEFAULT_CONDA_ENV)
+
+
+def _conda_env_selector(remote_python: str) -> tuple[EnvSelector, str]:
+    """Resolve a host's ``remote_python`` to a ``conda run`` selector.
+
+    Returns the selector plus a warning to show the user (empty when there is
+    nothing to say).
+
+    The Remotes dialog offers a **Remote python** field, and the run path used
+    to ignore it entirely — every run was hard-coded to ``conda run -n allwell``
+    no matter what the host was configured with. A user who pointed that field
+    at a different environment (which is the only reason to touch it) got their
+    setting silently dropped and the run died on the remote with conda's own
+    ``EnvironmentLocationNotFound: not a conda environment``, naming a path they
+    had never configured. The field is honoured here instead.
+
+    Left at its default the field is only a *placeholder*, not a fact — the
+    bootstrap creates the env inside whichever conda it found, which on a host
+    with a pre-existing system conda is not under ``~/miniforge3``. So the
+    default keeps the name selector and lets conda resolve it, which is what
+    makes a system-conda install work at all.
+
+    A value that is not shaped like ``<env>/bin/python`` cannot name an
+    environment; rather than guess, the name selector is kept and the caller is
+    told the setting was not usable.
+    """
+    value = (remote_python or "").strip()
+    if not value or value == DEFAULT_REMOTE_PYTHON:
+        return DEFAULT_ENV_SELECTOR, ""
+    path = PurePosixPath(value)
+    if path.parent.name == "bin" and path.name.startswith("python"):
+        return ("prefix", str(path.parent.parent)), ""
+    return DEFAULT_ENV_SELECTOR, (
+        f"configured Remote python {value!r} is not shaped like "
+        f"'<env>/bin/python', so it cannot name a conda environment; "
+        f"falling back to the env named {DEFAULT_CONDA_ENV!r}"
+    )
+
+
+def _conda_run_prefix_for(selector: EnvSelector) -> list[str]:
+    """``conda run`` argv prefix for *selector* (``-n name`` or ``-p prefix``)."""
+    kind, value = selector
+    return ["conda", "run", "--no-capture-output",
+            "-p" if kind == "prefix" else "-n", value]
+
+
+def _conda_env_guard(selector: EnvSelector) -> str:
+    """Bash that aborts with an actionable message if *selector* names no env.
+
+    Without this the run reaches ``conda run`` and dies on conda's own
+    ``EnvironmentLocationNotFound: not a conda environment: <path>`` — a line
+    with no ``[remote]`` prefix, no host name, and no hint that the fix is to
+    bootstrap the host. It is also indistinguishable, in a scrolling log, from
+    an error the *pipeline* raised, which sends the diagnosis to the wrong
+    machine entirely.
+
+    The check runs on the remote, immediately before the pipeline launches, so
+    on a scheduler-backed host it runs **inside the allocation** — the compute
+    node is where the env has to exist, and it is not always the login node's
+    filesystem.
+    """
+    kind, value = selector
+    value_q = _remote_quote(value)
+    if kind == "prefix":
+        found = f'[ -x {value_q}/bin/python ]'
+        what = f'conda env prefix {value}'
+        # No double quotes anywhere in these strings: they are interpolated
+        # into a double-quoted bash ``echo``, where a stray " ends the string
+        # and the message arrives mangled (or the shell fails to parse it).
+        fix = ('Set this hosts Remote python to the env python, or run '
+               'Analyze -> Remotes -> Bootstrap to create the env.')
+    else:
+        found = (f'conda env list 2>/dev/null | awk \'{{print $1}}\' '
+                 f'| grep -qx {value_q}')
+        what = f"conda env {value}"
+        fix = ('Run Analyze -> Remotes -> Bootstrap for this host to create '
+               'it, or set Remote python to an existing env python.')
+    return (
+        f'if ! {found}; then '
+        f'echo "[remote] ERROR: {what} not found on $(hostname)." >&2; '
+        f'echo "[remote] conda base: $(conda info --base 2>/dev/null || '
+        f'echo unknown)" >&2; '
+        f'echo "[remote] environments conda can see:" >&2; '
+        f'conda env list >&2 2>/dev/null || true; '
+        f'echo "[remote] {fix}" >&2; '
+        f'exit 127; '
+        f'fi'
+    )
 
 
 def _compose_remote_cmd(
@@ -1419,6 +1517,7 @@ def _compose_remote_cmd(
     remote_argv: list[str],
     *,
     cache_hit: bool,
+    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
 ) -> str:
     """Build the bash command string ssh runs on the remote login node.
 
@@ -1447,15 +1546,25 @@ def _compose_remote_cmd(
     ``shlex.quote``) so the outer shell passes it through literally and
     the inner ``bash`` is the one that expands ``$HOME`` / ``$SLURM_JOB_ID``
     on the compute node.
+
+    Both shapes check that *env_selector* actually names an environment before
+    reaching ``conda run`` (:func:`_conda_env_guard`), so a host that was never
+    bootstrapped — or one whose **Remote python** points somewhere that no
+    longer exists — fails with a labelled, actionable message instead of
+    conda's bare ``EnvironmentLocationNotFound``. A cache hit runs ``true`` and
+    needs no environment at all, so it skips the check rather than failing a
+    run that was never going to import anything.
     """
     pidfile_q = _remote_quote(remote_pidfile)
     launcher = launcher.strip()
+    guard = "" if cache_hit else f"{_conda_env_guard(env_selector)}; "
     if cache_hit or not launcher:
         # PID echoed first so the cancel path can target the pipeline
         # directly; conda activated on the login shell; then exec.
         return (
             f"echo $$ > {pidfile_q}; "
             f"{_CONDA_ACTIVATE_SNIPPET}; "
+            f"{guard}"
             f"exec {_remote_join(remote_argv)}"
         )
 
@@ -1466,6 +1575,7 @@ def _compose_remote_cmd(
     # <node>" signal, naming the job id and partition for diagnosis.
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
+        f"{guard}"
         f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
@@ -2889,6 +2999,7 @@ class _BatchedRemoteProcess:
                     self._runner._run.remote_pidfile,
                     remote_argv,
                     cache_hit=False,
+                    env_selector=self._runner.env_selector,
                 )
                 ssh_argv = (
                     self._runner.host.ssh_argv(allocate_tty=True)
@@ -3643,6 +3754,11 @@ class RemoteRunner:
 
     def __init__(self, host: RemoteHost):
         self.host = host
+        # Which conda env the pipeline runs in, resolved once from the host's
+        # "Remote python" setting. Both the argv builder and the shell composer
+        # read it, so they can never disagree about which env is being used.
+        self.env_selector, self._env_warning = _conda_env_selector(
+            host.remote_python)
         self._run: _RemoteRun | None = None
         self._cache: DatasetCache = DatasetCache(host)
         # The Fetcher created in spawn(), kept so cancel() can interrupt an
@@ -3964,9 +4080,17 @@ class RemoteRunner:
             remote_pidfile,
             remote_argv,
             cache_hit=cache_hit,
+            env_selector=self.env_selector,
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 
+        # Name the environment before the run starts. When it turns out not to
+        # exist, the guard's error names the same thing, so the two lines read
+        # as one story instead of a raw conda traceback out of nowhere.
+        kind, value = self.env_selector
+        log(f"[remote] conda env: {kind} {value}\n")
+        if self._env_warning:
+            log(f"[remote] warn: {self._env_warning}\n")
         log(
             f"[remote] run_id={run_id}  cache_key={key[:8]}  "
             f"(upload {sent / (1024**2):.1f} MB in {_fmt_secs(elapsed)})\n"
@@ -4495,7 +4619,7 @@ class RemoteRunner:
         # ``conda run --no-capture-output -n allwell python`` — the
         # surrounding shell prefix in ``spawn`` sources conda.sh first.
         remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
-        out = [*_conda_run_prefix(), "python", remote_script]
+        out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots
         while i < len(local_argv):
             arg = local_argv[i]

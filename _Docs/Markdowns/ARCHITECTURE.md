@@ -132,7 +132,7 @@ The `pipeline/` package (the Qt-free analysis-pipeline modules:
 `pipeline.auto_threshold`, `pipeline.background`, `pipeline.flatfield`,
 `pipeline.shape_features`, `pipeline.cellpose`, `pipeline.stardist`,
 `pipeline.io`) and the `util/` package (`util.well_token`, `util.aw_safe`,
-`util.zip_write`)
+`util.zip_write`, `util.retry_io`)
 are *deliberately at repo root* (not under `well_viewer/`): the pipeline
 contract forbids `well_viewer` / `widgets` / Qt imports, so anything both the
 pipeline and the GUI need to agree on has to live in a Qt-free module the
@@ -1660,7 +1660,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 |--------|------|
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into a small table-driven emitter to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). |
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). |
-| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. |
+| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
 | `input_resolution_service.py` | Validates the input folder shape (zip set vs flat). |
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
@@ -1702,13 +1702,53 @@ now falls back to a copy on `EXDEV`, so the staging dir is free to live anywhere
 they differ) so staging left by pre-change runs is still reclaimed.
 
 **Results (small, durable).** Only two writes per well must land on `output_dir`:
-the per-well CSV and `<well>_out.zip`. Both now carry the same
-retry-with-backoff shield `_safe_imwrite` has always had, via
-`pipeline.io.retry_write` — they stage to `__aw_tmp_` and commit with
-`os.replace`, so re-running is safe, and a transient fault costs a retry instead
-of the whole well. `_AtomicTextHandle.__exit__` guards its `flush()`/`close()`
-(previously unguarded, the direct source of the bare errno) and aborts the
-commit rather than renaming a short file over a good CSV.
+the per-well CSV and `<well>_out.zip`. Both carry the same retry-with-backoff
+shield `_safe_imwrite` has always had, via `pipeline.io.retry_write` — they stage
+to `__aw_tmp_` and commit with `os.replace`, so re-running is safe, and a
+transient fault costs a retry instead of the whole well.
+`_AtomicTextHandle.__exit__` guards its `flush()`/`close()` and aborts the commit
+rather than renaming a short file over a good CSV.
+
+**One retry shield, both sides of the app.** The loop itself is
+`util.retry_io.retry_io`: run the operation, and on an `OSError` clean up the
+staging file, back off and try again, up to five attempts. It lives in `util/`
+because both halves of All-Well need it and neither can import the other's —
+`pipeline.io` wraps it as `retry_write` (keeping the pipeline's own wording,
+which names `--workers` and `--incremental`), and the `services/` remote client
+calls it directly, where importing `pipeline.io` would drag numpy/tifffile into
+a module that must stay imaging-stack-free. Two behaviours are worth knowing:
+
+- **An error retrying cannot fix is re-raised unchanged, immediately.** A
+  missing path, wrong permissions, a full volume (`_PERMANENT_ERRNOS`) fail on
+  the first attempt, so a caller that treats a missing source as an ordinary
+  `OSError` stays responsive and the real cause isn't buried under a retry
+  story.
+- **The exhausted-budget message names the storage.** `volume_hint` maps the
+  errno to the protocol behind it — `EBADF` to macOS SMB, `ESTALE` to NFS,
+  `EIO`/`ECONNRESET`/`ETIMEDOUT` to a link that dropped — and the caller adds
+  its own advice tail. The user gets "this volume is a network mount and it
+  dropped" instead of `[Errno 9]`.
+
+**A remote run does the same I/O on the same volumes.** The pipeline executes on
+the cluster, but the *client* still reads the whole plate off the user's input
+volume and writes every fetched well back onto the output volume, so the same
+shield covers each of those crossings:
+
+| Where | What it protects |
+|---|---|
+| `remote_runner._copy_into_staging` | Copying each `<WELL>.zip` off the input volume into the upload staging dir — a whole plate, back to back, and an unguarded fault here failed the run before a byte was uploaded. |
+| `remote_runner._zip_well_folder` | Packing a leftover well folder read off the input volume. |
+| `input_resolution_service` | The mixed-input consolidation and the loose-image append, both of which rewrite archives *on* the input volume. |
+| `Fetcher._materialize` | Publishing `<well>_out.zip` into the output dir — the remote run's equivalent of the pipeline's out-zip write. |
+| `refresh_pipeline_info_available_from_outputs` | The `pipeline_info.json` rewrite, so one blip can't cost Review its timepoint/FOV lists. |
+
+The per-well CSV pull is rsync's write rather than Python's, so it is covered by
+the rsync retry policy instead: `_RSYNC_RETRY_CODES` includes **11** (*error in
+file I/O*), which is what a destination-side `EBADF` surfaces as. Permission-class
+failures (23, 3) still fail immediately. `Fetcher._rsync_glob` returns
+`(listed, pulled)` so the two outcomes are reported apart — "the remote produced
+no CSVs" and "the remote has them and the local write failed" used to print the
+same line, which sent every diagnosis at the wrong machine.
 
 **Well archives are published, not written in place.** Every per-well archive —
 the `in/<WELL>.zip` inputs and the `out/<well>_out.zip` outputs — is built
@@ -3071,18 +3111,34 @@ top-hat-filtered fluorescence (`*_tophat.tif`), masks (`*_labels.tif`), overlays
 those ZIPs. If channel tokens differ from what the viewer expected, re-open the
 directory — `pipeline_info.json` is re-read on every open.
 
-**Many wells fail with `OSError: [Errno 9] Bad file descriptor` on a local run
-(but never on a remote / Slurm run).** — The output or scratch volume is a
-network mount. macOS's SMB client invalidates every open file handle when the
-session drops and reconnects, and a run's parallel I/O is more than enough to
-provoke that; whichever wells had files open at that moment fail. Check the
-`Scratch  :` line at the top of the run log — it must **not** be a network path
-(it defaults to `~/.allwell/scratch`; set Analyze → *Scratch disk* or
-`--scratch_dir` to a local SSD if it isn't). If it's already local and wells
-still fail, the remaining exposure is the two per-well result writes on the
-output dir; lower `--workers` to cut the concurrent load, or write results
-locally and copy to the NAS afterwards. `mount | grep <path>` confirms the
-protocol — `smbfs` gives `EBADF`, NFS would give `ESTALE`. See §6.5.
+**Wells fail with `OSError: [Errno 9] Bad file descriptor`.** — One of the
+volumes the run touches is a network mount. macOS's SMB client invalidates every
+open file handle when the session drops and reconnects, and a run's parallel I/O
+is more than enough to provoke that; whatever had files open at that moment
+fails. `mount | grep <path>` confirms the protocol — `smbfs` gives `EBADF`, NFS
+would give `ESTALE`. The first question is *which side* the errno came from, and
+the log now says so rather than leaving it to be guessed:
+
+- **A local run.** Check the `Scratch  :` line at the top of the run log — it
+  must **not** be a network path (it defaults to `~/.allwell/scratch`; set
+  Analyze → *Scratch disk* or `--scratch_dir` to a local SSD if it isn't). That
+  line carries the bulk of the run's I/O. What remains on the output dir is the
+  two per-well result writes, which retry through the transient; if they still
+  exhaust the budget the message names the volume. Lower `--workers` to cut the
+  concurrent load, or write results locally and copy to the NAS afterwards.
+- **A remote / Slurm run.** The pipeline runs on the cluster, so a well that
+  fails there is the *cluster's* storage; the failure is logged by the pipeline
+  itself, on the remote's stdout, with the well label. Anything prefixed
+  `[remote]` is the **client**, on this machine, and points at the input or
+  output volume instead — staging reads the whole plate off the input volume and
+  every fetched well is published onto the output volume. Both retry, and a
+  `[retry]` line in the run log is the early warning that a volume is flapping
+  before it costs a well. See §6.5 for the full list of crossings.
+
+**A remote run fails while staging, before anything uploads.** — Same cause as
+above, on the input volume: staging copies every `<WELL>.zip` off it back to
+back. The copy retries, and the exhausted-budget message names the mount. Copy
+the plate to local storage and point All-Well at that copy.
 
 **Auto-threshold reports `timepoint unknown`.** — `pipeline_info.json` doesn't
 have a schema that names a `tp` or `timepoint` field. Re-run the pipeline with

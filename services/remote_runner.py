@@ -69,6 +69,14 @@ from pipeline.incremental_keys import (
     read_done_fov_keys_from_zip,
 )
 from util.aw_safe import swallowed
+# The shared "retry an OSError with a backoff, then fail with an actionable
+# message" shield. A remote run does as much I/O on the user's own volumes as a
+# local one — it reads the whole plate off the input volume to stage the upload
+# and writes every fetched well back onto the output volume — so it needs the
+# same protection the pipeline's result writes have. ``pipeline.io`` owns the
+# pipeline-side wrapper; this module cannot import it (that would drag numpy /
+# tifffile into the remote client), which is why the loop lives in ``util``.
+from util.retry_io import retry_io, volume_hint
 from util.zip_write import atomic_zip
 
 
@@ -134,6 +142,51 @@ def sweep_stale_scratch(*, max_age_h: float = 6.0,
     return removed
 
 
+# Tail of the exhausted-budget message for a client-side transfer. The remote
+# runner's knobs are different from the pipeline's (there is no ``--workers``
+# here), so it carries its own wording rather than the generic one.
+_TRANSFER_ADVICE = (
+    "A repeated failure on the same file usually means one of the volumes "
+    "involved is a network mount that is dropping its session under load. "
+    "Keep the input and output folders on local storage for the run and copy "
+    "the results across afterwards, or re-run with the plate mounted over a "
+    "steadier link."
+)
+
+
+def _copy_into_staging(
+    src: Path, dest: Path, *, log_fn: Callable[[str], None] | None = None,
+) -> None:
+    """Copy one well archive into the upload staging dir, retrying transients.
+
+    Staging reads the entire plate off whatever volume the user's input folder
+    lives on — for a 96-well plate that is every input archive, back to back. On
+    a network mount that is more than enough to provoke a session drop, and the
+    unguarded ``shutil.copy2`` this replaces turned one such blip into a failed
+    run before a single byte had been uploaded (``OSError: [Errno 9] Bad file
+    descriptor``, raised out of ``stage_local_zips``).
+
+    The copy is idempotent — *dest* is a fresh path in All-Well's own scratch
+    dir and is overwritten wholesale — so a retry is safe; the partial is
+    removed between attempts so a failed run never leaves a truncated archive
+    behind for the uploader to find.
+    """
+    def _cleanup() -> None:
+        try:
+            if dest.exists():
+                dest.unlink()
+        except OSError:
+            pass
+
+    retry_io(
+        lambda: shutil.copy2(src, dest),
+        what=f"{src.name} into the upload staging dir",
+        cleanup=_cleanup,
+        advice=_TRANSFER_ADVICE,
+        log_fn=log_fn,
+    )
+
+
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
 #
@@ -178,6 +231,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # The retry-with-backoff shield behind every pipeline write that lands on
+    # the output volume (pipeline.io imports it at module scope).
+    "util/retry_io.py",
     "util/schema.py",
     "util/timepoint.py",
     "util/well_token.py",
@@ -398,7 +454,7 @@ def stage_local_zips(
             staged: list[Path] = []
             for wz in well_zips:
                 dest = staging / wz.name
-                shutil.copy2(wz, dest)
+                _copy_into_staging(wz, dest, log_fn=log_fn)
                 staged.append(dest)
             staged_zips = tuple(staged)
             up_to_date: tuple[str, ...] = ()
@@ -765,6 +821,10 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
     ``process_microscopy.compress_folder_images_to_zip_and_remove`` and
     publishes only a verified archive. Returns the number of TIFs zipped
     (0 → folder had no images, caller should skip).
+
+    Every TIF is read off the user's input volume, so the write carries the
+    shared retry shield: on a network mount a dropped session mid-plate would
+    otherwise fail the run outright with a bare errno.
     """
     tifs = sorted(
         p for p in folder.iterdir()
@@ -772,9 +832,13 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
     )
     if not tifs:
         return 0
-    with atomic_zip(out_zip) as zf:
-        for t in tifs:
-            zf.write(t, arcname=t.name)
+
+    def _pack() -> None:
+        with atomic_zip(out_zip) as zf:
+            for t in tifs:
+                zf.write(t, arcname=t.name)
+
+    retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE)
     return len(tifs)
 
 
@@ -891,7 +955,7 @@ def _stage_mixed_mode(
             staged: list[Path] = []
             for z in all_zips:
                 dest = staging / z.name
-                shutil.copy2(z, dest)
+                _copy_into_staging(z, dest, log_fn=log_fn)
                 staged.append(dest)
             zin = _filter_channels_in_staging(
                 staging, tuple(staged), LocalInputMode.MIXED,
@@ -1239,8 +1303,26 @@ def refresh_pipeline_info_available_from_outputs(
         info["available_timepoints"] = tp_union
         info["available_fovs"] = fov_union
         tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(json.dumps(info, indent=2))
-        os.replace(str(tmp), str(p))
+        payload = json.dumps(info, indent=2)
+
+        def _cleanup_tmp() -> None:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+
+        def _publish() -> None:
+            tmp.write_text(payload)
+            os.replace(str(tmp), str(p))
+
+        # Lands on the output volume like every other result, so it gets the
+        # same shield — losing the sidecar to one transient fault would leave
+        # Review's timepoint/FOV dropdowns short of the data that is on disk.
+        retry_io(
+            _publish, what=p.name, cleanup=_cleanup_tmp,
+            advice=_TRANSFER_ADVICE, log_fn=log,
+        )
         log(
             f"[remote] refreshed pipeline_info from merged outputs: "
             f"{len(tp_union)} timepoint(s), {len(fov_union)} FOV(s)\n"
@@ -2039,10 +2121,19 @@ def _run_rsync_streaming(
 # the real problem.
 #
 #   10: error in socket I/O
+#   11: error in file I/O
 #   12: error in rsync protocol data stream
 #   30: timeout in data send/receive
 #   35: timeout waiting for daemon connection
-_RSYNC_RETRY_CODES = {10, 12, 30, 35}
+#
+# 11 is here because it is what a fault on the *local* end of a transfer looks
+# like: rsync writing a fetched well onto a network-mounted output dir reports
+# ``write failed on "…": Bad file descriptor (9)`` and exits 11 when the SMB
+# session drops and reconnects mid-file. That is the same transient the
+# pipeline's own writes retry through, and without it a single blip lost the
+# well's CSVs for the rest of the run. Genuine, non-transient file errors
+# (permission denied, no such file) exit 23 or 3 and still surface immediately.
+_RSYNC_RETRY_CODES = {10, 11, 12, 30, 35}
 
 # Backoff schedule for rsync retries — mirrors the git push/pull policy
 # documented at the top of the runner's invocation env. Total wait
@@ -3086,16 +3177,26 @@ class Fetcher:
                 return
             try:
                 self._fetch_one(item)
-            except Exception:
+            except Exception as exc:
                 # A crash in one well's fetch must not kill the fetcher thread
                 # — that left the remaining wells silently un-downloaded behind
                 # a misleading "N/M downloaded" line (audit E12). Log it and
                 # move on to the next item; the verify/retry step re-pulls the
                 # gap.
+                #
+                # The cause goes in the run log, not just the Python logger: a
+                # bare "error on 'A01'" is what made a storage fault look like a
+                # transfer bug. ``volume_hint`` names the protocol behind the
+                # errno when it recognises one.
                 import logging as _logging
                 _logging.getLogger(__name__).exception(
                     "fetcher: error downloading %r; continuing", item)
-                self._log(f"[remote] ↓ fetcher: error on {item!r}; continuing\n")
+                hint = volume_hint(exc)
+                self._log(
+                    f"[remote] ↓ fetcher: error on {item!r}: {exc}"
+                    + (f" — {hint}" if hint else "")
+                    + "; continuing\n"
+                )
 
     @contextlib.contextmanager
     def _transfer_heartbeat(self, label: str, dest_path: Path, interval: float = 8.0):
@@ -3218,18 +3319,33 @@ class Fetcher:
             # rather than overwriting it.
             tmp_csv_dir = _new_scratch_dir(f"allwell-csv-{well}-")
             try:
-                csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
+                csv_listed, csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
                 if csv_count:
                     self._merge_fetched_csvs(tmp_csv_dir)
             finally:
                 shutil.rmtree(tmp_csv_dir, ignore_errors=True)
+            # The temp dir is gone by now; name the volume it lived on, which is
+            # what the user would have to look at.
+            csv_dest = _scratch_dir()
         else:
-            csv_count = self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+            csv_listed, csv_count = self._rsync_glob(
+                csv_glob_src, self.run.local_output_dir)
+            csv_dest = self.run.local_output_dir
         csv_elapsed = time.monotonic() - t1
         if csv_count > 0:
             self._log(
                 f"[remote] ↓ {well}: {csv_count} CSV file(s) in "
                 f"{_fmt_secs(csv_elapsed)}\n"
+            )
+        elif csv_listed:
+            # The remote HAS the CSVs; every pull of them failed. That is a
+            # local-side fault (a full or unwritable destination, or a network
+            # mount that dropped its session), and saying "no CSV files found"
+            # here would point the user at the wrong machine entirely.
+            self._log(
+                f"[remote] ↓ {well}: WARN the remote has {csv_listed} CSV "
+                f"file(s) but none could be written to {csv_dest} — check that "
+                f"volume; the verify step will retry.\n"
             )
         else:
             self._log(
@@ -3380,16 +3496,33 @@ class Fetcher:
         # skipped.
         final = dest / f"{well}_out.zip"
         tmp = dest / f".{well}_out.zip.tmp"
-        try:
-            shutil.copyfile(well_zip, tmp)
-            os.replace(tmp, final)
-        except OSError as exc:
-            self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
+
+        def _cleanup_tmp() -> None:
             try:
                 if tmp.exists():
                     tmp.unlink()
             except OSError:
                 pass
+
+        def _publish() -> None:
+            shutil.copyfile(well_zip, tmp)
+            os.replace(tmp, final)
+
+        # This is the remote run's equivalent of the pipeline's ``<well>_out.zip``
+        # write, and it lands on the same volume — the user's output dir — so it
+        # carries the same retry shield. Unguarded, a single dropped SMB session
+        # failed the well here with a bare errno even though the data was already
+        # safely on disk in scratch.
+        try:
+            retry_io(
+                _publish,
+                what=f"{final.name} into {dest}",
+                cleanup=_cleanup_tmp,
+                advice=_TRANSFER_ADVICE,
+                log_fn=self._log,
+            )
+        except OSError as exc:
+            self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
             return False
         return True
 
@@ -3440,13 +3573,17 @@ class Fetcher:
         )
         return result.returncode == 0
 
-    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> int:
+    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> tuple[int, int]:
         """Pull files matching a glob. Wraps the source in a quoted-glob
         rsync so the remote side expands ``*``, not the local shell.
 
-        v5.2.18: returns the count of files successfully pulled
-        (was: bool). The caller logs the count so the user can see
-        how many CSVs landed per well.
+        Returns ``(listed, pulled)`` — how many files the remote's glob matched,
+        and how many of them landed locally. The caller needs both to tell the
+        two failures apart: the remote produced no CSVs for this well, or it
+        produced them and the *local* write failed. Reporting only the pulled
+        count made a dropped session on a network-mounted output dir read as
+        "no CSV files found" on the remote, which sent every diagnosis in the
+        wrong direction.
         """
         # We invoke `ssh host 'ls -1 GLOB'` first; rsync's own glob
         # support requires the source to be quoted in a way that's awkward
@@ -3473,7 +3610,7 @@ class Fetcher:
         )
         files = [ln for ln in listing_stdout.splitlines() if ln.strip()]
         if not files:
-            return 0
+            return 0, 0
         pulled = 0
         dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
@@ -3482,7 +3619,7 @@ class Fetcher:
                  "-a", f"{host}:{f}", dest_str]
             ):
                 pulled += 1
-        return pulled
+        return len(files), pulled
 
 
 # ────────────────────────────────────────────────────────────────────────────

@@ -49,10 +49,12 @@ import time
 import zipfile
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from collections.abc import Callable, Iterable
 
 from services.remote_config import (
+    DEFAULT_CONDA_ENV,
+    DEFAULT_REMOTE_PYTHON,
     RemoteHost,
     resolve_rsync_binary,
     resolve_ssh_for_rsync,
@@ -69,6 +71,14 @@ from pipeline.incremental_keys import (
     read_done_fov_keys_from_zip,
 )
 from util.aw_safe import swallowed
+# The shared "retry an OSError with a backoff, then fail with an actionable
+# message" shield. A remote run does as much I/O on the user's own volumes as a
+# local one — it reads the whole plate off the input volume to stage the upload
+# and writes every fetched well back onto the output volume — so it needs the
+# same protection the pipeline's result writes have. ``pipeline.io`` owns the
+# pipeline-side wrapper; this module cannot import it (that would drag numpy /
+# tifffile into the remote client), which is why the loop lives in ``util``.
+from util.retry_io import retry_io, volume_hint
 from util.zip_write import atomic_zip
 
 
@@ -134,6 +144,51 @@ def sweep_stale_scratch(*, max_age_h: float = 6.0,
     return removed
 
 
+# Tail of the exhausted-budget message for a client-side transfer. The remote
+# runner's knobs are different from the pipeline's (there is no ``--workers``
+# here), so it carries its own wording rather than the generic one.
+_TRANSFER_ADVICE = (
+    "A repeated failure on the same file usually means one of the volumes "
+    "involved is a network mount that is dropping its session under load. "
+    "Keep the input and output folders on local storage for the run and copy "
+    "the results across afterwards, or re-run with the plate mounted over a "
+    "steadier link."
+)
+
+
+def _copy_into_staging(
+    src: Path, dest: Path, *, log_fn: Callable[[str], None] | None = None,
+) -> None:
+    """Copy one well archive into the upload staging dir, retrying transients.
+
+    Staging reads the entire plate off whatever volume the user's input folder
+    lives on — for a 96-well plate that is every input archive, back to back. On
+    a network mount that is more than enough to provoke a session drop, and the
+    unguarded ``shutil.copy2`` this replaces turned one such blip into a failed
+    run before a single byte had been uploaded (``OSError: [Errno 9] Bad file
+    descriptor``, raised out of ``stage_local_zips``).
+
+    The copy is idempotent — *dest* is a fresh path in All-Well's own scratch
+    dir and is overwritten wholesale — so a retry is safe; the partial is
+    removed between attempts so a failed run never leaves a truncated archive
+    behind for the uploader to find.
+    """
+    def _cleanup() -> None:
+        try:
+            if dest.exists():
+                dest.unlink()
+        except OSError:
+            pass
+
+    retry_io(
+        lambda: shutil.copy2(src, dest),
+        what=f"{src.name} into the upload staging dir",
+        cleanup=_cleanup,
+        advice=_TRANSFER_ADVICE,
+        log_fn=log_fn,
+    )
+
+
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
 #
@@ -178,6 +233,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # process_microscopy at module top level, so the remote needs the package.
     "util/__init__.py",
     "util/aw_safe.py",
+    # The retry-with-backoff shield behind every pipeline write that lands on
+    # the output volume (pipeline.io imports it at module scope).
+    "util/retry_io.py",
     "util/schema.py",
     "util/timepoint.py",
     "util/well_token.py",
@@ -398,7 +456,7 @@ def stage_local_zips(
             staged: list[Path] = []
             for wz in well_zips:
                 dest = staging / wz.name
-                shutil.copy2(wz, dest)
+                _copy_into_staging(wz, dest, log_fn=log_fn)
                 staged.append(dest)
             staged_zips = tuple(staged)
             up_to_date: tuple[str, ...] = ()
@@ -765,6 +823,10 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
     ``process_microscopy.compress_folder_images_to_zip_and_remove`` and
     publishes only a verified archive. Returns the number of TIFs zipped
     (0 → folder had no images, caller should skip).
+
+    Every TIF is read off the user's input volume, so the write carries the
+    shared retry shield: on a network mount a dropped session mid-plate would
+    otherwise fail the run outright with a bare errno.
     """
     tifs = sorted(
         p for p in folder.iterdir()
@@ -772,9 +834,13 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
     )
     if not tifs:
         return 0
-    with atomic_zip(out_zip) as zf:
-        for t in tifs:
-            zf.write(t, arcname=t.name)
+
+    def _pack() -> None:
+        with atomic_zip(out_zip) as zf:
+            for t in tifs:
+                zf.write(t, arcname=t.name)
+
+    retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE)
     return len(tifs)
 
 
@@ -891,7 +957,7 @@ def _stage_mixed_mode(
             staged: list[Path] = []
             for z in all_zips:
                 dest = staging / z.name
-                shutil.copy2(z, dest)
+                _copy_into_staging(z, dest, log_fn=log_fn)
                 staged.append(dest)
             zin = _filter_channels_in_staging(
                 staging, tuple(staged), LocalInputMode.MIXED,
@@ -1239,8 +1305,26 @@ def refresh_pipeline_info_available_from_outputs(
         info["available_timepoints"] = tp_union
         info["available_fovs"] = fov_union
         tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(json.dumps(info, indent=2))
-        os.replace(str(tmp), str(p))
+        payload = json.dumps(info, indent=2)
+
+        def _cleanup_tmp() -> None:
+            try:
+                if tmp.exists():
+                    tmp.unlink()
+            except OSError:
+                pass
+
+        def _publish() -> None:
+            tmp.write_text(payload)
+            os.replace(str(tmp), str(p))
+
+        # Lands on the output volume like every other result, so it gets the
+        # same shield — losing the sidecar to one transient fault would leave
+        # Review's timepoint/FOV dropdowns short of the data that is on disk.
+        retry_io(
+            _publish, what=p.name, cleanup=_cleanup_tmp,
+            advice=_TRANSFER_ADVICE, log_fn=log,
+        )
         log(
             f"[remote] refreshed pipeline_info from merged outputs: "
             f"{len(tp_union)} timepoint(s), {len(fov_union)} FOV(s)\n"
@@ -1324,11 +1408,182 @@ _CONDA_ACTIVATE_SNIPPET = (
 )
 
 
-def _conda_run_prefix(env_name: str = "allwell") -> list[str]:
+def _conda_run_prefix(env_name: str = DEFAULT_CONDA_ENV) -> list[str]:
     """Argv prefix that runs the following command inside conda env
     ``env_name``. ``--no-capture-output`` makes stdout/stderr stream
     through unchanged so the existing progress parser keeps working."""
     return ["conda", "run", "--no-capture-output", "-n", env_name]
+
+
+# How the pipeline's conda environment is named on the remote: either by env
+# *name* (``conda run -n allwell``, resolved through conda's own envs dirs) or
+# by absolute *prefix* (``conda run -p /path/to/env``).
+EnvSelector = tuple[str, str]
+
+DEFAULT_ENV_SELECTOR: EnvSelector = ("name", DEFAULT_CONDA_ENV)
+
+
+def _conda_env_selector(remote_python: str) -> tuple[EnvSelector, str]:
+    """Resolve a host's ``remote_python`` to a ``conda run`` selector.
+
+    Returns the selector plus a warning to show the user (empty when there is
+    nothing to say).
+
+    The Remotes dialog offers a **Remote python** field, and the run path used
+    to ignore it entirely — every run was hard-coded to ``conda run -n allwell``
+    no matter what the host was configured with. A user who pointed that field
+    at a different environment (which is the only reason to touch it) got their
+    setting silently dropped and the run died on the remote with conda's own
+    ``EnvironmentLocationNotFound: not a conda environment``, naming a path they
+    had never configured. The field is honoured here instead.
+
+    Left at its default the field is only a *placeholder*, not a fact — the
+    bootstrap creates the env inside whichever conda it found, which on a host
+    with a pre-existing system conda is not under ``~/miniforge3``. So the
+    default keeps the name selector and lets conda resolve it, which is what
+    makes a system-conda install work at all.
+
+    A value that is not shaped like ``<env>/bin/python`` cannot name an
+    environment; rather than guess, the name selector is kept and the caller is
+    told the setting was not usable.
+    """
+    value = (remote_python or "").strip()
+    if not value or value == DEFAULT_REMOTE_PYTHON:
+        return DEFAULT_ENV_SELECTOR, ""
+    path = PurePosixPath(value)
+    if path.parent.name == "bin" and path.name.startswith("python"):
+        return ("prefix", str(path.parent.parent)), ""
+    return DEFAULT_ENV_SELECTOR, (
+        f"configured Remote python {value!r} is not shaped like "
+        f"'<env>/bin/python', so it cannot name a conda environment; "
+        f"falling back to the env named {DEFAULT_CONDA_ENV!r}"
+    )
+
+
+def _conda_run_prefix_for(selector: EnvSelector) -> list[str]:
+    """``conda run`` argv prefix for *selector* (``-n name`` or ``-p prefix``)."""
+    kind, value = selector
+    return ["conda", "run", "--no-capture-output",
+            "-p" if kind == "prefix" else "-n", value]
+
+
+# Shell helpers for locating and validating a conda env on the remote. Shared
+# with ``scripts/_bootstrap_lib.py`` so the runner's pre-launch check and the
+# bootstrap's create-or-skip decision cannot disagree about whether an
+# environment exists — the state where they *did* disagree is the one that
+# stranded users (see :func:`_conda_env_guard`).
+#
+# Validity is conda's own test, ``is_conda_environment()``: a prefix is an
+# environment iff it holds ``conda-meta/history``. A directory without that file
+# is not an environment no matter what it contains, and conda refuses both to
+# run in it and to create over it.
+CONDA_ENV_SHELL_HELPERS = r"""
+aw_env_prefix() {
+    conda env list 2>/dev/null | awk -v n="$1" '$1 == n { print $NF }' | head -1
+}
+aw_env_is_valid() {
+    [ -n "$1" ] && [ -f "$1/conda-meta/history" ]
+}
+aw_env_stale_dir() {
+    for _c in "$HOME/.conda/envs/$1" "$(conda info --base 2>/dev/null)/envs/$1"; do
+        if [ -d "$_c" ] && [ ! -f "$_c/conda-meta/history" ]; then
+            printf '%s\n' "$_c"
+            return 0
+        fi
+    done
+    return 1
+}
+"""
+
+
+def _conda_env_guard(selector: EnvSelector) -> str:
+    """Bash that aborts with an actionable message if *selector* has no usable env.
+
+    Without this the run reaches ``conda run`` and dies on conda's own
+    ``EnvironmentLocationNotFound: not a conda environment: <path>`` — a line
+    with no ``[remote]`` prefix, no host name, and no hint that the fix is to
+    bootstrap the host. It is also indistinguishable, in a scrolling log, from
+    an error the *pipeline* raised, which sends the diagnosis to the wrong
+    machine entirely.
+
+    Two states have to be told apart, because the fix differs and conda's own
+    message conflates them:
+
+    *No environment.* The host was never bootstrapped. Bootstrap it.
+
+    *A directory that is not an environment.* Something exists at the prefix but
+    holds no ``conda-meta/history`` — an env creation that failed part-way,
+    which on a cluster is most often a full home-directory quota. This is the
+    worse state: conda will neither run in it nor ``conda create`` over it, so
+    the run fails *and* a plain re-bootstrap fails behind it. The message names
+    the directory, because that is the thing that has to go.
+
+    The check runs on the remote, immediately before the pipeline launches, so
+    on a scheduler-backed host it runs **inside the allocation** — the compute
+    node is where the env has to exist, and it is not always the login node's
+    filesystem.
+    """
+    kind, value = selector
+    value_q = _remote_quote(value)
+    if kind == "prefix":
+        # The prefix is given, so there is nothing to look up: it either is an
+        # environment, is a directory that is not one, or is absent.
+        resolve = (
+            f'AW_PREFIX={value_q}; '
+            f'AW_STALE=""; '
+            f'if [ -d "$AW_PREFIX" ] && ! aw_env_is_valid "$AW_PREFIX"; then '
+            f'AW_STALE="$AW_PREFIX"; fi'
+        )
+        what = f'conda env prefix {value}'
+        # No double quotes anywhere in these strings: they are interpolated
+        # into a double-quoted bash ``echo``, where a stray " ends the string
+        # and the message arrives mangled (or the shell fails to parse it).
+        missing_fix = ('Set this hosts Remote python to the env python, or run '
+                       'Analyze -> Remotes -> Bootstrap to create the env.')
+    else:
+        resolve = (
+            f'AW_PREFIX="$(aw_env_prefix {value_q})"; '
+            f'AW_STALE="$(aw_env_stale_dir {value_q} || true)"'
+        )
+        what = f"conda env {value}"
+        missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
+                       'create it, or set Remote python to an existing env '
+                       'python.')
+    # The guard never deletes: a run is not the time to modify the host, and
+    # what is inside that directory is unreadable to us. Print the one command
+    # that unblocks it and let the user decide.
+    stale_fix = ('ACTION REQUIRED: remove that directory yourself, then re-run '
+                 'Analyze -> Remotes -> Bootstrap to rebuild the env:')
+    return (
+        f'{CONDA_ENV_SHELL_HELPERS} '
+        f'{resolve}; '
+        f'if ! aw_env_is_valid "$AW_PREFIX"; then '
+        f'echo "[remote] ERROR: {what} is not usable on $(hostname)." >&2; '
+        f'if [ -n "$AW_STALE" ]; then '
+        f'echo "[remote] $AW_STALE exists but is not a conda environment '
+        f'(no conda-meta/history)." >&2; '
+        f'echo "[remote] An env creation failed part-way — on a cluster a full '
+        f'home-directory quota is the usual cause. conda will neither run in '
+        f'it nor create over it." >&2; '
+        f'echo "[remote] {stale_fix}" >&2; '
+        f'echo "[remote]     rm -rf $AW_STALE" >&2; '
+        f'echo "[remote] Check the quota first (quota -s, or du -sh \\$HOME) — '
+        f'if that is what stopped the install, it will stop the next one too." '
+        f'>&2; '
+        f'else '
+        f'echo "[remote] {missing_fix}" >&2; '
+        f'fi; '
+        f'echo "[remote] conda base: $(conda info --base 2>/dev/null || '
+        f'echo unknown)" >&2; '
+        f'echo "[remote] environments conda can see:" >&2; '
+        # Prefix conda's own listing too. Every line of this block has to be
+        # attributable to the remote at a glance — an unprefixed listing in the
+        # middle of a labelled block reads like local output, which is the
+        # confusion the whole guard exists to remove.
+        f"conda env list 2>/dev/null | sed 's/^/[remote]   /' >&2 || true; "
+        f'exit 127; '
+        f'fi'
+    )
 
 
 def _compose_remote_cmd(
@@ -1337,6 +1592,7 @@ def _compose_remote_cmd(
     remote_argv: list[str],
     *,
     cache_hit: bool,
+    env_selector: EnvSelector = DEFAULT_ENV_SELECTOR,
 ) -> str:
     """Build the bash command string ssh runs on the remote login node.
 
@@ -1365,15 +1621,25 @@ def _compose_remote_cmd(
     ``shlex.quote``) so the outer shell passes it through literally and
     the inner ``bash`` is the one that expands ``$HOME`` / ``$SLURM_JOB_ID``
     on the compute node.
+
+    Both shapes check that *env_selector* actually names an environment before
+    reaching ``conda run`` (:func:`_conda_env_guard`), so a host that was never
+    bootstrapped — or one whose **Remote python** points somewhere that no
+    longer exists — fails with a labelled, actionable message instead of
+    conda's bare ``EnvironmentLocationNotFound``. A cache hit runs ``true`` and
+    needs no environment at all, so it skips the check rather than failing a
+    run that was never going to import anything.
     """
     pidfile_q = _remote_quote(remote_pidfile)
     launcher = launcher.strip()
+    guard = "" if cache_hit else f"{_conda_env_guard(env_selector)}; "
     if cache_hit or not launcher:
         # PID echoed first so the cancel path can target the pipeline
         # directly; conda activated on the login shell; then exec.
         return (
             f"echo $$ > {pidfile_q}; "
             f"{_CONDA_ACTIVATE_SNIPPET}; "
+            f"{guard}"
             f"exec {_remote_join(remote_argv)}"
         )
 
@@ -1384,6 +1650,7 @@ def _compose_remote_cmd(
     # <node>" signal, naming the job id and partition for diagnosis.
     inner = (
         f"{_CONDA_ACTIVATE_SNIPPET}; "
+        f"{guard}"
         f'echo "${{SLURM_JOB_ID:-}}" > {slurm_sidecar_q} 2>/dev/null || true; '
         f'echo "[remote] scheduler: allocation granted — job ${{SLURM_JOB_ID:-?}} '
         f'on ${{SLURMD_NODENAME:-$(hostname)}} '
@@ -2039,10 +2306,19 @@ def _run_rsync_streaming(
 # the real problem.
 #
 #   10: error in socket I/O
+#   11: error in file I/O
 #   12: error in rsync protocol data stream
 #   30: timeout in data send/receive
 #   35: timeout waiting for daemon connection
-_RSYNC_RETRY_CODES = {10, 12, 30, 35}
+#
+# 11 is here because it is what a fault on the *local* end of a transfer looks
+# like: rsync writing a fetched well onto a network-mounted output dir reports
+# ``write failed on "…": Bad file descriptor (9)`` and exits 11 when the SMB
+# session drops and reconnects mid-file. That is the same transient the
+# pipeline's own writes retry through, and without it a single blip lost the
+# well's CSVs for the rest of the run. Genuine, non-transient file errors
+# (permission denied, no such file) exit 23 or 3 and still surface immediately.
+_RSYNC_RETRY_CODES = {10, 11, 12, 30, 35}
 
 # Backoff schedule for rsync retries — mirrors the git push/pull policy
 # documented at the top of the runner's invocation env. Total wait
@@ -2798,6 +3074,7 @@ class _BatchedRemoteProcess:
                     self._runner._run.remote_pidfile,
                     remote_argv,
                     cache_hit=False,
+                    env_selector=self._runner.env_selector,
                 )
                 ssh_argv = (
                     self._runner.host.ssh_argv(allocate_tty=True)
@@ -3086,16 +3363,26 @@ class Fetcher:
                 return
             try:
                 self._fetch_one(item)
-            except Exception:
+            except Exception as exc:
                 # A crash in one well's fetch must not kill the fetcher thread
                 # — that left the remaining wells silently un-downloaded behind
                 # a misleading "N/M downloaded" line (audit E12). Log it and
                 # move on to the next item; the verify/retry step re-pulls the
                 # gap.
+                #
+                # The cause goes in the run log, not just the Python logger: a
+                # bare "error on 'A01'" is what made a storage fault look like a
+                # transfer bug. ``volume_hint`` names the protocol behind the
+                # errno when it recognises one.
                 import logging as _logging
                 _logging.getLogger(__name__).exception(
                     "fetcher: error downloading %r; continuing", item)
-                self._log(f"[remote] ↓ fetcher: error on {item!r}; continuing\n")
+                hint = volume_hint(exc)
+                self._log(
+                    f"[remote] ↓ fetcher: error on {item!r}: {exc}"
+                    + (f" — {hint}" if hint else "")
+                    + "; continuing\n"
+                )
 
     @contextlib.contextmanager
     def _transfer_heartbeat(self, label: str, dest_path: Path, interval: float = 8.0):
@@ -3218,18 +3505,33 @@ class Fetcher:
             # rather than overwriting it.
             tmp_csv_dir = _new_scratch_dir(f"allwell-csv-{well}-")
             try:
-                csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
+                csv_listed, csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
                 if csv_count:
                     self._merge_fetched_csvs(tmp_csv_dir)
             finally:
                 shutil.rmtree(tmp_csv_dir, ignore_errors=True)
+            # The temp dir is gone by now; name the volume it lived on, which is
+            # what the user would have to look at.
+            csv_dest = _scratch_dir()
         else:
-            csv_count = self._rsync_glob(csv_glob_src, self.run.local_output_dir)
+            csv_listed, csv_count = self._rsync_glob(
+                csv_glob_src, self.run.local_output_dir)
+            csv_dest = self.run.local_output_dir
         csv_elapsed = time.monotonic() - t1
         if csv_count > 0:
             self._log(
                 f"[remote] ↓ {well}: {csv_count} CSV file(s) in "
                 f"{_fmt_secs(csv_elapsed)}\n"
+            )
+        elif csv_listed:
+            # The remote HAS the CSVs; every pull of them failed. That is a
+            # local-side fault (a full or unwritable destination, or a network
+            # mount that dropped its session), and saying "no CSV files found"
+            # here would point the user at the wrong machine entirely.
+            self._log(
+                f"[remote] ↓ {well}: WARN the remote has {csv_listed} CSV "
+                f"file(s) but none could be written to {csv_dest} — check that "
+                f"volume; the verify step will retry.\n"
             )
         else:
             self._log(
@@ -3380,16 +3682,33 @@ class Fetcher:
         # skipped.
         final = dest / f"{well}_out.zip"
         tmp = dest / f".{well}_out.zip.tmp"
-        try:
-            shutil.copyfile(well_zip, tmp)
-            os.replace(tmp, final)
-        except OSError as exc:
-            self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
+
+        def _cleanup_tmp() -> None:
             try:
                 if tmp.exists():
                     tmp.unlink()
             except OSError:
                 pass
+
+        def _publish() -> None:
+            shutil.copyfile(well_zip, tmp)
+            os.replace(tmp, final)
+
+        # This is the remote run's equivalent of the pipeline's ``<well>_out.zip``
+        # write, and it lands on the same volume — the user's output dir — so it
+        # carries the same retry shield. Unguarded, a single dropped SMB session
+        # failed the well here with a bare errno even though the data was already
+        # safely on disk in scratch.
+        try:
+            retry_io(
+                _publish,
+                what=f"{final.name} into {dest}",
+                cleanup=_cleanup_tmp,
+                advice=_TRANSFER_ADVICE,
+                log_fn=self._log,
+            )
+        except OSError as exc:
+            self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")
             return False
         return True
 
@@ -3440,13 +3759,17 @@ class Fetcher:
         )
         return result.returncode == 0
 
-    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> int:
+    def _rsync_glob(self, src_glob: str, dest_dir: Path) -> tuple[int, int]:
         """Pull files matching a glob. Wraps the source in a quoted-glob
         rsync so the remote side expands ``*``, not the local shell.
 
-        v5.2.18: returns the count of files successfully pulled
-        (was: bool). The caller logs the count so the user can see
-        how many CSVs landed per well.
+        Returns ``(listed, pulled)`` — how many files the remote's glob matched,
+        and how many of them landed locally. The caller needs both to tell the
+        two failures apart: the remote produced no CSVs for this well, or it
+        produced them and the *local* write failed. Reporting only the pulled
+        count made a dropped session on a network-mounted output dir read as
+        "no CSV files found" on the remote, which sent every diagnosis in the
+        wrong direction.
         """
         # We invoke `ssh host 'ls -1 GLOB'` first; rsync's own glob
         # support requires the source to be quoted in a way that's awkward
@@ -3473,7 +3796,7 @@ class Fetcher:
         )
         files = [ln for ln in listing_stdout.splitlines() if ln.strip()]
         if not files:
-            return 0
+            return 0, 0
         pulled = 0
         dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
         for f in files:
@@ -3482,7 +3805,7 @@ class Fetcher:
                  "-a", f"{host}:{f}", dest_str]
             ):
                 pulled += 1
-        return pulled
+        return len(files), pulled
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -3506,6 +3829,11 @@ class RemoteRunner:
 
     def __init__(self, host: RemoteHost):
         self.host = host
+        # Which conda env the pipeline runs in, resolved once from the host's
+        # "Remote python" setting. Both the argv builder and the shell composer
+        # read it, so they can never disagree about which env is being used.
+        self.env_selector, self._env_warning = _conda_env_selector(
+            host.remote_python)
         self._run: _RemoteRun | None = None
         self._cache: DatasetCache = DatasetCache(host)
         # The Fetcher created in spawn(), kept so cancel() can interrupt an
@@ -3827,9 +4155,17 @@ class RemoteRunner:
             remote_pidfile,
             remote_argv,
             cache_hit=cache_hit,
+            env_selector=self.env_selector,
         )
         ssh_argv = self.host.ssh_argv(allocate_tty=True) + [remote_cmd]
 
+        # Name the environment before the run starts. When it turns out not to
+        # exist, the guard's error names the same thing, so the two lines read
+        # as one story instead of a raw conda traceback out of nowhere.
+        kind, value = self.env_selector
+        log(f"[remote] conda env: {kind} {value}\n")
+        if self._env_warning:
+            log(f"[remote] warn: {self._env_warning}\n")
         log(
             f"[remote] run_id={run_id}  cache_key={key[:8]}  "
             f"(upload {sent / (1024**2):.1f} MB in {_fmt_secs(elapsed)})\n"
@@ -4358,7 +4694,7 @@ class RemoteRunner:
         # ``conda run --no-capture-output -n allwell python`` — the
         # surrounding shell prefix in ``spawn`` sources conda.sh first.
         remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
-        out = [*_conda_run_prefix(), "python", remote_script]
+        out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots
         while i < len(local_argv):
             arg = local_argv[i]

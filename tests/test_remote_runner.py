@@ -1242,7 +1242,7 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
         z.writestr("A01_overlay.tif", b"data")
     try:
         with patch.object(Fetcher, "_rsync", return_value=False), \
-             patch.object(Fetcher, "_rsync_glob", return_value=1), \
+             patch.object(Fetcher, "_rsync_glob", return_value=(1, 1)), \
              patch.object(Fetcher, "_materialize", lambda self, w, z: True), \
              patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):
             f._fetch_one(well)
@@ -1396,7 +1396,7 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(Fetcher, "_rsync", fake_rsync)
-    monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: 1)
+    monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: (1, 1))
     monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: True)
 
     with patch.object(Fetcher, "_loop", lambda self: None):
@@ -1641,6 +1641,9 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
+        # The retry-with-backoff shield every pipeline write on the output
+        # volume goes through (util.retry_io), imported by pipeline.io.
+        "util/retry_io.py",
         "util/schema.py",
         "util/timepoint.py",
         "util/well_token.py",

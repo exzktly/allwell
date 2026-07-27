@@ -512,6 +512,23 @@ unsupported format."* If you do hit that message on a `<WELL>.zip`, the archive
 was truncated or emptied outside the app — delete it and re-run that well from
 the original TIFs.
 
+**Working over a network drive.** A NAS or file-server share is not a reliable
+disk while a plate is being processed: under the load of a run its session can
+drop and reconnect, and on macOS every file the app had open at that moment
+becomes invalid — the error reads `[Errno 9] Bad file descriptor`. All-Well
+keeps the bulk of a run's file churn off your chosen folders (its scratch
+defaults to `~/.allwell/scratch`; the *Scratch disk* field overrides it), and
+every remaining write on your input or output folder is retried a few times
+before it is allowed to fail. You will see a `[retry] …` line in the log when
+that happens — one or two is the app absorbing a blip, a steady stream means the
+share is struggling and the run is at risk. If a write does fail for good, the
+message names the folder and says that a network mount is the likely cause.
+Remote runs are no different in this respect: the analysis happens on the
+cluster, but your own machine still reads the whole plate off the input folder
+to upload it and writes every finished well back to the output folder. The
+reliable setup on a flaky share is to keep both folders on a local disk for the
+run and copy the results across afterwards.
+
 ---
 
 ## Review mode — exploring results

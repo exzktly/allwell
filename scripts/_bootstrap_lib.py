@@ -596,6 +596,113 @@ rm -f "$INSTALLER"
     )
 
 
+def force_clean_script() -> str:
+    """The bash ``--force`` runs to clear a suspect install off the remote.
+
+    The env is NOT always under ``~/miniforge3``. On a host with a pre-existing
+    system conda the bootstrap's ``conda create -n allwell`` lands in the first
+    writable envs dir, which is typically ``~/.conda/envs/allwell`` — so
+    removing ``~/miniforge3`` alone left the env in place, and ``--force`` did
+    not do what its help text promises ("Use when the remote env is suspected
+    corrupt"). The prefix is resolved through conda and removed too, and
+    anything that is not the env's own directory is refused.
+    """
+    from services.remote_runner import CONDA_ENV_SHELL_HELPERS
+
+    return (
+        "ENV_NAME=allwell\n"
+        + CONDA_ENV_SHELL_HELPERS
+        + r"""
+AW_PREFIX="$(aw_env_prefix "$ENV_NAME" 2>/dev/null || true)"
+[ -n "$AW_PREFIX" ] || AW_PREFIX="$(aw_env_stale_dir "$ENV_NAME" || true)"
+if [ -n "$AW_PREFIX" ]; then
+    case "$AW_PREFIX" in
+        */envs/"$ENV_NAME")
+            echo "[bootstrap-remote] --force: removing env at $AW_PREFIX" >&2
+            rm -rf "$AW_PREFIX"
+            ;;
+        *)
+            echo "[bootstrap-remote] --force: refusing to remove unexpected" \
+                 "path $AW_PREFIX — remove it by hand if you meant to" >&2
+            ;;
+    esac
+fi
+echo "[bootstrap-remote] --force: removing ~/miniforge3 and ~/allwell" >&2
+rm -rf ~/miniforge3 ~/allwell
+"""
+    )
+
+
+def env_setup_script() -> str:
+    """The bash the remote runs to create the env + staging dirs.
+
+    Split out from :func:`ensure_env_and_staging` so it can be run against a
+    stub conda and a scratch HOME — the create-or-repair decision it encodes is
+    the part that strands users when it is wrong, and it is not testable
+    through an ssh call.
+    """
+    # v5.2.4: prepend conda.sh discovery so this works whether the host
+    # has miniforge at $HOME or a pre-existing system conda elsewhere
+    # (HPC modules, /opt/conda, etc.). Without it, install_miniforge_
+    # if_missing is correctly skipped for the system-conda case but the
+    # next step here used to fail with "source: no such file or
+    # directory" on $HOME/miniforge3/etc/profile.d/conda.sh.
+    from services.remote_runner import CONDA_ENV_SHELL_HELPERS
+
+    return (
+        "set -euo pipefail\nENV_NAME=allwell\n"
+        + _LOCATE_CONDA_SH
+        + CONDA_ENV_SHELL_HELPERS
+        + r"""
+
+# Staging dirs always exist after this.
+mkdir -p "$HOME/.allwell-staging/datasets" "$HOME/.allwell-staging/runs"
+
+# Placeholder repo dir so rsync has somewhere to land.
+mkdir -p "$HOME/allwell/_Docs"
+
+# Whether the env exists is conda's own question — a prefix is an environment
+# iff it holds conda-meta/history. The old check ("is the name in conda env
+# list") answered a different one, and the gap between them stranded users: a
+# creation that failed part-way leaves a directory that conda will neither run
+# in nor create over, so every run failed on EnvironmentLocationNotFound and
+# every re-bootstrap failed behind it on conda's own "prefix already exists" —
+# a message that names the problem without saying what to do about it.
+#
+# The bootstrap does not delete the directory. Removing data on someone's
+# cluster account is the user's call, not a side effect of pressing Bootstrap:
+# whatever is in there is unreadable to us, and a wrong guess about which
+# directory is disposable is unrecoverable. Stop instead, and print the one
+# command that unblocks it.
+AW_PREFIX="$(aw_env_prefix "$ENV_NAME")"
+if aw_env_is_valid "$AW_PREFIX"; then
+    echo "[bootstrap-remote] env '$ENV_NAME' already present at $AW_PREFIX" >&2
+else
+    AW_STALE="$(aw_env_stale_dir "$ENV_NAME" || true)"
+    if [ -n "$AW_STALE" ]; then
+        echo "[bootstrap-remote] ACTION REQUIRED: $AW_STALE exists but is not" \
+             "a conda environment (it has no conda-meta/history)." >&2
+        echo "[bootstrap-remote]   An env creation there failed part-way — on" \
+             "a cluster a full home-directory quota is the usual cause." >&2
+        echo "[bootstrap-remote]   conda will neither run in it nor create" \
+             "over it, so bootstrap cannot continue." >&2
+        echo "[bootstrap-remote]   Run this on $(hostname), then press" \
+             "Bootstrap again:" >&2
+        echo "[bootstrap-remote]     rm -rf $AW_STALE" >&2
+        echo "[bootstrap-remote]   Check your quota first (quota -s, or du -sh" \
+             "\$HOME) — if that is what stopped the install, it will stop the" \
+             "next one too." >&2
+        exit 1
+    fi
+    echo "[bootstrap-remote] creating conda env '$ENV_NAME' (python 3.10.14)…" >&2
+    conda create -y -n "$ENV_NAME" python=3.10.14 setuptools=69.5.1 \
+        "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py \
+        tomli -c conda-forge >&2
+fi
+"""
+    )
+
+
 def ensure_env_and_staging(
     alias: str, probe: HostProbe, force: bool, *, ssh_key_path: str = "",
 ) -> None:
@@ -606,33 +713,10 @@ def ensure_env_and_staging(
     have been rsynced to the remote — that way pip can read
     ``_Docs/requirements.txt`` from disk.
     """
-    # v5.2.4: prepend conda.sh discovery so this works whether the host
-    # has miniforge at $HOME or a pre-existing system conda elsewhere
-    # (HPC modules, /opt/conda, etc.). Without it, install_miniforge_
-    # if_missing is correctly skipped for the system-conda case but the
-    # next step here used to fail with "source: no such file or
-    # directory" on $HOME/miniforge3/etc/profile.d/conda.sh.
-    setup_script = "set -euo pipefail\nENV_NAME=allwell\n" + _LOCATE_CONDA_SH + r"""
-
-# Staging dirs always exist after this.
-mkdir -p "$HOME/.allwell-staging/datasets" "$HOME/.allwell-staging/runs"
-
-# Placeholder repo dir so rsync has somewhere to land.
-mkdir -p "$HOME/allwell/_Docs"
-
-if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
-    echo "[bootstrap-remote] env '$ENV_NAME' already present" >&2
-else
-    echo "[bootstrap-remote] creating conda env '$ENV_NAME' (python 3.10.14)…" >&2
-    conda create -y -n "$ENV_NAME" python=3.10.14 setuptools=69.5.1 \
-        "numpy>=1.24,<1.25" scipy scikit-image matplotlib pillow imageio h5py \
-        tomli -c conda-forge >&2
-fi
-"""
     say("Ensuring conda env + staging dirs on remote…")
     _ssh_run(
         alias, ["bash", "-s"],
-        input=setup_script, check=True, capture=False,
+        input=env_setup_script(), check=True, capture=False,
         ssh_key_path=ssh_key_path,
     )
 
@@ -1065,9 +1149,17 @@ def main(argv: list[str] | None = None) -> int:
     #    install steps below behave as if it's a fresh host.
     if args.force:
         say("--force: removing existing miniforge + env on remote")
+        # The env is NOT always under ~/miniforge3. On a host with a
+        # pre-existing system conda the bootstrap's ``conda create -n allwell``
+        # lands in the first writable envs dir, which is typically
+        # ``~/.conda/envs/allwell`` — so removing ~/miniforge3 alone left the
+        # env in place and --force did not do what its help text promises
+        # ("Use when the remote env is suspected corrupt"). Resolve the prefix
+        # through conda and remove that too, refusing anything that isn't the
+        # env's own directory.
         _ssh_run(
-            ssh_target, ["bash", "-c", "rm -rf ~/miniforge3 ~/allwell"],
-            check=False, capture=False,
+            ssh_target, ["bash", "-s"],
+            input=force_clean_script(), check=False, capture=False,
             ssh_key_path=key_path,
         )
         probe = HostProbe(False, False, False, "", False, False, "")

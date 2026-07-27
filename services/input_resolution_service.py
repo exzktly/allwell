@@ -9,12 +9,25 @@ import zipfile
 from pathlib import Path
 from collections.abc import Callable
 from util.aw_safe import swallowed
+from util.retry_io import retry_io
 from util.zip_write import atomic_zip
 
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
 TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
 _WELL_NAME_RE = re.compile(r"^([A-Ha-h])(\d{1,2})$")
+
+# Consolidation reads and writes on whatever volume the user pointed at as the
+# input folder, and it moves the whole plate: every loose TIF into a per-well
+# archive. On a network mount that load is enough to drop the session, and the
+# unguarded write turned the blip into a failed run before analysis started
+# (``OSError: [Errno 9] Bad file descriptor``). ``atomic_zip`` stages and
+# commits with ``os.replace``, so re-running an attempt is safe.
+_CONSOLIDATION_ADVICE = (
+    "A repeated failure here usually means the input volume is a network "
+    "mount dropping its session under load. Copy the plate to local storage "
+    "and point All-Well at that copy."
+)
 
 
 def find_zipper_script() -> Path | None:
@@ -360,13 +373,19 @@ def append_loose_images_to_zips(
         if not new_files:
             continue
 
-        with atomic_zip(target) as zf:
-            if target.exists():
-                with zipfile.ZipFile(target, "r") as src:
-                    for name in src.namelist():
-                        zf.writestr(src.getinfo(name), src.read(name))
-            for f in new_files:
-                zf.write(f, arcname=f.name)
+        def _append(target=target, new_files=new_files) -> None:
+            with atomic_zip(target) as zf:
+                if target.exists():
+                    with zipfile.ZipFile(target, "r") as src:
+                        for name in src.namelist():
+                            zf.writestr(src.getinfo(name), src.read(name))
+                for f in new_files:
+                    zf.write(f, arcname=f.name)
+
+        retry_io(
+            _append, what=target.name, advice=_CONSOLIDATION_ADVICE,
+            log_fn=log_fn,
+        )
 
         created = "created" if not existing else "updated"
         # Durable in the zip now — remove the loose sources.
@@ -613,9 +632,14 @@ def _consolidate_mixed_to_zips(
                     "(no zip written)\n"
                 )
             continue
-        with atomic_zip(target) as zf:
-            for t in tifs:
-                zf.write(t, arcname=t.name)
+        def _pack(target=target, tifs=tifs) -> None:
+            with atomic_zip(target) as zf:
+                for t in tifs:
+                    zf.write(t, arcname=t.name)
+
+        retry_io(
+            _pack, what=target.name, advice=_CONSOLIDATION_ADVICE, log_fn=log_fn,
+        )
         shutil.rmtree(well_dir, ignore_errors=True)
         zipped_any = True
         if log_fn:

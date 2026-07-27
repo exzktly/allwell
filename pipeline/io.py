@@ -29,6 +29,7 @@ import imageio.v3 as iio
 from tifffile import imwrite
 from skimage.segmentation import find_boundaries
 
+from util.retry_io import retry_io
 from util.zip_write import atomic_zip, fsync_path, staging_path
 
 # Log under the pipeline logger name so worker-log output is unchanged.
@@ -276,6 +277,18 @@ _fsync_path = fsync_path
 _WRITE_MAX_ATTEMPTS = 5
 _RETRY_BASE_DELAY_S = 0.5
 
+# Tail of the exhausted-budget message for a pipeline-side write. Phrased for
+# someone reading the run log: it names the pipeline's own knobs (``--workers``,
+# ``--incremental``), which is what makes it worth keeping separate from the
+# generic advice in ``util.retry_io``.
+_PIPELINE_WRITE_ADVICE = (
+    "A repeated failure here usually means the destination volume is "
+    "unreliable under parallel load — on a network mount (SMB/NFS) a dropped "
+    "session invalidates open file handles and every subsequent write fails. "
+    "Point the output at local storage, or reduce --workers, and re-run with "
+    "--incremental to resume."
+)
+
 
 def _free_bytes(path: Path) -> int | None:
     """Free bytes on *path*'s volume, or ``None`` if it can't be determined."""
@@ -304,28 +317,23 @@ def retry_write(fn, *, what: str, cleanup=None):
     the failure propagates as an enriched ``OSError`` naming the target and the
     attempt count, so the caller marks the well failed with an actionable
     message instead of a bare errno.
+
+    The retry loop itself is :func:`util.retry_io.retry_io`, shared with the
+    remote client in ``services/`` — which stages the plate off the user's input
+    volume and writes every fetched well back onto the output volume, and so
+    needs the same shield without being able to import this module (it must stay
+    free of the imaging stack). The budget and the pipeline's own wording stay
+    here: ``_WRITE_MAX_ATTEMPTS`` / ``_RETRY_BASE_DELAY_S`` are read at call time
+    so a test can patch them on this module.
     """
-    for attempt in range(_WRITE_MAX_ATTEMPTS):
-        try:
-            return fn()
-        except OSError as exc:
-            if cleanup is not None:
-                cleanup()
-            if attempt + 1 >= _WRITE_MAX_ATTEMPTS:
-                raise OSError(
-                    f"Failed to write {what} after {_WRITE_MAX_ATTEMPTS} "
-                    f"attempts ({exc}). A repeated failure here usually means "
-                    f"the destination volume is unreliable under parallel load "
-                    f"— on a network mount (SMB/NFS) a dropped session "
-                    f"invalidates open file handles and every subsequent write "
-                    f"fails. Point the output at local storage, or reduce "
-                    f"--workers, and re-run with --incremental to resume."
-                ) from exc
-            log.warning(
-                "write %s failed (%s); retry %d/%d after backoff",
-                what, exc, attempt + 1, _WRITE_MAX_ATTEMPTS - 1,
-            )
-            time.sleep(_RETRY_BASE_DELAY_S * (2 ** attempt))
+    return retry_io(
+        fn,
+        what=what,
+        cleanup=cleanup,
+        attempts=_WRITE_MAX_ATTEMPTS,
+        base_delay=_RETRY_BASE_DELAY_S,
+        advice=_PIPELINE_WRITE_ADVICE,
+    )
 
 
 def _safe_imwrite(out_path: Path | str, data: np.ndarray) -> None:

@@ -30,7 +30,7 @@ _PT_PER_IN = 72.0     # matplotlib points
 _INNER_COLOR = "#333333"
 _GROUP_COLOR = "#111111"
 _CORNER_COLOR = "#666666"
-_GROUP_BAND_FACE = "#EEF1F5"
+_GROUP_BAND_FACE = "#DFE5EC"
 
 _LABEL_ROW_EM = 1.9   # per-value label row height, in multiples of the font size
 _BAND_EM = 2.4        # group band height / rotated strip width, same units

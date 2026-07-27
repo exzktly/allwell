@@ -841,8 +841,17 @@ place cells in a grid that mirrors your plate or your experimental design.
     *Rep-set avg*).
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
   - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
-  - **Log scale** toggle.
+  - **Log scale** toggle — colours the map across orders of magnitude (values at
+    or below zero drop out), and the colour bar beside it is labelled on the same
+    log scale. Needs at least two distinct positive values; when the data can't
+    support it the status line says so and the linear scale stays.
   - **⇄ Transpose** — swap the rows and columns of the layout.
+  - **Value format** (in the **Properties** panel, under *Cell values*) — a
+    printf-style format for the number written in each cell: `%.2f` for two
+    decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
+    blank to let the tab choose per metric — counts as whole numbers, fractions to
+    two places, intensities scaled to their size. The hover readout uses the same
+    format, so it always matches the number on the map.
   - The layout editor: drag wells into the grid and **Edit label** on any row /
     column header.
 - **Selecting wells.** The sidebar plate map does double duty on this tab: a
@@ -1184,9 +1193,16 @@ channel for every well).
   to rest instead of reverting to the plain cell tooltip.
 - **Per-cell tweak** — right-click any rendered cell to override just that cell's
   well / channel / timepoint / FOV.
+- **Exported layout** — every way out of the table (**Export to File…**, **Copy PNG**,
+  **Copy SVG**, **Save to Saved Plots**) reproduces the grid as you see it: the row and
+  column axis labels, the vertical group strips, the corner label, and the extra
+  spacing between groups. The saved image also reads at the same brightness as the
+  grid on screen. Because the axis labels already identify every cell, the per-cell
+  titles are off — switch **Show titles** on in the Export settings dialog if you want
+  them repeated above each image as well.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
-  cell tooltips, exported titles), its custom label is shown instead when one is set
-  under Sample Definitions → Well Labels.
+  cell tooltips, exported labels and titles), its custom label is shown instead when
+  one is set under Sample Definitions → Well Labels.
 - **Optimal use** — drag **Well** onto Rows and nest a couple of channels, drag
   **Timepoint** onto Columns → one row per well×channel, one column per timepoint,
   for a treatment's full time-course at a glance. Flip a root to **Overlay** for a

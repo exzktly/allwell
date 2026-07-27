@@ -1504,7 +1504,11 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         f'echo "[remote] conda base: $(conda info --base 2>/dev/null || '
         f'echo unknown)" >&2; '
         f'echo "[remote] environments conda can see:" >&2; '
-        f'conda env list >&2 2>/dev/null || true; '
+        # Prefix conda's own listing too. Every line of this block has to be
+        # attributable to the remote at a glance — an unprefixed listing in the
+        # middle of a labelled block reads like local output, which is the
+        # confusion the whole guard exists to remove.
+        f"conda env list 2>/dev/null | sed 's/^/[remote]   /' >&2 || true; "
         f'echo "[remote] {fix}" >&2; '
         f'exit 127; '
         f'fi'

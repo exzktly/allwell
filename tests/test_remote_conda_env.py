@@ -147,10 +147,40 @@ _NEEDS_BASH = pytest.mark.skipif(
     shutil.which("bash") is None, reason="needs a POSIX shell to run the guard")
 
 
-def _run_guard(selector, extra: str = "") -> subprocess.CompletedProcess:
+_FAKE_CONDA = """#!/bin/sh
+case "$1 $2" in
+  "info --base") echo /opt/conda ;;
+  "env list")
+    echo "# conda environments:"
+    echo "#"
+    echo "base                  *  /opt/conda"
+    ;;
+esac
+"""
+
+
+@pytest.fixture
+def conda_on_path(tmp_path, monkeypatch):
+    """A stub ``conda`` that answers the two queries the guard makes.
+
+    The guard's output depends on what conda reports, so the test has to own
+    that side. Reading whatever conda the machine happens to have made this
+    pass locally (no conda installed → empty listing) and fail on CI (a real
+    conda → a real listing), which says nothing about the code.
+    """
+    binder = tmp_path / "bin"
+    binder.mkdir()
+    conda = binder / "conda"
+    conda.write_text(_FAKE_CONDA)
+    conda.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{binder}:/usr/bin:/bin")
+    return binder
+
+
+def _run_guard(selector) -> subprocess.CompletedProcess:
     return subprocess.run(
         ["bash", "-c", _conda_env_guard(selector) + "; echo REACHED-PIPELINE"],
-        capture_output=True, text=True, env={"PATH": extra or "/usr/bin:/bin"},
+        capture_output=True, text=True,
     )
 
 
@@ -159,20 +189,25 @@ def _run_guard(selector, extra: str = "") -> subprocess.CompletedProcess:
     ("name", "allwell"),
     ("prefix", "/definitely/not/an/env"),
 ])
-def test_a_missing_env_aborts_with_a_labelled_actionable_message(selector):
+def test_a_missing_env_aborts_with_a_labelled_actionable_message(
+    selector, conda_on_path,
+):
     r = _run_guard(selector)
     assert r.returncode == 127
     assert "REACHED-PIPELINE" not in r.stdout
-    # Every line the user reads is attributed to the remote…
+    # Every line the user reads is attributed to the remote — including the
+    # environment listing, which is conda's own output.
     lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
     assert lines and all(ln.startswith("[remote]") for ln in lines), r.stderr
-    # …names what is missing, and says how to fix it.
+    # …names what is missing, what conda knows, and how to fix it.
     assert "not found on" in r.stderr
+    assert "conda base: /opt/conda" in r.stderr
+    assert "[remote]   base" in r.stderr
     assert "Bootstrap" in r.stderr
 
 
 @_NEEDS_BASH
-def test_an_env_that_exists_passes_through_to_the_pipeline(tmp_path):
+def test_an_env_that_exists_passes_through_to_the_pipeline(tmp_path, conda_on_path):
     env = tmp_path / "envs" / "aw"
     (env / "bin").mkdir(parents=True)
     py = env / "bin" / "python"
@@ -180,6 +215,29 @@ def test_an_env_that_exists_passes_through_to_the_pipeline(tmp_path):
     py.chmod(0o755)
 
     r = _run_guard(("prefix", str(env)))
+    assert r.returncode == 0
+    assert "REACHED-PIPELINE" in r.stdout
+
+
+@_NEEDS_BASH
+def test_a_named_env_conda_lists_passes_through_to_the_pipeline(
+    tmp_path, monkeypatch,
+):
+    """The name selector's happy path: the guard's check has to agree with the
+    resolution ``conda run -n`` will do a moment later, or it would block runs
+    that would have worked."""
+    binder = tmp_path / "bin"
+    binder.mkdir()
+    conda = binder / "conda"
+    conda.write_text(
+        '#!/bin/sh\n'
+        '[ "$1 $2" = "env list" ] && printf "%s\\n" '
+        '"# conda environments:" "base   /opt/conda" "allwell   /opt/conda/envs/allwell"\n'
+    )
+    conda.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{binder}:/usr/bin:/bin")
+
+    r = _run_guard(("name", "allwell"))
     assert r.returncode == 0
     assert "REACHED-PIPELINE" in r.stdout
 

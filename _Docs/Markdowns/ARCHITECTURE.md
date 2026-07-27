@@ -1901,6 +1901,23 @@ round-trips through `parse_hours` and stays chronologically after every dataset-
 label. A single-timepoint dataset 1 (no interval) or a non-time timepoint label
 is refused with a user-facing message in the status window.
 
+**Restart detection.** `execute_plan` isn't incremental — every well is
+reconstructed fresh from the two source datasets on each call — so the only
+question a re-run into the same destination needs to answer is whether it's
+safe to clear what's there first. `apply.execute_plan` writes
+`out/pipeline_info.json` last, only after every well; that ordering is the whole
+detection mechanism. `concatenate_compute.destination_is_complete_dataset`
+checks for that file: if present, the destination already holds a finished
+dataset (a completed prior concatenation, or an unrelated dataset the user
+pointed at by mistake) and `build_merge_plan` refuses rather than risk
+overwriting real data. `destination_is_failed_run` checks the opposite: content
+under `in`/`out` *without* that file can only mean an earlier attempt into this
+folder was interrupted (crash, kill, disk full) before its last step — safe to
+treat as a restart. `MergePlan.dest_is_restart` carries that verdict to
+`execute_plan`, which logs it and calls `clear_destination` (removes the
+destination's `in`/`out` folders) before rebuilding, so no orphaned file from a
+differently-scoped earlier attempt survives into the "finished" output.
+
 On success the page offers to open the merged dataset in Review, routed through
 `DatasetsTab._open_in_review → AllWellApp._open_dataset_in_review`, which loads
 the destination root into Review and switches to it — the same path

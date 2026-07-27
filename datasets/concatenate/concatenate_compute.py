@@ -93,6 +93,7 @@ class MergePlan:
     wells_ds2_only: tuple[str, ...]
     wells_both: tuple[str, ...]
     merged_info: dict                   # full merged pipeline_info.json content
+    dest_is_restart: bool = False       # dest has leftovers from an earlier, unfinished attempt
 
 
 # ── dataset resolution + sidecar IO ──────────────────────────────────────────
@@ -125,6 +126,44 @@ def read_info(paths: DatasetPaths, *, label: str) -> dict:
     if not isinstance(data, dict):
         raise ConcatError(f"{label}: pipeline_info.json is not a JSON object.")
     return data
+
+
+# ── destination state (crash/restart detection) ──────────────────────────────
+def destination_has_content(dest: DatasetPaths) -> bool:
+    """True if *dest*'s ``in`` or ``out`` folder exists and holds any file."""
+
+    def _has(folder: Path) -> bool:
+        return folder.is_dir() and any(folder.iterdir())
+
+    return _has(dest.in_dir) or _has(dest.out_dir)
+
+
+def destination_is_complete_dataset(dest: DatasetPaths) -> bool:
+    """True if *dest* already holds a finished dataset.
+
+    ``apply.execute_plan`` writes ``out/pipeline_info.json`` last, only after
+    every well has been copied — so its presence means either a prior
+    concatenation into this folder ran to completion, or the folder is an
+    unrelated, already-analyzed dataset. Either way it must not be silently
+    overwritten.
+    """
+    return (dest.out_dir / "pipeline_info.json").exists()
+
+
+def destination_is_failed_run(dest: DatasetPaths) -> bool:
+    """True if *dest* holds leftovers from an attempt that never finished.
+
+    The marker is the same one :func:`destination_is_complete_dataset` checks
+    for the opposite case: content under ``in``/``out`` *without*
+    ``out/pipeline_info.json`` can only come from a concatenation that started
+    writing into this folder and was interrupted (crash, kill, disk full)
+    before reaching its last step — a finished run always leaves that file
+    behind. That makes it safe to treat as a resumable restart rather than an
+    existing dataset: :func:`~datasets.concatenate.apply.execute_plan` clears
+    it and rebuilds every well fresh from the two source datasets, so no
+    partial or orphaned file from the earlier attempt survives.
+    """
+    return destination_has_content(dest) and not destination_is_complete_dataset(dest)
 
 
 # ── compatibility + timepoint remap ──────────────────────────────────────────
@@ -303,6 +342,14 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     if dest.root in (ds1.root, ds2.root):
         raise ConcatError("The destination must be a different folder from both datasets.")
 
+    if destination_is_complete_dataset(dest):
+        raise ConcatError(
+            f"The destination ({dest.root}) already holds a finished dataset "
+            "(out/pipeline_info.json exists there) — concatenating into it "
+            "would overwrite real data. Choose a new, empty folder."
+        )
+    dest_is_restart = destination_is_failed_run(dest)
+
     info1 = read_info(ds1, label="dataset 1")
     info2 = read_info(ds2, label="dataset 2")
     check_compatible(info1, info2)
@@ -336,6 +383,7 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
         wells_ds2_only=tuple(sorted(wells2 - wells1)),
         wells_both=tuple(sorted(wells1 & wells2)),
         merged_info=merged_info,
+        dest_is_restart=dest_is_restart,
     )
 
 

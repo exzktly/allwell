@@ -1450,6 +1450,18 @@ weren't analysed the same way (different filename schema, channels' positions, o
 segmentation method), when a timepoint can't be read as a time, or when dataset 1
 has only a single timepoint (so there's no interval to continue).
 
+**If a run is interrupted** (the app is closed, the machine loses power, the
+disk fills up) partway through, just point Concatenate at the same three
+folders and press Concatenate again — it detects that the destination holds
+leftovers from a run that never finished and clears them before rebuilding, so
+nothing partial or stale is left behind. It tells the two cases apart the same
+way it protects a folder you've already finished into: a destination whose
+`out/pipeline_info.json` exists is treated as a completed dataset and refused
+outright (pick a different folder rather than risk overwriting it); a
+destination with other files but no `pipeline_info.json` can only be an
+interrupted attempt, since that file is always the last thing a successful run
+writes.
+
 ---
 
 ## Filename schema

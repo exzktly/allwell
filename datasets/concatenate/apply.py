@@ -18,6 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from datasets.concatenate.concatenate_compute import (
+    DatasetPaths,
     MergePlan,
     in_containers,
     out_csvs,
@@ -153,6 +154,21 @@ def merge_qc_zip(plan: MergePlan, well: str, z1: Path | None, z2: Path | None) -
         write_zip(dest_zip, read_members(z1) + _rewrite_members(plan, read_members(z2)))
 
 
+def clear_destination(dest: DatasetPaths) -> None:
+    """Remove a destination's ``in``/``out`` content (a failed prior attempt).
+
+    Every well is rebuilt from the two source datasets on each
+    :func:`execute_plan` call — nothing here is incremental — so the only
+    correct way to resume into a destination that already has leftovers is to
+    clear them first; otherwise a well from an earlier, differently-scoped
+    attempt (or a partially-written file) would linger in the "finished"
+    output.
+    """
+    for folder in (dest.in_dir, dest.out_dir):
+        if folder.exists():
+            shutil.rmtree(folder)
+
+
 # ── top-level execution ──────────────────────────────────────────────────────
 def execute_plan(plan: MergePlan, log: Callable[[str], None] | None = None) -> str:
     """Carry out *plan*, writing the merged dataset. Returns a summary line.
@@ -169,6 +185,13 @@ def execute_plan(plan: MergePlan, log: Callable[[str], None] | None = None) -> s
         f"{len(plan.wells_ds2_only)} from dataset 2 only, "
         f"{len(plan.wells_both)} stitched."
     )
+
+    if plan.dest_is_restart:
+        emit(
+            "Destination has leftover files from an earlier attempt that didn't "
+            "finish — clearing them before rebuilding."
+        )
+        clear_destination(plan.dest)
 
     plan.dest.in_dir.mkdir(parents=True, exist_ok=True)
     plan.dest.out_dir.mkdir(parents=True, exist_ok=True)

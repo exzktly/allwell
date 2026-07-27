@@ -216,3 +216,67 @@ def test_destination_cannot_equal_a_source(tmp_path):
     _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
     with pytest.raises(cc.ConcatError, match="different folder"):
         cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "d1")
+
+
+# ── restart-from-a-failed-run detection ──────────────────────────────────────
+def test_fresh_destination_is_not_a_restart(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+    assert plan.dest_is_restart is False
+
+
+def test_partial_destination_without_sidecar_is_a_restart(tmp_path):
+    """A destination with leftover files but no pipeline_info.json can only be
+    an interrupted attempt (execute_plan writes that file last) — it should be
+    detected as resumable, not refused."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+
+    dest = tmp_path / "dest"
+    (dest / "in").mkdir(parents=True)
+    (dest / "out").mkdir(parents=True)
+    (dest / "out" / "measurements_A01.csv").write_text("well,timepoint\nA01,0\n")
+
+    assert cc.destination_is_failed_run(cc.DatasetPaths(dest, dest / "in", dest / "out"))
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    assert plan.dest_is_restart is True
+
+
+def test_destination_with_finished_sidecar_is_refused(tmp_path):
+    """A destination whose out/pipeline_info.json already exists looks like a
+    completed dataset (a prior successful concatenation, or an unrelated
+    dataset the user pointed at by mistake) — must never be silently
+    overwritten."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "dest", wells=["Q01"], timepoints=["0"])
+
+    with pytest.raises(cc.ConcatError, match="already holds a finished dataset"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+
+
+def test_restart_clears_stale_orphan_well_before_rebuilding(tmp_path):
+    """A well left over from an earlier, differently-scoped failed attempt must
+    not survive into the rebuilt output — execute_plan reconstructs every well
+    fresh from the two source datasets, so a stale file left in the
+    destination would otherwise masquerade as part of the merged dataset."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h", "48h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+
+    dest = tmp_path / "dest"
+    (dest / "in").mkdir(parents=True)
+    (dest / "out").mkdir(parents=True)
+    with zipfile.ZipFile(dest / "in" / "Z09.zip", "w") as zf:
+        zf.writestr("junk.tif", b"orphan")
+    (dest / "out" / "measurements_Z09.csv").write_text("well,timepoint\nZ09,0\n")
+
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    assert plan.dest_is_restart is True
+    apply.execute_plan(plan)
+
+    assert not (dest / "in" / "Z09.zip").exists()
+    assert not (dest / "out" / "measurements_Z09.csv").exists()
+    assert (dest / "in" / "A01.zip").exists()
+    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
+        assert [r["timepoint"] for r in csv.DictReader(handle)] == ["0", "24h", "48h", "72h", "96h"]

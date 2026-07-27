@@ -110,9 +110,12 @@ def test_build_grouped_layout_and_shared_lut(image_table_app):
         assert _row_cmap_name(ctx, n_ch, chan0) == "Reds"
 
     # Generate + export must not raise and the export mirrors the grid shape.
+    # The figure also carries the facet label strips, so count only image cells.
+    from well_viewer.features.image_browser.image_table.renderer import FACET_GID
     C.image_table_generate(ctx)
     fig, _ = _build_export_figure(ctx)
-    assert len(fig.axes) == len(cells) * len(cells[0])
+    cell_axes = [a for a in fig.axes if a.get_gid() != FACET_GID]
+    assert len(cell_axes) == len(cells) * len(cells[0])
 
 
 @pytest.mark.qt

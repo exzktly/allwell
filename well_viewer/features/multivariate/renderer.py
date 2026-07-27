@@ -183,6 +183,7 @@ def _render_correlation(fig, res) -> None:
         annot_color=lambda v: "white" if abs(v) > 0.5 else muted_fg,
     )
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    setattr(cbar.ax, "_aw_colorbar", True)
     cbar.ax.tick_params(labelsize=7, colors=muted_fg)
     fig.subplots_adjust(left=0.28, bottom=0.30, right=0.98, top=0.94)
 
@@ -364,5 +365,6 @@ def _render_facet(fig, res) -> None:
     ax.set_xlabel(res["col_factor"], fontsize=8, color=muted_fg)
     ax.set_ylabel(res["row_factor"], fontsize=8, color=muted_fg)
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    setattr(cbar.ax, "_aw_colorbar", True)
     cbar.ax.tick_params(labelsize=7, colors=muted_fg)
     fig.subplots_adjust(left=0.20, bottom=0.28, right=0.98, top=0.92)

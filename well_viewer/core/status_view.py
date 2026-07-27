@@ -9,10 +9,19 @@ from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
     QVBoxLayout, QWidget,
 )
-from well_viewer.core.safe import swallowed
+
+#: How many lines the log drawer keeps before dropping the oldest.
+_LOG_MAX_BLOCKS = 5000
+
 
 class _GUILogHandler(logging.Handler):
-    """Routes logging records into a QTextEdit on the Qt main thread."""
+    """Routes logging records into a QTextEdit on the Qt main thread.
+
+    Detaches itself the moment its widget is gone. A handler outlives the window
+    it writes into — nothing removes it on teardown, and in a process that builds
+    more than one window (the test suite does) the dead ones stay subscribed to
+    the same logger. Left attached they are not merely inert: see :meth:`_append`.
+    """
 
     def __init__(self, widget: QTextEdit) -> None:
         super().__init__()
@@ -38,8 +47,23 @@ class _GUILogHandler(logging.Handler):
     def _append(self, html: str) -> None:
         try:
             self._w.append(html)
-        except Exception:
-            swallowed()  # was: pass (silent except)
+        except RuntimeError:
+            # The QTextEdit's C++ half is gone. This handler can never work
+            # again, so drop it from every logger holding it — otherwise each
+            # record keeps fanning out to a widget that cannot receive it.
+            #
+            # Deliberately NOT swallowed(): that logs at DEBUG, and this failure
+            # is *inside a log handler*. The record would propagate straight back
+            # to the logger this handler is attached to, fail again here, and log
+            # again — an unbounded loop that a redraw's processEvents() drains
+            # forever. A logging handler must never log from its own failure path.
+            self._detach()
+
+    def _detach(self) -> None:
+        """Remove this handler from any logger still holding a reference."""
+        for logger in (logging.getLogger("well_viewer"), logging.getLogger()):
+            if self in logger.handlers:
+                logger.removeHandler(self)
 
 
 def build_bottom(win) -> None:
@@ -124,6 +148,11 @@ def build_bottom(win) -> None:
     win._log_text = QTextEdit(win._log_frame)
     win._log_text.setReadOnly(True)
     win._log_text.setLineWrapMode(QTextEdit.NoWrap)
+    # Ring-buffer the drawer: the handler below logs at DEBUG, and a long session
+    # (or one image-heavy load) emits enough records to grow the document without
+    # bound, which costs memory and makes every later append slower. Oldest lines
+    # drop off the top; the drawer is a tail, not an archive.
+    win._log_text.document().setMaximumBlockCount(_LOG_MAX_BLOCKS)
     lf_l.addWidget(win._log_text, 1)
 
     win._log_frame.hide()

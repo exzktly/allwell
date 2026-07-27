@@ -202,6 +202,10 @@ DEFAULT_EXPORT_STYLE_PREFS = {
     # Per-cell scatter: color points by local 2D density (FACS-style) instead
     # of solid per-well colors.
     "scatter_density": False,
+    # Heat Map: printf-style format for the number drawn in each grid cell
+    # (e.g. "%.2f", "%.1e", "%d"). Empty picks a format per metric and
+    # magnitude — counts as integers, fractions to two places, and so on.
+    "heatmap_value_format": "",
     # Per-cell scatter defaults to log/log (fluorescence spans decades). These
     # are scatter-specific so other plot types' linear default can't reset them.
     "scatter_x_log": True,
@@ -487,6 +491,17 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         ax.xaxis.label.set_fontfamily(_fam)
         ax.yaxis.label.set_fontfamily(_fam)
         ax.title.set_fontfamily(_fam)
+
+        # A colour bar is a legend for the plot's norm, not a plot axis of its
+        # own: its scale, limits, ticks and the mesh that fills it all belong to
+        # the mappable that created it. ``fig.axes`` includes it all the same, so
+        # everything below here has to leave it alone — the axis pass reset a
+        # LogNorm colour bar to a linear scale, discarding the log locator and
+        # formatter matplotlib had installed, and the grid and mark-styling passes
+        # drew gridlines and marker edges over the bar. Typography and colours are
+        # applied above, so the colour bar still tracks the plot theme.
+        if bool(getattr(ax, "_aw_colorbar", False)):
+            continue
 
         # Keep horizontal alignment in step with the applied angle: a
         # horizontal label (0°) reads centered under its bar/tick, while an

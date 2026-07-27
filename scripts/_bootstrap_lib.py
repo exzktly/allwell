@@ -623,10 +623,11 @@ if [ -n "$AW_PREFIX" ]; then
             ;;
         *)
             echo "[bootstrap-remote] --force: refusing to remove unexpected" \
-                 "path $AW_PREFIX" >&2
+                 "path $AW_PREFIX — remove it by hand if you meant to" >&2
             ;;
     esac
 fi
+echo "[bootstrap-remote] --force: removing ~/miniforge3 and ~/allwell" >&2
 rm -rf ~/miniforge3 ~/allwell
 """
     )
@@ -665,31 +666,33 @@ mkdir -p "$HOME/allwell/_Docs"
 # list") answered a different one, and the gap between them stranded users: a
 # creation that failed part-way leaves a directory that conda will neither run
 # in nor create over, so every run failed on EnvironmentLocationNotFound and
-# every re-bootstrap failed behind it on "prefix already exists". Nothing the
-# user could do from the app fixed it.
+# every re-bootstrap failed behind it on conda's own "prefix already exists" —
+# a message that names the problem without saying what to do about it.
+#
+# The bootstrap does not delete the directory. Removing data on someone's
+# cluster account is the user's call, not a side effect of pressing Bootstrap:
+# whatever is in there is unreadable to us, and a wrong guess about which
+# directory is disposable is unrecoverable. Stop instead, and print the one
+# command that unblocks it.
 AW_PREFIX="$(aw_env_prefix "$ENV_NAME")"
 if aw_env_is_valid "$AW_PREFIX"; then
     echo "[bootstrap-remote] env '$ENV_NAME' already present at $AW_PREFIX" >&2
 else
     AW_STALE="$(aw_env_stale_dir "$ENV_NAME" || true)"
     if [ -n "$AW_STALE" ]; then
-        # Only ever remove a directory that is provably not an environment AND
-        # sits where conda keeps this env — a valid env is never touched here
-        # (that is what --force is for).
-        case "$AW_STALE" in
-            */envs/"$ENV_NAME")
-                echo "[bootstrap-remote] $AW_STALE exists but is not a conda" \
-                     "environment (no conda-meta/history) — a previous" \
-                     "creation failed part-way. Removing it so the env can be" \
-                     "rebuilt." >&2
-                rm -rf "$AW_STALE"
-                ;;
-            *)
-                echo "[bootstrap-remote] refusing to remove unexpected path" \
-                     "$AW_STALE — remove it by hand and re-run bootstrap." >&2
-                exit 1
-                ;;
-        esac
+        echo "[bootstrap-remote] ACTION REQUIRED: $AW_STALE exists but is not" \
+             "a conda environment (it has no conda-meta/history)." >&2
+        echo "[bootstrap-remote]   An env creation there failed part-way — on" \
+             "a cluster a full home-directory quota is the usual cause." >&2
+        echo "[bootstrap-remote]   conda will neither run in it nor create" \
+             "over it, so bootstrap cannot continue." >&2
+        echo "[bootstrap-remote]   Run this on $(hostname), then press" \
+             "Bootstrap again:" >&2
+        echo "[bootstrap-remote]     rm -rf $AW_STALE" >&2
+        echo "[bootstrap-remote]   Check your quota first (quota -s, or du -sh" \
+             "\$HOME) — if that is what stopped the install, it will stop the" \
+             "next one too." >&2
+        exit 1
     fi
     echo "[bootstrap-remote] creating conda env '$ENV_NAME' (python 3.10.14)…" >&2
     conda create -y -n "$ENV_NAME" python=3.10.14 setuptools=69.5.1 \

@@ -242,7 +242,11 @@ def test_a_half_created_env_is_named_as_the_thing_to_remove(remote_home):
     assert str(stale) in r.stderr
     assert "is not a conda environment" in r.stderr
     assert "quota" in r.stderr          # the usual cause, named
-    assert "remove that directory" in r.stderr
+    # The guard reports; it never deletes. What it owes the user instead is the
+    # exact command, not an instruction to go and work out the path.
+    assert "ACTION REQUIRED" in r.stderr
+    assert f"rm -rf {stale}" in r.stderr
+    assert stale.is_dir(), "the guard must not touch the remote"
     lines = [ln for ln in r.stderr.splitlines() if ln.strip()]
     assert all(ln.startswith("[remote]") for ln in lines), r.stderr
 

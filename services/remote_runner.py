@@ -1549,8 +1549,11 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         missing_fix = ('Run Analyze -> Remotes -> Bootstrap for this host to '
                        'create it, or set Remote python to an existing env '
                        'python.')
-    stale_fix = ('Fix: remove that directory and re-run Analyze -> Remotes -> '
-                 'Bootstrap, which rebuilds the env from scratch.')
+    # The guard never deletes: a run is not the time to modify the host, and
+    # what is inside that directory is unreadable to us. Print the one command
+    # that unblocks it and let the user decide.
+    stale_fix = ('ACTION REQUIRED: remove that directory yourself, then re-run '
+                 'Analyze -> Remotes -> Bootstrap to rebuild the env:')
     return (
         f'{CONDA_ENV_SHELL_HELPERS} '
         f'{resolve}; '
@@ -1563,6 +1566,10 @@ def _conda_env_guard(selector: EnvSelector) -> str:
         f'home-directory quota is the usual cause. conda will neither run in '
         f'it nor create over it." >&2; '
         f'echo "[remote] {stale_fix}" >&2; '
+        f'echo "[remote]     rm -rf $AW_STALE" >&2; '
+        f'echo "[remote] Check the quota first (quota -s, or du -sh \\$HOME) — '
+        f'if that is what stopped the install, it will stop the next one too." '
+        f'>&2; '
         f'else '
         f'echo "[remote] {missing_fix}" >&2; '
         f'fi; '

@@ -123,12 +123,17 @@ def test_a_valid_env_is_left_alone(remote):
     assert (prefix / "conda-meta" / "history").is_file()
 
 
-def test_a_half_created_env_is_removed_and_rebuilt(remote):
-    """The user's case: `<home>/.conda/envs/allwell` exists but is not an env.
+def test_a_half_created_env_stops_with_the_command_the_user_must_run(remote):
+    """The reported case: `<home>/.conda/envs/allwell` exists but is not an env.
 
     conda does not list it (no ``conda-meta/history``), so the old check saw
-    "absent" and ran ``conda create``, which then failed on "prefix already
-    exists" — the state with no way out from inside the app.
+    "absent" and ran ``conda create``, which then failed on conda's "prefix
+    already exists" — a message that names the problem without saying what to
+    do about it, and the state had no way out from inside the app.
+
+    The bootstrap stops here rather than clearing the directory itself: what is
+    inside it is unreadable to us, and deleting data on someone's cluster
+    account is their call, not a side effect of pressing Bootstrap.
     """
     home, base, _ = remote
     stale = home / ".conda" / "envs" / "allwell"
@@ -136,11 +141,14 @@ def test_a_half_created_env_is_removed_and_rebuilt(remote):
 
     r, create_log = _run(env_setup_script(), remote, envs={})
 
-    assert r.returncode == 0, r.stderr
+    assert r.returncode == 1
+    assert "ACTION REQUIRED" in r.stderr
     assert "is not a conda environment" in r.stderr
-    assert "Removing it" in r.stderr
-    assert not (stale / "lib").exists(), "the broken prefix must be gone"
-    assert create_log.read_text().startswith("create -y -n allwell")
+    assert f"rm -rf {stale}" in r.stderr      # the exact command, not a hint
+    assert "quota" in r.stderr                # the usual cause, named
+    # Nothing was touched, and the doomed create was not attempted.
+    assert (stale / "lib").is_dir()
+    assert not create_log.exists()
 
 
 def test_a_missing_env_is_created_without_removing_anything(remote):

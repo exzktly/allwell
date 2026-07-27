@@ -1806,16 +1806,24 @@ with `EnvironmentLocationNotFound: not a conda environment: <prefix>` *and*
 every re-bootstrap failed behind it with `prefix already exists`. Nothing the
 user could reach from the app repaired it.
 
-Both sides now handle it, and the split of responsibility is deliberate:
+Both sides now detect it, and **neither deletes it**. All-Well does not remove
+data from a user's cluster account as a side effect of an action they asked for
+something else with — the contents of that directory are unreadable to us, and a
+wrong guess about which directory is disposable is not recoverable. What the two
+sides owe the user is the diagnosis and the exact command:
 
 - The **guard** distinguishes "no environment" from "a directory that is not an
-  environment" and names the directory, because that is the thing that has to
-  go. It never deletes anything: a run is not the time to modify the host.
-- The **bootstrap** repairs it. A prefix that is provably not an environment is
-  removed and rebuilt, guarded by a `*/envs/<name>` shape check so an unexpected
-  path from conda can never turn the repair into an arbitrary `rm -rf`. A
-  *valid* env is still left alone — replacing one of those is what `--force` is
-  for.
+  environment", names the directory, names the likely cause (quota), and prints
+  the `rm -rf <prefix>` line to run. A run is not the time to modify the host.
+- The **bootstrap** stops before the `conda create` that would fail, with the
+  same `ACTION REQUIRED` note. Continuing would only surface conda's `prefix
+  already exists`, which states the problem without stating the remedy.
+
+Deletion happens only where the user asked for deletion: `--force`, whose entire
+documented purpose is to clear a suspect install. Even there each removal is
+echoed before it happens, and a prefix that does not match `*/envs/<name>` is
+refused rather than removed, so an unexpected path from conda cannot turn the
+flag into an arbitrary `rm -rf`.
 
 **Where the env actually lives.** `conda create -n allwell` lands in the first
 writable envs dir, which on a host with a pre-existing system conda (an HPC
@@ -1827,8 +1835,10 @@ most likely to need it.
 
 The scripts are built by `env_setup_script()` / `force_clean_script()` rather
 than inline in the ssh callers, so `tests/test_bootstrap_env_repair.py` can run
-them against a stub conda and a scratch `HOME` — the create-or-repair decision
-is the part that strands users when it is wrong, and an ssh call hides it.
+them against a stub conda and a scratch `HOME` — the create-or-stop decision is
+the part that strands users when it is wrong, and an ssh call hides it. The stub
+refuses `conda create` over an existing prefix the way conda does; without that,
+tests of this behaviour pass against the broken script too.
 
 ---
 
@@ -3192,10 +3202,11 @@ conda can see. Three causes, and the guard says which:
 
 - *A directory exists at the prefix but is not an environment* (no
   `conda-meta/history`) — an env creation that died part-way, usually a full
-  home-directory quota. The guard names the directory. Re-run Analyze → Remotes
-  → *Bootstrap*: it removes the broken prefix and rebuilds. (Before that repair
-  existed, this state was a dead end — the run failed and the re-bootstrap
-  failed behind it on `prefix already exists`. See §6.6.)
+  home-directory quota. The guard names the directory and prints the `rm -rf`
+  line; remove it yourself (check the quota first, or the next install stops the
+  same way) and then re-run Analyze → Remotes → *Bootstrap*. All-Well does not
+  delete it for you. Bootstrap stops with the same note rather than attempting
+  the `conda create` that conda would refuse. See §6.6.
 - *The host was never bootstrapped*, or its env was removed. Run Analyze →
   Remotes → *Bootstrap* for that host.
 - *The host's `remote_python` points at an env that isn't there.* The field is
@@ -3207,8 +3218,8 @@ the runner keeps the name selector and says so on a `[remote] warn:` line
 rather than guessing at a prefix.
 
 **Bootstrap fails with `CondaValueError: prefix already exists`.** — The same
-half-created directory, on a build that predates the repair. Remove the prefix
-the message names and re-run Bootstrap.
+half-created directory, on a build that predates the check above. Remove the
+prefix the message names and re-run Bootstrap.
 
 **Auto-threshold reports `timepoint unknown`.** — `pipeline_info.json` doesn't
 have a schema that names a `tp` or `timepoint` field. Re-run the pipeline with

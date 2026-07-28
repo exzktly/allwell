@@ -105,8 +105,8 @@ class DatasetsTab(QWidget):
         panel.setObjectName("Sidebar")
         panel.setFixedWidth(260)
         col = QVBoxLayout(panel)
-        col.setContentsMargins(theme.Spacing.sm, theme.Spacing.md,
-                               theme.Spacing.sm, theme.Spacing.md)
+        col.setContentsMargins(theme.Spacing.md, theme.Spacing.md,
+                               theme.Spacing.md, theme.Spacing.md)
         col.setSpacing(theme.Spacing.sm)
 
         header = QLabel("DATASETS", panel)

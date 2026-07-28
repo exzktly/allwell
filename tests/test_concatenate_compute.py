@@ -456,3 +456,81 @@ def test_execute_plan_cancellation_leaves_marker_for_resume(tmp_path):
         apply.execute_plan(plan, is_cancelled=lambda: True)
     assert (dest / cc.IN_PROGRESS_MARKER).exists()
     assert not (dest / "out" / "pipeline_info.json").exists()
+
+
+# ── zero-rows guard: a well's images existing without its CSV ────────────────
+def _make_dataset_with_image_only_well(root: Path, *, normal_wells, image_only_well, timepoints) -> None:
+    """*normal_wells* get a full in/ zip + out/ QC zip + measurements CSV.
+    *image_only_well* (may be None) gets in/ + out/ QC zip but deliberately NO
+    measurements CSV -- a well that segmented zero cells at every timepoint,
+    or (in the naming-mismatch tests below) a CSV out_csvs() can't match."""
+    in_dir, out_dir = root / "in", root / "out"
+    in_dir.mkdir(parents=True)
+    out_dir.mkdir(parents=True)
+    info = dict(_BASE_INFO)
+    info["available_timepoints"] = list(timepoints)
+    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
+
+    def _write_images(well):
+        with zipfile.ZipFile(in_dir / f"{well}.zip", "w") as zf:
+            for tp in timepoints:
+                zf.writestr(f"exp_GFP_{well}_F001_{tp}.tif", b"img")
+        with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
+            for tp in timepoints:
+                zf.writestr(f"exp_GFP_{well}_F001_{tp}_labels.tif", b"mask")
+
+    for well in normal_wells:
+        _write_images(well)
+        with (out_dir / f"measurements_{well}.csv").open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=_ROW_COLUMNS)
+            writer.writeheader()
+            for tp in timepoints:
+                writer.writerow({
+                    "filename": f"exp_GFP_{well}_F001_{tp}.tif", "experiment": "exp",
+                    "channel": "GFP", "well": well, "fov": "F001", "timepoint": tp,
+                    "timepoint_hours": parse_hours(tp), "nucleus_id": 1, "area_px": 150,
+                })
+
+    if image_only_well:
+        _write_images(image_only_well)
+
+
+def test_execute_plan_zero_cell_well_alongside_normal_well_still_succeeds(tmp_path):
+    """A well with images but no CSV (zero cells segmented) is legitimate on
+    its own -- the merge must still succeed for the wells that do have data,
+    and note the image-only well rather than silently dropping it."""
+    _make_dataset_with_image_only_well(
+        tmp_path / "d1", normal_wells=["A01"], image_only_well="E05", timepoints=["0h", "24h", "48h"],
+    )
+    _make_dataset_with_image_only_well(
+        tmp_path / "d2", normal_wells=["A01"], image_only_well=None, timepoints=["0h", "24h"],
+    )
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    log: list[str] = []
+    summary = apply.execute_plan(plan, log.append)
+
+    assert "Concatenated 2 well(s)" in summary
+    assert any("E05 (dataset 1)" in line for line in log)
+    assert (dest / "out" / "measurements_A01.csv").exists()
+    assert not (dest / "out" / "measurements_E05.csv").exists()
+    assert (dest / "in" / "E05.zip").exists()  # images still carried over
+
+
+def test_execute_plan_zero_rows_everywhere_fails_loudly(tmp_path):
+    """The regression this guard exists for: if out_csvs() matches no CSV for
+    ANY well in EITHER dataset (e.g. every well is image-only, or a naming
+    mismatch hides real CSVs from the matcher), the merge must fail loudly
+    instead of silently reporting success with an empty destination."""
+    _make_dataset_with_image_only_well(
+        tmp_path / "d1", normal_wells=[], image_only_well="A01", timepoints=["0h", "24h", "48h"],
+    )
+    _make_dataset_with_image_only_well(
+        tmp_path / "d2", normal_wells=[], image_only_well="A01", timepoints=["0h", "24h"],
+    )
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    with pytest.raises(cc.ConcatError, match="zero measurement rows"):
+        apply.execute_plan(plan)
+    assert not (dest / "out" / "pipeline_info.json").exists()  # never reports success

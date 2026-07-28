@@ -22,6 +22,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -33,6 +34,15 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+
+
+def _hrule(parent: QWidget) -> QFrame:
+    """Full-width divider matching Analyze's section/log-header rules
+    (``QFrame#HRule`` — see analyze_tab_form._section / _build_log)."""
+    rule = QFrame(parent)
+    rule.setFrameShape(QFrame.HLine)
+    rule.setObjectName("HRule")
+    return rule
 
 
 def _is_dataset(root: Path) -> str:
@@ -64,6 +74,7 @@ class _FolderField(QWidget):
         col.setSpacing(theme.Spacing.xs)
 
         label = QLabel(title, self)
+        label.setObjectName("Muted")
         label.setWordWrap(True)
         col.addWidget(label)
 
@@ -135,9 +146,13 @@ class ConcatenatePage(QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
+        # Title + full-width rule, matching the "title, then HRule, then body"
+        # rhythm every Analyze form section and the "Pipeline Output" log
+        # header use (analyze_tab_form._section / _build_log).
         heading = QLabel("Concatenate datasets", self)
         heading.setObjectName("Heading")
         outer.addWidget(heading)
+        outer.addWidget(_hrule(self))
 
         blurb = QLabel(
             "Append dataset 2 onto dataset 1. The two datasets should be the "
@@ -169,14 +184,23 @@ class ConcatenatePage(QWidget):
             field.changed.connect(self._refresh_run_enabled)
             outer.addWidget(field)
 
-        self._run_btn = QPushButton("Concatenate", self)
+        self._run_btn = QPushButton("▶  Concatenate", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
 
-        status_label = QLabel("Status", self)
-        outer.addWidget(status_label)
+        # Status header row + rule, matching "Pipeline Output"'s header (a
+        # left-aligned label in a 12/6/12/6-margin row, then a full-width
+        # HRule) — see analyze_tab_form._build_log.
+        status_hdr = QWidget(self)
+        status_hl = QHBoxLayout(status_hdr)
+        status_hl.setContentsMargins(0, 0, 0, 0)
+        status_hl.addWidget(QLabel("Status", status_hdr))
+        status_hl.addStretch(1)
+        outer.addWidget(status_hdr)
+        outer.addWidget(_hrule(self))
+
         self._status = QPlainTextEdit(self)
         self._status.setObjectName("ConcatStatus")
         self._status.setReadOnly(True)

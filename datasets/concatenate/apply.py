@@ -381,6 +381,16 @@ def _verify(plan: MergePlan, well_stats: dict[str, WellCsvStats]) -> None:
     Runs before ``pipeline_info.json`` is written (see :func:`execute_plan`),
     so a failure never leaves a destination that looks finished.
     """
+    total_rows = sum(s.rows_ds1 + s.rows_ds2 for s in well_stats.values())
+    if well_stats and total_rows == 0:
+        raise ConcatError(
+            "Verification failed: the merge wrote zero measurement rows "
+            f"across {len(well_stats)} well(s) — no measurements_<WELL>.csv "
+            "was matched for any well in either dataset (images were still "
+            "copied). Check that each dataset's out/ folder actually "
+            "contains its measurements CSVs, not just the QC image zips."
+        )
+
     tp_mismatches = [m for s in well_stats.values() for m in s.tp_mismatches]
     if tp_mismatches:
         well, tp, hours = tp_mismatches[0]
@@ -497,6 +507,7 @@ def execute_plan(
 
     well_stats: dict[str, WellCsvStats] = {}
     total_unmatched = 0
+    images_without_csv: list[str] = []
     for well in all_wells:
         if cancelled():
             raise ConcatError("Cancelled — the in-progress destination was left in place to resume later.")
@@ -506,11 +517,28 @@ def execute_plan(
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
         well_stats[well] = stats
         total_unmatched += unmatched_in + unmatched_qc + stats.unmatched_filenames
+        # A well's images (in/ input or out/ QC zip) existing without a
+        # measurements CSV on that same side is legitimate on its own — the
+        # well may have segmented zero cells at every timepoint — but it's
+        # exactly the situation a naming mismatch in out_csvs() would also
+        # produce, silently, for every well. Surface it rather than let a
+        # merge that copied images but wrote no data pass as an ordinary
+        # success; _verify's zero-rows check below is the hard backstop.
+        if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
+            images_without_csv.append(f"{well} (dataset 1)")
+        if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
+            images_without_csv.append(f"{well} (dataset 2)")
 
     if total_unmatched:
         emit(
             f"Note: {total_unmatched} file(s) didn't match the filename "
             "schema and were copied unchanged (their timepoint wasn't shifted)."
+        )
+    if images_without_csv:
+        emit(
+            f"Note: {len(images_without_csv)} well/dataset pair(s) have image "
+            f"data but no measurements CSV — no cells were carried over for "
+            f"them: {', '.join(images_without_csv)}."
         )
 
     emit("Verifying the merged output before finishing…")

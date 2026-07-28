@@ -101,16 +101,30 @@ class DatasetsTab(QWidget):
             self._pages.setCurrentByName(_FEATURES[0].name)
 
     def _build_sidebar(self) -> QWidget:
+        # Matches Review's own rail (well_viewer/core/app_shell_view.py): the
+        # RailNav sits in a zero-margin layout so its row highlight and left
+        # accent bar reach the panel's true edges (RailNav's own QSS already
+        # insets the row body by 6px/4px — an outer container margin here
+        # would stack on top of that and pull the highlight away from the
+        # edge, which is what a themed.Spacing margin around the whole panel
+        # previously did). Only the header label gets its own inset.
         panel = QWidget(self)
         panel.setObjectName("Sidebar")
         panel.setFixedWidth(260)
         col = QVBoxLayout(panel)
-        col.setContentsMargins(theme.Spacing.sm, theme.Spacing.md,
-                               theme.Spacing.sm, theme.Spacing.md)
-        col.setSpacing(theme.Spacing.sm)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
 
         header = QLabel("DATASETS", panel)
-        header.setObjectName("Muted")
+        header.setObjectName("RailHead")
+        header.setContentsMargins(13, 10, 13, 4)
+        header.setStyleSheet(
+            f"color: {theme.Colors.text_muted}; "
+            f"font-family: {theme.Typography.family}; "
+            f"font-size: 11px; "
+            f"font-weight: 600; "
+            f"letter-spacing: 0.08em;"
+        )
         col.addWidget(header)
 
         self._nav = RailNav(panel)

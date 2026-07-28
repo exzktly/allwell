@@ -1451,12 +1451,15 @@ What it does to the data:
   thresholds and sample definitions carry over from dataset 1 and apply to
   dataset 2's rows too — worth reviewing after the merge, since they were set
   from dataset 1's imaging conditions.
-- **Before finishing, the merge verifies itself** — that every row's timepoint
-  label and its numeric hours agree, that dataset 2's timepoints actually land
-  after dataset 1's with no overlap, and that every image a row references
-  really is in the merged output. A verification failure aborts before
-  anything is marked complete, so a broken merge can never masquerade as a
-  finished dataset.
+- **Before finishing, the merge verifies itself** — that it actually wrote
+  measurement data at all (rather than only copying images), that every row's
+  timepoint label and its numeric hours agree, that dataset 2's timepoints
+  actually land after dataset 1's with no overlap, and that every image a row
+  references really is in the merged output. A verification failure aborts
+  before anything is marked complete, so a broken merge can never masquerade
+  as a finished dataset. A well whose images exist but has no measurements
+  (it segmented zero cells) is called out by name in the status window rather
+  than silently skipped.
 
 It refuses (with an explanation in the status window) when the two datasets
 weren't analysed the same way (different filename schema, channel positions, or

@@ -10,7 +10,7 @@ re-export these names.
 
 from __future__ import annotations
 
-from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, active_replicate_sets)
+from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label, active_replicate_sets)
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, get_thresh_frac_on
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
@@ -665,12 +665,12 @@ def collect_bar_items_for_group(
             valid = [w for w in rset.wells if w in ctx.state.dataset.well_paths]
             if not valid:
                 continue
-            members.append((rset.name, rset.name, valid, rset.name,
+            members.append((rset.name, replicate_display_label(ctx, rset), valid, rset.name,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
         for w in group.solo_wells:
             if w not in ctx.state.dataset.well_paths:
                 continue
-            members.append((w, w, [w], None,
+            members.append((w, well_display_label(ctx, w), [w], None,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
     else:
         # Expand rset members into per-well entries; each well coloured by
@@ -682,12 +682,12 @@ def collect_bar_items_for_group(
                 if w in seen or w not in ctx.state.dataset.well_paths:
                     continue
                 seen.add(w)
-                members.append((w, f"{w} [{rset.name}]", [w], rset.name, rcolor))
+                members.append((w, f"{well_display_label(ctx, w)} [{rset.name}]", [w], rset.name, rcolor))
         for w in group.solo_wells:
             if w in seen or w not in ctx.state.dataset.well_paths:
                 continue
             seen.add(w)
-            members.append((w, w, [w], None,
+            members.append((w, well_display_label(ctx, w), [w], None,
                             _WELL_COLORS[len(members) % len(_WELL_COLORS)]))
 
     def _member_pts(wells: list[str], rset_name: str | None) -> list:

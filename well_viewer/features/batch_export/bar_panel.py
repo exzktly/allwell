@@ -499,19 +499,6 @@ class BarBatchExportPanel(BatchExportPanel):
         if not draw_items:
             return fig
 
-        # Restore replicate-set display labels for legacy single-tp pooled
-        # mode (the batch collector emits bare rset.name; preserve the
-        # prior batch-figure convention of using ``_replicate_display_label``).
-        # In multi-tp mode the collector already produces the desired short
-        # display (e.g. "t=0") so we leave it alone.
-        if len(target_ts) == 1 and pool_replicates:
-            rset_display_by_name = {
-                r.name: _replicate_display_label(self._ctx, r)
-                for r in grp.members
-            }
-            for item in draw_items:
-                item.display = rset_display_by_name.get(item.key, item.display)
-
         _bar_render_items(
             ax_mean=ax_mean,
             ax_frac=ax_frac,

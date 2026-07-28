@@ -17,12 +17,22 @@ import math
 
 import numpy as np
 
+import theme
 from well_viewer.core.plot_style import style_legend, tokens_for
 from well_viewer.features.spatial import state as sp_state
 
 _logger = logging.getLogger("well_viewer")
 
 _COLONY_CMAP = "tab20"
+
+# The observed/reference pairing used across every viz below (a point-pattern-
+# analysis convention: the sample/observed series reads cool, the reference/
+# summary series reads warm) — named once here rather than repeated as magic
+# hex at ~8 call sites. Deliberately not sourced from theme.Colors: these are
+# plot-data series, not chrome, and this renderer also renders in Publication
+# mode via _tokens(ax), where a screen-only chrome token would look wrong.
+_OBSERVED_COLOR = "#4aa3ff"
+_REFERENCE_COLOR = "#ff9c4a"
 
 
 def render_spatial(ctx) -> None:
@@ -230,7 +240,7 @@ def _render_spatial_map(ax, payload, st) -> None:
         if st.show_hulls:
             _overlay_hulls(ax, pts, labels)
     else:
-        ax.scatter(pts[:, 0], pts[:, 1], s=8, color="#4aa3ff",
+        ax.scatter(pts[:, 0], pts[:, 1], s=8, color=_OBSERVED_COLOR,
                    edgecolors="none")
 
     ax.invert_yaxis()  # image-space y grows downward
@@ -240,11 +250,12 @@ def _render_spatial_map(ax, payload, st) -> None:
 def _scatter_by_colony(ax, pts, labels) -> None:
     import matplotlib
     if labels is None or labels.shape[0] != pts.shape[0]:
-        ax.scatter(pts[:, 0], pts[:, 1], s=8, color="#4aa3ff", edgecolors="none")
+        ax.scatter(pts[:, 0], pts[:, 1], s=8, color=_OBSERVED_COLOR, edgecolors="none")
         return
     noise = labels < 0
     if noise.any():
-        ax.scatter(pts[noise, 0], pts[noise, 1], s=8, color="#888888",
+        _, _, _muted, _, _ = _tokens(ax)
+        ax.scatter(pts[noise, 0], pts[noise, 1], s=8, color=_muted,
                    edgecolors="none", label="noise")
     cmap = matplotlib.colormaps[_COLONY_CMAP]
     unique = sorted({int(v) for v in labels if int(v) >= 0})
@@ -292,8 +303,8 @@ def _render_nnd_histogram(ax, payload) -> None:
         return
     _style_axes(ax, title="Nearest-neighbour distance",
                 xlabel="Distance (px)", ylabel="Cells")
-    ax.hist(finite, bins=30, color="#4aa3ff", alpha=0.8)
-    ax.axvline(float(np.median(finite)), color="#ff9c4a", lw=1.2,
+    ax.hist(finite, bins=30, color=_OBSERVED_COLOR, alpha=0.8)
+    ax.axvline(float(np.median(finite)), color=_REFERENCE_COLOR, lw=1.2,
                label=f"median = {np.median(finite):.1f} px")
     style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
@@ -308,10 +319,11 @@ def _render_ripley(ax, payload) -> None:
     _style_axes(ax,
                 title=f"Ripley L(r) − r · n={ripley.n_points}",
                 xlabel="r (px)", ylabel="L(r) − r")
+    _, _, _muted, _, _spine = _tokens(ax)
     ax.fill_between(ripley.r, ripley.csr_lo, ripley.csr_hi,
-                    color="#888888", alpha=0.25, label="CSR envelope")
-    ax.plot(ripley.r, ripley.L_minus_r, color="#4aa3ff", lw=1.4, label="sample")
-    ax.axhline(0.0, color="#666666", lw=0.6)
+                    color=_muted, alpha=0.25, label="CSR envelope")
+    ax.plot(ripley.r, ripley.L_minus_r, color=_OBSERVED_COLOR, lw=1.4, label="sample")
+    ax.axhline(0.0, color=_spine, lw=0.6)
     style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
 
@@ -327,8 +339,8 @@ def _render_colony_size(ax, payload) -> None:
                 xlabel="Cells per colony", ylabel="Colonies")
     max_size = int(stats.size.max())
     bins = min(30, max(3, max_size))
-    ax.hist(stats.size, bins=bins, color="#4aa3ff", alpha=0.85)
-    ax.axvline(float(np.median(stats.size)), color="#ff9c4a", lw=1.2,
+    ax.hist(stats.size, bins=bins, color=_OBSERVED_COLOR, alpha=0.85)
+    ax.axvline(float(np.median(stats.size)), color=_REFERENCE_COLOR, lw=1.2,
                label=f"median = {float(np.median(stats.size)):.1f}")
     style_legend(ax.legend(fontsize=8, frameon=False), ax)
 
@@ -365,6 +377,7 @@ def _render_colony_metric_dist(ax, payload) -> None:
 
     _style_axes(ax, title=f"{metric_col} · per-colony distribution",
                 xlabel="Colony (ordered by median)", ylabel=metric_col)
+    bg, title_fg, muted, _grid, _spine = _tokens(ax)
 
     import matplotlib
     cmap = matplotlib.colormaps[_COLONY_CMAP]
@@ -376,12 +389,12 @@ def _render_colony_metric_dist(ax, payload) -> None:
         body.set_alpha(0.65)
         body.set_edgecolor(c)
     if "cmedians" in parts:
-        parts["cmedians"].set_color("#222222")
+        parts["cmedians"].set_color(theme.Colors.ink_dark)
         parts["cmedians"].set_linewidth(0.8)
 
     # Grand median as a reference line.
     grand = float(np.median(np.concatenate(data)))
-    ax.axhline(grand, color="#888888", lw=0.6, linestyle="--",
+    ax.axhline(grand, color=muted, lw=0.6, linestyle="--",
                label=f"grand median = {grand:.3g}")
 
     # Sparse x labels — every ceil(n/12)th colony id — so wide colony sets
@@ -393,7 +406,6 @@ def _render_colony_metric_dist(ax, payload) -> None:
     # Variance-decomposition callout at top-left of the axes.
     decomp = payload.get("variance_decomp")
     if decomp is not None and decomp.n_cells > 0:
-        bg, title_fg, muted, _grid, _spine = _tokens(ax)
         text = (
             f"ICC = {decomp.icc:.2f}  ·  "
             f"σ²_between = {decomp.sigma2_between:.3g}  ·  "
@@ -419,7 +431,7 @@ def _render_radial_profile(ax, payload) -> None:
                 title=f"Radial profile of {metric_col}",
                 xlabel="r / R (colony centre → edge)", ylabel=metric_col)
     ax.errorbar(prof.bin_centres, prof.mean, yerr=prof.sem,
-                fmt="-o", color="#4aa3ff", ecolor="#4aa3ff",
+                fmt="-o", color=_OBSERVED_COLOR, ecolor=_OBSERVED_COLOR,
                 markersize=4, lw=1.2, capsize=2)
 
 
@@ -444,7 +456,7 @@ def _render_boundary_interior(ax, payload) -> None:
             boundary if boundary.size else np.array([0.0])]
     parts = ax.violinplot(data, positions=positions, showmeans=True,
                            showextrema=False)
-    colours = ["#4aa3ff", "#ff9c4a"]
+    colours = [_OBSERVED_COLOR, _REFERENCE_COLOR]
     for body, colour in zip(parts["bodies"], colours):
         body.set_facecolor(colour)
         body.set_alpha(0.6)

@@ -162,6 +162,7 @@ class CPub:
     bg_subtle   = "#F8F9FB"   # --pub-bg-subtle : axes facecolor when a slight inset reads better
     text        = "#1A1D24"   # --pub-text      : title / label text
     text_muted  = "#4C5360"   # --pub-text-muted: tick labels, secondary annotations
+    text_faint  = "#999999"   # --pub-text-faint: placeholder/unavailable-content text
     grid        = "#E5E7EB"   # --pub-grid      : gridlines
     spine       = "#4C5360"   # --pub-spine     : axis spines
 

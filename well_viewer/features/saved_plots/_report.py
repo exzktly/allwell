@@ -13,6 +13,8 @@ from datetime import datetime
 from pathlib import Path
 from collections.abc import Callable, Iterable
 
+import theme
+
 # Letter page in inches.
 _PAGE_W, _PAGE_H = 8.5, 11.0
 _MARGIN = 0.6
@@ -21,16 +23,16 @@ _MARGIN = 0.6
 def _cover_page(pdf, *, dataset_name: str, count: int) -> None:
     from matplotlib.figure import Figure
 
-    fig = Figure(figsize=(_PAGE_W, _PAGE_H), facecolor="white")
+    fig = Figure(figsize=(_PAGE_W, _PAGE_H), facecolor=theme.CPub.bg)
     fig.text(0.5, 0.70, "Saved Plots Report", ha="center", va="center",
-             fontsize=28, fontweight="bold")
+             fontsize=28, fontweight="bold", color=theme.CPub.text)
     sub = []
     if dataset_name:
         sub.append(f"Dataset: {dataset_name}")
     sub.append(f"{count} saved plot{'' if count == 1 else 's'}")
     sub.append("Generated " + datetime.now().strftime("%Y-%m-%d %H:%M"))
     fig.text(0.5, 0.55, "\n".join(sub), ha="center", va="top", fontsize=13,
-             color="#333333", linespacing=1.6)
+             color=theme.CPub.text, linespacing=1.6)
     pdf.savefig(fig)
 
 
@@ -38,20 +40,20 @@ def _plot_page(pdf, rec, *, image_path: Path | None, summary: str) -> None:
     import matplotlib.image as mpimg
     from matplotlib.figure import Figure
 
-    fig = Figure(figsize=(_PAGE_W, _PAGE_H), facecolor="white")
+    fig = Figure(figsize=(_PAGE_W, _PAGE_H), facecolor=theme.CPub.bg)
 
     # Header: title (left) + tab badge (right), then timestamp.
     title = getattr(rec, "title", "") or getattr(rec, "tab", "") or "Saved plot"
     fig.text(_MARGIN / _PAGE_W, 0.955, title, ha="left", va="top",
-             fontsize=16, fontweight="bold")
+             fontsize=16, fontweight="bold", color=theme.CPub.text)
     tab = getattr(rec, "tab", "") or ""
     if tab:
         fig.text(1 - _MARGIN / _PAGE_W, 0.955, tab, ha="right", va="top",
-                 fontsize=11, color="#666666")
+                 fontsize=11, color=theme.CPub.text_muted)
     created = getattr(rec, "created_at", "") or ""
     if created:
         fig.text(_MARGIN / _PAGE_W, 0.930, created.replace("T", "  "),
-                 ha="left", va="top", fontsize=9, color="#888888")
+                 ha="left", va="top", fontsize=9, color=theme.CPub.text_muted)
 
     # Caption block height scales with the summary's line count.
     n_lines = (summary.count("\n") + 1) if summary else 0
@@ -72,12 +74,12 @@ def _plot_page(pdf, rec, *, image_path: Path | None, summary: str) -> None:
             drawn = False
     if not drawn:
         ax.text(0.5, 0.5, "(image unavailable)", ha="center", va="center",
-                fontsize=11, color="#999999", transform=ax.transAxes)
+                fontsize=11, color=theme.CPub.text_faint, transform=ax.transAxes)
 
     if summary:
         fig.text(_MARGIN / _PAGE_W, _MARGIN / _PAGE_H + cap_h - 0.012, summary,
                  ha="left", va="top", fontsize=8, family="monospace",
-                 color="#333333", linespacing=1.4)
+                 color=theme.CPub.text, linespacing=1.4)
 
     pdf.savefig(fig)
 

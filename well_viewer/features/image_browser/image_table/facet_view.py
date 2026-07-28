@@ -16,7 +16,7 @@ and inter-group spacers. The controller places each cell widget at
 
 from __future__ import annotations
 
-
+import theme
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QLabel
@@ -45,16 +45,16 @@ _GROUP_PT = 11           # default facet-group band-label font size (px)
 
 
 def _inner_qss(pt: int) -> str:
-    return f"color:#98A2B3; font-size:{pt}px;"
+    return f"color:{theme.Colors.text_secondary}; font-size:{pt}px;"
 
 
 def _group_qss(pt: int) -> str:
-    return (f"color:#E6E9EF; font-size:{pt}px; font-weight:600;"
-            " background:#1A2230; border-radius:5px; padding:2px 6px;")
+    return (f"color:{theme.Colors.text_primary}; font-size:{pt}px; font-weight:600;"
+            f" background:{theme.Colors.panel_elevated}; border-radius:5px; padding:2px 6px;")
 
 
 def _corner_qss(pt: int) -> str:
-    return f"color:#5F6B7C; font-size:{max(8, pt - 1)}px;"
+    return f"color:{theme.Colors.text_muted}; font-size:{max(8, pt - 1)}px;"
 
 
 def _cv(cell, dim: str) -> str:

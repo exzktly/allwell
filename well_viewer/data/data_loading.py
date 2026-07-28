@@ -800,7 +800,7 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
     Scatter renderers (locked by test_iter_plot_groups_ctx).
     """
     from well_viewer.domain.selections_model import (
-        active_replicate_sets, color_for_replicate_set, color_for_wells,
+        _DEFAULT_COLOR, active_replicate_sets, color_for_replicate_set, color_for_wells,
     )
 
     well_paths = ctx.state.dataset.well_paths or {}
@@ -813,7 +813,7 @@ def iter_plot_groups(ctx, fallback_to_all: bool = True) -> Iterator[tuple[str, s
             return color_for_replicate_set(rset, selections)
         except Exception:
             swallowed()  # was: pass (silent except)
-        return "#808080"
+        return _DEFAULT_COLOR
 
     if rep_sets:
         # With groups defined the active set on the plot is exactly

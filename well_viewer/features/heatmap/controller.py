@@ -49,6 +49,29 @@ METRIC_RATIO = "Ratio value"  # legacy; not exposed in METRIC_OPTIONS — ratios
 # filter, which is the right default when the active Property isn't MFI.
 METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_COUNT]
 
+# Selection-rectangle outline. Deliberately its own colour, not
+# ``theme.Colors.danger`` — ``danger`` already marks the drag-reorder
+# drop-target label in this same axes (see the label-drag block below), and
+# reusing it here would make a selected well indistinguishable from a drop
+# target while dragging over it.
+_SELECTION_OUTLINE_COLOR = "#FF6B35"
+
+
+def _contrast_ink(rgba: tuple[float, float, float, float]) -> str:
+    """Pick readable ink for a cell's rendered colour (via ``im.to_rgba``).
+
+    Standard relative-luminance threshold. Takes the already-composited RGBA
+    a specific value maps to — including colormap ``set_bad`` masking — so it
+    agrees with what's actually drawn instead of recomputing the norm by hand.
+    Distinct from ``image_table/image_compose.py``'s "Auto (contrast)" toggle,
+    which measures mean raw-pixel RGB on the source image rather than a
+    colormap+norm-mapped scalar; the two operate on different inputs and
+    aren't interchangeable.
+    """
+    r, g, b = rgba[0], rgba[1], rgba[2]
+    luminance = 0.299 * r + 0.587 * g + 0.114 * b
+    return theme.Colors.ink_dark if luminance > 0.6 else theme.Colors.ink_light
+
 
 def active_layout(ctx) -> HeatmapLayout:
     """Return the active layout, synthesizing the plate default when needed."""
@@ -556,15 +579,16 @@ def redraw_heatmap(ctx) -> None:
             text = wells[0]
         else:
             text = f"{wells[0]}+{len(wells) - 1}"
+        ink = _contrast_ink(im.to_rgba(v))
         ax.text(
             c, r + 0.32, text,
             ha="center", va="center",
-            fontsize=6, color="black", alpha=0.8,
+            fontsize=6, color=ink, alpha=0.8,
         )
         ax.text(
             c, r - 0.05, _format_cell_value(v, metric, value_fmt),
             ha="center", va="center",
-            fontsize=8, color="black",
+            fontsize=8, color=ink,
         )
 
     # Selection rectangles.
@@ -573,7 +597,7 @@ def redraw_heatmap(ctx) -> None:
         if any(w in selected for w in wells):
             rect = mpatches.Rectangle(
                 (c - 0.5, r - 0.5), 1.0, 1.0,
-                fill=False, edgecolor="#FF6B35", linewidth=2.0,
+                fill=False, edgecolor=_SELECTION_OUTLINE_COLOR, linewidth=2.0,
             )
             ax.add_patch(rect)
 

@@ -458,7 +458,7 @@ def image_table_copy_svg(ctx) -> None:
 
 
 def _downsample_dpi(orig_dpi: int, w_in: float, h_in: float,
-                    *, max_px: int = 1600, floor: int = 60) -> int:
+                    *, max_px: int = 2400, floor: int = 60) -> int:
     """Pick a render dpi so the figure's longest side is ≤ *max_px* pixels,
     never above *orig_dpi* and never below *floor*."""
     longest = max(float(w_in), float(h_in), 0.1)
@@ -477,7 +477,7 @@ def image_table_save_to_gallery(ctx) -> None:
     # Pre-shrink each cell to bound the memory a full-resolution grid would take.
     # The pooling averages each block, exactly as the live thumbnail's smooth scale
     # does, so the saved snapshot reads at the same brightness as the grid.
-    fig, save_kwargs = _build_export_figure(ctx, cell_max_px=320)
+    fig, save_kwargs = _build_export_figure(ctx, cell_max_px=480)
     if fig is None:
         ctx.notify.set_status("Image table is empty — nothing to save.")
         return

@@ -580,11 +580,32 @@ The function:
    `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
    the Properties / Export Style sidebar.
 2. Adds the per-tab controls row (channel ctxbar, metric combo, timepoint
-   combo, action buttons — Export CSV, Copy SVG, Save figure, **Properties**).
+   combo, an **Export** dropdown, **Properties**).
 3. Mounts a `PlotCard` from `widgets/plot_card.py` (matplotlib figure +
    custom toolbar inside a styled panel).
 4. Stashes the figure / canvas on `app` so controllers can reach them
    later (`app._line_fig`, `app._bar_canvas`, …).
+
+Every `PlotCard`-based tab (Bar Plot, Line Graphs, Scatter — cells and
+aggregate, Distribution, Heat Map, Spatial, Multivariate) uses one
+`make_action_menu_button`/`add_menu_action` **Export** dropdown
+(`core/ui_helpers.py`) instead of separate flat icon buttons, with four
+standard entries: an export-data action specific to the tab, "Copy SVG"
+(`core.plot_card_actions.copy_active_card_as_svg`), "Save Figure…"
+(`save_active_card_figure`, a Save-As dialog), and "Save to Saved Plots"
+(`core.plot_card_actions.save_card_to_gallery(ctx, "<card_attr>")`, which
+calls the card's `saveFigureToGallery()` — a public wrapper around the
+hover-save button's whole-figure capture, added so a persistent menu
+action can trigger it without hover-axis context). A tab's `PlotCard` must
+also call `ui_helpers.apply_plot_card_decorators(ctx, card, "<Tab Name>")`
+for the hover-based gallery save and Saved Plots registration to exist at
+all, and its widget-registry attribute name must be listed in **both**
+`allwell.py::_on_present_toggled`'s `card_attrs` (the global Screen/
+Publication toggle) and `core/plot_card_actions.py::_CARDS` (Copy/Save's
+"first visible card" resolution) — these are hardcoded allowlists, not
+auto-discovered from the feature registry, so a new plot tab that skips
+either silently gets no Screen/Publication toggle or no global Copy/Save,
+exactly the bug that shipped for Spatial and Multivariate.
 5. Wires signals to the feature's controller / renderer entry points
    (e.g. matplotlib clicks → `features.scatter.controller.on_scatter_click`,
    button presses → `features.barplot.renderer.redraw_bars`).
@@ -1888,8 +1909,8 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 
 | Module | Role |
 |--------|------|
-| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
-| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Progress via a `log` callback and a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard. |
+| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
+| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. `write_zip` writes at `compresslevel=1` — a pure container-level merge of already-dense microscopy image data gains little from deeper DEFLATE effort, so the default level 6 was pure CPU waste — and tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback and a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard. |
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. |
 | `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (mirrors `analyze_tab_form.py`'s log panel). Emits `runRequested` / `openInReviewRequested`. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
@@ -1954,15 +1975,25 @@ controller has confirmed with the user, since destination content the marker
 refused rather than assumed to be safe to delete.
 
 **Verification.** Before writing the sidecar, `apply._verify` first checks
-that the merge actually wrote *any* measurement rows at all — a well's images
-(`in/<WELL>.zip`, `<WELL>_out.zip`) existing without a matching
-`measurements_<WELL>.csv` is individually legitimate (that well may have
-segmented zero cells at every timepoint), but if it's true for *every* well in
-*both* datasets — most often because `out_csvs()`'s well-token matching failed
-to recognise a real CSV's name rather than because every well is genuinely
-empty — the old code had nothing left to check and let the merge report
-success over a destination with copied images and zero rows of data. Per well,
-it further checks that every row's `timepoint` and `timepoint_hours` agree (via
+whether any zip member collided by name during the merge and was dropped by
+`write_zip` — a dataset-2 member whose filename fails the structural
+rewrite gate (see above) keeps its original, unshifted name, and if that
+name coincides with a dataset-1 member (most easily reproduced by pointing
+both datasets at the same folder), the merge would otherwise keep only one
+side's bytes under a name that still "looks fine" in the archive, with
+nothing else able to tell the difference — a dataset-2 row's `filename`
+check below only confirms the name *exists* somewhere, not whose bytes are
+under it. Any dropped member fails verification immediately, naming the
+well and file. It then checks that the merge actually wrote *any*
+measurement rows at all — a well's images (`in/<WELL>.zip`, `<WELL>_out.zip`)
+existing without a matching `measurements_<WELL>.csv` is individually
+legitimate (that well may have segmented zero cells at every timepoint), but
+if it's true for *every* well in *both* datasets — most often because
+`out_csvs()`'s well-token matching failed to recognise a real CSV's name
+rather than because every well is genuinely empty — the old code had nothing
+left to check and let the merge report success over a destination with
+copied images and zero rows of data. Per well, it further checks that every
+row's `timepoint` and `timepoint_hours` agree (via
 `well_viewer.domain.tp_match.tp_close`), that dataset-2's shifted hours never
 collide with or fall before dataset 1's, that every dataset-2 row's `filename`
 is actually present in the merged `in/<WELL>.zip`, and that every distinct hour

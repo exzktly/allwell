@@ -668,6 +668,7 @@ class AllWellApp(QMainWindow):
         card_attrs = (
             "_line_card", "_bar_card", "_scatter_card",
             "_scatter_agg_card", "_distribution_card", "_heatmap_card",
+            "_sp_card", "_mv_card",
         )
         for attr in card_attrs:
             card = getattr(self._review, attr, None)

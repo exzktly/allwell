@@ -26,6 +26,8 @@ _CARDS = (
     ("_scatter_agg_card", "scatter_agg.png"),
     ("_distribution_card", "distribution.png"),
     ("_heatmap_card", "heatmap.png"),
+    ("_sp_card", "spatial.png"),
+    ("_mv_card", "multivariate.png"),
 )
 
 
@@ -92,3 +94,18 @@ def save_active_card_figure(ctx) -> None:
         ctx.figures.save(fig, default)
     except Exception:
         swallowed()  # was: pass (silent except)
+
+
+def save_card_to_gallery(ctx, card_attr: str) -> None:
+    """Trigger *card_attr*'s whole-figure Saved-Plots capture directly.
+
+    Unlike :func:`copy_active_card_as_svg`/:func:`save_active_card_figure`,
+    which resolve the "first visible" card via :func:`_active_card` (fine for
+    a single global toolbar action), an Export dropdown's "Save to Saved
+    Plots" item is tab-local — it must always capture *that* tab's own
+    figure, even if another tab's card happens to also be visible (Split
+    View), so it resolves the named card directly instead.
+    """
+    card = ctx.widgets.get_or_none(card_attr)
+    if card is not None and hasattr(card, "saveFigureToGallery"):
+        card.saveFigureToGallery()

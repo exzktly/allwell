@@ -9,7 +9,7 @@ from __future__ import annotations
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
 from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure,
+    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
 )
 
 
@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
+    add_menu_action,
+    make_action_menu_button,
     make_plot_view_switcher,
     make_plot_with_right_dock,
 )
@@ -88,16 +90,14 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     cl1.addStretch(1)
 
-    from widgets.icon_button import IconButton as _IconButton
-    _export_btn = _IconButton("download", ctrl1, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_heatmap_data(ctx))
-    cl1.addWidget(_export_btn)
-    _copy_btn = _IconButton("copy", ctrl1, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
-    cl1.addWidget(_copy_btn)
-    _save_btn = _IconButton("save", ctrl1, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
-    cl1.addWidget(_save_btn)
+    export_btn, export_menu = make_action_menu_button("Export", ctrl1, tooltip="Export this plot")
+    add_menu_action(export_menu, "Export CSV…", lambda: export_heatmap_data(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    export_menu.addSeparator()
+    add_menu_action(export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_heatmap_card"))
+    cl1.addWidget(export_btn)
     # Pin the figure-properties button to the right edge of the plot area (where
     # the export-style dock slides out); the FlowLayout row can't right-align it.
     from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties

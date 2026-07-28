@@ -632,6 +632,13 @@ def build_merge_plan(ds1_root: Path | str, ds2_root: Path | str, dest_root: Path
     if dest.root in (ds1.root, ds2.root):
         raise ConcatError("The destination must be a different folder from both datasets.")
 
+    if ds1.root == ds2.root:
+        raise ConcatError(
+            "Dataset 1 and Dataset 2 are the same folder — concatenating a "
+            "dataset with itself isn't supported. Pick two different source "
+            "folders."
+        )
+
     if destination_is_complete_dataset(dest):
         raise ConcatError(
             f"The destination ({dest.root}) already holds a finished dataset "

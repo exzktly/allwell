@@ -16,8 +16,10 @@ from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from well_viewer.core.plot_card_actions import (
+    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
+)
 from well_viewer.core.safe import swallowed
-from well_viewer.features.export.style import copy_figure_to_clipboard
 from well_viewer.features.multivariate import state as mv_state
 from well_viewer.features.multivariate import controller as mv_ctrl
 from well_viewer.features.multivariate.collect import (
@@ -43,7 +45,6 @@ from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
 def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
-    from widgets.icon_button import IconButton
     from widgets.segmented_control import SegmentedControl
     from well_viewer.core.ui_helpers import make_popover_button, wrap_with_empty_state
 
@@ -89,15 +90,16 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
 
     r1.addStretch(1)
 
-    export_btn = IconButton("download", row1, tooltip="Export feature matrix (CSV)")
-    export_btn.clicked.connect(lambda _=False: mv_ctrl.mv_export_csv(ctx))
+    from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
+    export_btn, export_menu = make_action_menu_button("Export", row1, tooltip="Export this plot")
+    add_menu_action(export_menu, "Export CSV…", lambda: mv_ctrl.mv_export_csv(ctx),
+                    tooltip="Export feature matrix")
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    export_menu.addSeparator()
+    add_menu_action(export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_mv_card"))
     r1.addWidget(export_btn)
-    copy_btn = IconButton("copy", row1, tooltip="Copy figure")
-    copy_btn.clicked.connect(lambda _=False: _copy_figure(ctx))
-    r1.addWidget(copy_btn)
-    save_btn = IconButton("save", row1, tooltip="Save figure")
-    save_btn.clicked.connect(lambda _=False: _save_figure(ctx))
-    r1.addWidget(save_btn)
     layout.addWidget(row1)
     sync_flow_height(row1)   # reserve the wrapped height (see sync_flow_height)
 
@@ -254,6 +256,8 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_card", card)
     reg.register("_mv_fig", card.figure)
     reg.register("_mv_canvas", card.canvas)
+    from well_viewer.core.ui_helpers import apply_plot_card_decorators
+    apply_plot_card_decorators(ctx, card, "Multivariate")
     card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx))
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="scatter-chart",
@@ -335,25 +339,3 @@ def _select_combo_by_data(combo, value) -> None:
             return
 
 
-def _copy_figure(ctx) -> None:
-    card = ctx.runtime.multivariate.card
-    if card is None:
-        return
-    fig = getattr(card, "figure", None)
-    if fig is None:
-        return
-    try:
-        ctx.notify.set_status(copy_figure_to_clipboard(fig))
-    except Exception:
-        swallowed()
-
-
-def _save_figure(ctx) -> None:
-    card = ctx.runtime.multivariate.card
-    fig = getattr(card, "figure", None) if card is not None else None
-    if fig is None:
-        return
-    try:
-        ctx.figures.save(fig, "multivariate.png")
-    except Exception:
-        swallowed()

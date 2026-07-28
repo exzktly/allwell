@@ -82,7 +82,7 @@ def read_members(container: Path) -> list[tuple[str, bytes]]:
         ]
 
 
-def write_zip(dest: Path, members: list[tuple[str, bytes]]) -> frozenset[str]:
+def write_zip(dest: Path, members: list[tuple[str, bytes]]) -> tuple[frozenset[str], frozenset[str]]:
     """Write ``(name, bytes)`` members into a fresh deflated zip at *dest*.
 
     A later member whose name duplicates an earlier one is skipped rather than
@@ -90,18 +90,30 @@ def write_zip(dest: Path, members: list[tuple[str, bytes]]) -> frozenset[str]:
     both datasets contribute to a well, this means a dataset-2 member that
     failed the schema-conformance check in :func:`rewrite_member_name` (and so
     kept its original name) can never silently clobber a same-named dataset-1
-    member. Returns the set of names actually written, so callers can verify
-    a CSV row's ``filename`` value actually landed in the archive.
+    member. Returns ``(written, dropped)`` — *written* is the set of names
+    actually written (so callers can verify a CSV row's ``filename`` value
+    actually landed in the archive); *dropped* is the set of names that were
+    requested but skipped due to a collision, so a caller can tell a genuine
+    duplicate-write apart from data that never made it in at all (see
+    :func:`execute_plan` and :func:`_verify`, which both treat a nonzero
+    *dropped* as something that must never pass silently).
+
+    ``compresslevel=1``: microscopy image formats are already
+    information-dense, so re-deflating at the default level 6 spends a lot of
+    CPU for negligible size reduction — this is a pure container-level merge,
+    not a size-optimization pass.
     """
     dest.parent.mkdir(parents=True, exist_ok=True)
     written: set[str] = set()
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as archive:
+    dropped: set[str] = set()
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
         for name, data in members:
             if name in written:
+                dropped.add(name)
                 continue
             written.add(name)
             archive.writestr(name, data)
-    return frozenset(written)
+    return frozenset(written), frozenset(dropped)
 
 
 def _rewrite_members(plan: MergePlan, members: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], int]:
@@ -128,42 +140,51 @@ def _copy_container_as_is(src: Path, dest_in_dir: Path) -> None:
         shutil.copy2(src, dest_in_dir / src.name)
 
 
-def merge_input(plan: MergePlan, well: str, c1: Path | None, c2: Path | None) -> tuple[int, frozenset[str] | None]:
+def merge_input(
+    plan: MergePlan, well: str, c1: Path | None, c2: Path | None,
+) -> tuple[int, frozenset[str] | None, frozenset[str]]:
     """Merge a well's raw-input container into the destination ``in/``.
 
-    Returns ``(unmatched_member_count, written_names)`` — *written_names* is
-    ``None`` when the well came only from dataset 1 (a pure byte-copy, so
-    there's nothing dataset-2-derived to check filenames against).
+    Returns ``(unmatched_member_count, written_names, dropped_names)`` —
+    *written_names* is ``None`` when the well came only from dataset 1 (a pure
+    byte-copy, so there's nothing dataset-2-derived to check filenames
+    against). *dropped_names* is the set of member names that collided and
+    were silently skipped by :func:`write_zip` — nonzero here means real data
+    never made it into the merged archive and must not be treated as success
+    (see :func:`execute_plan` and :func:`_verify`).
     """
     dest_zip = plan.dest.in_dir / f"{well}.zip"
     if c1 and not c2:
         _copy_container_as_is(c1, plan.dest.in_dir)
-        return 0, None
+        return 0, None, frozenset()
     if c2 and not c1:
         rewritten, unmatched = _rewrite_members(plan, read_members(c2))
-        return unmatched, write_zip(dest_zip, rewritten)
+        written, dropped = write_zip(dest_zip, rewritten)
+        return unmatched, written, dropped
     if c1 and c2:
         rewritten, unmatched = _rewrite_members(plan, read_members(c2))
-        return unmatched, write_zip(dest_zip, read_members(c1) + rewritten)
-    return 0, None
+        written, dropped = write_zip(dest_zip, read_members(c1) + rewritten)
+        return unmatched, written, dropped
+    return 0, None, frozenset()
 
 
-def merge_qc_zip(plan: MergePlan, well: str, z1: Path | None, z2: Path | None) -> int:
+def merge_qc_zip(plan: MergePlan, well: str, z1: Path | None, z2: Path | None) -> tuple[int, frozenset[str]]:
     """Merge a well's ``<WELL>_out.zip`` QC archive into the destination
-    ``out/``. Returns the unmatched-member count (see :func:`merge_input`)."""
+    ``out/``. Returns ``(unmatched_member_count, dropped_names)`` (see
+    :func:`merge_input`)."""
     dest_zip = plan.dest.out_dir / f"{well}_out.zip"
     if z1 and not z2:
         shutil.copy2(z1, dest_zip)
-        return 0
+        return 0, frozenset()
     if z2 and not z1:
         rewritten, unmatched = _rewrite_members(plan, read_members(z2))
-        write_zip(dest_zip, rewritten)
-        return unmatched
+        _written, dropped = write_zip(dest_zip, rewritten)
+        return unmatched, dropped
     if z1 and z2:
         rewritten, unmatched = _rewrite_members(plan, read_members(z2))
-        write_zip(dest_zip, read_members(z1) + rewritten)
-        return unmatched
-    return 0
+        _written, dropped = write_zip(dest_zip, read_members(z1) + rewritten)
+        return unmatched, dropped
+    return 0, frozenset()
 
 
 # ── CSV row merge ─────────────────────────────────────────────────────────────
@@ -379,12 +400,33 @@ def _merge_cell_overrides(plan: MergePlan, emit: Callable[[str], None]) -> None:
 
 
 # ── verification (runs before the sidecar is written) ────────────────────────
-def _verify(plan: MergePlan, well_stats: dict[str, WellCsvStats]) -> None:
+def _verify(
+    plan: MergePlan, well_stats: dict[str, WellCsvStats],
+    dropped_members: dict[str, frozenset[str]] | None = None,
+) -> None:
     """Raise :class:`ConcatError` if the merged output doesn't actually plot
     correctly — this is the check that would have caught the original bug.
     Runs before ``pipeline_info.json`` is written (see :func:`execute_plan`),
     so a failure never leaves a destination that looks finished.
+
+    *dropped_members* — per-well sets of zip-member names that collided
+    during the merge and were silently discarded by :func:`write_zip`. A
+    merge that discarded real data must never report success, so this is
+    checked first: a colliding member usually means a same-named file exists
+    on both sides under a name that still "looks fine" (it exists in the
+    archive), which is exactly what the ``filename_mismatches`` check below
+    cannot detect on its own.
     """
+    if dropped_members:
+        well, names = next(iter(dropped_members.items()))
+        total_dropped = sum(len(v) for v in dropped_members.values())
+        raise ConcatError(
+            f"Verification failed: {total_dropped} file(s) across "
+            f"{len(dropped_members)} well(s) collided by name during the "
+            f"merge and were dropped (e.g. well {well}: {sorted(names)[0]!r}) "
+            "— dataset 2's data did not survive the merge for these files."
+        )
+
     total_rows = sum(s.rows_ds1 + s.rows_ds2 for s in well_stats.values())
     if well_stats and total_rows == 0:
         raise ConcatError(
@@ -519,16 +561,20 @@ def execute_plan(
     well_stats: dict[str, WellCsvStats] = {}
     total_unmatched = 0
     images_without_csv: list[str] = []
+    dropped_members: dict[str, frozenset[str]] = {}
     for well in all_wells:
         if cancelled():
             raise ConcatError("Cancelled — the in-progress destination was left in place to resume later.")
         emit(f"  {well}…")
         report(well, "merging")
-        unmatched_in, in_names = merge_input(plan, well, in1.get(well), in2.get(well))
-        unmatched_qc = merge_qc_zip(plan, well, zip1.get(well), zip2.get(well))
+        unmatched_in, in_names, dropped_in = merge_input(plan, well, in1.get(well), in2.get(well))
+        unmatched_qc, dropped_qc = merge_qc_zip(plan, well, zip1.get(well), zip2.get(well))
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
         well_stats[well] = stats
         total_unmatched += unmatched_in + unmatched_qc + stats.unmatched_filenames
+        well_dropped = dropped_in | dropped_qc
+        if well_dropped:
+            dropped_members[well] = well_dropped
         # A well's images (in/ input or out/ QC zip) existing without a
         # measurements CSV on that same side is legitimate on its own — the
         # well may have segmented zero cells at every timepoint — but it's
@@ -536,7 +582,7 @@ def execute_plan(
         # produce, silently, for every well. Surface it rather than let a
         # merge that copied images but wrote no data pass as an ordinary
         # success; _verify's zero-rows check below is the hard backstop.
-        well_warned = False
+        well_warned = bool(well_dropped)
         if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
             images_without_csv.append(f"{well} (dataset 1)")
             well_warned = True
@@ -558,7 +604,7 @@ def execute_plan(
         )
 
     emit("Verifying the merged output before finishing…")
-    _verify(plan, well_stats)
+    _verify(plan, well_stats, dropped_members)
 
     _merge_cell_overrides(plan, emit)
 

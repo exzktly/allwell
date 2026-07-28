@@ -44,7 +44,7 @@ class ConcatenateWorker(QThread):
             return
 
         try:
-            summary = execute_plan(plan, self.logLine.emit)
+            summary = execute_plan(plan, self.logLine.emit, self.isInterruptionRequested)
         except ConcatError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # pragma: no cover — defensive

@@ -1886,37 +1886,80 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 
 | Module | Role |
 |--------|------|
-| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method), computes the timepoint remap, enumerates wells, and returns a `MergePlan`. |
-| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with remapped timepoint tokens, stitches shared wells (dataset 1 rows then dataset 2's remapped rows; CSV columns unioned like `pipeline/io.merge_records_into_csv`), and writes the merged sidecar. Progress via a `log` callback. |
-| `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals. |
+| `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
+| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Progress via a `log` callback. |
+| `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals, and forwards `isInterruptionRequested` as a cancellation check. |
 | `view.py` | `ConcatenatePage(QWidget)` — three folder fields (dataset 1, dataset 2, destination; the Analyze folder-picker pattern) over a status window, plus an "Open merged dataset in Review" button revealed on success. Pure view; emits `runRequested` / `openInReviewRequested`. |
-| `controller.py` | `ConcatenateController` — wires the page to the worker and streams progress into the status window. |
+| `controller.py` | `ConcatenateController` — wires the page to the worker, streams progress into the status window, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
+
+**A measurement row's timepoint is carried by three values, not one**, and a
+zip member's timepoint lives in its filename — a fourth. The `timepoint` CSV
+column is a label string; `timepoint_hours` is the numeric column every
+plotting/grouping code path in `well_viewer` actually reads
+(`dataset_state.rebuild_timepoints`, `data_loading.get_all_timepoints`, …); and
+`filename` names the image the row was measured from, which `well_viewer`'s
+Cell Browser and Scatter tabs use to look up that image. All four are kept in
+lock-step for dataset-2 rows and members — a merge that touches only the label
+string leaves the numeric column pointing at dataset 2's original,
+pre-concatenation hours, so its rows would plot underneath dataset 1's instead
+of after them and its images would fail to look up by the stale filename. To
+avoid a fifth desync, new labels are never chosen independently of the numeric
+value: `render_timepoint` produces the label and `parse_hours` on that same
+label produces `timepoint_hours`, so the two can't disagree.
 
 **The timepoint rule.** Timepoints are hour-valued labels read through
 `util.timepoint.parse_hours`. Dataset 2's first timepoint is relabelled to
 `ds1_last + ds1_interval`, where `ds1_interval` is the median gap between dataset
 1's sorted unique timepoints; every other dataset-2 timepoint keeps its relative
-spacing (one additive hour offset). New labels render `f"{hours:g}h"`, which
-round-trips through `parse_hours` and stays chronologically after every dataset-1
-label. A single-timepoint dataset 1 (no interval) or a non-time timepoint label
-is refused with a user-facing message in the status window.
+spacing (one additive hour offset). `detect_timepoint_format` infers dataset 1's
+own label convention (compound `DDdHHhMMm`, `Xh`, `Xd`, `Xmin`, or a bare number)
+from its own labels and `render_timepoint` renders every new dataset-2 label in
+that same convention — dataset 1's own labels are never rewritten. An
+unrecognised convention (an ordinal format like `T01`) falls back to plain `Xh`
+with a status-window note. A single-timepoint dataset 1 (no interval) or a
+non-time timepoint label is refused with a user-facing message.
+
+**The filename-rewrite gate.** Positionally rewriting a split-on-separator
+filename field is unsafe on its own: `parse_hours` reads a plain digit-ending
+token as an hour value (`parse_hours("F001") == 1.0`), so a rewrite applied to
+the wrong field would silently succeed rather than fail loudly.
+`rewrite_member_name` rewrites a zip member's timepoint field only when the name
+is structurally conformant to the schema — a recognised image extension,
+exactly as many separator-delimited fields as the schema declares once any role
+suffix (`_labels`, `_overlay`, `_tophat_<chan>`, `_smfish_<chan>`, …) is
+stripped via `well_viewer.data.image_identity.parse_image_filename` /
+`build_image_filename`, and a timepoint field that parses to a finite hour
+value. A name that fails any check is copied unchanged rather than guessed at,
+and the merge reports how many members that happened to.
 
 **Restart detection.** `execute_plan` isn't incremental — every well is
-reconstructed fresh from the two source datasets on each call — so the only
-question a re-run into the same destination needs to answer is whether it's
-safe to clear what's there first. `apply.execute_plan` writes
-`out/pipeline_info.json` last, only after every well; that ordering is the whole
-detection mechanism. `concatenate_compute.destination_is_complete_dataset`
-checks for that file: if present, the destination already holds a finished
-dataset (a completed prior concatenation, or an unrelated dataset the user
-pointed at by mistake) and `build_merge_plan` refuses rather than risk
-overwriting real data. `destination_is_failed_run` checks the opposite: content
-under `in`/`out` *without* that file can only mean an earlier attempt into this
-folder was interrupted (crash, kill, disk full) before its last step — safe to
-treat as a restart. `MergePlan.dest_is_restart` carries that verdict to
-`execute_plan`, which logs it and calls `clear_destination` (removes the
-destination's `in`/`out` folders) before rebuilding, so no orphaned file from a
-differently-scoped earlier attempt survives into the "finished" output.
+reconstructed fresh from the two source datasets on each call — so a re-run
+into the same destination only needs to know whether it's safe to clear what's
+there first. `execute_plan` writes
+`concatenate_compute.IN_PROGRESS_MARKER` (`.aw_concat_in_progress`) as its
+*first* action and removes it only after `pipeline_info.json` is written and
+verified — that marker, not the mere absence of a finished sidecar, is the sole
+signal that content under `in`/`out` came from an interrupted attempt.
+`destination_is_complete_dataset` (sidecar present) makes `build_merge_plan`
+refuse outright — the folder holds a finished dataset, whether from a completed
+prior concatenation or an unrelated dataset the user pointed at by mistake.
+`destination_has_marker` without a sidecar means the interrupted-attempt case;
+`MergePlan.dest_is_restart` carries that verdict to `execute_plan`, which clears
+the destination's `in`/`out` folders before rebuilding — but only after the
+controller has confirmed with the user, since destination content the marker
+*doesn't* explain (e.g. a plate that's been zipped but never analyzed) is
+refused rather than assumed to be safe to delete.
+
+**Verification.** Before writing the sidecar, `apply._verify` checks — per
+well — that every row's `timepoint` and `timepoint_hours` agree (via
+`well_viewer.domain.tp_match.tp_close`), that dataset-2's shifted hours never
+collide with or fall before dataset 1's, that every dataset-2 row's `filename`
+is actually present in the merged `in/<WELL>.zip`, and that every distinct hour
+across the merged CSVs is listed in the merged `available_timepoints`. A
+failure raises before the sidecar is written, so a broken merge never leaves a
+destination that looks finished — the guard that would have caught this
+feature's own worst bug (dataset 2's rows collapsing onto dataset 1's timeline)
+before it shipped.
 
 On success the page offers to open the merged dataset in Review, routed through
 `DatasetsTab._open_in_review → AllWellApp._open_dataset_in_review`, which loads

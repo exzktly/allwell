@@ -3,12 +3,21 @@
 Both the pure planner (:mod:`datasets.concatenate.concatenate_compute`) and the
 Qt-free executor (:mod:`datasets.concatenate.apply`) are exercised on tiny
 ``tmp_path`` datasets — no Qt, no app, so this stays in the fast lane. The Qt
-``QThread`` wrapper (``worker.py``) is deliberately not imported here.
+``QThread`` wrapper (``worker.py``) and the controller's confirmation dialog are
+deliberately not imported here.
+
+Fixture CSVs use the **real** seven-column shape ``process_microscopy.py``'s
+``parse_filename`` actually writes (``filename, experiment, channel, well, fov,
+timepoint, timepoint_hours``, plus ``nucleus_id``/``area_px``) — a fixture with
+only ``well,fov,timepoint,nucleus_id`` exercises a CSV shape that never occurs
+on disk and would have hidden the ``timepoint_hours``/``filename`` staleness bug
+this module fixes.
 """
 
 from __future__ import annotations
 
 import csv
+import dataclasses
 import json
 import zipfile
 from pathlib import Path
@@ -17,6 +26,7 @@ import pytest
 
 from datasets.concatenate import apply
 from datasets.concatenate import concatenate_compute as cc
+from util.timepoint import parse_hours
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
@@ -36,9 +46,16 @@ _BASE_INFO = {
     "available_fovs": ["F001"],
 }
 
+_ROW_COLUMNS = [
+    "filename", "experiment", "channel", "well", "fov",
+    "timepoint", "timepoint_hours", "nucleus_id", "area_px",
+]
 
-def _make_dataset(root: Path, *, wells, timepoints, info_extra=None) -> Path:
-    """Build a minimal dataset (in/ zips, out/ CSVs + QC zips + sidecar)."""
+
+def _make_dataset(root: Path, *, wells, timepoints, exp: str = "exp",
+                   info_extra=None, columns=_ROW_COLUMNS) -> Path:
+    """Build a dataset (in/ zips, out/ QC zips + measurements CSV + sidecar)
+    whose CSV matches the real pipeline's column shape."""
     in_dir = root / "in"
     out_dir = root / "out"
     in_dir.mkdir(parents=True)
@@ -51,39 +68,40 @@ def _make_dataset(root: Path, *, wells, timepoints, info_extra=None) -> Path:
     (out_dir / "pipeline_info.json").write_text(json.dumps(info))
 
     for well in wells:
-        # in/ per-well zip with one TIF per timepoint
         with zipfile.ZipFile(in_dir / f"{well}.zip", "w") as zf:
             for tp in timepoints:
-                zf.writestr(f"exp_GFP_{well}_F001_{tp}.tif", b"img")
-        # out/ QC zip
+                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}.tif", b"img")
         with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
             for tp in timepoints:
-                zf.writestr(f"exp_GFP_{well}_F001_{tp}_labels.tif", b"mask")
-        # out/ measurements CSV
+                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}_labels.tif", b"mask")
+                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}_tophat_gfp.tif", b"tophat")
         with (out_dir / f"measurements_{well}.csv").open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["well", "fov", "timepoint", "nucleus_id"])
+            writer = csv.DictWriter(handle, fieldnames=columns)
             writer.writeheader()
             for tp in timepoints:
-                writer.writerow({"well": well, "fov": "F001", "timepoint": tp, "nucleus_id": 1})
+                row = {
+                    "filename": f"{exp}_GFP_{well}_F001_{tp}.tif", "experiment": exp,
+                    "channel": "GFP", "well": well, "fov": "F001", "timepoint": tp,
+                    "timepoint_hours": parse_hours(tp), "nucleus_id": 1, "area_px": 150,
+                }
+                writer.writerow({k: v for k, v in row.items() if k in columns})
     return root
 
 
 # ── timepoint math ───────────────────────────────────────────────────────────
-def test_timepoint_map_continues_after_last_plus_interval():
+def test_offset_continues_after_last_plus_interval():
     info1 = {"available_timepoints": ["0", "24h", "48h"]}
     info2 = {"available_timepoints": ["0", "24h"]}
-    mapping, offset, last, interval = cc.build_timepoint_map(info1, info2)
+    offset, last, interval = cc.compute_offset(info1, info2)
     assert last == 48.0
     assert interval == 24.0          # median gap
     assert offset == 72.0            # ds2 first (0) -> 48 + 24
-    assert mapping == {"0": "72h", "24h": "96h"}
 
 
 def test_interval_uses_median_gap():
-    # gaps 24, 24, 48 -> median 24
-    info1 = {"available_timepoints": ["0", "24h", "48h", "96h"]}
+    info1 = {"available_timepoints": ["0", "24h", "48h", "96h"]}   # gaps 24,24,48 -> median 24
     info2 = {"available_timepoints": ["0"]}
-    _mapping, offset, last, interval = cc.build_timepoint_map(info1, info2)
+    offset, last, interval = cc.compute_offset(info1, info2)
     assert last == 96.0
     assert interval == 24.0
     assert offset == 120.0           # 96 + 24 - 0
@@ -91,23 +109,103 @@ def test_interval_uses_median_gap():
 
 def test_single_timepoint_dataset1_raises():
     with pytest.raises(cc.ConcatError, match="only one timepoint"):
-        cc.build_timepoint_map({"available_timepoints": ["0"]},
-                               {"available_timepoints": ["0", "24h"]})
+        cc.compute_offset({"available_timepoints": ["0"]}, {"available_timepoints": ["0", "24h"]})
 
 
 def test_unparseable_timepoint_raises():
     with pytest.raises(cc.ConcatError, match="can't be read as a time"):
-        cc.build_timepoint_map({"available_timepoints": ["0", "24h"]},
-                               {"available_timepoints": ["treated_arm"]})
+        cc.compute_offset({"available_timepoints": ["0", "24h"]}, {"available_timepoints": ["treated_arm"]})
 
 
-def test_new_labels_round_trip_and_stay_after_ds1():
-    from util.timepoint import parse_hours
-    info1 = {"available_timepoints": ["0", "36h"]}   # interval 36, last 36
-    info2 = {"available_timepoints": ["0", "12h"]}
-    mapping, _offset, last, _interval = cc.build_timepoint_map(info1, info2)
-    for new_label in mapping.values():
-        assert parse_hours(new_label) > last        # strictly after ds1
+def test_nan_inf_timepoint_refused():
+    with pytest.raises(cc.ConcatError, match="can't be read as a time"):
+        cc.compute_offset({"available_timepoints": ["0", "24h"]}, {"available_timepoints": ["nan"]})
+
+
+# ── timepoint format detection + rendering ───────────────────────────────────
+def test_detect_format_compound():
+    fmt, warning = cc.detect_timepoint_format(["00d00h00m", "00d08h00m", "02d00h00m"])
+    assert fmt.kind == "compound"
+    assert warning is None
+
+
+def test_detect_format_mixed_bare_and_hours_suffix_is_legitimate():
+    # "0" and "24h" mixing is the repo's own documented example -- must not error.
+    fmt, warning = cc.detect_timepoint_format(["0", "24h", "48h"])
+    assert fmt.kind in ("hours", "bare")
+    assert warning is None
+
+
+def test_detect_format_ordinal_falls_back_with_warning():
+    fmt, warning = cc.detect_timepoint_format(["T01", "T02"])
+    assert fmt.kind == "fallback"
+    assert warning is not None
+
+
+def test_render_timepoint_round_trips_through_parse_hours():
+    fmt = cc.TimepointFormat(kind="compound", day_width=2, hour_width=2, min_width=2)
+    for hours in (0.0, 0.5, 8.5, 23.983333333333334, 72.0, 100.0, 1 / 3):
+        label = cc.render_timepoint(hours, fmt)
+        assert parse_hours(label) == pytest.approx(hours, abs=1 / 60)
+
+
+def test_remap_timepoint_label_matches_dataset1_format():
+    fmt, _ = cc.detect_timepoint_format(["00d00h00m", "00d08h00m"])
+    new_label = cc.remap_timepoint_label("0", 72.0, fmt)
+    assert new_label == "03d00h00m"
+    assert parse_hours(new_label) == 72.0
+
+
+# ── zip-member filename rewrite (the traps the shipped version hit) ──────────
+def _schema():
+    from well_viewer.data.image_identity import load_schema
+    return load_schema(_BASE_INFO)
+
+
+def test_rewrite_member_name_handles_fractional_hour_and_dotted_experiment():
+    """Path.suffixes-based rewriting silently no-op'd on these two shapes in
+    the shipped version -- images kept their pre-merge names."""
+    schema = _schema()
+    fmt = cc.TimepointFormat(kind="hours")
+    new_name, rewrote = cc.rewrite_member_name(
+        "exp_GFP_A01_F001_1.5h.tif", schema=schema, channels=(), offset_hours=72.0, tp_format=fmt,
+    )
+    assert rewrote and new_name == "exp_GFP_A01_F001_73.5h.tif"
+
+    new_name, rewrote = cc.rewrite_member_name(
+        "Exp2.1_NIR_A01_1_0h.tif", schema=schema, channels=(), offset_hours=72.0, tp_format=fmt,
+    )
+    assert rewrote and new_name == "Exp2.1_NIR_A01_1_72h.tif"
+
+
+def test_rewrite_member_name_handles_role_suffixed_and_channel_scoped():
+    schema = _schema()
+    fmt = cc.TimepointFormat(kind="compound", day_width=2, hour_width=2, min_width=2)
+    new_name, rewrote = cc.rewrite_member_name(
+        "exp_GFP_A01_F001_00d08h00m_labels.tif", schema=schema, channels=("gfp",),
+        offset_hours=72.0, tp_format=fmt,
+    )
+    assert rewrote and new_name == "exp_GFP_A01_F001_03d08h00m_labels.tif"
+
+    new_name, rewrote = cc.rewrite_member_name(
+        "exp_GFP_A01_F001_00d08h00m_tophat_gfp.tif", schema=schema, channels=("gfp", "nir"),
+        offset_hours=72.0, tp_format=fmt,
+    )
+    assert rewrote and new_name == "exp_GFP_A01_F001_03d08h00m_tophat_gfp.tif"
+
+
+def test_rewrite_member_name_passes_through_non_conformant_names():
+    """A positional rewrite that ignores structure risks silently corrupting
+    the wrong field (parse_hours("F001") == 1.0) -- non-conformant names must
+    be left untouched, not guessed at."""
+    schema = _schema()
+    fmt = cc.TimepointFormat(kind="hours")
+    for name in ("random_notes.txt", "F001_junk.tif"):
+        new_name, rewrote = cc.rewrite_member_name(
+            name, schema=schema, channels=(), offset_hours=72.0, tp_format=fmt,
+        )
+        assert not rewrote
+        assert new_name == name
 
 
 # ── compatibility ────────────────────────────────────────────────────────────
@@ -128,22 +226,11 @@ def test_merge_info_unions_and_keeps_user_blocks():
     info2 = dict(_BASE_INFO)
     info2["available_timepoints"] = ["0", "24h"]
     info2["fluor_tokens"] = ["nir", "gfp", "rfp"]
-    tp_map = {"0": "48h", "24h": "72h"}
 
-    merged = cc.merge_info(info1, info2, tp_map)
+    merged = cc.merge_info(info1, info2, offset_hours=48.0, tp_format=cc.TimepointFormat(kind="hours"))
     assert merged["available_timepoints"] == ["0", "24h", "48h", "72h"]
-    assert merged["fluor_tokens"] == ["nir", "gfp", "rfp"]     # union preserves order
-    assert merged["cell_gating"] == {"thresh_frac_on": {"gfp": 5.0}}   # from ds1
-
-
-# ── filename rewrite ─────────────────────────────────────────────────────────
-def test_rewrite_timepoint_in_name():
-    tp_map = {"24h": "96h"}
-    assert cc.rewrite_timepoint_in_name("exp_GFP_A01_F001_24h.tif", "_", 4, tp_map) == \
-        "exp_GFP_A01_F001_96h.tif"
-    # a timepoint not in the map passes through unchanged
-    assert cc.rewrite_timepoint_in_name("exp_GFP_A01_F001_0.tif", "_", 4, tp_map) == \
-        "exp_GFP_A01_F001_0.tif"
+    assert merged["fluor_tokens"] == ["nir", "gfp", "rfp"]
+    assert merged["cell_gating"] == {"thresh_frac_on": {"gfp": 5.0}}
 
 
 # ── dataset resolution / enumeration ─────────────────────────────────────────
@@ -159,56 +246,61 @@ def test_dataset_wells_enumerated(tmp_path):
     assert cc.dataset_wells(paths) == {"A01", "B02"}
 
 
-# ── end-to-end plan + execute ────────────────────────────────────────────────
-def test_build_merge_plan_partitions_wells(tmp_path):
-    _make_dataset(tmp_path / "d1", wells=["A01", "B02"], timepoints=["0", "24h", "48h"])
-    _make_dataset(tmp_path / "d2", wells=["B02", "C03"], timepoints=["0", "24h"])
+def test_folder_mode_output_refused(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    (tmp_path / "d1" / "out" / "A01").mkdir()  # folder-mode QC output
+    with pytest.raises(cc.ConcatError, match="per-well folders"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+
+
+def test_column_header_mismatch_warned(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"], columns=_ROW_COLUMNS)
+    extra_cols = _ROW_COLUMNS + ["gfp_smfish_count"]
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"], columns=extra_cols)
     plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
-    assert plan.wells_ds1_only == ("A01",)
-    assert plan.wells_ds2_only == ("C03",)
-    assert plan.wells_both == ("B02",)
-    assert plan.offset_hours == 72.0
+    assert any("gfp_smfish_count" in w for w in plan.column_warnings)
 
 
-def test_execute_plan_stitches_shared_well(tmp_path):
-    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h", "48h"])
+# ── destination state / restart detection ────────────────────────────────────
+def test_fresh_destination_is_not_a_restart(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+    assert plan.dest_is_restart is False
+
+
+def test_marker_present_is_a_restart(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
     _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
     dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / cc.IN_PROGRESS_MARKER).write_text("")
     plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
-    summary = apply.execute_plan(plan)
-
-    assert "1 well" in summary
-    # merged CSV: 3 ds1 rows (0/24h/48h) + 2 ds2 rows remapped to 72h/96h
-    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
-        rows = list(csv.DictReader(handle))
-    timepoints = [r["timepoint"] for r in rows]
-    assert timepoints == ["0", "24h", "48h", "72h", "96h"]
-
-    # in/ zip carries ds1 members verbatim + ds2 members with remapped tp tokens
-    with zipfile.ZipFile(dest / "in" / "A01.zip") as zf:
-        names = set(zf.namelist())
-    assert "exp_GFP_A01_F001_48h.tif" in names       # ds1 unchanged
-    assert "exp_GFP_A01_F001_72h.tif" in names       # ds2 (was 0)
-    assert "exp_GFP_A01_F001_96h.tif" in names       # ds2 (was 24h)
-
-    # merged sidecar extends the timeline
-    info = json.loads((dest / "out" / "pipeline_info.json").read_text())
-    assert info["available_timepoints"] == ["0", "24h", "48h", "72h", "96h"]
+    assert plan.dest_is_restart is True
 
 
-def test_execute_plan_copies_unique_wells(tmp_path):
-    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h", "48h"])
-    _make_dataset(tmp_path / "d2", wells=["B02"], timepoints=["0", "24h"])
+def test_unrecognized_content_without_marker_is_refused_not_deleted(tmp_path):
+    """A zipped-but-unanalyzed plate must never be silently rmtree'd just
+    because it lacks a finished sidecar -- only the in-progress marker
+    authorizes clearing a destination."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
     dest = tmp_path / "dest"
-    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
-    apply.execute_plan(plan)
+    (dest / "in").mkdir(parents=True)
+    with zipfile.ZipFile(dest / "in" / "Z09.zip", "w") as zf:
+        zf.writestr("some.tif", b"x")
+    with pytest.raises(cc.ConcatError, match="weren't created by a previous concatenation"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    assert (dest / "in" / "Z09.zip").exists()  # untouched
 
-    # ds1-only well unchanged
-    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
-        assert [r["timepoint"] for r in csv.DictReader(handle)] == ["0", "24h", "48h"]
-    # ds2-only well shifted by the offset (72h)
-    with (dest / "out" / "measurements_B02.csv").open(newline="") as handle:
-        assert [r["timepoint"] for r in csv.DictReader(handle)] == ["72h", "96h"]
+
+def test_destination_with_finished_sidecar_is_refused(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "dest", wells=["Q01"], timepoints=["0"])
+    with pytest.raises(cc.ConcatError, match="already holds a finished dataset"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
 
 
 def test_destination_cannot_equal_a_source(tmp_path):
@@ -218,55 +310,128 @@ def test_destination_cannot_equal_a_source(tmp_path):
         cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "d1")
 
 
-# ── restart-from-a-failed-run detection ──────────────────────────────────────
-def test_fresh_destination_is_not_a_restart(tmp_path):
-    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
-    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
-    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
-    assert plan.dest_is_restart is False
-
-
-def test_partial_destination_without_sidecar_is_a_restart(tmp_path):
-    """A destination with leftover files but no pipeline_info.json can only be
-    an interrupted attempt (execute_plan writes that file last) — it should be
-    detected as resumable, not refused."""
-    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
-    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
-
+# ── end-to-end execution ──────────────────────────────────────────────────────
+def test_execute_plan_shifts_timepoint_hours_not_just_the_label(tmp_path):
+    """The bug this module exists to fix: timepoint_hours (the actual
+    plotting key) must shift with the label, not stay at dataset 2's
+    original value."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h", "48h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
     dest = tmp_path / "dest"
-    (dest / "in").mkdir(parents=True)
-    (dest / "out").mkdir(parents=True)
-    (dest / "out" / "measurements_A01.csv").write_text("well,timepoint\nA01,0\n")
-
-    assert cc.destination_is_failed_run(cc.DatasetPaths(dest, dest / "in", dest / "out"))
     plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
-    assert plan.dest_is_restart is True
+    apply.execute_plan(plan)
+
+    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    hours = sorted(float(r["timepoint_hours"]) for r in rows)
+    assert hours == [0.0, 24.0, 48.0, 72.0, 96.0]
+    assert len(set(hours)) == 5  # dataset 2 did not collapse onto dataset 1
 
 
-def test_destination_with_finished_sidecar_is_refused(tmp_path):
-    """A destination whose out/pipeline_info.json already exists looks like a
-    completed dataset (a prior successful concatenation, or an unrelated
-    dataset the user pointed at by mistake) — must never be silently
-    overwritten."""
-    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
-    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
-    _make_dataset(tmp_path / "dest", wells=["Q01"], timepoints=["0"])
+def test_execute_plan_keeps_filename_column_in_sync_with_zip_members(tmp_path):
+    """The other half of the same bug: a stale filename column breaks
+    row-to-image linkage (Cell Browser / Scatter)."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    apply.execute_plan(plan)
 
-    with pytest.raises(cc.ConcatError, match="already holds a finished dataset"):
-        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", tmp_path / "dest")
+    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    with zipfile.ZipFile(dest / "in" / "A01.zip") as zf:
+        names = set(zf.namelist())
+    for row in rows:
+        assert row["filename"] in names
 
 
-def test_restart_clears_stale_orphan_well_before_rebuilding(tmp_path):
-    """A well left over from an earlier, differently-scoped failed attempt must
-    not survive into the rebuilt output — execute_plan reconstructs every well
-    fresh from the two source datasets, so a stale file left in the
-    destination would otherwise masquerade as part of the merged dataset."""
-    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h", "48h"])
-    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+def test_execute_plan_preserves_dataset1_format_never_mixes(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["00d00h00m", "00d08h00m", "00d16h00m"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["00d00h00m", "00d08h00m"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    assert plan.tp_format.kind == "compound"
+    apply.execute_plan(plan)
+
+    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
+        labels = [r["timepoint"] for r in csv.DictReader(handle)]
+    assert labels == ["00d00h00m", "00d08h00m", "00d16h00m", "01d00h00m", "01d08h00m"]
+
+
+def test_execute_plan_copies_unique_wells_and_shifts_ds2_only(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h", "48h"])
+    _make_dataset(tmp_path / "d2", wells=["B02"], timepoints=["0h", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    apply.execute_plan(plan)
+
+    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
+        assert [r["timepoint"] for r in csv.DictReader(handle)] == ["0h", "24h", "48h"]
+    with (dest / "out" / "measurements_B02.csv").open(newline="") as handle:
+        assert [r["timepoint"] for r in csv.DictReader(handle)] == ["72h", "96h"]
+
+
+def test_execute_plan_backfills_missing_timepoint_hours_column(tmp_path):
+    legacy_cols = ["well", "fov", "timepoint", "nucleus_id"]
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"], columns=legacy_cols)
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"], columns=legacy_cols)
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    apply.execute_plan(plan)
+
+    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert "timepoint_hours" in rows[0]
+    assert [float(r["timepoint_hours"]) for r in rows] == [0.0, 24.0, 48.0, 72.0]
+
+
+def test_execute_plan_carries_over_cell_overrides_with_shifted_tp(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
+    (tmp_path / "d1" / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [{"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+                       "included": "0", "seg_fp": "stale1"}],
+    }))
+    (tmp_path / "d2" / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [{"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+                       "included": "0", "seg_fp": "stale2"}],
+    }))
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    apply.execute_plan(plan)
+
+    merged = json.loads((dest / "out" / "cell_overrides.json").read_text())
+    tps = sorted(o["tp"] for o in merged["overrides"])
+    assert tps == ["0h", "48h"]  # ds1's untouched + ds2's shifted (48h = 24h last + 24h interval + 0h)
+    real_mtime = str((dest / "out" / "A01_out.zip").stat().st_mtime_ns)
+    assert all(o["seg_fp"] == real_mtime for o in merged["overrides"])
+
+
+def test_execute_plan_regression_guard_catches_a_broken_offset(tmp_path):
+    """Simulates the shipped bug directly: force a MergePlan whose offset
+    wasn't actually applied to timepoint_hours, and confirm verification
+    catches it before the sidecar is written."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h", "48h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    broken_plan = dataclasses.replace(plan, offset_hours=0.0)
+    with pytest.raises(cc.ConcatError):
+        apply.execute_plan(broken_plan)
+    assert not (dest / "out" / "pipeline_info.json").exists()  # never written on verify failure
+
+
+def test_execute_plan_restart_clears_stale_orphan_well(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h", "48h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
 
     dest = tmp_path / "dest"
     (dest / "in").mkdir(parents=True)
     (dest / "out").mkdir(parents=True)
+    (dest / cc.IN_PROGRESS_MARKER).write_text("")
     with zipfile.ZipFile(dest / "in" / "Z09.zip", "w") as zf:
         zf.writestr("junk.tif", b"orphan")
     (dest / "out" / "measurements_Z09.csv").write_text("well,timepoint\nZ09,0\n")
@@ -278,5 +443,16 @@ def test_restart_clears_stale_orphan_well_before_rebuilding(tmp_path):
     assert not (dest / "in" / "Z09.zip").exists()
     assert not (dest / "out" / "measurements_Z09.csv").exists()
     assert (dest / "in" / "A01.zip").exists()
-    with (dest / "out" / "measurements_A01.csv").open(newline="") as handle:
-        assert [r["timepoint"] for r in csv.DictReader(handle)] == ["0", "24h", "48h", "72h", "96h"]
+    assert not (dest / cc.IN_PROGRESS_MARKER).exists()  # cleared on success
+
+
+def test_execute_plan_cancellation_leaves_marker_for_resume(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01", "B02"], timepoints=["0h", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01", "B02"], timepoints=["0h", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    with pytest.raises(cc.ConcatError, match="Cancelled"):
+        apply.execute_plan(plan, is_cancelled=lambda: True)
+    assert (dest / cc.IN_PROGRESS_MARKER).exists()
+    assert not (dest / "out" / "pipeline_info.json").exists()

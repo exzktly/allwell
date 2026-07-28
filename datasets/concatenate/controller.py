@@ -10,10 +10,13 @@ builder (CLAUDE.md §3).
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 from PySide6.QtCore import QObject
+from PySide6.QtWidgets import QMessageBox
 
 from well_viewer.core.safe import swallowed
+from datasets.concatenate.concatenate_compute import DatasetPaths, destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker
 
@@ -38,6 +41,9 @@ class ConcatenateController(QObject):
     # ── run ──────────────────────────────────────────────────────────────────
     def _on_run(self) -> None:
         if self._worker is not None and self._worker.isRunning():
+            return
+        dest_path = self.page.destination_path()
+        if dest_path and self._destination_is_restart(dest_path) and not self._confirm_restart(dest_path):
             return
         self.page.clear_log()
         self.page.set_running(True)
@@ -69,6 +75,28 @@ class ConcatenateController(QObject):
     def _on_open_in_review_requested(self, dest_root: str) -> None:
         if self._on_open_in_review is not None:
             self._on_open_in_review(dest_root)
+
+    # ── restart confirmation ─────────────────────────────────────────────────
+    @staticmethod
+    def _destination_is_restart(dest_path: str) -> bool:
+        root = Path(dest_path)
+        return destination_has_marker(DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out"))
+
+    def _confirm_restart(self, dest_path: str) -> bool:
+        """Destructive-clear confirmation before resuming into a destination
+        that holds leftovers from an interrupted attempt (see
+        ``concatenate_compute.destination_has_marker`` / ``apply.clear_destination``)."""
+        answer = QMessageBox.question(
+            self.page,
+            "Resume interrupted run?",
+            "The destination already has partial output from an earlier "
+            f"attempt that didn't finish:\n\n{dest_path}\n\n"
+            "Continuing will delete that partial content and rebuild it from "
+            "scratch. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def shutdown(self) -> None:

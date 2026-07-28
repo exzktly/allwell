@@ -1950,16 +1950,24 @@ controller has confirmed with the user, since destination content the marker
 *doesn't* explain (e.g. a plate that's been zipped but never analyzed) is
 refused rather than assumed to be safe to delete.
 
-**Verification.** Before writing the sidecar, `apply._verify` checks — per
-well — that every row's `timepoint` and `timepoint_hours` agree (via
+**Verification.** Before writing the sidecar, `apply._verify` first checks
+that the merge actually wrote *any* measurement rows at all — a well's images
+(`in/<WELL>.zip`, `<WELL>_out.zip`) existing without a matching
+`measurements_<WELL>.csv` is individually legitimate (that well may have
+segmented zero cells at every timepoint), but if it's true for *every* well in
+*both* datasets — most often because `out_csvs()`'s well-token matching failed
+to recognise a real CSV's name rather than because every well is genuinely
+empty — the old code had nothing left to check and let the merge report
+success over a destination with copied images and zero rows of data. Per well,
+it further checks that every row's `timepoint` and `timepoint_hours` agree (via
 `well_viewer.domain.tp_match.tp_close`), that dataset-2's shifted hours never
 collide with or fall before dataset 1's, that every dataset-2 row's `filename`
 is actually present in the merged `in/<WELL>.zip`, and that every distinct hour
-across the merged CSVs is listed in the merged `available_timepoints`. A
-failure raises before the sidecar is written, so a broken merge never leaves a
-destination that looks finished — the guard that would have caught this
-feature's own worst bug (dataset 2's rows collapsing onto dataset 1's timeline)
-before it shipped.
+across the merged CSVs is listed in the merged `available_timepoints`. Any
+image-without-CSV well/dataset pair is also named in the status window as a
+note (not necessarily fatal — see above) so it's visible instead of silently
+dropped. A verification failure raises before the sidecar is written, so a
+broken merge never leaves a destination that looks finished.
 
 On success the page offers to open the merged dataset in Review, routed through
 `DatasetsTab._open_in_review → AllWellApp._open_dataset_in_review`, which loads

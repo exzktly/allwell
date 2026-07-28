@@ -1435,20 +1435,48 @@ What it does to the data:
 
 - **Timepoints.** Dataset 2's first timepoint is relabelled to *dataset 1's last
   timepoint + dataset 1's imaging interval* (the typical gap between its
-  timepoints), and the rest of dataset 2 keeps its spacing. So if dataset 1 runs
-  `0, 24h, 48h` and dataset 2 runs `0, 24h`, dataset 2 becomes `72h, 96h` and the
-  merged dataset runs `0, 24h, 48h, 72h, 96h`.
+  timepoints), and the rest of dataset 2 keeps its spacing. New labels are
+  written in **dataset 1's own format** — so a compound-format dataset 1
+  (`00d00h00m`, `00d08h00m`) gets compound-format continuations, not a mix of
+  conventions in the same file. Every value a row's timepoint is stored in —
+  the label, the numeric hours column, and the image filename it was measured
+  from — is shifted together, so dataset 2's data plots and its images open
+  exactly like dataset 1's.
 - **Wells.** The union of both datasets' wells is written. A well in both is
   stitched (dataset 1's rows, then dataset 2's shifted rows); a well in only one
   is copied across.
 - **Everything else** — measurement CSVs, per-well QC-image zips, raw input
-  images, and `pipeline_info.json` — is merged accordingly, with dataset 2's
-  timepoint labels rewritten throughout.
+  images, saved cell-inclusion overrides, and `pipeline_info.json` — is merged
+  accordingly, with dataset 2's timepoints rewritten throughout. Gating
+  thresholds and sample definitions carry over from dataset 1 and apply to
+  dataset 2's rows too — worth reviewing after the merge, since they were set
+  from dataset 1's imaging conditions.
+- **Before finishing, the merge verifies itself** — that every row's timepoint
+  label and its numeric hours agree, that dataset 2's timepoints actually land
+  after dataset 1's with no overlap, and that every image a row references
+  really is in the merged output. A verification failure aborts before
+  anything is marked complete, so a broken merge can never masquerade as a
+  finished dataset.
 
 It refuses (with an explanation in the status window) when the two datasets
-weren't analysed the same way (different filename schema, channels' positions, or
-segmentation method), when a timepoint can't be read as a time, or when dataset 1
-has only a single timepoint (so there's no interval to continue).
+weren't analysed the same way (different filename schema, channel positions, or
+segmentation method), when a timepoint can't be read as a time, when dataset 1
+has only a single timepoint (so there's no interval to continue), or when a
+dataset stores its QC images as per-well folders rather than zip archives (a
+layout Concatenate doesn't support). A column present in one dataset's
+measurements but not the other's — a channel one dataset didn't collect,
+say — gets called out too, since those rows will have a blank value for it.
+
+**If a run is interrupted** (the app is closed, the machine loses power, the
+disk fills up) partway through, just point Concatenate at the same three
+folders and press Concatenate again. The app can tell an interrupted attempt
+apart from a folder you've already finished into or one holding unrelated
+files: only a destination it itself marked as in-progress is offered as
+resumable, and you're asked to confirm before its partial contents are cleared
+and rebuilt. A destination that already looks like a finished dataset is
+refused outright rather than risked; a destination with files that were never
+part of any concatenation attempt (a plate zipped but not yet analyzed, say) is
+refused too, so nothing is deleted on a guess.
 
 ---
 

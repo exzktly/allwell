@@ -807,11 +807,11 @@ def stats_refresh_colors(ctx) -> None:
     Widget colours are driven by the app-level QSS stylesheet; only the
     embedded matplotlib figure needs an explicit repaint.
     """
-    from ui.theme import get_color
+    import theme
     app = ctx.window  # transitional: figure handles still on app._stats_*
 
     if hasattr(app, "_stats_fig"):
-        app._stats_fig.set_facecolor(get_color("BG_APP"))
+        app._stats_fig.set_facecolor(theme.Colors.surface)
     if hasattr(app, "_stats_canvas_widget"):
         app._stats_canvas_widget.draw()
 

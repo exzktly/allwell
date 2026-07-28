@@ -228,7 +228,7 @@ def open_export_style_panel(win, plot_key: str) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
         return
-    from ui.theme import PLOT_BG
+    import theme
     from well_viewer.features.export.style import launch_export_editor
-    launch_export_editor(win, fig, default_name, plot_bg=PLOT_BG, canvas=canvas)
+    launch_export_editor(win, fig, default_name, plot_bg=theme.CPub.bg, canvas=canvas)
 

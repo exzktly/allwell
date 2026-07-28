@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ui.theme import get_color
+import theme
 from well_viewer.core.safe import swallowed
 
 
@@ -36,27 +36,27 @@ def _cell_gating_plot_cdf(ctx) -> None:
         fig = ctx.runtime.cell_gating.figure
         if fig is not None:
             fig.clf()
-            fig.set_facecolor(get_color("BG_APP"))
-            ax = fig.add_subplot(111, facecolor=get_color("BG_PANEL"))
+            fig.set_facecolor(theme.Colors.surface)
+            ax = fig.add_subplot(111, facecolor=theme.Colors.panel)
             ax.set_axis_off()
             ax.text(
                 0.5, 0.5,
                 "No dataset loaded.\nOpen a results folder to view cell-gating "
                 "distributions.",
                 transform=ax.transAxes, ha="center", va="center",
-                color=get_color("TXT_MUT"), fontsize=11, wrap=True,
+                color=theme.Colors.text_muted, fontsize=11, wrap=True,
             )
             canvas = ctx.runtime.cell_gating.canvas
             if canvas is not None:
                 canvas.draw_idle()
         return
 
-    bg_app = get_color("BG_APP")
-    bg_panel = get_color("BG_PANEL")
-    txt_pri = get_color("TXT_PRI")
-    txt_mut = get_color("TXT_MUT")
-    accent = get_color("ACCENT")
-    warn = get_color("WARN")
+    bg_app = theme.Colors.surface
+    bg_panel = theme.Colors.panel
+    txt_pri = theme.Colors.text_primary
+    txt_mut = theme.Colors.text_muted
+    accent = theme.Colors.accent
+    warn = theme.Colors.warn
 
     fig = ctx.runtime.cell_gating.figure
     fig.clf()

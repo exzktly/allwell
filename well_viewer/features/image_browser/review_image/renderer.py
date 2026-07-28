@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+import theme
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
@@ -858,7 +859,7 @@ def review_image_refresh_color_swatch(ctx, which: str) -> None:
     # tight fixed size, leaving square lower corners.
     btn.setStyleSheet(
         f"QPushButton {{ background-color: rgb({r},{g},{b}); "
-        f"border: 1px solid #444; border-radius: 4px; "
+        f"border: 1px solid {theme.Colors.border_strong}; border-radius: 4px; "
         f"min-width: 28px; min-height: 18px; padding: 0; }}"
     )
 

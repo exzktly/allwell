@@ -12,6 +12,7 @@ import math
 from collections.abc import Iterable
 
 import numpy as np
+import theme
 from matplotlib import patches as mpatches
 from matplotlib import colormaps as mpl_colormaps
 
@@ -536,10 +537,10 @@ def redraw_heatmap(ctx) -> None:
         _drag_labels = ax.get_xticklabels() if _kind == "col" else ax.get_yticklabels()
         for _i, _lbl in enumerate(_drag_labels):
             if _i == _src:
-                _lbl.set_color("#2563EB")
+                _lbl.set_color(theme.Colors.accent_pressed)
                 _lbl.set_fontweight("bold")
             elif _over is not None and _i == _over and _over != _src:
-                _lbl.set_color("#DC2626")
+                _lbl.set_color(theme.Colors.danger)
                 _lbl.set_fontweight("bold")
 
     # Cell text annotations. Resolve the user's number format once, not per cell.
@@ -896,10 +897,10 @@ def _update_drag_label_colors(ctx) -> None:
         labels = ax.get_xticklabels() if kind == "col" else ax.get_yticklabels()
         for i, lbl in enumerate(labels):
             if i == src:
-                lbl.set_color("#2563EB")
+                lbl.set_color(theme.Colors.accent_pressed)
                 lbl.set_fontweight("bold")
             elif over is not None and i == over and over != src:
-                lbl.set_color("#DC2626")
+                lbl.set_color(theme.Colors.danger)
                 lbl.set_fontweight("bold")
     canvas.draw_idle()
 

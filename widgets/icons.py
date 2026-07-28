@@ -202,7 +202,7 @@ def _resolve_color(color) -> str:
         color = getattr(theme.Colors, color)
     from PySide6.QtGui import QColor
     c = QColor(color)
-    return c.name() if c.isValid() else "#E6E9EF"
+    return c.name() if c.isValid() else theme.Colors.text_primary
 
 
 def make_pixmap(name: str, color, size_px: int, dpr: float = 1.0) -> QPixmap:

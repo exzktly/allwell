@@ -210,7 +210,7 @@ class ColorSwatchRow(QWidget):
             self._picker.colorPicked.connect(self._on_picker_live)
             self._picker.colorCommitted.connect(self._on_picker_committed)
         self._picker.setRecents(self._recents)
-        self._picker.setColor(self._current if self._current.isValid() else QColor("#6B8AFD"))
+        self._picker.setColor(self._current if self._current.isValid() else QColor(theme.Colors.accent))
         # Anchor: a 1×1 invisible child at the tile centre — popup() maps it to global.
         if self._picker_anchor is None:
             self._picker_anchor = QWidget(self)

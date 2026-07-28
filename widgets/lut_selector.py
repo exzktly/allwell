@@ -67,7 +67,7 @@ _FALLBACK_STOPS: dict[str, list[str]] = {
     "hsv":      ["#ff0000", "#00ff00", "#0000ff"],
     "tab10":    ["#1f77b4", "#ff7f0e", "#2ca02c"],
 }
-_GENERIC_FALLBACK = ["#0b0f17", "#6b8afd", "#f0f4ff"]
+_GENERIC_FALLBACK = [theme.Colors.surface, theme.Colors.accent, theme.Colors.accent_fg]
 
 
 def _cmap_stops(name: str, n: int = 24) -> list[QColor]:

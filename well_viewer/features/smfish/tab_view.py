@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from ui.theme import get_color
+import theme
 from well_viewer.data.image_resolver import resolve_ref_by_fov_tp
 from well_viewer.features.smfish.controller import (
     SmfishImgRef as _ImgRef,  # noqa: F401 - re-exported for callers
@@ -457,10 +457,10 @@ def _smfish_update_cdf_plot(ctx) -> None:
     if ctx.runtime.smfish.cdf_ax is None:
         return
 
-    bg_panel = get_color("BG_PANEL")
-    txt_pri = get_color("TXT_PRI")
-    txt_mut = get_color("TXT_MUT")
-    accent = get_color("ACCENT")
+    bg_panel = theme.Colors.panel
+    txt_pri = theme.Colors.text_primary
+    txt_mut = theme.Colors.text_muted
+    accent = theme.Colors.accent
 
     log_img = ctx.runtime.smfish.current_log_img
     labels = ctx.runtime.smfish.current_labels
@@ -534,8 +534,8 @@ def _smfish_paint_empty(ctx, message: str) -> None:
     if ctx.runtime.smfish.ax_img is None:
         return
     try:
-        bg_panel = get_color("BG_PANEL")
-        txt_mut = get_color("TXT_MUT")
+        bg_panel = theme.Colors.panel
+        txt_mut = theme.Colors.text_muted
         ctx.runtime.smfish.ax_img.clear()
         ctx.runtime.smfish.ax_img.set_facecolor(bg_panel)
         if ctx.runtime.smfish.fig_img is not None:
@@ -656,7 +656,7 @@ def _smfish_get_threshold(ctx) -> float:
 def _smfish_redraw(ctx) -> None:
     if ctx.runtime.smfish.current_log_img is None or ctx.runtime.smfish.current_labels is None:
         return
-    txt_pri = get_color("TXT_PRI")
+    txt_pri = theme.Colors.text_primary
     thr = _smfish_get_threshold(ctx)
     log_img = ctx.runtime.smfish.current_log_img
     labels = ctx.runtime.smfish.current_labels

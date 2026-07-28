@@ -6,6 +6,8 @@ import csv
 import re
 from pathlib import Path
 
+import theme
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,9 +22,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.features.batch_export._common import (
     BarGroup,
-    PLOT_BG,
     WELL_COLORS,
-    get_color,
     _groups_with_loaded_wells,
     unique_export_stem,
 )
@@ -525,7 +525,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
         separate = self._sc_layout_cb.currentText().startswith("Separate")
         prefs = self._ctx.state.export_prefs.style_prefs or {}
         marker_size = float(prefs.get("marker_size", 5.0) or 5.0)
-        ink = get_color("TXT_MUT")
+        ink = theme.Colors.text_muted
 
         items = list(scatter_data.items())
         faceted = (separate or color_by_tp) and len(items) > 1
@@ -534,7 +534,7 @@ class ScatterBatchExportPanel(BatchExportPanel):
 
         n_panels = len(items) if faceted else 1
         fig = _Figure(figsize=(8, max(6, 3 * n_panels) if faceted else 6),
-                      dpi=300, facecolor=PLOT_BG)
+                      dpi=300, facecolor=theme.CPub.bg)
 
         def _panel(ax, data_dict) -> None:
             _ipts, legend_handles = _render_scatter_points(
@@ -569,12 +569,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
                     _panel(ax, {label: data})
                 axes[-1].set_xlabel(xlabel)
                 fig.suptitle(title, fontsize=11, fontweight="bold",
-                             color=get_color("PLOT_TXT"))
+                             color=theme.CPub.text)
             else:
                 ax = fig.add_subplot(1, 1, 1)
                 _panel(ax, scatter_data)
                 ax.set_xlabel(xlabel)
-                ax.set_title(title, color=get_color("PLOT_TXT"))
+                ax.set_title(title, color=theme.CPub.text)
             self._save_figure(fig, fig_path, fmt)
         finally:
             (_rt.axes_cols, _rt.gate_render, _rt.metadata,

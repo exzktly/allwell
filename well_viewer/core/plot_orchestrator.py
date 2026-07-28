@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from well_viewer.core.ui_helpers import refresh_plot_empty_states
 from well_viewer.core.plot_style import apply_ax_style, apply_export_style_to_current
-from ui.theme import WARN
+import theme
 from well_viewer.core.safe import swallowed
 
 
@@ -219,7 +219,7 @@ def redraw_app(ctx) -> None:
         apply_ax_style=apply_ax_style,
         all_fluor_values=_all_fluor_values,
         all_fluor_values_filtered=_all_fluor_values_filtered,
-        warn=WARN,
+        warn=theme.Colors.warn,
     )
     apply_export_style_to_current(
         ctx,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QPushButton
 
-from ui.theme import get_color
+import theme
 
 
 class _WellGridButton(QPushButton):
@@ -23,8 +23,8 @@ class _WellGridButton(QPushButton):
         self.setEnabled(enabled)
         self._base_color = bg
         self._active = active
-        accent = get_color("ACCENT")
-        border_color = get_color("BORDER")
+        accent = theme.Colors.accent
+        border_color = theme.Colors.border
         border = f"2px solid {accent}" if active else f"1px solid {border_color}"
         self.setStyleSheet(
             f"QPushButton {{ background: {bg}; color: {fg}; border: {border}; padding: 0px; }}"

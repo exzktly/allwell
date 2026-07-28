@@ -6,6 +6,8 @@ import csv
 import re
 from pathlib import Path
 
+import theme
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -23,9 +25,6 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.features.batch_export._common import (
-    PLOT_BG,
-    WARN,
-    get_color,
     BarGroup,
     _bar_render_items,
     apply_ax_style,
@@ -425,14 +424,14 @@ class BarBatchExportPanel(BatchExportPanel):
             target_ts = [float(target_t)]
             tp_strs = [str(tp_str)] if not isinstance(tp_str, (list, tuple)) else list(tp_str)
         tp_title = tp_strs[0] if len(tp_strs) == 1 else f"[{', '.join(tp_strs)}]"
-        fig = _Figure(figsize=(8, 10), dpi=300, facecolor=PLOT_BG)
+        fig = _Figure(figsize=(8, 10), dpi=300, facecolor=theme.CPub.bg)
         ax_mean = fig.add_subplot(3, 1, 1)
         ax_frac = fig.add_subplot(3, 1, 2)
         ax_n = fig.add_subplot(3, 1, 3)
         fig.subplots_adjust(hspace=0.55, top=0.94, bottom=0.10,
                             left=0.13, right=0.97)
         fig.suptitle(f"{grp.name}  \u2014  t = {tp_title} h",
-                     fontsize=10, fontweight="bold", color=get_color("PLOT_TXT"), y=0.97)
+                     fontsize=10, fontweight="bold", color=theme.CPub.text, y=0.97)
         _ch = (self._selected_export_channel() or self._ctx.state.channel.active_channel).upper()
         from well_viewer.data.metric_labels import (
             METRIC_KEY_TO_LABEL as _MLB,
@@ -520,7 +519,7 @@ class BarBatchExportPanel(BatchExportPanel):
             use_groups=pool_replicates and len(target_ts) == 1,
             items=draw_items,
             threshold=threshold,
-            warn_color=WARN,
+            warn_color=theme.Colors.warn,
             border_color="#333",
             placeholder_color=_CLR_PLACEHOLDER,
             disabled_well_color=_CLR_DISABLED_WELL,

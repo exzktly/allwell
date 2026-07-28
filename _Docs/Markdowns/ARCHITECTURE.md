@@ -138,7 +138,7 @@ allwell/
 ├── theme.py                     ← v2 design tokens (Colors / Typography / Spacing / Radii)
 ├── well_viewer/                 ← Review pane (the bulk of the app)
 ├── widgets/                     ← reusable Qt widgets (no app coupling)
-├── ui/theme/                    ← dark colour tokens (get_color + plot/well constants)
+├── ui/theme/                    ← legacy remnant: two colours with no theme.Colors home yet
 ├── services/                    ← Analyze-side service modules
 ├── scripts/                     ← build_executable.sh / .ps1, dev helpers
 ├── _Docs/                       ← installer / requirements / visual-audit screenshots
@@ -354,9 +354,11 @@ A few rules of thumb so you know where to put something new:
   in `well_viewer/core/`. Persistence stays in `well_viewer/persistence/`.
 - **It's a reusable Qt widget with no All-Well-specific knowledge →**
   `widgets/`.
-- **It's a design token / colour / size →** `theme.py` (chrome QSS + tokens)
-  or `ui/theme/styles.py` (plot/`get_color` colours); never hardcode hex
-  values in code.
+- **It's a design token / colour / size →** `theme.py` (chrome QSS + tokens,
+  including `CPub` for publication-mode plot colour and `WELL_COLORS_TUPLE`
+  for categorical well/trace identity — the single source of truth for
+  almost everything); never hardcode hex values in code. `ui/theme/styles.py`
+  is a two-token legacy remnant (see §8) — new colours never go there.
 
 ---
 
@@ -2030,13 +2032,15 @@ The app has two complementary theme surfaces:
    values here. This is the single source of the app chrome QSS. `theme.py`
    *also* holds the **theme registry** (`THEMES` / `apply_theme` /
    `select_theme_from_env`) — see "Selecting a theme" below.
-2. **`ui/theme/`** — a small dark-palette colour-token module read by
-   matplotlib-side plot styling, the Analyze tab, and a few batch-export
-   panels. `ui/theme/styles.py` defines `_DARK_THEME` (named colours) +
-   `_WELL_COLORS` and exposes them as `get_color("ACCENT")` and as import-time
-   constants (`PLOT_BG`, `TXT_PRI`, `TXT_MUT`, `WELL_COLOR_1..96`). The well
-   palette is sourced from `theme.WELL_COLORS_TUPLE` so both surfaces hand out
-   identical per-well colours.
+2. **`ui/theme/`** — a legacy remnant, down to exactly two colours with no
+   `theme.Colors` equivalent yet: `CLR_DANGER` and `CLR_SUCCESS_DARK`, read via
+   `ui.theme.get_color(name)` by batch-export's progress label (their hex
+   doesn't match `theme.Colors.danger`/`.success` closely enough to be a safe
+   direct swap). Everything else this module used to carry — surfaces,
+   borders, text, accent, warn, the well palette, the Publication-mode plot
+   palette — has migrated to `theme.Colors` / `theme.CPub` /
+   `theme.WELL_COLORS_TUPLE` directly. If a future change gives the remaining
+   two tokens a `theme.Colors` home too, `ui/theme/` can be deleted outright.
 
 `ui/theme/` is colour tokens only: it holds `styles.py` and nothing else — no
 stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
@@ -2080,19 +2084,15 @@ per-widget rewiring**.
 - `WELL_COLORS_TUPLE` (categorical data identity) and `CPub` (white-bg
   publication export) are deliberately **theme-independent**.
 - `ui/theme/styles.py` registers `refresh_from_theme` as a theme hook, so its
-  `get_color()` palette (Analyze tab, batch-export, plot styling) re-derives from
-  the freshly-applied `Colors`. (Names imported elsewhere as
-  `from ui.theme.styles import X` are value copies frozen at import time — chrome
-  that must follow a theme switch reads `get_color()` live.)
+  `get_color()` palette (`CLR_DANGER`/`CLR_SUCCESS_DARK` only, batch-export's
+  progress label) re-derives from the freshly-applied `Colors`.
 
-When you add a colour or size:
-
-- For widgets in `widgets/`, the app shell, or the v2-styled chrome:
-  add to `theme.Colors` / `theme.Spacing` / `theme.Metrics` / etc. To let a
-  theme override it, add the attribute to the relevant bundle in `THEMES`.
-- For plot styling, the Analyze tab, or anything reading via
-  `get_color()`: add to `ui/theme/styles._build_dark_theme()`.
-- **Do not** hardcode hex / px values inline.
+When you add a colour or size: add it to `theme.Colors` / `theme.CPub` (for a
+publication-mode plot colour) / `theme.Spacing` / `theme.Metrics` / etc. To
+let a theme override it, add the attribute to the relevant bundle in
+`THEMES`. **Do not** hardcode hex / px values inline, and never add a new
+entry to `ui/theme/styles.py` — that module is a two-token legacy remnant
+(see above), not a place to route new colours.
 
 ### Dividers
 

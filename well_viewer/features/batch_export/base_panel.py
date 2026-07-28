@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import math
 import re
+
+import theme
 from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Callable
@@ -31,11 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.features.batch_export._common import (
-    PLOT_BG,
-    PLOT_SPN,
-    WARN,
     WELL_COLORS,
-    get_color,
     BarGroup,
     _PLATE_COLS,
     _PLATE_ROWS,
@@ -48,9 +46,8 @@ from well_viewer.features.batch_export._common import (
     _clear_layout_helper,
     _logger,
     unique_export_stem,
-    _CLR_DANGER,
-    _CLR_SUCCESS_DARK,
     _CLR_WHITE,
+    get_color,
 )
 from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 # Qt-free export-execution service (A14 / X3) — safe to import at module level.
@@ -1053,7 +1050,7 @@ class BatchExportPanel(QWidget):
         if owner is not None:
             btn.set_colors(self._group_color(owner), _CLR_WHITE)
             return
-        btn.set_colors(get_color("BG_CELL"), get_color("TXT_PRI"))
+        btn.set_colors(theme.Colors.panel_elevated, theme.Colors.text_primary)
 
     def _refresh_map(self) -> None:
         avail = set(self._ctx.state.dataset.well_paths.keys())
@@ -1069,11 +1066,11 @@ class BatchExportPanel(QWidget):
                 active_wells.add(w)
         for tok, btn in self._map_btns.items():
             if tok not in avail:
-                btn.set_colors(get_color("CLR_AVAIL_WELL"), get_color("TXT_MUT"), enabled=False)
+                btn.set_colors(theme.Colors.well_unavailable, theme.Colors.text_muted, enabled=False)
             elif tok in tok_color:
                 btn.set_colors(tok_color[tok], _CLR_WHITE, active=(tok in active_wells))
             else:
-                btn.set_colors(get_color("BG_CELL"), get_color("TXT_PRI"))
+                btn.set_colors(theme.Colors.panel_elevated, theme.Colors.text_primary)
 
     def _clear_layout(self, layout) -> None:
         _clear_layout_helper(layout)
@@ -1113,7 +1110,7 @@ class BatchExportPanel(QWidget):
         card.setFrameShape(QFrame.StyledPanel)
         if is_sel:
             card.setStyleSheet(
-                f"QFrame {{ border: 2px solid {color}; background: {get_color('BG_CELL')}; }}"
+                f"QFrame {{ border: 2px solid {color}; background: {theme.Colors.panel_elevated}; }}"
             )
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(6, 4, 6, 4)
@@ -1439,12 +1436,12 @@ class BatchExportPanel(QWidget):
 
         if errors:
             self._prog_lbl.setText(f"Done with {len(errors)} error(s). See log.")
-            self._prog_lbl.setStyleSheet(f"color: {_CLR_DANGER};")
+            self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_DANGER')};")
             for err in errors:
                 _logger.error("Batch export error: %s", err)
             return
         self._prog_lbl.setText(success_text)
-        self._prog_lbl.setStyleSheet(f"color: {_CLR_SUCCESS_DARK};")
+        self._prog_lbl.setStyleSheet(f"color: {get_color('CLR_SUCCESS_DARK')};")
         self._ctx.notify.set_status(status_text)
 
     def _save_figure(self, fig, fig_path: Path, fmt: str) -> None:
@@ -1454,7 +1451,7 @@ class BatchExportPanel(QWidget):
         save_export_figure(
             fig, fig_path, fmt,
             export_prefs=_ensure_export_style_prefs(self._ctx),
-            plot_bg=PLOT_BG,
+            plot_bg=theme.CPub.bg,
         )
 
     def _export_scatter_figure(
@@ -1474,7 +1471,7 @@ class BatchExportPanel(QWidget):
         axis labels, title, grid, legend, and export are applied here.
         """
         from matplotlib.figure import Figure as _Figure
-        fig = _Figure(figsize=(8, 6), dpi=300, facecolor=PLOT_BG)
+        fig = _Figure(figsize=(8, 6), dpi=300, facecolor=theme.CPub.bg)
         ax = fig.add_subplot(1, 1, 1)
         draw(ax)
         ax.set_xlabel(xlabel)
@@ -1691,16 +1688,16 @@ class BatchExportPanel(QWidget):
         _val_col = val_col if val_col is not None else self._export_val_col_for("_line_channel_cb")
 
         # Four stacked panels — identical to the tab (lineplot/tab_view.py).
-        fig = _Figure(figsize=(10, 13), dpi=300, facecolor=PLOT_BG)
+        fig = _Figure(figsize=(10, 13), dpi=300, facecolor=theme.CPub.bg)
         ax_mean = fig.add_subplot(4, 1, 1)
         ax_frac = fig.add_subplot(4, 1, 2, sharex=ax_mean)
         ax_n = fig.add_subplot(4, 1, 3, sharex=ax_mean)
         ax_cdf = fig.add_subplot(4, 1, 4)
         fig.subplots_adjust(hspace=0.55, top=0.93, bottom=0.06, left=0.13, right=0.97)
-        fig.suptitle(grp.name, fontsize=11, fontweight="bold", color=get_color("PLOT_TXT"), y=0.98)
+        fig.suptitle(grp.name, fontsize=11, fontweight="bold", color=theme.CPub.text, y=0.98)
 
         legend_kw = dict(fontsize=7, framealpha=0.0, facecolor="none",
-                         edgecolor=PLOT_SPN, labelcolor=get_color("PLOT_TXT"))
+                         edgecolor=theme.CPub.spine, labelcolor=theme.CPub.text)
         _ch = (self._selected_export_channel() or self._ctx.state.channel.active_channel).upper()
         from well_viewer.data.metric_labels import (
             METRIC_KEY_TO_LABEL as _MLB,
@@ -1744,7 +1741,7 @@ class BatchExportPanel(QWidget):
         _render_line_series(
             _LineAxes(ax_mean, ax_frac, ax_n, ax_cdf), series_list,
             fov_active=_fov_active, fc_active=fc_active, threshold=threshold,
-            legend_kw=legend_kw, warn_color=WARN, muted_fg=get_color("PLOT_TXT"),
+            legend_kw=legend_kw, warn_color=theme.Colors.warn, muted_fg=theme.CPub.text,
             legend_visible=None,
             # Batch has always drawn the CDF threshold line and derives its
             # x-range from the data (cdf_xrange=None).

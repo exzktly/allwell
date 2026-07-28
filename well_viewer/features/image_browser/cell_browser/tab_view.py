@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from functools import partial
 
+import theme
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -272,7 +273,7 @@ def _paint_cb_swatch(btn, rgb) -> None:
     r, g, b = rgb
     btn.setStyleSheet(
         f"QPushButton {{ background-color: rgb({r},{g},{b}); "
-        f"border: 1px solid #444; border-radius: 4px; "
+        f"border: 1px solid {theme.Colors.border_strong}; border-radius: 4px; "
         f"min-width: 28px; min-height: 18px; padding: 0; }}")
 
 

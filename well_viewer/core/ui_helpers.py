@@ -639,8 +639,8 @@ def _themed_nav_toolbar_class():
             pm = QPixmap(filename)
             pm.setDevicePixelRatio(self.devicePixelRatioF() or 1)
             try:
-                from ui.theme import get_color
-                icon_color = QColor(get_color("TXT_PRI"))
+                import theme
+                icon_color = QColor(theme.Colors.text_primary)
             except Exception:
                 icon_color = self.palette().color(self.foregroundRole())
             mask = pm.createMaskFromColor(QColor("black"), Qt.MaskMode.MaskOutColor)

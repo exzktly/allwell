@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+import theme
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
@@ -32,12 +34,12 @@ class _GUILogHandler(logging.Handler):
             msg = self.format(record)
             level = record.levelname
             color_map = {
-                "ERROR":   "#DC2626",
-                "WARNING": "#D97706",
-                "INFO":    "#E2E8F0",
-                "DEBUG":   "#94A3B8",
+                "ERROR":   theme.Colors.danger,
+                "WARNING": theme.Colors.warn,
+                "INFO":    theme.Colors.text_secondary,
+                "DEBUG":   theme.Colors.text_muted,
             }
-            color = color_map.get(level, "#E2E8F0")
+            color = color_map.get(level, theme.Colors.text_secondary)
             html = f'<span style="color:{color};">{msg}</span>'
             # Marshal to the Qt main thread.
             QTimer.singleShot(0, lambda h=html: self._append(h))

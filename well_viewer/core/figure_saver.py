@@ -28,9 +28,9 @@ class FigureService:
     def save(self, fig, default_name: str) -> None:
         """Open the Save-As dialog for *fig*, honouring the shared file-type
         filter and the active dataset directory."""
-        from ui.theme import PLOT_BG
+        import theme
         from well_viewer.core.plot_orchestrator import save_matplotlib_fig
-        save_matplotlib_fig(self._ctx, fig, default_name, plot_bg=PLOT_BG)
+        save_matplotlib_fig(self._ctx, fig, default_name, plot_bg=theme.CPub.bg)
 
     def open_style_panel(self, plot_key: str) -> None:
         """Toggle the figure-properties (export-style) side panel for *plot_key*."""

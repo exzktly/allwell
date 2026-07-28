@@ -20,13 +20,7 @@ import math
 
 _logger = logging.getLogger(__name__)
 
-from ui.theme import (
-    BORDER,
-    CLR_ERR_BAR,
-    CLR_MUTED_DISABLED,
-    CLR_PLACEHOLDER,
-    WARN,
-)
+import theme
 
 from well_viewer.features.barplot.controller import (
     cluster_centers as _cluster_centers,
@@ -252,11 +246,11 @@ def draw_violin(
         if not math.isnan(fv):
             ax_frac.scatter([xi], [fv], c=color, s=30, zorder=3, linewidths=0)
         else:
-            ax_frac.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
+            ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
                             marker="x", zorder=3, linewidths=1)
 
     if getattr(ctx.state.plot, "show_threshold_line", False):
-        ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--", alpha=0.5, zorder=1)
+        ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--", alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
     for ax in (ax_mean, ax_frac):
@@ -378,7 +372,7 @@ def draw_beeswarm(
                 cell_vals = cell_vals[np.isfinite(cell_vals)]
 
         if skipped_scale:
-            ax_mean.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
+            ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
                             marker="x", zorder=3, linewidths=1)
         elif cell_vals.size:
             jx, jy = _beeswarm_jitter(cell_vals.tolist(), x_center=float(xi),
@@ -395,18 +389,18 @@ def draw_beeswarm(
             ax_mean.plot([xi - bar_w * 0.6, xi + bar_w * 0.6],
                          [m, m], color=color, lw=1.5, zorder=4)
         else:
-            ax_mean.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
+            ax_mean.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
                             marker="x", zorder=3, linewidths=1)
 
         if frac_val is not None:
             ax_frac.scatter([xi], [frac_val], c=color, s=30,
                             zorder=3, linewidths=0)
         else:
-            ax_frac.scatter([xi], [0], c=CLR_PLACEHOLDER, s=16,
+            ax_frac.scatter([xi], [0], c=theme.Colors.placeholder, s=16,
                             marker="x", zorder=3, linewidths=1)
 
     if getattr(ctx.state.plot, "show_threshold_line", False):
-        ax_frac.axhline(0.5, color=BORDER, lw=0.8, ls="--",
+        ax_frac.axhline(0.5, color=theme.Colors.border, lw=0.8, ls="--",
                         alpha=0.5, zorder=1)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6
     xlim_hi = (max(xs) + 0.6) if xs else 0.4
@@ -624,11 +618,11 @@ def draw_grouped_bar_mode(
         use_groups=use_groups,
         items=items,
         threshold=threshold,
-        warn_color=WARN,
-        border_color=BORDER,
-        placeholder_color=CLR_PLACEHOLDER,
-        disabled_well_color=CLR_MUTED_DISABLED,
-        err_bar_color=CLR_ERR_BAR,
+        warn_color=theme.Colors.warn,
+        border_color=theme.Colors.border,
+        placeholder_color=theme.Colors.placeholder,
+        disabled_well_color=theme.Colors.text_disabled,
+        err_bar_color=theme.Colors.err_bar,
         fc_active=bool(ctx.state.plot.fold_change_active),
         ctx=ctx,
     )
@@ -1111,9 +1105,9 @@ def draw_per_well_n_bars(
         if bar_val > 0:
             ax_n.bar(xi, bar_val, width=bar_w, color=color, alpha=0.85, zorder=3, linewidth=0)
             if err_val > 0:
-                ax_n.errorbar(xi, bar_val, yerr=err_val, fmt="none", ecolor=CLR_ERR_BAR, elinewidth=1.4, capsize=4, zorder=4)
+                ax_n.errorbar(xi, bar_val, yerr=err_val, fmt="none", ecolor=theme.Colors.err_bar, elinewidth=1.4, capsize=4, zorder=4)
         else:
-            ax_n.bar(xi, 0, width=bar_w, color=CLR_PLACEHOLDER, linewidth=1, edgecolor=CLR_MUTED_DISABLED, linestyle="--", zorder=3)
+            ax_n.bar(xi, 0, width=bar_w, color=theme.Colors.placeholder, linewidth=1, edgecolor=theme.Colors.text_disabled, linestyle="--", zorder=3)
     ax_n.set_xticks(xs)
     ax_n.set_xticklabels(xlabels, rotation=45 if n > 8 else 0, ha="right" if n > 8 else "center", fontsize=7)
     xlim_lo = (min(xs) - 0.6) if xs else -0.6

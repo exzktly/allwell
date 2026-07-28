@@ -19,15 +19,13 @@ from __future__ import annotations
 # (light blue) is positioned in the most-used slot — the original first colour
 # was a dark red that read as too heavy at a single-well selection.
 #
-# This tuple is the canonical list. Three other consumers reference it:
+# This tuple is the canonical list. Two other consumers reference it:
 #   * ``Colors.trace`` / ``CPub.trace`` below — what
 #     ``widgets/plot_card.plot_palette()`` feeds into matplotlib's
 #     ``axes.prop_cycle`` (used for screen + publication modes).
-#   * ``ui.theme.styles._WELL_COLORS`` — derives a name→hex dict
-#     (``WELL_COLOR_1`` … ``WELL_COLOR_96``) for QSS template substitution.
-#   * ``well_viewer.plate_layout.WELL_COLORS`` — re-exports it for the
-#     ``_rank_color_well`` / ``_rank_color_rset`` helpers and every plot
-#     renderer that needs a per-well colour by rank.
+#   * ``well_viewer.plate_layout.WELL_COLORS`` — a plain ``list()`` copy, read
+#     by the ``_rank_color_well`` / ``_rank_color_rset`` helpers and every
+#     plot renderer that needs a per-well colour by rank.
 #
 # Keeping the list here (not in ui/theme/styles.py) lets the ``widgets``
 # package — which is supposed to import only ``theme`` — see the full
@@ -79,6 +77,7 @@ class Colors:
     panel_elevated  = "#1A2230"   # --bg-elevated  : default button/input fill
     hover           = "#212B3B"   # --bg-hover     : hover state for controls/rows
     active          = "#2A3548"   # --bg-active    : pressed / selected state
+    well_unavailable = "#1F2937"  # fill for a batch-export plate button not in the dataset
 
     # ── Borders / dividers ───────────────────────────────────────────────
     border_subtle   = "#1B2331"   # --border-subtle : hairlines within a panel
@@ -95,6 +94,8 @@ class Colors:
     text_secondary  = "#98A2B3"   # --text-secondary : labels-on-controls, metadata
     text_muted      = "#5F6B7C"   # --text-muted     : hints, inactive labels, ticks
     text_faint      = "#404B5C"   # --text-faint     : decorative separators
+    text_disabled   = "#A0AEC0"   # --text-disabled  : disabled control label text
+    placeholder     = "#64748B"   # --placeholder    : empty-field placeholder text
 
     # ── Accent (interactive / brand) ─────────────────────────────────────
     accent          = "#6B8AFD"   # --accent
@@ -122,6 +123,8 @@ class Colors:
     # same colours every other tab uses for the matching well-rank.
     trace           = WELL_COLORS_TUPLE
     threshold       = "#F5A524"   # --threshold  : dashed line + threshold chip
+    gate            = "#E24A4A"   # scatter gate outline / rubber-band selector
+    err_bar         = "#4A5568"   # bar-chart error-bar color
     plot_bg         = "#131A24"   # plot card fill (== panel)
     plot_grid       = "#1F2733"   # --plot-grid  : gridlines inside the figure
     plot_spine      = "#3A4658"   # --plot-spine : axis spines

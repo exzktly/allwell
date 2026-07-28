@@ -26,6 +26,7 @@ theme tokens (mirrors ``theme.py``).
 
 from __future__ import annotations
 
+from string import Template
 
 from PySide6.QtCore import QMimeData, Qt, QTimer
 from PySide6.QtGui import QDrag
@@ -33,6 +34,8 @@ from PySide6.QtWidgets import (
     QApplication, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
     QSizePolicy, QToolButton, QVBoxLayout, QWidget,
 )
+
+import theme
 
 from well_viewer.core.safe import swallow
 from well_viewer.core.ui_helpers import parse_float_edit
@@ -62,7 +65,11 @@ _RENDER_SHORT = {"corrected": "corr", "raw": "raw", "mask": "mask", "threshold":
 
 # Colour swatch per root dimension + a rough colour per colormap (mirrors the
 # LUT the render actually applies; the chip swatch is a glanceable hint).
-_DIM_SWATCH = {"well": "#6B8AFD", "timepoint": "#F59E0B", "fov": "#98A2B3"}
+_DIM_SWATCH = {
+    "well": theme.Colors.accent,
+    "timepoint": theme.Colors.warn,
+    "fov": theme.Colors.text_secondary,
+}
 _CMAP_SWATCH = {
     "Greys": "#C8CDD8", "Reds": "#F87171", "Greens": "#4ADE80", "Blues": "#6EA8FF",
     "Purples": "#A78BFA", "Oranges": "#FB923C", "Cyan": "#22D3EE", "Magenta": "#E879F9",
@@ -81,22 +88,22 @@ _STANDARD_CMAP = (
 
 # Scoped stylesheet — applied to the shelf root; object-name selectors keep it
 # from leaking onto the rest of the app. Colours mirror ``theme.py`` tokens.
-_QSS = """
+_QSS_TEMPLATE = Template("""
 QWidget#ITBShelf { background: transparent; }
-QLabel#ITBTitle { color: #E6E9EF; font-weight: 640; font-size: 12.5px; }
-QLabel#ITBShape { color: #98A2B3; font-size: 11px; }
+QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: 12.5px; }
+QLabel#ITBShape { color: $text_secondary; font-size: 11px; }
 QLabel#ITBShape b { color: #B9C6FF; }
 
 QFrame#ITBZone {
-    border: 1px dashed #2A3343; border-radius: 9px; background: #131A24;
+    border: 1px dashed $border; border-radius: 9px; background: $panel;
 }
-QFrame#ITBZone[dropActive="true"] { border: 1px dashed #6B8AFD; background: #17203A; }
-QFrame#ITBFixed { border: 1px solid #2A3343; border-radius: 9px; background: #131A24; }
-QFrame#ITBTray { border: 1px solid #1B2331; border-radius: 9px; background: #0E131C; }
+QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: #17203A; }
+QFrame#ITBFixed { border: 1px solid $border; border-radius: 9px; background: $panel; }
+QFrame#ITBTray { border: 1px solid $border_subtle; border-radius: 9px; background: $rail; }
 
-QLabel#ITBHead { color: #E6E9EF; font-weight: 620; font-size: 12px; }
-QLabel#ITBSub  { color: #5F6B7C; font-size: 10px; }
-QLabel#ITBHint { color: #5F6B7C; font-style: italic; font-size: 11px; }
+QLabel#ITBHead { color: $text_primary; font-weight: 620; font-size: 12px; }
+QLabel#ITBSub  { color: $text_muted; font-size: 10px; }
+QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: 11px; }
 
 QFrame#ITBRoot {
     background: #202B4D; border: 1px solid #4560A8; border-radius: 7px;
@@ -106,64 +113,65 @@ QLabel#ITBRootLbl { color: #E9ECF5; font-weight: 640; font-size: 12px; }
 QWidget#ITBNest { border-left: 2px solid #3A4E86; background: transparent; }
 
 QFrame#ITBChan, QFrame#ITBChip {
-    background: #1A2230; border: 1px solid #2A3343; border-radius: 7px;
+    background: $panel_elevated; border: 1px solid $border; border-radius: 7px;
 }
 QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: #4560A8; }
-QLabel#ITBChanLbl { color: #E6E9EF; font-size: 12px; font-weight: 560; }
-QLabel#ITBVar { color: #98A2B3; font-size: 10.5px; }
-QLabel#ITBGrip { color: #5F6B7C; font-size: 11px; }
-QLabel#ITBNote { color: #5F6B7C; font-size: 10px; }
+QLabel#ITBChanLbl { color: $text_primary; font-size: 12px; font-weight: 560; }
+QLabel#ITBVar { color: $text_secondary; font-size: 10.5px; }
+QLabel#ITBGrip { color: $text_muted; font-size: 11px; }
+QLabel#ITBNote { color: $text_muted; font-size: 10px; }
 
 QToolButton#ITBOpt {
-    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    color: $text_secondary; background: $panel; border: 1px solid $border;
     border-radius: 5px; padding: 3px 8px; font-size: 12px;
 }
-QToolButton#ITBOpt:hover { color: #E6E9EF; border-color: #6B8AFD; }
+QToolButton#ITBOpt:hover { color: $text_primary; border-color: $accent; }
 QToolButton#ITBOpt::menu-indicator { image: none; width: 0px; }
 
 QToolButton#ITBX {
-    color: #5F6B7C; background: transparent; border: none;
+    color: $text_muted; background: transparent; border: none;
     font-size: 15px; padding: 0px 4px;
 }
-QToolButton#ITBX:hover { color: #F87171; }
+QToolButton#ITBX:hover { color: $danger; }
 
 QToolButton#ITBSeg {
-    background: #131A24; color: #98A2B3; border: 1px solid #2A3343;
+    background: $panel; color: $text_secondary; border: 1px solid $border;
     padding: 3px 11px; font-size: 11px;
 }
-QToolButton#ITBSeg:hover { color: #E6E9EF; }
-QToolButton#ITBSeg[on="true"] { background: #2C3A66; color: #F0F4FF; }
-QToolButton#ITBSeg[on="true"][ov="true"] { background: #3A2E12; color: #F5A524; }
+QToolButton#ITBSeg:hover { color: $text_primary; }
+QToolButton#ITBSeg[on="true"] { background: $accent_dim; color: $accent_fg; }
+QToolButton#ITBSeg[on="true"][ov="true"] { background: #3A2E12; color: $threshold; }
 
 QComboBox#ITBCombo {
-    background: #1A2230; color: #E6E9EF; border: 1px solid #2A3343;
+    background: $panel_elevated; color: $text_primary; border: 1px solid $border;
     border-radius: 6px; padding: 2px 6px; min-height: 20px;
 }
-QComboBox#ITBCombo:hover { border-color: #3B475C; }
-QLabel#ITBFixLbl { color: #E6E9EF; font-size: 12px; }
-QLabel#ITBEq { color: #5F6B7C; font-size: 12px; }
+QComboBox#ITBCombo:hover { border-color: $border_strong; }
+QLabel#ITBFixLbl { color: $text_primary; font-size: 12px; }
+QLabel#ITBEq { color: $text_muted; font-size: 12px; }
 
-QFrame#ITBLut { border: 1px solid #2A3343; border-radius: 9px; background: #131A24; }
+QFrame#ITBLut { border: 1px solid $border; border-radius: 9px; background: $panel; }
 QFrame#ITBLutRow { background: transparent; border: none; }
-QLabel#ITBLutChan { color: #E6E9EF; font-size: 12px; font-weight: 560; }
-QLabel#ITBLutTag { color: #5F6B7C; font-size: 11px; }
+QLabel#ITBLutChan { color: $text_primary; font-size: 12px; font-weight: 560; }
+QLabel#ITBLutTag { color: $text_muted; font-size: 11px; }
 QLineEdit#ITBLutEdit {
-    background: #1A2230; color: #E6E9EF; border: 1px solid #2A3343;
+    background: $panel_elevated; color: $text_primary; border: 1px solid $border;
     border-radius: 6px; padding: 2px 6px; min-height: 18px; max-width: 66px;
 }
-QLineEdit#ITBLutEdit:focus { border-color: #6B8AFD; }
+QLineEdit#ITBLutEdit:focus { border-color: $accent; }
 QToolButton#ITBLutFit {
-    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    color: $text_secondary; background: $panel; border: 1px solid $border;
     border-radius: 5px; padding: 2px 9px; font-size: 11px;
 }
-QToolButton#ITBLutFit:hover { color: #E6E9EF; border-color: #6B8AFD; }
+QToolButton#ITBLutFit:hover { color: $text_primary; border-color: $accent; }
 
 QToolButton#ITBClear {
-    color: #98A2B3; background: #131A24; border: 1px solid #2A3343;
+    color: $text_secondary; background: $panel; border: 1px solid $border;
     border-radius: 6px; padding: 3px 10px; font-size: 11px;
 }
-QToolButton#ITBClear:hover { color: #F87171; border-color: #F87171; }
-"""
+QToolButton#ITBClear:hover { color: $danger; border-color: $danger; }
+""")
+_QSS = _QSS_TEMPLATE.substitute(vars(theme.Colors))
 
 
 # ── spec accessors ──────────────────────────────────────────────────────────

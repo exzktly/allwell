@@ -7,14 +7,14 @@ When the axes belongs to a figure inside a ``widgets.PlotCard``, the styling
 honours the card's active ``plotTheme()`` — ``"publication"`` (white bg,
 ``theme.CPub`` ink — the canonical / exported state) or ``"screen"`` (the dark
 token set, a per-card live preview). When the axes is on a bare figure (no
-card), falls back to the legacy ``ui.theme`` constants (publication-style).
+card), falls back directly to ``theme.CPub`` (publication-style).
 """
 
 from __future__ import annotations
 
 from collections.abc import MutableMapping
 
-from ui.theme import PLOT_BG, PLOT_GRD, PLOT_SPN, PLOT_TXT, TXT_PRI
+import theme
 from well_viewer.core.safe import swallowed
 
 _PLOT_FONT_REGISTERED = False  # matplotlib font-manager registration runs once
@@ -56,7 +56,7 @@ def tokens_for(ax) -> tuple:
     """
     fig = getattr(ax, "figure", None)
     if fig is None:
-        return PLOT_BG, TXT_PRI, PLOT_TXT, PLOT_GRD, PLOT_SPN
+        return theme.CPub.bg, theme.Colors.text_primary, theme.CPub.text, theme.CPub.grid, theme.CPub.spine
 
     mode = None
     card = getattr(fig, "_plot_card", None)
@@ -78,7 +78,7 @@ def tokens_for(ax) -> tuple:
         from widgets.plot_card import plot_tokens
         return plot_tokens(mode)
     except Exception:
-        return PLOT_BG, TXT_PRI, PLOT_TXT, PLOT_GRD, PLOT_SPN
+        return theme.CPub.bg, theme.Colors.text_primary, theme.CPub.text, theme.CPub.grid, theme.CPub.spine
 
 
 # Internal alias (was the original name).

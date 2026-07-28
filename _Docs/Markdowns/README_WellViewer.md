@@ -1421,15 +1421,26 @@ onto **dataset 1**, shifting dataset 2's timepoints so they carry on after datas
 
 How it works:
 
-1. Pick three folders:
-   - **Dataset 1** — the base (earlier timepoints). A dataset folder is one that
-     contains both an `in/` and an `out/` folder.
-   - **Dataset 2** — the session that comes after (its timepoints get shifted).
-   - **Destination** — a new, empty folder. Both originals are left untouched.
-2. Press **Concatenate**. Progress streams into the status window below the
-   folder fields.
+1. Fill in the one-line **Dataset 1 + Dataset 2 = Destination** row: click each
+   folder icon to pick a folder, and hover a filled-in field to see its full
+   path (the box itself shows just the folder name). A field turns up its own
+   hint below it if the folder isn't usable — **Dataset 1**/**Dataset 2** must
+   each contain both an `in/` and an `out/` folder; **Destination** must be a
+   new, empty folder, different from both datasets. Both originals are left
+   untouched either way.
+2. Press **Concatenate**. A live plate map fills in below, coloured per well as
+   the merge progresses (grey → amber "merging" → green "merged", or blue if a
+   well's images survived without a matching measurements file on one side),
+   alongside a phase rail (Validate → Merge → Verify → Finalize) and an overall
+   progress bar. The full text log is still there if you want it — tick
+   **Show raw log** to reveal it below the plate.
 3. On success, click **Open merged dataset in Review** to load the result
    straight into Review.
+
+If something goes wrong — even before any well is touched, like an
+incompatible schema between the two datasets — the headline above the plate
+turns red with the reason, so the failure is visible whether or not the raw
+log is showing.
 
 What it does to the data:
 
@@ -1461,7 +1472,7 @@ What it does to the data:
   (it segmented zero cells) is called out by name in the status window rather
   than silently skipped.
 
-It refuses (with an explanation in the status window) when the two datasets
+It refuses (with an explanation on the dashboard headline) when the two datasets
 weren't analysed the same way (different filename schema, channel positions, or
 segmentation method), when a timepoint can't be read as a time, when dataset 1
 has only a single timepoint (so there's no interval to continue), or when a

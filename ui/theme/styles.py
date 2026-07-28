@@ -51,9 +51,11 @@ def _build_dark_theme() -> dict[str, str]:
     # Contrast inks
     "CLR_WHITE": _C.ink_light, "CLR_OFF_WHITE": _C.accent_fg,
     # Status / dialog palette — independent (no v2 equivalents)
-    "CLR_SUCCESS": "#059669", "CLR_SUCCESS_DARK": "#047857",
+    "CLR_SUCCESS": _C.success,        # was "#059669"
+    "CLR_SUCCESS_DARK": "#047857",
     "CLR_SUCCESS_BG_DARK": "#064E3B", "CLR_SUCCESS_TEXT_SOFT": "#6EE7B7",
-    "CLR_DANGER": "#DC2626", "CLR_DANGER_DARK": "#B91C1C",
+    "CLR_DANGER": _C.danger,          # was "#DC2626"
+    "CLR_DANGER_DARK": "#B91C1C",
     "CLR_DANGER_BG": "#7F1D1D", "CLR_DANGER_HOVER": "#991B1B",
     "CLR_ERROR_BG_DARK": "#7F1D1D", "CLR_ERROR_TEXT_SOFT": "#FCA5A5",
     "CLR_WARN_DARK": "#D97706", "CLR_WARN_TEXT": "#92400E", "CLR_WARN_BG": "#78350F",

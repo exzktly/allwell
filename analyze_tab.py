@@ -37,9 +37,7 @@ from services.pipeline_runner import (
 )
 from services.pipeline_service import find_pipeline_script
 from services.remote_config import default_remote_index
-from ui.theme import (
-    CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN,
-)
+import theme
 from well_viewer.core.safe import swallowed
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
@@ -101,13 +99,15 @@ def _has_well_content(folder: Path) -> bool:
 class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
-    _LOG_COLORS = {
-        "INFO":    TXT_PRI,
-        "WARNING": WARN,
-        "ERROR":   CLR_DANGER,
-        "DONE":    CLR_SUCCESS,
-        "CMD":     TXT_MUT,
-    }
+    @staticmethod
+    def _log_color(tag: str) -> str:
+        return {
+            "INFO":    theme.Colors.text_primary,
+            "WARNING": theme.Colors.warn,
+            "ERROR":   theme.Colors.danger,
+            "DONE":    theme.Colors.success,
+            "CMD":     theme.Colors.text_muted,
+        }.get(tag, theme.Colors.text_primary)
 
     def __init__(
         self,
@@ -809,7 +809,7 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         cursor = QTextCursor(doc)
         cursor.movePosition(QTextCursor.End)
         fmt = QTextCharFormat()
-        fmt.setForeground(QColor(self._LOG_COLORS.get(tag, self._LOG_COLORS["INFO"])))
+        fmt.setForeground(QColor(self._log_color(tag)))
         cursor.insertText(text, fmt)
 
         if at_bottom:

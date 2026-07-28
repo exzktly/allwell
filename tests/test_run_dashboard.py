@@ -97,20 +97,20 @@ def test_remote_threshold_does_not_count_as_download(qapp):
         d.set_well_stage(w, "threshold")      # server finished all wells
     assert d._count("threshold") == 3
     assert d._count("download") == 0          # nothing fetched yet
-    from ui.theme import ACCENT, CLR_SUCCESS
-    assert d._well_color("A01") == ACCENT      # blue: computed, awaiting fetch
+    from theme import Colors
+    assert d._well_color("A01") == Colors.accent      # blue: computed, awaiting fetch
     d.set_well_stage("A01", "download")
     assert d._count("download") == 1
-    assert d._well_color("A01") == CLR_SUCCESS  # green only once data is local
+    assert d._well_color("A01") == Colors.success  # green only once data is local
 
 
 def test_dashboard_error_wins(qapp):
     from widgets.run_dashboard import RunDashboard
-    from ui.theme import CLR_DANGER
+    from theme import Colors
     d = RunDashboard(); d.reset(remote=True, total=1)
     d.set_well_stage("A01", "process")
     d.set_well_stage("A01", "error")
-    assert d._well_color("A01") == CLR_DANGER and "failed" in d._well_tooltip("A01")
+    assert d._well_color("A01") == Colors.danger and "failed" in d._well_tooltip("A01")
 
 
 def test_dashboard_rail_local_vs_remote(qapp):

@@ -47,35 +47,35 @@ def qapp():
 
 
 def test_grouped_well_is_pending_not_processing(qapp):
-    from widgets.run_dashboard import (
-        RunDashboard, _COL_PENDING, _COL_PROCESSING, _COL_FETCHED)
+    from widgets.run_dashboard import RunDashboard
+    from theme import Colors
     d = RunDashboard()
     d.reset(remote=False, total=3)
 
     # a grouped (queued) well shows the pending colour, NOT the processing amber
     d.set_well_stage("A01", "group")
-    assert d._well_color("A01") == _COL_PENDING
+    assert d._well_color("A01") == Colors.text_muted
     assert "pending" in d._well_tooltip("A01") or "grouped" in d._well_tooltip("A01")
 
     # once it starts processing it flips to amber, then blue when processed
     d.set_well_stage("A01", "active")
-    assert d._well_color("A01") == _COL_PROCESSING
+    assert d._well_color("A01") == Colors.warn
     d.set_well_stage("A01", "process")
-    assert d._well_color("A01") == _COL_FETCHED
+    assert d._well_color("A01") == Colors.accent
 
     # an untouched well stays uncoloured (truly empty, distinct from pending)
     assert d._well_color("H12") is None
 
 
 def test_grouped_well_is_pending_remote(qapp):
-    from widgets.run_dashboard import (
-        RunDashboard, _COL_PENDING, _COL_PROCESSING)
+    from widgets.run_dashboard import RunDashboard
+    from theme import Colors
     d = RunDashboard()
     d.reset(remote=True, total=2)
     d.set_well_stage("A01", "group")
-    assert d._well_color("A01") == _COL_PENDING       # queued, not yet uploaded
+    assert d._well_color("A01") == Colors.text_muted   # queued, not yet uploaded
     d.set_well_stage("A01", "upload")
-    assert d._well_color("A01") == _COL_PROCESSING     # uploading / active
+    assert d._well_color("A01") == Colors.warn          # uploading / active
 
 
 # ── 3) Auto-threshold rounds to the nearest integer before saving ────────────

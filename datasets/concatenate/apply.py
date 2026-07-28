@@ -57,6 +57,10 @@ def _null_cancelled() -> bool:
     return False
 
 
+def _null_progress(_well: str, _stage: str) -> None:
+    return None
+
+
 # ── container IO ─────────────────────────────────────────────────────────────
 def read_members(container: Path) -> list[tuple[str, bytes]]:
     """Read a well container's files as ``(member_name, bytes)``.
@@ -447,6 +451,7 @@ def execute_plan(
     plan: MergePlan,
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
+    progress: Callable[[str, str], None] | None = None,
 ) -> str:
     """Carry out *plan*, writing the merged dataset. Returns a summary line.
 
@@ -454,6 +459,11 @@ def execute_plan(
     *is_cancelled* is polled once per well; when it returns ``True`` the merge
     stops with a plain :class:`ConcatError` and the in-progress marker is left
     in place, so a later re-run is correctly detected as a resumable restart.
+    *progress* receives ``(well, stage)`` for each well as it's processed —
+    ``stage`` is ``"merging"`` before that well's containers/CSV are merged,
+    then ``"merged"`` or ``"warned"`` (image data survived on one side with no
+    matching measurements CSV) once it's done — for a live per-well status
+    display (defaults to a no-op).
 
     Writes :data:`~datasets.concatenate.concatenate_compute.IN_PROGRESS_MARKER`
     first and removes it only after the merged sidecar is written — the whole
@@ -463,6 +473,7 @@ def execute_plan(
     """
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
+    report = progress or _null_progress
 
     emit(
         f"Dataset 1 last timepoint {plan.ds1_last_hours:g}h, interval "
@@ -512,6 +523,7 @@ def execute_plan(
         if cancelled():
             raise ConcatError("Cancelled — the in-progress destination was left in place to resume later.")
         emit(f"  {well}…")
+        report(well, "merging")
         unmatched_in, in_names = merge_input(plan, well, in1.get(well), in2.get(well))
         unmatched_qc = merge_qc_zip(plan, well, zip1.get(well), zip2.get(well))
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
@@ -524,10 +536,14 @@ def execute_plan(
         # produce, silently, for every well. Surface it rather than let a
         # merge that copied images but wrote no data pass as an ordinary
         # success; _verify's zero-rows check below is the hard backstop.
+        well_warned = False
         if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
             images_without_csv.append(f"{well} (dataset 1)")
+            well_warned = True
         if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
             images_without_csv.append(f"{well} (dataset 2)")
+            well_warned = True
+        report(well, "warned" if well_warned else "merged")
 
     if total_unmatched:
         emit(

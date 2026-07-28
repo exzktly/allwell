@@ -46,6 +46,9 @@ class ConcatenateController(QObject):
         if dest_path and self._destination_is_restart(dest_path) and not self._confirm_restart(dest_path):
             return
         self.page.clear_log()
+        self.page.dashboard.reset()
+        self.page.dashboard.set_phase("validate")
+        self.page.dashboard.set_headline("Validating datasets…")
         self.page.set_running(True)
 
         worker = ConcatenateWorker(
@@ -54,23 +57,41 @@ class ConcatenateController(QObject):
             self.page.destination_path(),
         )
         worker.logLine.connect(self.page.append_log)
+        worker.wellsPlanned.connect(self._on_wells_planned)
+        worker.wellStage.connect(self.page.dashboard.set_well_stage)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
         self._worker = worker
         worker.start()
 
+    def _on_wells_planned(self, wells: list) -> None:
+        self.page.dashboard.set_wells(wells)
+        self.page.dashboard.set_phase("merge")
+        self.page.dashboard.set_headline(f"Merging {len(wells)} well(s)…")
+
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log("")
         self.page.append_log(f"✓ {summary}")
+        self.page.dashboard.set_phase("finalize")
+        self.page.dashboard.set_done(summary)
         self.page.show_open_in_review(dest_root)
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log("")
         self.page.append_log(f"✗ {message}")
+        if message.startswith("Cancelled"):
+            self.page.dashboard.set_cancelled(message)
+        else:
+            self.page.dashboard.set_failed(message)
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
+        # Disk state under the destination (and possibly the marker file)
+        # just changed — refresh the fields' inline hints so a destination
+        # that's now "already holds a finished dataset" explains itself
+        # instead of just quietly disabling the button.
+        self.page.revalidate_fields()
 
     def _on_open_in_review_requested(self, dest_root: str) -> None:
         if self._on_open_in_review is not None:

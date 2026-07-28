@@ -534,3 +534,54 @@ def test_execute_plan_zero_rows_everywhere_fails_loudly(tmp_path):
     with pytest.raises(cc.ConcatError, match="zero measurement rows"):
         apply.execute_plan(plan)
     assert not (dest / "out" / "pipeline_info.json").exists()  # never reports success
+
+
+# ── progress callback: per-well events driving the status dashboard ─────────
+def test_execute_plan_progress_reports_merging_then_merged_per_well(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01", "A02"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01", "A02"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+
+    # each well reports "merging" before its terminal state, and every well
+    # reaches a terminal state exactly once
+    seen_terminal = set()
+    for i, (well, stage) in enumerate(events):
+        if stage == "merging":
+            assert (well, "merged") in events[i + 1:] or (well, "warned") in events[i + 1:]
+        else:
+            assert stage in ("merged", "warned")
+            assert well not in seen_terminal
+            seen_terminal.add(well)
+    assert seen_terminal == {"A01", "A02"}
+
+
+def test_execute_plan_progress_reports_warned_for_image_only_well(tmp_path):
+    _make_dataset_with_image_only_well(
+        tmp_path / "d1", normal_wells=["A01"], image_only_well="E05", timepoints=["0h", "24h"],
+    )
+    _make_dataset_with_image_only_well(
+        tmp_path / "d2", normal_wells=["A01"], image_only_well=None, timepoints=["0h", "24h"],
+    )
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+
+    assert ("E05", "warned") in events
+    assert ("A01", "merged") in events
+
+
+def test_execute_plan_progress_defaults_to_a_no_op(tmp_path):
+    """The kwarg must stay optional -- every pre-existing call site (and all
+    the tests above it) omits it and must keep working unchanged."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    summary = apply.execute_plan(plan)
+    assert "Concatenated 1 well(s)" in summary

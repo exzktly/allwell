@@ -13,18 +13,19 @@ An at-a-glance, per-well view of a pipeline run that sits above the raw log:
 The widget is a pure view: the host (``AnalyzeTab``) drives it from the same
 progress events as the bar, via :meth:`reset`, :meth:`set_well_stage`,
 :meth:`set_active_stage`, and the headline/eta/status setters.
+
+Built on :class:`~widgets.plate_progress.PlateProgress`, which owns the
+header/headline/overall-bar/plate+legend chrome shared with
+:class:`~datasets.concatenate.dashboard.ConcatDashboard`; this class supplies
+only the stage rail and Analyze's remote/local well-colour rules.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea, QSizePolicy,
-    QToolButton, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 
-from ui.theme import ACCENT, CLR_DANGER, CLR_SUCCESS, TXT_MUT, TXT_PRI, WARN
-from widgets.well_plate_selector import WellPlateSelector
+import theme
+from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
 # Per-well completed milestones. Stages are tracked INDEPENDENTLY (not as a
 # single "furthest" rank) because the order differs local vs remote: on a remote
@@ -36,13 +37,6 @@ _LABELS = {"group": "grouped", "upload": "uploaded", "active": "processing",
            "threshold": "thresholded", "error": "failed"}
 _STAGE_KEYS = ("group", "upload", "active", "process", "threshold", "download")
 
-# Plate colours.
-_COL_PENDING = TXT_MUT          # slate — grouped/queued, awaiting processing
-_COL_PROCESSING = WARN          # amber — actively computing
-_COL_FETCHED = ACCENT           # blue — computed (remote: on server, awaiting fetch)
-_COL_COMPLETE = CLR_SUCCESS     # green — done with data local
-_COL_ERROR = CLR_DANGER         # red
-
 # Rail rows in the order they actually happen. Remote: the server thresholds
 # before the client downloads, so Download is the LAST (terminal, local) step.
 _RAIL_LOCAL = [("group", "Group"), ("process", "Process"), ("threshold", "Threshold")]
@@ -50,26 +44,10 @@ _RAIL_REMOTE = [("group", "Group"), ("upload", "Upload"), ("process", "Process")
                 ("threshold", "Threshold"), ("download", "Download")]
 
 
-def _canon(well_id: str) -> str:
-    """Normalise a well token to ``A01`` form; '' if it isn't a well."""
-    import re
-    m = re.match(r"^([A-Ha-h])(\d{1,2})$", str(well_id).strip())
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else ""
-
-
-def _dot(color: str, d: int = 11) -> QLabel:
-    lbl = QLabel()
-    lbl.setFixedSize(d, d)
-    lbl.setStyleSheet(f"background:{color}; border-radius:{d // 2}px;")
-    return lbl
-
-
-class RunDashboard(QWidget):
+class RunDashboard(PlateProgress):
     """At-a-glance per-well run view. Driven entirely by the host."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setObjectName("RunDashboard")
         self._remote = False
         self._total = 0
         self._done: dict[str, set] = {}          # stage -> set of wells completed
@@ -78,107 +56,8 @@ class RunDashboard(QWidget):
         self._fov: dict[str, tuple] = {}         # well -> (done, total) FOV-groups
         self._active_stage = ""
         self._rail: dict[str, tuple] = {}        # stage -> (dot,name,bar,count)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(12, 8, 12, 8)
-        root.setSpacing(6)
-
-        # header: title + status + collapse toggle
-        hdr = QHBoxLayout(); hdr.setSpacing(8)
-        title = QLabel("Run Progress", self)
-        title.setStyleSheet(f"color:{TXT_PRI}; font-weight:600;")
-        hdr.addWidget(title)
-        self._status = QLabel("", self); self._status.setObjectName("Muted")
-        hdr.addWidget(self._status)
-        hdr.addStretch(1)
-        self._eta = QLabel("", self); self._eta.setObjectName("Muted")
-        hdr.addWidget(self._eta)
-        self._toggle = QToolButton(self)
-        self._toggle.setText("▾"); self._toggle.setAutoRaise(True)
-        self._toggle.setCheckable(True); self._toggle.setChecked(True)
-        self._toggle.setToolTip("Collapse / expand the run progress view")
-        self._toggle.clicked.connect(self._on_toggle)
-        hdr.addWidget(self._toggle)
-        root.addLayout(hdr)
-
-        self._headline = QLabel("Idle", self)
-        self._headline.setStyleSheet(f"color:{TXT_PRI};")
-        root.addWidget(self._headline)
-
-        # The single authoritative overall-completion bar for the whole run
-        # (grouping → pipeline). Per-stage detail lives in the rail below and
-        # per-well detail in the plate; this is the one at-a-glance fraction.
-        self._bar = QProgressBar(self)
-        self._bar.setRange(0, 100); self._bar.setValue(0)
-        self._bar.setTextVisible(False)
-        root.addWidget(self._bar)
-
-        # body: rail | plate (+ per-well FOV rails beneath it) | legend
-        self._body = QWidget(self)
-        body = QHBoxLayout(self._body)
-        body.setContentsMargins(0, 4, 0, 0); body.setSpacing(14)
-
-        self._rail_host = QWidget(self._body)
-        self._rail_lay = QVBoxLayout(self._rail_host)
-        self._rail_lay.setContentsMargins(0, 0, 0, 0); self._rail_lay.setSpacing(8)
-        self._rail_host.setFixedWidth(238)
-        body.addWidget(self._rail_host)
-
-        d1 = QFrame(self._body); d1.setFrameShape(QFrame.VLine); d1.setObjectName("VRule")
-        body.addWidget(d1)
-
-        # Centre column: the plate map, with the per-well FOV·timepoint
-        # progress rails stacked directly beneath it.
-        self._center_host = QWidget(self._body)
-        center = QVBoxLayout(self._center_host)
-        center.setContentsMargins(0, 0, 0, 0); center.setSpacing(6)
-
-        self._plate = WellPlateSelector(self._center_host)
-        self._plate.setSelectionMode("passive")
-        self._plate.setDragSelectEnabled(False)
-        self._plate.setRowColumnSelectable(False)
-        self._plate.setActionsVisible(False)
-        # Paint coloured wells in the raised/lit style (not the dim recessed
-        # tint) so run states read clearly on the status map.
-        self._plate.setColoredWellsLit(True)
-        self._plate.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self._plate.setMaximumHeight(210)
-        self._plate.setWellTooltipProvider(self._well_tooltip)
-        center.addWidget(self._plate)
-
-        # Per-well FOV·timepoint sub-progress: one labelled rail per well
-        # currently computing, rebuilt by _refresh_fov. Wrapped in a height-
-        # capped scroll area so that when many wells compute at once the rails
-        # scroll instead of growing the dashboard and crushing the log below.
-        self._fov_host = QWidget()
-        self._fov_lay = QVBoxLayout(self._fov_host)
-        self._fov_lay.setContentsMargins(0, 0, 0, 0); self._fov_lay.setSpacing(3)
-        self._fov_scroll = QScrollArea(self._center_host)
-        self._fov_scroll.setWidget(self._fov_host)
-        self._fov_scroll.setWidgetResizable(True)
-        self._fov_scroll.setFrameShape(QFrame.NoFrame)
-        self._fov_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._fov_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # ~6 rails (≈15px each) before scrolling; keeps the log visible.
-        self._fov_scroll.setMaximumHeight(96)
-        self._fov_scroll.setStyleSheet("QScrollArea { background: transparent; }")
-        self._fov_host.setStyleSheet("background: transparent;")
-        center.addWidget(self._fov_scroll)
-        center.addStretch(1)
-        body.addWidget(self._center_host, 1)
-
-        d2 = QFrame(self._body); d2.setFrameShape(QFrame.VLine); d2.setObjectName("VRule")
-        body.addWidget(d2)
-
-        self._legend_host = QWidget(self._body)
-        self._legend_lay = QVBoxLayout(self._legend_host)
-        self._legend_lay.setContentsMargins(0, 0, 0, 0); self._legend_lay.setSpacing(8)
-        self._legend_host.setFixedWidth(140)
-        body.addWidget(self._legend_host)
-
-        root.addWidget(self._body)
-        self._build_rail(); self._build_legend()
+        super().__init__("Run Progress", parent)
+        self.setObjectName("RunDashboard")
 
     # ── host-facing API ─────────────────────────────────────────────────────
     def reset(self, *, remote: bool = False, total: int = 0) -> None:
@@ -203,21 +82,10 @@ class RunDashboard(QWidget):
         self._total = int(total)
         self._refresh_rail()
 
-    def set_overall_range(self, total: int) -> None:
-        """Set the denominator of the overall-completion bar."""
-        self._bar.setRange(0, max(1, int(total)))
-
-    def set_overall(self, value: int) -> None:
-        """Set the numerator of the overall-completion bar."""
-        self._bar.setValue(max(0, int(value)))
-
-    def overall_maximum(self) -> int:
-        return self._bar.maximum()
-
     def set_well_stage(self, well_id: str, stage: str) -> None:
         """Record that *well_id* reached *stage* (the main driver). Each stage is
         tracked independently — reaching one does not imply any other."""
-        w = _canon(well_id)
+        w = canon_well(well_id)
         if not w or stage not in _STAGE_KEYS and stage != "error":
             return
         if stage == "error":
@@ -239,7 +107,7 @@ class RunDashboard(QWidget):
     def set_well_fov(self, well_id: str, done: int, total: int) -> None:
         """Per-well FOV·timepoint sub-progress (one group = one FOV × timepoint)
         for the well(s) currently computing."""
-        w = _canon(well_id)
+        w = canon_well(well_id)
         if not w:
             return
         self._fov[w] = (int(done), int(total))
@@ -288,15 +156,6 @@ class RunDashboard(QWidget):
         self._active_stage = key
         self._refresh_rail()
 
-    def set_headline(self, text: str) -> None:
-        self._headline.setText(text or "")
-
-    def set_eta(self, text: str) -> None:
-        self._eta.setText(text or "")
-
-    def set_status(self, text: str) -> None:
-        self._status.setText(text or "")
-
     # ── internals ───────────────────────────────────────────────────────────
     def _has(self, stage: str, w: str) -> bool:
         return w in self._done.get(stage, ())
@@ -308,61 +167,52 @@ class RunDashboard(QWidget):
         is the *download*, not the (server-side) threshold; for a local run it is
         the threshold. Blue is "computed but the data isn't local yet"."""
         if w in self._errored:
-            return _COL_ERROR
+            return theme.Colors.danger
         if self._remote:
             if self._has("download", w):
-                return _COL_COMPLETE                      # fetched locally — done
+                return theme.Colors.success               # fetched locally — done
             if self._has("process", w) or self._has("threshold", w):
-                return _COL_FETCHED                       # computed on server, awaiting fetch
+                return theme.Colors.accent                # computed on server, awaiting fetch
             if w in self._active or self._has("upload", w):
-                return _COL_PROCESSING                    # actively uploading / computing
+                return theme.Colors.warn                   # actively uploading / computing
             if self._has("group", w):
-                return _COL_PENDING                        # grouped, queued for processing
+                return theme.Colors.text_muted             # grouped, queued for processing
             return None
         # local
         if self._has("threshold", w):
-            return _COL_COMPLETE
+            return theme.Colors.success
         if self._has("process", w):
-            return _COL_FETCHED
+            return theme.Colors.accent
         if w in self._active:
-            return _COL_PROCESSING                        # actively computing
+            return theme.Colors.warn                       # actively computing
         if self._has("group", w):
-            return _COL_PENDING                            # grouped, queued for processing
+            return theme.Colors.text_muted                 # grouped, queued for processing
         return None
 
     def _count(self, stage: str) -> int:
         return len(self._done.get(stage, ()))
 
-    @staticmethod
-    def _clear(layout) -> None:
-        while layout.count():
-            it = layout.takeAt(0)
-            w = it.widget()
-            if w is not None:
-                w.setParent(None)        # un-render immediately
-                w.deleteLater()
-
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
         self._rail = {}
         head = QLabel("Stages", self._rail_host)
-        head.setStyleSheet(f"color:{TXT_PRI}; font-weight:600;")
+        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._rail_lay.addWidget(head)
         rows = _RAIL_REMOTE if self._remote else _RAIL_LOCAL
         for key, label in rows:
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(7)
-            dot = _dot(TXT_MUT)
+            dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
             nm = QLabel(label, row_w); nm.setFixedWidth(74)
-            nm.setStyleSheet(f"color:{TXT_PRI};")
+            nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
             bar.setTextVisible(False); bar.setFixedSize(86, 6)
             row.addWidget(bar)
             cnt = QLabel("0/0", row_w); cnt.setFixedWidth(40)
-            cnt.setStyleSheet(f"color:{TXT_MUT};")
+            cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
             row.addWidget(cnt)
             row.addStretch(1)
             self._rail_lay.addWidget(row_w)
@@ -382,31 +232,32 @@ class RunDashboard(QWidget):
             cnt.setText(f"{done}/{self._total}")
             active = key == self._active_stage
             complete = self._total and done >= self._total
-            color = CLR_SUCCESS if complete else (WARN if active else
-                                                  (ACCENT if done else TXT_MUT))
+            color = (theme.Colors.success if complete else
+                     (theme.Colors.warn if active else
+                      (theme.Colors.accent if done else theme.Colors.text_muted)))
             dot.setStyleSheet(f"background:{color}; border-radius:5px;")
-            nm.setStyleSheet(f"color:{TXT_PRI};" + ("font-weight:700;" if active else ""))
+            nm.setStyleSheet(f"color:{theme.Colors.text_primary};" + ("font-weight:700;" if active else ""))
 
     def _build_legend(self) -> None:
         self._clear(self._legend_lay)
         head = QLabel("Wells", self._legend_host)
-        head.setStyleSheet(f"color:{TXT_PRI}; font-weight:600;")
+        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._legend_lay.addWidget(head)
-        items = [(TXT_MUT, "pending"), (WARN, "processing")]
-        items.append((ACCENT, "on server" if self._remote else "processed"))
-        items.append((CLR_SUCCESS, "downloaded" if self._remote else "complete"))
-        items.append((CLR_DANGER, "failed"))
+        items = [(theme.Colors.text_muted, "pending"), (theme.Colors.warn, "processing")]
+        items.append((theme.Colors.accent, "on server" if self._remote else "processed"))
+        items.append((theme.Colors.success, "downloaded" if self._remote else "complete"))
+        items.append((theme.Colors.danger, "failed"))
         for color, txt in items:
             row_w = QWidget(self._legend_host)
             r = QHBoxLayout(row_w); r.setContentsMargins(0, 0, 0, 0); r.setSpacing(7)
-            r.addWidget(_dot(color))
-            t = QLabel(txt, row_w); t.setStyleSheet(f"color:{TXT_PRI};")
+            r.addWidget(status_dot(color))
+            t = QLabel(txt, row_w); t.setStyleSheet(f"color:{theme.Colors.text_primary};")
             r.addWidget(t); r.addStretch(1)
             self._legend_lay.addWidget(row_w)
         self._legend_lay.addStretch(1)
 
     def _well_tooltip(self, well_id: str) -> str:
-        w = _canon(well_id)
+        w = canon_well(well_id)
         if w in self._errored:
             state = "failed"
         elif self._remote and self._has("download", w):
@@ -424,8 +275,3 @@ class RunDashboard(QWidget):
         else:
             state = "pending"
         return f"{w or well_id}: {state}"
-
-    def _on_toggle(self) -> None:
-        show = self._toggle.isChecked()
-        self._body.setVisible(show)
-        self._toggle.setText("▾" if show else "▸")

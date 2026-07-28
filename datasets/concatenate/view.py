@@ -1,11 +1,10 @@
 """Qt builder for the Concatenate Datasets page (the main viewer area).
 
-Three folder fields — dataset 1 (the base / earlier timepoints), dataset 2 (the
-one appended after), and a fresh destination — over a status window that streams
-the worker's progress. The folder-picker rows reuse the Analyze pane's pattern
-(read-only ``QLineEdit`` + a "Browse…" button opening
-``QFileDialog.getExistingDirectory`` with ``DontResolveSymlinks``; see
-``analyze_tab_form._build_folders_section``).
+One equation-style input row — dataset 1 (the base / earlier timepoints) +
+dataset 2 (the one appended after) = a fresh destination — over an
+Analyze-style status view: a live per-well :class:`~datasets.concatenate.dashboard.ConcatDashboard`
+with the raw text log demoted to a collapsible "Show raw log" checkbox
+(mirrors ``analyze_tab_form.py``'s ``_build_log``/``_on_toggle_raw_log``).
 
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInReviewRequested``); the worker wiring lives in
@@ -21,6 +20,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -29,11 +29,20 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 import theme
+from widgets.icons import make_icon
+from datasets.concatenate.concatenate_compute import (
+    DatasetPaths,
+    destination_has_marker,
+    destination_has_unrecognized_content,
+    destination_is_complete_dataset,
+)
+from datasets.concatenate.dashboard import ConcatDashboard
 
 
 def _hrule(parent: QWidget) -> QFrame:
@@ -52,8 +61,26 @@ def _is_dataset(root: Path) -> str:
     return ""
 
 
+def _is_destination(root: Path) -> str:
+    """Return "" if *root* is usable as a destination, else a short reason.
+
+    Only the checks that don't need the other two fields — the "must differ
+    from both datasets" rule is cross-field and handled separately by
+    :meth:`ConcatenatePage._revalidate_cross`.
+    """
+    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    if destination_is_complete_dataset(dest):
+        return "Already holds a finished dataset — choose an empty folder."
+    if destination_has_unrecognized_content(dest) and not destination_has_marker(dest):
+        return "Already has unrelated files — choose an empty folder."
+    return ""
+
+
 class _FolderField(QWidget):
-    """Label + read-only path box + Browse button, with an optional validator."""
+    """Caption + a compact path box (basename, full path on hover) + an
+    icon-only Browse button, with an optional validator and its own inline
+    hint — so three of these can sit on one equation row while each still
+    reports which field is wrong."""
 
     changed = Signal()
 
@@ -68,6 +95,8 @@ class _FolderField(QWidget):
         super().__init__(parent)
         self._validator = validator
         self._prompt = prompt
+        self._path = ""
+        self.setMinimumWidth(180)
 
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)
@@ -85,48 +114,54 @@ class _FolderField(QWidget):
         self._edit = QLineEdit(row)
         self._edit.setReadOnly(True)
         self._edit.setPlaceholderText("(not set)")
-        self._edit.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row_layout.addWidget(self._edit, 1)
-        browse = QPushButton("Browse…", row)
-        browse.setProperty("variant", "secondary")
+        browse = QToolButton(row)
+        browse.setIcon(make_icon("folder-open"))
+        browse.setAutoRaise(True)
+        browse.setToolTip("Browse…")
         browse.clicked.connect(self._browse)
         row_layout.addWidget(browse)
         col.addWidget(row)
 
         self._hint = QLabel("", self)
-        self._hint.setObjectName("Muted")
+        self._hint.setObjectName("Danger")
         self._hint.setWordWrap(True)
+        self._hint.setVisible(False)
         col.addWidget(self._hint)
 
     def _browse(self) -> None:
         chosen = QFileDialog.getExistingDirectory(
             self,
             self._prompt,
-            self._edit.text() or "",
+            self._path or "",
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
         if chosen:
-            self._edit.setText(chosen)
-            self._revalidate()
+            self._set_path(chosen)
             self.changed.emit()
 
+    def _set_path(self, path: str) -> None:
+        self._path = path
+        self._edit.setText(Path(path).name or path)
+        self._edit.setToolTip(path)
+        self._revalidate()
+
+    def _validity_message(self) -> str:
+        if not self._path or self._validator is None:
+            return ""
+        return self._validator(Path(self._path))
+
     def _revalidate(self) -> None:
-        text = self._edit.text().strip()
-        if not text or self._validator is None:
-            self._hint.setText("")
-            return
-        self._hint.setText(self._validator(Path(text)))
+        message = self._validity_message()
+        self._hint.setText(message)
+        self._hint.setVisible(bool(message))
 
     def path(self) -> str:
-        return self._edit.text().strip()
+        return self._path
 
     def is_valid(self) -> bool:
-        text = self.path()
-        if not text:
-            return False
-        if self._validator is None:
-            return True
-        return self._validator(Path(text)) == ""
+        return bool(self._path) and self._validity_message() == ""
 
 
 class ConcatenatePage(QWidget):
@@ -146,9 +181,6 @@ class ConcatenatePage(QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
-        # Title + full-width rule, matching the "title, then HRule, then body"
-        # rhythm every Analyze form section and the "Pipeline Output" log
-        # header use (analyze_tab_form._section / _build_log).
         heading = QLabel("Concatenate datasets", self)
         heading.setObjectName("Heading")
         outer.addWidget(heading)
@@ -166,23 +198,7 @@ class ConcatenatePage(QWidget):
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
-        self._ds1_field = _FolderField(
-            "Dataset 1 (base — earlier timepoints)",
-            prompt="Select dataset 1 folder",
-            validator=_is_dataset,
-        )
-        self._ds2_field = _FolderField(
-            "Dataset 2 (appended — later timepoints)",
-            prompt="Select dataset 2 folder",
-            validator=_is_dataset,
-        )
-        self._dest_field = _FolderField(
-            "Destination (a new, empty folder)",
-            prompt="Select destination folder",
-        )
-        for field in (self._ds1_field, self._ds2_field, self._dest_field):
-            field.changed.connect(self._refresh_run_enabled)
-            outer.addWidget(field)
+        self._build_equation_row(outer)
 
         self._run_btn = QPushButton("▶  Concatenate", self)
         self._run_btn.setProperty("variant", "primary")
@@ -190,29 +206,95 @@ class ConcatenatePage(QWidget):
         self._run_btn.clicked.connect(self.runRequested)
         outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
 
-        # Status header row + rule, matching "Pipeline Output"'s header (a
-        # left-aligned label in a 12/6/12/6-margin row, then a full-width
-        # HRule) — see analyze_tab_form._build_log.
-        status_hdr = QWidget(self)
-        status_hl = QHBoxLayout(status_hdr)
-        status_hl.setContentsMargins(0, 0, 0, 0)
-        status_hl.addWidget(QLabel("Status", status_hdr))
-        status_hl.addStretch(1)
-        outer.addWidget(status_hdr)
-        outer.addWidget(_hrule(self))
-
-        self._status = QPlainTextEdit(self)
-        self._status.setObjectName("ConcatStatus")
-        self._status.setReadOnly(True)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Status will appear here.")
-        outer.addWidget(self._status, 1)
+        self._build_status_section(outer)
 
         self._open_btn = QPushButton("Open merged dataset in Review", self)
         self._open_btn.setProperty("variant", "secondary")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
+
+    def _build_equation_row(self, outer: QVBoxLayout) -> None:
+        row = QWidget(self)
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(theme.Spacing.sm)
+
+        self._ds1_field = _FolderField(
+            "Dataset 1 (base)", prompt="Select dataset 1 folder", validator=_is_dataset)
+        self._ds2_field = _FolderField(
+            "Dataset 2 (appended)", prompt="Select dataset 2 folder", validator=_is_dataset)
+        self._dest_field = _FolderField(
+            "Destination", prompt="Select destination folder", validator=_is_destination)
+
+        def _operator(text: str) -> QLabel:
+            lbl = QLabel(text, row)
+            lbl.setObjectName("Heading")
+            lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
+            lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+            lbl.setFixedWidth(20)
+            return lbl
+
+        hl.addWidget(self._ds1_field, 1)
+        hl.addWidget(_operator("+"))
+        hl.addWidget(self._ds2_field, 1)
+        hl.addWidget(_operator("="))
+        hl.addWidget(self._dest_field, 1)
+        outer.addWidget(row)
+
+        self._cross_hint = QLabel("", self)
+        self._cross_hint.setObjectName("Danger")
+        self._cross_hint.setWordWrap(True)
+        self._cross_hint.setVisible(False)
+        outer.addWidget(self._cross_hint)
+
+        for field in (self._ds1_field, self._ds2_field, self._dest_field):
+            field.changed.connect(self._revalidate_cross)
+
+    def _build_status_section(self, outer: QVBoxLayout) -> None:
+        hdr = QWidget(self)
+        hl = QHBoxLayout(hdr)
+        hl.setContentsMargins(12, 6, 12, 6)
+        hl.addWidget(QLabel("Merge Output", hdr))
+        hl.addStretch(1)
+        # The dashboard below IS the summary view; the verbose text log is off
+        # by default and revealed on demand, matching Analyze's own pattern
+        # (analyze_tab_form.py::_build_log / _on_toggle_raw_log).
+        self._raw_log_cb = QCheckBox("Show raw log", hdr)
+        self._raw_log_cb.setToolTip("Show the full per-file merge log beneath the progress dashboard")
+        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
+        hl.addWidget(self._raw_log_cb)
+        clear_btn = QPushButton("Clear", hdr)
+        clear_btn.setProperty("variant", "secondary")
+        clear_btn.clicked.connect(self.clear_log)
+        hl.addWidget(clear_btn)
+        outer.addWidget(hdr)
+        outer.addWidget(_hrule(self))
+
+        self.dashboard = ConcatDashboard(self)
+        outer.addWidget(self.dashboard, 1)
+
+        self._log_sep = _hrule(self)
+        outer.addWidget(self._log_sep)
+
+        self._status = QPlainTextEdit(self)
+        self._status.setObjectName("ConcatStatus")
+        self._status.setReadOnly(True)
+        # Cap the document so a long-running merge can't grow it unbounded —
+        # matches Analyze's raw log (analyze_tab_form.py:1241).
+        self._status.document().setMaximumBlockCount(10000)
+        self._status.setFont(QFont("monospace"))
+        self._status.setPlaceholderText("Status will appear here.")
+        outer.addWidget(self._status, 1)
+
+        self._on_toggle_raw_log(False)
+
+    def _on_toggle_raw_log(self, show: bool) -> None:
+        """Show/hide the verbose text log. The progress dashboard stays
+        visible either way; this only toggles the raw per-file stream."""
+        for w in (getattr(self, "_status", None), getattr(self, "_log_sep", None)):
+            if w is not None:
+                w.setVisible(bool(show))
 
     # ── public API used by the controller ────────────────────────────────────
     def dataset1_path(self) -> str:
@@ -223,6 +305,19 @@ class ConcatenatePage(QWidget):
 
     def destination_path(self) -> str:
         return self._dest_field.path()
+
+    def revalidate_fields(self) -> None:
+        """Re-run every field's validator against current disk state.
+
+        A run changes what's on disk under the destination path (and the
+        button's enabled state already reflects that on the next check), so
+        call this once a run finishes to refresh the inline hints too —
+        otherwise a destination that just became "already holds a finished
+        dataset" silently disables Concatenate without saying why.
+        """
+        for field in (self._ds1_field, self._ds2_field, self._dest_field):
+            field._revalidate()
+        self._revalidate_cross()
 
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
@@ -245,8 +340,21 @@ class ConcatenatePage(QWidget):
         return (
             self._ds1_field.is_valid()
             and self._ds2_field.is_valid()
-            and bool(self._dest_field.path())
+            and self._dest_field.is_valid()
+            and not self._cross_message()
         )
+
+    def _cross_message(self) -> str:
+        d1, d2, dest = self._ds1_field.path(), self._ds2_field.path(), self._dest_field.path()
+        if dest and (dest == d1 or dest == d2):
+            return "Destination must be a different folder from both datasets."
+        return ""
+
+    def _revalidate_cross(self) -> None:
+        message = self._cross_message()
+        self._cross_hint.setText(message)
+        self._cross_hint.setVisible(bool(message))
+        self._refresh_run_enabled()
 
     def _refresh_run_enabled(self) -> None:
         self._run_btn.setEnabled(self._inputs_ready())

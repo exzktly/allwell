@@ -70,6 +70,14 @@ class PlaygroundState:
     display_arr: object = None          # the array currently shown (raw or corrected)
     image_cache: dict = field(default_factory=dict)
     base_rgb: object = None             # last rendered RGB (for zoom/pan re-blit)
+    # Memoized correct_single_frame() result + the identity key it was computed
+    # from, so playground_on_change can skip re-running the expensive pipeline
+    # (~1.8s+ per call at 1024², per pipeline/background.py's own docstring) when
+    # nothing that affects the output has actually changed -- covers a redundant
+    # re-render on tab (re)activation and toggling "Source" back and forth.
+    # Single slot: this tab shows one frame at a time.
+    last_correction_key: tuple | None = None
+    last_corrected_arr: object = None
 
     def clear_caches(self) -> None:
         """Drop per-frame caches + reference fields (call on dataset swap)."""
@@ -81,3 +89,5 @@ class PlaygroundState:
         self.ff_field_by_chan.clear()
         self.bg_field_by_chan.clear()
         self.model_well = None
+        self.last_correction_key = None
+        self.last_corrected_arr = None

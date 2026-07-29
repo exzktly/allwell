@@ -565,7 +565,7 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 │   …          │  │            (plot canvas)                   │  │
 │   …          │  │                                            │  │
 │   …          │  └────────────────────────────────────────────┘  │
-│              │         Export CSV  Copy SVG  Save  Properties   │
+│              │              Export ▾            Properties      │
 │              │                                                  │
 │              │                                                  │
 │              │                                                  │
@@ -642,20 +642,26 @@ tabs and is what every plot / aggregate / export consumes.
   well picker, and both panes refresh on a selection or channel change. It
   needs a second tab to show something; a tab can't be split against itself.
 
-#### Figure actions — Export CSV · Copy SVG · Save · Properties
+#### Figure actions — the Export dropdown · Properties
 
-Every plot tab carries the same action buttons on its controls row:
+Every plot tab (Bar Plot, Line Graphs, Scatter, Distribution, Heat Map,
+Spatial, Multivariate) carries the same **Export ▾** dropdown on its controls
+row, holding four actions:
 
-- **Export CSV** — writes the underlying data behind the current plot.
+- **Export CSV…** (label varies by tab) — writes the underlying data behind
+  the current plot.
 - **Copy SVG** — puts a vector copy of the figure on the clipboard (paste into
   Illustrator / Inkscape / Keynote / Slides). On macOS the clipboard is written
   natively (PDF + SVG) so Illustrator pastes editable vector; this needs
   `pyobjc-framework-Cocoa` (see `requirements.txt`).
-- **Save figure** — saves to disk; the file dialog picks the format from the
+- **Save Figure…** — saves to disk; the file dialog picks the format from the
   extension (`.svg` / `.pdf` / `.eps` / `.png`).
-- **Save to Saved Plots** — hover a plot panel's top-right corner and click the
-  **save** button to send that panel, plus the exact parameters that produced
-  it, to the per-dataset [Saved Plots](#saved-plots) gallery.
+- **Save to Saved Plots** — sends the whole figure, plus the exact parameters
+  that produced it, to the per-dataset [Saved Plots](#saved-plots) gallery.
+  The same capture is also reachable by hovering a plot panel's top-right
+  corner and clicking the floating **save** button, which saves just that one
+  panel rather than the whole figure — handy on a multi-panel tab (Bar Plot,
+  Line Graphs) when you only want one of the stacked subplots.
 - **Properties** — opens a slide-out sidebar that styles the active figure:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale, layout engine, and an
@@ -1223,6 +1229,15 @@ channel for every well).
   grid on screen. Because the axis labels already identify every cell, the per-cell
   titles are off — switch **Show titles** on in the Export settings dialog if you want
   them repeated above each image as well.
+- **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
+  **Standard**, **High**), picked either from the Export dropdown's quick-pick submenu
+  or the Export settings dialog. Save to Saved Plots pre-shrinks each cell and caps the
+  assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
+  always render full resolution), so a large grid saves faster at the cost of per-cell
+  detail; raise it to **High** when the saved image needs to hold up in a full-page PDF
+  report. Save to Saved Plots also reuses whatever the last **Generate** already
+  decoded, and warms anything it hasn't with the same parallel prefetch Generate uses —
+  saving right after generating decodes nothing twice.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
   one is set under Sample Definitions → Well Labels.
@@ -1421,15 +1436,26 @@ onto **dataset 1**, shifting dataset 2's timepoints so they carry on after datas
 
 How it works:
 
-1. Pick three folders:
-   - **Dataset 1** — the base (earlier timepoints). A dataset folder is one that
-     contains both an `in/` and an `out/` folder.
-   - **Dataset 2** — the session that comes after (its timepoints get shifted).
-   - **Destination** — a new, empty folder. Both originals are left untouched.
-2. Press **Concatenate**. Progress streams into the status window below the
-   folder fields.
+1. Fill in the one-line **Dataset 1 + Dataset 2 = Destination** row: click each
+   folder icon to pick a folder, and hover a filled-in field to see its full
+   path (the box itself shows just the folder name). A field turns up its own
+   hint below it if the folder isn't usable — **Dataset 1**/**Dataset 2** must
+   each contain both an `in/` and an `out/` folder; **Destination** must be a
+   new, empty folder, different from both datasets. Both originals are left
+   untouched either way.
+2. Press **Concatenate**. A live plate map fills in below, coloured per well as
+   the merge progresses (grey → amber "merging" → green "merged", or blue if a
+   well's images survived without a matching measurements file on one side),
+   alongside a phase rail (Validate → Merge → Verify → Finalize) and an overall
+   progress bar. The full text log is still there if you want it — tick
+   **Show raw log** to reveal it below the plate.
 3. On success, click **Open merged dataset in Review** to load the result
    straight into Review.
+
+If something goes wrong — even before any well is touched, like an
+incompatible schema between the two datasets — the headline above the plate
+turns red with the reason, so the failure is visible whether or not the raw
+log is showing.
 
 What it does to the data:
 
@@ -1461,7 +1487,7 @@ What it does to the data:
   (it segmented zero cells) is called out by name in the status window rather
   than silently skipped.
 
-It refuses (with an explanation in the status window) when the two datasets
+It refuses (with an explanation on the dashboard headline) when the two datasets
 weren't analysed the same way (different filename schema, channel positions, or
 segmentation method), when a timepoint can't be read as a time, when dataset 1
 has only a single timepoint (so there's no interval to continue), or when a

@@ -12,6 +12,7 @@ import logging
 
 import numpy as np
 
+import theme
 from well_viewer.core.plot_style import apply_ax_style, style_legend, tokens_for
 
 _logger = logging.getLogger("well_viewer")
@@ -104,7 +105,7 @@ def _point_colors(data, color_by: str, clusters=None):
         if lbl not in seen:
             seen.add(lbl)
             order.append(lbl)
-    default = "#4C78A8"
+    default = theme.Colors.accent
     colors = [gcolors.get(lbl, default) for lbl in labels.tolist()]
     legend = [(str(lbl), gcolors.get(lbl, default)) for lbl in order]
     return colors, legend

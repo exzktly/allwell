@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ui.theme import get_color
+import theme
 from well_viewer.core.safe import swallowed
 
 
@@ -36,27 +36,27 @@ def _cell_gating_plot_cdf(ctx) -> None:
         fig = ctx.runtime.cell_gating.figure
         if fig is not None:
             fig.clf()
-            fig.set_facecolor(get_color("BG_APP"))
-            ax = fig.add_subplot(111, facecolor=get_color("BG_PANEL"))
+            fig.set_facecolor(theme.Colors.surface)
+            ax = fig.add_subplot(111, facecolor=theme.Colors.panel)
             ax.set_axis_off()
             ax.text(
                 0.5, 0.5,
                 "No dataset loaded.\nOpen a results folder to view cell-gating "
                 "distributions.",
                 transform=ax.transAxes, ha="center", va="center",
-                color=get_color("TXT_MUT"), fontsize=11, wrap=True,
+                color=theme.Colors.text_muted, fontsize=11, wrap=True,
             )
             canvas = ctx.runtime.cell_gating.canvas
             if canvas is not None:
                 canvas.draw_idle()
         return
 
-    bg_app = get_color("BG_APP")
-    bg_panel = get_color("BG_PANEL")
-    txt_pri = get_color("TXT_PRI")
-    txt_mut = get_color("TXT_MUT")
-    accent = get_color("ACCENT")
-    warn = get_color("WARN")
+    bg_app = theme.Colors.surface
+    bg_panel = theme.Colors.panel
+    txt_pri = theme.Colors.text_primary
+    txt_mut = theme.Colors.text_muted
+    accent = theme.Colors.accent
+    warn = theme.Colors.warn
 
     fig = ctx.runtime.cell_gating.figure
     fig.clf()
@@ -96,16 +96,18 @@ def _cell_gating_plot_cdf(ctx) -> None:
             swallowed()  # was: pass (silent except)
         _focus_cdf_xaxis(axes[0], areas)
 
-    colors = [accent, "#FF9500", "#FF3B30", "#34C759"]
+    colors = theme.WELL_COLORS_TUPLE
     next_idx = 1
     for channel, values in sorted(ctx.runtime.cell_gating.fluor_data.items()):
         if next_idx >= len(axes):
             break
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
+        next_idx += 1
         vals = np.array(sorted(values))
         if vals.size == 0:
-            continue  # empty channel → no CDF (audit S8; avoids 0/0)
+            continue  # empty channel → no CDF, but the axes slot stays reserved
+                       # (audit S8; avoids 0/0) so later channels don't inherit it
         cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
@@ -123,16 +125,17 @@ def _cell_gating_plot_cdf(ctx) -> None:
         else:
             swallowed("cell gating CDF: no fluor-gate line (channel not in slice)")
         _focus_cdf_xaxis(ax, vals)
-        next_idx += 1
 
     for ratio_label, values in sorted(ratio_data.items()):
         if next_idx >= len(axes):
             break
         ax = axes[next_idx]
         color = colors[next_idx % len(colors)]
+        next_idx += 1
         vals = np.array(sorted(values))
         if vals.size == 0:
-            continue  # empty channel → no CDF (audit S8; avoids 0/0)
+            continue  # empty ratio → no CDF, but the axes slot stays reserved
+                      # (audit S8; avoids 0/0) so later ratios don't inherit it
         cdf = np.arange(1, len(vals) + 1) / len(vals)
         ax.plot(vals, cdf, linewidth=2, color=color, alpha=0.8)
         ax.fill_between(vals, cdf, alpha=0.2, color=color)
@@ -143,7 +146,6 @@ def _cell_gating_plot_cdf(ctx) -> None:
         ax.grid(True, alpha=0.2, color=txt_mut)
         ax.tick_params(colors=txt_mut, labelsize=8)
         _focus_cdf_xaxis(ax, vals)
-        next_idx += 1
 
     ctx.runtime.cell_gating.ax = axes[0]
 

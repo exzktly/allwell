@@ -7,7 +7,7 @@ from well_viewer.core.channel_state_controller import on_metric_selected
 from well_viewer.core.channel_state_controller import on_plot_channel_selected
 
 from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure,
+    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
 )
 
 from PySide6.QtWidgets import (
@@ -16,8 +16,8 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher)
+    add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
+    make_band_controls, make_plot_with_right_dock, make_plot_view_switcher)
 from functools import partial
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.export.service import export_plot_data
@@ -103,19 +103,14 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     cl.addStretch(1)
 
-    # IconButton (QToolButton subclass) matches the Sample Definitions
-    # top toolbar style — compact, auto-raise icon-only buttons rather
-    # than the pill-style btn_primary / btn_secondary used pre-v2.
-    from widgets.icon_button import IconButton as _IconButton
-    _export_btn = _IconButton("download", line_ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_plot_data(ctx))
-    cl.addWidget(_export_btn)
-    _copy_btn = _IconButton("copy", line_ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
-    cl.addWidget(_copy_btn)
-    _save_btn = _IconButton("save", line_ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
-    cl.addWidget(_save_btn)
+    export_btn, export_menu = make_action_menu_button("Export", line_ctrl, tooltip="Export this plot")
+    add_menu_action(export_menu, "Export CSV…", lambda: export_plot_data(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    export_menu.addSeparator()
+    add_menu_action(export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_line_card"))
+    cl.addWidget(export_btn)
     # Pin the figure-properties button to the right edge of the plot area (where
     # the export-style dock slides out). The FlowLayout control row can't
     # right-align it, so wrap the row via the shared helper.

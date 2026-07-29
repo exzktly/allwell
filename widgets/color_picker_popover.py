@@ -210,9 +210,9 @@ class ColorPickerPopover(Popover):
     colorCommitted = Signal(QColor)    # on Return / recent-click / dismiss
 
     def __init__(self, parent: QWidget | None = None, *,
-                 color="#6B8AFD", recents=None) -> None:
+                 color=theme.Colors.accent, recents=None) -> None:
         super().__init__(parent)
-        self._color = QColor(color) if QColor(color).isValid() else QColor("#6B8AFD")
+        self._color = QColor(color) if QColor(color).isValid() else QColor(theme.Colors.accent)
         self._committed = QColor(self._color)
         self._recents: list[QColor] = [QColor(c) for c in (recents or []) if QColor(c).isValid()][:8]
         self._updating = False

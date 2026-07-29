@@ -7,14 +7,14 @@ When the axes belongs to a figure inside a ``widgets.PlotCard``, the styling
 honours the card's active ``plotTheme()`` — ``"publication"`` (white bg,
 ``theme.CPub`` ink — the canonical / exported state) or ``"screen"`` (the dark
 token set, a per-card live preview). When the axes is on a bare figure (no
-card), falls back to the legacy ``ui.theme`` constants (publication-style).
+card), falls back directly to ``theme.CPub`` (publication-style).
 """
 
 from __future__ import annotations
 
 from collections.abc import MutableMapping
 
-from ui.theme import PLOT_BG, PLOT_GRD, PLOT_SPN, PLOT_TXT, TXT_PRI
+import theme
 from well_viewer.core.safe import swallowed
 
 _PLOT_FONT_REGISTERED = False  # matplotlib font-manager registration runs once
@@ -56,7 +56,7 @@ def tokens_for(ax) -> tuple:
     """
     fig = getattr(ax, "figure", None)
     if fig is None:
-        return PLOT_BG, TXT_PRI, PLOT_TXT, PLOT_GRD, PLOT_SPN
+        return theme.CPub.bg, theme.Colors.text_primary, theme.CPub.text, theme.CPub.grid, theme.CPub.spine
 
     mode = None
     card = getattr(fig, "_plot_card", None)
@@ -78,7 +78,7 @@ def tokens_for(ax) -> tuple:
         from widgets.plot_card import plot_tokens
         return plot_tokens(mode)
     except Exception:
-        return PLOT_BG, TXT_PRI, PLOT_TXT, PLOT_GRD, PLOT_SPN
+        return theme.CPub.bg, theme.Colors.text_primary, theme.CPub.text, theme.CPub.grid, theme.CPub.spine
 
 
 # Internal alias (was the original name).
@@ -417,6 +417,20 @@ def axis_scoped_value(prefs, idx, key, default=None):
     return v
 
 
+def _apply_axis_limits(lo, hi, *, setter) -> None:
+    """Apply a user-entered axis-limit override, nudging apart an equal
+    lo/hi so matplotlib doesn't emit "identical low and high ylims" and
+    silently expand on its own terms. A typed override that matches on both
+    fields is a normal thing to do (e.g. locking an axis to a single value)
+    so expand around it symmetrically rather than let matplotlib's own
+    asymmetric auto-expansion decide.
+    """
+    if lo is not None and hi is not None and lo == hi:
+        eps = abs(lo) * 1e-3 or 1e-3
+        lo, hi = lo - eps, hi + eps
+    setter(lo, hi)
+
+
 def apply_export_style_prefs(fig, prefs: dict) -> None:
     for ax in fig.axes:
         if not hasattr(ax, "_fixed_axes_position"):
@@ -708,10 +722,12 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
         yhi = _axis_limit(idx, "y_lim_max")
         if xlo is not None or xhi is not None:
             cur = ax.get_xlim()
-            ax.set_xlim(xlo if xlo is not None else cur[0], xhi if xhi is not None else cur[1])
+            _apply_axis_limits(xlo if xlo is not None else cur[0],
+                                xhi if xhi is not None else cur[1], setter=ax.set_xlim)
         if ylo is not None or yhi is not None:
             cur = ax.get_ylim()
-            ax.set_ylim(ylo if ylo is not None else cur[0], yhi if yhi is not None else cur[1])
+            _apply_axis_limits(ylo if ylo is not None else cur[0],
+                                yhi if yhi is not None else cur[1], setter=ax.set_ylim)
 
         if target_idx is None or idx == target_idx:
             # ``_aw_force_xlog``/``_aw_force_ylog`` let an axis pin its own log

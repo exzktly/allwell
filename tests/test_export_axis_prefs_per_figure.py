@@ -6,6 +6,7 @@ leaked onto every other tab because they shared the single app-wide
 """
 from __future__ import annotations
 
+import warnings
 from types import SimpleNamespace
 
 import matplotlib
@@ -122,6 +123,32 @@ def test_per_axis_limits_apply_to_each_panel():
     assert fig.axes[1].get_ylim() == (0.2, 0.8)    # Fraction panel keeps its own limit
     # Panel 3 has no stored limit and is not the target → not pinned to panel 1's.
     assert fig.axes[2].get_ylim() != (0.0, 10.0)
+
+
+def test_equal_axis_limits_expand_instead_of_warning():
+    """Typing the same value into both min and max of the Limits & Scale
+    fields (locking an axis to one value) must not raise matplotlib's
+    "identical low and high ylims" UserWarning, and must not leave the axis
+    degenerate. Regression: apply_export_style_prefs passed lo == hi straight
+    to set_xlim/set_ylim with no guard."""
+    app = _app()
+    fig = app._bar_fig
+    fig.add_subplot(1, 1, 1).plot([0, 1], [0, 1])
+    prefs = PS.figure_prefs(app._ctx, fig)
+    prefs["y_lim_min"] = "5"
+    prefs["y_lim_max"] = "5"
+    prefs["x_lim_min"] = "2"
+    prefs["x_lim_max"] = "2"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        PS.apply_export_style_to_current(app._ctx, fig)
+    assert not any("identical low and high" in str(w.message) for w in caught)
+
+    ylo, yhi = fig.axes[0].get_ylim()
+    assert ylo < 5 < yhi
+    xlo, xhi = fig.axes[0].get_xlim()
+    assert xlo < 2 < xhi
 
 
 def test_per_axis_style_controls_apply_to_each_panel():

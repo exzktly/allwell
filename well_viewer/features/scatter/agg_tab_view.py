@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure,
+    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
 )
 
 from PySide6.QtWidgets import (
@@ -120,6 +120,9 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     add_menu_action(_export_menu, "Export CSV…", lambda: export_scatter_agg_data(ctx))
     add_menu_action(_export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
     add_menu_action(_export_menu, "Save figure…", lambda: save_active_card_figure(ctx))
+    _export_menu.addSeparator()
+    add_menu_action(_export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_scatter_agg_card"))
     cl.addWidget(_export_btn)
     # Figure-properties button, pinned to the right edge of the plot area (where
     # the export-style dock slides out) — matching every other plot tab. The

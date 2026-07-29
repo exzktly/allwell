@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QInputDialog, QLabel, QLineEdit, QPushButton,
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
+import theme
 from well_viewer.data.data_loading import parse_timepoint_hours
 from well_viewer.core.safe import swallowed
 
@@ -639,8 +640,8 @@ def _themed_nav_toolbar_class():
             pm = QPixmap(filename)
             pm.setDevicePixelRatio(self.devicePixelRatioF() or 1)
             try:
-                from ui.theme import get_color
-                icon_color = QColor(get_color("TXT_PRI"))
+                import theme
+                icon_color = QColor(theme.Colors.text_primary)
             except Exception:
                 icon_color = self.palette().color(self.foregroundRole())
             mask = pm.createMaskFromColor(QColor("black"), Qt.MaskMode.MaskOutColor)
@@ -998,12 +999,13 @@ def safe_int_or_none(value: object) -> int | None:
 
 
 def mute_color(hex_color: str, factor: float = 0.5) -> str:
-    """Blend *hex_color* 50% toward a neutral mid-grey (#94A3B8).
+    """Blend *hex_color* 50% toward ``theme.Colors.text_muted``.
 
     Used to dim hidden rep-sets on the plate map so they are visually
     distinct from visible ones while still showing their hue.
     """
-    grey = (0x94, 0xA3, 0xB8)
+    mh = theme.Colors.text_muted.lstrip("#")
+    grey = (int(mh[0:2], 16), int(mh[2:4], 16), int(mh[4:6], 16))
     h = hex_color.lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     mr = int(r + (grey[0] - r) * factor)

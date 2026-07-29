@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from well_viewer.core.safe import swallowed
+from well_viewer.features.image_browser.image_table.builder_view import builder_refresh
 
 _logger = logging.getLogger("well_viewer")
 
@@ -242,3 +243,18 @@ def apply_image_table(ctx, state: dict) -> None:
     _restore_display(ctx, state)
     # Intentionally NOT calling image_table_generate here — restore only pre-fills
     # the dropdowns; the user clicks Generate to load images off disk.
+
+    # Redraw the shelf (rows/cols trees, Fixed panel, tray) so it visually
+    # reflects what was just restored instead of the stale spec it was built
+    # with before this restore ran. Safe pre-build: no-ops if the shelf's body
+    # handles don't exist yet.
+    try:
+        builder_refresh(ctx)
+    except Exception:
+        swallowed()
+
+    # Tell the on_dataset_loaded reset hook (registry._loaded_image_table) that
+    # a saved grid was just correctly restored this load, so it must not wipe
+    # it back to fresh-tab defaults. Reset to False once per dataset load in
+    # load_controller.load_directory.
+    ctx.runtime.image_table.restored_this_load = True

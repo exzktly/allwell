@@ -22,6 +22,8 @@ class ConcatenateWorker(QThread):
     """Plans and executes a concatenation, streaming progress to the UI."""
 
     logLine = Signal(str)          # one line for the status window
+    wellsPlanned = Signal(list)    # the wells this merge will actually touch
+    wellStage = Signal(str, str)   # (well, "merging"|"merged"|"warned")
     succeeded = Signal(str, str)   # (destination root, summary line)
     failed = Signal(str)           # user-facing error message
 
@@ -43,8 +45,14 @@ class ConcatenateWorker(QThread):
             self.failed.emit(f"Unexpected error while planning: {exc}")
             return
 
+        all_wells = sorted(set(plan.wells_ds1_only) | set(plan.wells_ds2_only) | set(plan.wells_both))
+        self.wellsPlanned.emit(all_wells)
+
         try:
-            summary = execute_plan(plan, self.logLine.emit, self.isInterruptionRequested)
+            summary = execute_plan(
+                plan, self.logLine.emit, self.isInterruptionRequested,
+                progress=self.wellStage.emit,
+            )
         except ConcatError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # pragma: no cover — defensive

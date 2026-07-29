@@ -12,6 +12,8 @@ from well_viewer.core.ui_helpers import norm_timepoint
 
 import logging
 
+import theme
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
@@ -48,8 +50,9 @@ class _CellThumb(QLabel):
         self.setCursor(Qt.PointingHandCursor)
         self.setObjectName("CellThumb")
         self.setStyleSheet(
-            "#CellThumb { background: #111; border: 1px solid #333; }"
-            "#CellThumb:hover { border: 1px solid #e2a23a; }"
+            f"#CellThumb {{ background: {theme.Colors.rail}; "
+            f"border: 1px solid {theme.Colors.border}; }}"
+            f"#CellThumb:hover {{ border: 1px solid {theme.Colors.border_strong}; }}"
         )
 
     def mousePressEvent(self, ev) -> None:  # Qt override

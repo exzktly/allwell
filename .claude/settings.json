@@ -5,9 +5,11 @@
       "mcp__Claude_Code_Remote__send_later",
       "mcp__claude-code-remote__send_later",
       "mcp__claude_code_remote__send_later",
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a__send_later",
       "mcp__Claude_Code_Remote__delete_trigger",
       "mcp__claude-code-remote__delete_trigger",
-      "mcp__claude_code_remote__delete_trigger"
+      "mcp__claude_code_remote__delete_trigger",
+      "mcp__bf7c680d-5fdc-5ef4-b4a0-abadb619bf0a__delete_trigger"
     ]
   },
   "hooks": {

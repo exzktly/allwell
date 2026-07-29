@@ -13,7 +13,7 @@ import numpy as np
 
 from PySide6.QtWidgets import QDialog, QVBoxLayout
 
-from ui.theme import get_color
+import theme
 from well_viewer.data.data_loading import get_rows
 from well_viewer.features.grouping.cell_gating.gating_compute import (
     ThreshFracOptimizationResult,
@@ -88,10 +88,10 @@ def _cell_gating_show_opt_curve_popup(
 
     fig = popup._fig
     fig.clear()
-    bg_panel = get_color("BG_PANEL")
-    txt_pri = get_color("TXT_PRI")
-    txt_mut = get_color("TXT_MUT")
-    accent = get_color("ACCENT")
+    bg_panel = theme.Colors.panel
+    txt_pri = theme.Colors.text_primary
+    txt_mut = theme.Colors.text_muted
+    accent = theme.Colors.accent
     fig.patch.set_facecolor(bg_panel)
     ax = fig.add_subplot(111)
     ax.set_facecolor(bg_panel)

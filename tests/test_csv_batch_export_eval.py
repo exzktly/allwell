@@ -221,6 +221,39 @@ def test_batch_line_solo_well_uses_sample_label(ctx):
     assert by_key["B02"].display == "B02"        # unlabelled → bare token
 
 
+def test_batch_bar_group_uses_sample_labels(ctx):
+    """The Batch Export bar collector must resolve both a solo well's and a
+    replicate set's display label the same way the live Bar Plot tab does
+    (``well_display_label`` / ``replicate_display_label``), not emit the
+    bare well token / rep-set name. Regression: ``collect_bar_items_for_group``
+    used to hand back ``(rset.name, rset.name, ...)`` and ``(w, w, ...)``
+    straight through to ``BarItem.display``, so a custom Sample Definitions
+    label never reached the batch-exported bar figure even though the
+    on-tab collector (``collect_bar_items``) already resolved it."""
+    from well_viewer.features.barplot.controller import (
+        FC_STATE_OFF, collect_bar_items_for_group,
+    )
+    from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+
+    val_col = f"{ctx.state.channel.active_channel}_{ctx.state.channel.active_metric}"
+    prev_labels = dict(ctx.state.dataset.well_labels)
+    ctx.state.dataset.well_labels = {"B01": "Treated"}
+    try:
+        grp = BarGroup("Cond1", members=[ReplicateSet("RepA", ["A01", "A02"])],
+                       solo_wells=["B01"])
+        items = collect_bar_items_for_group(
+            ctx, grp, 0.0,
+            val_col=val_col, threshold=-1.0, use_sem=True,
+            per_fov_spread=False, fc_state=FC_STATE_OFF,
+        )
+    finally:
+        ctx.state.dataset.well_labels = prev_labels
+
+    by_key = {it.key: it for it in items}
+    assert by_key["B01"].display == "Treated"   # labelled solo well → sample name
+    assert by_key["RepA"].display == "RepA"     # rep-set with no custom label → its own name
+
+
 # =============================================================================
 # 2. ON-TAB BAR EXPORT  (export_bar_plot_data)
 # =============================================================================

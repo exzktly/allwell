@@ -7,7 +7,7 @@ from well_viewer.core.channel_state_controller import (
 )
 
 from well_viewer.core.plot_card_actions import (
-    copy_active_card_as_svg, save_active_card_figure,
+    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
 )
 
 from PySide6.QtCore import Qt
@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    install_canvas_wheel_scroll, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher)
+    add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
+    make_band_controls, make_plot_with_right_dock, make_plot_view_switcher)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
     on_bar_drag_motion,
@@ -33,7 +33,7 @@ from well_viewer.features.barplot.controller import (
 from well_viewer.features.barplot.renderer import redraw_bars
 from functools import partial
 from well_viewer.features.export.service import export_bar_plot_data
-from ui.theme import ACCENT
+import theme
 
 # The Bar Plots figure: three stacked subplots (mean / fraction / n).
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
@@ -235,18 +235,14 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
     cl.addWidget(reset_order_btn)
 
-    # IconButton — matches Sample Definitions top toolbar style; see
-    # equivalent block in features/lineplot/tab_view.py for rationale.
-    from widgets.icon_button import IconButton as _IconButton
-    _export_btn = _IconButton("download", bar_ctrl, tooltip="Export CSV")
-    _export_btn.clicked.connect(lambda _=False: export_bar_plot_data(ctx))
-    cl.addWidget(_export_btn)
-    _copy_btn = _IconButton("copy", bar_ctrl, tooltip="Copy SVG")
-    _copy_btn.clicked.connect(lambda _=False: copy_active_card_as_svg(ctx))
-    cl.addWidget(_copy_btn)
-    _save_btn = _IconButton("save", bar_ctrl, tooltip="Save figure")
-    _save_btn.clicked.connect(lambda _=False: save_active_card_figure(ctx))
-    cl.addWidget(_save_btn)
+    export_btn, export_menu = make_action_menu_button("Export", bar_ctrl, tooltip="Export this plot")
+    add_menu_action(export_menu, "Export CSV…", lambda: export_bar_plot_data(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    export_menu.addSeparator()
+    add_menu_action(export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_bar_card"))
+    cl.addWidget(export_btn)
     # Pin the figure-properties button to the right edge of the plot area (where
     # the export-style dock slides out) — the FlowLayout control row can't
     # right-align it, so wrap the row.
@@ -297,6 +293,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     canvas.mpl_connect("button_press_event", partial(on_bar_drag_press, ctx))
     canvas.mpl_connect(
         "motion_notify_event",
-        partial(on_bar_drag_motion, ctx, accent_color=ACCENT),
+        partial(on_bar_drag_motion, ctx, accent_color=theme.Colors.accent),
     )
     canvas.mpl_connect("button_release_event", partial(on_bar_drag_release, ctx))

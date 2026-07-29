@@ -126,6 +126,109 @@ def test_snapshot_tolerates_unbuilt_image_table(loaded_app):
     assert vsio.snapshot_image_table(app._ctx) == {}
 
 
+def test_apply_image_table_refreshes_the_builder_shelf(monkeypatch):
+    """Regression: ``apply_image_table`` used to set ``row_dims``/``col_dims``/
+    ``active_channels`` etc. correctly but never called ``builder_view.
+    builder_refresh``, so the drag-and-drop shelf widget (rows/cols trees, Fixed
+    panel) kept showing whatever it was built with -- typically the "every
+    channel, every timepoint" fresh-tab fallback ``_default_spec`` produces
+    before a restore has run -- even though the underlying state was correct.
+    This is the actual user-visible "reloads with the wrong parameter" bug:
+    the rendered grid and ``ctx.state.image_table`` were fine, only the
+    authoring shelf's own widget tree was stale. Verified narrowly (spy on
+    builder_refresh) because reconstructing the real shelf's Qt tree to check
+    it doesn't show stale chips is far more Qt-plumbing than the behavior
+    itself warrants."""
+    from types import SimpleNamespace
+    from well_viewer.data.crop_tool import CropTool
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    calls = []
+    # apply_image_table imports builder_refresh at module scope (no cycle: the
+    # reverse edge builder_view -> view_state_io doesn't exist), so patch the
+    # name as bound in vsio's own namespace, not builder_view's.
+    monkeypatch.setattr(vsio, "builder_refresh", lambda ctx: calls.append(ctx))
+
+    ctx = SimpleNamespace(
+        state=SimpleNamespace(image_table=ImageTableState()),
+        runtime=SimpleNamespace(image_table=_RuntimeNS(crop_tool=CropTool(on_change=lambda: None), cells=[])),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
+    )
+    vsio.apply_image_table(ctx, {"row_dims": ["well"], "col_dims": ["timepoint"]})
+
+    assert calls == [ctx], "apply_image_table must refresh the builder shelf"
+    assert ctx.runtime.image_table.restored_this_load is True
+
+
+def test_image_table_selection_survives_dataset_reload_via_load_directory(image_table_app):
+    """A non-trivial (strict-subset, not "every channel/timepoint") Image
+    Table grid selection must round-trip through a REAL dataset reload —
+    ``app._load_path``, i.e. ``load_controller.load_directory`` end to end —
+    not just the hand-rolled ``vs.restore`` + ``vs.apply_pending_tab_state``
+    shortcut the other tests in this file use. That shortcut bypasses
+    ``load_directory``'s ``on_dataset_loaded`` fan-out (``registry.
+    _loaded_image_table``) entirely, which is exactly the gap that let the
+    shelf-staleness bug above go unexercised by any full-path test."""
+    from well_viewer.features.image_browser.image_table.state import (
+        Axis, ChannelSpec, TableSpec,
+    )
+    from well_viewer.features.image_browser.image_table.build_layout import (
+        image_table_apply_spec,
+    )
+    from well_viewer.features.image_browser.image_table.builder_view import (
+        _base_channels,
+    )
+
+    app = image_table_app
+    ctx = app._ctx
+
+    chans = _base_channels(ctx)
+    tps = C._timepoint_options(ctx)
+    assert len(chans) >= 2 and len(tps) >= 2, (
+        "mini_dataset must offer >=2 channels/timepoints for a real subset test")
+    chan, tp = chans[0], tps[0]
+
+    # A strict subset -- one channel, one timepoint -- NOT "every channel,
+    # every timepoint" (the bug's fallback default).
+    spec = TableSpec(
+        rows=Axis(root="well", channels=[ChannelSpec(chan)]),
+        cols=Axis(root="timepoint"),
+        filters={"timepoint": {tp}},
+    )
+    image_table_apply_spec(ctx, spec, render=False)
+    st = ctx.state.image_table
+    assert st.active_channels == {chan}
+    assert st.active_timepoints == {tp}
+    assert st.row_dims and st.col_dims
+
+    # Land on Image Table as the active leaf so it becomes active_centre_tab.
+    app._notebook.setCurrentByName("Image Browser")
+    sub = ctx.runtime.image_browser.subtabs
+    idx = next(i for i in range(sub.count()) if sub.tabText(i) == "Image Table")
+    sub.setCurrentIndex(idx)
+
+    app._persistence.save("view_state")
+
+    # Reload the SAME dataset through the real production load path, with Image
+    # Table left as the current tab throughout (matching the reported scenario:
+    # the app reopens the same dataset with Image Table already/still active).
+    # load_directory's own end-of-load safety net (on_tab_change, added for the
+    # separate "wells/channels don't load until you switch tabs" fix) always
+    # re-dispatches apply_pending_tab_state against whatever tab is CURRENTLY
+    # active -- so Image Table must still be current when _load_path runs, or
+    # that final re-apply targets the wrong tab and never touches Image Table.
+    data_dir = ctx.state.dataset.data_dir
+    app._load_path(data_dir)
+
+    st2 = app._ctx.state.image_table
+    assert st2.active_channels == {chan}, (
+        f"expected only {chan!r} restored, got {st2.active_channels!r} "
+        "-- looks like the fresh-tab reset clobbered the restore")
+    assert st2.active_timepoints == {tp}, (
+        f"expected only {tp!r} restored, got {st2.active_timepoints!r}")
+    assert st2.row_dims and st2.col_dims, "grid was reset to the empty default"
+
+
 def test_channel_restore_through_full_view_state_path(image_table_app):
     """Per-cell values + channel_opts come back through the SAME path Saved Plots
     uses: full ``view_state.snapshot`` → ``view_state.restore`` →

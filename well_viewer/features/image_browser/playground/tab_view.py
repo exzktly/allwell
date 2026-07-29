@@ -325,4 +325,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     _sync_method_rows()
 
     playground_repopulate_dropdowns(app._ctx)
-    on_change()
+    # No trailing on_change() here: build_playground_tab is only ever reached
+    # through image_browser.controller.on_image_browser_subtab_changed, which
+    # always follows with registry._activate_playground -> playground_activate
+    # -> its own on_change() call. A second call here just repeated the same
+    # (expensive, uncached) correction pass back to back on every first open.

@@ -392,6 +392,15 @@ if _HAVE_MPL:
                 label = ""
             self._dispatch_saved_png(png_bytes, label)
 
+        def saveFigureToGallery(self) -> None:
+            """External toolbar/menu entry point for the same whole-figure
+            Saved-Plots capture the hover 'save' button already performs.
+
+            Unlike :meth:`_on_save_axis_clicked`, this needs no hover-axis
+            context, so it's the one a persistent Export dropdown action can
+            call directly."""
+            self._on_save_figure_clicked()
+
         def _on_save_figure_clicked(self) -> None:
             """Save the WHOLE figure (all panels) as a single Saved Plots entry."""
             if self._save_handler is None:

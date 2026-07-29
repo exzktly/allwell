@@ -426,11 +426,15 @@ def _loaded_image_table(ctx) -> None:
     # Refresh the dropdown options for the new dataset, then reset the grid to
     # fresh-tab defaults so a (re)load never inherits the previous dataset's grid.
     # This is also what makes the "Reset all saved state" trash-can reset the
-    # Image Table: it deletes persistence.json then reloads, landing here. A
-    # dataset that has a saved grid gets it back when the tab is (re)activated —
-    # view_state restore re-applies its Image Table block over this default.
+    # Image Table: it deletes persistence.json then reloads, landing here with
+    # nothing to restore. When there IS a saved grid, view_state.restore() (run
+    # earlier in this same load, from load_controller.load_directory) may have
+    # already force-built this tab and correctly re-applied it — in which case
+    # ctx.runtime.image_table.restored_this_load is True and the reset below
+    # must be skipped, or it would wipe out what was just restored.
     image_table_repopulate_dropdowns(ctx)
-    image_table_reset_on_dataset_load(ctx)
+    if not ctx.runtime.image_table.restored_this_load:
+        image_table_reset_on_dataset_load(ctx)
 
 
 def _loaded_smfish(ctx) -> None:

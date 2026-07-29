@@ -90,9 +90,7 @@ _stats_draw_ks_cdf = _lazy("well_viewer.features.stats.controller", "draw_ks_cdf
 
 from well_viewer.domain.viewer_state import read_pipeline_info as _read_pipeline_info_shared
 from well_viewer.domain.viewer_state import parse_rc
-from ui.theme import (
-    ACCENT_DARK, PLOT_BG,
-)
+import theme
 
 
 try:
@@ -117,9 +115,6 @@ except ImportError:
 
 # ── Module logger (GUI handler wired in at build time) ───────────────────────
 _logger = logging.getLogger("well_viewer")
-
-# ── Semantic colour aliases (use these instead of magic hex strings) ──────────
-CLR_ACCENT_DARK = ACCENT_DARK
 
 from well_viewer.domain.selections_model import color_for_well
 
@@ -798,7 +793,7 @@ class WellViewerApp(QWidget):
             self._ctx,
             fig,
             default_name,
-            plot_bg=PLOT_BG,
+            plot_bg=theme.CPub.bg,
         )
 
     # ── Scatter Plot tab ───────────────────────────────────────────────────────

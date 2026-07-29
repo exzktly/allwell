@@ -564,19 +564,31 @@ def _install_cell_events(
 
 
 def _prefetch_cell_arrays(ctx, cells, cache) -> None:
-    """Decode the grid's unique (well, channel, variant) images in parallel.
+    """Decode every distinct (well, channel, timepoint, fov) image in parallel.
 
     The first Generate after a dataset load (or after the cache is invalidated)
     has to read every cell's image off disk; doing that sequentially on the GUI
-    thread is the slow part. One ``_load_array`` call loads (and caches) all
-    FOVs/timepoints for a well+channel, so the unique work is far smaller than
-    the cell count. Threads help because ``zipfile``/``tifffile``/``PIL`` release
-    the GIL for the C-level inflate+decode, and the per-zip-handle serialization
-    in ``data/zipfile_cache.py`` keeps concurrent reads safe (same well → one
-    handle, serialized; different wells → parallel). Ratio channels are skipped
-    (they compose from per-channel arrays, which this still warms). Best-effort:
-    any failure leaves the sequential in-loop load as the fallback.
+    thread is the slow part. Threads help because ``zipfile``/``tifffile``/``PIL``
+    release the GIL for the C-level inflate+decode, and the per-zip-handle
+    serialization in ``data/zipfile_cache.py`` keeps concurrent reads safe (same
+    well → one handle, serialized; different wells → parallel).
+
+    Warms every distinct cell's own (timepoint, fov) — not just one
+    representative per well+channel — because a grid that varies timepoint or
+    FOV per cell (the Image Table's core purpose: a facet per timepoint, a
+    facet per FOV, a full-plate walk, …) otherwise leaves most cells' actual
+    pixel decode to happen later, sequentially, on the GUI thread inside
+    ``_compute_auto_luts`` and the render loop — exactly the two passes this
+    prefetch exists to make unnecessary. Dedupes against
+    ``ctx.state.image_table.prefetched_cells`` (not ``cache``, which holds
+    per-well+channel ref-dicts, not a per-image marker), so a second Generate
+    on an unchanged grid submits nothing to the thread pool at all rather than
+    just cheaply re-hitting ``_load_array``'s own caches. Ratio channels are
+    skipped (they compose from per-channel arrays, which this still warms).
+    Best-effort: any failure leaves the sequential in-loop load as the
+    fallback.
     """
+    warmed = ctx.state.image_table.prefetched_cells
     todo: dict = {}
     for r, row in enumerate(cells):
         for cell in row:
@@ -592,10 +604,10 @@ def _prefetch_cell_arrays(ctx, cells, cache) -> None:
             use_tophat = _row_display_opts(ctx, r, chan)[0]
             th = bool(use_tophat) and not _is_nuc_seg(chan)
             variant = "tophat" if th else "raw"
-            key = (well, chan.lower(), variant)
-            if key in cache:
+            key = (well, chan.lower(), variant, str(tp), str(fov))
+            if key in warmed or key in todo:
                 continue
-            todo.setdefault(key, (well, chan, tp, fov, th))
+            todo[key] = (well, chan, tp, fov, th)
     if len(todo) < 2:
         return  # nothing to gain from a pool for 0–1 reads
     import os
@@ -615,6 +627,10 @@ def _prefetch_cell_arrays(ctx, cells, cache) -> None:
         import logging as _logging
         _logging.getLogger("well_viewer.image_table").debug(
             "image_table: parallel prefetch failed", exc_info=True)
+    # Mark every attempted key regardless of per-item success -- a failed
+    # decode won't succeed on an identical retry this session either, and
+    # _load_array's own None-return already handles that downstream.
+    warmed.update(todo)
 
 
 def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:

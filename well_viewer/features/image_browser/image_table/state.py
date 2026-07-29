@@ -141,12 +141,19 @@ class ImageTableState:
     # Generate so a channel left on Auto uses ONE brightness window across every cell
     # (comparable) instead of each cell auto-fitting independently. Not persisted.
     auto_lut_by_channel: dict = field(default_factory=dict)
+    # Set of (well, chan_lower, variant, tp, fov) tuples the parallel prefetch
+    # (controller._prefetch_cell_arrays) has already warmed, across Generates —
+    # separate from image_cache (which holds ref-dicts, not a per-image marker)
+    # so a second Generate on an unchanged grid skips re-submitting work to the
+    # thread pool instead of just cheaply re-hitting _load_array's own caches.
+    prefetched_cells: set = field(default_factory=set)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
         self.last_render.clear()
         self.image_cache.clear()
         self.auto_lut_by_channel.clear()
+        self.prefetched_cells.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

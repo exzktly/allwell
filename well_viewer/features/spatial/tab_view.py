@@ -17,8 +17,10 @@ from PySide6.QtWidgets import (
 
 from widgets.flow_layout import FlowLayout
 
+from well_viewer.core.plot_card_actions import (
+    copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
+)
 from well_viewer.core.safe import swallowed
-from well_viewer.features.export.style import copy_figure_to_clipboard
 from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial import controller as sp_ctrl
 from well_viewer.features.spatial.collect import available_metric_columns
@@ -207,20 +209,20 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_recompute_btn", recompute_btn)
     r1.addWidget(recompute_btn)
 
-    export_csv_btn = IconButton(
-        "download", row1,
-        tooltip="Export Summary matrix as CSV (Summary level only)")
-    export_csv_btn.clicked.connect(
-        lambda _=False: sp_ctrl.sp_export_summary_csv(ctx))
-    reg.register("_sp_export_csv_btn", export_csv_btn)
-    r1.addWidget(export_csv_btn)
-
-    copy_btn = IconButton("copy", row1, tooltip="Copy figure")
-    copy_btn.clicked.connect(lambda _=False: _copy_spatial_figure(ctx))
-    r1.addWidget(copy_btn)
-    save_btn = IconButton("save", row1, tooltip="Save figure")
-    save_btn.clicked.connect(lambda _=False: _save_spatial_figure(ctx))
-    r1.addWidget(save_btn)
+    from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
+    export_btn, export_menu = make_action_menu_button("Export", row1, tooltip="Export this plot")
+    export_csv_act = add_menu_action(
+        export_menu, "Export Summary CSV…",
+        lambda: sp_ctrl.sp_export_summary_csv(ctx),
+        tooltip="Summary level only")
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    export_menu.addSeparator()
+    add_menu_action(export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_sp_card"))
+    reg.register("_sp_export_btn", export_btn)
+    reg.register("_sp_export_csv_act", export_csv_act)
+    r1.addWidget(export_btn)
 
     # Pin the figure-properties button to the right edge of the plot area (where
     # the export-style dock slides out); the FlowLayout row can't right-align it.
@@ -407,7 +409,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         # Single-timepoint picker is meaningless at Summary level (all tps
         # are walked).
         tp_cb.setEnabled(not is_summary)
-        export_csv_btn.setEnabled(is_summary)
+        export_csv_act.setEnabled(is_summary)
 
     reg.register("_sp_sync_summary_visibility", _sync_visibility)
     _sync_visibility()
@@ -423,6 +425,8 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_card", card)
     reg.register("_sp_fig", card.figure)
     reg.register("_sp_canvas", card.canvas)
+    from well_viewer.core.ui_helpers import apply_plot_card_decorators
+    apply_plot_card_decorators(ctx, card, "Spatial")
     card.plotThemeChanged.connect(lambda _m: sp_ctrl.sp_recompute(ctx))
     layout.addWidget(card, 1)
 
@@ -515,26 +519,3 @@ def _loaded_timepoints(ctx):
         tp = pd.to_numeric(df["timepoint_hours"], errors="coerce").where(mask)
         seen.update(float(t) for t in tp.dropna().unique())
     return sorted(seen)
-
-
-def _copy_spatial_figure(ctx) -> None:
-    card = ctx.widgets.get_or_none("_sp_card")
-    fig = getattr(card, "figure", None) if card is not None else None
-    if fig is None:
-        return
-    try:
-        status = copy_figure_to_clipboard(fig)
-        ctx.notify.set_status(status)
-    except Exception:
-        swallowed()
-
-
-def _save_spatial_figure(ctx) -> None:
-    card = ctx.widgets.get_or_none("_sp_card")
-    fig = getattr(card, "figure", None) if card is not None else None
-    if fig is None:
-        return
-    try:
-        ctx.figures.save(fig, "spatial.png")
-    except Exception:
-        swallowed()

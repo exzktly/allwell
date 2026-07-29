@@ -147,8 +147,18 @@ def read_member_bytes(zip_path: Path, member: str) -> bytes | None:
 # Table Generate, a crop/zoom/LUT tweak) nearly free on the decode axis, and it
 # collapses the Image Table's prefetch double-decode into one (the warm pass
 # fills the cache, the render pass hits it).
-DEFAULT_MAX_DECODE_ENTRIES = 96
-DEFAULT_MAX_DECODE_BYTES = 1 << 30   # 1 GiB
+DEFAULT_MAX_DECODE_ENTRIES = 512
+DEFAULT_MAX_DECODE_BYTES = 1 << 32   # 4 GiB
+# Sized for the Image Table's actual documented use cases (a full 96-well
+# plate walk, a facet per timepoint/FOV) rather than an arbitrary round
+# number: the old 96-entry/1 GiB budget was smaller than a single plate's
+# worth of distinct images, so any such grid evicted entries the prefetch
+# had just warmed before the render pass could reuse them — reintroducing,
+# via cache thrash, exactly the double-decode this cache exists to collapse
+# into one (see the module docstring above and _prefetch_cell_arrays in
+# image_table/controller.py). Still bounded, not unlimited — a dataset
+# large enough to blow even this budget still degrades via LRU eviction
+# instead of growing without limit.
 
 
 class _DecodedArrayCache:

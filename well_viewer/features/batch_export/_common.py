@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from ui.theme import PLOT_BG, PLOT_SPN, WARN, get_color
+from ui.theme import get_color
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.core.lazy import lazy as _lazy
 # Lazy so batch export imports without barplot present (keeps it deletable).
@@ -48,8 +48,6 @@ def unique_export_stem(stem: str, used: set) -> str:
     used.add(candidate)
     return candidate
 
-_CLR_DANGER = "#d2453d"
-_CLR_SUCCESS_DARK = "#2e7d32"
 _CLR_PLACEHOLDER = "#9aa0a6"
 _CLR_DISABLED_WELL = "#404040"
 _CLR_ERR_BAR = "#333333"
@@ -57,7 +55,7 @@ _CLR_WHITE = "#ffffff"
 
 
 __all__ = [
-    "PLOT_BG", "PLOT_SPN", "WARN", "get_color",
+    "get_color",
     "BarGroup", "_bar_render_items",
     "_all_fluor_values", "_extract_well_token",
     "_PLATE_COLS", "_PLATE_ROWS", "WELL_COLORS",
@@ -65,6 +63,6 @@ __all__ = [
     "ask_name_dialog", "btn_card", "btn_danger", "btn_primary", "btn_secondary",
     "_clear_layout_helper",
     "_groups_with_loaded_wells", "_logger", "unique_export_stem",
-    "_CLR_DANGER", "_CLR_SUCCESS_DARK", "_CLR_PLACEHOLDER",
+    "_CLR_PLACEHOLDER",
     "_CLR_DISABLED_WELL", "_CLR_ERR_BAR", "_CLR_WHITE",
 ]

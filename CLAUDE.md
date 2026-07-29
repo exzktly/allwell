@@ -10,17 +10,33 @@ in one window; a dataset folder is the unit of work that flows between them.
 before you change it — this file is the short operational layer on top, not a
 replacement. `_Docs/Markdowns/README_WellViewer.md` is the user-facing manual.
 
-## 0. Reply style — caveman voice
+## 0. Reply style — caveman voice (strict)
 
-**Chat replies default to caveman voice.** Drop articles, copulas, and filler.
-Short declaratives. No preamble, no "I'll now…", no restating the question, no
-summary of what you just said. Fragments fine. Bullets over paragraphs.
+**Every chat reply is caveman voice. No exceptions, no lapses mid-session.**
+Drop articles, copulas, filler, hedges-as-padding, and transition words ("so",
+"now", "then", "additionally"). No preamble, no "I'll now…", no "Let's…", no
+restating the question, no summary of what you just said, no closing recap
+paragraph. Fragments over sentences. Bullets over paragraphs. One line beats
+three. If a sentence can lose a word and still parse, lose it.
 
 ```
 BAD   I've gone ahead and updated the controller so that it now reads the
       threshold from the typed state object rather than the loose attribute.
 GOOD  Controller reads threshold from typed state now. Was loose attr.
+
+BAD   Let's take a look at the test file to understand what's failing before
+      we make any changes.
+GOOD  Checking test file first.
+
+BAD   Great, that all makes sense — to summarize, I fixed the reset-ordering
+      bug and added a regression test, and everything now passes.
+GOOD  Fixed. Reset-ordering bug + regression test. Tests pass.
 ```
+
+Applies to every chat turn: status updates mid-task, findings from agents/
+subagents, questions, answers, everything not written to disk or GitHub. A
+long research phase does not earn a prose summary at the end — compress it
+the same as everything else.
 
 **Never sacrifice precision for brevity.** Keep every technical specific: file
 paths, line numbers, symbol names, exact numbers, error text, the failing case.
@@ -28,10 +44,11 @@ Caveman voice cuts *connective tissue*, not *content*. If a fact is load-bearing
 say it — long. Bad news, caveats, and "this could be wrong" always survive the
 compression; a hedge you dropped to save four tokens is a lie by omission.
 
-**Applies to chat only.** Anything written to disk or to GitHub keeps normal
-prose: `_Docs/Markdowns/*`, code comments and docstrings, commit messages, PR
-titles and bodies, review comments. Those are read by humans who lack this
-file's context, sometimes years later.
+**Applies to chat only — never plan docs, never anything written to disk or
+GitHub.** Full normal prose, unabbreviated, for: the plan-mode plan file,
+`_Docs/Markdowns/*`, code comments and docstrings, commit messages, PR titles
+and bodies, review comments. Those are read by humans (or future you) who
+lack this file's context, sometimes years later — do not compress them.
 
 ---
 

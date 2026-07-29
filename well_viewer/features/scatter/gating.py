@@ -22,12 +22,10 @@ from typing import Any
 
 import numpy as np
 
+import theme
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.tp_match import tp_close_mask
 from well_viewer.features.scatter.collect import timepoint_color_map
-
-# Accent used for gate outlines / selector rubber-band (matches the app accent).
-GATE_COLOR = "#e24a4a"
 
 
 # ── density ──────────────────────────────────────────────────────────────────
@@ -485,7 +483,7 @@ def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
         h = gn["y1"] - gn["y0"]
         rect = Rectangle(
             (gn["x0"], gn["y0"]), w, h,
-            fill=False, edgecolor=GATE_COLOR, linewidth=1.2,
+            fill=False, edgecolor=theme.Colors.gate, linewidth=1.2,
             linestyle="--", zorder=20,
         )
         rect._scatter_gate_artist = True  # tag for our own use
@@ -499,7 +497,7 @@ def draw_gates(ctx, ax, scatter_data, tps_list, ink_color: str,
             handles = ax.scatter(
                 [gn["x0"], gn["x1"], gn["x0"], gn["x1"]],
                 [gn["y0"], gn["y0"], gn["y1"], gn["y1"]],
-                marker="s", s=28, facecolors="white", edgecolors=GATE_COLOR,
+                marker="s", s=28, facecolors="white", edgecolors=theme.Colors.gate,
                 linewidths=1.0, zorder=22,
             )
             handles._scatter_gate_artist = True
@@ -543,7 +541,7 @@ def _make_selector(ctx, ax):
     def _onselect(eclick, erelease):
         _on_gate_drawn(ctx, eclick, erelease)
 
-    style = dict(facecolor="none", edgecolor=GATE_COLOR,
+    style = dict(facecolor="none", edgecolor=theme.Colors.gate,
                  linewidth=1.2, linestyle="--")
     try:  # matplotlib >= 3.5
         return RectangleSelector(

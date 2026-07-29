@@ -534,3 +534,125 @@ def test_execute_plan_zero_rows_everywhere_fails_loudly(tmp_path):
     with pytest.raises(cc.ConcatError, match="zero measurement rows"):
         apply.execute_plan(plan)
     assert not (dest / "out" / "pipeline_info.json").exists()  # never reports success
+
+
+# ── progress callback: per-well events driving the status dashboard ─────────
+def test_execute_plan_progress_reports_merging_then_merged_per_well(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01", "A02"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01", "A02"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+
+    # each well reports "merging" before its terminal state, and every well
+    # reaches a terminal state exactly once
+    seen_terminal = set()
+    for i, (well, stage) in enumerate(events):
+        if stage == "merging":
+            assert (well, "merged") in events[i + 1:] or (well, "warned") in events[i + 1:]
+        else:
+            assert stage in ("merged", "warned")
+            assert well not in seen_terminal
+            seen_terminal.add(well)
+    assert seen_terminal == {"A01", "A02"}
+
+
+def test_execute_plan_progress_reports_warned_for_image_only_well(tmp_path):
+    _make_dataset_with_image_only_well(
+        tmp_path / "d1", normal_wells=["A01"], image_only_well="E05", timepoints=["0h", "24h"],
+    )
+    _make_dataset_with_image_only_well(
+        tmp_path / "d2", normal_wells=["A01"], image_only_well=None, timepoints=["0h", "24h"],
+    )
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+
+    assert ("E05", "warned") in events
+    assert ("A01", "merged") in events
+
+
+def test_execute_plan_progress_defaults_to_a_no_op(tmp_path):
+    """The kwarg must stay optional -- every pre-existing call site (and all
+    the tests above it) omits it and must keep working unchanged."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    summary = apply.execute_plan(plan)
+    assert "Concatenated 1 well(s)" in summary
+
+
+# ── collision / silent-drop regression (reported bug) ─────────────────────────
+#
+# Reported symptom: pointing dataset 1 and dataset 2 at datasets that share a
+# real filename produced an output the same size as the input, with only one
+# copy of the files -- no error, no warning. Traced to ``rewrite_member_name``
+# leaving a non-schema-conformant member's name unchanged, so when both sides
+# happen to carry an identically-named non-conformant file, ``write_zip``'s
+# dedup logic (``if name in written: continue``) silently keeps only whichever
+# side was written first and drops the other, with no count, no warning, and
+# no verification check that would catch it (``_verify``'s ``filename_mismatches``
+# only confirms the name exists somewhere in the archive, not that it's the
+# right side's bytes).
+
+def _make_dataset_with_stray_member(root: Path, *, well: str, timepoints,
+                                    stray_content: bytes, exp: str = "exp") -> Path:
+    """Like :func:`_make_dataset`, plus one extra zip member whose name
+    ("notes.tif") does not match the schema's 5-field naming -- deliberately
+    non-conformant, so :func:`rewrite_member_name` leaves it unchanged."""
+    _make_dataset(root, wells=[well], timepoints=timepoints, exp=exp)
+    with zipfile.ZipFile(root / "in" / f"{well}.zip", "a") as zf:
+        zf.writestr("notes.tif", stray_content)
+    return root
+
+
+def test_execute_plan_does_not_silently_drop_a_colliding_nonconformant_member(tmp_path):
+    """A non-schema-conformant member that collides by name across datasets 1
+    and 2 must never vanish without a trace: the merge must either fail
+    loudly (ConcatError) or genuinely preserve both sides' data -- it must
+    never silently keep only one side's bytes under a name that looks fine."""
+    _make_dataset_with_stray_member(
+        tmp_path / "d1", well="A01", timepoints=["0h", "24h"], stray_content=b"d1-notes",
+    )
+    _make_dataset_with_stray_member(
+        tmp_path / "d2", well="A01", timepoints=["0h", "24h"], stray_content=b"d2-notes",
+    )
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    try:
+        apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+    except cc.ConcatError:
+        # Loud failure is an acceptable outcome -- but the per-well progress
+        # callback (already collected before the raise, since _verify runs
+        # after the per-well loop) must still have flagged the well, so a
+        # live dashboard watching mid-run would have shown "warned" rather
+        # than nothing at all.
+        assert ("A01", "warned") in events
+        return
+
+    # If it didn't raise, both sides' bytes must actually be present -- not
+    # just a name that happens to exist (that's exactly what the old
+    # ``filename_mismatches`` check couldn't tell apart).
+    with zipfile.ZipFile(dest / "in" / "A01.zip") as zf:
+        contents = {info.filename: zf.read(info.filename) for info in zf.infolist()}
+    stray_bytes = [v for k, v in contents.items() if "notes" in k]
+    assert set(stray_bytes) == {b"d1-notes", b"d2-notes"}, (
+        "dataset 2's colliding member was silently dropped -- only "
+        f"{stray_bytes!r} survived in the merged archive"
+    )
+
+
+def test_build_merge_plan_rejects_identical_source_roots(tmp_path):
+    """The exact scenario from the bug report: dataset 1 and dataset 2
+    pointed at the same directory. This must fail clearly at planning time,
+    not silently merge a dataset with itself."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    with pytest.raises(cc.ConcatError, match="[Ss]ame"):
+        cc.build_merge_plan(tmp_path / "d1", tmp_path / "d1", tmp_path / "dest")

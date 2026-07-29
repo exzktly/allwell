@@ -256,6 +256,13 @@ def load_directory(ctx, d: Path, label=None) -> None:
     if _image_table is not None:
         _image_table.image_cache = {}
         _image_table.last_render = {}
+        _image_table.prefetched_cells = set()
+        # Cleared per load, set True by view_state_io.apply_image_table when it
+        # restores a saved grid for this load — tells the on_dataset_loaded reset
+        # hook below (registry._loaded_image_table) not to clobber a selection
+        # that was just correctly restored (view_state.restore() runs, and can
+        # force-build + apply this tab, earlier in this same load).
+        ctx.runtime.image_table.restored_this_load = False
     # Gate on the review_image slice, not hasattr(method): runtime_app defines
     # _invalidate_review_image_frame_cache unconditionally (a lazy shim), so the
     # hasattr is always true — the slice is the real "Image Browser present" test.

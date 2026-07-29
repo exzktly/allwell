@@ -32,6 +32,7 @@ import theme
 from widgets.rail_nav import RailNav
 from well_viewer.core.centre_view import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
+from datasets.ome_import.controller import OmeImportController
 
 
 @dataclass(frozen=True)
@@ -52,8 +53,14 @@ def _build_concatenate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] 
     return controller.page, controller.shutdown
 
 
+def _build_ome_import(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = OmeImportController(on_open_in_analyze=tab._open_in_analyze)
+    return controller.page, controller.shutdown
+
+
 _FEATURES: tuple[_Feature, ...] = (
     _Feature(name="Concatenate datasets", icon="copy", build=_build_concatenate),
+    _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
 )
 
 
@@ -65,9 +72,11 @@ class DatasetsTab(QWidget):
         parent: QWidget | None = None,
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
+        on_open_in_analyze: Callable[[Path], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
+        self._on_open_in_analyze = on_open_in_analyze
         self._teardowns: list[Callable[[], None]] = []
         self._build_ui()
 
@@ -144,6 +153,10 @@ class DatasetsTab(QWidget):
     def _open_in_review(self, dest_root: str) -> None:
         if self._on_open_in_review is not None and dest_root:
             self._on_open_in_review(Path(dest_root))
+
+    def _open_in_analyze(self, dataset_root: str) -> None:
+        if self._on_open_in_analyze is not None and dataset_root:
+            self._on_open_in_analyze(Path(dataset_root))
 
     def shutdown(self) -> None:
         """Stop any running feature workers (called on app close)."""

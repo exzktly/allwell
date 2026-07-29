@@ -759,22 +759,13 @@ def _group_loose_tifs_in_place(
 _OME_SUFFIXES = (".ome.tif", ".ome.tiff")
 
 
-def _strip_ome_suffix(name: str) -> str:
-    """Return *name* without a trailing ``.ome.tif`` / ``.ome.tiff`` extension."""
-    low = name.lower()
-    for suf in _OME_SUFFIXES:
-        if low.endswith(suf):
-            return name[: -len(suf)]
-    return Path(name).stem
-
-
 def detect_ome_input(raw: Path) -> Path | None:
-    """Return the packed OME-TIFF to explode, or ``None`` if *raw* isn't one.
+    """Return a packed OME-TIFF at *raw*, or ``None`` if it isn't one.
 
     Accepts either the ``.ome.tif`` / ``.ome.tiff`` file selected directly, or a
-    directory containing exactly one such file at its top level. A directory with
-    zero or several OME-TIFFs is ambiguous and returns ``None`` so the caller
-    falls back to the normal loose-TIF / well-folder resolution.
+    directory containing exactly one such file at its top level. Analyze uses this
+    to spot a raw OME-TIFF and redirect the user to the Datasets converter; the
+    converter itself does the de-interleave (``datasets.ome_import``).
     """
     if raw.is_file() and raw.name.lower().endswith(_OME_SUFFIXES):
         return raw
@@ -789,55 +780,6 @@ def detect_ome_input(raw: Path) -> Path | None:
         if len(hits) == 1:
             return hits[0]
     return None
-
-
-def explode_ome_if_present(
-    raw: Path,
-    opts: dict,
-    *,
-    log_fn: Callable[[str], None] | None = None,
-) -> Path | None:
-    """De-interleave a packed OME-TIFF into loose TIFs and return the base dir.
-
-    When ``opts['ome_input']`` is set, locate the OME-TIFF (via
-    :func:`detect_ome_input`), explode it into a sibling ``in/`` folder using the
-    serpentine well-grid parameters from *opts*, and return the base directory
-    that holds that ``in/`` — ready to hand straight to
-    :func:`resolve_input_output`, which then groups the loose TIFs per well as
-    usual. Returns ``None`` (a no-op) when OME mode is not requested. Raises
-    ``ValueError`` when OME mode is requested but no OME-TIFF is found.
-    """
-    if not opts.get("ome_input"):
-        return None
-
-    ome_file = detect_ome_input(raw)
-    if ome_file is None:
-        raise ValueError(
-            "OME-TIFF input was selected, but no single .ome.tif / .ome.tiff "
-            f"file was found at:\n{raw}"
-        )
-
-    from pipeline.ome_explode import explode_ome_tiff
-
-    base = ome_file.parent
-    in_dir = base / "in"
-    experiment = opts.get("ome_experiment") or _strip_ome_suffix(ome_file.name)
-    # 0 / absent → derive fields-of-view per well; a positive value is used and
-    # cross-checked against the position count by explode_ome_tiff.
-    fovs = int(opts.get("ome_fovs_per_well", 0) or 0)
-    explode_ome_tiff(
-        ome_file,
-        in_dir,
-        grid_rows=int(opts["ome_grid_rows"]),
-        grid_cols=int(opts["ome_grid_cols"]),
-        origin_well=str(opts.get("ome_origin_well", "A01")),
-        direction=str(opts.get("ome_direction", "row")),
-        experiment=str(experiment),
-        fovs_per_well=fovs if fovs > 0 else None,
-        frame_order=str(opts.get("ome_frame_order", "single")),
-        log_fn=log_fn,
-    )
-    return base
 
 
 def resolve_input_output(

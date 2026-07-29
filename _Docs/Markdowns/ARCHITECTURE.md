@@ -110,10 +110,11 @@ allwell/
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
-├── analyze_ome.py               ← packed OME-TIFF input: form section + de-interleave (mixin)
+├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
 ├── datasets/                    ← Qt-free dataset operations + their feature views
-│   └── concatenate/            ← Concatenate datasets feature (compute/apply/worker/view/controller/dashboard)
+│   ├── concatenate/            ← Concatenate datasets feature (compute/apply/worker/view/controller/dashboard)
+│   └── ome_import/             ← Convert OME-TIFF feature (de-interleave a packed OME-TIFF → dataset folder)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
@@ -1549,37 +1550,25 @@ The Run path:
 5. The Analyze tab streams stdout/stderr into its log view (`tail -f`-style).
 6. On completion, the dataset folder is offered to the Review tab.
 
-**Single packed OME-TIFF input (`analyze_ome.py`).** Besides per-well
-zips/folders and loose TIFs, the Analyze pane accepts one OME-TIFF holding every
-timepoint, channel, Z-plane and stage position of a plate scan. This path is a
-third mixin, `AnalyzeOmeMixin`, kept in `analyze_ome.py` (out of both monoliths,
-which sit on their line budgets): it owns the collapsible **Single OME-TIFF
-Input** form section (imaged well-grid dimensions, origin well, serpentine
-direction, an optional explicit FOVs-per-well, and a per-channel role picker),
-the `OME file…` picker, pre-run validation, and the run-directory resolver
-`_resolve_run_dirs_for_runner`. The key idea is that the file is
-**de-interleaved into ordinary loose TIFs before anything else runs**, so the
-whole downstream stack — `WellPlateZipper` grouping, `process_microscopy`,
-`pipeline_info.json`, the Review viewer — is untouched.
+**Single packed OME-TIFF input — the Datasets converter.** A plate scan can
+arrive as one OME-TIFF holding every timepoint, channel, Z-plane and stage
+position. De-interleaving it is a **standalone converter** in the Datasets pane
+(`datasets/ome_import/`, §6b), *separate from processing*: it writes an ordinary
+dataset folder, which the user then opens in Analyze and runs like any other
+input. Keeping the two apart is deliberate — when the explode ran *inside* an
+Analyze run the wells only existed mid-run, so pre-run checks that look for a
+well (an `empty_well` background, control-well auto-threshold, both via
+`well_present_in_input`) failed against the raw `.ome.tif`. Analyze now only ever
+processes **folders**; `analyze_input.AnalyzeInputMixin._ome_input_hint` spots a
+raw OME-TIFF selected as input and redirects the user to the converter instead of
+trying to run it.
 
-Channel roles are **explicit, not guessed by order**: after the file is read, the
-role picker lists each OME channel name with a role dropdown (Segmentation /
-Fluorescence / Phase-brightfield / smFISH / Ignore), defaulting to Fluorescence.
-The picker *drives the existing Channel-Tokens widgets* (`_apply_ome_channel_roles`
-→ `_nuclear_token_edit` + `_set_fluor_rows`), so everything that reads them
-(`_collect_run_options`, `_phase_token`, `_segmentation_validation_errors`) is
-unchanged; the manual fluorescent-channel list is hidden and the
-segmentation-channel field is read-only while an OME file is active.
-
-The resolver runs `services.input_resolution_service.explode_ome_if_present`
-first (a no-op unless `opts['ome_input']`), which calls
-`pipeline.ome_explode.explode_ome_tiff`. It reads the OME-XML for dimension
-order and channel names, **max-projects Z**, maps each stage position to a
-96-well label via `util.plate_grid` (serpentine order + the imaged grid, one
-well × FOV per position; FOVs-per-well is entered explicitly and cross-checked,
-or derived), and writes `<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`
-into a sibling `in/` folder.
-
+The conversion itself is `pipeline.ome_explode.explode_ome_tiff`. It reads the
+OME-XML for dimension order and channel names, **max-projects Z**, maps each
+stage position to a 96-well label via `util.plate_grid` (serpentine order + the
+imaged grid, one well × FOV per position; FOVs-per-well is entered explicitly and
+cross-checked, or derived), and writes
+`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` into `<destination>/in/`.
 Two source structures are handled (`read_ome_layout` → `OmeLayout.single_image`),
 because OME allows only X/Y/Z/C/T inside one `<Image>` — there is no position
 dimension:
@@ -1588,16 +1577,20 @@ dimension:
   per stage position; each series' `T` axis is that position's timepoints.
 - **Single-image packed** — one `<Image>` whose `T` axis packs *every* position
   (and any real timepoints) into a flat frame sequence. A **frame-order** choice
-  (`ome_frame_order`: `single` / `pos_in_time` / `time_in_pos`) says how that
-  sequence splits: `n_positions = wells × FOVs`, `n_timepoints = n_frames /
-  n_positions`. Planes are read **one page at a time** (`_packed_plane` ravels
-  the T/C/Z indices against the series' leading-axis sizes, honouring the file's
-  `DimensionOrder`) because a packed plate array is routinely tens–hundreds of
-  GB — far too large to `asarray` whole. The resolver then hands that `in/` to `resolve_input_output` exactly as
-for any loose-TIF drop. Because the explode is client-side, remote runs receive
-the loose TIFs and need no OME awareness; `pipeline/ome_explode.py` and
-`util/plate_grid.py` are still listed in the remote manifest so it stays a
-complete mirror of `pipeline/` + `util/` (`test_remote_manifest.py`).
+  (`single` / `pos_in_time` / `time_in_pos`) says how that sequence splits:
+  `n_positions = wells × FOVs`, `n_timepoints = n_frames / n_positions`. Planes
+  are read **one page at a time** (`_packed_plane` ravels the T/C/Z indices
+  against the series' leading-axis sizes, honouring the file's `DimensionOrder`)
+  because a packed plate array is routinely tens–hundreds of GB — far too large
+  to `asarray` whole.
+
+`explode_ome_tiff` also takes a `progress_fn`/`should_abort` pair (raising
+`OmeExplodeCancelled`) so the converter's worker can drive a progress bar and
+Cancel. Channel roles are *not* set in the converter — it writes the OME channel
+**names** as tokens; the user assigns nuclear/fluor/phase in Analyze's normal
+Channel Tokens section on the converted folder. `pipeline/ome_explode.py` and
+`util/plate_grid.py` are in the remote manifest so it stays a complete mirror of
+`pipeline/` + `util/` (`test_remote_manifest.py`).
 
 ### 6.2 `process_microscopy.py`
 
@@ -1975,12 +1968,28 @@ one-line change, without pulling in Review's well/selection-scoped
 `FeatureRegistry`/`ViewerContext` machinery. The rail's `currentChanged` drives
 `NamedPageStack.setCurrentByName`.
 
-The one feature today is **Concatenate datasets** (`datasets/concatenate/`),
-which appends one dataset's timepoints after another's. Two datasets of the same
-plate, imaged in separate sessions, are stitched into one longer timelapse:
-dataset 2's timepoints are relabelled to continue after dataset 1's last
-timepoint, and the union of both datasets' wells is written to a fresh
-destination folder (both originals untouched).
+Two features live here today. Each is one `_Feature` entry in
+`datasets_tab.py::_FEATURES` and a `datasets/<name>/` package on the standard
+view/controller/worker + Qt-free compute/apply split; a completed run hands its
+output to another pane through an injected callback (`on_open_in_review` →
+`AllWellApp._open_dataset_in_review`; `on_open_in_analyze` →
+`_open_dataset_in_analyze`).
+
+**Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
+de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
+the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
+readout, `apply.convert` calls `explode_ome_tiff` into `<destination>/in/` with
+progress + cancel, and `OmeImportWorker` runs it off the UI thread. On success
+the page's "Open in Analyze" button routes the produced folder to the Analyze
+pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
+dataset. Channel roles are left to Analyze's normal Channel Tokens section.
+
+**Concatenate datasets** (`datasets/concatenate/`) appends one dataset's
+timepoints after another's. Two datasets of the same plate, imaged in separate
+sessions, are stitched into one longer timelapse: dataset 2's timepoints are
+relabelled to continue after dataset 1's last timepoint, and the union of both
+datasets' wells is written to a fresh destination folder (both originals
+untouched).
 
 The package splits along the standard suffix contract, and deliberately keeps
 everything that isn't Qt out of the two `QThread`/view modules so the whole merge

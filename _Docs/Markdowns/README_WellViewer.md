@@ -346,17 +346,27 @@ can't select a file). All-Well reads the file's OME metadata and a small
   (e.g. `2 × 3` for a six-well region). All-Well assumes the stage visited the
   wells in **serpentine** order (sweep one row, drop down, sweep back), so these
   dimensions are what let it auto-label each stage position with its well.
+- **FOVs per well** — the number of fields-of-view acquired per well. Leave it
+  blank to derive it from the position count and the well grid; enter a value to
+  state it explicitly, and All-Well will refuse to run if `wells × FOVs` doesn't
+  equal the file's position count (this catches a mistyped grid before it
+  silently mislabels every well).
 - **Origin well** — the top-left well of that block (default `A01`).
 - **Serpentine direction** — whether the snake runs along rows or columns.
+- **Channel roles** — one row per channel found in the file, each with a
+  dropdown to assign its role: **Segmentation** (the channel your segmentation
+  method runs on — nuclear stain or brightfield), **Fluorescence**, **Phase /
+  brightfield**, **smFISH**, or **Ignore**. Every channel starts as
+  Fluorescence, so nothing is assumed about acquisition order (channel 1 is often
+  brightfield, not the nuclear channel); assign exactly one Segmentation channel
+  and mark any Phase / smFISH channels. These choices fill in the Channel Tokens
+  above for you, so the manual channel list is hidden while an OME file is loaded.
 
 The panel shows a live summary: how many stage positions the file holds, how
-many wells × fields-of-view that works out to (fields-of-view per well is the
-position count divided by the number of wells), and a preview of the first well
-labels. Channel names and timepoints are read from the OME metadata — the
-channel tokens are pre-filled from them (you still pick which one is the
-segmentation channel), and any Z-stack is **maximum-intensity projected** to the
-single plane the pipeline measures. Labels stay within the 96-well plate
-(`A01`–`H12`).
+many wells × fields-of-view that works out to, and a preview of the first well
+labels. Timepoints are read from the OME metadata, and any Z-stack is
+**maximum-intensity projected** to the single plane the pipeline measures. Labels
+stay within the 96-well plate (`A01`–`H12`).
 
 Under the hood the file is exploded into ordinary per-well TIFs before the run,
 so everything after that — grouping, segmentation, the CSVs, and the Review pane

@@ -322,6 +322,7 @@ class AnalyzeTabFormMixin:
         ))
         fl_hl.addStretch(1)
         sec.layout().addWidget(fl_header)
+        self._fluor_header = fl_header  # hidden for OME input (role picker drives it)
 
         self._fluor_frame = QWidget(sec)
         self._fluor_frame_layout = QVBoxLayout(self._fluor_frame)
@@ -335,6 +336,7 @@ class AnalyzeTabFormMixin:
         add_btn.setFixedWidth(130)
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
+        self._fluor_add_btn = add_btn  # hidden for OME input (role picker drives it)
 
         # Per-method parameter panel — swapped by _refresh_segmentation_hints so
         # only the selected routine's controls are shown.

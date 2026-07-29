@@ -107,6 +107,7 @@ def group_by_well(
     out: dict[str, list[str]] = {}
     examined = 0
     matched = 0
+    unreadable: list[str] = []
     for root, _, files in os.walk(search_dir):
         for fname in files:
             examined += 1
@@ -118,10 +119,37 @@ def group_by_well(
             extracted = _extract_well_from_filename(fname, schema, sep)
             if extracted is None:
                 continue
+            full = os.path.join(root, fname)
+            # ``os.walk`` lists a dangling symlink (a link whose target has been
+            # unmounted, moved, or deleted) among ``files`` — it is a directory
+            # entry that is not a directory. The copy in ``folder_well`` follows
+            # symlinks, so grouping such an entry made ``shutil.copy2`` open a
+            # target that isn't there and raise a bare ``FileNotFoundError``,
+            # which crashed the whole zipper subprocess and failed the entire
+            # plate. The rest of the pipeline never sees these files: its own
+            # discovery (``process_microscopy.organize_loose_tifs_into_well_folders``,
+            # ``find_image_groups``) filters on ``Path.is_file()`` / an existence
+            # check, both of which follow the link and treat a broken one as
+            # absent. Match that rule here (``os.path.isfile`` also follows) so a
+            # broken symlink is skipped — loudly, so the operator can repair it —
+            # instead of aborting grouping for every other well.
+            if not os.path.isfile(full):
+                unreadable.append(full)
+                continue
             matched += 1
-            out.setdefault(extracted, []).append(os.path.join(root, fname))
+            out.setdefault(extracted, []).append(full)
         if not recursive:
             break
+    if unreadable:
+        print(
+            f"warning: skipped {len(unreadable)} unreadable image(s) — each is a "
+            f"broken symlink or otherwise not a readable file (its target may be "
+            f"on an unmounted/moved volume). These wells will be missing those "
+            f"images:",
+            file=sys.stderr, flush=True,
+        )
+        for path in unreadable:
+            print(f"warning:   {path}", file=sys.stderr, flush=True)
     print(f"Discovery complete: examined {examined} file(s); {matched} image(s) "
           f"matched a well token across {len(out)} well(s). Grouping now…",
           flush=True)

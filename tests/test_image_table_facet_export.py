@@ -198,6 +198,10 @@ def _export_ctx(cells, row_dims, col_dims, well_labels=None):
         state=SimpleNamespace(
             image_table=st,
             dataset=SimpleNamespace(well_labels=dict(well_labels or {}), data_dir=None),
+            # _build_export_figure now also warms the parallel prefetch
+            # (_prefetch_cell_arrays), which reads ratio_metrics while
+            # deciding what to warm.
+            channel=SimpleNamespace(ratio_metrics=[]),
         ),
         runtime=SimpleNamespace(
             image_table=SimpleNamespace(cells=cells, crop_tool=None)),
@@ -279,3 +283,30 @@ def test_progress_callback_fires_once_per_cell_in_order(monkeypatch):
     assert len(calls) == total_cells
     assert [c[0] for c in calls] == list(range(1, total_cells + 1))
     assert {c[1] for c in calls} == {total_cells}
+
+
+def test_export_shares_the_persistent_image_cache_not_a_throwaway_copy(monkeypatch):
+    """Regression: ``_build_export_figure`` used to copy ``image_cache`` into a
+    local ``dict(...)`` before rendering, so any well/channel it scanned for
+    the first time was discarded instead of being written back -- a save run
+    without a prior Generate (or vice versa) never benefited the other path.
+    The ``cache`` object every ``_load_array`` call receives must be the same
+    object as ``ctx.state.image_table.image_cache``."""
+    from well_viewer.features.image_browser.image_table import export as E
+
+    cells = _nested_cells()
+    seen_cache_ids: set = set()
+
+    def _fake_load(ctx, cache, *a, **k):
+        seen_cache_ids.add(id(cache))
+        cache[("touched",)] = True
+        return None
+
+    monkeypatch.setattr(E, "_load_array", _fake_load)
+    monkeypatch.setattr(E, "resolve_chrome_plan", lambda *a, **k: (0, set(), None))
+    ctx = _export_ctx(cells, ["well", "channel"], ["timepoint"])
+
+    E._build_export_figure(ctx)
+
+    assert seen_cache_ids == {id(ctx.state.image_table.image_cache)}
+    assert ("touched",) in ctx.state.image_table.image_cache

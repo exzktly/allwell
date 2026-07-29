@@ -31,6 +31,27 @@ from well_viewer.features.image_browser.image_table.image_compose import (
 from well_viewer.features.image_browser.image_table.grid_layout import _axis_dim_values
 
 
+# Save to Saved Plots quality presets: (cell_max_px, gallery_max_px).
+# cell_max_px pre-shrinks each cell's array before compositing (bounds the
+# memory a full-resolution grid would take during the build); gallery_max_px
+# caps the whole assembled figure's longest side at savefig time (see
+# _downsample_dpi). Both scale together per preset so raising quality doesn't
+# raise the whole-figure pixel budget past what the per-cell source data can
+# actually resolve, and so lowering it actually saves the compositing time,
+# not just file size.
+GALLERY_QUALITY_PRESETS: dict[str, tuple[int, int]] = {
+    "draft": (280, 1400),
+    "standard": (480, 2400),
+    "high": (800, 4000),
+}
+GALLERY_QUALITY_LABELS: dict[str, str] = {
+    "draft": "Draft (fastest)",
+    "standard": "Standard",
+    "high": "High (slower)",
+}
+DEFAULT_GALLERY_QUALITY = "standard"
+
+
 def _export_opts(ctx) -> dict[str, Any]:
     """Return the image-table export option dict, seeding defaults on demand."""
     opts = getattr(ctx.state.image_table, "export_opts", None)
@@ -44,22 +65,54 @@ def _export_opts(ctx) -> dict[str, Any]:
             "title_fontsize": 7,
             "dpi": 300,
             "transparent_bg": True,
+            # "Save to Saved Plots" resolution/speed trade-off -- see
+            # GALLERY_QUALITY_PRESETS. Only the gallery-save path reads this;
+            # Export to File / Copy PNG / Copy SVG always render full-res.
+            "gallery_quality": DEFAULT_GALLERY_QUALITY,
         }
         ctx.state.image_table.export_opts = opts
+    elif "gallery_quality" not in opts:
+        opts["gallery_quality"] = DEFAULT_GALLERY_QUALITY  # older saved opts dict
     return opts
+
+
+def gallery_quality_px(ctx) -> tuple[int, int]:
+    """``(cell_max_px, gallery_max_px)`` for the current gallery-quality preset."""
+    key = _export_opts(ctx).get("gallery_quality", DEFAULT_GALLERY_QUALITY)
+    return GALLERY_QUALITY_PRESETS.get(key, GALLERY_QUALITY_PRESETS[DEFAULT_GALLERY_QUALITY])
+
+
+def set_gallery_quality(ctx, key: str) -> None:
+    """Set the "Save to Saved Plots" quality preset (see GALLERY_QUALITY_PRESETS)."""
+    if key not in GALLERY_QUALITY_PRESETS:
+        return
+    _export_opts(ctx)["gallery_quality"] = key
 
 
 def image_table_open_export_settings(ctx) -> None:
     """Pop a small modal dialog to edit the image-table export options."""
     from PySide6.QtWidgets import (
-        QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-        QSpinBox,
+        QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
+        QFormLayout, QSpinBox,
     )
 
     opts = _export_opts(ctx)
     dlg = QDialog(ctx.window)
     dlg.setWindowTitle("Image Table — Export settings")
     form = QFormLayout(dlg)
+
+    quality_cb = QComboBox(dlg)
+    quality_keys = list(GALLERY_QUALITY_PRESETS)
+    for key in quality_keys:
+        cell_px, gallery_px = GALLERY_QUALITY_PRESETS[key]
+        quality_cb.addItem(f"{GALLERY_QUALITY_LABELS[key]} — {gallery_px}px", key)
+    quality_cb.setCurrentIndex(quality_keys.index(
+        opts.get("gallery_quality", DEFAULT_GALLERY_QUALITY)))
+    quality_cb.setToolTip(
+        "Resolution → speed trade-off for “Save to Saved Plots” only "
+        "(Export to File / Copy PNG / Copy SVG always render full resolution)."
+    )
+    form.addRow("Save to Saved Plots quality:", quality_cb)
 
     pad_spin = QDoubleSpinBox(dlg)
     pad_spin.setRange(0.0, 4.0)
@@ -117,6 +170,7 @@ def image_table_open_export_settings(ctx) -> None:
         return
 
     opts.update({
+        "gallery_quality": quality_cb.currentData(),
         "pad_inches": float(pad_spin.value()),
         "cell_pad": float(cell_spin.value()),
         "show_titles": bool(titles_cb.isChecked()),
@@ -256,7 +310,22 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
     overlay_on = bool(getattr(ctx.state.image_table, "composite", False))
     overlay_chans = _axis_dim_values(ctx, "channel", collapse_overlay=False) if overlay_on else []
 
-    cache: dict[tuple[str, str, str], dict] = dict(getattr(ctx.state.image_table, "image_cache", None) or {})
+    # Share the SAME persistent cache image_table_generate writes into (not a
+    # throwaway copy) so a well/channel this export scans for the first time
+    # is available to a later Generate too, and vice versa -- a save run
+    # right after a Generate should not re-scan or re-decode anything.
+    cache = ctx.state.image_table.image_cache
+    if not isinstance(cache, dict):
+        cache = {}
+        ctx.state.image_table.image_cache = cache
+    # Warm every distinct cell's image in parallel first (same helper
+    # image_table_generate's prefetch pass uses) -- otherwise an export run
+    # without a prior Generate decodes every cell sequentially below, on the
+    # GUI thread, one at a time.
+    from well_viewer.features.image_browser.image_table.controller import (
+        _prefetch_cell_arrays,
+    )
+    _prefetch_cell_arrays(ctx, cells, cache)
     rendered = getattr(ctx.state.image_table, "last_render", None) or {}
     crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
     # Scale bar + identity labels are burned into the same RGB the live grid uses,
@@ -482,8 +551,13 @@ def image_table_save_to_gallery(ctx) -> None:
     """Render the current image grid (downsampled) and save it to Saved Plots.
 
     Microscopy grids can be enormous at full export resolution, so the saved
-    snapshot is capped to a modest longest-side pixel budget — enough to read
-    the grid in the gallery / PDF report without bloating the per-dataset store.
+    snapshot is capped to a longest-side pixel budget — enough to read the
+    grid in the gallery / PDF report without bloating the per-dataset store.
+    The exact budget is user-tunable (``GALLERY_QUALITY_PRESETS`` via
+    ``gallery_quality_px`` — Draft/Standard/High, set from the Export ▾ menu's
+    "Save quality" submenu or the "Export settings…" dialog), since a large
+    plate walk at the default preset can still be slow enough to want faster
+    (or, for a figure headed straight to a report, sharper) than the default.
 
     This whole render is synchronous on the GUI thread (per-cell disk reads +
     colormap/LUT application, then a final savefig pass), so a large grid can
@@ -527,12 +601,16 @@ def image_table_save_to_gallery(ctx) -> None:
         except Exception:
             swallowed()
 
+    cell_max_px, gallery_max_px = gallery_quality_px(ctx)
     try:
         # Pre-shrink each cell to bound the memory a full-resolution grid would
         # take. The pooling averages each block, exactly as the live thumbnail's
         # smooth scale does, so the saved snapshot reads at the same brightness
-        # as the grid.
-        fig, save_kwargs = _build_export_figure(ctx, cell_max_px=480, progress=_report)
+        # as the grid. Both this cap and the final downsample below come from
+        # the same user-tunable quality preset (Export ▾ → Save quality, or
+        # Export settings…) so raising/lowering it actually moves the speed/
+        # detail trade-off instead of just one half of it.
+        fig, save_kwargs = _build_export_figure(ctx, cell_max_px=cell_max_px, progress=_report)
         if fig is None:
             ctx.notify.set_status("Image table is empty — nothing to save.")
             return
@@ -544,10 +622,9 @@ def image_table_save_to_gallery(ctx) -> None:
         orig_dpi = int(save_kwargs.pop("_dpi", 200) or 200)
         save_kwargs.pop("format", None)
 
-        # Downsample: cap the longest side to ~2400 px.
         try:
             w_in, h_in = (float(v) for v in fig.get_size_inches())
-            dpi_ds = _downsample_dpi(orig_dpi, w_in, h_in)
+            dpi_ds = _downsample_dpi(orig_dpi, w_in, h_in, max_px=gallery_max_px)
         except Exception:
             dpi_ds = min(orig_dpi, 110)
 

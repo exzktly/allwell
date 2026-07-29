@@ -419,16 +419,14 @@ QPushButton:disabled, QToolButton:disabled {{
     border-color: {c.border_subtle};
 }}
 
-/* Dropdown-caret tool buttons (those marked ``hasMenu``). Reserve room on the
-   right and paint one shared chevron so every menu caret is the same size.
-   Qt's native arrows are inconsistent — the small ``menu-indicator`` on
-   instant-popup buttons (Channels / More / Crop) vs the ``menu-button`` on split
-   buttons (Build table / Export) — so we override both with the same SVG glyph. */
+/* Dropdown-caret tool buttons (those marked ``hasMenu``). Every one of these is
+   InstantPopup (the whole button opens the menu — no split default-action
+   region anywhere in the app), so only ``menu-indicator`` is live; it's purely
+   decorative, a fixed 10x10 chevron inset from the right edge. Reserve room on
+   the right and paint one shared chevron so every menu caret is the same size. */
 QToolButton[hasMenu="true"] {{
     padding-right: 20px;
 }}
-/* Instant-popup buttons: the whole button opens the menu, so ``menu-indicator``
-   is purely decorative — a fixed 10x10 chevron inset from the right edge. */
 QToolButton[hasMenu="true"]::menu-indicator {{
     image: url({_chev});
     width: 10px;
@@ -438,27 +436,6 @@ QToolButton[hasMenu="true"]::menu-indicator {{
     right: 6px;
     border: none;
     background: transparent;
-}}
-/* Split buttons (MenuButtonPopup — Build table / Export): ``menu-button`` is the
-   *clickable* dropdown region, not just decoration. It must span the full button
-   height and the whole reserved right strip, otherwise arrow clicks land on the
-   default-action area and fire it instead of opening the menu. Keep it a
-   transparent, full-height 20px box — the glyph is drawn by ``menu-arrow`` below. */
-QToolButton[hasMenu="true"]::menu-button {{
-    width: 20px;
-    subcontrol-origin: padding;
-    subcontrol-position: center right;
-    border: none;
-    background: transparent;
-}}
-/* The caret glyph inside the split button's menu-button. Pin it to the same 10x10
-   chevron as the instant-popup ``menu-indicator`` — otherwise Qt paints its own
-   native down-arrow, which scales with the full-height menu-button and reads as a
-   huge caret next to the small carets on Channels / More / Crop. */
-QToolButton[hasMenu="true"]::menu-arrow {{
-    image: url({_chev});
-    width: 10px;
-    height: 10px;
 }}
 
 QPushButton#Primary {{

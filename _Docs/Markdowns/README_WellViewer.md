@@ -1229,6 +1229,15 @@ channel for every well).
   grid on screen. Because the axis labels already identify every cell, the per-cell
   titles are off — switch **Show titles** on in the Export settings dialog if you want
   them repeated above each image as well.
+- **Save to Saved Plots quality** — a per-cell/whole-grid resolution preset (**Draft**,
+  **Standard**, **High**), picked either from the Export dropdown's quick-pick submenu
+  or the Export settings dialog. Save to Saved Plots pre-shrinks each cell and caps the
+  assembled grid's longest side before saving (Export to File / Copy PNG / Copy SVG
+  always render full resolution), so a large grid saves faster at the cost of per-cell
+  detail; raise it to **High** when the saved image needs to hold up in a full-page PDF
+  report. Save to Saved Plots also reuses whatever the last **Generate** already
+  decoded, and warms anything it hasn't with the same parallel prefetch Generate uses —
+  saving right after generating decodes nothing twice.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
   one is set under Sample Definitions → Well Labels.

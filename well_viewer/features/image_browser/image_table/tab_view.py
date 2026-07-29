@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QMenu, QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget,
@@ -51,6 +51,12 @@ from well_viewer.features.image_browser.image_table.build_layout import (
 )
 from well_viewer.features.image_browser.image_table.builder_view import (
     build_shelf, builder_notify_rendered, builder_flush_pending,
+)
+from well_viewer.features.image_browser.image_table.export import (
+    GALLERY_QUALITY_LABELS,
+    GALLERY_QUALITY_PRESETS,
+    gallery_quality_px,
+    set_gallery_quality,
 )
 
 
@@ -429,6 +435,28 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     emenu.addSeparator()
     emenu.addAction("Save to Saved Plots").triggered.connect(
         lambda _=False: image_table_save_to_gallery(ctx))
+
+    # Quick-pick resolution/speed preset for "Save to Saved Plots" — the same
+    # setting "Export settings…" exposes, surfaced here too since downsampling
+    # speed is the thing users tend to want to change right before saving.
+    quality_menu = emenu.addMenu("Save to Saved Plots quality")
+    quality_group = QActionGroup(quality_menu)
+    quality_group.setExclusive(True)
+    quality_actions: dict[str, QAction] = {}
+    for _qkey in GALLERY_QUALITY_PRESETS:
+        _gallery_px = GALLERY_QUALITY_PRESETS[_qkey][1]
+        _qact = quality_menu.addAction(f"{GALLERY_QUALITY_LABELS[_qkey]} — {_gallery_px}px")
+        _qact.setCheckable(True)
+        quality_group.addAction(_qact)
+        _qact.triggered.connect(partial(set_gallery_quality, ctx, _qkey))
+        quality_actions[_qkey] = _qact
+
+    def _sync_quality_check():
+        current = gallery_quality_px(ctx)
+        for key, act in quality_actions.items():
+            act.setChecked(GALLERY_QUALITY_PRESETS[key] == current)
+    quality_menu.aboutToShow.connect(_sync_quality_check)
+
     emenu.addSeparator()
     emenu.addAction("Export settings…").triggered.connect(
         lambda _=False: image_table_open_export_settings(ctx))

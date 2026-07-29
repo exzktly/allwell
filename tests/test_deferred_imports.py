@@ -94,7 +94,16 @@ FEATURE_PREFIX = "well_viewer.features"
 # ``view_state_io`` registry hook). ``view_state`` now fans out over the registry
 # instead of deferring feature imports, netting fewer deferred feature imports
 # across the persistence layer.
-MAX_DEFERRED_FEATURE_IMPORTS = 111
+#
+# Raised to 112 for the Image Table export/gallery-save path: ``export.py``'s
+# ``_build_export_figure`` now shares (and pre-warms via) the same threaded
+# prefetch helper ``controller._prefetch_cell_arrays`` uses, so a save run
+# without a prior Generate is no longer forced to decode every cell
+# sequentially. ``export`` is already imported at module scope by
+# ``controller`` (the re-export point noted above), so the reverse edge —
+# ``export`` needing one function out of ``controller`` — must stay a deferred
+# import to avoid a real init-order cycle, not just a style choice.
+MAX_DEFERRED_FEATURE_IMPORTS = 112
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

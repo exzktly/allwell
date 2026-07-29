@@ -596,14 +596,19 @@ class AnalyzeTabFormMixin:
         nir_row.layout().addStretch(1)
         fluor_row = self._row(sec, "Fluor radius")
         self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
-        self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
-        fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
+        # The ⓘ documents the *radius* entry, so it sits beside it — not after the
+        # Disable checkbox. Trailing the checkbox let the marker land on the tail
+        # of "Disable" under QMacStyle's checkbox metrics (invisible under Fusion,
+        # which is all CI runs); placing it before the checkbox removes the
+        # adjacency entirely.
         fluor_row.layout().addWidget(self._info_icon(
             fluor_row,
             "Radius = background scale (px); Fluor radius applies to all "
             "fluorescent channels. For fft_bandpass it is the large-structure "
             "(low-frequency) cutoff; for robust_mesh it is the tile size.",
         ))
+        self._no_tophat_fluor_cb = QCheckBox("Disable", fluor_row)
+        fluor_row.layout().addWidget(self._no_tophat_fluor_cb)
         fluor_row.layout().addStretch(1)
         # _row() returns the right-hand cell, not the full row — the "Nuclear
         # radius" / "Fluor radius" label lives in the cell's parent. Toggle

@@ -18,6 +18,8 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
+import theme
+
 
 class WrapCheckBox(QWidget):
     toggled = Signal(bool)
@@ -26,7 +28,13 @@ class WrapCheckBox(QWidget):
         super().__init__(parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(6)
+        # The indicator↔label gap is the app-wide checkbox spacing token, not a
+        # hand-picked constant. A plain ``QCheckBox`` renders its indicator and
+        # label ``theme.Spacing.sm`` apart (the QSS ``QCheckBox { spacing }``
+        # rule); the composite must match, or its label reads visibly tighter to
+        # the box than every native checkbox around it — enough that under
+        # QMacStyle's metrics the first word sat on top of the indicator.
+        lay.setSpacing(theme.Spacing.sm)
         self._cb = QCheckBox(self)
         self._cb.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         # A text-less checkbox still reserves the indicator↔label ``spacing`` gap,

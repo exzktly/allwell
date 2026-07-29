@@ -1,0 +1,138 @@
+"""Serpentine plate-position labelling for packed multi-position acquisitions.
+
+Some acquisition software emits a single file (an OME-TIFF, say) that holds every
+stage position visited during a scan, in **serpentine** (boustrophedon) order:
+the stage sweeps one row of wells left-to-right, drops to the next row and sweeps
+right-to-left, and so on — reversing direction every row so it never has to fly
+back across the plate. There are no per-file well tokens to parse, so the well
+label of each position has to be *reconstructed* from the acquisition order plus
+the dimensions of the imaged block.
+
+This module turns "the user imaged a ``rows`` × ``cols`` block of wells starting
+at ``origin``, snaking by row" into the ordered list of 96-well labels the rest
+of All-Well already understands. It depends only on the stdlib and
+``util.well_token`` (the single source of truth for the 96-well geometry), so the
+pipeline can import it without breaching the "no ``well_viewer`` / ``widgets`` /
+Qt imports" contract — the same reason ``util.well_token`` and ``util.schema``
+live under ``util/``.
+
+The 96-well plate is the only supported vocabulary: rows ``A``–``H`` (8) and
+columns ``1``–``12`` (12). A grid that would run past ``H`` or ``12`` from the
+chosen origin is rejected rather than silently wrapped.
+"""
+
+from __future__ import annotations
+
+from util.well_token import canonical_well_label
+
+# 96-well geometry. Kept here as the labelling bound; ``util.well_token`` owns the
+# parsing/validation of an individual token.
+PLATE_ROWS = "ABCDEFGH"
+PLATE_MAX_COL = 12
+
+# Serpentine snake axis. "row" snakes along rows (sweep a row, step down, sweep
+# back); "col" snakes along columns (sweep a column, step right, sweep back).
+DIRECTIONS = ("row", "col")
+
+
+def _origin_rc(origin: str) -> tuple[int, int]:
+    """Return the ``(row_index, col_index)`` of *origin* as 0-based offsets.
+
+    Row ``A`` → 0, column ``1`` → 0. Raises ``ValueError`` if *origin* is not a
+    valid 96-well position.
+    """
+    canon = canonical_well_label(origin)
+    if canon is None:
+        raise ValueError(
+            f"Origin well {origin!r} is not a valid 96-well position (A01–H12)."
+        )
+    row_idx = PLATE_ROWS.index(canon[0])
+    col_idx = int(canon[1:]) - 1
+    return row_idx, col_idx
+
+
+def serpentine_well_labels(
+    rows: int,
+    cols: int,
+    *,
+    origin: str = "A01",
+    direction: str = "row",
+) -> list[str]:
+    """Return the 96-well labels of a *rows* × *cols* block in serpentine order.
+
+    The block's top-left corner is *origin* (default ``"A01"``). ``direction``
+    selects the snake axis:
+
+    * ``"row"`` — sweep a whole row of wells, step down to the next row, sweep it
+      back the other way. Row 0 runs left-to-right, row 1 right-to-left, etc.
+    * ``"col"`` — sweep a whole column, step right, sweep back up. Column 0 runs
+      top-to-bottom, column 1 bottom-to-top, etc.
+
+    The returned list has length ``rows * cols`` and is in *acquisition order*:
+    element ``i`` is the well the stage visited at position ``i``.
+
+    Raises ``ValueError`` for a non-positive dimension, an unknown *direction*, an
+    invalid *origin*, or a block that would extend past ``H`` / column ``12`` from
+    the origin.
+    """
+    if rows <= 0 or cols <= 0:
+        raise ValueError(f"Grid dimensions must be positive (got {rows}×{cols}).")
+    if direction not in DIRECTIONS:
+        raise ValueError(
+            f"Unknown serpentine direction {direction!r}; expected one of {DIRECTIONS}."
+        )
+
+    row0, col0 = _origin_rc(origin)
+    last_row = row0 + rows - 1
+    last_col = col0 + cols - 1
+    if last_row >= len(PLATE_ROWS) or last_col >= PLATE_MAX_COL:
+        raise ValueError(
+            f"A {rows}×{cols} block from origin {origin} runs past the 96-well "
+            f"plate (would reach row {PLATE_ROWS[min(last_row, 7)]}"
+            f"{'+' if last_row >= len(PLATE_ROWS) else ''}, column {last_col + 1}). "
+            f"The plate is rows A–H, columns 1–12."
+        )
+
+    def _label(row_idx: int, col_idx: int) -> str:
+        return f"{PLATE_ROWS[row_idx]}{col_idx + 1:02d}"
+
+    labels: list[str] = []
+    if direction == "row":
+        for r in range(rows):
+            col_range = range(cols) if r % 2 == 0 else range(cols - 1, -1, -1)
+            for c in col_range:
+                labels.append(_label(row0 + r, col0 + c))
+    else:  # "col"
+        for c in range(cols):
+            row_range = range(rows) if c % 2 == 0 else range(rows - 1, -1, -1)
+            for r in row_range:
+                labels.append(_label(row0 + r, col0 + c))
+    return labels
+
+
+def position_to_well_fov(
+    index: int,
+    *,
+    well_labels: list[str],
+    fovs_per_well: int,
+) -> tuple[str, int]:
+    """Split a flat stage-position *index* into its ``(well_label, fov_index)``.
+
+    Assumes the stage acquires every field-of-view (FOV) tile of a well before
+    advancing to the next well — i.e. FOV tiles are *contiguous* within a well
+    (well-major order). With ``fovs_per_well`` tiles each, position ``index``
+    belongs to well ``well_labels[index // fovs_per_well]`` and is that well's FOV
+    ``index % fovs_per_well`` (0-based).
+
+    Raises ``ValueError`` for a non-positive ``fovs_per_well`` or an *index* that
+    falls outside ``len(well_labels) * fovs_per_well``.
+    """
+    if fovs_per_well <= 0:
+        raise ValueError(f"fovs_per_well must be positive (got {fovs_per_well}).")
+    total = len(well_labels) * fovs_per_well
+    if not (0 <= index < total):
+        raise ValueError(
+            f"Position index {index} out of range for {len(well_labels)} well(s) "
+            f"× {fovs_per_well} FOV(s) = {total} position(s)."
+        )
+    return well_labels[index // fovs_per_well], index % fovs_per_well

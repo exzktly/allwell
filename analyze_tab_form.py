@@ -228,6 +228,7 @@ class AnalyzeTabFormMixin:
         self._build_schema_section(parent)
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
+        self._build_ome_section(parent)
         self._refresh_schema_preview()
         # Quality Control leads the optional sections (above Shape Metrics) and
         # stays open — the correction stages it configures are the common tuning
@@ -453,6 +454,9 @@ class AnalyzeTabFormMixin:
         self._browse_btn.setEnabled(False)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
+        # Separate picker for a single packed OME-TIFF *file* (AnalyzeOmeMixin) —
+        # the folder picker above cannot select a file.
+        self._attach_ome_browse_button(in_pick, ipl)
         # Balancing stretch: input field gets ~50% of the row width
         # rather than stretching to fill the whole sidebar.
         ipl.addStretch(1)
@@ -1025,22 +1029,6 @@ class AnalyzeTabFormMixin:
         except Exception:
             swallowed()
 
-    def _set_fluor_rows(self, tokens, *, smfish, phase) -> None:
-        """Repopulate the fluor-channel rows to *tokens*, restoring smFISH/Phase flags."""
-        tokens = [str(t).strip() for t in tokens if str(t).strip()] or ["GFP"]
-        # Collapse to a single row, then grow to match the loaded tokens.
-        while len(self._fluor_rows) > 1:
-            _e, _s, _p, b = self._fluor_rows[-1]
-            self._fluor_remove_row(b.parent(), b)
-        self._fluor_rows[0][0].setText(tokens[0])
-        for tok in tokens[1:]:
-            self._fluor_add_row(tok)
-        sm, ph = set(smfish or []), (phase or "").strip()
-        for e, s_cb, p_cb, _b in self._fluor_rows:
-            tok = e.text().strip()
-            s_cb.setChecked(tok in sm)
-            p_cb.setChecked(bool(ph) and tok == ph)
-
     def _build_run_controls(self, parent: QWidget) -> None:
         # Remote-execution selector. Populated from ~/.config/allwell/remotes.toml
         # so users can flip between Local and any configured SSH host
@@ -1441,7 +1429,7 @@ class AnalyzeTabFormMixin:
         cyto = self._cytoplasm_edit.text().strip()
         if method != "stardist_seeded_watershed_cell":
             cyto = ""
-        return dict(
+        opts = dict(
             raw=Path(self._input_edit.text().strip()),
             scratch_dir=self._scratch_edit.text().strip() or None,
             nuclear_token=self._nuclear_token_edit.text().strip() or "NIR",
@@ -1490,3 +1478,7 @@ class AnalyzeTabFormMixin:
             cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
             cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
         )
+        # Packed OME-TIFF de-interleave parameters (AnalyzeOmeMixin); ignored
+        # downstream unless ome_input is set.
+        self._merge_ome_run_options(opts)
+        return opts

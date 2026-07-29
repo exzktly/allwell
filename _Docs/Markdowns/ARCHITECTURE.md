@@ -109,6 +109,8 @@ allwell/
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
+├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
+├── analyze_ome.py               ← packed OME-TIFF input: form section + de-interleave (mixin)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
 ├── datasets/                    ← Qt-free dataset operations + their feature views
 │   └── concatenate/            ← Concatenate datasets feature (compute/apply/worker/view/controller/dashboard)
@@ -121,12 +123,16 @@ allwell/
 │   ├── shape_features.py       ← per-cell shape-feature catalog (pipeline emits, GUI labels)
 │   ├── cellpose.py             ← Cellpose segmenters (Torch imported lazily)
 │   ├── stardist.py             ← StarDist segmenters + per-worker model state (TF lazy)
+│   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into loose per-plane
+│   │                              TIFs (Z max-projected; positions → wells via §OME)
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, WellPlateZipper, analyze_tab and
 │   │                              input_resolution_service all parse well names through it)
+│   ├── plate_grid.py           ← serpentine (boustrophedon) index → 96-well label mapping
+│   │                              (used by the OME-TIFF de-interleave)
 │   ├── schema.py               ← filename-schema vocabulary + parse/validate
 │   │                              (shared by process_microscopy and WellPlateZipper)
 │   ├── timepoint.py            ← timepoint token → hours + the shared sort key
@@ -1532,6 +1538,33 @@ The Run path:
    so Stop can signal the entire tree.
 5. The Analyze tab streams stdout/stderr into its log view (`tail -f`-style).
 6. On completion, the dataset folder is offered to the Review tab.
+
+**Single packed OME-TIFF input (`analyze_ome.py`).** Besides per-well
+zips/folders and loose TIFs, the Analyze pane accepts one OME-TIFF holding every
+timepoint, channel, Z-plane and stage position of a plate scan. This path is a
+third mixin, `AnalyzeOmeMixin`, kept in `analyze_ome.py` (out of both monoliths,
+which sit on their line budgets): it owns the collapsible **Single OME-TIFF
+Input** form section (imaged well-grid dimensions, origin well, serpentine
+direction), the `OME file…` picker, channel-token prefill from the OME channel
+names, pre-run grid validation, and the run-directory resolver
+`_resolve_run_dirs_for_runner`. The key idea is that the file is
+**de-interleaved into ordinary loose TIFs before anything else runs**, so the
+whole downstream stack — `WellPlateZipper` grouping, `process_microscopy`,
+`pipeline_info.json`, the Review viewer — is untouched.
+
+The resolver runs `services.input_resolution_service.explode_ome_if_present`
+first (a no-op unless `opts['ome_input']`), which calls
+`pipeline.ome_explode.explode_ome_tiff`: it reads the OME-XML for dimension
+order, channel names and timepoints; **max-projects Z** per (position, T, C);
+maps each stage position to a 96-well label via `util.plate_grid`
+(serpentine order + the imaged grid, one well × FOV per position, FOVs-per-well
+derived as `n_positions / (rows × cols)`); and writes
+`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` into a sibling `in/`
+folder. The resolver then hands that `in/` to `resolve_input_output` exactly as
+for any loose-TIF drop. Because the explode is client-side, remote runs receive
+the loose TIFs and need no OME awareness; `pipeline/ome_explode.py` and
+`util/plate_grid.py` are still listed in the remote manifest so it stays a
+complete mirror of `pipeline/` + `util/` (`test_remote_manifest.py`).
 
 ### 6.2 `process_microscopy.py`
 

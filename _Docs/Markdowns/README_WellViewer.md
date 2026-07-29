@@ -330,8 +330,37 @@ The input folder is resolved by
   per-well ZIPs according to your schema, then the pipeline runs against
   those.
 - A folder of per-well ZIPs already → used directly.
+- A **single packed OME-TIFF** (one `.ome.tif` holding every well, channel,
+  Z-plane and timepoint) → de-interleaved into per-well images first (see below).
 
 You can also explicitly override the output folder.
+
+### 3a. Single OME-TIFF input
+
+Some microscopes save a whole plate scan as one OME-TIFF instead of a file per
+image. Pick it with the **OME file…** button next to Browse (the folder picker
+can't select a file). All-Well reads the file's OME metadata and a small
+**Single OME-TIFF Input** panel appears; fill it in:
+
+- **Well grid (rows × cols)** — the dimensions of the block of wells you imaged
+  (e.g. `2 × 3` for a six-well region). All-Well assumes the stage visited the
+  wells in **serpentine** order (sweep one row, drop down, sweep back), so these
+  dimensions are what let it auto-label each stage position with its well.
+- **Origin well** — the top-left well of that block (default `A01`).
+- **Serpentine direction** — whether the snake runs along rows or columns.
+
+The panel shows a live summary: how many stage positions the file holds, how
+many wells × fields-of-view that works out to (fields-of-view per well is the
+position count divided by the number of wells), and a preview of the first well
+labels. Channel names and timepoints are read from the OME metadata — the
+channel tokens are pre-filled from them (you still pick which one is the
+segmentation channel), and any Z-stack is **maximum-intensity projected** to the
+single plane the pipeline measures. Labels stay within the 96-well plate
+(`A01`–`H12`).
+
+Under the hood the file is exploded into ordinary per-well TIFs before the run,
+so everything after that — grouping, segmentation, the CSVs, and the Review pane
+— behaves exactly as for any other input.
 
 ### 4. Pipeline options
 

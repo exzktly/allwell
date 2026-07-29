@@ -379,6 +379,80 @@ def test_on_change_handles_missing_frame(playground_app, monkeypatch):
     assert "No raw image" in app._playground_status.text()
 
 
+def test_activating_playground_calls_on_change_exactly_once(loaded_app):
+    """Regression: opening the Playground sub-tab for the first time used to
+    run the expensive correct+render pass 2-3x back to back --
+    build_playground_tab's own trailing on_change() call, immediately followed
+    by registry._activate_playground -> playground_activate's own on_change()
+    call (both fired from the same on_image_browser_subtab_changed dispatch).
+    Exercises the REAL activation path (the sub-tab bar's currentChanged
+    signal), not the playground_app fixture's direct build_playground_tab
+    call, which never fired either of those two."""
+    from well_viewer.features.image_browser.playground import (
+        controller as PC, tab_view as PT,
+    )
+
+    app = loaded_app
+    calls = []
+    orig = PC.playground_on_change
+
+    def _counted(ctx):
+        calls.append(1)
+        return orig(ctx)
+
+    # Both tab_view (imported by name, bound via partial at build time) and
+    # controller (its own internal call sites) must be patched -- either one
+    # left unpatched would silently undercount.
+    monkeypatch_targets = (PT, PC)
+    for mod in monkeypatch_targets:
+        mod.playground_on_change = _counted
+    try:
+        build_pending = app._ctx.runtime.centre.build_pending
+        if build_pending is not None:
+            build_pending("Image Browser")
+        sub = app._ctx.runtime.image_browser.subtabs
+        idx = next(i for i in range(sub.count()) if sub.tabText(i) == "Playground")
+        sub.setCurrentIndex(idx)   # fires on_image_browser_subtab_changed for real
+        assert len(calls) == 1
+    finally:
+        PT.playground_on_change = orig
+        PC.playground_on_change = orig
+
+
+def test_repeat_on_change_with_unchanged_frame_and_params_skips_correction(
+        playground_app, monkeypatch):
+    """Regression: playground_on_change used to recompute correct_single_frame
+    from scratch on every call, even when the frame + every correction
+    parameter were unchanged from the last computed result -- e.g. every tab
+    re-activation, or the load_controller.py post-load safety-net re-dispatch.
+    A repeat call with nothing changed must hit the memoized result instead."""
+    app = playground_app
+    st = app._app_state.playground
+    from well_viewer.features.image_browser.playground import controller as C
+    frame = _frame(9)
+    monkeypatch.setattr(C, "_load_array", lambda *a, **k: frame)
+    monkeypatch.setattr(C, "_load_mask_array", lambda *a, **k: None)
+    calls = []
+    orig = C.pm.correct_single_frame
+    monkeypatch.setattr(
+        C.pm, "correct_single_frame",
+        lambda *a, **k: (calls.append(1), orig(*a, **k))[1])
+
+    st.source = "corrected"
+    app._playground_bg_cb.setCurrentText("sliding_disk")
+    C.playground_on_change(app._ctx)
+    assert len(calls) == 1
+
+    calls.clear()
+    C.playground_on_change(app._ctx)
+    assert calls == [], "repeat call with nothing changed should hit the memo cache"
+
+    # A real change (radius) invokes it again.
+    app._playground_radius_edit.setText("99")
+    C.playground_on_change(app._ctx)
+    assert len(calls) == 1
+
+
 def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
     """Regression: the plotting ctxbar threshold box must show the actual
     ThreshFracOn (e.g. after an auto-threshold or Cell Gating edit), not stay at

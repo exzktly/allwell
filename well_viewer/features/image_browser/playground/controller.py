@@ -254,11 +254,28 @@ def playground_on_change(ctx) -> None:
 
     # Flat-field source applies only the flat-field (background = none).
     bg_method = st.background_method if st.source == "corrected" else "none"
-    corrected = pm.correct_single_frame(
-        st.raw_arr, flatfield_mode=st.flatfield_mode,
-        background_method=bg_method, radius=st.radius,
-        fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
-        ff_field=ff, bg_field=bg)
+    # id(raw) (the pre-np.asarray object _load_array returned, above) is a valid
+    # identity proxy for "is this the same decoded frame" ONLY because
+    # image_discovery.open_imgref_as_array's decode cache guarantees a returned
+    # array is shared by reference on a hit -- same frame -> same object -> same
+    # id(); a real frame change, or a test monkeypatching _load_array to return
+    # different data for the same nominal (well, channel, tp, fov), correctly
+    # misses instead. id(st.raw_arr) would NOT work here -- it's a fresh
+    # np.asarray(...) object every single call, never stable across calls.
+    correction_key = (
+        id(raw), st.source, st.flatfield_mode, bg_method, st.radius,
+        st.fft_small, st.mesh_ratio, st.mesh_sigma, id(ff), id(bg),
+    )
+    if correction_key == st.last_correction_key and st.last_corrected_arr is not None:
+        corrected = st.last_corrected_arr
+    else:
+        corrected = pm.correct_single_frame(
+            st.raw_arr, flatfield_mode=st.flatfield_mode,
+            background_method=bg_method, radius=st.radius,
+            fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
+            ff_field=ff, bg_field=bg)
+        st.last_correction_key = correction_key
+        st.last_corrected_arr = corrected
     _render(ctx, corrected)
     label = ("Flat-field" if st.source == "flatfield"
              else f"Corrected ({st.flatfield_mode}+{st.background_method})")

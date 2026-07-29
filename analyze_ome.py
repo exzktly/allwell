@@ -25,7 +25,9 @@ from __future__ import annotations
 import queue
 from pathlib import Path
 
-from PySide6.QtWidgets import QComboBox, QFileDialog, QLabel, QPushButton
+from PySide6.QtWidgets import (
+    QComboBox, QFileDialog, QLabel, QPushButton, QVBoxLayout, QWidget,
+)
 
 from services.input_resolution_service import (
     explode_ome_if_present,
@@ -66,6 +68,16 @@ class AnalyzeOmeMixin:
         self._ome_cols_edit = self._entry(grid_row, "1", width=48)
         grid_row.layout().addStretch(1)
 
+        fovs_row = self._row(sec, "FOVs per well")
+        self._ome_fovs_edit = self._entry(fovs_row, "", width=48)
+        self._ome_fovs_edit.setPlaceholderText("auto")
+        self._ome_fovs_edit.setToolTip(
+            "Fields-of-view acquired per well. Leave blank to derive it from the "
+            "position count and the well grid; enter a value to state it "
+            "explicitly and catch a mistyped grid."
+        )
+        fovs_row.layout().addStretch(1)
+
         origin_row = self._row(sec, "Origin well (top-left)")
         self._ome_origin_edit = self._entry(origin_row, "A01", width=60)
         self._ome_origin_edit.setPlaceholderText("A01")
@@ -79,16 +91,37 @@ class AnalyzeOmeMixin:
         dir_row.layout().addWidget(self._ome_direction_cb)
         dir_row.layout().addStretch(1)
 
+        # Per-channel role picker, (re)built from the file's OME channel names.
+        roles_hdr = QLabel("Channel roles", sec)
+        roles_hdr.setObjectName("Muted")
+        sec.layout().addWidget(roles_hdr)
+        self._ome_roles_box = QWidget(sec)
+        box_layout = QVBoxLayout(self._ome_roles_box)
+        box_layout.setContentsMargins(0, 0, 0, 0)
+        box_layout.setSpacing(2)
+        sec.layout().addWidget(self._ome_roles_box)
+        self._ome_role_combos: list[tuple[str, QComboBox]] = []
+
         self._ome_info_lbl = QLabel("", sec)
         self._ome_info_lbl.setObjectName("Muted")
         self._ome_info_lbl.setWordWrap(True)
         sec.layout().addWidget(self._ome_info_lbl)
 
-        for w in (self._ome_rows_edit, self._ome_cols_edit, self._ome_origin_edit):
+        for w in (self._ome_rows_edit, self._ome_cols_edit,
+                  self._ome_fovs_edit, self._ome_origin_edit):
             w.textChanged.connect(lambda _=None: self._refresh_ome_readout())
         self._ome_direction_cb.currentIndexChanged.connect(
             lambda _=None: self._refresh_ome_readout())
         self._ome_section.setVisible(False)
+
+    # Role vocabulary: (opts-key, dropdown label).
+    _OME_ROLES = (
+        ("fluor", "Fluorescence"),
+        ("segmentation", "Segmentation"),
+        ("phase", "Phase / brightfield"),
+        ("smfish", "smFISH"),
+        ("ignore", "Ignore"),
+    )
 
     def _attach_ome_browse_button(self, container, layout) -> None:
         """Add the 'OME file…' picker to the Folders row's *layout*.
@@ -147,6 +180,18 @@ class AnalyzeOmeMixin:
         """``"row"`` or ``"col"`` — the selected serpentine snake axis."""
         return str(self._ome_direction_cb.currentData() or "row")
 
+    def _ome_fovs_per_well(self) -> int | None:
+        """Entered fields-of-view per well, or ``None`` for auto-derive.
+
+        A blank field means "derive from the position count"; a non-positive or
+        non-integer entry is treated as blank rather than raising.
+        """
+        try:
+            val = int(self._ome_fovs_edit.text().strip())
+        except (AttributeError, ValueError):
+            return None
+        return val if val > 0 else None
+
     def _ome_read_layout(self, path):
         """Read (and cache) the OME layout metadata for *path*, or ``None``.
 
@@ -174,15 +219,68 @@ class AnalyzeOmeMixin:
         cache[key] = layout
         return layout
 
-    def _ome_prefill_channels(self, path) -> None:
-        """Auto-fill the nuclear + fluor channel tokens from OME channel names."""
+    def _rebuild_ome_channel_roles(self, path) -> None:
+        """(Re)build the per-channel role picker from the OME channel names.
+
+        One row per channel: the channel name and a role dropdown. Every channel
+        defaults to **Fluorescence** — never to Segmentation, since guessing the
+        segmentation channel by acquisition order is the misfire this replaces
+        (channel 0 is often brightfield). The user assigns Segmentation and any
+        Phase / smFISH channels; the assignment then drives the Channel-Tokens
+        widgets via :meth:`_apply_ome_channel_roles`.
+        """
         layout = self._ome_read_layout(path)
         names = list(getattr(layout, "channel_names", []) or [])
-        if not names or not hasattr(self, "_nuclear_token_edit"):
+        box = getattr(self, "_ome_roles_box", None)
+        if box is None:
             return
-        self._nuclear_token_edit.setText(names[0])
-        fluors = names[1:] or names[:1]
-        self._set_fluor_rows(fluors, smfish=[], phase="")
+        # Clear any previous rows.
+        while box.layout().count():
+            item = box.layout().takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._ome_role_combos = []
+        for name in names:
+            row = self._row(box, name)
+            combo = QComboBox(row)
+            for value, label in self._OME_ROLES:
+                combo.addItem(label, userData=value)
+            combo.setFixedWidth(170)
+            combo.currentIndexChanged.connect(
+                lambda _=None: self._apply_ome_channel_roles())
+            row.layout().addWidget(combo)
+            row.layout().addStretch(1)
+            self._ome_role_combos.append((name, combo))
+        self._apply_ome_channel_roles()
+
+    def _ome_channel_roles(self) -> dict[str, list[str]]:
+        """Group the picked channel names by role key."""
+        out: dict[str, list[str]] = {v: [] for v, _ in self._OME_ROLES}
+        for name, combo in getattr(self, "_ome_role_combos", []):
+            out.setdefault(str(combo.currentData() or "fluor"), []).append(name)
+        return out
+
+    def _apply_ome_channel_roles(self) -> None:
+        """Drive the Channel-Tokens widgets from the role picker.
+
+        Segmentation → the nuclear token; every measured channel (Fluorescence ∪
+        smFISH ∪ Phase) → a fluor row with its smFISH / Phase flag set. Keeping
+        the existing widgets as the single source of truth means everything that
+        reads them (``_collect_run_options``, ``_phase_token``,
+        ``_smfish_tokens_list``, ``_segmentation_validation_errors``) works
+        unchanged.
+        """
+        if not hasattr(self, "_nuclear_token_edit"):
+            return
+        roles = self._ome_channel_roles()
+        seg = roles["segmentation"]
+        self._nuclear_token_edit.setText(seg[0] if seg else "")
+        measured = roles["fluor"] + roles["smfish"] + roles["phase"]
+        self._set_fluor_rows(
+            measured, smfish=roles["smfish"],
+            phase=roles["phase"][0] if roles["phase"] else "",
+        )
 
     def _set_fluor_rows(self, tokens, *, smfish, phase) -> None:
         """Repopulate the fluor-channel rows to *tokens*, restoring smFISH/Phase flags.
@@ -216,12 +314,25 @@ class AnalyzeOmeMixin:
             except Exception:
                 swallowed()
         self._ome_detected_file = detected
+        # When a packed OME-TIFF is active the role picker in the OME section
+        # drives the Channel-Tokens widgets: hide the fluorescent-channel list
+        # (the segmentation *method* combo + its param stack stay), and make the
+        # segmentation-channel token read-only so it reflects the picked role
+        # without letting the user desync it. (The nuclear *row*'s visibility is
+        # owned by ``_refresh_segmentation_hints`` per method, so we don't fight
+        # it here.)
+        for attr in ("_fluor_header", "_fluor_frame", "_fluor_add_btn"):
+            w = getattr(self, attr, None)
+            if w is not None:
+                w.setVisible(detected is None)
+        if hasattr(self, "_nuclear_token_edit"):
+            self._nuclear_token_edit.setReadOnly(detected is not None)
         if not hasattr(self, "_ome_section"):
             return
         self._ome_section.setVisible(detected is not None)
         if detected is not None:
             if getattr(self, "_ome_prefilled_for", None) != str(detected):
-                self._ome_prefill_channels(detected)
+                self._rebuild_ome_channel_roles(detected)
                 self._ome_prefilled_for = str(detected)
             self._refresh_ome_readout()
 
@@ -239,25 +350,40 @@ class AnalyzeOmeMixin:
         if layout.size_z > 1:
             info += f" · {layout.size_z} Z (max-projected)"
         rows, cols, ok = self._ome_grid_dims()
+        entered_fovs = self._ome_fovs_per_well()
         if ok:
             n_wells = rows * cols
-            if layout.n_positions % n_wells != 0:
+            if entered_fovs is not None:
+                # Explicit FOVs/well: cross-check against the position count.
+                expected = n_wells * entered_fovs
+                if expected != layout.n_positions:
+                    info += (f"\n⚠ {rows}×{cols} wells × {entered_fovs} FOV(s) = "
+                             f"{expected}, but the file has {layout.n_positions} "
+                             f"position(s).")
+                else:
+                    info += self._ome_well_line(rows, cols, n_wells, entered_fovs)
+            elif layout.n_positions % n_wells != 0:
                 info += (f"\n⚠ {layout.n_positions} positions not divisible by "
-                         f"{rows}×{cols} = {n_wells} wells.")
+                         f"{rows}×{cols} = {n_wells} wells. Set FOVs per well, "
+                         f"or fix the grid.")
             else:
                 fpw = layout.n_positions // n_wells
-                try:
-                    from util.plate_grid import serpentine_well_labels
-                    labels = serpentine_well_labels(
-                        rows, cols,
-                        origin=self._ome_origin_edit.text().strip() or "A01",
-                        direction=self._ome_direction(),
-                    )
-                    preview = ", ".join(labels[:6]) + (" …" if len(labels) > 6 else "")
-                    info += f"\n→ {n_wells} well(s) × {fpw} FOV(s). Wells: {preview}"
-                except ValueError as exc:
-                    info += f"\n⚠ {exc}"
+                info += self._ome_well_line(rows, cols, n_wells, fpw)
         self._ome_info_lbl.setText(info)
+
+    def _ome_well_line(self, rows: int, cols: int, n_wells: int, fpw: int) -> str:
+        """The ``→ N well(s) × M FOV(s). Wells: …`` summary (or a grid-overflow warning)."""
+        try:
+            from util.plate_grid import serpentine_well_labels
+            labels = serpentine_well_labels(
+                rows, cols,
+                origin=self._ome_origin_edit.text().strip() or "A01",
+                direction=self._ome_direction(),
+            )
+        except ValueError as exc:
+            return f"\n⚠ {exc}"
+        preview = ", ".join(labels[:6]) + (" …" if len(labels) > 6 else "")
+        return f"\n→ {n_wells} well(s) × {fpw} FOV(s). Wells: {preview}"
 
     # ------------------------------------------------------------------
     # Validation + run-option merge
@@ -279,11 +405,19 @@ class AnalyzeOmeMixin:
             return ("The selected .ome.tif could not be read. Confirm it is a "
                     "valid OME-TIFF.")
         n_wells = rows * cols
-        if layout.n_positions % n_wells != 0:
+        entered_fovs = self._ome_fovs_per_well()
+        if entered_fovs is not None:
+            if n_wells * entered_fovs != layout.n_positions:
+                return (f"The {rows}×{cols} = {n_wells} well grid × "
+                        f"{entered_fovs} FOV(s) per well = "
+                        f"{n_wells * entered_fovs}, but the file has "
+                        f"{layout.n_positions} stage position(s).\n\nCheck the "
+                        f"grid dimensions and the FOVs-per-well value.")
+        elif layout.n_positions % n_wells != 0:
             return (f"The file has {layout.n_positions} stage position(s), which "
                     f"is not divisible by the {rows}×{cols} = {n_wells} well "
-                    f"grid.\n\nFields-of-view per well must be a whole number — "
-                    f"check the grid dimensions.")
+                    f"grid.\n\nEnter the FOVs per well, or fix the grid "
+                    f"dimensions so fields-of-view per well is a whole number.")
         try:
             from util.plate_grid import serpentine_well_labels
             serpentine_well_labels(
@@ -293,6 +427,22 @@ class AnalyzeOmeMixin:
             )
         except ValueError as exc:
             return str(exc)
+        return self._ome_channel_role_error()
+
+    def _ome_channel_role_error(self) -> str | None:
+        """Validate the channel-role picker: one Segmentation, ≤1 Phase, ≥1 measured."""
+        roles = self._ome_channel_roles()
+        if len(roles["segmentation"]) != 1:
+            return ("Assign exactly one channel as the Segmentation channel "
+                    "(the nuclear/brightfield image the segmentation method runs "
+                    "on) in the Channel roles list.")
+        if len(roles["phase"]) > 1:
+            return ("At most one channel can be Phase / brightfield "
+                    f"(you marked {len(roles['phase'])}).")
+        if not (roles["fluor"] + roles["smfish"] + roles["phase"]):
+            return ("Assign at least one channel as Fluorescence (or smFISH / "
+                    "Phase) to measure — every channel is currently Segmentation "
+                    "or Ignore.")
         return None
 
     def _merge_ome_run_options(self, opts: dict) -> None:
@@ -304,9 +454,11 @@ class AnalyzeOmeMixin:
         """
         ome_on = getattr(self, "_ome_detected_file", None) is not None
         rows, cols, _ = self._ome_grid_dims() if ome_on else (0, 0, False)
+        fovs = self._ome_fovs_per_well() if ome_on else None
         opts["ome_input"] = ome_on
         opts["ome_grid_rows"] = rows
         opts["ome_grid_cols"] = cols
+        opts["ome_fovs_per_well"] = fovs or 0  # 0 = auto-derive
         opts["ome_origin_well"] = (
             (self._ome_origin_edit.text().strip() or "A01") if ome_on else "A01")
         opts["ome_direction"] = self._ome_direction() if ome_on else "row"

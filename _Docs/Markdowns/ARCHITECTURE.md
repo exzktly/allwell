@@ -1545,20 +1545,30 @@ timepoint, channel, Z-plane and stage position of a plate scan. This path is a
 third mixin, `AnalyzeOmeMixin`, kept in `analyze_ome.py` (out of both monoliths,
 which sit on their line budgets): it owns the collapsible **Single OME-TIFF
 Input** form section (imaged well-grid dimensions, origin well, serpentine
-direction), the `OME file…` picker, channel-token prefill from the OME channel
-names, pre-run grid validation, and the run-directory resolver
+direction, an optional explicit FOVs-per-well, and a per-channel role picker),
+the `OME file…` picker, pre-run validation, and the run-directory resolver
 `_resolve_run_dirs_for_runner`. The key idea is that the file is
 **de-interleaved into ordinary loose TIFs before anything else runs**, so the
 whole downstream stack — `WellPlateZipper` grouping, `process_microscopy`,
 `pipeline_info.json`, the Review viewer — is untouched.
+
+Channel roles are **explicit, not guessed by order**: after the file is read, the
+role picker lists each OME channel name with a role dropdown (Segmentation /
+Fluorescence / Phase-brightfield / smFISH / Ignore), defaulting to Fluorescence.
+The picker *drives the existing Channel-Tokens widgets* (`_apply_ome_channel_roles`
+→ `_nuclear_token_edit` + `_set_fluor_rows`), so everything that reads them
+(`_collect_run_options`, `_phase_token`, `_segmentation_validation_errors`) is
+unchanged; the manual fluorescent-channel list is hidden and the
+segmentation-channel field is read-only while an OME file is active.
 
 The resolver runs `services.input_resolution_service.explode_ome_if_present`
 first (a no-op unless `opts['ome_input']`), which calls
 `pipeline.ome_explode.explode_ome_tiff`: it reads the OME-XML for dimension
 order, channel names and timepoints; **max-projects Z** per (position, T, C);
 maps each stage position to a 96-well label via `util.plate_grid`
-(serpentine order + the imaged grid, one well × FOV per position, FOVs-per-well
-derived as `n_positions / (rows × cols)`); and writes
+(serpentine order + the imaged grid, one well × FOV per position; FOVs-per-well
+is entered explicitly and cross-checked, or derived as
+`n_positions / (rows × cols)` when left blank); and writes
 `<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` into a sibling `in/`
 folder. The resolver then hands that `in/` to `resolve_input_output` exactly as
 for any loose-TIF drop. Because the explode is client-side, remote runs receive

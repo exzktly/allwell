@@ -119,6 +119,38 @@ def test_multiple_fovs_per_well_derived_from_position_count(tmp_path):
     assert (out / "exp_c0_A02_f1_t0.tif").exists()
 
 
+def test_explicit_fovs_per_well_matches_derived(tmp_path):
+    # 6 positions, 1×3 grid → 2 FOVs/well either way. Passing it explicitly must
+    # produce the same output as letting it derive.
+    p = _write_ome(
+        tmp_path / "s.ome.tif", positions=6, size_t=1, size_c=1, size_z=1,
+        channel_names=("",),
+    )
+    auto = tmp_path / "auto"
+    explicit = tmp_path / "explicit"
+    r_auto = explode_ome_tiff(
+        p, auto, grid_rows=1, grid_cols=3, experiment="exp",
+    )
+    r_exp = explode_ome_tiff(
+        p, explicit, grid_rows=1, grid_cols=3, fovs_per_well=2, experiment="exp",
+    )
+    assert r_exp.fovs_per_well == r_auto.fovs_per_well == 2
+    assert sorted(x.name for x in explicit.glob("*.tif")) == sorted(
+        x.name for x in auto.glob("*.tif")
+    )
+
+
+def test_explicit_fovs_per_well_mismatch_rejected(tmp_path):
+    # 6 positions, but 2×2 wells × 2 FOVs = 8 ≠ 6.
+    p = _write_ome(tmp_path / "s.ome.tif", positions=6, size_t=1, size_c=1, size_z=1)
+    out = tmp_path / "in"
+    with pytest.raises(ValueError, match="stage position"):
+        explode_ome_tiff(
+            p, out, grid_rows=2, grid_cols=2, fovs_per_well=2, experiment="exp",
+        )
+    assert not out.exists() or not list(out.glob("*.tif"))
+
+
 def test_indivisible_position_count_rejected(tmp_path):
     p = _write_ome(tmp_path / "s.ome.tif", positions=5, size_t=1, size_c=1, size_z=1)
     with pytest.raises(ValueError, match="not divisible"):

@@ -227,6 +227,7 @@ def explode_ome_tiff(
     origin_well: str = "A01",
     direction: str = "row",
     experiment: str = "ome",
+    fovs_per_well: int | None = None,
     log_fn: Callable[[str], None] | None = None,
 ) -> ExplodeResult:
     """Explode a packed OME-TIFF into loose per-plane 2-D TIFs under *out_in_dir*.
@@ -238,9 +239,14 @@ def explode_ome_tiff(
     serpentine order and the *grid_rows* × *grid_cols* imaged block; each
     position is one well × FOV.
 
-    Raises ``ValueError`` if the number of positions is not an exact multiple of
-    ``grid_rows * grid_cols`` (so FOVs-per-well is not integral), or if the grid
-    overflows the 96-well plate from *origin_well*.
+    *fovs_per_well* is the fields-of-view acquired per well. When ``None`` it is
+    derived as ``n_positions / (grid_rows * grid_cols)``. When given, it is used
+    verbatim and cross-checked: it turns a mistyped grid — which would otherwise
+    silently mislabel every well — into an explicit error.
+
+    Raises ``ValueError`` if the position count is not consistent with the grid
+    (not an exact multiple when deriving, or ``grid_rows*grid_cols*fovs_per_well``
+    when given), or if the grid overflows the 96-well plate from *origin_well*.
     """
     ome_path = Path(ome_path)
     out_in_dir = Path(out_in_dir)
@@ -251,14 +257,22 @@ def explode_ome_tiff(
 
     layout = read_ome_layout(ome_path)
     n_wells = grid_rows * grid_cols
-    if layout.n_positions % n_wells != 0:
+    if fovs_per_well is None:
+        if layout.n_positions % n_wells != 0:
+            raise ValueError(
+                f"{ome_path.name} has {layout.n_positions} stage position(s), "
+                f"which is not divisible by the {grid_rows}×{grid_cols} = "
+                f"{n_wells} well grid. Fields-of-view per well must be a whole "
+                f"number — check the grid dimensions."
+            )
+        fovs_per_well = layout.n_positions // n_wells
+    elif n_wells * fovs_per_well != layout.n_positions:
         raise ValueError(
-            f"{ome_path.name} has {layout.n_positions} stage position(s), which "
-            f"is not divisible by the {grid_rows}×{grid_cols} = {n_wells} well "
-            f"grid. Fields-of-view per well must be a whole number — check the "
-            f"grid dimensions."
+            f"{ome_path.name} has {layout.n_positions} stage position(s), but "
+            f"the {grid_rows}×{grid_cols} = {n_wells} well grid × "
+            f"{fovs_per_well} FOV(s) per well = {n_wells * fovs_per_well}. "
+            f"Check the grid dimensions and the FOVs-per-well value."
         )
-    fovs_per_well = layout.n_positions // n_wells
 
     # Raises for an out-of-range grid before any file is written.
     well_labels = serpentine_well_labels(

@@ -799,6 +799,9 @@ def explode_ome_if_present(
     base = ome_file.parent
     in_dir = base / "in"
     experiment = opts.get("ome_experiment") or _strip_ome_suffix(ome_file.name)
+    # 0 / absent → derive fields-of-view per well; a positive value is used and
+    # cross-checked against the position count by explode_ome_tiff.
+    fovs = int(opts.get("ome_fovs_per_well", 0) or 0)
     explode_ome_tiff(
         ome_file,
         in_dir,
@@ -807,6 +810,7 @@ def explode_ome_if_present(
         origin_well=str(opts.get("ome_origin_well", "A01")),
         direction=str(opts.get("ome_direction", "row")),
         experiment=str(experiment),
+        fovs_per_well=fovs if fovs > 0 else None,
         log_fn=log_fn,
     )
     return base

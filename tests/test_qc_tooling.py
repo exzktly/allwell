@@ -583,6 +583,34 @@ def test_well_present_in_input_layouts(tmp_path):
     assert not well_present_in_input(zd, "ZZ9")
 
 
+def test_well_present_in_input_resolves_in_subfolder(tmp_path):
+    """A selected dataset folder holding ``in/`` + ``out/`` feeds the pipeline
+    from ``in/``; the pre-run check must look there too, or a well grouped as
+    ``in/<WELL>.zip`` / ``in/<WELL>/`` is wrongly reported missing and blocks
+    the run."""
+    from services.input_resolution_service import well_present_in_input
+
+    # Wells zipped inside in/ (the failing case): top-level glob never sees them.
+    ds = tmp_path / "dataset"
+    (ds / "in").mkdir(parents=True)
+    (ds / "out").mkdir()
+    with zipfile.ZipFile(ds / "in" / "D07.zip", "w") as z:
+        z.writestr("D07_s0_DAPI.tif", b"x")
+    assert well_present_in_input(ds, "d7")           # selected the parent folder
+    assert well_present_in_input(ds, "D07")
+    assert not well_present_in_input(ds, "H12")
+
+    # Wells as folders inside in/ resolve the same way.
+    ds2 = tmp_path / "dataset2"
+    (ds2 / "in" / "E08").mkdir(parents=True)
+    (ds2 / "out").mkdir()
+    assert well_present_in_input(ds2, "e8")
+
+    # Selecting the in/ folder directly still works and must not double-descend
+    # into a nested in/ that doesn't exist.
+    assert well_present_in_input(ds / "in", "D07")
+
+
 def test_background_well_validation_blocks_run(tmp_path):
     import os
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")

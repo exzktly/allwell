@@ -596,11 +596,6 @@ class AnalyzeTabFormMixin:
         nir_row.layout().addStretch(1)
         fluor_row = self._row(sec, "Fluor radius")
         self._tophat_radius_fluor_edit = self._entry(fluor_row, "100", width=60)
-        # The ⓘ documents the *radius* entry, so it sits beside it — not after the
-        # Disable checkbox. Trailing the checkbox let the marker land on the tail
-        # of "Disable" under QMacStyle's checkbox metrics (invisible under Fusion,
-        # which is all CI runs); placing it before the checkbox removes the
-        # adjacency entirely.
         fluor_row.layout().addWidget(self._info_icon(
             fluor_row,
             "Radius = background scale (px); Fluor radius applies to all "

@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
 
 @pytest.fixture(scope="module")
@@ -78,3 +78,28 @@ def test_remote_params_grouped_and_gated_on_selection(qapp):
     assert grp.isHidden()
     assert not tab._cleanup_remote_cb.isChecked()
     assert not tab._dry_run_cleanup_cb.isChecked()
+
+
+def test_fluor_radius_info_icon_precedes_disable_checkbox(qapp):
+    """The ⓘ documents the radius entry and sits before the Disable checkbox.
+
+    Trailing the checkbox put the marker on the tail of "Disable" under
+    QMacStyle's checkbox metrics. Placing it beside the entry it explains keeps
+    it clear of the checkbox regardless of platform style. Assert the layout
+    order (a number that holds on any style) rather than the rendered pixels.
+    """
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    tab._background_cb.setCurrentText("robust_mesh")  # reveals the radius rows
+
+    row = tab._no_tophat_fluor_cb.parentWidget()
+    lay = row.layout()
+    order = [lay.itemAt(i).widget() for i in range(lay.count())]
+    entry_i = order.index(tab._tophat_radius_fluor_edit)
+    disable_i = order.index(tab._no_tophat_fluor_cb)
+    info_i = next(i for i, w in enumerate(order)
+                  if isinstance(w, QLabel) and w.text() == "ⓘ")
+
+    # entry → ⓘ → Disable: the marker never lands after the checkbox text.
+    assert entry_i < info_i < disable_i

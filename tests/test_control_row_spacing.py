@@ -113,6 +113,20 @@ def test_wrap_checkbox_indicator_owns_no_extra_space(qtbot):
     assert gap == 0, f"gap {gap}px — the text-less box must not reserve a label gap"
 
 
+def test_wrap_checkbox_label_gap_matches_native_checkbox_spacing(qtbot):
+    """The composite's box↔label gap is the app-wide checkbox ``spacing`` token.
+
+    A plain ``QCheckBox`` puts ``theme.Spacing.sm`` between its indicator and
+    label. The composite draws its own label, so its layout spacing must be the
+    same number — a smaller hand-picked constant read tighter than every native
+    checkbox beside it, and under QMacStyle's metrics the first word sat on the
+    indicator.
+    """
+    wcb = WrapCheckBox("Remove debris", None)
+    qtbot.addWidget(wcb)
+    assert wcb.layout().spacing() == theme.Spacing.sm
+
+
 def test_toggle_switch_reserves_no_indicator(qtbot):
     """A switch draws itself; the inherited checkbox indicator must vanish.
 

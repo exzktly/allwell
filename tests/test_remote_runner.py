@@ -1644,6 +1644,10 @@ def test_required_files_list_is_what_we_promised():
         # The retry-with-backoff shield every pipeline write on the output
         # volume goes through (util.retry_io), imported by pipeline.io.
         "util/retry_io.py",
+        # Serpentine plate-position labelling for packed OME-TIFF input. The
+        # de-interleave runs client-side (before remote sync), so a remote run
+        # never imports this — but the manifest mirrors every ``util/`` file.
+        "util/plate_grid.py",
         "util/schema.py",
         "util/timepoint.py",
         "util/well_token.py",
@@ -1659,6 +1663,9 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/flatfield.py",
         "pipeline/incremental_keys.py",
         "pipeline/io.py",
+        # Packed OME-TIFF de-interleave; client-side, listed for manifest
+        # completeness (mirrors every ``pipeline/`` file).
+        "pipeline/ome_explode.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",
         "pipeline/threshold_optimize.py",

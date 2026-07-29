@@ -236,6 +236,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).
     "util/retry_io.py",
+    # Serpentine plate-position labelling for packed OME-TIFF input. The
+    # de-interleave runs client-side (before any remote sync), so a remote run
+    # never imports this — but the manifest must list every ``util/`` file so
+    # the completeness guard (test_remote_manifest) passes.
+    "util/plate_grid.py",
     "util/schema.py",
     "util/timepoint.py",
     "util/well_token.py",
@@ -255,6 +260,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/flatfield.py",
     "pipeline/incremental_keys.py",
     "pipeline/io.py",
+    # Packed OME-TIFF de-interleave. Runs client-side before remote sync (the
+    # remote receives ordinary loose TIFs), but listed so the manifest stays a
+    # complete mirror of ``pipeline/`` per test_remote_manifest.
+    "pipeline/ome_explode.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
     "pipeline/threshold_optimize.py",

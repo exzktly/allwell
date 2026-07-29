@@ -25,8 +25,6 @@ from PySide6.QtWidgets import (
 )
 
 from services.input_resolution_service import (
-    resolve_input_output,
-    select_incremental_scope,
     tif_files_in,
 )
 from util.well_token import is_valid_well_name
@@ -39,6 +37,7 @@ from services.pipeline_service import find_pipeline_script
 from services.remote_config import default_remote_index
 import theme
 from well_viewer.core.safe import swallowed
+from analyze_ome import AnalyzeOmeMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
@@ -96,7 +95,7 @@ def _has_well_content(folder: Path) -> bool:
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeOmeMixin, AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     @staticmethod
@@ -130,6 +129,8 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         self._on_pipeline_complete = on_pipeline_complete
         self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
         self._schema_cbs: list[QComboBox] = []
+        # OME-TIFF input state (``_ome_detected_file``, layout cache, prefill
+        # marker) is initialised lazily by AnalyzeOmeMixin as the input is set.
 
         self._build_ui()
         self._poll_log()
@@ -569,7 +570,13 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
     def _refresh_output(self) -> None:
         raw_str = self._input_edit.text().strip()
         if not raw_str:
-            self._output_lbl.setText("—"); self._layout_lbl.setText(""); return
+            self._output_lbl.setText("—"); self._layout_lbl.setText("")
+            self._refresh_ome_section(); return
+        # A packed OME-TIFF (a file, or the lone .ome.tif in a folder) is
+        # de-interleaved before the normal grouping; ``_apply_ome_output_labels``
+        # returns True and sets its own status when that's the case.
+        if self._apply_ome_output_labels():
+            return
         raw = Path(raw_str)
         if not raw.is_dir():
             self._output_lbl.setText("—"); self._layout_lbl.setText("Not a directory."); return
@@ -679,6 +686,10 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
         if at_err:
             QMessageBox.critical(self, "Control Well Error", at_err)
             return None
+        ome_err = self._ome_validation_error()
+        if ome_err:
+            QMessageBox.critical(self, "OME-TIFF Input Error", ome_err)
+            return None
         pipeline = find_pipeline_script()
         if pipeline is None:
             QMessageBox.critical(self, "Configuration Error",
@@ -710,54 +721,6 @@ class AnalyzeTab(AnalyzeTabFormMixin, QWidget):
             filename_schema=opts["filename_schema"],
             filename_sep=opts["filename_sep"],
         )
-
-    def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
-                                     *, proc_hook=None):
-        """Adapter passed to ``PipelineRunner.start``.
-
-        Lives on the tab because expected-well-count + grouping progress are
-        UI-side helpers that depend on Analyze form state. ``proc_hook`` is
-        forwarded to ``resolve_input_output`` so the grouping subprocess can
-        be tracked by the runner and reached by Stop.
-        """
-        try:
-            log_q.put(("zipper_start", self._expected_well_count(opts)))
-            grouped = {"n": 0}
-
-            emitted: set[str] = set()
-
-            def _on_group(tok: str) -> None:
-                grouped["n"] += 1
-                emitted.add(tok)
-                log_q.put(("zipper_well", tok))
-
-            input_dir, output_dir, on_success = resolve_input_output(
-                opts["raw"],
-                log_fn=lambda msg: log_q.put(("line", msg)),
-                progress_fn=_on_group,
-                filename_schema=opts["filename_schema"],
-                filename_sep=opts["filename_sep"],
-                proc_hook=proc_hook,
-                move_source_tifs=bool(opts.get("move_source_tifs", False)),
-            )
-            # Fold loose images into well zips, then pick run scope (mutates opts).
-            select_incremental_scope(opts, input_dir,
-                                     log_fn=lambda m: log_q.put(("line", m)))
-            # Surface every resolved well in the Group stage (pre-grouped wells
-            # emit no zipper progress) so none are missing from the plate/rail.
-            from services.input_resolution_service import iter_well_tokens
-            for tok in iter_well_tokens(input_dir):
-                if tok not in emitted:
-                    log_q.put(("zipper_well", tok))
-            log_q.put(("zipper_done", None))
-            # v5.x.x: forward the optional success callback as a
-            # 3-tuple. PipelineRunner unpacks it and runs it after
-            # a clean pipeline completion so loose TIFs at raw/ get
-            # cleaned up once raw/in/ has the zipped equivalents.
-            return input_dir, output_dir, on_success
-        except (ValueError, RuntimeError) as exc:
-            log_q.put(("error", f"Input error: {exc}\n"))
-            return None
 
     def _stop(self) -> None:
         # Never let an exception escape this Qt slot (PySide6≥6.5 aborts the app).

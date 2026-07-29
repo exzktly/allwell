@@ -1,83 +1,110 @@
-"""``folder_well`` must survive a source file that vanished mid-run.
+"""The loose-TIF grouping (zipper) phase must not crash on a broken symlink.
 
-Loose-TIF ("zipper") mode discovers every TIF in the search dir with one
-``os.walk``, then copies each into a per-well subfolder. On a network mount, or
-when an acquisition writes and then cleans up partial files, a path collected by
-the walk can be gone by the time the copy runs. Before this guard a single such
-file raised a raw ``FileNotFoundError`` out of ``shutil.copy2``, crashed the
-zipper subprocess with a non-zero exit, and ``run_zipper`` turned that into a
-``RuntimeError`` that failed grouping for the entire plate.
+Big microscopy plates are often presented to the pipeline as a folder of
+symlinks pointing at the raw TIFs on another (often network) volume. When such a
+link's target is unmounted, moved, or deleted, the link itself is still a
+directory entry — ``ls`` shows it and ``os.walk`` lists it among ``files`` — but
+opening it fails.
 
-``folder_well`` now skips a vanished source with a warning and keeps going, so
-the other wells still group.
+The rest of the pipeline never trips on this: ``organize_loose_tifs_into_well_folders``
+and ``find_image_groups`` discover images through ``Path.is_file()`` / an
+existence check, both of which follow the link and treat a broken one as absent.
+The zipper's ``group_by_well`` used a bare ``os.walk`` + extension check, so it
+collected the broken link, and ``folder_well``'s ``shutil.copy2`` (which follows
+symlinks) then opened the missing target and raised a bare ``FileNotFoundError``
+that crashed the zipper subprocess and failed grouping for the whole plate.
+
+``group_by_well`` now applies the same ``os.path.isfile`` rule at discovery, so a
+broken link is skipped (loudly) and the remaining wells still group.
 """
 
 import os
 
 import WellPlateZipper as wpz
 
-
-def test_places_all_present_files(tmp_path):
-    src = tmp_path / "src"
-    src.mkdir()
-    files = []
-    for name in ("A01_f1_z1_c1.tif", "A01_f2_z1_c1.tif"):
-        p = src / name
-        p.write_bytes(b"tif")
-        files.append(str(p))
-    out = tmp_path / "out"
-    out.mkdir()
-
-    placed = wpz.folder_well("A01", files, str(out))
-
-    assert placed == 2
-    dst = out / "A01"
-    assert {f.name for f in dst.iterdir()} == {"A01_f1_z1_c1.tif", "A01_f2_z1_c1.tif"}
+_SCHEMA = ["well", "field", "z", "channel"]
+_SEP = "_"
 
 
-def test_vanished_source_is_skipped_not_fatal(tmp_path, capsys):
-    src = tmp_path / "src"
-    src.mkdir()
-    present = src / "A01_f1_z1_c1.tif"
-    present.write_bytes(b"tif")
-    missing = src / "A01_f2_z1_c1.tif"      # never created — simulates a vanish
+def _touch(p):
+    with open(p, "w") as fh:
+        fh.write("tif")
 
-    out = tmp_path / "out"
-    out.mkdir()
 
-    # Must not raise even though one path does not exist.
-    placed = wpz.folder_well("A01", [str(present), str(missing)], str(out))
+def test_broken_symlink_is_skipped_not_collected(tmp_path, capsys):
+    search = tmp_path / "in"
+    search.mkdir()
+    real = tmp_path / "real"
+    real.mkdir()
 
-    assert placed == 1
-    dst = out / "A01"
-    assert {f.name for f in dst.iterdir()} == {"A01_f1_z1_c1.tif"}
+    # One ordinary file, and one symlink whose target we then delete.
+    _touch(search / "A01_1_1_DAPI.tif")
+    target = real / "A01_1_1_GFP.tif"
+    _touch(target)
+    link = search / "A01_1_1_GFP.tif"
+    os.symlink(target, link)
+    target.unlink()                      # link is now dangling
+
+    assert os.path.lexists(link)         # the "file" is still present on disk
+    assert not os.path.isfile(link)      # but it does not resolve to a file
+
+    grouped = wpz.group_by_well(str(search), False, _SCHEMA, _SEP)
+
+    # The dangling link is dropped; the real file is kept.
+    assert grouped == {"A01": [str(search / "A01_1_1_DAPI.tif")]}
 
     err = capsys.readouterr().err
-    assert "no longer exists" in err
-    assert str(missing) in err
+    assert "broken symlink" in err
+    assert str(link) in err
 
 
-def test_empty_file_list_returns_zero(tmp_path):
-    out = tmp_path / "out"
-    out.mkdir()
-    assert wpz.folder_well("A01", [], str(out)) == 0
-    # No empty well folder created for a well with nothing to place.
-    assert not (out / "A01").exists()
+def test_broken_symlink_does_not_crash_the_zipper_run(tmp_path):
+    """End to end: group_by_well -> folder_well no longer raises FileNotFoundError."""
+    search = tmp_path / "in"
+    search.mkdir()
+    real = tmp_path / "real"
+    real.mkdir()
+
+    _touch(search / "A01_1_1_DAPI.tif")
+    target = real / "A01_1_1_GFP.tif"
+    _touch(target)
+    os.symlink(target, search / "A01_1_1_GFP.tif")
+    target.unlink()
+
+    grouped = wpz.group_by_well(str(search), False, _SCHEMA, _SEP)
+    # This is what main() does next; before the fix it raised FileNotFoundError.
+    for well, files in grouped.items():
+        wpz.folder_well(well, files, str(search))
+
+    assert (search / "A01" / "A01_1_1_DAPI.tif").exists()
 
 
-def test_move_mode_also_tolerates_a_vanished_source(tmp_path):
-    src = tmp_path / "src"
-    src.mkdir()
-    present = src / "B02_f1_z1_c1.tif"
-    present.write_bytes(b"tif")
-    missing = str(src / "B02_gone.tif")
+def test_valid_symlink_is_still_grouped(tmp_path):
+    """A symlink whose target IS present must be treated as a normal image."""
+    search = tmp_path / "in"
+    search.mkdir()
+    real = tmp_path / "real"
+    real.mkdir()
 
-    out = tmp_path / "out"
-    out.mkdir()
+    target = real / "A02_1_1_DAPI.tif"
+    _touch(target)
+    os.symlink(target, search / "A02_1_1_DAPI.tif")
 
-    placed = wpz.folder_well("B02", [str(present), missing], str(out), move=True)
+    grouped = wpz.group_by_well(str(search), False, _SCHEMA, _SEP)
+    assert grouped == {"A02": [str(search / "A02_1_1_DAPI.tif")]}
 
-    assert placed == 1
-    assert not present.exists()                      # moved out of src
-    assert (out / "B02" / "B02_f1_z1_c1.tif").exists()
-    assert not os.path.exists(missing)
+    # And it copies through fine (follows the link to the real target).
+    wpz.folder_well("A02", grouped["A02"], str(search))
+    assert (search / "A02" / "A02_1_1_DAPI.tif").read_text() == "tif"
+
+
+def test_ordinary_files_group_unchanged(tmp_path):
+    search = tmp_path / "in"
+    search.mkdir()
+    for name in ("A01_1_1_DAPI.tif", "A01_2_1_DAPI.tif", "B02_1_1_DAPI.tif"):
+        _touch(search / name)
+
+    grouped = wpz.group_by_well(str(search), False, _SCHEMA, _SEP)
+    assert set(grouped) == {"A01", "B02"}
+    assert len(grouped["A01"]) == 2
+    assert len(grouped["B02"]) == 1

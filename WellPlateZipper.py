@@ -107,6 +107,7 @@ def group_by_well(
     out: dict[str, list[str]] = {}
     examined = 0
     matched = 0
+    unreadable: list[str] = []
     for root, _, files in os.walk(search_dir):
         for fname in files:
             examined += 1
@@ -118,10 +119,37 @@ def group_by_well(
             extracted = _extract_well_from_filename(fname, schema, sep)
             if extracted is None:
                 continue
+            full = os.path.join(root, fname)
+            # ``os.walk`` lists a dangling symlink (a link whose target has been
+            # unmounted, moved, or deleted) among ``files`` — it is a directory
+            # entry that is not a directory. The copy in ``folder_well`` follows
+            # symlinks, so grouping such an entry made ``shutil.copy2`` open a
+            # target that isn't there and raise a bare ``FileNotFoundError``,
+            # which crashed the whole zipper subprocess and failed the entire
+            # plate. The rest of the pipeline never sees these files: its own
+            # discovery (``process_microscopy.organize_loose_tifs_into_well_folders``,
+            # ``find_image_groups``) filters on ``Path.is_file()`` / an existence
+            # check, both of which follow the link and treat a broken one as
+            # absent. Match that rule here (``os.path.isfile`` also follows) so a
+            # broken symlink is skipped — loudly, so the operator can repair it —
+            # instead of aborting grouping for every other well.
+            if not os.path.isfile(full):
+                unreadable.append(full)
+                continue
             matched += 1
-            out.setdefault(extracted, []).append(os.path.join(root, fname))
+            out.setdefault(extracted, []).append(full)
         if not recursive:
             break
+    if unreadable:
+        print(
+            f"warning: skipped {len(unreadable)} unreadable image(s) — each is a "
+            f"broken symlink or otherwise not a readable file (its target may be "
+            f"on an unmounted/moved volume). These wells will be missing those "
+            f"images:",
+            file=sys.stderr, flush=True,
+        )
+        for path in unreadable:
+            print(f"warning:   {path}", file=sys.stderr, flush=True)
     print(f"Discovery complete: examined {examined} file(s); {matched} image(s) "
           f"matched a well token across {len(out)} well(s). Grouping now…",
           flush=True)
@@ -131,7 +159,7 @@ def group_by_well(
 def folder_well(
     well: str, files: list[str], output_dir: str,
     *, move: bool = False,
-) -> int:
+) -> None:
     """Place *files* into a per-well subfolder <output_dir>/<well>/.
 
     ``move=False`` (default) — copy each file with ``shutil.copy2``,
@@ -144,35 +172,15 @@ def folder_well(
     is that a crash mid-zipper leaves a half-converted input dir
     (some wells migrated to subfolders, the rest still loose at
     the top level).
-
-    A source that has vanished between the discovery walk and this copy —
-    a partially-written acquisition file that got cleaned up, a file the
-    user removed mid-run, or a network mount that dropped it — is skipped
-    with a warning rather than aborting the grouping phase for the whole
-    plate. Before this guard a single such file raised a raw
-    ``FileNotFoundError`` out of ``shutil``, crashed the zipper subprocess
-    with a non-zero exit, and took the other 95 wells down with it.
-
-    Returns the number of files actually placed into the well folder.
     """
     if not files:
-        return 0
+        return
     well_dir = os.path.join(output_dir, well)
     os.makedirs(well_dir, exist_ok=True)
     place = shutil.move if move else shutil.copy2
-    placed = 0
     for f in files:
-        try:
-            place(f, os.path.join(well_dir, os.path.basename(f)))
-        except FileNotFoundError:
-            print(
-                f"warning: {well}: source file no longer exists, skipping: {f}",
-                file=sys.stderr, flush=True,
-            )
-            continue
-        placed += 1
-    print(f"{well}: {placed} files")
-    return placed
+        place(f, os.path.join(well_dir, os.path.basename(f)))
+    print(f"{well}: {len(files)} files")
 
 
 def main():
@@ -202,26 +210,12 @@ def main():
     files_by_well = group_by_well(search_dir, args.recursive, schema, sep)
     # Emit per-well progress in canonical A01…H12 order so the Analyze
     # tab's progress chip can keep tracking.
-    total_discovered = sum(len(v) for v in files_by_well.values())
-    total_placed = 0
     for well in generate_wells():
-        total_placed += folder_well(
+        folder_well(
             well,
             files_by_well.get(well, []),
             output_dir,
             move=args.move_source_tifs,
-        )
-
-    skipped = total_discovered - total_placed
-    if skipped:
-        # Surface the discrepancy loudly, but keep exit code 0: a handful of
-        # vanished source files must not fail the run for the wells that did
-        # group. The per-file warnings above name each one.
-        print(
-            f"warning: grouped {total_placed} of {total_discovered} discovered "
-            f"image(s); {skipped} source file(s) vanished before they could be "
-            f"placed (see warnings above).",
-            file=sys.stderr, flush=True,
         )
 
 

@@ -1527,6 +1527,16 @@ valid 96-well position, distinct, and present in the input folder — by
 `_auto_threshold_validation_error`, which blocks the run the same way the
 background-well check does. Under Otsu it does not read the fields at all.
 
+Both presence checks go through `input_resolution_service.well_present_in_input`,
+which accepts any of the pipeline's input layouts (per-well `<WELL>.zip`,
+per-well `<WELL>/` folder, or loose TIFs parsed via the schema's `well` field).
+The form validates the *selected* folder, but a folder holding an `in/`
+subfolder — the ordinary `<dataset>/in` + `<dataset>/out` layout — feeds the
+pipeline from that `in/`, not the parent (see `resolve_input_output`). The
+grouped-layout lookup therefore searches both the selected dir and its `in/`, so
+a well packaged as `in/<WELL>.zip` / `in/<WELL>/` is not reported missing when it
+lives one level down.
+
 The Run path:
 
 1. Validate the form.

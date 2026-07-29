@@ -131,7 +131,7 @@ def group_by_well(
 def folder_well(
     well: str, files: list[str], output_dir: str,
     *, move: bool = False,
-) -> None:
+) -> int:
     """Place *files* into a per-well subfolder <output_dir>/<well>/.
 
     ``move=False`` (default) — copy each file with ``shutil.copy2``,
@@ -144,15 +144,35 @@ def folder_well(
     is that a crash mid-zipper leaves a half-converted input dir
     (some wells migrated to subfolders, the rest still loose at
     the top level).
+
+    A source that has vanished between the discovery walk and this copy —
+    a partially-written acquisition file that got cleaned up, a file the
+    user removed mid-run, or a network mount that dropped it — is skipped
+    with a warning rather than aborting the grouping phase for the whole
+    plate. Before this guard a single such file raised a raw
+    ``FileNotFoundError`` out of ``shutil``, crashed the zipper subprocess
+    with a non-zero exit, and took the other 95 wells down with it.
+
+    Returns the number of files actually placed into the well folder.
     """
     if not files:
-        return
+        return 0
     well_dir = os.path.join(output_dir, well)
     os.makedirs(well_dir, exist_ok=True)
     place = shutil.move if move else shutil.copy2
+    placed = 0
     for f in files:
-        place(f, os.path.join(well_dir, os.path.basename(f)))
-    print(f"{well}: {len(files)} files")
+        try:
+            place(f, os.path.join(well_dir, os.path.basename(f)))
+        except FileNotFoundError:
+            print(
+                f"warning: {well}: source file no longer exists, skipping: {f}",
+                file=sys.stderr, flush=True,
+            )
+            continue
+        placed += 1
+    print(f"{well}: {placed} files")
+    return placed
 
 
 def main():
@@ -182,12 +202,26 @@ def main():
     files_by_well = group_by_well(search_dir, args.recursive, schema, sep)
     # Emit per-well progress in canonical A01…H12 order so the Analyze
     # tab's progress chip can keep tracking.
+    total_discovered = sum(len(v) for v in files_by_well.values())
+    total_placed = 0
     for well in generate_wells():
-        folder_well(
+        total_placed += folder_well(
             well,
             files_by_well.get(well, []),
             output_dir,
             move=args.move_source_tifs,
+        )
+
+    skipped = total_discovered - total_placed
+    if skipped:
+        # Surface the discrepancy loudly, but keep exit code 0: a handful of
+        # vanished source files must not fail the run for the wells that did
+        # group. The per-file warnings above name each one.
+        print(
+            f"warning: grouped {total_placed} of {total_discovered} discovered "
+            f"image(s); {skipped} source file(s) vanished before they could be "
+            f"placed (see warnings above).",
+            file=sys.stderr, flush=True,
         )
 
 

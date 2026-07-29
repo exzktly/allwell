@@ -54,23 +54,15 @@ from well_viewer.features.image_browser.image_table.builder_view import (
 )
 
 
-def _menu_button(parent, text, *, split=False, default_action=None, tooltip="") -> QToolButton:
-    """A QToolButton that opens a QMenu — styled to read like btn_secondary.
-
-    ``split=True`` gives a split button (text section runs *default_action*, the
-    arrow opens the menu); otherwise the whole button opens the menu. The caller
-    populates ``btn.menu()``.
-    """
+def _menu_button(parent, text, *, tooltip="") -> QToolButton:
+    """A QToolButton that opens a QMenu on any click — styled to read like
+    btn_secondary. The caller populates ``btn.menu()``."""
     btn = QToolButton(parent)
     btn.setText(text)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     menu = QMenu(btn)
     btn.setMenu(menu)
-    if split and default_action is not None:
-        btn.setPopupMode(QToolButton.MenuButtonPopup)
-        btn.setDefaultAction(default_action)
-    else:
-        btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setPopupMode(QToolButton.InstantPopup)
     if tooltip:
         btn.setToolTip(tooltip)
     btn.setProperty("variant", "secondary")
@@ -420,12 +412,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     thresh_chan_cb.currentTextChanged.connect(_sync_thresh_for_channel)
     tr.addWidget(thresh_stepper)
 
-    # Export ▾ split button: click = Export; menu = Copy / settings.
-    export_act = QAction("Export", action_row)
-    export_act.triggered.connect(lambda _=False: image_table_export(ctx))
+    # Export ▾ menu button: clicking anywhere on it opens the menu (no
+    # split default-action — that surprised users by firing "Export to
+    # File" on a plain click instead of showing the options).
     export_btn = _menu_button(
-        action_row, "Export", split=True, default_action=export_act,
-        tooltip="Export the rendered table to a file. ▾ = copy / settings.",
+        action_row, "Export", tooltip="Export, copy, or save this table.",
     )
     emenu = export_btn.menu()
     emenu.addAction("Export to File…").triggered.connect(

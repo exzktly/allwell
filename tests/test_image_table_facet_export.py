@@ -258,3 +258,24 @@ def test_show_titles_opt_in_still_draws_them(monkeypatch):
     fig, _kw = E._build_export_figure(ctx)
     cell_axes = [ax for ax in fig.axes if ax.get_gid() != R.FACET_GID]
     assert any(ax.get_title() for ax in cell_axes)
+
+
+def test_progress_callback_fires_once_per_cell_in_order(monkeypatch):
+    """``image_table_save_to_gallery`` drives a progress dialog off this
+    callback -- it must fire exactly once per cell, with a monotonically
+    increasing ``done`` count and a stable ``total``, or the dialog either
+    stalls partway or overshoots its own maximum."""
+    from well_viewer.features.image_browser.image_table import export as E
+
+    cells = _nested_cells()
+    monkeypatch.setattr(E, "_load_array", lambda *a, **k: None)
+    monkeypatch.setattr(E, "resolve_chrome_plan", lambda *a, **k: (0, set(), None))
+    ctx = _export_ctx(cells, ["well", "channel"], ["timepoint"])
+
+    calls: list[tuple[int, int]] = []
+    fig, _kw = E._build_export_figure(ctx, progress=lambda done, total: calls.append((done, total)))
+
+    total_cells = sum(len(row) for row in cells)
+    assert len(calls) == total_cells
+    assert [c[0] for c in calls] == list(range(1, total_cells + 1))
+    assert {c[1] for c in calls} == {total_cells}

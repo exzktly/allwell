@@ -256,6 +256,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     if _image_table is not None:
         _image_table.image_cache = {}
         _image_table.last_render = {}
+        _image_table.prefetched_cells = set()
     # Gate on the review_image slice, not hasattr(method): runtime_app defines
     # _invalidate_review_image_frame_cache unconditionally (a lazy shim), so the
     # hasattr is always true — the slice is the real "Image Browser present" test.

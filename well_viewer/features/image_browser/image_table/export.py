@@ -198,7 +198,7 @@ def _export_grid(fig_factory, plan, n_rows: int, n_cols: int, *,
     return fig, gs, (lambda r, c: (plan.grid_row_of[r], plan.grid_col_of[c]))
 
 
-def _build_export_figure(ctx, *, cell_max_px: int | None = None):
+def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
     """Render the current image-table contents to a matplotlib Figure.
 
     Returns ``(fig, save_kwargs)`` where *save_kwargs* are the format-agnostic
@@ -210,6 +210,13 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
     longest-side pixel budget (see :func:`_area_pool_rgb`), bounding the memory a
     96-cell plate of full-resolution RGB would otherwise take. ``None`` (file export
     / clipboard) renders full-res.
+
+    ``progress``, if given, is called as ``progress(done, total)`` after each
+    cell is loaded/rendered/drawn — the per-cell loop below is the actual cost
+    (disk reads + colormap/LUT application per cell), so this is the only point
+    fine-grained progress is available. A caller uses it to drive a
+    ``QProgressDialog`` and pump the event loop, since this whole function runs
+    synchronously on the GUI thread.
 
     Placement and labelling mirror the live grid: the same ``plan_facets`` output
     that lays out the Qt widgets drives the gridspec here, and ``renderer.py`` draws
@@ -308,6 +315,8 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
     fig, gs, slot_of = _export_grid(_make_figure, plan, rows, cols,
                                     cell_w=cell_w, cell_h=cell_h, pad_in=pad_in)
 
+    total_cells = sum(len(row) for row in cells)
+    done_cells = 0
     for r, row in enumerate(cells):
         for c, cell in enumerate(row):
             ax = fig.add_subplot(gs[slot_of(r, c)])
@@ -371,6 +380,10 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None):
             ax.set_yticks([])
             for spine in ax.spines.values():
                 spine.set_visible(False)
+
+            done_cells += 1
+            if progress is not None:
+                progress(done_cells, total_cells)
 
     if plan is not None:
         _renderer.draw_facet_labels(fig, gs, plan)
@@ -471,44 +484,98 @@ def image_table_save_to_gallery(ctx) -> None:
     Microscopy grids can be enormous at full export resolution, so the saved
     snapshot is capped to a modest longest-side pixel budget — enough to read
     the grid in the gallery / PDF report without bloating the per-dataset store.
+
+    This whole render is synchronous on the GUI thread (per-cell disk reads +
+    colormap/LUT application, then a final savefig pass), so a large grid can
+    take long enough to look hung. Shows a modal progress dialog driven by
+    ``_build_export_figure``'s per-cell callback and pumps the event loop after
+    each update, the same pattern ``load_controller._make_opening_dialog`` uses
+    for the equally-blocking dataset-open path.
     """
     import io
 
-    # Pre-shrink each cell to bound the memory a full-resolution grid would take.
-    # The pooling averages each block, exactly as the live thumbnail's smooth scale
-    # does, so the saved snapshot reads at the same brightness as the grid.
-    fig, save_kwargs = _build_export_figure(ctx, cell_max_px=480)
-    if fig is None:
-        ctx.notify.set_status("Image table is empty — nothing to save.")
-        return
-    orig_dpi = int(save_kwargs.pop("_dpi", 200) or 200)
-    save_kwargs.pop("format", None)
-
-    # Downsample: cap the longest side to ~1600 px.
-    try:
-        w_in, h_in = (float(v) for v in fig.get_size_inches())
-        dpi_ds = _downsample_dpi(orig_dpi, w_in, h_in)
-    except Exception:
-        dpi_ds = min(orig_dpi, 110)
-
-    buf = io.BytesIO()
-    try:
-        fig.savefig(buf, format="png", dpi=dpi_ds, **save_kwargs)
-    except Exception as exc:
-        QMessageBox.critical(ctx.window, "Save failed", str(exc))
-        return
-    finally:
-        try:
-            import matplotlib.pyplot as _plt
-            _plt.close(fig)
-        except Exception:
-            swallowed()  # figure cleanup is best-effort
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QProgressDialog
 
     cells = getattr(ctx.runtime.image_table, "cells", None) or []
-    rows = len(cells)
-    cols = len(cells[0]) if rows and cells[0] else 0
-    label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
+    total_cells = sum(len(row) for row in cells)
 
-    from well_viewer.features.saved_plots.controller import save_plot_from_card
-    status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
-    ctx.notify.set_status(status)
+    dlg = None
+    if total_cells:
+        try:
+            dlg = QProgressDialog("Rendering image table…", None, 0, total_cells, ctx.window)
+            dlg.setWindowTitle("Save to Saved Plots")
+            dlg.setWindowModality(Qt.WindowModal)
+            dlg.setCancelButton(None)
+            dlg.setMinimumDuration(0)
+            dlg.setAutoClose(False)
+            dlg.setAutoReset(False)
+            dlg.setValue(0)
+            dlg.show()
+            QApplication.processEvents()
+        except Exception:
+            swallowed()  # never let the progress UI block the save itself
+            dlg = None
+
+    def _report(done: int, total: int) -> None:
+        if dlg is None:
+            return
+        try:
+            dlg.setLabelText(f"Rendering image table… ({done}/{total})")
+            dlg.setValue(done)
+            QApplication.processEvents()
+        except Exception:
+            swallowed()
+
+    try:
+        # Pre-shrink each cell to bound the memory a full-resolution grid would
+        # take. The pooling averages each block, exactly as the live thumbnail's
+        # smooth scale does, so the saved snapshot reads at the same brightness
+        # as the grid.
+        fig, save_kwargs = _build_export_figure(ctx, cell_max_px=480, progress=_report)
+        if fig is None:
+            ctx.notify.set_status("Image table is empty — nothing to save.")
+            return
+
+        if dlg is not None:
+            dlg.setLabelText("Saving to gallery…")
+            QApplication.processEvents()
+
+        orig_dpi = int(save_kwargs.pop("_dpi", 200) or 200)
+        save_kwargs.pop("format", None)
+
+        # Downsample: cap the longest side to ~2400 px.
+        try:
+            w_in, h_in = (float(v) for v in fig.get_size_inches())
+            dpi_ds = _downsample_dpi(orig_dpi, w_in, h_in)
+        except Exception:
+            dpi_ds = min(orig_dpi, 110)
+
+        buf = io.BytesIO()
+        try:
+            fig.savefig(buf, format="png", dpi=dpi_ds, **save_kwargs)
+        except Exception as exc:
+            QMessageBox.critical(ctx.window, "Save failed", str(exc))
+            return
+        finally:
+            try:
+                import matplotlib.pyplot as _plt
+                _plt.close(fig)
+            except Exception:
+                swallowed()  # figure cleanup is best-effort
+
+        cells = getattr(ctx.runtime.image_table, "cells", None) or []
+        rows = len(cells)
+        cols = len(cells[0]) if rows and cells[0] else 0
+        label = f"Image grid ({rows}×{cols})" if rows and cols else "Image grid"
+
+        from well_viewer.features.saved_plots.controller import save_plot_from_card
+        status = save_plot_from_card(ctx, "Image Table", buf.getvalue(), label)
+        ctx.notify.set_status(status)
+    finally:
+        if dlg is not None:
+            try:
+                dlg.close()
+                dlg.deleteLater()
+            except Exception:
+                swallowed()

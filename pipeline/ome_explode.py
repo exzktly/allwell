@@ -45,18 +45,40 @@ import tifffile
 from pipeline.io import _safe_imwrite
 from util.plate_grid import position_to_well_fov, serpentine_well_labels
 
+# How a single-image file's flat T-frame sequence splits into (position, timepoint):
+#   "single"      — every frame is a distinct position; one timepoint.
+#   "pos_in_time" — time on the outside: frame = t*n_positions + p.
+#   "time_in_pos" — position on the outside: frame = p*n_timepoints + t.
+FRAME_ORDERS = ("single", "pos_in_time", "time_in_pos")
+
 
 @dataclass
 class OmeLayout:
-    """The dimensions and metadata labels read from a packed OME-TIFF."""
+    """The dimensions and metadata labels read from a packed OME-TIFF.
+
+    Two structures are represented:
+
+    * **Multi-image** — the plate scan is stored as several OME ``<Image>``
+      elements (one ``tifffile`` series each), one per stage position. Then
+      ``single_image`` is False, ``n_positions`` is the series count, and
+      ``size_t`` is the timepoints *per* position.
+    * **Single-image packed** — one ``<Image>`` whose ``T`` axis packs every
+      stage position (and any real timepoints) into one flat frame sequence,
+      because OME allows only X/Y/Z/C/T in an Image (no position dimension).
+      Then ``single_image`` is True and ``n_frames`` is that ``SizeT`` frame
+      count; how it splits into positions × timepoints is decided at explode time
+      from the user's grid and frame-order.
+    """
 
     n_positions: int
     size_t: int
     size_c: int
     size_z: int
     channel_names: list[str]      # length == size_c
-    timepoint_tokens: list[str]   # length == size_t
-    axes_per_series: list[str]    # tifffile axes string per position
+    timepoint_tokens: list[str]   # length == size_t (multi-image only)
+    axes_per_series: list[str]    # tifffile axes string per series
+    single_image: bool = False
+    n_frames: int = 0             # single-image: the T-axis frame count
 
 
 @dataclass
@@ -158,9 +180,13 @@ def _parse_ome_labels(
 def read_ome_layout(ome_path: Path | str) -> OmeLayout:
     """Open *ome_path* and read its position/T/C/Z sizes and metadata labels.
 
-    One ``tifffile`` series == one OME ``Image`` == one stage position. Sizes are
-    taken from the first series (a plate scan is dimensionally uniform across
-    positions).
+    A multi-image file (several OME ``<Image>`` elements → several ``tifffile``
+    series) has one series per stage position, and ``size_t`` is the timepoints
+    per position. A single-image file has one series whose ``T`` axis packs every
+    stage position into a flat frame sequence — ``single_image`` is True and
+    ``n_frames`` is that ``SizeT`` (the split into positions × timepoints is
+    decided at explode time). Sizes are taken from the first series (a plate scan
+    is dimensionally uniform).
     """
     with tifffile.TiffFile(str(ome_path)) as tf:
         series = list(tf.series)
@@ -176,15 +202,22 @@ def read_ome_layout(ome_path: Path | str) -> OmeLayout:
         size_t, size_c, size_z = _size("T"), _size("C"), _size("Z")
         ome_xml = tf.ome_metadata
 
-    channel_names, timepoint_tokens = _parse_ome_labels(ome_xml, size_c, size_t)
+    single_image = len(series) == 1
+    # For a single-image file the T axis is the frame sequence, not timepoints, so
+    # don't manufacture size_t timepoint tokens (there could be thousands).
+    channel_names, timepoint_tokens = _parse_ome_labels(
+        ome_xml, size_c, 0 if single_image else size_t
+    )
     return OmeLayout(
         n_positions=len(series),
-        size_t=size_t,
+        size_t=0 if single_image else size_t,
         size_c=size_c,
         size_z=size_z,
         channel_names=channel_names,
         timepoint_tokens=timepoint_tokens,
         axes_per_series=axes_per_series,
+        single_image=single_image,
+        n_frames=size_t if single_image else 0,
     )
 
 
@@ -218,6 +251,64 @@ def _extract_plane(arr: np.ndarray, axes: str, t: int, c: int) -> np.ndarray:
     return sub
 
 
+def _packed_plane(series, axes: str, frame: int, c: int) -> np.ndarray:
+    """Read one 2-D plane (T=*frame*, C=*c*, Z max-projected) from a series' pages.
+
+    A single-image packed file can be far too large to ``asarray`` whole, so the
+    plane is read a page at a time. Pages are ordered by the series' leading axes
+    (everything but Y/X), first axis slowest — so the flat page index is the
+    mixed-radix ravel of the (T, C, Z) indices against those axis sizes, honouring
+    whatever order the file's ``DimensionOrder`` produced.
+    """
+    axes = axes.upper()
+    leading = [a for a in axes if a not in "YX"]
+    sizes = {a: int(series.shape[axes.index(a)]) for a in leading}
+
+    def _page_index(idx: dict[str, int]) -> int:
+        pi = 0
+        for a in leading:
+            pi = pi * sizes[a] + idx.get(a, 0)
+        return pi
+
+    nz = sizes.get("Z", 1)
+    if "Z" in leading and nz > 1:
+        stack = [
+            np.asarray(series.pages[_page_index({"T": frame, "C": c, "Z": z})].asarray())
+            for z in range(nz)
+        ]
+        return np.max(np.stack(stack), axis=0)
+    plane = series.pages[_page_index({"T": frame, "C": c, "Z": 0})].asarray()
+    plane = np.asarray(plane)
+    while plane.ndim > 2:
+        plane = plane[0]
+    return plane
+
+
+def _resolve_positions(
+    total: int, n_wells: int, fovs_per_well: int | None, *, what: str, name: str,
+) -> int:
+    """Return the validated FOVs-per-well for *total* positions/frames.
+
+    ``None`` derives it (``total`` must be an exact multiple of *n_wells*); a
+    given value is cross-checked against ``n_wells * fovs_per_well == total``.
+    """
+    if fovs_per_well is None:
+        if total % n_wells != 0:
+            raise ValueError(
+                f"{name} has {total} {what}, which is not divisible by the "
+                f"well grid ({n_wells} well(s)). Fields-of-view per well must be "
+                f"a whole number — check the grid dimensions."
+            )
+        return total // n_wells
+    if n_wells * fovs_per_well != total:
+        raise ValueError(
+            f"{name} has {total} {what}, but the {n_wells} well(s) × "
+            f"{fovs_per_well} FOV(s) per well = {n_wells * fovs_per_well}. "
+            f"Check the grid dimensions and the FOVs-per-well value."
+        )
+    return fovs_per_well
+
+
 def explode_ome_tiff(
     ome_path: Path | str,
     out_in_dir: Path | str,
@@ -228,6 +319,7 @@ def explode_ome_tiff(
     direction: str = "row",
     experiment: str = "ome",
     fovs_per_well: int | None = None,
+    frame_order: str = "single",
     log_fn: Callable[[str], None] | None = None,
 ) -> ExplodeResult:
     """Explode a packed OME-TIFF into loose per-plane 2-D TIFs under *out_in_dir*.
@@ -235,18 +327,20 @@ def explode_ome_tiff(
     For every (position, timepoint, channel) the Z stack is max-projected to a
     2-D plane and written as
     ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`` (the default
-    filename schema). The position axis is mapped to a 96-well label via the
+    filename schema). Each stage position is mapped to a 96-well label via the
     serpentine order and the *grid_rows* × *grid_cols* imaged block; each
     position is one well × FOV.
 
-    *fovs_per_well* is the fields-of-view acquired per well. When ``None`` it is
-    derived as ``n_positions / (grid_rows * grid_cols)``. When given, it is used
-    verbatim and cross-checked: it turns a mistyped grid — which would otherwise
-    silently mislabel every well — into an explicit error.
+    Two source structures are handled (see :class:`OmeLayout`). A **multi-image**
+    file has one series per position. A **single-image** file packs every
+    position into one series' ``T`` axis; *frame_order* then says how that flat
+    frame sequence splits into positions × timepoints (see :data:`FRAME_ORDERS`)
+    and planes are read one page at a time (the whole array can be far too large
+    to load).
 
-    Raises ``ValueError`` if the position count is not consistent with the grid
-    (not an exact multiple when deriving, or ``grid_rows*grid_cols*fovs_per_well``
-    when given), or if the grid overflows the 96-well plate from *origin_well*.
+    *fovs_per_well* is the fields-of-view per well; ``None`` derives it. Raises
+    ``ValueError`` on any inconsistency between the position/frame count and the
+    grid, an unknown *frame_order*, or a grid that overflows the 96-well plate.
     """
     ome_path = Path(ome_path)
     out_in_dir = Path(out_in_dir)
@@ -255,46 +349,52 @@ def explode_ome_tiff(
         if log_fn:
             log_fn(msg)
 
-    layout = read_ome_layout(ome_path)
-    n_wells = grid_rows * grid_cols
-    if fovs_per_well is None:
-        if layout.n_positions % n_wells != 0:
-            raise ValueError(
-                f"{ome_path.name} has {layout.n_positions} stage position(s), "
-                f"which is not divisible by the {grid_rows}×{grid_cols} = "
-                f"{n_wells} well grid. Fields-of-view per well must be a whole "
-                f"number — check the grid dimensions."
-            )
-        fovs_per_well = layout.n_positions // n_wells
-    elif n_wells * fovs_per_well != layout.n_positions:
+    if frame_order not in FRAME_ORDERS:
         raise ValueError(
-            f"{ome_path.name} has {layout.n_positions} stage position(s), but "
-            f"the {grid_rows}×{grid_cols} = {n_wells} well grid × "
-            f"{fovs_per_well} FOV(s) per well = {n_wells * fovs_per_well}. "
-            f"Check the grid dimensions and the FOVs-per-well value."
+            f"Unknown frame order {frame_order!r}; expected one of {FRAME_ORDERS}."
         )
 
+    layout = read_ome_layout(ome_path)
+    n_wells = grid_rows * grid_cols
+    exp_tok = _safe_token(experiment, "ome")
     # Raises for an out-of-range grid before any file is written.
     well_labels = serpentine_well_labels(
         grid_rows, grid_cols, origin=origin_well, direction=direction
     )
-    exp_tok = _safe_token(experiment, "ome")
-
     out_in_dir.mkdir(parents=True, exist_ok=True)
-    _log(
-        f"[ome] {ome_path.name}: {layout.n_positions} position(s) → "
-        f"{n_wells} well(s) × {fovs_per_well} FOV(s), "
-        f"{layout.size_c} channel(s), {layout.size_t} timepoint(s)"
+
+    common = dict(
+        out_in_dir=out_in_dir, well_labels=well_labels, exp_tok=exp_tok,
+        n_wells=n_wells, fovs_per_well=fovs_per_well, log=_log, name=ome_path.name,
+    )
+    if layout.single_image:
+        return _explode_single_image(
+            ome_path, layout, frame_order=frame_order, **common
+        )
+    return _explode_multi_image(ome_path, layout, **common)
+
+
+def _explode_multi_image(
+    ome_path, layout, *, out_in_dir, well_labels, exp_tok, n_wells,
+    fovs_per_well, log, name,
+) -> ExplodeResult:
+    """One OME ``<Image>`` (series) per stage position; timepoints are its T axis."""
+    fovs_per_well = _resolve_positions(
+        layout.n_positions, n_wells, fovs_per_well,
+        what="stage position(s)", name=name,
+    )
+    log(
+        f"[ome] {name}: {layout.n_positions} position(s) → {n_wells} well(s) × "
+        f"{fovs_per_well} FOV(s), {layout.size_c} channel(s), "
+        f"{layout.size_t} timepoint(s)"
         f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}.\n"
     )
-
     result = ExplodeResult(
         channels=list(layout.channel_names),
         timepoints=list(layout.timepoint_tokens),
         fovs_per_well=fovs_per_well,
     )
     seen_wells: list[str] = []
-
     with tifffile.TiffFile(str(ome_path)) as tf:
         for pos, series in enumerate(tf.series):
             well, fov = position_to_well_fov(
@@ -307,15 +407,93 @@ def explode_ome_tiff(
             for ti in range(layout.size_t):
                 tp_tok = layout.timepoint_tokens[ti]
                 for ci in range(layout.size_c):
-                    ch_tok = layout.channel_names[ci]
                     plane = _extract_plane(arr, axes, ti, ci)
-                    name = f"{exp_tok}_{ch_tok}_{well}_f{fov}_{tp_tok}.tif"
-                    _safe_imwrite(out_in_dir / name, plane)
+                    _write_plane(out_in_dir, exp_tok, layout.channel_names[ci],
+                                 well, fov, tp_tok, plane)
                     result.images_written += 1
-
     result.wells = sorted(set(seen_wells))
-    _log(
+    return _finish(result, out_in_dir, log)
+
+
+def _explode_single_image(
+    ome_path, layout, *, frame_order, out_in_dir, well_labels, exp_tok, n_wells,
+    fovs_per_well, log, name,
+) -> ExplodeResult:
+    """One ``<Image>`` whose T axis packs every position (× any timepoints).
+
+    ``n_positions = n_wells × fovs_per_well``; ``n_timepoints`` is derived as
+    ``n_frames / n_positions``. Planes are read one page at a time — a packed
+    plate file's full array is routinely tens to hundreds of GB.
+    """
+    n_frames = layout.n_frames
+    if frame_order == "single":
+        # Every frame is a distinct position; one timepoint.
+        fovs_per_well = _resolve_positions(
+            n_frames, n_wells, fovs_per_well, what="frame(s)", name=name,
+        )
+        n_positions, n_timepoints = n_frames, 1
+    else:
+        if fovs_per_well is None:
+            raise ValueError(
+                f"{name} packs {n_frames} frames into one image with timepoints, "
+                f"so FOVs per well is needed to separate positions from "
+                f"timepoints (positions = wells × FOVs; timepoints = frames / "
+                f"positions)."
+            )
+        n_positions = n_wells * fovs_per_well
+        n_timepoints, rem = divmod(n_frames, n_positions)
+        if rem or n_timepoints < 1:
+            raise ValueError(
+                f"{name} has {n_frames} frame(s), which does not split evenly "
+                f"into {n_wells} well(s) × {fovs_per_well} FOV(s) = {n_positions} "
+                f"position(s) × a whole number of timepoints. Check the grid and "
+                f"FOVs-per-well."
+            )
+
+    log(
+        f"[ome] {name}: single image, {n_frames} frame(s) ({frame_order}) → "
+        f"{n_wells} well(s) × {fovs_per_well} FOV(s) × {n_timepoints} "
+        f"timepoint(s), {layout.size_c} channel(s)"
+        f"{f', {layout.size_z} Z-plane(s) max-projected' if layout.size_z > 1 else ''}.\n"
+    )
+    result = ExplodeResult(
+        channels=list(layout.channel_names),
+        timepoints=[f"t{t}" for t in range(n_timepoints)],
+        fovs_per_well=fovs_per_well,
+    )
+    seen_wells: list[str] = []
+    with tifffile.TiffFile(str(ome_path)) as tf:
+        series = tf.series[0]
+        axes = str(series.axes).upper()
+        for frame in range(n_frames):
+            if frame_order == "single":
+                pos, tp = frame, 0
+            elif frame_order == "pos_in_time":
+                pos, tp = frame % n_positions, frame // n_positions
+            else:  # time_in_pos
+                pos, tp = frame // n_timepoints, frame % n_timepoints
+            well, fov = position_to_well_fov(
+                pos, well_labels=well_labels, fovs_per_well=fovs_per_well
+            )
+            if well not in seen_wells:
+                seen_wells.append(well)
+            for ci in range(layout.size_c):
+                plane = _packed_plane(series, axes, frame, ci)
+                _write_plane(out_in_dir, exp_tok, layout.channel_names[ci],
+                             well, fov, f"t{tp}", plane)
+                result.images_written += 1
+    result.wells = sorted(set(seen_wells))
+    return _finish(result, out_in_dir, log)
+
+
+def _write_plane(out_in_dir, exp_tok, ch_tok, well, fov, tp_tok, plane) -> None:
+    name = f"{exp_tok}_{ch_tok}_{well}_f{fov}_{tp_tok}.tif"
+    _safe_imwrite(out_in_dir / name, plane)
+
+
+def _finish(result, out_in_dir, log) -> ExplodeResult:
+    log(
         f"[ome] Wrote {result.images_written} loose TIF(s) for "
-        f"{len(result.wells)} well(s) into {out_in_dir.name}/.\n"
+        f"{len(result.wells)} well(s) into {Path(out_in_dir).name}/.\n"
     )
     return result

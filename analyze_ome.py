@@ -91,6 +91,27 @@ class AnalyzeOmeMixin:
         dir_row.layout().addWidget(self._ome_direction_cb)
         dir_row.layout().addStretch(1)
 
+        # Only meaningful for single-<Image> files that pack every position into
+        # the T axis; shown by the readout when the selected file is that kind.
+        order_row = self._row(sec, "Frame order")
+        self._ome_frame_order_cb = QComboBox(order_row)
+        self._ome_frame_order_cb.addItem("Single timepoint", userData="single")
+        self._ome_frame_order_cb.addItem("Positions within timepoint", userData="pos_in_time")
+        self._ome_frame_order_cb.addItem("Timepoints within position", userData="time_in_pos")
+        self._ome_frame_order_cb.setFixedWidth(200)
+        self._ome_frame_order_cb.setToolTip(
+            "How the file's frame sequence is ordered when it packs every stage "
+            "position into one image's T axis. 'Single timepoint': every frame is "
+            "a distinct position. Otherwise the acquisition looped positions "
+            "inside each timepoint, or timepoints inside each position."
+        )
+        order_row.layout().addWidget(self._ome_frame_order_cb)
+        order_row.layout().addStretch(1)
+        self._ome_frame_order_row = order_row.parentWidget()
+        self._ome_frame_order_row.setVisible(False)
+        self._ome_frame_order_cb.currentIndexChanged.connect(
+            lambda _=None: self._refresh_ome_readout())
+
         # Per-channel role picker, (re)built from the file's OME channel names.
         roles_hdr = QLabel("Channel roles", sec)
         roles_hdr.setObjectName("Muted")
@@ -191,6 +212,43 @@ class AnalyzeOmeMixin:
         except (AttributeError, ValueError):
             return None
         return val if val > 0 else None
+
+    def _ome_frame_order(self) -> str:
+        """``"single"`` / ``"pos_in_time"`` / ``"time_in_pos"`` — the packed-frame order."""
+        cb = getattr(self, "_ome_frame_order_cb", None)
+        return str(cb.currentData() or "single") if cb is not None else "single"
+
+    def _ome_split(self, layout, rows: int, cols: int, fovs: int | None):
+        """Resolve a single-image file's frame count into positions × timepoints.
+
+        Returns ``(n_positions, n_timepoints, fovs_per_well, error)``; *error* is a
+        message (and the counts 0) when the grid/FOVs/frame-order can't produce a
+        whole split, else ``None``.
+        """
+        n_wells = rows * cols
+        n_frames = layout.n_frames
+        order = self._ome_frame_order()
+        if order == "single":
+            if fovs is None:
+                if n_wells == 0 or n_frames % n_wells != 0:
+                    return 0, 0, 0, (f"{n_frames} frames don't divide evenly into "
+                                     f"{rows}×{cols} = {n_wells} wells.")
+                fovs = n_frames // n_wells
+            if n_wells * fovs != n_frames:
+                return 0, 0, 0, (f"{rows}×{cols} wells × {fovs} FOV(s) = "
+                                 f"{n_wells * fovs}, but the file has {n_frames} "
+                                 f"frame(s).")
+            return n_frames, 1, fovs, None
+        if fovs is None:
+            return 0, 0, 0, ("Enter FOVs per well — with timepoints in the frame "
+                             "axis, positions can't be separated from timepoints "
+                             "on their own.")
+        positions = n_wells * fovs
+        if positions == 0 or n_frames % positions != 0:
+            return 0, 0, 0, (f"{n_frames} frames don't split into {rows}×{cols} × "
+                             f"{fovs} FOV(s) = {positions} positions × a whole "
+                             f"number of timepoints.")
+        return positions, n_frames // positions, fovs, None
 
     def _ome_read_layout(self, path):
         """Read (and cache) the OME layout metadata for *path*, or ``None``.
@@ -345,12 +403,28 @@ class AnalyzeOmeMixin:
             self._ome_info_lbl.setText(
                 "⚠ Could not read OME metadata from the selected file.")
             return
+        # The frame-order selector only applies to single-<Image> packed files.
+        if hasattr(self, "_ome_frame_order_row"):
+            self._ome_frame_order_row.setVisible(layout.single_image)
+        rows, cols, ok = self._ome_grid_dims()
+        entered_fovs = self._ome_fovs_per_well()
+        if layout.single_image:
+            info = f"single image: {layout.n_frames} frame(s) · {layout.size_c} channel(s)"
+            if layout.size_z > 1:
+                info += f" · {layout.size_z} Z (max-projected)"
+            if ok:
+                positions, tps, fovs, err = self._ome_split(layout, rows, cols, entered_fovs)
+                if err:
+                    info += f"\n⚠ {err}"
+                else:
+                    info += (f"\n→ {rows * cols} well(s) × {fovs} FOV(s) × {tps} "
+                             f"timepoint(s). {self._ome_wells_preview(rows, cols)}")
+            self._ome_info_lbl.setText(info)
+            return
         info = (f"{layout.n_positions} position(s) · {layout.size_c} channel(s) · "
                 f"{layout.size_t} timepoint(s)")
         if layout.size_z > 1:
             info += f" · {layout.size_z} Z (max-projected)"
-        rows, cols, ok = self._ome_grid_dims()
-        entered_fovs = self._ome_fovs_per_well()
         if ok:
             n_wells = rows * cols
             if entered_fovs is not None:
@@ -373,6 +447,13 @@ class AnalyzeOmeMixin:
 
     def _ome_well_line(self, rows: int, cols: int, n_wells: int, fpw: int) -> str:
         """The ``→ N well(s) × M FOV(s). Wells: …`` summary (or a grid-overflow warning)."""
+        preview = self._ome_wells_preview(rows, cols)
+        if preview.startswith("⚠"):
+            return f"\n{preview}"
+        return f"\n→ {n_wells} well(s) × {fpw} FOV(s). {preview}"
+
+    def _ome_wells_preview(self, rows: int, cols: int) -> str:
+        """``Wells: A01, A02 …`` for the current grid, or a ``⚠``-prefixed overflow."""
         try:
             from util.plate_grid import serpentine_well_labels
             labels = serpentine_well_labels(
@@ -381,9 +462,8 @@ class AnalyzeOmeMixin:
                 direction=self._ome_direction(),
             )
         except ValueError as exc:
-            return f"\n⚠ {exc}"
-        preview = ", ".join(labels[:6]) + (" …" if len(labels) > 6 else "")
-        return f"\n→ {n_wells} well(s) × {fpw} FOV(s). Wells: {preview}"
+            return f"⚠ {exc}"
+        return "Wells: " + ", ".join(labels[:6]) + (" …" if len(labels) > 6 else "")
 
     # ------------------------------------------------------------------
     # Validation + run-option merge
@@ -406,7 +486,13 @@ class AnalyzeOmeMixin:
                     "valid OME-TIFF.")
         n_wells = rows * cols
         entered_fovs = self._ome_fovs_per_well()
-        if entered_fovs is not None:
+        if layout.single_image:
+            # Positions live in the T frame axis; the grid + frame-order must split
+            # it into whole positions × timepoints.
+            _pos, _tps, _fovs, err = self._ome_split(layout, rows, cols, entered_fovs)
+            if err:
+                return err
+        elif entered_fovs is not None:
             if n_wells * entered_fovs != layout.n_positions:
                 return (f"The {rows}×{cols} = {n_wells} well grid × "
                         f"{entered_fovs} FOV(s) per well = "
@@ -462,6 +548,7 @@ class AnalyzeOmeMixin:
         opts["ome_origin_well"] = (
             (self._ome_origin_edit.text().strip() or "A01") if ome_on else "A01")
         opts["ome_direction"] = self._ome_direction() if ome_on else "row"
+        opts["ome_frame_order"] = self._ome_frame_order() if ome_on else "single"
         if ome_on:
             opts["filename_schema"] = DEFAULT_SCHEMA
             opts["filename_sep"] = DEFAULT_SEP

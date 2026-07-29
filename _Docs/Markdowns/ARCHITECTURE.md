@@ -1563,14 +1563,27 @@ segmentation-channel field is read-only while an OME file is active.
 
 The resolver runs `services.input_resolution_service.explode_ome_if_present`
 first (a no-op unless `opts['ome_input']`), which calls
-`pipeline.ome_explode.explode_ome_tiff`: it reads the OME-XML for dimension
-order, channel names and timepoints; **max-projects Z** per (position, T, C);
-maps each stage position to a 96-well label via `util.plate_grid`
-(serpentine order + the imaged grid, one well × FOV per position; FOVs-per-well
-is entered explicitly and cross-checked, or derived as
-`n_positions / (rows × cols)` when left blank); and writes
-`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` into a sibling `in/`
-folder. The resolver then hands that `in/` to `resolve_input_output` exactly as
+`pipeline.ome_explode.explode_ome_tiff`. It reads the OME-XML for dimension
+order and channel names, **max-projects Z**, maps each stage position to a
+96-well label via `util.plate_grid` (serpentine order + the imaged grid, one
+well × FOV per position; FOVs-per-well is entered explicitly and cross-checked,
+or derived), and writes `<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`
+into a sibling `in/` folder.
+
+Two source structures are handled (`read_ome_layout` → `OmeLayout.single_image`),
+because OME allows only X/Y/Z/C/T inside one `<Image>` — there is no position
+dimension:
+
+- **Multi-image** — several `<Image>` elements (one `tifffile` series each), one
+  per stage position; each series' `T` axis is that position's timepoints.
+- **Single-image packed** — one `<Image>` whose `T` axis packs *every* position
+  (and any real timepoints) into a flat frame sequence. A **frame-order** choice
+  (`ome_frame_order`: `single` / `pos_in_time` / `time_in_pos`) says how that
+  sequence splits: `n_positions = wells × FOVs`, `n_timepoints = n_frames /
+  n_positions`. Planes are read **one page at a time** (`_packed_plane` ravels
+  the T/C/Z indices against the series' leading-axis sizes, honouring the file's
+  `DimensionOrder`) because a packed plate array is routinely tens–hundreds of
+  GB — far too large to `asarray` whole. The resolver then hands that `in/` to `resolve_input_output` exactly as
 for any loose-TIF drop. Because the explode is client-side, remote runs receive
 the loose TIFs and need no OME awareness; `pipeline/ome_explode.py` and
 `util/plate_grid.py` are still listed in the remote manifest so it stays a

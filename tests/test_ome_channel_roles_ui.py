@@ -107,6 +107,55 @@ def test_explicit_fovs_mismatch_blocks_run(ome_tab):
     assert ome_tab._ome_validation_error() is None
 
 
+def _write_packed(path, *, n_frames, channel_names):
+    y = x = 6
+    data = np.zeros((n_frames, len(channel_names), y, x), np.uint16)
+    tifffile.imwrite(
+        str(path), data, ome=True, photometric="minisblack",
+        metadata={"axes": "TCYX", "Channel": {"Name": list(channel_names)}},
+    )
+    return path
+
+
+def test_frame_order_row_hidden_for_multi_image(ome_tab):
+    # The BF/DAPI/GFP fixture is multi-<Image> (one series per position).
+    ome_tab._refresh_ome_readout()
+    row = ome_tab._ome_frame_order_row
+    assert not row.isVisibleTo(row.parentWidget())
+
+
+def test_frame_order_row_shown_for_single_image(tab, tmp_path):
+    p = _write_packed(tmp_path / "packed.ome.tif", n_frames=12,
+                      channel_names=("BF", "DAPI", "GFP"))
+    tab._input_edit.setText(str(p))
+    row = tab._ome_frame_order_row
+    assert row.isVisibleTo(row.parentWidget())
+    assert tab._ome_read_layout(tab._ome_detected_file).single_image is True
+
+
+def test_single_image_splits_frames_into_positions_and_timepoints(tab, tmp_path):
+    p = _write_packed(tmp_path / "packed.ome.tif", n_frames=12,
+                      channel_names=("BF", "DAPI", "GFP"))
+    tab._input_edit.setText(str(p))
+    _set_role(tab, "DAPI", "segmentation")
+    tab._ome_rows_edit.setText("1")
+    tab._ome_cols_edit.setText("3")
+    tab._ome_fovs_edit.setText("2")
+    # single-timepoint would need 3×2 = 6 frames, but there are 12 → error.
+    tab._ome_frame_order_cb.setCurrentIndex(
+        [tab._ome_frame_order_cb.itemData(i)
+         for i in range(tab._ome_frame_order_cb.count())].index("single"))
+    assert tab._ome_validation_error() is not None
+    # positions-within-timepoint: 6 positions × 2 timepoints → valid.
+    tab._ome_frame_order_cb.setCurrentIndex(
+        [tab._ome_frame_order_cb.itemData(i)
+         for i in range(tab._ome_frame_order_cb.count())].index("pos_in_time"))
+    assert tab._ome_validation_error() is None
+    opts = tab._collect_run_options()
+    assert opts["ome_frame_order"] == "pos_in_time"
+    assert opts["ome_fovs_per_well"] == 2
+
+
 def test_run_options_carry_roles_and_fovs(ome_tab):
     _set_role(ome_tab, "DAPI", "segmentation")
     _set_role(ome_tab, "BF", "phase")

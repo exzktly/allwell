@@ -353,6 +353,16 @@ can't select a file). All-Well reads the file's OME metadata and a small
   silently mislabels every well).
 - **Origin well** — the top-left well of that block (default `A01`).
 - **Serpentine direction** — whether the snake runs along rows or columns.
+- **Frame order** — *shown only when the file is a single OME image that packs
+  every position into its T axis* (common when a scope saves a whole plate as one
+  time-series). Because an OME image has no position dimension, the stage
+  positions live in the T axis, possibly interleaved with real timepoints. Tell
+  All-Well how that frame sequence is ordered: **Single timepoint** (every frame
+  is a distinct position — no time-lapse), **Positions within timepoint** (all
+  positions acquired, then the set repeats for the next timepoint), or
+  **Timepoints within position** (all timepoints of one position, then the next
+  position). Positions come from your grid × FOVs; timepoints are then derived as
+  `frames ÷ positions`.
 - **Channel roles** — one row per channel found in the file, each with a
   dropdown to assign its role: **Segmentation** (the channel your segmentation
   method runs on — nuclear stain or brightfield), **Fluorescence**, **Phase /

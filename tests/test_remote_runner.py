@@ -1641,6 +1641,9 @@ def test_required_files_list_is_what_we_promised():
         # parsing, timepoint parsing, logged-swallow).
         "util/__init__.py",
         "util/aw_safe.py",
+        # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
+        # imported by process_microscopy at module load (and by WellPlateZipper).
+        "util/frozen_io.py",
         # The retry-with-backoff shield every pipeline write on the output
         # volume goes through (util.retry_io), imported by pipeline.io.
         "util/retry_io.py",

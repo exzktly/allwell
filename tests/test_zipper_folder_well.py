@@ -98,6 +98,32 @@ def test_valid_symlink_is_still_grouped(tmp_path):
     assert (search / "A02" / "A02_1_1_DAPI.tif").read_text() == "tif"
 
 
+def test_main_repairs_stdio_before_emitting_progress(tmp_path, monkeypatch):
+    """In a frozen windowed build sys.stdout/sys.stderr are None in this
+    subprocess; main() must rebind them (via util.frozen_io.ensure_std_streams)
+    before the first print, or every progress line and warning is silently
+    dropped and the Analyze grouping phase looks frozen."""
+    import util.frozen_io as frozen_io
+
+    calls = []
+    monkeypatch.setattr(frozen_io, "ensure_std_streams", lambda: calls.append(True))
+
+    search = tmp_path / "in"
+    search.mkdir()
+    _touch(search / "A01_1_1_DAPI.tif")
+    monkeypatch.setattr(
+        wpz.sys, "argv",
+        ["WellPlateZipper.py", "--search-dir", str(search),
+         "--output-dir", str(search),
+         "--filename_schema", "well:field:z:channel", "--filename_sep", "_"],
+    )
+
+    wpz.main()
+
+    assert calls, "main() did not call ensure_std_streams()"
+    assert (search / "A01" / "A01_1_1_DAPI.tif").exists()
+
+
 def test_ordinary_files_group_unchanged(tmp_path):
     search = tmp_path / "in"
     search.mkdir()

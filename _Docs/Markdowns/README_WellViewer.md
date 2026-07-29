@@ -47,7 +47,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
-   - [Concatenate datasets](#concatenate-datasets)
+   - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -70,7 +70,8 @@ to add features, how to debug, and build / environment troubleshooting), see
   editing, an smFISH spot-detection view, pairwise statistics, batch export
   to CSV + figures.
 - **Datasets tab.** Dataset-level operations that work on whole folders rather
-  than one plate at a time. Its first tool, **Concatenate datasets**, appends one
+  than one plate at a time: **Convert OME-TIFF** de-interleaves a single packed
+  OME-TIFF into a dataset folder, and **Concatenate datasets** appends one
   dataset's timepoints after another's — for when the same plate was imaged in
   two separate sessions and you want one continuous timelapse.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
@@ -330,57 +331,14 @@ The input folder is resolved by
   per-well ZIPs according to your schema, then the pipeline runs against
   those.
 - A folder of per-well ZIPs already → used directly.
-- A **single packed OME-TIFF** (one `.ome.tif` holding every well, channel,
-  Z-plane and timepoint) → de-interleaved into per-well images first (see below).
+
+If your plate arrived as a **single packed OME-TIFF** (one `.ome.tif` holding
+every well, channel, Z-plane and timepoint), Analyze can't process it directly —
+convert it to a dataset folder first in the **Datasets tab → Convert OME-TIFF**
+(see [Convert OME-TIFF](#convert-ome-tiff)), then open that folder here. Pointing
+Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
-
-### 3a. Single OME-TIFF input
-
-Some microscopes save a whole plate scan as one OME-TIFF instead of a file per
-image. Pick it with the **OME file…** button next to Browse (the folder picker
-can't select a file). All-Well reads the file's OME metadata and a small
-**Single OME-TIFF Input** panel appears; fill it in:
-
-- **Well grid (rows × cols)** — the dimensions of the block of wells you imaged
-  (e.g. `2 × 3` for a six-well region). All-Well assumes the stage visited the
-  wells in **serpentine** order (sweep one row, drop down, sweep back), so these
-  dimensions are what let it auto-label each stage position with its well.
-- **FOVs per well** — the number of fields-of-view acquired per well. Leave it
-  blank to derive it from the position count and the well grid; enter a value to
-  state it explicitly, and All-Well will refuse to run if `wells × FOVs` doesn't
-  equal the file's position count (this catches a mistyped grid before it
-  silently mislabels every well).
-- **Origin well** — the top-left well of that block (default `A01`).
-- **Serpentine direction** — whether the snake runs along rows or columns.
-- **Frame order** — *shown only when the file is a single OME image that packs
-  every position into its T axis* (common when a scope saves a whole plate as one
-  time-series). Because an OME image has no position dimension, the stage
-  positions live in the T axis, possibly interleaved with real timepoints. Tell
-  All-Well how that frame sequence is ordered: **Single timepoint** (every frame
-  is a distinct position — no time-lapse), **Positions within timepoint** (all
-  positions acquired, then the set repeats for the next timepoint), or
-  **Timepoints within position** (all timepoints of one position, then the next
-  position). Positions come from your grid × FOVs; timepoints are then derived as
-  `frames ÷ positions`.
-- **Channel roles** — one row per channel found in the file, each with a
-  dropdown to assign its role: **Segmentation** (the channel your segmentation
-  method runs on — nuclear stain or brightfield), **Fluorescence**, **Phase /
-  brightfield**, **smFISH**, or **Ignore**. Every channel starts as
-  Fluorescence, so nothing is assumed about acquisition order (channel 1 is often
-  brightfield, not the nuclear channel); assign exactly one Segmentation channel
-  and mark any Phase / smFISH channels. These choices fill in the Channel Tokens
-  above for you, so the manual channel list is hidden while an OME file is loaded.
-
-The panel shows a live summary: how many stage positions the file holds, how
-many wells × fields-of-view that works out to, and a preview of the first well
-labels. Timepoints are read from the OME metadata, and any Z-stack is
-**maximum-intensity projected** to the single plane the pipeline measures. Labels
-stay within the 96-well plate (`A01`–`H12`).
-
-Under the hood the file is exploded into ordinary per-well TIFs before the run,
-so everything after that — grouping, segmentation, the CSVs, and the Review pane
-— behaves exactly as for any other input.
 
 ### 4. Pipeline options
 
@@ -1474,7 +1432,38 @@ are held and saved once.
 
 Switch to **Datasets** with the title-bar segmented control (the third segment,
 beside Review and Analyze). Unlike Review there is no plate/well picker — the left
-sidebar is just a list of dataset-level tools. There is one tool today.
+sidebar is just a list of dataset-level tools.
+
+### Convert OME-TIFF
+
+Turns a single packed OME-TIFF (one file holding every well, channel, Z-plane and
+timepoint of a plate scan) into an ordinary dataset folder of per-well images —
+the layout Analyze processes. Do this first, then open the result in Analyze.
+
+1. **OME-TIFF source** — pick the `.ome.tif` file. All-Well reads its metadata
+   and suggests a **Destination folder** (`<name>_dataset` beside the file); change
+   it if you like.
+2. **Well grid (rows × cols)** — the block of wells you imaged (e.g. `2 × 3`).
+   The stage is assumed to have visited them in **serpentine** order (sweep a row,
+   drop down, sweep back); this is what lets each position get its well label.
+3. **FOVs per well** — fields-of-view per well. Leave blank to derive it; enter a
+   value and the converter refuses to run if it doesn't match the file.
+4. **Origin** (top-left well, default `A01`) and **Serpentine** direction (snake
+   by row or by column).
+5. **Frame order** — *shown only for a single-image file that packs every
+   position into its T axis*. Because an OME image has no position dimension, the
+   positions live in the T axis, possibly interleaved with real timepoints. Say
+   how the frames are ordered: **Single timepoint** (every frame is a distinct
+   position), **Positions within timepoint** (all positions, then the set repeats
+   next timepoint), or **Timepoints within position**. Positions come from your
+   grid × FOVs; timepoints are then `frames ÷ positions`.
+
+The readout shows how the file splits into wells × FOVs × timepoints and lists the
+channel names (any Z-stack is **maximum-intensity projected**; labels stay within
+the 96-well plate `A01`–`H12`). Press **Convert** to write `<destination>/in/`,
+then **Open dataset in Analyze**. In Analyze, type the channel names it listed
+into the Segmentation / fluorescent channel tokens as usual, and run — because the
+wells now exist on disk, background-well and control-well options work normally.
 
 ### Concatenate datasets
 

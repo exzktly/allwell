@@ -7,7 +7,11 @@ import pytest
 
 tifffile = pytest.importorskip("tifffile")
 
-from pipeline.ome_explode import explode_ome_tiff, read_ome_layout  # noqa: E402
+from pipeline.ome_explode import (  # noqa: E402
+    OmeExplodeCancelled,
+    explode_ome_tiff,
+    read_ome_layout,
+)
 from process_microscopy import parse_filename  # noqa: E402
 from util.schema import DEFAULT_SEP, parse_schema  # noqa: E402
 
@@ -254,6 +258,29 @@ def test_unknown_frame_order_rejected(tmp_path):
             p, tmp_path / "in", grid_rows=1, grid_cols=3, fovs_per_well=2,
             frame_order="sideways", experiment="e",
         )
+
+
+def test_progress_reports_every_plane(tmp_path):
+    p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=1, size_c=2, size_z=1)
+    seen: list[tuple[int, int]] = []
+    explode_ome_tiff(
+        p, tmp_path / "in", grid_rows=2, grid_cols=2, experiment="e",
+        progress_fn=lambda done, total: seen.append((done, total)),
+    )
+    # 4 wells × 2 channels = 8 planes; the last report is (8, 8).
+    assert seen[0] == (0, 8)
+    assert seen[-1] == (8, 8)
+
+
+def test_should_abort_cancels_and_raises(tmp_path):
+    p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=1, size_c=1)
+    out = tmp_path / "in"
+    with pytest.raises(OmeExplodeCancelled):
+        explode_ome_tiff(
+            p, out, grid_rows=2, grid_cols=2, experiment="e",
+            should_abort=lambda: True,  # abort before the first position
+        )
+    assert not list(out.glob("*.tif"))
 
 
 def test_indivisible_position_count_rejected(tmp_path):

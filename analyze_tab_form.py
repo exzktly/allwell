@@ -228,7 +228,6 @@ class AnalyzeTabFormMixin:
         self._build_schema_section(parent)
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
-        self._build_ome_section(parent)
         self._refresh_schema_preview()
         # Quality Control leads the optional sections (above Shape Metrics) and
         # stays open — the correction stages it configures are the common tuning
@@ -456,9 +455,6 @@ class AnalyzeTabFormMixin:
         self._browse_btn.setEnabled(False)
         self._browse_btn.clicked.connect(self._browse_input)
         ipl.addWidget(self._browse_btn)
-        # Separate picker for a single packed OME-TIFF *file* (AnalyzeOmeMixin) —
-        # the folder picker above cannot select a file.
-        self._attach_ome_browse_button(in_pick, ipl)
         # Balancing stretch: input field gets ~50% of the row width
         # rather than stretching to fill the whole sidebar.
         ipl.addStretch(1)
@@ -1480,7 +1476,4 @@ class AnalyzeTabFormMixin:
             cellpose_cellprob_threshold=_safe_seg_float(self._cellpose_cellprob_thr_edit.text(), 0.0),
             cellpose_nuclei_channel=self._cellpose_nuclei_channel_edit.text().strip(),
         )
-        # Packed OME-TIFF de-interleave parameters (AnalyzeOmeMixin); ignored
-        # downstream unless ome_input is set.
-        self._merge_ome_run_options(opts)
         return opts

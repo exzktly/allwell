@@ -52,6 +52,10 @@ from util.plate_grid import position_to_well_fov, serpentine_well_labels
 FRAME_ORDERS = ("single", "pos_in_time", "time_in_pos")
 
 
+class OmeExplodeCancelled(Exception):
+    """Raised when a ``should_abort`` callback stops an explode mid-run."""
+
+
 @dataclass
 class OmeLayout:
     """The dimensions and metadata labels read from a packed OME-TIFF.
@@ -321,6 +325,8 @@ def explode_ome_tiff(
     fovs_per_well: int | None = None,
     frame_order: str = "single",
     log_fn: Callable[[str], None] | None = None,
+    progress_fn: Callable[[int, int], None] | None = None,
+    should_abort: Callable[[], bool] | None = None,
 ) -> ExplodeResult:
     """Explode a packed OME-TIFF into loose per-plane 2-D TIFs under *out_in_dir*.
 
@@ -341,6 +347,11 @@ def explode_ome_tiff(
     *fovs_per_well* is the fields-of-view per well; ``None`` derives it. Raises
     ``ValueError`` on any inconsistency between the position/frame count and the
     grid, an unknown *frame_order*, or a grid that overflows the 96-well plate.
+
+    *progress_fn* (when given) receives ``(planes_written, total_planes)`` as the
+    explode proceeds. *should_abort*, polled before each position/frame, raises
+    :class:`OmeExplodeCancelled` when it returns True — leaving whatever partial
+    output was written (a re-run overwrites it).
     """
     ome_path = Path(ome_path)
     out_in_dir = Path(out_in_dir)
@@ -348,6 +359,13 @@ def explode_ome_tiff(
     def _log(msg: str) -> None:
         if log_fn:
             log_fn(msg)
+
+    def _progress(done: int, total: int) -> None:
+        if progress_fn:
+            progress_fn(done, total)
+
+    def _abort() -> bool:
+        return bool(should_abort and should_abort())
 
     if frame_order not in FRAME_ORDERS:
         raise ValueError(
@@ -366,6 +384,7 @@ def explode_ome_tiff(
     common = dict(
         out_in_dir=out_in_dir, well_labels=well_labels, exp_tok=exp_tok,
         n_wells=n_wells, fovs_per_well=fovs_per_well, log=_log, name=ome_path.name,
+        progress=_progress, abort=_abort,
     )
     if layout.single_image:
         return _explode_single_image(
@@ -376,7 +395,7 @@ def explode_ome_tiff(
 
 def _explode_multi_image(
     ome_path, layout, *, out_in_dir, well_labels, exp_tok, n_wells,
-    fovs_per_well, log, name,
+    fovs_per_well, log, name, progress, abort,
 ) -> ExplodeResult:
     """One OME ``<Image>`` (series) per stage position; timepoints are its T axis."""
     fovs_per_well = _resolve_positions(
@@ -394,9 +413,13 @@ def _explode_multi_image(
         timepoints=list(layout.timepoint_tokens),
         fovs_per_well=fovs_per_well,
     )
+    total = layout.n_positions * layout.size_t * layout.size_c
+    progress(0, total)
     seen_wells: list[str] = []
     with tifffile.TiffFile(str(ome_path)) as tf:
         for pos, series in enumerate(tf.series):
+            if abort():
+                raise OmeExplodeCancelled()
             well, fov = position_to_well_fov(
                 pos, well_labels=well_labels, fovs_per_well=fovs_per_well
             )
@@ -411,13 +434,14 @@ def _explode_multi_image(
                     _write_plane(out_in_dir, exp_tok, layout.channel_names[ci],
                                  well, fov, tp_tok, plane)
                     result.images_written += 1
+                    progress(result.images_written, total)
     result.wells = sorted(set(seen_wells))
     return _finish(result, out_in_dir, log)
 
 
 def _explode_single_image(
     ome_path, layout, *, frame_order, out_in_dir, well_labels, exp_tok, n_wells,
-    fovs_per_well, log, name,
+    fovs_per_well, log, name, progress, abort,
 ) -> ExplodeResult:
     """One ``<Image>`` whose T axis packs every position (× any timepoints).
 
@@ -461,11 +485,15 @@ def _explode_single_image(
         timepoints=[f"t{t}" for t in range(n_timepoints)],
         fovs_per_well=fovs_per_well,
     )
+    total = n_frames * layout.size_c
+    progress(0, total)
     seen_wells: list[str] = []
     with tifffile.TiffFile(str(ome_path)) as tf:
         series = tf.series[0]
         axes = str(series.axes).upper()
         for frame in range(n_frames):
+            if abort():
+                raise OmeExplodeCancelled()
             if frame_order == "single":
                 pos, tp = frame, 0
             elif frame_order == "pos_in_time":
@@ -482,6 +510,7 @@ def _explode_single_image(
                 _write_plane(out_in_dir, exp_tok, layout.channel_names[ci],
                              well, fov, f"t{tp}", plane)
                 result.images_written += 1
+                progress(result.images_written, total)
     result.wells = sorted(set(seen_wells))
     return _finish(result, out_in_dir, log)
 

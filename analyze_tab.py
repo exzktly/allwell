@@ -37,7 +37,7 @@ from services.pipeline_service import find_pipeline_script
 from services.remote_config import default_remote_index
 import theme
 from well_viewer.core.safe import swallowed
-from analyze_ome import AnalyzeOmeMixin
+from analyze_input import AnalyzeInputMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
@@ -95,7 +95,7 @@ def _has_well_content(folder: Path) -> bool:
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeOmeMixin, AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     @staticmethod
@@ -129,8 +129,6 @@ class AnalyzeTab(AnalyzeOmeMixin, AnalyzeTabFormMixin, QWidget):
         self._on_pipeline_complete = on_pipeline_complete
         self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
         self._schema_cbs: list[QComboBox] = []
-        # OME-TIFF input state (``_ome_detected_file``, layout cache, prefill
-        # marker) is initialised lazily by AnalyzeOmeMixin as the input is set.
 
         self._build_ui()
         self._poll_log()
@@ -570,12 +568,12 @@ class AnalyzeTab(AnalyzeOmeMixin, AnalyzeTabFormMixin, QWidget):
     def _refresh_output(self) -> None:
         raw_str = self._input_edit.text().strip()
         if not raw_str:
-            self._output_lbl.setText("—"); self._layout_lbl.setText("")
-            self._refresh_ome_section(); return
-        # A packed OME-TIFF (a file, or the lone .ome.tif in a folder) is
-        # de-interleaved before the normal grouping; ``_apply_ome_output_labels``
-        # returns True and sets its own status when that's the case.
-        if self._apply_ome_output_labels():
+            self._output_lbl.setText("—"); self._layout_lbl.setText(""); return
+        # A raw packed OME-TIFF must be converted to a dataset folder first
+        # (Datasets → Convert OME-TIFF); Analyze only processes folders.
+        ome_hint = self._ome_input_hint()
+        if ome_hint is not None:
+            self._output_lbl.setText("—"); self._layout_lbl.setText(f"⚠ {ome_hint}")
             return
         raw = Path(raw_str)
         if not raw.is_dir():
@@ -656,6 +654,10 @@ class AnalyzeTab(AnalyzeOmeMixin, AnalyzeTabFormMixin, QWidget):
         if not self._input_edit.text().strip():
             QMessageBox.critical(self, "Input Error", "No input folder selected.")
             return None
+        ome_hint = self._ome_input_hint()
+        if ome_hint is not None:
+            QMessageBox.critical(self, "OME-TIFF Input", ome_hint)
+            return None
         schema_errors = self._schema_errors()
         if schema_errors:
             QMessageBox.critical(self, "Schema Error", "Invalid filename schema:\n\n" + "\n".join(schema_errors))
@@ -685,10 +687,6 @@ class AnalyzeTab(AnalyzeOmeMixin, AnalyzeTabFormMixin, QWidget):
         at_err = self._auto_threshold_validation_error()
         if at_err:
             QMessageBox.critical(self, "Control Well Error", at_err)
-            return None
-        ome_err = self._ome_validation_error()
-        if ome_err:
-            QMessageBox.critical(self, "OME-TIFF Input Error", ome_err)
             return None
         pipeline = find_pipeline_script()
         if pipeline is None:

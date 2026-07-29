@@ -361,12 +361,14 @@ class AllWellApp(QMainWindow):
         self._review.mountAnalyzePane(self._analyze)
 
         # Datasets pane — third top-level mode. Its own left rail lists the
-        # dataset-level features (currently just Concatenate); it has no well
-        # picker. A completed concatenation can hand its output straight to
-        # Review via _open_dataset_in_review.
+        # dataset-level features; it has no well picker. A completed
+        # concatenation hands its output to Review via _open_dataset_in_review;
+        # the OME-TIFF converter hands its produced input folder to Analyze via
+        # _open_dataset_in_analyze.
         self._datasets = DatasetsTab(
             parent=None,
             on_open_in_review=self._open_dataset_in_review,
+            on_open_in_analyze=self._open_dataset_in_analyze,
         )
         self._review.mountDatasetsPane(self._datasets)
 
@@ -1238,6 +1240,21 @@ class AllWellApp(QMainWindow):
         self._nb.setCurrentIndex(0)
         QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
         self._update_dataset_chip(dataset_path)
+
+    def _open_dataset_in_analyze(self, dataset_path: Path) -> None:
+        """Point the Analyze pane at a dataset folder and switch to it.
+
+        Used by the Datasets OME-TIFF converter: the folder it produced is an
+        Analyze *input* (a raw ``in/`` dataset), so it opens in Analyze — where
+        the user configures channels and runs the pipeline — not in Review.
+        """
+        if self._analyze is None:
+            return
+        self._nb.setCurrentIndex(1)
+        edit = getattr(self._analyze, "_input_edit", None)
+        if edit is not None:
+            edit.setEnabled(True)
+            edit.setText(str(dataset_path))
 
     def _nudge_review(self) -> None:
         if self._review is None:

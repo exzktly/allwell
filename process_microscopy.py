@@ -329,54 +329,12 @@ def _ensure_pipeline_io_ready() -> None:
     This shim restores a working text wrapper around fd 1 / fd 2 when
     needed, so the module-level ``logging.basicConfig`` below picks up
     a valid sink and every subsequent ``log.<level>(...)`` reaches the
-    parent's pipe.
+    parent's pipe. The mechanism is shared with the ``WellPlateZipper``
+    grouping subprocess (which has the identical frozen-windowed stdio
+    problem) via :func:`util.frozen_io.ensure_std_streams`.
     """
-    import sys
-    import io
-
-    def _fd_ok(fd: int) -> bool:
-        try:
-            os.fstat(fd)
-            return True
-        except OSError:
-            return False
-
-    def _wrap_fd(fd: int):
-        # ``closefd=False`` is critical — the StreamHandler outlives the
-        # main script, but we must not close the parent's pipe end when
-        # GC eventually drops this wrapper.
-        try:
-            raw = os.fdopen(fd, "wb", buffering=0, closefd=False)
-            return io.TextIOWrapper(
-                raw, encoding="utf-8", errors="replace",
-                line_buffering=True, write_through=True,
-            )
-        except OSError:
-            return None
-
-    def _probe(stream) -> bool:
-        if stream is None:
-            return False
-        try:
-            stream.write("")
-            stream.flush()
-            return True
-        except Exception:  # broken streams raise anything
-            return False
-
-    if not _probe(sys.stdout):
-        wrapper = _wrap_fd(1) if _fd_ok(1) else None
-        if wrapper is not None:
-            sys.stdout = wrapper
-    if not _probe(sys.stderr):
-        # Prefer fd 2 if it's live; otherwise alias to sys.stdout so the
-        # logging StreamHandler still has somewhere to write. The parent
-        # spawns us with ``stderr=STDOUT`` so the two streams merge
-        # downstream anyway.
-        wrapper = _wrap_fd(2) if _fd_ok(2) else None
-        if wrapper is None:
-            wrapper = sys.stdout
-        sys.stderr = wrapper
+    from util.frozen_io import ensure_std_streams
+    ensure_std_streams()
 
 
 _ensure_pipeline_io_ready()

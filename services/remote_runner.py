@@ -235,6 +235,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "util/aw_safe.py",
     # The retry-with-backoff shield behind every pipeline write that lands on
     # the output volume (pipeline.io imports it at module scope).
+    # Rebinds sys.stdout / sys.stderr when a frozen windowed build nulls them;
+    # imported by process_microscopy at module load (and by WellPlateZipper). A
+    # remote run never hits the frozen-windowed case, but the manifest must list
+    # every ``util/`` file so the completeness guard (test_remote_manifest) passes.
+    "util/frozen_io.py",
     "util/retry_io.py",
     # Serpentine plate-position labelling for packed OME-TIFF input. The
     # de-interleave runs client-side (before any remote sync), so a remote run

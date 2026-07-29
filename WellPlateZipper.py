@@ -184,6 +184,16 @@ def folder_well(
 
 
 def main():
+    # A frozen windowed (console=False) build leaves sys.stdout / sys.stderr set
+    # to None in this subprocess even though the parent piped fd 1 / fd 2, so
+    # every print below — the per-well "A01: N files" progress the Analyze tab
+    # parses, the scan/discovery lines, and the broken-symlink warnings — would
+    # be silently dropped and the grouping phase would look frozen. Rebind the
+    # streams onto the live descriptors first (shared with the pipeline
+    # subprocess via util.frozen_io). No-op from source / in a console build.
+    from util.frozen_io import ensure_std_streams
+    ensure_std_streams()
+
     args = build_arg_parser().parse_args()
 
     search_dir = args.search_dir

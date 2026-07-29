@@ -177,6 +177,24 @@ def _has_well_content(folder: Path) -> bool:
         return False
 
 
+def _well_in_grouped_root(root: Path, target: str) -> bool:
+    """True iff *root* holds *target* as a per-well ``<WELL>.zip`` or ``<WELL>/``
+    folder (non-recursive, mirroring the pipeline's grouped-input lookup)."""
+    from util.well_token import canonical_well_label
+    try:
+        # per-well zip:  <root>/<WELL>.zip
+        for p in root.glob("*.zip"):
+            if canonical_well_label(p.stem) == target:
+                return True
+        # per-well folder:  <root>/<WELL>/
+        for p in root.iterdir():
+            if p.is_dir() and canonical_well_label(p.name) == target:
+                return True
+    except OSError:
+        return False
+    return False
+
+
 def well_present_in_input(input_dir: Path, well: str, *,
                           schema: list[str] | None = None,
                           sep: str = "_") -> bool:
@@ -189,23 +207,28 @@ def well_present_in_input(input_dir: Path, well: str, *,
     Analyze pre-run check agrees with what the pipeline will actually find. Used
     to block a run when ``--flatfield empty_well`` / ``--background empty_well``
     name a background well that doesn't exist.
+
+    The Analyze form validates the *selected* folder, but a folder that holds an
+    ``in/`` subfolder (the common ``<dataset>/in`` + ``<dataset>/out`` layout)
+    feeds the pipeline from that ``in/``, not the parent — see
+    :func:`resolve_input_output`. The grouped-layout lookup therefore also
+    searches ``<input_dir>/in`` so a well packaged as ``in/<WELL>.zip`` /
+    ``in/<WELL>/`` isn't reported missing when it's really one level down.
     """
     from util.well_token import canonical_well_label
     target = canonical_well_label(well or "")
     if target is None:
         return False
-    try:
-        # 1) per-well zip:  <input_dir>/<WELL>.zip
-        for p in input_dir.glob("*.zip"):
-            if canonical_well_label(p.stem) == target:
-                return True
-        # 2) per-well folder:  <input_dir>/<WELL>/
-        for p in input_dir.iterdir():
-            if p.is_dir() and canonical_well_label(p.name) == target:
-                return True
-    except OSError:
-        return False
-    # 3) loose TIFFs — parse the 'well' field from the filename schema.
+    # 1 + 2) grouped layouts, in the selected dir and (when present) its ``in/``.
+    roots = [input_dir]
+    in_sub = input_dir / "in"
+    if input_dir.name.lower() != "in" and in_sub.is_dir():
+        roots.append(in_sub)
+    for root in roots:
+        if _well_in_grouped_root(root, target):
+            return True
+    # 3) loose TIFFs — parse the 'well' field from the filename schema. The
+    # recursive walk from the selected dir already descends into ``in/``.
     fields = [str(f).strip().lower() for f in (schema or [])]
     if "well" not in fields:
         return False

@@ -811,6 +811,7 @@ def explode_ome_if_present(
         direction=str(opts.get("ome_direction", "row")),
         experiment=str(experiment),
         fovs_per_well=fovs if fovs > 0 else None,
+        frame_order=str(opts.get("ome_frame_order", "single")),
         log_fn=log_fn,
     )
     return base

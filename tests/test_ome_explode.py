@@ -45,6 +45,24 @@ def _write_ome(
     return path
 
 
+def _write_packed(path, *, n_frames, size_c=2, channel_names=("DAPI", "GFP")):
+    """Write a single-<Image> OME-TIFF that packs *n_frames* into the T axis.
+
+    Pixel value at (frame, c) is ``frame * 10 + c`` — a checkable fingerprint for
+    the (position, timepoint) split.
+    """
+    y = x = 6
+    data = np.zeros((n_frames, size_c, y, x), np.uint16)
+    for f in range(n_frames):
+        for c in range(size_c):
+            data[f, c] = f * 10 + c
+    tifffile.imwrite(
+        str(path), data, ome=True, photometric="minisblack",
+        metadata={"axes": "TCYX", "Channel": {"Name": list(channel_names)}},
+    )
+    return path
+
+
 def test_read_layout_reports_sizes_and_names(tmp_path):
     p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=2, size_c=2, size_z=3)
     layout = read_ome_layout(p)
@@ -149,6 +167,93 @@ def test_explicit_fovs_per_well_mismatch_rejected(tmp_path):
             p, out, grid_rows=2, grid_cols=2, fovs_per_well=2, experiment="exp",
         )
     assert not out.exists() or not list(out.glob("*.tif"))
+
+
+def test_single_image_layout_reports_frames(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=12, size_c=3,
+                      channel_names=("BF", "DAPI", "GFP"))
+    layout = read_ome_layout(p)
+    assert layout.single_image is True
+    assert layout.n_frames == 12
+    assert layout.size_c == 3
+    assert layout.channel_names == ["BF", "DAPI", "GFP"]
+
+
+def test_single_image_single_timepoint_maps_frames_to_positions(tmp_path):
+    # 6 frames, single timepoint, 1×3 wells × 2 FOVs.
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=6, size_c=1,
+                      channel_names=("GFP",))
+    out = tmp_path / "in"
+    res = explode_ome_tiff(
+        p, out, grid_rows=1, grid_cols=3, fovs_per_well=2,
+        frame_order="single", experiment="e",
+    )
+    assert res.wells == ["A01", "A02", "A03"]
+    assert res.timepoints == ["t0"]
+    assert res.images_written == 6
+    # Frame 3 → position 3 → well A02 (3 // 2), FOV 1; pixel = 3*10+0 = 30.
+    assert int(tifffile.imread(out / "e_GFP_A02_f1_t0.tif").max()) == 30
+
+
+def test_single_image_positions_within_timepoint(tmp_path):
+    # 12 frames = 6 positions × 2 timepoints, time on the outside.
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=12, size_c=1,
+                      channel_names=("GFP",))
+    out = tmp_path / "in"
+    res = explode_ome_tiff(
+        p, out, grid_rows=1, grid_cols=3, fovs_per_well=2,
+        frame_order="pos_in_time", experiment="e",
+    )
+    assert res.timepoints == ["t0", "t1"]
+    assert res.images_written == 12
+    # frame = t*6 + p. Frame 7 → t1, position 1 → A01 FOV 1; pixel = 70.
+    assert int(tifffile.imread(out / "e_GFP_A01_f1_t1.tif").max()) == 70
+    # Frame 4 → t0, position 4 → A03 FOV 0; pixel = 40.
+    assert int(tifffile.imread(out / "e_GFP_A03_f0_t0.tif").max()) == 40
+
+
+def test_single_image_timepoints_within_position(tmp_path):
+    # 12 frames = 6 positions × 2 timepoints, position on the outside.
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=12, size_c=1,
+                      channel_names=("GFP",))
+    out = tmp_path / "in"
+    explode_ome_tiff(
+        p, out, grid_rows=1, grid_cols=3, fovs_per_well=2,
+        frame_order="time_in_pos", experiment="e",
+    )
+    # frame = p*2 + t. Frame 7 → position 3 (A02 FOV 1), t1; pixel = 70.
+    assert int(tifffile.imread(out / "e_GFP_A02_f1_t1.tif").max()) == 70
+
+
+def test_single_image_frame_split_mismatch_rejected(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=10, size_c=1,
+                      channel_names=("GFP",))
+    out = tmp_path / "in"
+    with pytest.raises(ValueError, match="split|divide"):
+        explode_ome_tiff(
+            p, out, grid_rows=1, grid_cols=3, fovs_per_well=2,
+            frame_order="pos_in_time", experiment="e",
+        )
+
+
+def test_single_image_timepoints_need_fovs(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=12, size_c=1,
+                      channel_names=("GFP",))
+    with pytest.raises(ValueError, match="FOVs per well"):
+        explode_ome_tiff(
+            p, tmp_path / "in", grid_rows=1, grid_cols=3,
+            frame_order="pos_in_time", experiment="e",
+        )
+
+
+def test_unknown_frame_order_rejected(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=6, size_c=1,
+                      channel_names=("GFP",))
+    with pytest.raises(ValueError, match="frame order"):
+        explode_ome_tiff(
+            p, tmp_path / "in", grid_rows=1, grid_cols=3, fovs_per_well=2,
+            frame_order="sideways", experiment="e",
+        )
 
 
 def test_indivisible_position_count_rejected(tmp_path):

@@ -28,6 +28,15 @@ def _write_packed(path, *, n_frames, channel_names):
     return path
 
 
+def _write_multi(path, *, positions, channel_names):
+    with tifffile.TiffWriter(str(path), ome=True) as tw:
+        for _ in range(positions):
+            arr = np.zeros((1, len(channel_names), 6, 6), np.uint16)
+            tw.write(arr, metadata={"axes": "TCYX",
+                                    "Channel": {"Name": list(channel_names)}})
+    return path
+
+
 def test_converter_page_readout_and_run_gate(qapp, tmp_path):
     from datasets.ome_import.controller import OmeImportController
 
@@ -61,6 +70,24 @@ def test_converter_page_readout_and_run_gate(qapp, tmp_path):
     assert params.frame_order == "pos_in_time"
     assert params.fovs_per_well == 2
     assert "timepoint(s)" in page._readout.text()
+
+
+def test_readout_shows_metadata_well_target(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    # 6-position multi-image file: the readout should surface the target the
+    # moment the source is picked, before any grid is entered.
+    p = _write_multi(tmp_path / "m.ome.tif", positions=6, channel_names=("GFP",))
+    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert "6 stage position(s)" in page._readout.text()
+
+    # Pinning FOVs turns the budget into an explicit expected-well count.
+    page._fovs_edit.setText("2")
+    page.refresh_readout()
+    assert "3 well(s) at 2 FOV(s)/well" in page._readout.text()
 
 
 def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):

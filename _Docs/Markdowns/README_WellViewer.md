@@ -1441,8 +1441,11 @@ timepoint of a plate scan) into an ordinary dataset folder of per-well images �
 the layout Analyze processes. Do this first, then open the result in Analyze.
 
 1. **OME-TIFF source** — pick the `.ome.tif` file. All-Well reads its metadata
-   and suggests a **Destination folder** (`<name>_dataset` beside the file); change
-   it if you like.
+   immediately and suggests a **Destination folder** (`<name>_dataset` beside the
+   file); change it if you like. The readout then shows the file's **target** —
+   how many stage positions (or, for a single packed image, frames) it holds, and
+   once you set FOVs per well, the well count that implies (positions ÷ FOVs). Use
+   it to guide how many wells to place before you touch the grid or the plate.
 2. **Well grid (rows × cols)** — the block of wells you imaged (e.g. `2 × 3`).
    By default the stage is assumed to have visited them in **serpentine** order
    (sweep a row, drop down, sweep back); this is what lets each position get its

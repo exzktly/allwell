@@ -2011,7 +2011,10 @@ output to another pane through an injected callback (`on_open_in_review` →
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
 the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
-readout, `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
+readout — alongside `ome_import_compute.selection_target`, which reads the file's
+position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the well
+count it implies, so the readout guides how many wells to place before any grid is
+entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
 runs it off the UI thread. On success
 the page's "Open in Analyze" button routes the produced folder to the Analyze

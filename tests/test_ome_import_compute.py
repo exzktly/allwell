@@ -14,6 +14,7 @@ from datasets.ome_import.ome_import_compute import (  # noqa: E402
     default_dest,
     plan_conversion,
     read_layout,
+    selection_target,
     strip_ome_suffix,
 )
 
@@ -121,6 +122,41 @@ def test_plan_well_order_duplicate_rejected(tmp_path):
             ConversionParams(grid_rows=1, grid_cols=1,
                              well_order=("A01", "A01")),
         )
+
+
+def test_selection_target_multi_image_reports_positions(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=6)
+    layout = read_layout(p)
+    # FOVs auto → target is the raw position budget, no implied well count.
+    t = selection_target(layout, ConversionParams(grid_rows=1, grid_cols=1))
+    assert t.positions == 6
+    assert t.noun == "stage position"
+    assert t.expected_wells is None
+    assert "6 stage position(s)" in t.hint()
+
+
+def test_selection_target_expected_wells_when_fovs_pinned(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=6)
+    layout = read_layout(p)
+    # 6 positions ÷ 2 FOVs → expect 3 wells.
+    t = selection_target(layout, ConversionParams(grid_rows=1, grid_cols=1, fovs_per_well=2))
+    assert t.expected_wells == 3
+    assert "3 well(s) at 2 FOV(s)/well" in t.hint()
+
+
+def test_selection_target_single_image_packed_positions_unknown(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=12)
+    layout = read_layout(p)
+    # "single" frame order → every frame is a position, so the budget is known.
+    single = selection_target(layout, ConversionParams(
+        grid_rows=1, grid_cols=1, frame_order="single"))
+    assert single.positions == 12
+    assert single.noun == "frame"
+    # Packed timepoints → positions fold with timepoints, budget not knowable.
+    packed = selection_target(layout, ConversionParams(
+        grid_rows=1, grid_cols=1, frame_order="pos_in_time"))
+    assert packed.positions is None
+    assert "timepoints" in packed.hint()
 
 
 def test_convert_writes_dataset_folder(tmp_path):

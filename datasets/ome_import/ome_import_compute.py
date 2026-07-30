@@ -69,6 +69,67 @@ class ConversionPlan:
         )
 
 
+@dataclass
+class SelectionTarget:
+    """How many wells the file's metadata expects you to place, for the readout.
+
+    The OME metadata fixes a total count — stage *positions* (multi-image) or
+    *frames* (single-image) — and ``positions = wells × FOVs`` (a single-image
+    file with timepoints folds those in too, so the position count isn't knowable
+    from metadata until the frame-order splits them out). This carries that count
+    and, when FOVs-per-well is pinned, the well count it implies, so the page can
+    tell the user up front how many wells to select rather than only erroring at
+    the end.
+    """
+
+    positions: int | None    # total stage positions the file holds, if knowable
+    noun: str                # "stage position" | "frame" — for the wording
+    fovs_fixed: int | None   # user-pinned FOVs/well, else None (auto/derive)
+
+    @property
+    def expected_wells(self) -> int | None:
+        """The well count the position budget implies at the pinned FOVs, if any."""
+        if self.positions is None or not self.fovs_fixed:
+            return None
+        if self.positions % self.fovs_fixed:
+            return None
+        return self.positions // self.fovs_fixed
+
+    def hint(self) -> str:
+        """A one-line, forward-looking target for the readout (no ✓/⚠ — the
+        plan's own validation line carries the pass/fail)."""
+        if self.positions is None:
+            return (
+                "↳ Frames pack positions × timepoints — set FOVs per well so "
+                "positions = wells × FOVs and timepoints = frames ÷ positions."
+            )
+        exp = self.expected_wells
+        if exp is not None:
+            return (
+                f"↳ Target: {exp} well(s) at {self.fovs_fixed} FOV(s)/well "
+                f"({self.positions} {self.noun}(s))."
+            )
+        return (
+            f"↳ Target: place {self.positions} {self.noun}(s) — select wells so "
+            f"wells × FOVs = {self.positions}."
+        )
+
+
+def selection_target(layout: OmeLayout, params: ConversionParams) -> SelectionTarget:
+    """Read the well-placement target from *layout* under *params*' frame-order.
+
+    Qt-free so the page's readout stays a thin renderer over it (and it is
+    unit-testable). See :class:`SelectionTarget` for what "knowable" means.
+    """
+    if not layout.single_image:
+        positions, noun = layout.n_positions, "stage position"
+    elif params.frame_order == "single":
+        positions, noun = layout.n_frames, "frame"
+    else:
+        positions, noun = None, "frame"
+    return SelectionTarget(positions, noun, params.fovs_per_well)
+
+
 def is_ome_tiff(path: Path | str) -> bool:
     """True iff *path* names an ``.ome.tif`` / ``.ome.tiff`` file."""
     return str(path).lower().endswith(_OME_SUFFIXES)

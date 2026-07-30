@@ -47,6 +47,7 @@ from datasets.ome_import.ome_import_compute import (
     default_dest,
     plan_conversion,
     read_layout,
+    selection_target,
 )
 
 
@@ -422,16 +423,21 @@ class OmeImportPage(QWidget):
                 message = "⚠ Could not read this file as an OME-TIFF."
             else:
                 single = layout.single_image
+                params = self.params()
                 head = (
                     f"single image: {layout.n_frames} frame(s)"
                     if single else f"{layout.n_positions} position(s)"
                 ) + f" · {layout.size_c} channel(s)"
+                # Metadata-derived target: how many wells to place (read on load,
+                # before any grid is entered) so the user is guided, not just
+                # error-checked at the end.
+                guide = selection_target(layout, params).hint()
                 try:
-                    plan = plan_conversion(layout, self.params())
-                    message = f"{head}\n→ {plan.summary()}"
+                    plan = plan_conversion(layout, params)
+                    message = f"{head}\n{guide}\n✓ {plan.summary()}"
                     can = bool(self._dest_field.path())
                 except OmeImportError as exc:
-                    message = f"{head}\n⚠ {exc}"
+                    message = f"{head}\n{guide}\n⚠ {exc}"
         self._order_label.setVisible(single)
         self._frame_order_cb.setVisible(single)
         self._readout.setText(message)

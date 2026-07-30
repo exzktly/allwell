@@ -329,9 +329,23 @@ class PipelineRunner:
         self._dry_run_cleanup: bool = False
         self._selective_channels: bool = True
 
+    # Completion is decided by these three event kinds — a job queue's
+    # scheduler advances or blocks entirely on having seen one. Dropping one
+    # on queue overflow doesn't cost a log line, it stalls the job forever,
+    # so they're exempt from the drop-on-overflow policy below.
+    _CONTROL_KINDS = frozenset({"done", "error", "finished"})
+
     def _enqueue(self, event: tuple[str, object]) -> None:
-        """Non-blocking enqueue; drops the message on overflow with a
-        one-shot warning rather than blocking the reader thread."""
+        """Non-blocking enqueue for a log line; drops the message on overflow
+        with a one-shot warning rather than blocking the reader thread.
+
+        ``done`` / ``error`` / ``finished`` are never dropped — they block
+        until the reader (draining at 80ms intervals in ``_poll_log``) makes
+        room, since losing one leaves a run's completion unobservable.
+        """
+        if event[0] in self._CONTROL_KINDS:
+            self.log_q.put(event)
+            return
         try:
             self.log_q.put_nowait(event)
         except queue.Full:
@@ -354,6 +368,15 @@ class PipelineRunner:
     @property
     def last_output_dir(self) -> Path | None:
         return self._last_output_dir
+
+    @property
+    def was_stopped(self) -> bool:
+        """Whether the most recent (or in-flight) run was cancelled via
+        :meth:`stop`. Cleared only at the *start* of the next run, so it is
+        still readable after a stopped run's ``("finished", None)`` event —
+        letting a caller tell a user-requested cancel apart from a genuine
+        failure, which otherwise both surface as ``("error", …)``."""
+        return self._stop_requested.is_set()
 
     def start(
         self,

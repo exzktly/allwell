@@ -26,66 +26,10 @@ import pytest
 
 from datasets.concatenate import apply
 from datasets.concatenate import concatenate_compute as cc
+from tests.fixtures.dataset_builder import BASE_INFO as _BASE_INFO
+from tests.fixtures.dataset_builder import ROW_COLUMNS as _ROW_COLUMNS
+from tests.fixtures.dataset_builder import build_dataset as _make_dataset
 from util.timepoint import parse_hours
-
-
-# ── fixtures ─────────────────────────────────────────────────────────────────
-_BASE_INFO = {
-    "schema": "experiment:channel:well:fov:timepoint",
-    "separator": "_",
-    "schema_fields": ["experiment", "channel", "well", "fov", "timepoint"],
-    "well_index": 2,
-    "channel_index": 1,
-    "fov_index": 3,
-    "tp_index": 4,
-    "nuclear_token": "nir",
-    "segmentation_method": "stardist_nuclei",
-    "fluor_tokens": ["nir", "gfp"],
-    "smfish_tokens": [],
-    "shape_features": [],
-    "available_fovs": ["F001"],
-}
-
-_ROW_COLUMNS = [
-    "filename", "experiment", "channel", "well", "fov",
-    "timepoint", "timepoint_hours", "nucleus_id", "area_px",
-]
-
-
-def _make_dataset(root: Path, *, wells, timepoints, exp: str = "exp",
-                   info_extra=None, columns=_ROW_COLUMNS) -> Path:
-    """Build a dataset (in/ zips, out/ QC zips + measurements CSV + sidecar)
-    whose CSV matches the real pipeline's column shape."""
-    in_dir = root / "in"
-    out_dir = root / "out"
-    in_dir.mkdir(parents=True)
-    out_dir.mkdir(parents=True)
-
-    info = dict(_BASE_INFO)
-    info["available_timepoints"] = list(timepoints)
-    if info_extra:
-        info.update(info_extra)
-    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
-
-    for well in wells:
-        with zipfile.ZipFile(in_dir / f"{well}.zip", "w") as zf:
-            for tp in timepoints:
-                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}.tif", b"img")
-        with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
-            for tp in timepoints:
-                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}_labels.tif", b"mask")
-                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}_tophat_gfp.tif", b"tophat")
-        with (out_dir / f"measurements_{well}.csv").open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=columns)
-            writer.writeheader()
-            for tp in timepoints:
-                row = {
-                    "filename": f"{exp}_GFP_{well}_F001_{tp}.tif", "experiment": exp,
-                    "channel": "GFP", "well": well, "fov": "F001", "timepoint": tp,
-                    "timepoint_hours": parse_hours(tp), "nucleus_id": 1, "area_px": 150,
-                }
-                writer.writerow({k: v for k, v in row.items() if k in columns})
-    return root
 
 
 # ── timepoint math ───────────────────────────────────────────────────────────

@@ -15,7 +15,6 @@ theme tokens — nothing hardcoded (CLAUDE.md §5).
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -31,15 +30,13 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QSizePolicy,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 import theme
 from util.plate_grid import serpentine_well_labels
-from widgets.icons import make_icon
+from widgets.path_field import PathField
 from widgets.plate_order_editor import PlateOrderEditor
 from datasets.ome_import.ome_import_compute import (
     ConversionParams,
@@ -55,62 +52,6 @@ def _hrule(parent: QWidget) -> QFrame:
     rule.setFrameShape(QFrame.HLine)
     rule.setObjectName("HRule")
     return rule
-
-
-class _PathField(QWidget):
-    """Caption + a compact read-only path box + an icon Browse button.
-
-    *pick* returns the chosen path string (a file or a folder dialog); the field
-    stores it, shows the basename with the full path on hover, and emits
-    ``changed``.
-    """
-
-    changed = Signal()
-
-    def __init__(
-        self, title: str, *, pick: Callable[[str], str], parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._pick = pick
-        self._path = ""
-
-        col = QVBoxLayout(self)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(theme.Spacing.xs)
-        label = QLabel(title, self)
-        label.setObjectName("Muted")
-        col.addWidget(label)
-
-        row = QWidget(self)
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(theme.Spacing.xs)
-        self._edit = QLineEdit(row)
-        self._edit.setReadOnly(True)
-        self._edit.setPlaceholderText("(not set)")
-        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        rl.addWidget(self._edit, 1)
-        browse = QToolButton(row)
-        browse.setIcon(make_icon("folder-open"))
-        browse.setAutoRaise(True)
-        browse.setToolTip("Browse…")
-        browse.clicked.connect(self._browse)
-        rl.addWidget(browse)
-        col.addWidget(row)
-
-    def _browse(self) -> None:
-        chosen = self._pick(self._path)
-        if chosen:
-            self.set_path(chosen)
-            self.changed.emit()
-
-    def set_path(self, path: str) -> None:
-        self._path = path
-        self._edit.setText(Path(path).name or path)
-        self._edit.setToolTip(path)
-
-    def path(self) -> str:
-        return self._path
 
 
 class OmeImportPage(QWidget):
@@ -151,10 +92,10 @@ class OmeImportPage(QWidget):
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
-        self._src_field = _PathField("OME-TIFF source", pick=self._pick_source)
+        self._src_field = PathField("OME-TIFF source", pick=self._pick_source)
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
-        self._dest_field = _PathField("Destination folder", pick=self._pick_dest)
+        self._dest_field = PathField("Destination folder", pick=self._pick_dest)
         self._dest_field.changed.connect(self._on_dest_changed)
         outer.addWidget(self._dest_field)
 
@@ -340,16 +281,16 @@ class OmeImportPage(QWidget):
                 w.setVisible(bool(show))
 
     # ── pickers ──────────────────────────────────────────────────────────────
-    def _pick_source(self, current: str) -> str:
+    def _pick_source(self, current: str, parent: QWidget | None = None) -> str:
         f, _ = QFileDialog.getOpenFileName(
-            self, "Select OME-TIFF file", current or "",
+            parent or self, "Select OME-TIFF file", current or "",
             "OME-TIFF (*.ome.tif *.ome.tiff);;All files (*)",
         )
         return f
 
-    def _pick_dest(self, current: str) -> str:
+    def _pick_dest(self, current: str, parent: QWidget | None = None) -> str:
         return QFileDialog.getExistingDirectory(
-            self, "Select destination folder", current or "",
+            parent or self, "Select destination folder", current or "",
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
 

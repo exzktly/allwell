@@ -22,6 +22,7 @@ import json
 import logging
 from pathlib import Path
 
+from util.well_token import canonical_well_label
 from well_viewer.data.image_identity import CellKey
 from well_viewer.persistence._io import atomic_write_json
 
@@ -40,14 +41,24 @@ def _well_zip_fingerprints(app) -> dict[str, str]:
     """Snapshot the ``<well>_out.zip`` mtimes for every loaded well.
 
     Used both at save time (stored alongside each override) and at load
-    time (compared against the file on disk).
+    time (compared against the file on disk). Keys are canonicalised
+    (``a1_out.zip`` -> ``"A01"``) to match ``CellKey.well`` — the override
+    map's own keys, which every well is normalised into via
+    ``normalize_well``. An unpadded on-disk filename previously left this
+    dict keyed by the raw, unpadded stem, so the lookup at both save and
+    load time missed on an unpadded dataset; both sides missed the same
+    way, so the staleness guard silently never fired instead of failing
+    loudly — stale overrides were kept rather than dropped.
     """
     out: dict[str, str] = {}
     data_dir = app._app_state.dataset.data_dir
     if not data_dir:
         return out
     for zip_path in Path(data_dir).glob("*_out.zip"):
-        well = zip_path.stem.replace("_out", "")
+        stem = zip_path.stem
+        well = canonical_well_label(stem[:-4]) if stem.endswith("_out") else None
+        if not well:
+            continue
         try:
             out[well] = f"{zip_path.stat().st_mtime_ns}"
         except OSError:

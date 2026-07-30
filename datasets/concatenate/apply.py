@@ -21,7 +21,6 @@ import csv
 import json
 import math
 import shutil
-import zipfile
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,10 +28,19 @@ from pathlib import Path
 from util.timepoint import parse_hours
 from util.aw_safe import swallow
 from well_viewer.domain.tp_match import tp_close
+from datasets._common.containers import (
+    FILENAME_COLUMN as _FILENAME_COLUMN,
+    OVERRIDES_FILENAME as _OVERRIDES_FILENAME,
+    OVERRIDES_SCHEMA_VERSION as _OVERRIDES_SCHEMA_VERSION,
+    TIMEPOINT_COLUMN as _TIMEPOINT_COLUMN,
+    TIMEPOINT_HOURS_COLUMN as _TIMEPOINT_HOURS_COLUMN,
+    clear_destination,
+    read_members,
+    write_zip,
+)
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
-    DatasetPaths,
     MergePlan,
     in_containers,
     out_csvs,
@@ -40,12 +48,6 @@ from datasets.concatenate.concatenate_compute import (
     remap_timepoint_label,
     rewrite_member_name,
 )
-
-_TIMEPOINT_COLUMN = "timepoint"
-_TIMEPOINT_HOURS_COLUMN = "timepoint_hours"
-_FILENAME_COLUMN = "filename"
-_OVERRIDES_FILENAME = "cell_overrides.json"
-_OVERRIDES_SCHEMA_VERSION = 2
 
 
 # A no-op progress sink, so callers that don't care can omit one.
@@ -62,60 +64,8 @@ def _null_progress(_well: str, _stage: str) -> None:
 
 
 # ── container IO ─────────────────────────────────────────────────────────────
-def read_members(container: Path) -> list[tuple[str, bytes]]:
-    """Read a well container's files as ``(member_name, bytes)``.
-
-    Works for both input layouts: a ``.zip`` (its entries) or a folder (its files
-    by POSIX-relative name). Directory entries are skipped.
-    """
-    if container.is_dir():
-        members: list[tuple[str, bytes]] = []
-        for path in sorted(container.rglob("*")):
-            if path.is_file():
-                members.append((path.relative_to(container).as_posix(), path.read_bytes()))
-        return members
-    with zipfile.ZipFile(container) as archive:
-        return [
-            (info.filename, archive.read(info.filename))
-            for info in archive.infolist()
-            if not info.is_dir()
-        ]
-
-
-def write_zip(dest: Path, members: list[tuple[str, bytes]]) -> tuple[frozenset[str], frozenset[str]]:
-    """Write ``(name, bytes)`` members into a fresh deflated zip at *dest*.
-
-    A later member whose name duplicates an earlier one is skipped rather than
-    overwriting it — since dataset 1's members are always listed first when
-    both datasets contribute to a well, this means a dataset-2 member that
-    failed the schema-conformance check in :func:`rewrite_member_name` (and so
-    kept its original name) can never silently clobber a same-named dataset-1
-    member. Returns ``(written, dropped)`` — *written* is the set of names
-    actually written (so callers can verify a CSV row's ``filename`` value
-    actually landed in the archive); *dropped* is the set of names that were
-    requested but skipped due to a collision, so a caller can tell a genuine
-    duplicate-write apart from data that never made it in at all (see
-    :func:`execute_plan` and :func:`_verify`, which both treat a nonzero
-    *dropped* as something that must never pass silently).
-
-    ``compresslevel=1``: microscopy image formats are already
-    information-dense, so re-deflating at the default level 6 spends a lot of
-    CPU for negligible size reduction — this is a pure container-level merge,
-    not a size-optimization pass.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    written: set[str] = set()
-    dropped: set[str] = set()
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
-        for name, data in members:
-            if name in written:
-                dropped.add(name)
-                continue
-            written.add(name)
-            archive.writestr(name, data)
-    return frozenset(written), frozenset(dropped)
-
-
+# read_members / write_zip now live in datasets._common.containers — see the
+# import block above.
 def _rewrite_members(plan: MergePlan, members: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], int]:
     """Rewrite every member's timepoint field. Returns ``(members, unmatched)``
     — *unmatched* counts members that didn't match the filename schema and
@@ -332,19 +282,8 @@ def merge_measurements(
 
 
 # ── restart cleanup ───────────────────────────────────────────────────────────
-def clear_destination(dest: DatasetPaths) -> None:
-    """Remove a destination's ``in``/``out`` content (a failed prior attempt).
-
-    Every well is rebuilt from the two source datasets on each
-    :func:`execute_plan` call — nothing here is incremental — so the only
-    correct way to resume into a destination that already has leftovers is to
-    clear them first; otherwise a well from an earlier, differently-scoped
-    attempt (or a partially-written file) would linger in the "finished"
-    output.
-    """
-    for folder in (dest.in_dir, dest.out_dir):
-        if folder.exists():
-            shutil.rmtree(folder)
+# clear_destination now lives in datasets._common.containers — see the import
+# block above.
 
 
 # ── cell overrides carry-over ─────────────────────────────────────────────────

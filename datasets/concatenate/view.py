@@ -14,28 +14,23 @@ and theme tokens — nothing hardcoded (CLAUDE.md §5).
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPlainTextEdit,
     QPushButton,
-    QSizePolicy,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 import theme
-from widgets.icons import make_icon
+from widgets.path_field import PathField, folder_picker
 from datasets.concatenate.concatenate_compute import (
     DatasetPaths,
     destination_has_marker,
@@ -74,94 +69,6 @@ def _is_destination(root: Path) -> str:
     if destination_has_unrecognized_content(dest) and not destination_has_marker(dest):
         return "Already has unrelated files — choose an empty folder."
     return ""
-
-
-class _FolderField(QWidget):
-    """Caption + a compact path box (basename, full path on hover) + an
-    icon-only Browse button, with an optional validator and its own inline
-    hint — so three of these can sit on one equation row while each still
-    reports which field is wrong."""
-
-    changed = Signal()
-
-    def __init__(
-        self,
-        title: str,
-        *,
-        prompt: str,
-        validator: Callable[[Path], str] | None = None,
-        parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._validator = validator
-        self._prompt = prompt
-        self._path = ""
-        self.setMinimumWidth(180)
-
-        col = QVBoxLayout(self)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(theme.Spacing.xs)
-
-        label = QLabel(title, self)
-        label.setObjectName("Muted")
-        label.setWordWrap(True)
-        col.addWidget(label)
-
-        row = QWidget(self)
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(theme.Spacing.xs)
-        self._edit = QLineEdit(row)
-        self._edit.setReadOnly(True)
-        self._edit.setPlaceholderText("(not set)")
-        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        row_layout.addWidget(self._edit, 1)
-        browse = QToolButton(row)
-        browse.setIcon(make_icon("folder-open"))
-        browse.setAutoRaise(True)
-        browse.setToolTip("Browse…")
-        browse.clicked.connect(self._browse)
-        row_layout.addWidget(browse)
-        col.addWidget(row)
-
-        self._hint = QLabel("", self)
-        self._hint.setObjectName("Danger")
-        self._hint.setWordWrap(True)
-        self._hint.setVisible(False)
-        col.addWidget(self._hint)
-
-    def _browse(self) -> None:
-        chosen = QFileDialog.getExistingDirectory(
-            self,
-            self._prompt,
-            self._path or "",
-            QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
-        )
-        if chosen:
-            self._set_path(chosen)
-            self.changed.emit()
-
-    def _set_path(self, path: str) -> None:
-        self._path = path
-        self._edit.setText(Path(path).name or path)
-        self._edit.setToolTip(path)
-        self._revalidate()
-
-    def _validity_message(self) -> str:
-        if not self._path or self._validator is None:
-            return ""
-        return self._validator(Path(self._path))
-
-    def _revalidate(self) -> None:
-        message = self._validity_message()
-        self._hint.setText(message)
-        self._hint.setVisible(bool(message))
-
-    def path(self) -> str:
-        return self._path
-
-    def is_valid(self) -> bool:
-        return bool(self._path) and self._validity_message() == ""
 
 
 class ConcatenatePage(QWidget):
@@ -220,12 +127,15 @@ class ConcatenatePage(QWidget):
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.sm)
 
-        self._ds1_field = _FolderField(
-            "Dataset 1 (base)", prompt="Select dataset 1 folder", validator=_is_dataset)
-        self._ds2_field = _FolderField(
-            "Dataset 2 (appended)", prompt="Select dataset 2 folder", validator=_is_dataset)
-        self._dest_field = _FolderField(
-            "Destination", prompt="Select destination folder", validator=_is_destination)
+        self._ds1_field = PathField(
+            "Dataset 1 (base)", pick=folder_picker("Select dataset 1 folder"),
+            validator=_is_dataset)
+        self._ds2_field = PathField(
+            "Dataset 2 (appended)", pick=folder_picker("Select dataset 2 folder"),
+            validator=_is_dataset)
+        self._dest_field = PathField(
+            "Destination", pick=folder_picker("Select destination folder"),
+            validator=_is_destination)
 
         def _operator(text: str) -> QLabel:
             lbl = QLabel(text, row)
@@ -316,7 +226,7 @@ class ConcatenatePage(QWidget):
         dataset" silently disables Concatenate without saying why.
         """
         for field in (self._ds1_field, self._ds2_field, self._dest_field):
-            field._revalidate()
+            field.revalidate()
         self._revalidate_cross()
 
     def append_log(self, text: str) -> None:

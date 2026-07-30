@@ -111,8 +111,21 @@ class PlateProgress(QWidget):
         self._plate.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self._plate.setMaximumHeight(210)
+        # WellPlateSelector paints a panel background + border across its
+        # *entire* allocated box (well_plate_selector.py's #WellPlateSelector
+        # QSS rule), independent of how much of that box the grid itself
+        # actually draws into — _metrics() sizes the grid to
+        # min(avail_w/12, avail_h/8), so once maxHeight above caps the grid's
+        # cell size, any extra width the layout hands this widget (the
+        # centre column is wide, shared with a fixed-width rail/legend) does
+        # NOT grow the grid — it only stretches the panel's own background
+        # into a big, mostly-empty grey card with a small grid centred
+        # inside it. Cap the width too so the card hugs its content, matching
+        # the height-bound cell size's own natural width (12 cols at the
+        # same cell size the 210px height already produces).
+        self._plate.setMaximumWidth(330)
         self._plate.setWellTooltipProvider(self._well_tooltip)
-        center.addWidget(self._plate, 1)
+        center.addWidget(self._plate, 0, Qt.AlignLeft)
 
         # Per-well sub-progress rails (RunDashboard: FOV·timepoint progress;
         # unused by ConcatDashboard, which has no per-well sub-phases) —

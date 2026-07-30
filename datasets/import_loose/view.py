@@ -156,6 +156,14 @@ class ImportLoosePage(QWidget):
         self._open_btn.clicked.connect(lambda: self.openInAnalyzeRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
 
+        # A trailing stretch outranks every 0-stretch item above it for any
+        # leftover space the QScrollArea's content widget picks up filling
+        # the viewport (see widgets/plate_progress.py's own Maximum policy
+        # fix for why the dashboard itself no longer eats that space) — so
+        # slack collects as blank page background below everything instead
+        # of inflating a label, field, or the dashboard's own plate map.
+        outer.addStretch(1)
+
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
@@ -173,7 +181,7 @@ class ImportLoosePage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = ImportLooseDashboard(self)
-        outer.addWidget(self.dashboard, 1)
+        outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)

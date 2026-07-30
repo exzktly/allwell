@@ -139,6 +139,14 @@ class MergePlatesPage(QWidget):
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
 
+        # A trailing stretch outranks every 0-stretch item above it for any
+        # leftover space the QScrollArea's content widget picks up filling
+        # the viewport, so slack collects as blank page background below
+        # everything instead of inflating the dashboard's own plate map (the
+        # dashboard has no maximumHeight of its own, and with the raw log
+        # hidden by default there was nothing else to absorb the growth).
+        outer.addStretch(1)
+
     def _build_equation_row(self, outer: QVBoxLayout) -> None:
         row = QWidget(self)
         hl = QHBoxLayout(row)
@@ -216,7 +224,7 @@ class MergePlatesPage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = MergePlatesDashboard(self)
-        outer.addWidget(self.dashboard, 1)
+        outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)

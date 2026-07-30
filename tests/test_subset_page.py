@@ -113,3 +113,41 @@ def test_page_content_is_wrapped_in_a_scroll_area(qapp):
     assert outer_scroll.widgetResizable() is True
     assert page._src_field.parent() is not page  # reparented under the scroll content
     ctrl.shutdown()
+
+
+def test_dashboard_does_not_stretch_to_fill_a_tall_viewport(qapp):
+    """Regression guard: the scroll area's content widget gets resized to
+    fill the viewport (QScrollArea.setWidgetResizable(True)), and with the
+    raw log hidden by default the dashboard used to be the only widget in
+    the page's outer layout willing to absorb that leftover height — which
+    its own internal ``center.addStretch(1)`` then turned into a growing
+    dead zone of blank space below the height-capped plate map, rather than
+    the plate map itself growing. A trailing ``outer.addStretch(1)`` after
+    the page's last real widget should collect that leftover space instead,
+    so the dashboard renders at its natural, tight sizeHint regardless of
+    how much taller the window is than the page's actual content."""
+    from datasets.subset.controller import SubsetController
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page.resize(1300, 2000)  # much taller than the page's natural content
+    page.show()
+    qapp.processEvents()
+    assert page.dashboard.height() <= page.dashboard.sizeHint().height() + 20
+    ctrl.shutdown()
+
+
+def test_picker_and_dashboard_plates_are_sized_identically(qapp):
+    """Regression guard: the interactive well-picker plate at the top of
+    this page and SubsetDashboard's own status plate at the bottom used to
+    render at visibly different scales — the picker spanned nearly the full
+    page width with a small grid centred in a lot of dead space, while the
+    dashboard's plate was boxed into a narrower column. Both should be
+    capped at the same size so they read as the same kind of control."""
+    from datasets.subset.controller import SubsetController
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    assert page._plate.maximumWidth() == page.dashboard._plate.maximumWidth()
+    assert page._plate.maximumHeight() == page.dashboard._plate.maximumHeight()
+    ctrl.shutdown()

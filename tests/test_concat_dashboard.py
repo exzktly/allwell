@@ -35,6 +35,25 @@ def test_plate_vertical_size_policy_is_not_fixed(qapp):
     assert d._plate.sizePolicy().verticalPolicy() != QSizePolicy.Fixed
 
 
+def test_plate_has_a_matching_width_cap(qapp):
+    """Regression guard: well_plate_selector.WellPlateSelector paints a
+    panel background + border across its *entire* allocated widget box
+    (its #WellPlateSelector QSS rule), independent of how much of that box
+    the grid itself actually draws into (well_plate_selector._metrics()
+    sizes the grid to min(avail_w/12, avail_h/8)). PlateProgress's centre
+    column is shared with a fixed-width rail + legend but is otherwise as
+    wide as the host page allows, so once the plate's maximumHeight caps the
+    grid's cell size, any extra width the layout still hands the plate
+    widget doesn't grow the grid at all — it only stretches the panel's own
+    background into a big, mostly-empty grey card with a small grid
+    centred inside it. A matching maximumWidth keeps the card hugging its
+    content instead."""
+    from datasets.concatenate.dashboard import ConcatDashboard
+    d = ConcatDashboard()
+    assert d._plate.maximumWidth() < 500
+    assert d._plate.maximumHeight() < 500
+
+
 def test_run_dashboard_still_exposes_every_test_facing_attribute(qapp):
     """Regression guard for the PlateProgress extraction: every attribute
     tests/test_run_dashboard.py pokes must still resolve on RunDashboard."""

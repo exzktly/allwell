@@ -118,9 +118,18 @@ class SubsetPage(QWidget):
 
         outer.addWidget(QLabel("Wells", self))
         self._plate = WellPlateSelector(self)
-        self._plate.setMaximumHeight(220)
+        # Same cap as PlateProgress's own plate map (widgets/plate_progress.py)
+        # and a matching width cap so this picker and the dashboard's status
+        # plate at the bottom of this same page render at the same cell
+        # scale, rather than this one spreading across the full page width
+        # with dead space padding a tiny grid. Left-aligned since an
+        # unconstrained QVBoxLayout item would otherwise stretch to fill —
+        # and then immediately clip back down to maxWidth, floating it
+        # wherever Qt's default alignment happens to land it.
+        self._plate.setMaximumHeight(210)
+        self._plate.setMaximumWidth(330)
         self._plate.selectionChanged.connect(self._refresh_run_enabled)
-        outer.addWidget(self._plate)
+        outer.addWidget(self._plate, 0, Qt.AlignLeft)
 
         outer.addWidget(QLabel("Timepoints", self))
         self._tp_host = QWidget(self)
@@ -158,6 +167,14 @@ class SubsetPage(QWidget):
         self._open_btn.clicked.connect(lambda: self.openInReviewRequested.emit(self._dest_root))
         outer.addWidget(self._open_btn, 0, Qt.AlignLeft)
 
+        # A trailing stretch outranks every 0-stretch item above it for any
+        # leftover space the QScrollArea's content widget picks up filling
+        # the viewport, so slack collects as blank page background below
+        # everything instead of inflating the dashboard's own plate map (the
+        # dashboard has no maximumHeight of its own, and with the raw log
+        # hidden by default there was nothing else to absorb the growth).
+        outer.addStretch(1)
+
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
@@ -175,7 +192,7 @@ class SubsetPage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = SubsetDashboard(self)
-        outer.addWidget(self.dashboard, 1)
+        outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)

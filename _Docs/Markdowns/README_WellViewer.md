@@ -48,7 +48,8 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
-     [Validate & Repair Dataset](#validate--repair-dataset)
+     [Validate & Repair Dataset](#validate--repair-dataset) ·
+     [Subset / Split Dataset](#subset--split-dataset)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -76,7 +77,9 @@ to add features, how to debug, and build / environment troubleshooting), see
   dataset's timepoints after another's — for when the same plate was imaged in
   two separate sessions and you want one continuous timelapse; and
   **Validate & Repair Dataset** checks whether an Analyze run actually
-  finished and fixes metadata drift without re-running the pipeline.
+  finished and fixes metadata drift without re-running the pipeline; and
+  **Subset / Split Dataset** copies a filtered slice of wells/timepoints/FOVs
+  into a new folder, leaving the source untouched.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
   it. The hand-off is automatic when an Analyze run completes successfully.
 - **Persistence baked in.** Channel-threshold defaults, saved selections,
@@ -1589,6 +1592,26 @@ plain re-run would skip the very wells that need finishing.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
    Analyze** opens the dataset there so you can re-run and pick up the
    missing pieces.
+
+### Subset / Split Dataset
+
+Use this to copy part of a dataset — some wells, some timepoints, some
+FOVs — into a new folder, without re-running the pipeline. Useful for
+sharing one condition with a collaborator, dropping a contaminated well, or
+trimming a drifted tail of timepoints.
+
+1. Pick the **source dataset** folder. The well plate, timepoint checkboxes,
+   and FOV checkboxes fill in from what's actually in that dataset, all
+   selected by default (meaning "keep everything" until you narrow it down).
+2. Uncheck the wells, timepoints, or FOVs you don't want kept, and pick a
+   **destination folder** (must be new and empty).
+3. Press **Subset**. A live plate map shows each well being copied.
+
+Timepoints keep their original hours — a subset spanning 24h–72h stays
+labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-
+inclusion overrides carry over for cells that survive the filter (dropped for
+ones that don't) and gating thresholds / sample definitions carry over from
+the source, same as Concatenate. The source dataset is never modified.
 
 ---
 

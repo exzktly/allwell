@@ -2195,6 +2195,33 @@ through the existing `on_open_in_analyze` seam — the same one `Convert
 OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
 incremental) Analyze run, not a new execution path.
 
+**Subset / Split Dataset** (`datasets/subset/`) copies a filtered slice of a
+dataset — chosen wells, timepoints, and/or FOVs — into a fresh destination,
+leaving the source untouched. It deliberately **keeps every kept row's
+original timepoint hours** (no re-basing): a subset of 24h–72h stays
+labelled 24h–72h. That single decision is what keeps the feature small — the
+four coupled timepoint-derived values §6b documents for Concatenate (the
+`timepoint` label, the numeric `timepoint_hours` column, the `filename`
+column, and the zip member's own name) never diverge here because nothing
+about a kept row or member is rewritten at all; filtering is a pure predicate
+(`subset_compute.member_matches` / `row_matches`) over what's already there.
+
+`build_subset_plan` reuses the destination-state predicates with its own
+marker (`.aw_subset_in_progress`) and refuses a filter matching zero wells.
+`apply.execute_plan` follows Concatenate's skeleton — marker written first,
+per-well copy loop, `_verify` (currently: at least one measurement row
+written, and every kept row's `filename` present in the filtered `in/`
+archive), sidecar write, marker cleared last.
+
+Cell overrides need one thing Concatenate's carry-over doesn't: **filtering
+before restamping**. `_merge_cell_overrides` there carries every entry
+unconditionally because nothing is dropped; Subset drops wells, timepoints,
+and FOVs, so an override for a filtered-out cell is dropped too — copying
+Concatenate's restamp verbatim would otherwise stat a well's destination zip
+for an override that doesn't belong there. The restamp itself (`seg_fp` set
+to the destination `<well>_out.zip`'s own mtime, as the **last** write to
+that archive) is unchanged from Concatenate's pattern.
+
 ---
 
 ## 7. The widget library (`widgets/`)

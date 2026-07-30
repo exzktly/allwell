@@ -109,10 +109,10 @@ class PlateProgress(QWidget):
         # tint) so run states read clearly on the status map.
         self._plate.setColoredWellsLit(True)
         self._plate.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
         self._plate.setMaximumHeight(210)
         self._plate.setWellTooltipProvider(self._well_tooltip)
-        center.addWidget(self._plate)
+        center.addWidget(self._plate, 1)
 
         # Per-well sub-progress rails (RunDashboard: FOV·timepoint progress;
         # unused by ConcatDashboard, which has no per-well sub-phases) —

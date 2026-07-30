@@ -10,7 +10,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
 
 from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
 
@@ -88,4 +88,28 @@ def test_subset_run_end_to_end_through_the_page(qapp, tmp_path):
     assert (dest / "out" / "measurements_A01.csv").exists()
     assert not (dest / "out" / "measurements_B02.csv").exists()
     assert not page._open_btn.isHidden()
+    ctrl.shutdown()
+
+
+def test_page_content_is_wrapped_in_a_scroll_area(qapp):
+    """Regression guard: the page used to lay every section directly into
+    its own top-level QVBoxLayout, so at the app's default window height
+    (1640x980 - allwell.py) the dashboard's plate map at the bottom got
+    crushed into whatever space was left instead of the page scrolling to
+    it. set_path()/set_source_path() etc. must still resolve on widgets
+    reparented under the scroll area's inner content widget - Qt's
+    layout.addWidget() reparents regardless of constructor parent, so this
+    also guards that the reparenting didn't break anything."""
+    from datasets.subset.controller import SubsetController
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    # The page's own top-level layout wraps everything in one QScrollArea;
+    # a second, unrelated one lives inside SubsetDashboard (PlateProgress's
+    # own _fov_scroll, for per-well sub-progress rows) - findChildren() sees
+    # both, so check the page's outer layout directly rather than counting.
+    outer_scroll = page.layout().itemAt(0).widget()
+    assert isinstance(outer_scroll, QScrollArea)
+    assert outer_scroll.widgetResizable() is True
+    assert page._src_field.parent() is not page  # reparented under the scroll content
     ctrl.shutdown()

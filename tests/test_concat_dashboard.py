@@ -10,12 +10,29 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSizePolicy
 
 
 @pytest.fixture(scope="module")
 def qapp():
     return QApplication.instance() or QApplication([])
+
+
+def test_plate_vertical_size_policy_is_not_fixed(qapp):
+    """Regression guard: PlateProgress._plate used to be pinned to
+    QSizePolicy.Fixed vertically, which locks the widget's rendered height
+    at its own small sizeHint regardless of how much room the row actually
+    has. Since well_plate_selector._metrics() derives cell size from
+    min(available_width / 12, available_height / 8), a Fixed-height plate
+    starves the height side of that min() even when the row is hundreds of
+    pixels wide, rendering a dashboard's plate map illegibly small at the
+    app's real default window size (1640x980 - allwell.py) — every
+    PlateProgress subclass (RunDashboard, ConcatDashboard, SubsetDashboard,
+    MergePlatesDashboard, ValidateDashboard) shares the one base class, so
+    one policy fix (widgets/plate_progress.py) covers all of them."""
+    from datasets.concatenate.dashboard import ConcatDashboard
+    d = ConcatDashboard()
+    assert d._plate.sizePolicy().verticalPolicy() != QSizePolicy.Fixed
 
 
 def test_run_dashboard_still_exposes_every_test_facing_attribute(qapp):

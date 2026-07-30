@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -65,7 +66,27 @@ class SubsetPage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # The page's content (fields, plate selector, dashboard, log) can
+        # exceed the window's default height (1640x980 — allwell.py), and the
+        # dashboard's own plate map sits at the very bottom. A plain
+        # QVBoxLayout with no scroll area just crushes whatever doesn't fit
+        # into whatever's left, which is exactly what made
+        # SubsetDashboard._plate render illegibly small — its cell size is
+        # computed from its actual allotted width/height (well_plate_selector's
+        # _metrics()), and a squeezed few dozen pixels of height produces a
+        # squeezed cell size regardless of how much width is available. Wrap
+        # everything in a scroll area instead, mirroring the pattern
+        # analyze_tab.py already uses for its own form panel.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page_layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)

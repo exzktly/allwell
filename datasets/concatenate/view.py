@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -84,7 +85,23 @@ class ConcatenatePage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # Wrap in a scroll area so the page's content (fields, plate
+        # selector, dashboard, log) can exceed the window's default height
+        # (1640x980 — allwell.py) without crushing whatever's at the bottom —
+        # that used to make ConcatDashboard._plate render illegibly small,
+        # since its cell size derives from its actual allotted width/height
+        # (well_plate_selector's _metrics()). Mirrors the pattern
+        # analyze_tab.py already uses for its own form panel.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page_layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)

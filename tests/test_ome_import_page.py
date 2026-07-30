@@ -11,7 +11,7 @@ import pytest
 
 tifffile = pytest.importorskip("tifffile")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -97,6 +97,26 @@ def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
     page._cols_edit.setText("2")
     page.refresh_readout()
     assert page.params().well_order == ("A01", "A02", "A03", "H12")
+
+
+def test_page_content_is_wrapped_in_a_scroll_area(qapp):
+    """Regression guard: the page used to lay every section directly into
+    its own top-level QVBoxLayout with no scroll area, so once the status
+    section grew (the log filled with lines, the raw log toggled on), a
+    plain fixed-height window had no room left for both it and the
+    acquisition-order plate map above — the plate got silently squeezed down
+    to a fraction of its natural size instead of the page scrolling to
+    reach the status section. set_path() etc. must still resolve on widgets
+    reparented under the scroll area's inner content widget — Qt's
+    layout.addWidget() reparents regardless of constructor parent."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    outer_scroll = page.layout().itemAt(0).widget()
+    assert isinstance(outer_scroll, QScrollArea)
+    assert outer_scroll.widgetResizable() is True
+    assert page._src_field.parent() is not page  # reparented under the scroll content
 
 
 def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):

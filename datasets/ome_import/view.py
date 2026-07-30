@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -70,7 +71,23 @@ class OmeImportPage(QWidget):
 
     # ── build ────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # Wrap in a scroll area — see datasets/concatenate/view.py's
+        # _build_ui for why (the acquisition-order plate above the status
+        # section used to get crushed into whatever space the growing
+        # progress/log area left it, with no way to scroll down to see
+        # both). Qt's layout.addWidget() reparents regardless of any
+        # constructor-passed parent, so the widgets below can keep passing
+        # ``self`` without needing a bulk rewrite.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page_layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)

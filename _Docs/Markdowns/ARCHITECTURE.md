@@ -2071,7 +2071,13 @@ page also carries a `PlateOrderEditor` (§6.1): the grid fields seed a live
 serpentine preview, and the user can click wells to define an arbitrary
 `ConversionParams.well_order` (populated from `PlateOrderEditor.order()`) for a
 non-rectangular scan, which `plan_conversion` / `explode_ome_tiff` use in place of
-the serpentine.
+the serpentine. The page wraps its whole content in a `QScrollArea`, the same
+pattern every other Datasets tool page uses (mirroring `analyze_tab.py`'s own
+form panel): without it, growing the status section (the raw log filling with
+lines, the progress bar becoming visible) left no room in a fixed-height
+window for both it and the `PlateOrderEditor` above, so the plate quietly
+rendered at a fraction of its natural size instead of the page scrolling to
+reach the status section.
 
 **Concatenate datasets** (`datasets/concatenate/`) appends one dataset's
 timepoints after another's. Two datasets of the same plate, imaged in separate

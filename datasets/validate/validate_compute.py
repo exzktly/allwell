@@ -35,9 +35,11 @@ import json
 import math
 import re
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 
+from datasets._common.concurrency import pick_workers
 from pipeline.incremental_keys import (
     read_done_fov_keys_from_folder,
     read_done_fov_keys_from_zip,
@@ -318,60 +320,85 @@ def _row_content_findings(well: str, container: Path, csvs: list[Path]) -> list[
     return findings
 
 
+def _scan_one_well(
+    well: str, *, in_map, zip_map, csv_candidates, schema_fields, sep: str, fov_field_present: bool,
+) -> tuple[WellReport, list[Finding]]:
+    """Read-only per-well diff: intent (from the input container) vs. done
+    (from the CSV/out-zip). Pulled out of :func:`_scan_wells` so it can run
+    on its own thread — nothing here touches another well's files or any
+    shared state, only this well's own container/CSV reads."""
+    findings: list[Finding] = []
+    container = in_map.get(well)
+    intent, unreadable_message = _well_intent(container, schema_fields=schema_fields, sep=sep)
+    if unreadable_message is not None:
+        findings.append(Finding(
+            severity="error", code="unreadable_in_container", well=well,
+            message=f"Well {well}: {unreadable_message}",
+        ))
+
+    csvs = csv_candidates.get(well, [])
+    out_zip = zip_map.get(well)
+    done, csv_state = _well_done(csvs, out_zip, schema_fields=schema_fields, sep=sep)
+
+    missing = (intent - done) if (fov_field_present and container is not None) else set()
+    report = WellReport(
+        well=well, missing=tuple(sorted(missing)), csv_state=csv_state,
+        has_in_container=container is not None, has_out_zip=out_zip is not None,
+    )
+
+    if missing:
+        sample = sorted(missing)[:5]
+        findings.append(Finding(
+            severity="error", code="missing_fov_tp", well=well,
+            message=(
+                f"Well {well}: {len(missing)} (fov, timepoint) pair(s) present "
+                f"in the input but not in the output — e.g. {sample}."
+            ),
+        ))
+    if csv_state == "missing" and (container is not None or out_zip is not None):
+        findings.append(Finding(
+            severity="warning", code="no_csv", well=well,
+            message=(
+                f"Well {well}: images exist but no measurements CSV was found "
+                "(it may have segmented zero cells at every timepoint)."
+            ),
+        ))
+    elif csv_state == "unreadable":
+        findings.append(Finding(
+            severity="error", code="unreadable_csv", well=well,
+            message=f"Well {well}: its measurements CSV could not be parsed.",
+        ))
+
+    if csv_state == "ok" and container is not None:
+        findings.extend(_row_content_findings(well, container, csvs))
+
+    return report, findings
+
+
 def _scan_wells(
     paths, *, schema_fields, sep: str, fov_field_present: bool,
-    csv_candidates: dict[str, list[Path]],
+    csv_candidates: dict[str, list[Path]], workers: int = 0,
 ) -> tuple[list[WellReport], list[Finding]]:
-    findings: list[Finding] = []
     in_map = in_containers(paths)
     zip_map = out_zips(paths)
     all_wells = sorted(set(in_map) | set(csv_candidates) | set(zip_map))
 
-    well_reports: list[WellReport] = []
-    for well in all_wells:
-        container = in_map.get(well)
-        intent, unreadable_message = _well_intent(container, schema_fields=schema_fields, sep=sep)
-        if unreadable_message is not None:
-            findings.append(Finding(
-                severity="error", code="unreadable_in_container", well=well,
-                message=f"Well {well}: {unreadable_message}",
-            ))
-
-        csvs = csv_candidates.get(well, [])
-        out_zip = zip_map.get(well)
-        done, csv_state = _well_done(csvs, out_zip, schema_fields=schema_fields, sep=sep)
-
-        missing = (intent - done) if (fov_field_present and container is not None) else set()
-        well_reports.append(WellReport(
-            well=well, missing=tuple(sorted(missing)), csv_state=csv_state,
-            has_in_container=container is not None, has_out_zip=out_zip is not None,
+    # Read-only per well (no cancellation, no live per-well dashboard here —
+    # unlike the other Datasets tools' write-heavy execute_plan()s), so
+    # .map() is enough: it runs wells in parallel but hands results back in
+    # the same order they were submitted, keeping the report's well/finding
+    # ordering identical to the old sequential loop's.
+    with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
+        results = list(ex.map(
+            lambda well: _scan_one_well(
+                well, in_map=in_map, zip_map=zip_map, csv_candidates=csv_candidates,
+                schema_fields=schema_fields, sep=sep, fov_field_present=fov_field_present,
+            ),
+            all_wells,
         ))
 
-        if missing:
-            sample = sorted(missing)[:5]
-            findings.append(Finding(
-                severity="error", code="missing_fov_tp", well=well,
-                message=(
-                    f"Well {well}: {len(missing)} (fov, timepoint) pair(s) present "
-                    f"in the input but not in the output — e.g. {sample}."
-                ),
-            ))
-        if csv_state == "missing" and (container is not None or out_zip is not None):
-            findings.append(Finding(
-                severity="warning", code="no_csv", well=well,
-                message=(
-                    f"Well {well}: images exist but no measurements CSV was found "
-                    "(it may have segmented zero cells at every timepoint)."
-                ),
-            ))
-        elif csv_state == "unreadable":
-            findings.append(Finding(
-                severity="error", code="unreadable_csv", well=well,
-                message=f"Well {well}: its measurements CSV could not be parsed.",
-            ))
-
-        if csv_state == "ok" and container is not None:
-            findings.extend(_row_content_findings(well, container, csvs))
+    well_reports = [report for report, _findings in results]
+    findings: list[Finding] = [f for _report, well_findings in results for f in well_findings]
 
     if not fov_field_present:
         findings.insert(0, Finding(
@@ -461,13 +488,16 @@ def _check_stale_overrides(paths, zip_map: dict[str, Path]) -> tuple[int, list[F
     return stale_count, findings
 
 
-def build_report(root: Path | str) -> DatasetReport:
+def build_report(root: Path | str, *, workers: int = 0) -> DatasetReport:
     """Scan a dataset folder and report what Analyze did and did not finish.
 
     Read-only. Raises :class:`ValidateError` only when the folder isn't a
     dataset at all or its sidecar can't be read — every other problem is
     reported as a :class:`Finding` rather than an exception, since the whole
     point is to describe a broken dataset rather than refuse to look at it.
+
+    The per-well diff runs in parallel — *workers* threads (0 = auto, see
+    :func:`datasets._common.concurrency.pick_workers`).
     """
     try:
         paths = resolve_dataset(root, label="dataset")
@@ -484,6 +514,7 @@ def build_report(root: Path | str) -> DatasetReport:
     well_reports, well_findings = _scan_wells(
         paths, schema_fields=schema_fields, sep=sep,
         fov_field_present=fov_field_present, csv_candidates=csv_candidates,
+        workers=workers,
     )
     stale_tps, missing_tps, stale_fovs, missing_fovs, availability_findings = (
         _check_sidecar_availability(paths, info, schema_fields=schema_fields, sep=sep)

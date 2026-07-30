@@ -23,13 +23,13 @@ Two modes, one code path each:
 
 from __future__ import annotations
 
-import os
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.zip_write import atomic_zip
+from datasets._common.concurrency import pick_workers
 from datasets.import_loose.import_loose_compute import group_files_by_well
 
 
@@ -43,19 +43,6 @@ def _null_cancelled() -> bool:
 
 def _null_progress(_well: str, _stage: str) -> None:
     return None
-
-
-def _pick_workers(workers: int, n_wells: int) -> int:
-    """Resolve the worker-thread count (0 = auto), capped at the well count.
-
-    Mirrors ``pipeline.ome_explode._pick_workers`` — more threads than wells
-    just contend for the same disk I/O with nothing left to parallelise.
-    """
-    if n_wells <= 0:
-        return 1
-    if workers > 0:
-        return max(1, min(workers, n_wells))
-    return max(1, min(8, os.cpu_count() or 4, n_wells))
 
 
 def convert_to_new_destination(
@@ -114,7 +101,7 @@ def convert_to_new_destination(
 
     wells = sorted(by_well)
     written_wells = 0
-    with ThreadPoolExecutor(max_workers=_pick_workers(workers, len(wells))) as ex:
+    with ThreadPoolExecutor(max_workers=pick_workers(workers, len(wells))) as ex:
         futures = [ex.submit(_write_well, well) for well in wells]
         for fut in as_completed(futures):
             fut.result()  # re-raises the first well's exception, incl. Cancelled

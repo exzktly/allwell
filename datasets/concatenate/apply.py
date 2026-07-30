@@ -21,13 +21,16 @@ import csv
 import json
 import math
 import shutil
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
 from util.aw_safe import swallow
 from well_viewer.domain.tp_match import tp_close
+from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN as _FILENAME_COLUMN,
     OVERRIDES_FILENAME as _OVERRIDES_FILENAME,
@@ -433,6 +436,7 @@ def execute_plan(
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    workers: int = 0,
 ) -> str:
     """Carry out *plan*, writing the merged dataset. Returns a summary line.
 
@@ -445,6 +449,16 @@ def execute_plan(
     then ``"merged"`` or ``"warned"`` (image data survived on one side with no
     matching measurements CSV) once it's done — for a live per-well status
     display (defaults to a no-op).
+
+    Wells are merged in parallel — *workers* threads (0 = auto, see
+    :func:`datasets._common.concurrency.pick_workers`), each owning one
+    well's own destination files (``in/<WELL>.zip``, ``out/<WELL>_out.zip``,
+    its measurements CSV) with nothing shared between wells. ``log``/
+    ``progress`` calls that happen before a well's work starts are
+    serialised behind a lock; aggregating each well's result into
+    ``well_stats``/``dropped_members``/etc. and reporting its "merged"/
+    "warned" outcome both happen back on this function's own thread as each
+    future completes, so that bookkeeping needs no lock at all.
 
     Writes :data:`~datasets.concatenate.concatenate_compute.IN_PROGRESS_MARKER`
     first and removes it only after the merged sidecar is written — the whole
@@ -501,19 +515,20 @@ def execute_plan(
     total_unmatched = 0
     images_without_csv: list[str] = []
     dropped_members: dict[str, frozenset[str]] = {}
-    for well in all_wells:
+
+    callback_lock = threading.Lock()
+
+    def _merge_one_well(well: str):
         if cancelled():
             raise ConcatError("Cancelled — the in-progress destination was left in place to resume later.")
-        emit(f"  {well}…")
-        report(well, "merging")
+        with callback_lock:
+            emit(f"  {well}…")
+            report(well, "merging")
         unmatched_in, in_names, dropped_in = merge_input(plan, well, in1.get(well), in2.get(well))
         unmatched_qc, dropped_qc = merge_qc_zip(plan, well, zip1.get(well), zip2.get(well))
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
-        well_stats[well] = stats
-        total_unmatched += unmatched_in + unmatched_qc + stats.unmatched_filenames
+        unmatched_total = unmatched_in + unmatched_qc + stats.unmatched_filenames
         well_dropped = dropped_in | dropped_qc
-        if well_dropped:
-            dropped_members[well] = well_dropped
         # A well's images (in/ input or out/ QC zip) existing without a
         # measurements CSV on that same side is legitimate on its own — the
         # well may have segmented zero cells at every timepoint — but it's
@@ -522,13 +537,25 @@ def execute_plan(
         # merge that copied images but wrote no data pass as an ordinary
         # success; _verify's zero-rows check below is the hard backstop.
         well_warned = bool(well_dropped)
+        well_images_without_csv: list[str] = []
         if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
-            images_without_csv.append(f"{well} (dataset 1)")
+            well_images_without_csv.append(f"{well} (dataset 1)")
             well_warned = True
         if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
-            images_without_csv.append(f"{well} (dataset 2)")
+            well_images_without_csv.append(f"{well} (dataset 2)")
             well_warned = True
-        report(well, "warned" if well_warned else "merged")
+        return well, stats, unmatched_total, well_dropped, well_images_without_csv, well_warned
+
+    with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
+        futures = [ex.submit(_merge_one_well, well) for well in all_wells]
+        for fut in as_completed(futures):
+            well, stats, unmatched_total, well_dropped, well_images_without_csv, well_warned = fut.result()
+            well_stats[well] = stats
+            total_unmatched += unmatched_total
+            if well_dropped:
+                dropped_members[well] = well_dropped
+            images_without_csv.extend(well_images_without_csv)
+            report(well, "warned" if well_warned else "merged")
 
     if total_unmatched:
         emit(

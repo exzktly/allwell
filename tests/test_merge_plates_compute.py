@@ -186,3 +186,45 @@ def test_incompatible_schema_refused(tmp_path):
     build_dataset(ds2, wells=["B02"], timepoints=["0h"], info_extra={"nuclear_token": "dapi"})
     with pytest.raises(mpc.MergePlatesError, match="not analysed the same way"):
         mpc.build_plate_merge_plan(ds1, ds2, dest)
+
+
+def test_execute_plan_merges_many_wells_from_both_datasets_in_parallel(tmp_path):
+    """Enough wells across both datasets to force >1 worker (default
+    auto-sizing) -- every well from either side must land correctly with no
+    cross-well interference, and every well reports exactly one merging +
+    one merged event, regardless of which dataset it came from."""
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    ds1_wells = [f"A{c:02d}" for c in range(1, 9)]   # A01..A08
+    ds2_wells = [f"B{c:02d}" for c in range(1, 9)]   # B01..B08 - disjoint
+    build_dataset(ds1, wells=ds1_wells, timepoints=["0h", "24h"])
+    build_dataset(ds2, wells=ds2_wells, timepoints=["0h", "24h"])
+
+    events: list[tuple[str, str]] = []
+    plan = mpc.build_plate_merge_plan(ds1, ds2, dest)
+    summary = mp_apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+    all_wells = ds1_wells + ds2_wells
+    assert f"{len(all_wells)} well(s)" in summary
+
+    by_well: dict[str, list[str]] = {}
+    for well, stage in events:
+        by_well.setdefault(well, []).append(stage)
+    assert set(by_well) == set(all_wells)
+    for stages in by_well.values():
+        assert stages == ["merging", "merged"]
+
+    for well in all_wells:
+        with (dest / "out" / f"measurements_{well}.csv").open() as f:
+            assert len(list(csv.DictReader(f))) == 2
+
+
+def test_execute_plan_respects_explicit_worker_count(tmp_path):
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01", "A02"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B01", "B02"], timepoints=["0h"])
+    plan = mpc.build_plate_merge_plan(ds1, ds2, dest)
+    summary = mp_apply.execute_plan(plan, workers=1)
+    assert "4 well(s)" in summary

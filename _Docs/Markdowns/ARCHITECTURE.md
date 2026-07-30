@@ -2052,6 +2052,7 @@ deletable:
 | `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. |
 | `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. |
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
+| `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
 
 `datasets/concatenate/concatenate_compute.py` and `apply.py` re-export the
 names they lifted from `_common`, so their own public API (and every existing
@@ -2086,7 +2087,7 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 | Module | Role |
 |--------|------|
 | `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
-| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. `write_zip` writes at `compresslevel=1` — a pure container-level merge of already-dense microscopy image data gains little from deeper DEFLATE effort, so the default level 6 was pure CPU waste — and tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback and a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard. |
+| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. `write_zip` writes at `compresslevel=1` — a pure container-level merge of already-dense microscopy image data gains little from deeper DEFLATE effort, so the default level 6 was pure CPU waste — and tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback and a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. |
 | `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (mirrors `analyze_tab_form.py`'s log panel). Emits `runRequested` / `openInReviewRequested`. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
@@ -2211,6 +2212,14 @@ happened to glob last. A CSV that matches a well by filename but whose header
 lacks `timepoint_hours` is flagged as a phantom (an unrelated file, not
 broken data) rather than counted as that well's state.
 
+The per-well diff itself (`_scan_one_well`) runs on a `ThreadPoolExecutor`
+(`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads
+with no destination file and no live per-well dashboard, so there's no lock
+to take: `ThreadPoolExecutor.map()` (not `as_completed`) hands results back
+in the same order they were submitted regardless of which well's thread
+finishes first, so the report's well/finding ordering is identical to the
+old sequential loop's no matter the worker count.
+
 Beyond the per-well diff, `build_report` also checks: the sidecar's
 `available_timepoints`/`available_fovs` against what
 `_common.collect_available_schema_values` finds on disk (both directions —
@@ -2248,9 +2257,11 @@ about a kept row or member is rewritten at all; filtering is a pure predicate
 `build_subset_plan` reuses the destination-state predicates with its own
 marker (`.aw_subset_in_progress`) and refuses a filter matching zero wells.
 `apply.execute_plan` follows Concatenate's skeleton — marker written first,
-per-well copy loop, `_verify` (currently: at least one measurement row
-written, and every kept row's `filename` present in the filtered `in/`
-archive), sidecar write, marker cleared last.
+per-well copy through a `ThreadPoolExecutor` (`pick_workers`, same
+lock-only-around-the-pre-work-callback shape Concatenate uses), `_verify`
+(currently: at least one measurement row written, and every kept row's
+`filename` present in the filtered `in/` archive), sidecar write, marker
+cleared last.
 
 Cell overrides need one thing Concatenate's carry-over doesn't: **filtering
 before restamping**. `_merge_cell_overrides` there carries every entry
@@ -2338,6 +2349,13 @@ gaps, so it must be said).
 **When dataset 2's wells are already disjoint from dataset 1's (the identity
 map, the common case), nothing is rewritten at all** — containers are
 copied byte-for-byte and CSV rows verbatim, so the fast path is a pure copy.
+
+`apply.execute_plan` merges dataset 1's and dataset 2's wells through **one**
+`ThreadPoolExecutor` rather than two sequential rounds — a destination well
+only ever comes from one source (`build_plate_merge_plan` already refused a
+post-remap collision), so the two sides' per-well work is safe to run
+concurrently in the same pool. Sized by `pick_workers`, same
+lock-only-around-the-pre-work-callback shape Concatenate and Subset use.
 
 Curation is where this is genuinely harder than Concatenate, which simply
 carries dataset 1's forward unchanged: `merge_sample_definitions` remaps

@@ -193,11 +193,6 @@ def test_convert_to_new_destination_callback_invocations_are_not_corrupted(tmp_p
     assert all(stages == ["writing", "done"] for stages in by_well.values())
 
 
-def test_pick_workers_caps_at_well_count_and_explicit_request():
-    assert il_apply._pick_workers(0, 0) == 1
-    assert il_apply._pick_workers(0, 1) == 1
-    assert il_apply._pick_workers(4, 2) == 2
-    assert il_apply._pick_workers(0, 100) <= 8
 
 
 def test_group_files_by_well_and_scan_agree(tmp_path):

@@ -531,6 +531,46 @@ def test_execute_plan_progress_defaults_to_a_no_op(tmp_path):
     assert "Concatenated 1 well(s)" in summary
 
 
+def test_execute_plan_merges_many_wells_in_parallel(tmp_path):
+    """Enough wells to force >1 worker (default auto-sizing) -- every well
+    must still land correctly with no cross-well interference, and every
+    well must still report exactly one merging + one terminal event."""
+    wells = [f"{r}{c:02d}" for r in "ABCD" for c in range(1, 5)]  # 16 wells
+    _make_dataset(tmp_path / "d1", wells=wells, timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=wells, timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    summary = apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+    assert f"Concatenated {len(wells)} well(s)" in summary
+
+    by_well: dict[str, list[str]] = {}
+    for well, stage in events:
+        by_well.setdefault(well, []).append(stage)
+    assert set(by_well) == set(wells)
+    for well, stages in by_well.items():
+        assert stages[0] == "merging"
+        assert stages[1] in ("merged", "warned")
+        assert len(stages) == 2
+
+    for well in wells:
+        with zipfile.ZipFile(dest / "in" / f"{well}.zip") as zf:
+            assert len(zf.namelist()) > 0
+        with (dest / "out" / f"measurements_{well}.csv").open() as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) == 4  # 2 timepoints x 2 datasets
+
+
+def test_execute_plan_respects_explicit_worker_count(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01", "B02", "C03"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01", "B02", "C03"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    summary = apply.execute_plan(plan, workers=1)
+    assert "Concatenated 3 well(s)" in summary
+
+
 # ── collision / silent-drop regression (reported bug) ─────────────────────────
 #
 # Reported symptom: pointing dataset 1 and dataset 2 at datasets that share a

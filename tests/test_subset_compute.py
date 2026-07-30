@@ -183,3 +183,38 @@ def test_restart_detection_and_clear(tmp_path):
     assert plan2.dest_is_restart
     subset_apply.execute_plan(plan2)
     assert (dest / "out" / "pipeline_info.json").exists()
+
+
+def test_execute_plan_copies_many_wells_in_parallel(tmp_path):
+    """Enough wells to force >1 worker (default auto-sizing) -- every well
+    must land correctly with no cross-well interference, and every well must
+    report exactly one copying + one terminal event."""
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    wells = [f"{r}{c:02d}" for r in "ABCD" for c in range(1, 5)]  # 16 wells
+    _build(src, wells=wells, timepoints=["0h", "24h"], fovs=("F001",))
+
+    events: list[tuple[str, str]] = []
+    plan = sc.build_subset_plan(src, dest, sc.SubsetFilter())
+    summary = subset_apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+    assert f"{len(wells)} well(s)" in summary
+
+    by_well: dict[str, list[str]] = {}
+    for well, stage in events:
+        by_well.setdefault(well, []).append(stage)
+    assert set(by_well) == set(wells)
+    for stages in by_well.values():
+        assert stages == ["copying", "done"]
+
+    for well in wells:
+        with (dest / "out" / f"measurements_{well}.csv").open() as f:
+            assert len(list(csv.DictReader(f))) == 2
+
+
+def test_execute_plan_respects_explicit_worker_count(tmp_path):
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    _build(src, wells=["A01", "B02", "C03"], timepoints=["0h"], fovs=("F001",))
+    plan = sc.build_subset_plan(src, dest, sc.SubsetFilter())
+    summary = subset_apply.execute_plan(plan, workers=1)
+    assert "3 well(s)" in summary

@@ -15,11 +15,14 @@ import csv
 import json
 import re
 import shutil
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
+from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -228,7 +231,22 @@ def execute_plan(
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    workers: int = 0,
 ) -> str:
+    """Carry out *plan*, writing the merged dataset. Returns a summary line.
+
+    Dataset 1's and dataset 2's wells are merged together in one parallel
+    pass — *workers* threads (0 = auto, see
+    :func:`datasets._common.concurrency.pick_workers`). Each unit of work
+    owns one *destination* well's own files; a destination well only ever
+    comes from one source (`build_plate_merge_plan` already refused a
+    post-remap collision when the plan was built), so the two source sides
+    can safely run in the same pool rather than two sequential rounds.
+    ``log``/``progress`` calls before a well's work starts are serialised
+    behind a lock; aggregating each result back into ``row_counts``/
+    ``mismatches`` happens on this function's own thread as each future
+    completes, so that bookkeeping needs no lock.
+    """
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
     report = progress or _null_progress
@@ -257,36 +275,46 @@ def execute_plan(
     row_counts: dict[str, int] = {}
     mismatches: dict[str, list[str]] = {}
 
-    ds1_wells = sorted(set(in1) | set(csv1) | set(zip1))
-    for src_well in ds1_wells:
+    callback_lock = threading.Lock()
+
+    def _merge_ds1_well(src_well: str):
         if cancelled():
             raise MergePlatesError("Cancelled — the in-progress destination was left in place to resume later.")
-        report(src_well, "merging")
-        emit(f"  {src_well} (dataset 1)…")
+        with callback_lock:
+            report(src_well, "merging")
+            emit(f"  {src_well} (dataset 1)…")
         dest_names = _merge_input(plan, src_well, src_well, in1.get(src_well))
         _merge_qc_zip(plan, src_well, src_well, zip1.get(src_well))
         n, mism = _merge_measurements(
             plan, src_well, src_well, csv1.get(src_well), dest_in_names=dest_names,
         )
-        row_counts[src_well] = n
-        mismatches[src_well] = mism
-        report(src_well, "merged")
+        return src_well, n, mism
 
-    ds2_wells = sorted(set(in2) | set(csv2) | set(zip2))
-    for src_well in ds2_wells:
+    def _merge_ds2_well(src_well: str):
         dest_well = plan.well_map.get(src_well, src_well)
         if cancelled():
             raise MergePlatesError("Cancelled — the in-progress destination was left in place to resume later.")
-        report(dest_well, "merging")
-        emit(f"  {src_well} → {dest_well} (dataset 2)…")
+        with callback_lock:
+            report(dest_well, "merging")
+            emit(f"  {src_well} → {dest_well} (dataset 2)…")
         dest_names = _merge_input(plan, dest_well, src_well, in2.get(src_well))
         _merge_qc_zip(plan, dest_well, src_well, zip2.get(src_well))
         n, mism = _merge_measurements(
             plan, dest_well, src_well, csv2.get(src_well), dest_in_names=dest_names,
         )
-        row_counts[dest_well] = n
-        mismatches[dest_well] = mism
-        report(dest_well, "merged")
+        return dest_well, n, mism
+
+    ds1_wells = sorted(set(in1) | set(csv1) | set(zip1))
+    ds2_wells = sorted(set(in2) | set(csv2) | set(zip2))
+    total_units = len(ds1_wells) + len(ds2_wells)
+    with ThreadPoolExecutor(max_workers=pick_workers(workers, total_units)) as ex:
+        futures = [ex.submit(_merge_ds1_well, w) for w in ds1_wells]
+        futures += [ex.submit(_merge_ds2_well, w) for w in ds2_wells]
+        for fut in as_completed(futures):
+            dest_well, n, mism = fut.result()
+            row_counts[dest_well] = n
+            mismatches[dest_well] = mism
+            report(dest_well, "merged")
 
     emit("Verifying the merged output before finishing…")
     _verify(plan, row_counts, mismatches)

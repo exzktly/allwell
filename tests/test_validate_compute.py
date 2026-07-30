@@ -180,3 +180,31 @@ def test_stale_cell_override_flagged_and_pruned(tmp_path):
 
     remaining = json.loads((tmp_path / "out" / "cell_overrides.json").read_text())
     assert remaining["overrides"] == []
+
+
+def test_scan_of_many_wells_runs_in_parallel_and_stays_deterministic(tmp_path):
+    """Enough wells to force >1 worker (default auto-sizing). The Check scan
+    is read-only with no live per-well dashboard callback, so the only
+    invariant that matters is that the report's well/finding ordering stays
+    identical regardless of worker count -- .map() preserves submission
+    order even though wells scan out of order."""
+    wells = [f"{r}{c:02d}" for r in "ABCD" for c in range(1, 5)]  # 16 wells
+    build_dataset(tmp_path, wells=wells, timepoints=["0h", "24h"])
+    # Truncate a handful of wells so there's real per-well finding content to
+    # compare, not just sixteen identical "complete" reports.
+    for well in ("A01", "B03", "D04"):
+        _truncate_well_to_first_timepoint(tmp_path, well)
+
+    auto_report = vc.build_report(tmp_path)
+    single_threaded_report = vc.build_report(tmp_path, workers=1)
+
+    assert [w.well for w in auto_report.wells] == wells
+    assert auto_report.wells == single_threaded_report.wells
+    assert auto_report.findings == single_threaded_report.findings
+
+
+def test_build_report_respects_explicit_worker_count(tmp_path):
+    build_dataset(tmp_path, wells=["A01", "B02", "C03"], timepoints=["0h"])
+    report = vc.build_report(tmp_path, workers=1)
+    assert report.is_clean
+    assert {w.well for w in report.wells} == {"A01", "B02", "C03"}

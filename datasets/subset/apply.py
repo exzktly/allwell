@@ -14,10 +14,13 @@ from __future__ import annotations
 
 import csv
 import json
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
+from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -124,12 +127,21 @@ def execute_plan(
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    workers: int = 0,
 ) -> str:
     """Carry out *plan*, writing the filtered dataset. Returns a summary line.
 
     Writes :data:`~datasets.subset.subset_compute.IN_PROGRESS_MARKER` first
     and removes it only after the narrowed sidecar is written, mirroring
     Concatenate's restart-detection discipline.
+
+    Wells are copied in parallel — *workers* threads (0 = auto, see
+    :func:`datasets._common.concurrency.pick_workers`), each owning one
+    well's own destination files with nothing shared between wells. ``log``/
+    ``progress`` calls before a well's work starts are serialised behind a
+    lock; aggregating each well's result back into ``well_row_counts``/etc.
+    happens on this function's own thread as each future completes, so that
+    bookkeeping needs no lock.
     """
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
@@ -153,11 +165,14 @@ def execute_plan(
     in_names_by_well: dict[str, frozenset[str]] = {}
     kept_keys_by_well: dict[str, set[tuple[str, str]]] = {}
 
-    for well in plan.wells_kept:
+    callback_lock = threading.Lock()
+
+    def _copy_one_well(well: str):
         if cancelled():
             raise SubsetError("Cancelled — the in-progress destination was left in place to resume later.")
-        emit(f"  {well}…")
-        report(well, "copying")
+        with callback_lock:
+            emit(f"  {well}…")
+            report(well, "copying")
 
         container = in_map.get(well)
         kept_in_names: frozenset[str] = frozenset()
@@ -166,7 +181,6 @@ def execute_plan(
             kept = [(n, d) for n, d in members if member_matches(n, schema=plan.schema, filt=plan.filt)]
             if kept:
                 kept_in_names, _dropped = write_zip(plan.dest.in_dir / f"{well}.zip", kept)
-        in_names_by_well[well] = kept_in_names
 
         out_zip = zip_map.get(well)
         if out_zip is not None:
@@ -192,9 +206,16 @@ def execute_plan(
                             f"{fname!r}, which isn't in the filtered in/{well}.zip."
                         )
                     keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
-        well_row_counts[well] = row_count
-        kept_keys_by_well[well] = keys
-        report(well, "done" if row_count else "empty")
+        return well, row_count, kept_in_names, keys
+
+    with ThreadPoolExecutor(max_workers=pick_workers(workers, len(plan.wells_kept))) as ex:
+        futures = [ex.submit(_copy_one_well, well) for well in plan.wells_kept]
+        for fut in as_completed(futures):
+            well, row_count, kept_in_names, keys = fut.result()
+            well_row_counts[well] = row_count
+            in_names_by_well[well] = kept_in_names
+            kept_keys_by_well[well] = keys
+            report(well, "done" if row_count else "empty")
 
     _verify(plan, well_row_counts, in_names_by_well)
     _copy_filtered_overrides(plan, kept_keys_by_well, emit)

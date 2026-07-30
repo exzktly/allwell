@@ -18,6 +18,7 @@ from collections.abc import Callable
 
 import pandas as pd
 
+from util.fov import sort_key as _fov_sort_key
 from well_viewer.data.data_loading import parse_timepoint_hours
 from well_viewer.data.image_resolver import normalize_numeric_token
 
@@ -138,10 +139,4 @@ class DatasetState:
         if not all_fovs and self.well_paths:
             all_fovs.add("1")
 
-        def _sort_key(token: str) -> tuple[int, float, str]:
-            try:
-                return (0, float(token), token)
-            except ValueError:
-                return (1, 0.0, token)
-
-        self.all_fovs_cache = sorted(all_fovs, key=_sort_key)
+        self.all_fovs_cache = sorted(all_fovs, key=_fov_sort_key)

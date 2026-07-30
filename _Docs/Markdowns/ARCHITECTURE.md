@@ -139,6 +139,13 @@ allwell/
 │   │                              (shared by process_microscopy and WellPlateZipper)
 │   ├── timepoint.py            ← timepoint token → hours + the shared sort key
 │   │                              (pipeline, services and well_viewer all use it)
+│   ├── fov.py                  ← FOV token → number + the shared sort key, so a
+│   │                              prefixed token ("f10") orders numerically, not
+│   │                              lexicographically (pipeline, services, viewer)
+│   ├── channel_roles.py        ← channel-name → role heuristic (nuclear/fluor/
+│   │                              phase), shared by the OME converter + Analyze
+│   ├── schema_infer.py         ← guess a filename schema + channels by scanning an
+│   │                              input folder (loose TIFs / zips); Analyze pre-fill
 │   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote)
@@ -1509,6 +1516,17 @@ keeps only the run/log/dashboard orchestration. Both files carry a line budget
 (`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
 behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
 
+Picking an input folder through the browse dialog also **auto-fills the schema
+and channel fields** from what the folder's filenames look like:
+`_browse_input` → `_autofill_from_input_scan` briefly samples the names (loose
+TIFs, a zip, or the per-well-zip layout) via `util.schema_infer.infer_from_dir`,
+which guesses the separator, slot layout, channel tokens and their roles (roles
+via `util.channel_roles`, the same heuristic the OME converter uses), and applies
+the guess through the existing `_apply_pipeline_info` path. It is best-effort and
+editable — a folder whose names don't parse leaves the form as the user set it —
+and only the interactive picker triggers it, so the converter's "Open in Analyze"
+handoff keeps supplying its own channel roles instead of being re-guessed.
+
 The optional sections fold by default; **Auto-threshold** is one of them, and it
 owns every threshold-related control: a checkbox driving the pipeline's
 `--no_auto_threshold` (which previously had no UI), a **Method** combo choosing
@@ -2008,12 +2026,23 @@ output to another pane through an injected callback (`on_open_in_review` →
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
 the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
-readout, `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
+readout — alongside `ome_import_compute.selection_target`, which reads the file's
+position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the well
+count it implies, so the readout guides how many wells to place before any grid is
+entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
 runs it off the UI thread. On success
 the page's "Open in Analyze" button routes the produced folder to the Analyze
 pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
-dataset. Channel roles are left to Analyze's normal Channel Tokens section. The
+dataset. The page also carries a per-channel **role picker** (one row per OME
+channel name, seeded by `ome_import_compute.default_channel_roles`'s name
+heuristic — a strong nuclear stain (`DAPI`/`Hoechst`/…) wins the segmentation
+role, else a secondary `NIR`/`RFP` channel, else the first channel);
+`channel_tokens_from_roles` aggregates the picks into a minimal
+`pipeline_info`-shaped dict (`nuclear_token` / `fluor_tokens` / `phase_token`)
+that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds to
+`AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive pre-filled.
+The channel names are written into the output filenames regardless of the roles. The
 page also carries a `PlateOrderEditor` (§6.1): the grid fields seed a live
 serpentine preview, and the user can click wells to define an arbitrary
 `ConversionParams.well_order` (populated from `PlateOrderEditor.order()`) for a

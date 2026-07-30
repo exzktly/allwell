@@ -1241,12 +1241,17 @@ class AllWellApp(QMainWindow):
         QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
         self._update_dataset_chip(dataset_path)
 
-    def _open_dataset_in_analyze(self, dataset_path: Path) -> None:
+    def _open_dataset_in_analyze(
+        self, dataset_path: Path, channel_tokens: dict | None = None,
+    ) -> None:
         """Point the Analyze pane at a dataset folder and switch to it.
 
         Used by the Datasets OME-TIFF converter: the folder it produced is an
         Analyze *input* (a raw ``in/`` dataset), so it opens in Analyze — where
-        the user configures channels and runs the pipeline — not in Review.
+        the user configures channels and runs the pipeline — not in Review. When
+        the converter assigned channel roles, *channel_tokens* is a minimal
+        ``pipeline_info``-shaped dict (nuclear/fluor/phase) applied to the Analyze
+        form so those fields arrive pre-filled.
         """
         if self._analyze is None:
             return
@@ -1255,6 +1260,8 @@ class AllWellApp(QMainWindow):
         if edit is not None:
             edit.setEnabled(True)
             edit.setText(str(dataset_path))
+        if channel_tokens and hasattr(self._analyze, "_apply_pipeline_info"):
+            self._analyze._apply_pipeline_info(channel_tokens)
 
     def _nudge_review(self) -> None:
         if self._review is None:

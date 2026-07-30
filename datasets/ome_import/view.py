@@ -42,12 +42,23 @@ from util.plate_grid import serpentine_well_labels
 from widgets.icons import make_icon
 from widgets.plate_order_editor import PlateOrderEditor
 from datasets.ome_import.ome_import_compute import (
+    CHANNEL_ROLES,
     ConversionParams,
     OmeImportError,
+    channel_tokens_from_roles,
+    default_channel_roles,
     default_dest,
     plan_conversion,
     read_layout,
+    selection_target,
 )
+
+_ROLE_LABELS = {
+    "nuclear": "Nuclear / segmentation",
+    "fluor": "Fluorescent",
+    "phase": "Phase / brightfield",
+    "skip": "Skip",
+}
 
 
 def _hrule(parent: QWidget) -> QFrame:
@@ -160,6 +171,7 @@ class OmeImportPage(QWidget):
 
         self._build_params(outer)
         self._build_plate(outer)
+        self._build_channels(outer)
 
         self._readout = QLabel("", self)
         self._readout.setObjectName("Muted")
@@ -303,6 +315,62 @@ class OmeImportPage(QWidget):
         except ValueError:
             return []
 
+    def _build_channels(self, outer: QVBoxLayout) -> None:
+        self._channel_rows: list[tuple[str, QComboBox]] = []
+        self._channel_names_shown: list[str] = []
+        self._channels_caption = QLabel(
+            "Channel roles — assign each channel a role (seeded from its name). "
+            "These pre-fill Analyze's channel tokens when you open the dataset "
+            "there; the OME channel names are always written into the filenames.",
+            self,
+        )
+        self._channels_caption.setObjectName("Muted")
+        self._channels_caption.setWordWrap(True)
+        self._channels_caption.setVisible(False)
+        outer.addWidget(self._channels_caption)
+        self._channels_host = QWidget(self)
+        self._channels_lay = QVBoxLayout(self._channels_host)
+        self._channels_lay.setContentsMargins(0, 0, 0, 0)
+        self._channels_lay.setSpacing(theme.Spacing.xs)
+        outer.addWidget(self._channels_host)
+
+    def _rebuild_channels(self, names) -> None:
+        """Rebuild the per-channel role rows when the channel set changes."""
+        names = list(names)
+        if names == self._channel_names_shown:
+            return
+        self._channel_names_shown = names
+        while self._channels_lay.count():
+            item = self._channels_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._channel_rows = []
+        defaults = default_channel_roles(names)
+        for name in names:
+            row = QWidget(self._channels_host)
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(theme.Spacing.sm)
+            lbl = QLabel(name, row)
+            lbl.setMinimumWidth(120)
+            hl.addWidget(lbl)
+            cb = QComboBox(row)
+            for role in CHANNEL_ROLES:
+                cb.addItem(_ROLE_LABELS[role], userData=role)
+            cb.setCurrentIndex(CHANNEL_ROLES.index(defaults.get(name, "fluor")))
+            hl.addWidget(cb)
+            hl.addStretch(1)
+            self._channels_lay.addWidget(row)
+            self._channel_rows.append((name, cb))
+        self._channels_caption.setVisible(bool(names))
+
+    def channel_tokens_dict(self) -> dict:
+        """The channel role assignment as a ``pipeline_info``-shaped dict."""
+        pairs = [(name, str(cb.currentData() or "fluor"))
+                 for name, cb in self._channel_rows]
+        return channel_tokens_from_roles(pairs).as_pipeline_info()
+
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
@@ -416,22 +484,29 @@ class OmeImportPage(QWidget):
         single = False
         message = ""
         can = False
+        layout = self._read_layout(src) if src else None
+        if hasattr(self, "_channels_host"):
+            self._rebuild_channels(layout.channel_names if layout else [])
         if src:
-            layout = self._read_layout(src)
             if layout is None:
                 message = "⚠ Could not read this file as an OME-TIFF."
             else:
                 single = layout.single_image
+                params = self.params()
                 head = (
                     f"single image: {layout.n_frames} frame(s)"
                     if single else f"{layout.n_positions} position(s)"
                 ) + f" · {layout.size_c} channel(s)"
+                # Metadata-derived target: how many wells to place (read on load,
+                # before any grid is entered) so the user is guided, not just
+                # error-checked at the end.
+                guide = selection_target(layout, params).hint()
                 try:
-                    plan = plan_conversion(layout, self.params())
-                    message = f"{head}\n→ {plan.summary()}"
+                    plan = plan_conversion(layout, params)
+                    message = f"{head}\n{guide}\n✓ {plan.summary()}"
                     can = bool(self._dest_field.path())
                 except OmeImportError as exc:
-                    message = f"{head}\n⚠ {exc}"
+                    message = f"{head}\n{guide}\n⚠ {exc}"
         self._order_label.setVisible(single)
         self._frame_order_cb.setVisible(single)
         self._readout.setText(message)

@@ -28,6 +28,7 @@ from services.input_resolution_service import (
     tif_files_in,
 )
 from util.well_token import is_valid_well_name
+from util.schema_infer import infer_from_dir
 from services.pipeline_runner import (
     PipelineRunner,
     ProgressTracker,
@@ -564,6 +565,28 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
         if d:
             self._input_edit.setText(d)
             self._input_edit.setEnabled(True)
+            self._autofill_from_input_scan(d)
+
+    def _autofill_from_input_scan(self, folder: str) -> None:
+        """Pre-fill the schema + channel fields by briefly scanning *folder*.
+
+        Samples the filenames on disk (loose TIFs, a zip, or the per-well-zip
+        layout) and guesses the separator, slot layout, channel tokens and their
+        roles, applying them like a loaded ``pipeline_info``. Best-effort: a
+        folder whose names don't parse (or an unreadable one) leaves the form as
+        the user set it. Only the interactive picker calls this — the converter's
+        "Open in Analyze" handoff supplies its own channel roles.
+        """
+        try:
+            guess = infer_from_dir(folder)
+        except Exception:
+            swallowed()  # a scan must never break folder selection
+            return
+        if guess is None:
+            return
+        info = {"filename_sep": guess.separator, "filename_schema": guess.schema_str}
+        info.update(guess.channel_tokens().as_pipeline_info())
+        self._apply_pipeline_info(info)
 
     def _refresh_output(self) -> None:
         raw_str = self._input_edit.text().strip()

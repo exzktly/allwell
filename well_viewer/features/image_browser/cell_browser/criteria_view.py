@@ -7,6 +7,7 @@ timepoint/FOV pickers are multi-select menus (mirroring the scatter tab). The
 
 from __future__ import annotations
 
+from util.fov import sort_key as fov_sort_key
 from well_viewer.data.data_loading import get_rows
 
 from PySide6.QtGui import QAction
@@ -344,10 +345,10 @@ def _refresh_multiselect_label(selections: dict, label) -> None:
 
 
 def _sort_key(s: str):
-    try:
-        return (0, float(s))
-    except (TypeError, ValueError):
-        return (1, s)
+    # Both call sites feed numeric-ish tokens (timepoint keys "24"/"1.5", FOV
+    # tokens); the shared FOV key orders bare numbers identically and also reads
+    # a prefixed FOV ("f10") numerically instead of lexicographically.
+    return fov_sort_key(s)
 
 
 def cell_browser_sidebar_refresh(ctx) -> None:

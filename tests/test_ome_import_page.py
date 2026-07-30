@@ -28,12 +28,21 @@ def _write_packed(path, *, n_frames, channel_names):
     return path
 
 
+def _write_multi(path, *, positions, channel_names):
+    with tifffile.TiffWriter(str(path), ome=True) as tw:
+        for _ in range(positions):
+            arr = np.zeros((1, len(channel_names), 6, 6), np.uint16)
+            tw.write(arr, metadata={"axes": "TCYX",
+                                    "Channel": {"Name": list(channel_names)}})
+    return path
+
+
 def test_converter_page_readout_and_run_gate(qapp, tmp_path):
     from datasets.ome_import.controller import OmeImportController
 
     p = _write_packed(tmp_path / "plate.ome.tif", n_frames=12,
                       channel_names=("DAPI", "GFP"))
-    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
     page = ctrl.page
 
     # No source yet → Convert disabled, frame-order hidden.
@@ -63,11 +72,63 @@ def test_converter_page_readout_and_run_gate(qapp, tmp_path):
     assert "timepoint(s)" in page._readout.text()
 
 
+def test_readout_shows_metadata_well_target(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    # 6-position multi-image file: the readout should surface the target the
+    # moment the source is picked, before any grid is entered.
+    p = _write_multi(tmp_path / "m.ome.tif", positions=6, channel_names=("GFP",))
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert "6 stage position(s)" in page._readout.text()
+
+    # Pinning FOVs turns the budget into an explicit expected-well count.
+    page._fovs_edit.setText("2")
+    page.refresh_readout()
+    assert "3 well(s) at 2 FOV(s)/well" in page._readout.text()
+
+
+def test_channel_roles_seed_from_names_and_export_tokens(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_multi(tmp_path / "m.ome.tif", positions=2,
+                     channel_names=("DAPI", "GFP", "RFP"))
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    # One role row per channel, seeded by the name heuristic.
+    assert [name for name, _cb in page._channel_rows] == ["DAPI", "GFP", "RFP"]
+    assert page._channels_caption.isVisibleTo(page)
+    assert page.channel_tokens_dict() == {
+        "nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"]}
+
+    # Override: mark RFP as phase → it leaves the fluor list.
+    _, rfp_cb = next((n, cb) for n, cb in page._channel_rows if n == "RFP")
+    _select(rfp_cb, "phase")
+    assert page.channel_tokens_dict() == {
+        "nuclear_token": "DAPI", "fluor_tokens": ["GFP"], "phase_token": "RFP"}
+
+
+def test_channel_roles_prefill_analyze_on_open(qapp, tmp_path):
+    # The role assignment reaches Analyze: _open_dataset_in_analyze applies the
+    # tokens dict to the Analyze form (nuclear token + fluor rows).
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    tab._apply_pipeline_info({"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"]})
+    assert tab._nuclear_token_edit.text() == "DAPI"
+    assert tab._fluor_tokens_list() == ["GFP", "RFP"]
+
+
 def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
     from datasets.ome_import.controller import OmeImportController
     from widgets.plate_order_editor import _parse_well_id
 
-    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
     page = ctrl.page
 
     # A valid grid drives a live (non-dirty) serpentine preview on the plate.

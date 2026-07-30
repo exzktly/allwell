@@ -91,6 +91,12 @@ def test_convert_to_new_destination_through_the_page(qapp, tmp_path):
     with zipfile.ZipFile(dest / "in" / "A01.zip") as zf:
         assert zf.namelist() == ["exp_GFP_A01_F001_0h.tif"]
     assert not page._open_btn.isHidden()
+    # The per-well plate map (Analyze-style graphical progress) reflects the
+    # real conversion, not just a plain progress bar: both wells the scan
+    # found are tracked and land in the "done" state.
+    assert page.dashboard._wells == ["A01", "B02"]
+    assert page.dashboard._well_stage == {"A01": "done", "B02": "done"}
+    assert page.dashboard.overall_maximum() == 2
     ctrl.shutdown()
 
 
@@ -128,6 +134,12 @@ def test_group_in_place_through_the_page_zips_and_deletes_sources(qapp, tmp_path
             assert set(zf.namelist()) == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}
     assert not list(src.glob("*.tif")), "loose TIF originals should be deleted, not copied, on success"
     assert not page._open_btn.isHidden()
+    # In-place mode drives the same plate-map dashboard through the
+    # subprocess-backed run_zipper's progress_fn -> "writing" then
+    # _zip_well_folders's own "done" report, not just the new-destination
+    # mode's ThreadPoolExecutor path.
+    assert page.dashboard._wells == ["A01", "B02"]
+    assert page.dashboard._well_stage == {"A01": "done", "B02": "done"}
     ctrl.shutdown()
 
 

@@ -1,8 +1,10 @@
 """Runs an Import Loose Folder conversion off the UI thread.
 
-Same shape as ``datasets.ome_import.worker.OmeImportWorker`` — a plain
-progress bar rather than a per-well plate map, since the unit of work here is
-"file", not "well" the way Concatenate/Subset/Merge plates report it.
+Same shape as ``datasets.concatenate.worker.ConcatenateWorker`` /
+``datasets.subset.worker.SubsetWorker`` — the wells the scan already found
+(``import_loose_compute.scan_folder``, run up front for the preview) are
+reported once via ``wellsPlanned`` and then tracked one at a time via
+``wellStage``, driving a per-well plate map instead of a plain progress bar.
 """
 
 from __future__ import annotations
@@ -18,7 +20,8 @@ class ImportLooseWorker(QThread):
     """Scans + converts a loose-TIF folder, streaming progress to the UI."""
 
     logLine = Signal(str)
-    progress = Signal(int, int)   # (wells_written, total_wells)
+    wellsPlanned = Signal(list)   # the wells this conversion will actually touch
+    wellStage = Signal(str, str)  # (well, "writing"|"done")
     succeeded = Signal(str, str)  # (destination root — "" for in-place, summary)
     failed = Signal(str)
 
@@ -52,14 +55,7 @@ class ImportLooseWorker(QThread):
             )
             return
 
-        total = len(preview.wells)
-        done = 0
-
-        def _report(well: str, stage: str) -> None:
-            nonlocal done
-            if stage == "done":
-                done += 1
-                self.progress.emit(done, total)
+        self.wellsPlanned.emit(list(preview.wells))
 
         try:
             if self._in_place:
@@ -67,7 +63,7 @@ class ImportLooseWorker(QThread):
                     self._search_dir, filename_schema=self._filename_schema,
                     filename_sep=self._filename_sep,
                     move_source_tifs=self._move_source_tifs,
-                    log=self.logLine.emit,
+                    log=self.logLine.emit, progress=self.wellStage.emit,
                 )
                 dest = ""
             else:
@@ -76,7 +72,7 @@ class ImportLooseWorker(QThread):
                     filename_schema=self._filename_schema,
                     filename_sep=self._filename_sep,
                     log=self.logLine.emit, is_cancelled=self.isInterruptionRequested,
-                    progress=_report,
+                    progress=self.wellStage.emit,
                 )
                 dest = self._dest_root
         except ValueError as exc:

@@ -2279,6 +2279,13 @@ counts — that updates on every schema/separator keystroke, so a mismatch is
 caught before conversion rather than mid-run. It does **not** modify
 `WellPlateZipper.py` or `services.input_resolution_service.resolve_input_output`
 — Analyze's own loose-TIF handling keeps working exactly as it does today.
+Conversion progress is a per-well plate map
+(`dashboard.py::ImportLooseDashboard`, a `PlateProgress` subclass — see the
+`PlateProgress` row above) in the same Analyze-style graphical shape
+`ConcatDashboard`/`SubsetDashboard` use, rather than a plain progress bar:
+`ImportLooseWorker.wellsPlanned` seeds the plate with the wells
+`scan_folder` already found for the preview, and `wellStage` colours each one
+`pending` → `writing` → `done` as its zip actually lands on disk.
 
 The preview (`import_loose_compute.scan_folder`) mirrors
 `WellPlateZipper._extract_well_from_filename`'s rule exactly — schema-index
@@ -2298,12 +2305,12 @@ Two conversion modes, one code path each, both in `apply.py`:
   `ThreadPoolExecutor` sized by `_pick_workers` (0 = auto, capped at 8 and at
   the CPU count, mirroring `pipeline.ome_explode._pick_workers`), since each
   well's zip is an independent file with no shared state. `log`/`progress`
-  calls are serialised behind a lock so a caller's own closure (e.g.
-  `ImportLooseWorker`'s `nonlocal done` counter) never sees two wells'
-  callbacks execute at once — the lock protects individual callback
+  calls are serialised behind a lock so a caller's own closure never sees two
+  wells' callbacks execute at once — the lock protects individual callback
   invocations from corruption, not the overall run from wells' "writing"..
   "done" spans overlapping in time, which is expected under real
-  parallelism.
+  parallelism. `progress` reports `(well, "writing"|"done")` — the shape
+  `ImportLooseDashboard.set_well_stage` expects.
 - **In-place** (opt-in, destructive — "group in place, delete sources on
   success") — shells out through the existing
   `services.input_resolution_service.run_zipper` (which invokes
@@ -2323,7 +2330,14 @@ Two conversion modes, one code path each, both in `apply.py`:
   in-place checkbox (`ImportLooseController._launch`) so the "delete loose
   TIFs on success" promise in the checkbox label and confirm dialog is
   actually honored — `WellPlateZipper.py`'s `folder_well()` copies rather
-  than moving originals when this is left false.
+  than moving originals when this is left false. `run_zipper`'s own
+  `progress_fn` only reports a well once WellPlateZipper.py finishes
+  grouping its files into a folder — there is no earlier "started" signal
+  from the subprocess — so that single event is reported as the dashboard's
+  "writing" stage; `_zip_well_folders` then reports "done" once that well's
+  zip actually lands on disk, giving both conversion modes the same
+  `(well, "writing"|"done")` callback shape off one `ImportLooseWorker.wellStage`
+  signal.
 
 **Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
 Concatenate. Concatenate joins the same plate imaged at different times (a
@@ -2494,7 +2508,7 @@ Notable members worth knowing about by name:
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
 | `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | An 8×12 plate whose model is an *ordered list* of wells — the acquisition path — not an unordered selection set. Lit wells carry their 1-based visit number and a subtle alpha-blended arrow traces the order across the plate; clicking an off-path well appends it, clicking an on-path one removes it and the rest renumber (`orderChanged`). A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
-| `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, and `ValidateDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. The plate map (`self._plate`, a `WellPlateSelector`) is `QSizePolicy.Preferred`/`Preferred` with `center.addWidget(self._plate, 1)` — **not** `Fixed` vertically, which used to lock its rendered height at its own small `sizeHint()` regardless of how wide the row actually was. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate rendered illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze_tab.py`'s own form panel) for the same reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. |
+| `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, `ValidateDashboard`, and `ImportLooseDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. The plate map (`self._plate`, a `WellPlateSelector`) is `QSizePolicy.Preferred`/`Preferred` with `center.addWidget(self._plate, 1)` — **not** `Fixed` vertically, which used to lock its rendered height at its own small `sizeHint()` regardless of how wide the row actually was. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate rendered illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze_tab.py`'s own form panel) for the same reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. |
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by its furthest-reached stage and overlays a gear glyph on the actively-computing well with its `FOV done/total` sub-progress. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `RailNav` | The left-rail section navigator. |

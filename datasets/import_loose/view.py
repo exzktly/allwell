@@ -4,7 +4,10 @@ A source-folder picker, editable filename-schema/separator fields, a live
 preview readout (wells × FOVs × timepoints × channels, plus unparsed/
 unreadable counts) that updates on every keystroke, a destination-folder
 picker (hidden when "group in place" is checked), and the usual
-progress-bar + collapsible-log status section.
+Analyze-style status section — a per-well plate map
+(:class:`~datasets.import_loose.dashboard.ImportLooseDashboard`) with the raw
+log demoted to a collapsible checkbox, the same shape
+``datasets/concatenate/view.py`` and ``datasets/subset/view.py`` use.
 
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInAnalyzeRequested``); the worker wiring lives in
@@ -24,8 +27,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QProgressBar,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -33,6 +36,7 @@ from PySide6.QtWidgets import (
 import theme
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets.path_field import PathField, folder_picker
+from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import scan_folder
 
 
@@ -57,7 +61,19 @@ class ImportLoosePage(QWidget):
         self.refresh_readout()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # Wrap in a scroll area — see datasets/concatenate/view.py's
+        # _build_ui for why (the dashboard's plate map used to render
+        # illegibly small at the app's default window height).
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page_layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
@@ -156,8 +172,8 @@ class ImportLoosePage(QWidget):
         outer.addWidget(hdr)
         outer.addWidget(_hrule(self))
 
-        self._bar = QProgressBar(self)
-        outer.addWidget(self._bar)
+        self.dashboard = ImportLooseDashboard(self)
+        outer.addWidget(self.dashboard, 1)
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)
@@ -205,13 +221,6 @@ class ImportLoosePage(QWidget):
 
     def clear_log(self) -> None:
         self._status.clear()
-
-    def set_progress(self, done: int, total: int) -> None:
-        if total <= 0:
-            self._bar.setRange(0, 0)
-        else:
-            self._bar.setRange(0, total)
-            self._bar.setValue(done)
 
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())

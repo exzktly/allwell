@@ -48,7 +48,8 @@ class ImportLooseController(QObject):
         if self._worker is not None and self._worker.isRunning():
             return
         self.page.clear_log()
-        self.page.set_progress(0, 0)
+        self.page.dashboard.reset()
+        self.page.dashboard.set_headline("Scanning…")
         self.page.set_running(True)
 
         worker = ImportLooseWorker(
@@ -59,7 +60,8 @@ class ImportLooseController(QObject):
             move_source_tifs=self.page.in_place(),
         )
         worker.logLine.connect(self.page.append_log)
-        worker.progress.connect(self.page.set_progress)
+        worker.wellsPlanned.connect(self._on_wells_planned)
+        worker.wellStage.connect(self.page.dashboard.set_well_stage)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
@@ -94,8 +96,13 @@ class ImportLooseController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
 
+    def _on_wells_planned(self, wells: list) -> None:
+        self.page.dashboard.set_wells(wells)
+        self.page.dashboard.set_headline(f"Converting {len(wells)} well(s)…")
+
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")
+        self.page.dashboard.set_done(summary)
         produced = dest_root
         if dest_root:
             self.page.show_open_in_analyze(dest_root)
@@ -106,6 +113,10 @@ class ImportLooseController(QObject):
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log(f"✗ {message}")
+        if message.startswith("Cancelled"):
+            self.page.dashboard.set_cancelled(message)
+        else:
+            self.page.dashboard.set_failed(message)
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:

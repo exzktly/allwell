@@ -1634,8 +1634,9 @@ structure yet) into the layout Analyze reads directly.
    loose TIFs once each well is safely zipped — the same thing Analyze itself
    does when it's pointed at a folder of loose TIFs, exposed here as its own
    step; you're asked to confirm before anything is deleted.
-3. Press **Convert**. On success, **Open in Analyze** sends the resulting
-   folder there.
+3. Press **Convert**. A live plate map fills in as each well converts,
+   the same graphical progress view Analyze itself uses. On success, **Open
+   in Analyze** sends the resulting folder there.
 
 Files that don't match the schema are left alone and reported rather than
 guessed at; a broken symlink is skipped and counted rather than crashing the

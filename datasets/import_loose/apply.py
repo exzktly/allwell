@@ -26,6 +26,12 @@ Two modes, one code path each:
   documented no-op when zero zips exist yet, which is exactly what a fresh
   ``run_zipper`` call produces. Calling it here previously left every well as
   a bare folder, never a zip, with no error — the run reported success.
+
+Both modes report per-well progress through the same ``(well, "writing" |
+"done")`` callback shape, so :mod:`~datasets.import_loose.dashboard`'s
+:class:`~datasets.import_loose.dashboard.ImportLooseDashboard` — a per-well
+plate map in the same style Analyze's own ``RunDashboard`` uses — can drive
+off one signal regardless of which mode is running.
 """
 
 from __future__ import annotations
@@ -119,7 +125,12 @@ def convert_to_new_destination(
     return f"Wrote {written_wells} well(s) into {dest_in}."
 
 
-def _zip_well_folders(folder: Path, *, log_fn: Callable[[str], None] | None = None) -> int:
+def _zip_well_folders(
+    folder: Path,
+    *,
+    log_fn: Callable[[str], None] | None = None,
+    progress: Callable[[str, str], None] | None = None,
+) -> int:
     """Convert every ``<well>/`` subfolder of *folder* into ``<well>.zip``,
     removing the folder once packed. Returns the count zipped.
 
@@ -128,9 +139,13 @@ def _zip_well_folders(folder: Path, *, log_fn: Callable[[str], None] | None = No
     just because zero zips exist yet (see this module's docstring for why
     that distinction matters). A well that already has a matching zip is
     left alone (idempotent re-run); a well folder with no TIFs in it is
-    skipped rather than publishing a member-less archive.
+    skipped rather than publishing a member-less archive. ``progress``, when
+    given, fires ``(well, "done")`` once that well's zip lands on disk —
+    the same "done" stage :func:`convert_to_new_destination` reports, so one
+    dashboard callback works for both conversion modes.
     """
     emit = log_fn or _null_log
+    report = progress or _null_progress
     try:
         entries = list(folder.iterdir())
     except OSError:
@@ -161,6 +176,7 @@ def _zip_well_folders(folder: Path, *, log_fn: Callable[[str], None] | None = No
         shutil.rmtree(p, ignore_errors=True)
         zipped += 1
         emit(f"  {well}: folder → {well}.zip ({len(tifs)} file(s))\n")
+        report(well, "done")
     return zipped
 
 
@@ -171,21 +187,35 @@ def convert_in_place(
     filename_sep: str,
     move_source_tifs: bool = False,
     log: Callable[[str], None] | None = None,
-    progress: Callable[[str], None] | None = None,
+    progress: Callable[[str, str], None] | None = None,
     proc_hook=None,
 ) -> str:
     """Group loose TIFs directly under *search_dir* into ``<well>.zip``,
     deleting (or moving) the sources — the same destructive path Analyze
     takes when it finds loose TIFs, exposed here as a standalone step.
+
+    *progress*, when given, reports the same ``(well, "writing"|"done")``
+    stages :func:`convert_to_new_destination` does, so one dashboard callback
+    drives both conversion modes. ``run_zipper``'s own ``progress_fn`` only
+    reports a well once WellPlateZipper.py finishes grouping its files into a
+    folder — there is no earlier "started" signal from the subprocess — so
+    that single event is reported as "writing" (grouped, awaiting its zip);
+    :func:`_zip_well_folders` then reports "done" once that well's zip
+    actually lands on disk.
     """
     from services.input_resolution_service import run_zipper
 
     emit = log or _null_log
+    report = progress or _null_progress
+
+    def _on_grouped(well: str) -> None:
+        report(well, "writing")
+
     run_zipper(
         Path(search_dir), Path(search_dir),
-        log_fn=emit, progress_fn=progress, filename_schema=filename_schema,
+        log_fn=emit, progress_fn=_on_grouped, filename_schema=filename_schema,
         filename_sep=filename_sep, proc_hook=proc_hook,
         move_source_tifs=move_source_tifs,
     )
-    zipped = _zip_well_folders(Path(search_dir), log_fn=emit)
+    zipped = _zip_well_folders(Path(search_dir), log_fn=emit, progress=report)
     return f"Grouped loose TIFs in {search_dir} into {zipped} per-well zip(s)."

@@ -2222,6 +2222,37 @@ for an override that doesn't belong there. The restamp itself (`seg_fp` set
 to the destination `<well>_out.zip`'s own mtime, as the **last** write to
 that archive) is unchanged from Concatenate's pattern.
 
+**Import Loose Folder** (`datasets/import_loose/`) groups a folder of loose,
+ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
+wells × FOVs × timepoints × channels, plus unparsed and unreadable-symlink
+counts — that updates on every schema/separator keystroke, so a mismatch is
+caught before conversion rather than mid-run. It does **not** modify
+`WellPlateZipper.py` or `services.input_resolution_service.resolve_input_output`
+— Analyze's own loose-TIF handling keeps working exactly as it does today.
+
+The preview (`import_loose_compute.scan_folder`) mirrors
+`WellPlateZipper._extract_well_from_filename`'s rule exactly — schema-index
+lookup, `canonical_well_label`, and `os.path.isfile` to drop dangling
+symlinks the way `os.walk` lists them — rather than calling
+`WellPlateZipper.group_by_well` directly, which `print()`s unconditionally (a
+scan banner, a per-5000-files progress line, a completion line) for the
+Analyze log and would otherwise pollute this app's own captured output.
+`scan_folder` and the executor's `group_files_by_well` share one `_walk`
+helper, so the preview and what actually gets written can't disagree.
+
+Two conversion modes, one code path each, both in `apply.py`:
+
+- **New destination** (default) — writes `<dest>/in/<WELL>.zip` directly via
+  `util.zip_write.atomic_zip`, never publishing a member-less archive. The
+  source folder is left untouched.
+- **In-place** (opt-in, destructive — "group in place, delete sources on
+  success") — shells out through the existing
+  `services.input_resolution_service.run_zipper` (which invokes
+  `WellPlateZipper.py` as a subprocess) rather than reimplementing the same
+  grouping a second time, then `_consolidate_mixed_to_zips` to normalise the
+  per-well folders `run_zipper` produces into the same `<well>.zip` layout
+  the new-destination mode writes.
+
 ---
 
 ## 7. The widget library (`widgets/`)

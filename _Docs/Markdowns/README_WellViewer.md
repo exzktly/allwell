@@ -49,7 +49,8 @@ to add features, how to debug, and build / environment troubleshooting), see
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
-     [Subset / Split Dataset](#subset--split-dataset)
+     [Subset / Split Dataset](#subset--split-dataset) ·
+     [Import Loose Folder](#import-loose-folder)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -79,7 +80,9 @@ to add features, how to debug, and build / environment troubleshooting), see
   **Validate & Repair Dataset** checks whether an Analyze run actually
   finished and fixes metadata drift without re-running the pipeline; and
   **Subset / Split Dataset** copies a filtered slice of wells/timepoints/FOVs
-  into a new folder, leaving the source untouched.
+  into a new folder, leaving the source untouched; and **Import Loose
+  Folder** groups a folder of loose TIFs into per-well zips with a live
+  preview before converting.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
   it. The hand-off is automatic when an Analyze run completes successfully.
 - **Persistence baked in.** Channel-threshold defaults, saved selections,
@@ -1612,6 +1615,28 @@ labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-
 inclusion overrides carry over for cells that survive the filter (dropped for
 ones that don't) and gating thresholds / sample definitions carry over from
 the source, same as Concatenate. The source dataset is never modified.
+
+### Import Loose Folder
+
+Use this to group a folder of loose, ungrouped TIFs (no `in/<WELL>.zip`
+structure yet) into the layout Analyze reads directly.
+
+1. Pick the folder of loose TIFs. A readout below the schema/separator fields
+   shows how the files split into wells × FOVs × timepoints × channels,
+   updating on every keystroke — so a wrong separator or schema is obvious
+   before you convert, not partway through.
+2. By default the result is written to a **new destination folder** you pick,
+   leaving the loose TIFs exactly where they are. Check **Group in place**
+   instead to group the files directly in the source folder and delete the
+   loose TIFs once each well is safely zipped — the same thing Analyze itself
+   does when it's pointed at a folder of loose TIFs, exposed here as its own
+   step; you're asked to confirm before anything is deleted.
+3. Press **Convert**. On success, **Open in Analyze** sends the resulting
+   folder there.
+
+Files that don't match the schema are left alone and reported rather than
+guessed at; a broken symlink is skipped and counted rather than crashing the
+conversion.
 
 ---
 

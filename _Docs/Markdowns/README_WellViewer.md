@@ -47,7 +47,8 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
-   - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets)
+   - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
+     [Validate & Repair Dataset](#validate--repair-dataset)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -71,9 +72,11 @@ to add features, how to debug, and build / environment troubleshooting), see
   to CSV + figures.
 - **Datasets tab.** Dataset-level operations that work on whole folders rather
   than one plate at a time: **Convert OME-TIFF** de-interleaves a single packed
-  OME-TIFF into a dataset folder, and **Concatenate datasets** appends one
+  OME-TIFF into a dataset folder; **Concatenate datasets** appends one
   dataset's timepoints after another's — for when the same plate was imaged in
-  two separate sessions and you want one continuous timelapse.
+  two separate sessions and you want one continuous timelapse; and
+  **Validate & Repair Dataset** checks whether an Analyze run actually
+  finished and fixes metadata drift without re-running the pipeline.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
   it. The hand-off is automatic when an Analyze run completes successfully.
 - **Persistence baked in.** Channel-threshold defaults, saved selections,
@@ -1563,6 +1566,29 @@ and rebuilt. A destination that already looks like a finished dataset is
 refused outright rather than risked; a destination with files that were never
 part of any concatenation attempt (a plate zipped but not yet analyzed, say) is
 refused too, so nothing is deleted on a guess.
+
+### Validate & Repair Dataset
+
+Use this to check whether an Analyze run actually finished — a crash or a
+partial run can leave `pipeline_info.json` advertising more timepoints than
+`out/` actually holds, so Review would show gaps with no obvious cause and a
+plain re-run would skip the very wells that need finishing.
+
+1. Pick the dataset folder and press **Check**. A per-well plate map fills in
+   (green = complete, yellow = missing some `(FOV, timepoint)` work, red = no
+   measurements recorded, grey = no output yet), and a findings list below it
+   names anything wrong — exactly which timepoints a well is missing, a
+   sidecar that's out of sync with what's on disk, a CSV that looks like a
+   well's data but isn't, or cell-inclusion overrides that no longer match the
+   current segmentation.
+2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't
+   match what's on disk, or stale cell overrides), **Apply repairs** fixes
+   just that metadata. It never touches measurement CSVs or images — gating
+   thresholds, sample definitions, and every other saved setting are
+   preserved untouched.
+3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
+   Analyze** opens the dataset there so you can re-run and pick up the
+   missing pieces.
 
 ---
 

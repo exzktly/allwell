@@ -9,8 +9,7 @@ sidebar is a plain :class:`~widgets.rail_nav.RailNav` page navigator over a
 
 Features are declared in one small local list (:data:`_FEATURES`) — adding a
 future Datasets feature is a one-line entry, mirroring Review's feature registry
-without pulling in its well/selection-scoped machinery. The first and only
-feature today is *Concatenate datasets*.
+without pulling in its well/selection-scoped machinery.
 """
 
 from __future__ import annotations
@@ -33,6 +32,7 @@ from widgets.rail_nav import RailNav
 from well_viewer.core.centre_view import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.ome_import.controller import OmeImportController
+from datasets.validate.controller import ValidateController
 
 
 @dataclass(frozen=True)
@@ -58,9 +58,15 @@ def _build_ome_import(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] |
     return controller.page, controller.shutdown
 
 
+def _build_validate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = ValidateController(on_open_in_analyze=tab._open_in_analyze)
+    return controller.page, controller.shutdown
+
+
 _FEATURES: tuple[_Feature, ...] = (
     _Feature(name="Concatenate datasets", icon="copy", build=_build_concatenate),
     _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
+    _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate),
 )
 
 

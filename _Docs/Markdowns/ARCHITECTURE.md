@@ -1998,12 +1998,25 @@ one-line change, without pulling in Review's well/selection-scoped
 `FeatureRegistry`/`ViewerContext` machinery. The rail's `currentChanged` drives
 `NamedPageStack.setCurrentByName`.
 
-Two features live here today. Each is one `_Feature` entry in
-`datasets_tab.py::_FEATURES` and a `datasets/<name>/` package on the standard
-view/controller/worker + Qt-free compute/apply split; a completed run hands its
-output to another pane through an injected callback (`on_open_in_review` →
-`AllWellApp._open_dataset_in_review`; `on_open_in_analyze` →
-`_open_dataset_in_analyze`).
+Each feature is one `_Feature` entry in `datasets_tab.py::_FEATURES` and a
+`datasets/<name>/` package on the standard view/controller/worker + Qt-free
+compute/apply split; a completed run hands its output to another pane through
+an injected callback (`on_open_in_review` → `AllWellApp._open_dataset_in_review`;
+`on_open_in_analyze` → `_open_dataset_in_analyze`). Helpers shared across more
+than one feature — dataset-folder resolution, well-container IO, schema-safe
+filename rewriting — live in `datasets/_common/` rather than being imported
+from one feature package into another, so each feature stays independently
+deletable:
+
+| Module | What it holds |
+|---|---|
+| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. |
+| `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. |
+| `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
+
+`datasets/concatenate/concatenate_compute.py` and `apply.py` re-export the
+names they lifted from `_common`, so their own public API (and every existing
+test against it) is unchanged.
 
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
@@ -2132,6 +2145,56 @@ On success the page offers to open the merged dataset in Review, routed through
 the destination root into Review and switches to it — the same path
 `_on_analyze_pipeline_complete` uses.
 
+**Validate & Repair Dataset** (`datasets/validate/`) answers a question the
+GUI otherwise has no answer for: which `(well, fov, timepoint)` work an
+Analyze run actually finished, versus what `pipeline_info.json` — written
+*before* any image work, per §6.2 — claims. A crashed or partial run leaves
+the sidecar advertising the full plate while `out/` holds a fraction, and a
+plain re-run then treats a partially-done well as complete
+(`output_exists_for_well`), so the FOV-level gap is otherwise invisible.
+
+`validate_compute.py::build_report(root)` is a read-only Qt-free scan.
+*Intent* — what a well's raw input actually contains — is read via
+`pipeline.incremental_keys.read_done_fov_keys_from_zip`/`_from_folder` pointed
+at `in/<WELL>.zip`/`<WELL>/` instead of the output archive those functions
+were written for; nothing about them cares which side of the pipeline a
+container sits on, they only parse `(fov, timepoint)` positionally off member
+names. *Done* is read the same way `incremental_done_fov_keys` composes it
+(CSV rows ∪ out-zip members ∪ output folder) but on the real, already-resolved
+CSV/zip paths rather than by reconstructing `f"{csv_prefix}_{safe_well}.csv"`
+— `csv_prefix` is a CLI arg never recorded in the sidecar, and `_safe_well`
+only strips path separators, so an unpadded on-disk CSV would reconstruct to a
+nonexistent filename and silently report "0 FOVs done". `out/*.csv` is globbed
+directly rather than through `out_csvs()` (which plainly overwrites on a
+duplicate well key) so a dataset holding CSVs from two different
+`--csv_prefix` runs is flagged rather than silently resolved to whichever file
+happened to glob last. A CSV that matches a well by filename but whose header
+lacks `timepoint_hours` is flagged as a phantom (an unrelated file, not
+broken data) rather than counted as that well's state.
+
+Beyond the per-well diff, `build_report` also checks: the sidecar's
+`available_timepoints`/`available_fovs` against what
+`_common.collect_available_schema_values` finds on disk (both directions —
+stale entries and missing ones); `timepoint` vs `timepoint_hours` agreement
+and `filename`-in-archive presence per row; zero-member or unreadable zips;
+and `cell_overrides.json` entries whose `seg_fp` no longer matches the
+current out-zip mtime (silently dropped on load regardless — see
+`well_viewer/persistence/cell_overrides.py`).
+
+`apply.py::apply_repairs` is metadata-only — it never rewrites a measurement
+CSV or a well archive. It read-modify-writes the already-loaded sidecar dict
+(replacing only `available_timepoints`/`available_fovs` with what's actually
+on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
+`__aw_tmp_*` staging files. `services.remote_runner.refresh_pipeline_info_available_from_outputs`
+is deliberately not reused here — it only ever *unions* into the existing
+availability lists, so a stale entry can never be dropped, which is the
+opposite of what a repair needs to do.
+
+The page's **Complete this run** button hands the dataset off to Analyze
+through the existing `on_open_in_analyze` seam — the same one `Convert
+OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
+incremental) Analyze run, not a new execution path.
+
 ---
 
 ## 7. The widget library (`widgets/`)
@@ -2154,6 +2217,7 @@ Notable members worth knowing about by name:
 |--------|-----------|
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
+| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | An 8×12 plate whose model is an *ordered list* of wells — the acquisition path — not an unordered selection set. Lit wells carry their 1-based visit number and a subtle alpha-blended arrow traces the order across the plate; clicking an off-path well appends it, clicking an on-path one removes it and the rest renumber (`orderChanged`). A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
 | `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind both live run dashboards: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` and `ConcatDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so the two can't visually drift apart. |
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by its furthest-reached stage and overlays a gear glyph on the actively-computing well with its `FOV done/total` sub-progress. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |

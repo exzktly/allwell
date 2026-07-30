@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import re
+import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -204,3 +206,59 @@ def out_zips(paths: DatasetPaths) -> dict[str, Path]:
 def dataset_wells(paths: DatasetPaths) -> set[str]:
     """Every 96-well position present in a dataset's ``in`` or ``out``."""
     return set(in_containers(paths)) | set(out_csvs(paths)) | set(out_zips(paths))
+
+
+# ── input-side availability scan ─────────────────────────────────────────────
+# Mirrors process_microscopy._collect_image_stems / _collect_available_schema_
+# values, generalised so a Datasets feature can ask "what timepoints/FOVs does
+# the raw input actually cover" independent of what pipeline_info.json claims
+# — the question Validate needs to answer, and the pipeline's own answer at
+# write_pipeline_info time, so a rebuilt sidecar can't disagree with a fresh
+# run's. Deliberately not imported from process_microscopy itself: that would
+# drag the whole pipeline import graph into a Datasets compute module.
+def collect_input_image_stems(in_dir: Path) -> set[str]:
+    """Every image filename stem findable under *in_dir* — loose top-level
+    TIFs, one level of well subfolders, or well zips' TIF members."""
+    stems: set[str] = set()
+    for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
+        for p in in_dir.glob(pat):
+            stems.add(p.stem)
+    with swallow(f"list well subfolders under {in_dir}"):
+        for entry in in_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
+                for p in entry.glob(pat):
+                    stems.add(p.stem)
+    for zip_path in in_dir.glob("*.zip"):
+        with swallow(f"scan {zip_path} for image stems"):
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                for member in zf.namelist():
+                    name = Path(member).name
+                    if name.lower().endswith((".tif", ".tiff")):
+                        stems.add(Path(name).stem)
+    return stems
+
+
+def collect_available_schema_values(
+    in_dir: Path,
+    *,
+    schema_fields,
+    sep: str,
+    field_name: str,
+    sort_key: Callable,
+) -> list[str]:
+    """Every distinct value of *field_name* found across ``in_dir``'s images,
+    sorted by *sort_key*. Returns ``[]`` if *field_name* isn't in the schema."""
+    fields = [str(f).strip().lower() for f in schema_fields]
+    if field_name not in fields:
+        return []
+    field_idx = fields.index(field_name)
+    values: set[str] = set()
+    for stem in collect_input_image_stems(in_dir):
+        parts = stem.split(sep)
+        if 0 <= field_idx < len(parts):
+            tok = str(parts[field_idx]).strip()
+            if tok:
+                values.add(tok)
+    return sorted(values, key=sort_key)

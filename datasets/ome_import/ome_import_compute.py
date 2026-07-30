@@ -141,11 +141,20 @@ def selection_target(layout: OmeLayout, params: ConversionParams) -> SelectionTa
 
 CHANNEL_ROLES = ("nuclear", "fluor", "phase", "skip")
 
-# Names that read as the nuclear/segmentation channel, or a phase/brightfield one.
-_NUCLEAR_HINT_RE = re.compile(r"dapi|hoechst|nuclear|nucleus|nuc|dna|h33342|405|nir",
-                              re.IGNORECASE)
+# Names that read as the nuclear/segmentation channel. Two tiers: a *strong*
+# nuclear stain (DAPI/Hoechst/…) always wins as the segmentation channel, and a
+# *secondary* channel (NIR / RFP) is the best guess only when no strong stain is
+# present — common when segmentation runs on a far-red or membrane marker.
+_NUCLEAR_STRONG_RE = re.compile(r"dapi|hoechst|nuclear|nucleus|nuc|dna|h33342|405",
+                                re.IGNORECASE)
+_NUCLEAR_SECONDARY_RE = re.compile(r"nir|rfp", re.IGNORECASE)
 _PHASE_HINT_RE = re.compile(r"phase|brightfield|bright.?field|trans|dic|\bbf\b",
                             re.IGNORECASE)
+
+
+def _is_nuclear_name(name: str) -> bool:
+    name = name or ""
+    return bool(_NUCLEAR_STRONG_RE.search(name) or _NUCLEAR_SECONDARY_RE.search(name))
 
 
 @dataclass
@@ -168,28 +177,44 @@ class ChannelTokens:
 
 def guess_channel_role(name: str) -> str:
     """The best-guess role for a single channel *name* (``nuclear``/``phase``/``fluor``)."""
-    if _NUCLEAR_HINT_RE.search(name or ""):
+    if _is_nuclear_name(name):
         return "nuclear"
     if _PHASE_HINT_RE.search(name or ""):
         return "phase"
     return "fluor"
 
 
+def _pick_nuclear(names: list[str]) -> str | None:
+    """The one channel to assign the nuclear/segmentation role, or None.
+
+    A strong nuclear stain wins over a secondary (NIR/RFP) channel regardless of
+    order; with neither, the first channel is used so segmentation always has one.
+    """
+    strong = [n for n in names if _NUCLEAR_STRONG_RE.search(n or "")]
+    if strong:
+        return strong[0]
+    secondary = [n for n in names if _NUCLEAR_SECONDARY_RE.search(n or "")]
+    if secondary:
+        return secondary[0]
+    return names[0] if names else None
+
+
 def default_channel_roles(names) -> dict[str, str]:
     """Heuristic role per channel token, keyed by name, with exactly one nuclear.
 
-    Segmentation needs a nuclear channel, so when no name reads as nuclear the
-    first channel is assigned it; when several do, only the first keeps it and the
-    rest fall back to fluorescent. The caller can override any of it.
+    Segmentation needs a nuclear channel; :func:`_pick_nuclear` chooses it
+    (strongest nuclear name, else first channel) and every other channel takes its
+    per-name guess (never nuclear). The caller can override any of it.
     """
     names = list(names)
-    roles = {n: guess_channel_role(n) for n in names}
-    nucs = [n for n in names if roles[n] == "nuclear"]
-    if not nucs and names:
-        roles[names[0]] = "nuclear"
-    elif len(nucs) > 1:
-        for n in nucs[1:]:
-            roles[n] = "fluor"
+    chosen = _pick_nuclear(names)
+    roles: dict[str, str] = {}
+    for n in names:
+        if n == chosen:
+            roles[n] = "nuclear"
+        else:
+            guess = guess_channel_role(n)
+            roles[n] = "fluor" if guess == "nuclear" else guess
     return roles
 
 

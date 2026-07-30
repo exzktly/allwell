@@ -2021,8 +2021,9 @@ the page's "Open in Analyze" button routes the produced folder to the Analyze
 pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
 dataset. The page also carries a per-channel **role picker** (one row per OME
 channel name, seeded by `ome_import_compute.default_channel_roles`'s name
-heuristic — `guess_channel_role` reads a `DAPI`/`Hoechst`/`NIR`-type name as
-nuclear); `channel_tokens_from_roles` aggregates the picks into a minimal
+heuristic — a strong nuclear stain (`DAPI`/`Hoechst`/…) wins the segmentation
+role, else a secondary `NIR`/`RFP` channel, else the first channel);
+`channel_tokens_from_roles` aggregates the picks into a minimal
 `pipeline_info`-shaped dict (`nuclear_token` / `fluor_tokens` / `phase_token`)
 that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds to
 `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive pre-filled.

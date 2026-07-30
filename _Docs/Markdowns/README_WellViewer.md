@@ -1478,9 +1478,10 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    grid × FOVs; timepoints are then `frames ÷ positions`.
 8. **Channel roles** — one row per channel read from the OME metadata, each with a
    role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**, or
-   **Skip**. The roles are seeded from the channel names (a `DAPI` / `Hoechst` /
-   `NIR`-type name is guessed as nuclear, the rest fluorescent); change any of
-   them. This is only a convenience: the channel names are always written into the
+   **Skip**. The roles are seeded from the channel names: a `DAPI` / `Hoechst`-type
+   stain is guessed as the nuclear/segmentation channel, or failing that a
+   `NIR` / `RFP` channel (the usual far-red segmentation markers), with the rest
+   fluorescent; change any of them. This is only a convenience: the channel names are always written into the
    output filenames regardless, but the roles you set here **pre-fill Analyze's
    channel-token fields** when you open the dataset there, so you don't retype them.
 

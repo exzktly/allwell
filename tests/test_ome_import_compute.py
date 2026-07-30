@@ -166,23 +166,37 @@ def test_guess_channel_role_by_name():
     assert guess_channel_role("DAPI") == "nuclear"
     assert guess_channel_role("Hoechst 33342") == "nuclear"
     assert guess_channel_role("NIR") == "nuclear"
+    assert guess_channel_role("RFP") == "nuclear"     # secondary segmentation guess
     assert guess_channel_role("Phase") == "phase"
     assert guess_channel_role("Brightfield") == "phase"
     assert guess_channel_role("GFP") == "fluor"
 
 
 def test_default_channel_roles_picks_one_nuclear():
-    # DAPI reads as nuclear; the rest fluorescent.
+    # DAPI is a strong nuclear stain; the rest fluorescent.
     roles = default_channel_roles(["DAPI", "GFP", "RFP"])
     assert roles == {"DAPI": "nuclear", "GFP": "fluor", "RFP": "fluor"}
 
 
+def test_default_channel_roles_uses_nir_or_rfp_when_no_strong_stain():
+    # No DAPI/Hoechst → NIR / RFP is the best-guess segmentation channel.
+    assert default_channel_roles(["GFP", "NIR"]) == {"GFP": "fluor", "NIR": "nuclear"}
+    assert default_channel_roles(["GFP", "RFP"]) == {"GFP": "fluor", "RFP": "nuclear"}
+
+
+def test_default_channel_roles_strong_stain_beats_secondary_regardless_of_order():
+    # RFP is a secondary nuclear guess, but a real DAPI stain wins even when RFP
+    # comes first.
+    roles = default_channel_roles(["RFP", "DAPI", "GFP"])
+    assert roles == {"RFP": "fluor", "DAPI": "nuclear", "GFP": "fluor"}
+
+
 def test_default_channel_roles_falls_back_to_first_channel():
-    # No nuclear-looking name → the first channel is assigned nuclear so
+    # No nuclear-looking name at all → the first channel is assigned nuclear so
     # segmentation has a channel to run on.
-    roles = default_channel_roles(["GFP", "RFP"])
+    roles = default_channel_roles(["GFP", "YFP"])
     assert roles["GFP"] == "nuclear"
-    assert roles["RFP"] == "fluor"
+    assert roles["YFP"] == "fluor"
 
 
 def test_default_channel_roles_keeps_only_first_nuclear():

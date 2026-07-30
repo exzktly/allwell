@@ -205,6 +205,13 @@ class OmeImportPage(QWidget):
         hl.addWidget(QLabel("Origin:", row))
         self._origin_edit = _small("A01", width=56, placeholder="A01")
         hl.addWidget(self._origin_edit)
+        hl.addWidget(QLabel("Workers:", row))
+        self._workers_edit = _small("", placeholder="auto")
+        self._workers_edit.setToolTip(
+            "Parallel conversion threads (blank = auto). Wells are converted in "
+            "parallel; lower this if a single spinning disk thrashes."
+        )
+        hl.addWidget(self._workers_edit)
         hl.addStretch(1)
         outer.addWidget(row)
 
@@ -309,6 +316,7 @@ class OmeImportPage(QWidget):
             direction=str(self._direction_cb.currentData() or "row"),
             fovs_per_well=_as_int(self._fovs_edit.text()) or None,
             frame_order=str(self._frame_order_cb.currentData() or "single"),
+            workers=max(0, _as_int(self._workers_edit.text())),
         )
 
     def append_log(self, text: str) -> None:

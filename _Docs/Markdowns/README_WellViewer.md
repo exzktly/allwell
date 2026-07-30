@@ -1450,7 +1450,9 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    value and the converter refuses to run if it doesn't match the file.
 4. **Origin** (top-left well, default `A01`) and **Serpentine** direction (snake
    by row or by column).
-5. **Frame order** — *shown only for a single-image file that packs every
+5. **Workers** — how many wells to convert in parallel (blank = auto). Lower it if
+   converting to a single spinning disk feels slower rather than faster.
+6. **Frame order** — *shown only for a single-image file that packs every
    position into its T axis*. Because an OME image has no position dimension, the
    positions live in the T axis, possibly interleaved with real timepoints. Say
    how the frames are ordered: **Single timepoint** (every frame is a distinct
@@ -1460,10 +1462,13 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
 
 The readout shows how the file splits into wells × FOVs × timepoints and lists the
 channel names (any Z-stack is **maximum-intensity projected**; labels stay within
-the 96-well plate `A01`–`H12`). Press **Convert** to write `<destination>/in/`,
-then **Open dataset in Analyze**. In Analyze, type the channel names it listed
-into the Segmentation / fluorescent channel tokens as usual, and run — because the
-wells now exist on disk, background-well and control-well options work normally.
+the 96-well plate `A01`–`H12`). Press **Convert** — a progress bar fills as the
+wells are written in parallel (Cancel stops it cleanly), and the output is one
+per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
+(no regrouping step). Then **Open dataset in Analyze**, type the channel names it
+listed into the Segmentation / fluorescent channel tokens as usual, and run —
+because the wells now exist on disk, background-well and control-well options work
+normally.
 
 ### Concatenate datasets
 

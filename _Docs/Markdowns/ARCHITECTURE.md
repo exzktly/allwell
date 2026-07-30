@@ -1567,8 +1567,19 @@ The conversion itself is `pipeline.ome_explode.explode_ome_tiff`. It reads the
 OME-XML for dimension order and channel names, **max-projects Z**, maps each
 stage position to a 96-well label via `util.plate_grid` (serpentine order + the
 imaged grid, one well × FOV per position; FOVs-per-well is entered explicitly and
-cross-checked, or derived), and writes
-`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` into `<destination>/in/`.
+cross-checked, or derived), and writes the planes named
+`<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` **directly into per-well
+`<destination>/in/<WELL>.zip` archives** — the exact layout `resolve_input_output`
+accepts as ready input, so Analyze uses it with **no** `WellPlateZipper` pass.
+Wells are converted **in parallel** across a `ThreadPoolExecutor` (`workers`,
+0 = auto), each worker owning a disjoint set of wells and its own read handle and
+writing that well's archive alone (via `util.zip_write.atomic_zip`, so no locking
+on the zip handles). Writing per-well zips also collapses what a loose-TIF explode
+would cost in per-file fsyncs (one per plane — tens of thousands) into two per
+well, and a cancelled/failed well leaves **no** partial archive (`atomic_zip`
+discards its staging file). A read-vs-write timing line is logged so the dominant
+cost is visible; the parallelism grain is per-well, so a degenerate single-well
+grid stays serial.
 Two source structures are handled (`read_ome_layout` → `OmeLayout.single_image`),
 because OME allows only X/Y/Z/C/T inside one `<Image>` — there is no position
 dimension:
@@ -1978,8 +1989,9 @@ output to another pane through an injected callback (`on_open_in_review` →
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
 the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
-readout, `apply.convert` calls `explode_ome_tiff` into `<destination>/in/` with
-progress + cancel, and `OmeImportWorker` runs it off the UI thread. On success
+readout, `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
+`<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
+runs it off the UI thread. On success
 the page's "Open in Analyze" button routes the produced folder to the Analyze
 pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
 dataset. Channel roles are left to Analyze's normal Channel Tokens section.

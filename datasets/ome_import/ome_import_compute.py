@@ -39,6 +39,7 @@ class ConversionParams:
     fovs_per_well: int | None = None      # None = derive
     frame_order: str = "single"           # single-image files only
     experiment: str = ""                  # blank = derive from the filename
+    workers: int = 0                      # 0 = auto (per-well thread pool)
 
 
 @dataclass

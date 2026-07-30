@@ -47,6 +47,25 @@ def test_colliding_wells_refused(tmp_path):
         mpc.build_plate_merge_plan(ds1, ds2, dest)
 
 
+def test_well_map_collapsing_two_ds2_wells_onto_one_target_is_refused(tmp_path):
+    """Regression guard: dest_from_ds2 used to be a set comprehension over
+    dataset 2's wells, so two distinct dataset-2 wells mapping to the same
+    destination silently collapsed into one element and the collision check
+    never fired — execute_plan would then submit both source wells as
+    separate ThreadPoolExecutor futures writing the same destination path
+    concurrently (non-deterministic last-writer-wins data loss). Not
+    reachable through the GUI today (block_shift_well_map is always
+    injective), but build_plate_merge_plan's own well_map parameter must
+    refuse this on its own, since nothing else guarantees an injective map."""
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02", "C03"], timepoints=["0h"])
+    with pytest.raises(mpc.MergePlatesError, match="same destination position"):
+        mpc.build_plate_merge_plan(ds1, ds2, dest, well_map={"B02": "E05", "C03": "E05"})
+
+
 def test_remap_moves_all_four_coupled_values_together(tmp_path):
     ds1 = tmp_path / "ds1"
     ds2 = tmp_path / "ds2"

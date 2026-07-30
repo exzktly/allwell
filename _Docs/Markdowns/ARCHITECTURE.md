@@ -2049,7 +2049,7 @@ deletable:
 
 | Module | What it holds |
 |---|---|
-| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. |
+| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. |
 | `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. |
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
 | `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
@@ -2206,8 +2206,13 @@ at `in/<WELL>.zip`/`<WELL>/` instead of the output archive those functions
 were written for; nothing about them cares which side of the pipeline a
 container sits on, they only parse `(fov, timepoint)` positionally off member
 names. *Done* is read the same way `incremental_done_fov_keys` composes it
-(CSV rows ∪ out-zip members ∪ output folder) but on the real, already-resolved
-CSV/zip paths rather than by reconstructing `f"{csv_prefix}_{safe_well}.csv"`
+(CSV rows ∪ out-zip members ∪ output folder — `_well_done` unions all three,
+the last via `_common.dataset_paths.out_folders`, the `out_zips`-shaped
+well→path map for `compressed_output=False` datasets; a folder-mode well
+that legitimately segmented zero cells at a timepoint still writes an image
+there even with no CSV row for it, the same "done" evidence a zip-mode
+well's out-zip member supplies) but on the real, already-resolved CSV/zip
+paths rather than by reconstructing `f"{csv_prefix}_{safe_well}.csv"`
 — `csv_prefix` is a CLI arg never recorded in the sidecar, and `_safe_well`
 only strips path separators, so an unpadded on-disk CSV would reconstruct to a
 nonexistent filename and silently report "0 FOVs done". `out/*.csv` is globbed
@@ -2294,7 +2299,15 @@ legend; `datasets/subset/dashboard.py` exports `well_color`/
 rail/legend can't disagree on what a stage looks like. Source-dataset changes
 clear the overlay (`SubsetPage.sourceChanged` → the controller's
 `_on_source_changed`) so a stale colour from a previous run's wells can never
-survive onto a newly-picked dataset that happens to reuse the same tokens.
+survive onto a newly-picked dataset that happens to reuse the same tokens —
+but that alone only handles a source change *between* runs. `SubsetPage.
+set_running` also locks `_src_field`/`_dest_field` (not just the plate) for
+the run's duration: picking a *different* source mid-run does not stop the
+still-running `SubsetWorker`, so without the lock, `sourceChanged` would
+repaint the plate for the newly-picked dataset while the old run keeps
+executing in the background — its still-arriving `wellStage` signals would
+then paint the *previous* dataset's progress onto wells the user now believes
+belong to the new one.
 
 **Import Loose Folder** (`datasets/import_loose/`) groups a folder of loose,
 ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
@@ -2393,10 +2406,22 @@ from the actual filename, never reconstructed), and the `well` keys inside
 from `concatenate_compute` unchanged, gates on the same destination-state
 predicates with its own marker (`.aw_merge_in_progress`), refuses a
 well-remap target that isn't a valid 96-well position, refuses a post-remap
-collision (naming the colliding tokens), and **warns** rather than refuses
-when the two datasets don't share the same timepoints (a merged plate is
-legitimately ragged — one plate imaged longer — but every plot will show
-gaps, so it must be said).
+collision against dataset 1 (naming the colliding tokens), and **warns**
+rather than refuses when the two datasets don't share the same timepoints (a
+merged plate is legitimately ragged — one plate imaged longer — but every
+plot will show gaps, so it must be said). It also refuses a `well_map` that
+maps two *different* dataset-2 wells onto the same destination position —
+checked on the raw list of mapped targets before it's deduplicated into a
+set, since deduplicating first (`{well_map.get(w, w) for w in wells2}`) would
+silently collapse the duplicate and let the collision check downstream see
+only one element, never firing. Not reachable through the shipping UI today
+(the only `well_map` the GUI ever builds, `block_shift_well_map`'s rigid
+translation, is always injective — it can't collapse two distinct wells), but
+`build_plate_merge_plan`'s own validation must hold regardless of what a
+future caller (a different remap UI, a persisted job-queue spec) passes in:
+without it, `execute_plan` would submit both source wells as separate
+`ThreadPoolExecutor` futures writing the same destination path concurrently —
+silent, non-deterministic last-writer-wins data loss.
 
 **When dataset 2's wells are already disjoint from dataset 1's (the identity
 map, the common case), nothing is rewritten at all** — containers are

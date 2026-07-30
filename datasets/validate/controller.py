@@ -95,7 +95,7 @@ class ValidateController(QObject):
                 state = "partial"
             elif w.csv_state == "ok":
                 state = "complete"
-            elif w.has_in_container or w.has_out_zip:
+            elif w.has_in_container or w.has_out_zip or w.has_out_folder:
                 state = "missing"
             else:
                 state = "no_output"

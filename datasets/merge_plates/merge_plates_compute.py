@@ -266,7 +266,22 @@ def build_plate_merge_plan(
     resolved_map = {canonical_well_label(k) or k: canonical_well_label(v) or v
                     for k, v in resolved_map.items()}
 
-    dest_from_ds2 = {resolved_map.get(w, w) for w in wells2}
+    mapped2 = [resolved_map.get(w, w) for w in wells2]
+    # A dict comprehension over wells2 (well_map.get(w, w) collected into a
+    # set) would silently collapse two distinct dataset-2 wells that map to
+    # the same destination — the set has one element either way, so the
+    # collision check below would never see it, and execute_plan would then
+    # submit both source wells as separate ThreadPoolExecutor futures that
+    # write the same destination path concurrently. Check the *list* for an
+    # internal duplicate before deduping it into a set.
+    dupes = sorted({w for w in mapped2 if mapped2.count(w) > 1})
+    if dupes:
+        raise MergePlatesError(
+            "The well remap maps more than one dataset-2 well onto the same "
+            f"destination position: {dupes}. Each dataset-2 well must land "
+            "on its own free position."
+        )
+    dest_from_ds2 = set(mapped2)
     collisions = sorted(dest_from_ds2 & wells1)
     if collisions:
         raise MergePlatesError(

@@ -279,6 +279,14 @@ class SubsetPage(QWidget):
         self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         self._run_btn.setText("Subsetting…" if running else "▶  Subset")
+        # Locked alongside the plate (SubsetController._launch) — picking a
+        # new source mid-run fires sourceChanged, which repaints the plate
+        # for the new dataset while the old run's worker keeps executing in
+        # the background; its still-arriving wellStage signals would then
+        # paint the *previous* dataset's progress onto wells the user now
+        # believes belong to the newly-selected one.
+        self._src_field.setEnabled(not running)
+        self._dest_field.setEnabled(not running)
         if running:
             self._open_btn.setVisible(False)
 

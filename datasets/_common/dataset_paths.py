@@ -203,6 +203,21 @@ def out_zips(paths: DatasetPaths) -> dict[str, Path]:
     return zips
 
 
+def out_folders(paths: DatasetPaths) -> dict[str, Path]:
+    """Map each well to its ``out/<WELL>/`` folder-mode QC-image folder
+    (``compressed_output=False`` — see :func:`has_folder_mode_output`).
+    Disjoint from :func:`out_zips` in practice (a dataset is written either
+    zipped or folder-mode, never both), but a caller that needs "done" image
+    evidence regardless of which mode produced it should check both."""
+    folders: dict[str, Path] = {}
+    with swallow("scan out/ for folder-mode wells"):
+        for entry in paths.out_dir.iterdir():
+            well = canonical_well_label(entry.name) if entry.is_dir() else None
+            if well:
+                folders[well] = entry
+    return folders
+
+
 def dataset_wells(paths: DatasetPaths) -> set[str]:
     """Every 96-well position present in a dataset's ``in`` or ``out``."""
     return set(in_containers(paths)) | set(out_csvs(paths)) | set(out_zips(paths))

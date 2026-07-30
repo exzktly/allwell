@@ -223,3 +223,37 @@ def test_run_progress_overlays_onto_the_picker_plate(qapp, tmp_path):
         assert grid._colors.get(key) is not None
         assert grid._colors[key].name() == well_color("done").lower()
     ctrl.shutdown()
+
+
+def test_source_and_destination_fields_are_locked_during_a_run(qapp, tmp_path):
+    """Regression guard: only the plate and Run/Queue buttons used to be
+    locked during a run — the source field stayed clickable. Picking a
+    different source mid-run fires sourceChanged, which repaints the picker
+    plate for the newly-chosen dataset while the old run's SubsetWorker
+    keeps executing in the background; its still-arriving wellStage signals
+    would then paint the *previous* dataset's progress onto wells the user
+    now believes belong to the new, unrelated dataset. Locking the fields
+    the same way the plate already is (SubsetController._launch) closes off
+    that path through the GUI entirely."""
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    build_dataset(src, wells=["A01"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    assert page._src_field.isEnabled() is True
+    assert page._dest_field.isEnabled() is True
+    page.runRequested.emit()
+    assert page._src_field.isEnabled() is False
+    assert page._dest_field.isEnabled() is False
+    _run_worker_to_completion(ctrl)
+    assert page._src_field.isEnabled() is True
+    assert page._dest_field.isEnabled() is True
+    ctrl.shutdown()

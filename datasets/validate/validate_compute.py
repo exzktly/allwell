@@ -52,6 +52,7 @@ from datasets._common.dataset_paths import (
     DatasetPathsError,
     collect_available_schema_values,
     in_containers,
+    out_folders,
     out_zips,
     resolve_dataset,
 )
@@ -81,6 +82,7 @@ class WellReport:
     csv_state: str          # "ok" | "missing" | "empty" | "unreadable"
     has_in_container: bool
     has_out_zip: bool
+    has_out_folder: bool = False
 
     @property
     def complete(self) -> bool:
@@ -255,11 +257,18 @@ def _well_intent(container: Path | None, *, schema_fields, sep: str) -> tuple[se
 
 
 def _well_done(
-    csvs: list[Path], out_zip: Path | None, *, schema_fields, sep: str,
+    csvs: list[Path], out_zip: Path | None, out_folder: Path | None,
+    *, schema_fields, sep: str,
 ) -> tuple[set[tuple[str, str]], str]:
     """``(fov, timepoint)`` pairs already recorded for a well, plus the
     three-way CSV state (``ok`` / ``empty`` / ``unreadable`` / ``missing``)
-    that ``read_done_fov_keys`` alone can't distinguish."""
+    that ``read_done_fov_keys`` alone can't distinguish. Unions the CSV rows
+    with *both* possible image-evidence sources — a dataset is written
+    either zipped or folder-mode, never both, so only one of ``out_zip`` /
+    ``out_folder`` is ever non-None in practice, but checking both here
+    (rather than the caller picking one) means this function alone decides
+    what "done" means, matching ``pipeline.incremental_keys.
+    incremental_done_fov_keys``'s own three-way union."""
     done: set[tuple[str, str]] = set()
     csv_state = "missing"
     if csvs:
@@ -275,6 +284,8 @@ def _well_done(
         csv_state = "ok" if "ok" in states else ("empty" if "empty" in states else "unreadable")
     if out_zip is not None:
         done |= read_done_fov_keys_from_zip(out_zip, schema=schema_fields, sep=sep)
+    if out_folder is not None:
+        done |= read_done_fov_keys_from_folder(out_folder, schema=schema_fields, sep=sep)
     return done, csv_state
 
 
@@ -321,12 +332,13 @@ def _row_content_findings(well: str, container: Path, csvs: list[Path]) -> list[
 
 
 def _scan_one_well(
-    well: str, *, in_map, zip_map, csv_candidates, schema_fields, sep: str, fov_field_present: bool,
+    well: str, *, in_map, zip_map, folder_map, csv_candidates, schema_fields, sep: str,
+    fov_field_present: bool,
 ) -> tuple[WellReport, list[Finding]]:
     """Read-only per-well diff: intent (from the input container) vs. done
-    (from the CSV/out-zip). Pulled out of :func:`_scan_wells` so it can run
-    on its own thread — nothing here touches another well's files or any
-    shared state, only this well's own container/CSV reads."""
+    (from the CSV/out-zip/out-folder). Pulled out of :func:`_scan_wells` so
+    it can run on its own thread — nothing here touches another well's files
+    or any shared state, only this well's own container/CSV reads."""
     findings: list[Finding] = []
     container = in_map.get(well)
     intent, unreadable_message = _well_intent(container, schema_fields=schema_fields, sep=sep)
@@ -338,12 +350,14 @@ def _scan_one_well(
 
     csvs = csv_candidates.get(well, [])
     out_zip = zip_map.get(well)
-    done, csv_state = _well_done(csvs, out_zip, schema_fields=schema_fields, sep=sep)
+    out_folder = folder_map.get(well)
+    done, csv_state = _well_done(csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
 
     missing = (intent - done) if (fov_field_present and container is not None) else set()
     report = WellReport(
         well=well, missing=tuple(sorted(missing)), csv_state=csv_state,
         has_in_container=container is not None, has_out_zip=out_zip is not None,
+        has_out_folder=out_folder is not None,
     )
 
     if missing:
@@ -355,7 +369,7 @@ def _scan_one_well(
                 f"in the input but not in the output — e.g. {sample}."
             ),
         ))
-    if csv_state == "missing" and (container is not None or out_zip is not None):
+    if csv_state == "missing" and (container is not None or out_zip is not None or out_folder is not None):
         findings.append(Finding(
             severity="warning", code="no_csv", well=well,
             message=(
@@ -381,7 +395,8 @@ def _scan_wells(
 ) -> tuple[list[WellReport], list[Finding]]:
     in_map = in_containers(paths)
     zip_map = out_zips(paths)
-    all_wells = sorted(set(in_map) | set(csv_candidates) | set(zip_map))
+    folder_map = out_folders(paths)
+    all_wells = sorted(set(in_map) | set(csv_candidates) | set(zip_map) | set(folder_map))
 
     # Read-only per well (no cancellation, no live per-well dashboard here —
     # unlike the other Datasets tools' write-heavy execute_plan()s), so
@@ -391,8 +406,9 @@ def _scan_wells(
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
         results = list(ex.map(
             lambda well: _scan_one_well(
-                well, in_map=in_map, zip_map=zip_map, csv_candidates=csv_candidates,
-                schema_fields=schema_fields, sep=sep, fov_field_present=fov_field_present,
+                well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
+                csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
+                fov_field_present=fov_field_present,
             ),
             all_wells,
         ))

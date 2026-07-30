@@ -114,6 +114,58 @@ def test_absent_empty_and_unreadable_csv_are_distinct_findings(tmp_path):
     assert states["C03"] == "unreadable"
 
 
+def test_folder_mode_output_counts_as_done_without_a_csv_row(tmp_path):
+    """Regression guard: _well_done used to union only CSV rows and out-zip
+    members, never a folder-mode well's output folder (out/<WELL>/, written
+    when compressed_output=False) -- contradicting this module's own
+    docstring, which claims to mirror
+    pipeline.incremental_keys.incremental_done_fov_keys's three-way union
+    (CSV rows |UNION| out-zip members |UNION| output folder). A folder-mode
+    well that legitimately segmented zero cells at one timepoint still gets
+    an image written to out/<WELL>/, but no measurements row -- exactly the
+    case this module's own no_csv finding already treats as legitimate for
+    zip-mode wells (an out-zip's image member supplies the "done" evidence
+    there). Without reading the output folder too, a folder-mode well got
+    no such evidence and was falsely reported as still missing that
+    timepoint."""
+    from tests.fixtures.dataset_builder import BASE_INFO, ROW_COLUMNS
+    from util.timepoint import parse_hours
+
+    exp, sep = "exp", "_"
+    root = tmp_path
+    in_dir, out_dir = root / "in", root / "out"
+    in_dir.mkdir(parents=True)
+    out_dir.mkdir(parents=True)
+    info = dict(BASE_INFO)
+    info["available_timepoints"] = ["0h", "24h"]
+    info["available_fovs"] = ["F001"]
+    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
+
+    # B02: folder-mode output (no _out.zip). Both 0h and 24h were actually
+    # processed (an image exists for both in out/B02/), but 24h segmented
+    # zero cells so it has no measurements row -- legitimate, not a gap.
+    with zipfile.ZipFile(in_dir / "B02.zip", "w") as zf:
+        for tp in ("0h", "24h"):
+            zf.writestr(f"{exp}_GFP_B02_F001_{tp}.tif", b"img")
+    b02_out = out_dir / "B02"
+    b02_out.mkdir()
+    for tp in ("0h", "24h"):
+        (b02_out / f"{exp}_GFP_B02_F001_{tp}_labels.tif").write_bytes(b"mask")
+    with (out_dir / "measurements_B02.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=ROW_COLUMNS)
+        writer.writeheader()
+        writer.writerow({
+            "filename": f"{exp}_GFP_B02_F001_0h.tif", "experiment": exp, "channel": "GFP",
+            "well": "B02", "fov": "F001", "timepoint": "0h",
+            "timepoint_hours": parse_hours("0h"), "nucleus_id": 1, "area_px": 150,
+        })
+
+    report = vc.build_report(root)
+    b02 = next(w for w in report.wells if w.well == "B02")
+    assert b02.has_out_folder is True
+    assert b02.missing == (), f"expected no missing pairs, got {b02.missing}"
+
+
 def test_no_fov_field_skips_fov_check_without_false_alarm(tmp_path):
     build_dataset(
         tmp_path, wells=["A01"], timepoints=["0h", "24h"],

@@ -1,6 +1,11 @@
 """Wires the Subset / Split page to its background worker.
 
-Same shape as ``datasets.concatenate.controller.ConcatenateController``.
+Same shape as ``datasets.concatenate.controller.ConcatenateController``, with
+one difference: Subset's page already has an interactive well-plate selector
+for choosing the input wells, so this controller paints run progress directly
+onto that same widget (``page._plate``) instead of driving a second, separate
+status plate — ``SubsetDashboard`` (``PlateProgress(show_plate=False)``)
+carries only the headline, overall bar, counts rail and legend.
 """
 
 from __future__ import annotations
@@ -13,6 +18,8 @@ from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
+from widgets.plate_progress import canon_well
+from datasets.subset.dashboard import well_color, well_tooltip_label
 from datasets.subset.subset_compute import (
     DatasetPaths,
     SubsetFilter,
@@ -40,11 +47,15 @@ class SubsetController(QObject):
         self._on_add_to_queue = on_add_to_queue
         self._worker: SubsetWorker | None = None
         self._last_result: tuple[bool, str, str] = (False, "", "")
+        self._well_stage: dict[str, str] = {}
 
         self.page = SubsetPage()
+        self.page._plate.setColoredWellsLit(True)
+        self.page._plate.setWellTooltipProvider(self._well_tooltip)
         self.page.runRequested.connect(self._on_run)
         self.page.queueRequested.connect(self._on_queue_requested)
         self.page.openInReviewRequested.connect(self._on_open_in_review_requested)
+        self.page.sourceChanged.connect(self._on_source_changed)
 
     def _on_run(self) -> None:
         dest_path = self.page.destination_path()
@@ -64,12 +75,19 @@ class SubsetController(QObject):
         self.page.clear_log()
         self.page.dashboard.reset()
         self.page.dashboard.set_headline("Validating…")
+        self.page.dashboard.setVisible(True)
+        self._well_stage = {}
+        self.page._plate.clearWellColors()
+        self.page._plate.clearWellMarkers()
+        # Lock the picker for the duration of the run — it's about to become
+        # the progress display for exactly the selection it holds right now.
+        self.page._plate.setEnabled(False)
         self.page.set_running(True)
 
         worker = SubsetWorker(self.page.source_path(), dest_path, filt)
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
-        worker.wellStage.connect(self.page.dashboard.set_well_stage)
+        worker.wellStage.connect(self._on_well_stage)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
@@ -107,9 +125,33 @@ class SubsetController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
 
+    def _on_source_changed(self) -> None:
+        self._well_stage = {}
+        self.page._plate.clearWellColors()
+        self.page._plate.clearWellMarkers()
+
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Copying {len(wells)} well(s)…")
+        self._well_stage = dict.fromkeys((canon_well(w) for w in wells), "pending")
+        for w in self._well_stage:
+            self.page._plate.setWellColor(w, well_color("pending"))
+
+    def _on_well_stage(self, well_id: str, stage: str) -> None:
+        self.page.dashboard.set_well_stage(well_id, stage)
+        w = canon_well(well_id)
+        if not w:
+            return
+        self._well_stage[w] = stage
+        self.page._plate.setWellColor(w, well_color(stage))
+        self.page._plate.setWellMarker(w, "⚙" if stage == "copying" else None)
+
+    def _well_tooltip(self, well_id: str) -> str:
+        w = canon_well(well_id)
+        stage = self._well_stage.get(w)
+        if not w or stage is None:
+            return ""
+        return f"{w}: {well_tooltip_label(stage)}"
 
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")
@@ -127,6 +169,7 @@ class SubsetController(QObject):
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
+        self.page._plate.setEnabled(True)
         self.page.revalidate_fields()
         ok, message, dest_root = self._last_result
         try:

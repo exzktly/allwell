@@ -224,6 +224,10 @@ class MergePlatesPage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = MergePlatesDashboard(self)
+        # Not shown until a run actually starts — an idle status strip above
+        # an empty log reads as "something is wrong" rather than "nothing
+        # has happened yet". MergePlatesController reveals it in _on_run().
+        self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)

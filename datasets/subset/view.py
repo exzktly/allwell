@@ -2,12 +2,15 @@
 
 Source + destination folder pickers, a well-plate selector, timepoint and FOV
 checkbox rows seeded from the source dataset's own ``available_timepoints``/
-``available_fovs``, and the same Analyze-style status view (a live per-well
-:class:`~datasets.subset.dashboard.SubsetDashboard` with the raw log demoted
-to a collapsible checkbox) the other Datasets features use.
+``available_fovs``, and a compact status strip
+(:class:`~datasets.subset.dashboard.SubsetDashboard` — headline, overall bar,
+a per-well-state counts rail, and a colour legend, but **no plate map of its
+own**) with the raw log demoted to a collapsible checkbox. Run progress is
+painted directly onto the well-plate selector above instead of a second
+plate map — see :mod:`~datasets.subset.controller`.
 
 Pure view: it owns widgets and emits intent (``runRequested``,
-``openInReviewRequested``); the worker wiring lives in
+``openInReviewRequested``, ``sourceChanged``); the worker wiring lives in
 :mod:`~datasets.subset.controller`.
 """
 
@@ -57,6 +60,7 @@ class SubsetPage(QWidget):
     runRequested = Signal()
     queueRequested = Signal()
     openInReviewRequested = Signal(str)
+    sourceChanged = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -66,13 +70,13 @@ class SubsetPage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        # The page's content (fields, plate selector, dashboard, log) can
-        # exceed the window's default height (1640x980 — allwell.py), and the
-        # dashboard's own plate map sits at the very bottom. A plain
-        # QVBoxLayout with no scroll area just crushes whatever doesn't fit
-        # into whatever's left, which is exactly what made
-        # SubsetDashboard._plate render illegibly small — its cell size is
-        # computed from its actual allotted width/height (well_plate_selector's
+        # The page's content (fields, plate selector, timepoints/FOVs,
+        # status strip, log) can exceed the window's default height
+        # (1640x980 — allwell.py). A plain QVBoxLayout with no scroll area
+        # just crushes whatever doesn't fit into whatever's left, which is
+        # exactly what made the well-plate selector above render illegibly
+        # small before this wrap existed — its cell size is computed from
+        # its actual allotted width/height (well_plate_selector's
         # _metrics()), and a squeezed few dozen pixels of height produces a
         # squeezed cell size regardless of how much width is available. Wrap
         # everything in a scroll area instead, mirroring the pattern
@@ -192,6 +196,10 @@ class SubsetPage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = SubsetDashboard(self)
+        # Not shown until a run actually starts — an idle status strip above
+        # an empty log reads as "something is wrong" rather than "nothing
+        # has happened yet". SubsetController reveals it in _launch().
+        self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)
@@ -287,8 +295,10 @@ class SubsetPage(QWidget):
     def _on_source_changed(self) -> None:
         self._open_btn.setVisible(False)
         self.dashboard.reset()
+        self.dashboard.setVisible(False)
         self._reload_source_metadata()
         self._refresh_run_enabled()
+        self.sourceChanged.emit()
 
     def _reload_source_metadata(self) -> None:
         src = self.source_path()

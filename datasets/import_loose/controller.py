@@ -50,6 +50,7 @@ class ImportLooseController(QObject):
         self.page.clear_log()
         self.page.dashboard.reset()
         self.page.dashboard.set_headline("Scanning…")
+        self.page.dashboard.setVisible(True)
         self.page.set_running(True)
 
         worker = ImportLooseWorker(

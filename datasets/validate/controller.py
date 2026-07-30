@@ -58,6 +58,7 @@ class ValidateController(QObject):
         self.page.clear_log()
         self.page.dashboard.reset()
         self.page.dashboard.set_headline("Scanning…" if not apply_repair else "Repairing…")
+        self.page.dashboard.setVisible(True)
         self.page.set_running(True)
 
         worker = ValidateWorker(root, apply_repair=apply_repair)

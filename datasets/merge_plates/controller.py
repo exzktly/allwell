@@ -58,6 +58,13 @@ class MergePlatesController(QObject):
     def _launch(self) -> None:
         if self._worker is not None and self._worker.isRunning():
             return
+        # Reset + shown for the remap-validation failure branch below too,
+        # not just the normal worker-launch path — that failure is still
+        # "the process has started" from the user's point of view (they
+        # pressed Merge), and with the raw log hidden by default it's the
+        # only feedback they'd otherwise see.
+        self.page.dashboard.reset()
+        self.page.dashboard.setVisible(True)
         dest_path = self.page.destination_path()
         well_map: dict[str, str] = {}
         if self.page.remap_enabled():
@@ -79,7 +86,6 @@ class MergePlatesController(QObject):
                 return
 
         self.page.clear_log()
-        self.page.dashboard.reset()
         self.page.dashboard.set_headline("Validating…")
         self.page.set_running(True)
 

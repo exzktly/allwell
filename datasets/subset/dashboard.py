@@ -1,9 +1,18 @@
-"""At-a-glance per-well progress view for Subset / Split Dataset.
+"""At-a-glance progress view for Subset / Split Dataset.
 
-Same shape as ``datasets.concatenate.dashboard.ConcatDashboard`` and
-``datasets.validate.dashboard.ValidateDashboard`` — a
-:class:`~widgets.plate_progress.PlateProgress` subclass with its own well
-states and a plain rail (a subset run has one phase, so no phase sequence).
+Unlike ``datasets.concatenate.dashboard.ConcatDashboard`` and the other
+Datasets dashboards, this one carries **no plate map of its own**
+(``PlateProgress(show_plate=False)``) — Subset's page already has an
+interactive :class:`~widgets.well_plate_selector.WellPlateSelector` above the
+Run button for choosing wells, so progress is overlaid directly onto that
+same widget (:mod:`~datasets.subset.controller`) instead of drawing a second,
+redundant plate here. This dashboard keeps only the counts rail and the
+colour legend — both still meaningful as plain text/dots without a plate
+alongside them — plus the shared header/headline/overall-bar chrome.
+
+``well_color``/``well_tooltip_label`` are exported so the controller colours
+the *input* plate with exactly the same mapping this rail and legend use,
+rather than each keeping its own copy that could drift.
 """
 
 from __future__ import annotations
@@ -13,7 +22,26 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
-_WELL_STATES = ("pending", "copying", "done", "empty")
+WELL_STATES = ("pending", "copying", "done", "empty")
+
+
+def well_color(stage: str) -> str | None:
+    if stage == "done":
+        return theme.Colors.success
+    if stage == "empty":
+        return theme.Colors.accent
+    if stage == "copying":
+        return theme.Colors.warn
+    if stage == "pending":
+        return theme.Colors.text_muted
+    return None
+
+
+def well_tooltip_label(stage: str) -> str:
+    return {
+        "pending": "pending", "copying": "copying",
+        "done": "copied", "empty": "no rows matched the filter",
+    }.get(stage, "")
 
 
 class SubsetDashboard(PlateProgress):
@@ -21,7 +49,7 @@ class SubsetDashboard(PlateProgress):
         self._wells: list[str] = []
         self._well_stage: dict[str, str] = {}
         self._outcome = ""
-        super().__init__("Subset Progress", parent)
+        super().__init__("Subset Progress", parent, show_plate=False)
         self.setObjectName("SubsetDashboard")
 
     def reset(self) -> None:
@@ -30,9 +58,6 @@ class SubsetDashboard(PlateProgress):
         self._outcome = ""
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
-        self._plate.clearWellColors()
-        self._plate.clearWellMarkers()
-        self._plate.setEnabledWells(None)
         self._build_rail()
         self._build_legend()
         self._headline.setText("Idle")
@@ -44,20 +69,15 @@ class SubsetDashboard(PlateProgress):
         wells = sorted({canon_well(w) for w in well_ids} - {""})
         self._wells = wells
         self._well_stage = dict.fromkeys(wells, "pending")
-        self._plate.setEnabledWells(wells)
-        for w in wells:
-            self._plate.setWellColor(w, self._well_color(w))
         self.set_overall_range(len(wells))
         self.set_overall(0)
         self._refresh_rail()
 
     def set_well_stage(self, well_id: str, stage: str) -> None:
         w = canon_well(well_id)
-        if not w or stage not in _WELL_STATES:
+        if not w or stage not in WELL_STATES:
             return
         self._well_stage[w] = stage
-        self._plate.setWellColor(w, self._well_color(w))
-        self._plate.setWellMarker(w, "⚙" if stage == "copying" else None)
         self.set_overall(sum(1 for s in self._well_stage.values() if s in ("done", "empty")))
         self._refresh_rail()
 
@@ -76,29 +96,6 @@ class SubsetDashboard(PlateProgress):
         self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
         self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
 
-    def _well_color(self, w: str) -> str | None:
-        stage = self._well_stage.get(w)
-        if stage == "done":
-            return theme.Colors.success
-        if stage == "empty":
-            return theme.Colors.accent
-        if stage == "copying":
-            return theme.Colors.warn
-        if stage == "pending":
-            return theme.Colors.text_muted
-        return None
-
-    def _well_tooltip(self, well_id: str) -> str:
-        w = canon_well(well_id)
-        stage = self._well_stage.get(w)
-        if stage is None:
-            return f"{w or well_id}: not part of this subset"
-        label = {
-            "pending": "pending", "copying": "copying",
-            "done": "copied", "empty": "no rows matched the filter",
-        }[stage]
-        return f"{w}: {label}"
-
     def _build_rail(self) -> None:
         self._clear(self._rail_lay)
         head = QLabel("Wells", self._rail_host)
@@ -111,7 +108,7 @@ class SubsetDashboard(PlateProgress):
             row = QHBoxLayout(row_w)
             row.setContentsMargins(0, 0, 0, 0)
             row.setSpacing(7)
-            row.addWidget(status_dot(self._state_color(state)))
+            row.addWidget(status_dot(well_color(state) or theme.Colors.text_muted))
             nm = QLabel(f"{label}: {n}", row_w)
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
@@ -121,12 +118,6 @@ class SubsetDashboard(PlateProgress):
 
     def _refresh_rail(self) -> None:
         self._build_rail()
-
-    def _state_color(self, state: str) -> str:
-        return {
-            "pending": theme.Colors.text_muted, "copying": theme.Colors.warn,
-            "done": theme.Colors.success, "empty": theme.Colors.accent,
-        }[state]
 
     def _build_legend(self) -> None:
         self._clear(self._legend_lay)
@@ -139,7 +130,7 @@ class SubsetDashboard(PlateProgress):
             r = QHBoxLayout(row_w)
             r.setContentsMargins(0, 0, 0, 0)
             r.setSpacing(7)
-            r.addWidget(status_dot(self._state_color(state)))
+            r.addWidget(status_dot(well_color(state) or theme.Colors.text_muted))
             t = QLabel(label, row_w)
             t.setStyleSheet(f"color:{theme.Colors.text_primary};")
             r.addWidget(t)

@@ -1611,7 +1611,10 @@ trimming a drifted tail of timepoints.
    selected by default (meaning "keep everything" until you narrow it down).
 2. Uncheck the wells, timepoints, or FOVs you don't want kept, and pick a
    **destination folder** (must be new and empty).
-3. Press **Subset**. A live plate map shows each well being copied.
+3. Press **Subset**. The same well plate you picked wells with now shows
+   each one being copied — locked against further clicks until the run
+   finishes, so it can double as the progress view instead of a second
+   plate map elsewhere on the page.
 
 Timepoints keep their original hours — a subset spanning 24h–72h stays
 labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-

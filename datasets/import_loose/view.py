@@ -181,6 +181,10 @@ class ImportLoosePage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = ImportLooseDashboard(self)
+        # Not shown until a run actually starts — an idle status strip above
+        # an empty log reads as "something is wrong" rather than "nothing
+        # has happened yet". ImportLooseController reveals it in _launch().
+        self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)
@@ -263,6 +267,7 @@ class ImportLoosePage(QWidget):
 
     # ── internals ────────────────────────────────────────────────────────────
     def _on_source_changed(self) -> None:
+        self.dashboard.setVisible(False)
         self.refresh_readout()
 
     def _on_in_place_toggled(self, checked: bool) -> None:

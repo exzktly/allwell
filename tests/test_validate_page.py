@@ -54,6 +54,36 @@ def test_check_gate_requires_a_path(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_dashboard_hidden_until_check_starts(qapp, tmp_path):
+    """Regression guard: the status strip below the button row used to be
+    visible from the moment the page loaded, showing an idle headline and
+    an empty plate map before anything had happened — confusing, since it
+    reads as an in-between state rather than "nothing has run yet". Uses
+    isHidden() (a local, explicit hide/show flag) rather than isVisible(),
+    since the page is never actually shown in this test — isVisible() would
+    report False for the whole tree regardless of these setVisible() calls."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    assert page.dashboard.isHidden() is True
+
+    page._dataset_field.set_path(str(tmp_path))
+    page._on_dataset_changed()
+    assert page.dashboard.isHidden() is True  # still nothing has run
+
+    page.checkRequested.emit()
+    assert page.dashboard.isHidden() is False  # shown the moment Check starts
+    _run_worker_to_completion(ctrl)
+    assert page.dashboard.isHidden() is False  # stays up to show the result
+
+    page._dataset_field.set_path(str(tmp_path))
+    page._on_dataset_changed()
+    assert page.dashboard.isHidden() is True  # hidden again for the new selection
+    ctrl.shutdown()
+
+
 def test_check_reports_clean_dataset(qapp, tmp_path):
     from datasets.validate.controller import ValidateController
 

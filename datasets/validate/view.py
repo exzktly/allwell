@@ -146,6 +146,10 @@ class ValidatePage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = ValidateDashboard(self)
+        # Not shown until a run actually starts — an idle status strip above
+        # an empty log reads as "something is wrong" rather than "nothing
+        # has happened yet". ValidateController reveals it in _run().
+        self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard, 1)
 
         self._findings_list = QListWidget(self)
@@ -216,4 +220,5 @@ class ValidatePage(QWidget):
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
         self.dashboard.reset()
+        self.dashboard.setVisible(False)
         self._findings_list.clear()

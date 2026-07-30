@@ -35,6 +35,38 @@ def _run_worker_to_completion(ctrl) -> None:
         QApplication.processEvents()
 
 
+def test_dashboard_hidden_until_convert_starts(qapp, tmp_path):
+    """Regression guard: the status strip below the Convert button used to
+    be visible from page load, showing an idle headline over an empty plate
+    map before anything had happened. Uses isHidden() (a local, explicit
+    hide/show flag) rather than isVisible(), since the page is never
+    actually shown in this test — isVisible() would report False for the
+    whole tree regardless of these setVisible() calls."""
+    from datasets.import_loose.controller import ImportLooseController
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    assert page.dashboard.isHidden() is True
+
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    assert page.dashboard.isHidden() is True  # still nothing has run
+
+    page._dest_field.set_path(str(tmp_path / "dest"))
+    page._refresh_run_enabled()
+    page.runRequested.emit()
+    assert page.dashboard.isHidden() is False  # shown the moment Convert starts
+    _run_worker_to_completion(ctrl)
+    assert page.dashboard.isHidden() is False  # stays up to show the result
+
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    assert page.dashboard.isHidden() is True  # hidden again for the new selection
+    ctrl.shutdown()
+
+
 def test_readout_updates_on_source_change(qapp, tmp_path):
     from datasets.import_loose.controller import ImportLooseController
 

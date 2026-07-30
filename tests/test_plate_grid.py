@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from util.plate_grid import position_to_well_fov, serpentine_well_labels
+from util.plate_grid import (
+    normalize_well_order,
+    position_to_well_fov,
+    serpentine_well_labels,
+)
 
 
 def test_row_snake_reverses_alternate_rows():
@@ -60,6 +64,28 @@ def test_nonpositive_dimensions_rejected(rows, cols):
 def test_unknown_direction_rejected():
     with pytest.raises(ValueError):
         serpentine_well_labels(2, 2, direction="diagonal")
+
+
+def test_normalize_well_order_canonicalises_and_preserves_order():
+    # An arbitrary, non-rectangular ordering — canonicalised, order kept.
+    assert normalize_well_order(["a1", "B02", "h12", "C7"]) == [
+        "A01", "B02", "H12", "C07",
+    ]
+
+
+def test_normalize_well_order_rejects_invalid_token():
+    with pytest.raises(ValueError):
+        normalize_well_order(["A01", "Z09"])
+
+
+def test_normalize_well_order_rejects_duplicate():
+    with pytest.raises(ValueError, match="more than once"):
+        normalize_well_order(["A01", "B02", "a01"])
+
+
+def test_normalize_well_order_rejects_empty():
+    with pytest.raises(ValueError):
+        normalize_well_order([])
 
 
 def test_position_split_is_well_major():

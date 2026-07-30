@@ -63,6 +63,42 @@ def test_converter_page_readout_and_run_gate(qapp, tmp_path):
     assert "timepoint(s)" in page._readout.text()
 
 
+def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+    from widgets.plate_order_editor import _parse_well_id
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+
+    # A valid grid drives a live (non-dirty) serpentine preview on the plate.
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("3")
+    page.refresh_readout()
+    assert page._plate.order() == ["A01", "A02", "A03"]
+    assert not page._plate.is_dirty()
+    # A preview does not populate params.well_order until the user owns it…
+    assert page.params().well_order == ("A01", "A02", "A03")
+
+    # "Generate path from grid" seeds an editable (dirty) order.
+    page._generate_path()
+    assert page._plate.is_dirty()
+
+    # Clicking a fourth, off-grid well appends it → a non-rectangular order.
+    row, col = _parse_well_id("H12")
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    center = page._plate._cell_rect(row, col).center()
+    page._plate.mousePressEvent(QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress, QPointF(center), Qt.LeftButton,
+        Qt.LeftButton, Qt.NoModifier))
+    assert page.params().well_order == ("A01", "A02", "A03", "H12")
+
+    # A later grid edit no longer overwrites the hand-drawn order.
+    page._cols_edit.setText("2")
+    page.refresh_readout()
+    assert page.params().well_order == ("A01", "A02", "A03", "H12")
+
+
 def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):
     from analyze_tab import AnalyzeTab
 

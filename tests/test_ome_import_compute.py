@@ -89,6 +89,40 @@ def test_plan_grid_overflow_rejected(tmp_path):
             grid_rows=2, grid_cols=2, origin="H12", fovs_per_well=1))
 
 
+def test_plan_explicit_well_order_non_rectangular(tmp_path):
+    # 3 positions, an explicit non-rectangular ordering — the plan uses that order
+    # and count, ignoring the (seed) grid fields entirely.
+    p = _write_multi(tmp_path / "m.ome.tif", positions=3)
+    plan = plan_conversion(
+        read_layout(p),
+        ConversionParams(grid_rows=1, grid_cols=1,
+                         well_order=("A01", "B02", "H12")),
+    )
+    assert plan.well_labels == ["A01", "B02", "H12"]
+    assert plan.n_wells == 3
+    assert plan.fovs_per_well == 1
+
+
+def test_plan_well_order_count_mismatch_rejected(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=3)
+    with pytest.raises(OmeImportError):
+        plan_conversion(
+            read_layout(p),
+            ConversionParams(grid_rows=1, grid_cols=1,
+                             well_order=("A01", "B02")),  # 2 wells, 3 positions
+        )
+
+
+def test_plan_well_order_duplicate_rejected(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=2)
+    with pytest.raises(OmeImportError):
+        plan_conversion(
+            read_layout(p),
+            ConversionParams(grid_rows=1, grid_cols=1,
+                             well_order=("A01", "A01")),
+        )
+
+
 def test_convert_writes_dataset_folder(tmp_path):
     p = _write_packed(tmp_path / "p.ome.tif", n_frames=6, size_c=2,
                       channel_names=("DAPI", "GFP"))
@@ -96,8 +130,32 @@ def test_convert_writes_dataset_folder(tmp_path):
     params = ConversionParams(grid_rows=1, grid_cols=3, fovs_per_well=2,
                               frame_order="pos_in_time")
     summary = convert(p, dest, params)
-    tifs = sorted(x.name for x in (dest / "in").glob("*.tif"))
-    assert len(tifs) == 12  # 3 wells × 2 FOVs... 6 positions × 2 channels × 1 tp
+    # Output is per-well zips (ready Analyze input), not loose TIFs.
+    import zipfile
+    zips = sorted(z.name for z in (dest / "in").glob("*.zip"))
+    assert zips == ["A01.zip", "A02.zip", "A03.zip"]
     assert "3 well(s)" in summary
-    # experiment token defaults to the file stem; channel token from OME name.
-    assert (dest / "in" / "p_DAPI_A01_f0_t0.tif").exists()
+    with zipfile.ZipFile(dest / "in" / "A01.zip") as zf:
+        members = zf.namelist()
+    # 2 FOVs × 2 channels × 1 timepoint per well; experiment token = file stem.
+    assert len(members) == 4
+    assert "p_DAPI_A01_f0_t0.tif" in members
+
+
+def test_convert_output_is_ready_analyze_input(tmp_path):
+    # The per-well zips must be usable by resolve_input_output *directly* — no
+    # WellPlateZipper regrouping pass (that's the point of zip-direct output).
+    from services.input_resolution_service import resolve_input_output
+
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=6)
+    dest = tmp_path / "ds"
+    convert(p, dest, ConversionParams(grid_rows=1, grid_cols=3, fovs_per_well=2,
+                                      frame_order="pos_in_time"))
+    logs: list[str] = []
+    in_dir, out_dir, on_success = resolve_input_output(
+        dest, log_fn=logs.append,
+        filename_schema="experiment:channel:well:fov:timepoint", filename_sep="_")
+    assert in_dir == dest / "in"
+    assert out_dir == dest / "out"
+    assert on_success is None  # nothing to clean up — already grouped
+    assert not any("zipper" in m.lower() for m in logs)

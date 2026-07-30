@@ -48,7 +48,7 @@ from typing import Callable
 import numpy as np
 import tifffile
 
-from util.plate_grid import serpentine_well_labels
+from util.plate_grid import normalize_well_order, serpentine_well_labels
 from util.zip_write import atomic_zip
 
 # How a single-image file's flat T-frame sequence splits into (position, timepoint):
@@ -383,6 +383,7 @@ def explode_ome_tiff(
     experiment: str = "ome",
     fovs_per_well: "int | None" = None,
     frame_order: str = "single",
+    well_order: "list[str] | None" = None,
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
     progress_fn: "Callable[[int, int], None] | None" = None,
@@ -395,8 +396,10 @@ def explode_ome_tiff(
     ``<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif`` inside that well's
     archive (the default filename schema -- the layout the pipeline reads
     directly, so no ``WellPlateZipper`` pass is needed). Each stage position maps
-    to a 96-well label via the serpentine order and the *grid_rows* x *grid_cols*
-    imaged block; each position is one well x FOV.
+    to a 96-well label by acquisition order: *well_order*, an explicit ordered
+    list of wells (which need not be rectangular), is used verbatim when given;
+    otherwise the label list is the serpentine sweep of the *grid_rows* x
+    *grid_cols* imaged block. Each position is one well x FOV.
 
     Two source structures are handled (see :class:`OmeLayout`). A **multi-image**
     file has one series per position. A **single-image** file packs every position
@@ -432,12 +435,17 @@ def explode_ome_tiff(
         )
 
     layout = read_ome_layout(ome_path)
-    n_wells = grid_rows * grid_cols
     exp_tok = _safe_token(experiment, "ome")
-    # Raises for an out-of-range grid before any archive is written.
-    well_labels = serpentine_well_labels(
-        grid_rows, grid_cols, origin=origin_well, direction=direction
-    )
+    # An explicit ordering (click-defined on the plate mockup) is used verbatim;
+    # it needn't be rectangular. Otherwise reconstruct the rectangular serpentine
+    # from the grid — both raise before any archive is written.
+    if well_order:
+        well_labels = normalize_well_order(well_order)
+    else:
+        well_labels = serpentine_well_labels(
+            grid_rows, grid_cols, origin=origin_well, direction=direction
+        )
+    n_wells = len(well_labels)
 
     if layout.single_image:
         n_positions, n_timepoints, fovs = _resolve_single_image(

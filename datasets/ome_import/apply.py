@@ -43,6 +43,7 @@ def convert(
         experiment=experiment,
         fovs_per_well=params.fovs_per_well,
         frame_order=params.frame_order,
+        well_order=list(params.well_order) or None,
         workers=params.workers,
         log_fn=log,
         progress_fn=progress,

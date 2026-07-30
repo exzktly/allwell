@@ -124,16 +124,17 @@ allwell/
 │   ├── shape_features.py       ← per-cell shape-feature catalog (pipeline emits, GUI labels)
 │   ├── cellpose.py             ← Cellpose segmenters (Torch imported lazily)
 │   ├── stardist.py             ← StarDist segmenters + per-worker model state (TF lazy)
-│   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into loose per-plane
-│   │                              TIFs (Z max-projected; positions → wells via §OME)
+│   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into per-well .zip
+│   │                              archives (Z max-projected; positions → wells via §OME)
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
 │   ├── well_token.py           ← canonical 96-well token parser (single source of truth:
 │   │                              process_microscopy, WellPlateZipper, analyze_tab and
 │   │                              input_resolution_service all parse well names through it)
-│   ├── plate_grid.py           ← serpentine (boustrophedon) index → 96-well label mapping
-│   │                              (used by the OME-TIFF de-interleave)
+│   ├── plate_grid.py           ← position index → 96-well label mapping: serpentine
+│   │                              (boustrophedon) + normalize_well_order (arbitrary
+│   │                              click-defined order); used by the OME-TIFF de-interleave
 │   ├── schema.py               ← filename-schema vocabulary + parse/validate
 │   │                              (shared by process_microscopy and WellPlateZipper)
 │   ├── timepoint.py            ← timepoint token → hours + the shared sort key
@@ -1565,9 +1566,8 @@ trying to run it.
 
 The conversion itself is `pipeline.ome_explode.explode_ome_tiff`. It reads the
 OME-XML for dimension order and channel names, **max-projects Z**, maps each
-stage position to a 96-well label via `util.plate_grid` (serpentine order + the
-imaged grid, one well × FOV per position; FOVs-per-well is entered explicitly and
-cross-checked, or derived), and writes the planes named
+stage position to a 96-well label via `util.plate_grid`, and writes the planes
+named
 `<experiment>_<channel>_<well>_f<fov>_<timepoint>.tif` **directly into per-well
 `<destination>/in/<WELL>.zip` archives** — the exact layout `resolve_input_output`
 accepts as ready input, so Analyze uses it with **no** `WellPlateZipper` pass.
@@ -1580,6 +1580,25 @@ well, and a cancelled/failed well leaves **no** partial archive (`atomic_zip`
 discards its staging file). A read-vs-write timing line is logged so the dominant
 cost is visible; the parallelism grain is per-well, so a degenerate single-well
 grid stays serial.
+
+**The well ordering need not be rectangular.** Each stage position `i` maps to
+`well_labels[i // fovs_per_well]`, so the acquisition path is just an ordered list
+of wells (one well × FOV per position; FOVs-per-well is entered explicitly and
+cross-checked, or derived). By default that list is the **serpentine** sweep of
+the imaged `grid_rows × grid_cols` block (`serpentine_well_labels`). But
+`explode_ome_tiff` / `plan_conversion` also accept an explicit **`well_order`** —
+an ordered list of wells that need not form a rectangle or any particular shape
+(`util.plate_grid.normalize_well_order` canonicalises it and rejects an invalid or
+duplicated token) — which replaces the serpentine entirely, with the grid fields
+acting only as a seed. The converter page builds this order on
+`widgets/plate_order_editor.PlateOrderEditor`, an 8×12 plate whose model is an
+*ordered list* (unlike `WellPlateSelector`'s unordered set): it draws the
+numbered visit sequence plus a subtle arrow tracing position→well across the
+plate (the visual confirmation), and clicking wells appends / removes-and-
+renumbers them to define an arbitrary order (component 2). The page keeps the
+plate a live serpentine preview of the grid until the user clicks (the widget's
+*dirty* flag), after which the grid no longer overwrites it.
+
 Two source structures are handled (`read_ome_layout` → `OmeLayout.single_image`),
 because OME allows only X/Y/Z/C/T inside one `<Image>` — there is no position
 dimension:
@@ -1994,7 +2013,12 @@ readout, `apply.convert` calls `explode_ome_tiff` (which writes per-well zips in
 runs it off the UI thread. On success
 the page's "Open in Analyze" button routes the produced folder to the Analyze
 pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
-dataset. Channel roles are left to Analyze's normal Channel Tokens section.
+dataset. Channel roles are left to Analyze's normal Channel Tokens section. The
+page also carries a `PlateOrderEditor` (§6.1): the grid fields seed a live
+serpentine preview, and the user can click wells to define an arbitrary
+`ConversionParams.well_order` (populated from `PlateOrderEditor.order()`) for a
+non-rectangular scan, which `plan_conversion` / `explode_ome_tiff` use in place of
+the serpentine.
 
 **Concatenate datasets** (`datasets/concatenate/`) appends one dataset's
 timepoints after another's. Two datasets of the same plate, imaged in separate
@@ -2130,6 +2154,7 @@ Notable members worth knowing about by name:
 |--------|-----------|
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
+| `PlateOrderEditor` (`widgets/plate_order_editor.py`) | An 8×12 plate whose model is an *ordered list* of wells — the acquisition path — not an unordered selection set. Lit wells carry their 1-based visit number and a subtle alpha-blended arrow traces the order across the plate; clicking an off-path well appends it, clicking an on-path one removes it and the rest renumber (`orderChanged`). A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
 | `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind both live run dashboards: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` and `ConcatDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so the two can't visually drift apart. |
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by its furthest-reached stage and overlays a gear glyph on the actively-computing well with its `FOV done/total` sub-progress. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |

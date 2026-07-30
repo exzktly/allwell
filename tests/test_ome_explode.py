@@ -179,6 +179,37 @@ def test_explicit_fovs_per_well_matches_derived(tmp_path):
     assert _members(explicit) == _members(auto)
 
 
+def test_explicit_well_order_non_rectangular(tmp_path):
+    # 3 positions, an explicit non-rectangular / non-serpentine ordering. The
+    # per-well zips are exactly those wells, and the position→well mapping
+    # follows the given order (position i → well_order[i], pixel-identity).
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=3, size_c=1,
+                      channel_names=("GFP",))
+    out = tmp_path / "in"
+    res = explode_ome_tiff(
+        p, out, grid_rows=1, grid_cols=1, fovs_per_well=1,
+        frame_order="single", well_order=["A01", "H12", "B02"], experiment="e",
+    )
+    assert res.wells == ["A01", "B02", "H12"]      # sorted set of the given wells
+    assert _zips(out) == ["A01.zip", "B02.zip", "H12.zip"]
+    # Frame value is frame*10. Position 1 → well H12 (well_order[1]); pixel = 10.
+    assert int(_read(out, "H12", "e_GFP_H12_f0_t0.tif").max()) == 10
+    # Position 2 → well B02; pixel = 20.
+    assert int(_read(out, "B02", "e_GFP_B02_f0_t0.tif").max()) == 20
+
+
+def test_well_order_duplicate_rejected_before_writing(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=2, size_c=1,
+                      channel_names=("GFP",))
+    out = tmp_path / "in"
+    with pytest.raises(ValueError, match="more than once"):
+        explode_ome_tiff(
+            p, out, grid_rows=1, grid_cols=1, fovs_per_well=1,
+            frame_order="single", well_order=["A01", "A01"], experiment="e",
+        )
+    assert _zips(out) == []
+
+
 def test_explicit_fovs_per_well_mismatch_rejected(tmp_path):
     # 6 positions, but 2×2 wells × 2 FOVs = 8 ≠ 6.
     p = _write_ome(tmp_path / "s.ome.tif", positions=6, size_t=1, size_c=1, size_z=1)

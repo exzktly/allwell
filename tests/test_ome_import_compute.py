@@ -89,6 +89,40 @@ def test_plan_grid_overflow_rejected(tmp_path):
             grid_rows=2, grid_cols=2, origin="H12", fovs_per_well=1))
 
 
+def test_plan_explicit_well_order_non_rectangular(tmp_path):
+    # 3 positions, an explicit non-rectangular ordering — the plan uses that order
+    # and count, ignoring the (seed) grid fields entirely.
+    p = _write_multi(tmp_path / "m.ome.tif", positions=3)
+    plan = plan_conversion(
+        read_layout(p),
+        ConversionParams(grid_rows=1, grid_cols=1,
+                         well_order=("A01", "B02", "H12")),
+    )
+    assert plan.well_labels == ["A01", "B02", "H12"]
+    assert plan.n_wells == 3
+    assert plan.fovs_per_well == 1
+
+
+def test_plan_well_order_count_mismatch_rejected(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=3)
+    with pytest.raises(OmeImportError):
+        plan_conversion(
+            read_layout(p),
+            ConversionParams(grid_rows=1, grid_cols=1,
+                             well_order=("A01", "B02")),  # 2 wells, 3 positions
+        )
+
+
+def test_plan_well_order_duplicate_rejected(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=2)
+    with pytest.raises(OmeImportError):
+        plan_conversion(
+            read_layout(p),
+            ConversionParams(grid_rows=1, grid_cols=1,
+                             well_order=("A01", "A01")),
+        )
+
+
 def test_convert_writes_dataset_folder(tmp_path):
     p = _write_packed(tmp_path / "p.ome.tif", n_frames=6, size_c=2,
                       channel_names=("DAPI", "GFP"))

@@ -110,6 +110,41 @@ def serpentine_well_labels(
     return labels
 
 
+def normalize_well_order(labels) -> list[str]:
+    """Canonicalise an explicit acquisition ordering into 96-well labels.
+
+    Takes an arbitrary sequence of well tokens — the order in which the stage
+    visited wells, as defined by clicking a plate mockup rather than derived from
+    a rectangular serpentine — and returns the canonical zero-padded uppercase
+    labels (``"a1"`` → ``"A01"``) in the same order. Unlike
+    :func:`serpentine_well_labels` the wells need not form a rectangle or any
+    particular shape; the only constraints are that every token is a valid
+    96-well position and no well appears twice (a stage can't be at two places at
+    the same acquisition index).
+
+    Raises ``ValueError`` for an empty ordering, an invalid token, or a duplicate.
+    """
+    order = list(labels or [])
+    if not order:
+        raise ValueError("The well ordering is empty; add at least one well.")
+    seen: set[str] = set()
+    result: list[str] = []
+    for tok in order:
+        canon = canonical_well_label(str(tok))
+        if canon is None:
+            raise ValueError(
+                f"Well {tok!r} is not a valid 96-well position (A01–H12)."
+            )
+        if canon in seen:
+            raise ValueError(
+                f"Well {canon} appears more than once in the ordering; each well "
+                f"may be visited only once."
+            )
+        seen.add(canon)
+        result.append(canon)
+    return result
+
+
 def position_to_well_fov(
     index: int,
     *,

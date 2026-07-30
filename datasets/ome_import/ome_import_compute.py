@@ -19,7 +19,7 @@ from pipeline.ome_explode import (
     OmeLayout,
     read_ome_layout,
 )
-from util.plate_grid import serpentine_well_labels
+from util.plate_grid import normalize_well_order, serpentine_well_labels
 
 _OME_SUFFIXES = (".ome.tif", ".ome.tiff")
 
@@ -40,6 +40,10 @@ class ConversionParams:
     frame_order: str = "single"           # single-image files only
     experiment: str = ""                  # blank = derive from the filename
     workers: int = 0                      # 0 = auto (per-well thread pool)
+    # An explicit acquisition ordering (click-defined on the plate mockup). When
+    # non-empty it replaces the rectangular serpentine: wells are visited in this
+    # order and the grid fields only seed it. May be non-rectangular.
+    well_order: tuple[str, ...] = ()
 
 
 @dataclass
@@ -104,27 +108,40 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
     can't produce a whole split, or the grid overflows the 96-well plate.
     """
     rows, cols = params.grid_rows, params.grid_cols
-    if rows <= 0 or cols <= 0:
-        raise OmeImportError(
-            "Enter the imaged well-grid dimensions (rows × columns) as positive "
-            "whole numbers."
-        )
-    n_wells = rows * cols
-    try:
-        well_labels = serpentine_well_labels(
-            rows, cols, origin=params.origin or "A01", direction=params.direction,
-        )
-    except ValueError as exc:
-        raise OmeImportError(str(exc)) from exc
+    if params.well_order:
+        try:
+            well_labels = normalize_well_order(params.well_order)
+        except ValueError as exc:
+            raise OmeImportError(str(exc)) from exc
+    else:
+        if rows <= 0 or cols <= 0:
+            raise OmeImportError(
+                "Enter the imaged well-grid dimensions (rows × columns) as positive "
+                "whole numbers."
+            )
+        try:
+            well_labels = serpentine_well_labels(
+                rows, cols, origin=params.origin or "A01", direction=params.direction,
+            )
+        except ValueError as exc:
+            raise OmeImportError(str(exc)) from exc
+    n_wells = len(well_labels)
+
+    # How to name the well count in errors: the grid shape when it's an actual
+    # rectangle, else the plain count (a click-defined order needn't be one).
+    if params.well_order or rows * cols != n_wells:
+        wells_desc = f"{n_wells} well(s)"
+    else:
+        wells_desc = f"{rows}×{cols} = {n_wells} well(s)"
 
     fovs = params.fovs_per_well
     if layout.single_image:
         n_positions, n_timepoints, fovs = _split_single_image(
-            layout.n_frames, n_wells, fovs, params.frame_order, rows, cols,
+            layout.n_frames, n_wells, fovs, params.frame_order, wells_desc,
         )
     else:
         n_positions, n_timepoints, fovs = _split_multi_image(
-            layout.n_positions, n_wells, fovs, layout.size_t, rows, cols,
+            layout.n_positions, n_wells, fovs, layout.size_t, wells_desc,
         )
     return ConversionPlan(
         single_image=layout.single_image,
@@ -137,25 +154,25 @@ def plan_conversion(layout: OmeLayout, params: ConversionParams) -> ConversionPl
 
 
 def _split_multi_image(
-    total: int, n_wells: int, fovs: int | None, size_t: int, rows: int, cols: int,
+    total: int, n_wells: int, fovs: int | None, size_t: int, wells_desc: str,
 ) -> tuple[int, int, int]:
     if fovs is None:
         if total % n_wells != 0:
             raise OmeImportError(
-                f"{total} stage position(s) don't divide evenly into {rows}×{cols} "
-                f"= {n_wells} wells. Set FOVs per well, or fix the grid."
+                f"{total} stage position(s) don't divide evenly into {wells_desc}. "
+                f"Set FOVs per well, or fix the grid."
             )
         fovs = total // n_wells
     elif n_wells * fovs != total:
         raise OmeImportError(
-            f"{rows}×{cols} wells × {fovs} FOV(s) = {n_wells * fovs}, but the file "
+            f"{wells_desc} × {fovs} FOV(s) = {n_wells * fovs}, but the file "
             f"has {total} stage position(s)."
         )
     return total, max(size_t, 1), fovs
 
 
 def _split_single_image(
-    n_frames: int, n_wells: int, fovs: int | None, order: str, rows: int, cols: int,
+    n_frames: int, n_wells: int, fovs: int | None, order: str, wells_desc: str,
 ) -> tuple[int, int, int]:
     if order not in FRAME_ORDERS:
         raise OmeImportError(f"Unknown frame order {order!r}.")
@@ -163,13 +180,13 @@ def _split_single_image(
         if fovs is None:
             if n_frames % n_wells != 0:
                 raise OmeImportError(
-                    f"{n_frames} frames don't divide evenly into {rows}×{cols} = "
-                    f"{n_wells} wells. Set FOVs per well, or fix the grid."
+                    f"{n_frames} frames don't divide evenly into {wells_desc}. "
+                    f"Set FOVs per well, or fix the grid."
                 )
             fovs = n_frames // n_wells
         if n_wells * fovs != n_frames:
             raise OmeImportError(
-                f"{rows}×{cols} wells × {fovs} FOV(s) = {n_wells * fovs}, but the "
+                f"{wells_desc} × {fovs} FOV(s) = {n_wells * fovs}, but the "
                 f"file has {n_frames} frame(s)."
             )
         return n_frames, 1, fovs
@@ -183,7 +200,7 @@ def _split_single_image(
     n_timepoints, rem = divmod(n_frames, n_positions)
     if rem or n_timepoints < 1:
         raise OmeImportError(
-            f"{n_frames} frames don't split into {rows}×{cols} × {fovs} FOV(s) = "
+            f"{n_frames} frames don't split into {wells_desc} × {fovs} FOV(s) = "
             f"{n_positions} positions × a whole number of timepoints."
         )
     return n_positions, n_timepoints, fovs

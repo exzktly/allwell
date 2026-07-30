@@ -38,7 +38,9 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from util.plate_grid import serpentine_well_labels
 from widgets.icons import make_icon
+from widgets.plate_order_editor import PlateOrderEditor
 from datasets.ome_import.ome_import_compute import (
     ConversionParams,
     OmeImportError,
@@ -157,6 +159,7 @@ class OmeImportPage(QWidget):
         outer.addWidget(self._dest_field)
 
         self._build_params(outer)
+        self._build_plate(outer)
 
         self._readout = QLabel("", self)
         self._readout.setObjectName("Muted")
@@ -241,6 +244,65 @@ class OmeImportPage(QWidget):
         hl2.addStretch(1)
         outer.addWidget(row2)
 
+    def _build_plate(self, outer: QVBoxLayout) -> None:
+        caption = QLabel(
+            "Acquisition path — the numbered wells and arrow show the order stage "
+            "positions map onto the plate. Enter a grid above to seed a serpentine "
+            "path, or click wells here, in visit order, to define an arbitrary "
+            "(even non-rectangular) ordering.",
+            self,
+        )
+        caption.setObjectName("Muted")
+        caption.setWordWrap(True)
+        outer.addWidget(caption)
+
+        self._plate = PlateOrderEditor(self)
+        self._plate.orderChanged.connect(lambda _=None: self.refresh_readout())
+        outer.addWidget(self._plate)
+
+        btn_row = QWidget(self)
+        bl = QHBoxLayout(btn_row)
+        bl.setContentsMargins(0, 0, 0, 0)
+        bl.setSpacing(theme.Spacing.sm)
+        self._seed_btn = QPushButton("Generate path from grid", btn_row)
+        self._seed_btn.setProperty("variant", "secondary")
+        self._seed_btn.setToolTip(
+            "Fill the plate with the serpentine path of the grid above, as an "
+            "editable starting point."
+        )
+        self._seed_btn.clicked.connect(self._generate_path)
+        bl.addWidget(self._seed_btn)
+        self._clear_path_btn = QPushButton("Clear path", btn_row)
+        self._clear_path_btn.setProperty("variant", "secondary")
+        self._clear_path_btn.setToolTip(
+            "Clear the clicked ordering and return to the live grid preview."
+        )
+        self._clear_path_btn.clicked.connect(self._plate.clear)
+        bl.addWidget(self._clear_path_btn)
+        bl.addStretch(1)
+        outer.addWidget(btn_row)
+
+    def _generate_path(self) -> None:
+        labels = self._serpentine_seed()
+        if labels:
+            self._plate.set_order(labels)
+            self.refresh_readout()
+
+    def _serpentine_seed(self) -> list[str]:
+        """The grid's serpentine well labels, or ``[]`` if the grid is invalid."""
+        rows = _as_int(self._rows_edit.text())
+        cols = _as_int(self._cols_edit.text())
+        if rows <= 0 or cols <= 0:
+            return []
+        try:
+            return serpentine_well_labels(
+                rows, cols,
+                origin=self._origin_edit.text().strip() or "A01",
+                direction=str(self._direction_cb.currentData() or "row"),
+            )
+        except ValueError:
+            return []
+
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
@@ -316,6 +378,7 @@ class OmeImportPage(QWidget):
             direction=str(self._direction_cb.currentData() or "row"),
             fovs_per_well=_as_int(self._fovs_edit.text()) or None,
             frame_order=str(self._frame_order_cb.currentData() or "single"),
+            well_order=tuple(self._plate.order()) if hasattr(self, "_plate") else (),
             workers=max(0, _as_int(self._workers_edit.text())),
         )
 
@@ -344,6 +407,11 @@ class OmeImportPage(QWidget):
 
     def refresh_readout(self) -> None:
         """Recompute the split readout and the frame-order visibility / Run gate."""
+        # Keep the plate a live serpentine preview of the grid until the user
+        # hand-draws an order (dirty); ``set_preview`` is a no-op once dirty, so
+        # a clicked ordering is never clobbered by a grid edit.
+        if hasattr(self, "_plate") and not self._plate.is_dirty():
+            self._plate.set_preview(self._serpentine_seed())
         src = self._src_field.path() if hasattr(self, "_src_field") else ""
         single = False
         message = ""

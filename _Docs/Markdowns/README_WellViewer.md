@@ -1444,15 +1444,29 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    and suggests a **Destination folder** (`<name>_dataset` beside the file); change
    it if you like.
 2. **Well grid (rows × cols)** — the block of wells you imaged (e.g. `2 × 3`).
-   The stage is assumed to have visited them in **serpentine** order (sweep a row,
-   drop down, sweep back); this is what lets each position get its well label.
+   By default the stage is assumed to have visited them in **serpentine** order
+   (sweep a row, drop down, sweep back); this is what lets each position get its
+   well label. For a non-rectangular scan you can override this by clicking the
+   plate mockup directly (step 5).
 3. **FOVs per well** — fields-of-view per well. Leave blank to derive it; enter a
    value and the converter refuses to run if it doesn't match the file.
 4. **Origin** (top-left well, default `A01`) and **Serpentine** direction (snake
    by row or by column).
-5. **Workers** — how many wells to convert in parallel (blank = auto). Lower it if
+5. **Acquisition path** — the plate mockup below the settings shows how stage
+   positions map onto the plate: each visited well is numbered in visit order and
+   a subtle arrow traces the sequence across the plate. Entering a grid seeds this
+   with the serpentine path automatically, so for a normal rectangular scan you
+   only need to glance at it to confirm the labelling. If your scan **isn't**
+   rectangular — an L-shape, a scattered subset, or a custom visit order — click
+   the wells directly, in the order the stage visited them: the first click is
+   position 1, the next is position 2, and so on. Clicking a numbered well removes
+   it and the rest renumber. **Generate path from grid** refills the plate with
+   the serpentine of the current grid as an editable starting point; **Clear path**
+   empties it and returns to the live grid preview. Once you've clicked, the grid
+   fields stop overwriting your hand-drawn order (they become just a seed).
+6. **Workers** — how many wells to convert in parallel (blank = auto). Lower it if
    converting to a single spinning disk feels slower rather than faster.
-6. **Frame order** — *shown only for a single-image file that packs every
+7. **Frame order** — *shown only for a single-image file that packs every
    position into its T axis*. Because an OME image has no position dimension, the
    positions live in the T axis, possibly interleaved with real timepoints. Say
    how the frames are ordered: **Single timepoint** (every frame is a distinct

@@ -1476,16 +1476,23 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    position), **Positions within timepoint** (all positions, then the set repeats
    next timepoint), or **Timepoints within position**. Positions come from your
    grid × FOVs; timepoints are then `frames ÷ positions`.
+8. **Channel roles** — one row per channel read from the OME metadata, each with a
+   role: **Nuclear / segmentation**, **Fluorescent**, **Phase / brightfield**, or
+   **Skip**. The roles are seeded from the channel names (a `DAPI` / `Hoechst` /
+   `NIR`-type name is guessed as nuclear, the rest fluorescent); change any of
+   them. This is only a convenience: the channel names are always written into the
+   output filenames regardless, but the roles you set here **pre-fill Analyze's
+   channel-token fields** when you open the dataset there, so you don't retype them.
 
 The readout shows how the file splits into wells × FOVs × timepoints and lists the
 channel names (any Z-stack is **maximum-intensity projected**; labels stay within
 the 96-well plate `A01`–`H12`). Press **Convert** — a progress bar fills as the
 wells are written in parallel (Cancel stops it cleanly), and the output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
-(no regrouping step). Then **Open dataset in Analyze**, type the channel names it
-listed into the Segmentation / fluorescent channel tokens as usual, and run —
-because the wells now exist on disk, background-well and control-well options work
-normally.
+(no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
+fluorescent channel tokens arrive pre-filled from the channel roles you set (step
+8; adjust if needed), so you can run straight away. Because the wells now exist on
+disk, background-well and control-well options work normally.
 
 ### Concatenate datasets
 

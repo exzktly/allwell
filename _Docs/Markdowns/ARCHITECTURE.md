@@ -2019,7 +2019,14 @@ entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (w
 runs it off the UI thread. On success
 the page's "Open in Analyze" button routes the produced folder to the Analyze
 pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
-dataset. Channel roles are left to Analyze's normal Channel Tokens section. The
+dataset. The page also carries a per-channel **role picker** (one row per OME
+channel name, seeded by `ome_import_compute.default_channel_roles`'s name
+heuristic — `guess_channel_role` reads a `DAPI`/`Hoechst`/`NIR`-type name as
+nuclear); `channel_tokens_from_roles` aggregates the picks into a minimal
+`pipeline_info`-shaped dict (`nuclear_token` / `fluor_tokens` / `phase_token`)
+that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds to
+`AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive pre-filled.
+The channel names are written into the output filenames regardless of the roles. The
 page also carries a `PlateOrderEditor` (§6.1): the grid fields seed a live
 serpentine preview, and the user can click wells to define an arbitrary
 `ConversionParams.well_order` (populated from `PlateOrderEditor.order()`) for a

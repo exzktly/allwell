@@ -11,7 +11,10 @@ from datasets.ome_import.apply import convert  # noqa: E402
 from datasets.ome_import.ome_import_compute import (  # noqa: E402
     ConversionParams,
     OmeImportError,
+    channel_tokens_from_roles,
+    default_channel_roles,
     default_dest,
+    guess_channel_role,
     plan_conversion,
     read_layout,
     selection_target,
@@ -157,6 +160,48 @@ def test_selection_target_single_image_packed_positions_unknown(tmp_path):
         grid_rows=1, grid_cols=1, frame_order="pos_in_time"))
     assert packed.positions is None
     assert "timepoints" in packed.hint()
+
+
+def test_guess_channel_role_by_name():
+    assert guess_channel_role("DAPI") == "nuclear"
+    assert guess_channel_role("Hoechst 33342") == "nuclear"
+    assert guess_channel_role("NIR") == "nuclear"
+    assert guess_channel_role("Phase") == "phase"
+    assert guess_channel_role("Brightfield") == "phase"
+    assert guess_channel_role("GFP") == "fluor"
+
+
+def test_default_channel_roles_picks_one_nuclear():
+    # DAPI reads as nuclear; the rest fluorescent.
+    roles = default_channel_roles(["DAPI", "GFP", "RFP"])
+    assert roles == {"DAPI": "nuclear", "GFP": "fluor", "RFP": "fluor"}
+
+
+def test_default_channel_roles_falls_back_to_first_channel():
+    # No nuclear-looking name → the first channel is assigned nuclear so
+    # segmentation has a channel to run on.
+    roles = default_channel_roles(["GFP", "RFP"])
+    assert roles["GFP"] == "nuclear"
+    assert roles["RFP"] == "fluor"
+
+
+def test_default_channel_roles_keeps_only_first_nuclear():
+    roles = default_channel_roles(["DAPI", "Hoechst", "GFP"])
+    assert roles["DAPI"] == "nuclear"
+    assert roles["Hoechst"] == "fluor"   # demoted — only one nuclear
+
+
+def test_channel_tokens_from_roles_aggregates():
+    tokens = channel_tokens_from_roles([
+        ("DAPI", "nuclear"), ("GFP", "fluor"), ("RFP", "fluor"),
+        ("Phase", "phase"), ("Junk", "skip"),
+    ])
+    assert tokens.nuclear_token == "DAPI"
+    assert tokens.fluor_tokens == ["GFP", "RFP"]
+    assert tokens.phase_token == "Phase"
+    info = tokens.as_pipeline_info()
+    assert info == {"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"],
+                    "phase_token": "Phase"}
 
 
 def test_convert_writes_dataset_folder(tmp_path):

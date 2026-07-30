@@ -11,6 +11,7 @@ page/worker layer stays a thin shell on top (CLAUDE.md §3/§5).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -128,6 +129,85 @@ def selection_target(layout: OmeLayout, params: ConversionParams) -> SelectionTa
     else:
         positions, noun = None, "frame"
     return SelectionTarget(positions, noun, params.fovs_per_well)
+
+
+# ── channel roles ───────────────────────────────────────────────────────────
+# The converter writes the OME channel names as filename tokens but leaves their
+# analysis *roles* (which is the nuclear/segmentation channel, which are the
+# fluorescent readouts, which is a phase/brightfield frame) to Analyze. Assigning
+# them here — seeded by a name heuristic, user-overridable — lets the page hand a
+# ready channel mapping to Analyze on "Open in Analyze" instead of the user
+# retyping every token.
+
+CHANNEL_ROLES = ("nuclear", "fluor", "phase", "skip")
+
+# Names that read as the nuclear/segmentation channel, or a phase/brightfield one.
+_NUCLEAR_HINT_RE = re.compile(r"dapi|hoechst|nuclear|nucleus|nuc|dna|h33342|405|nir",
+                              re.IGNORECASE)
+_PHASE_HINT_RE = re.compile(r"phase|brightfield|bright.?field|trans|dic|\bbf\b",
+                            re.IGNORECASE)
+
+
+@dataclass
+class ChannelTokens:
+    """The channel role assignment, in Analyze's ``pipeline_info`` vocabulary."""
+
+    nuclear_token: str = ""
+    fluor_tokens: list[str] = field(default_factory=list)
+    phase_token: str = ""
+
+    def as_pipeline_info(self) -> dict:
+        """A minimal ``pipeline_info``-shaped dict for ``_apply_pipeline_info``."""
+        d: dict = {"fluor_tokens": list(self.fluor_tokens)}
+        if self.nuclear_token:
+            d["nuclear_token"] = self.nuclear_token
+        if self.phase_token:
+            d["phase_token"] = self.phase_token
+        return d
+
+
+def guess_channel_role(name: str) -> str:
+    """The best-guess role for a single channel *name* (``nuclear``/``phase``/``fluor``)."""
+    if _NUCLEAR_HINT_RE.search(name or ""):
+        return "nuclear"
+    if _PHASE_HINT_RE.search(name or ""):
+        return "phase"
+    return "fluor"
+
+
+def default_channel_roles(names) -> dict[str, str]:
+    """Heuristic role per channel token, keyed by name, with exactly one nuclear.
+
+    Segmentation needs a nuclear channel, so when no name reads as nuclear the
+    first channel is assigned it; when several do, only the first keeps it and the
+    rest fall back to fluorescent. The caller can override any of it.
+    """
+    names = list(names)
+    roles = {n: guess_channel_role(n) for n in names}
+    nucs = [n for n in names if roles[n] == "nuclear"]
+    if not nucs and names:
+        roles[names[0]] = "nuclear"
+    elif len(nucs) > 1:
+        for n in nucs[1:]:
+            roles[n] = "fluor"
+    return roles
+
+
+def channel_tokens_from_roles(role_pairs) -> ChannelTokens:
+    """Aggregate an ordered ``[(name, role), …]`` list into a :class:`ChannelTokens`.
+
+    Takes the first ``nuclear`` and first ``phase`` (extra picks fall to
+    fluorescent); ``skip`` channels are dropped from every role.
+    """
+    pairs = list(role_pairs)
+    nuclear = next((n for n, r in pairs if r == "nuclear"), "")
+    phase = next((n for n, r in pairs if r == "phase"), "")
+    used_singletons = {nuclear, phase} - {""}
+    fluor = [
+        n for n, r in pairs
+        if n not in used_singletons and r in ("fluor", "nuclear", "phase")
+    ]
+    return ChannelTokens(nuclear_token=nuclear, fluor_tokens=fluor, phase_token=phase)
 
 
 def is_ome_tiff(path: Path | str) -> bool:

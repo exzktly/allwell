@@ -2253,6 +2253,56 @@ Two conversion modes, one code path each, both in `apply.py`:
   per-well folders `run_zipper` produces into the same `<well>.zip` layout
   the new-destination mode writes.
 
+**Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
+Concatenate. Concatenate joins the same plate imaged at different times (a
+well present in both datasets is stitched — more timepoints for the same
+sample); this joins **different plates at the same times** (two 24-well
+runs becoming one 96-well dataset). The semantics are the inverse of
+Concatenate's on the point that matters most: a well present in both
+datasets here is **two different biological samples**, so it is **refused**,
+not merged, unless the user remaps dataset 2's wells onto free positions
+first (a block-placement control — "place dataset 2 starting at well E01" —
+translating dataset 2's occupied wells as a rigid block via
+`merge_plates_compute.block_shift_well_map`).
+
+A well is carried by four values, and all four must move together — the
+same lock-step discipline this section documents for Concatenate's
+timepoints, with a wider surface because three of these are filenames
+rather than file contents: the `well` field inside each zip member's name
+(rewritten through `datasets._common.member_names.rewrite_member_field`,
+whose predicate is `canonical_well_label(old) == expected_source_well` — a
+stricter gate than the timepoint case's `isfinite`, since a mismatch here
+means the member is sitting in the wrong well's archive), the `well` column
+in every CSV row, the three container names (`in/<WELL>.zip`,
+`out/<WELL>_out.zip`, `out/<csv_prefix>_<WELL>.csv` — the prefix derived
+from the actual filename, never reconstructed), and the `well` keys inside
+`cell_overrides.json` and `pipeline_info.json::sample_definitions`.
+
+`build_plate_merge_plan` reuses `check_compatible` and `known_channel_tokens`
+from `concatenate_compute` unchanged, gates on the same destination-state
+predicates with its own marker (`.aw_merge_in_progress`), refuses a
+well-remap target that isn't a valid 96-well position, refuses a post-remap
+collision (naming the colliding tokens), and **warns** rather than refuses
+when the two datasets don't share the same timepoints (a merged plate is
+legitimately ragged — one plate imaged longer — but every plot will show
+gaps, so it must be said).
+
+**When dataset 2's wells are already disjoint from dataset 1's (the identity
+map, the common case), nothing is rewritten at all** — containers are
+copied byte-for-byte and CSV rows verbatim, so the fast path is a pure copy.
+
+Curation is where this is genuinely harder than Concatenate, which simply
+carries dataset 1's forward unchanged: `merge_sample_definitions` remaps
+dataset 2's `well_labels`/`rep_sets`/`groups` well references through the
+well map and disambiguates dataset-2 rep-set/group names that collide with
+dataset 1's by suffixing with dataset 2's folder name, rather than silently
+overwriting a same-named definition. `cell_gating` still simply carries
+dataset 1's forward, with the same "set under dataset 1's imaging
+conditions, worth reviewing" note Concatenate gives. Cell overrides remap
+their `well` key through the well map before the `seg_fp` restamp (from the
+destination `<well>_out.zip`, as the last write to that archive) —
+Concatenate's own precedent, not reinvented.
+
 ---
 
 ## 7. The widget library (`widgets/`)

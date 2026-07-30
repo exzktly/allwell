@@ -50,7 +50,8 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
      [Subset / Split Dataset](#subset--split-dataset) ·
-     [Import Loose Folder](#import-loose-folder)
+     [Import Loose Folder](#import-loose-folder) ·
+     [Merge Plates](#merge-plates)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -80,9 +81,10 @@ to add features, how to debug, and build / environment troubleshooting), see
   **Validate & Repair Dataset** checks whether an Analyze run actually
   finished and fixes metadata drift without re-running the pipeline; and
   **Subset / Split Dataset** copies a filtered slice of wells/timepoints/FOVs
-  into a new folder, leaving the source untouched; and **Import Loose
+  into a new folder, leaving the source untouched; **Import Loose
   Folder** groups a folder of loose TIFs into per-well zips with a live
-  preview before converting.
+  preview before converting; and **Merge Plates** joins two different plates
+  along the well axis into one dataset.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
   it. The hand-off is automatic when an Analyze run completes successfully.
 - **Persistence baked in.** Channel-threshold defaults, saved selections,
@@ -1637,6 +1639,42 @@ structure yet) into the layout Analyze reads directly.
 Files that don't match the schema are left alone and reported rather than
 guessed at; a broken symlink is skipped and counted rather than crashing the
 conversion.
+
+### Merge Plates
+
+Use this when the *same plate* imaged in two separate sessions isn't what
+you have — instead, you have **two different plates** you want to treat as
+one 96-well dataset (e.g. two 24-well runs of different conditions). This is
+the well-axis counterpart to Concatenate, which joins the same plate across
+time.
+
+1. Fill in **Dataset 1 + Dataset 2 = Destination**, the same way as
+   Concatenate.
+2. If the two plates used any of the same well positions, the merge refuses
+   — a well in both datasets is treated as two different samples, not one to
+   stitch together. Check **Place dataset 2 starting at well** and enter a
+   well (e.g. `E01`) to shift all of dataset 2's wells as a block to start
+   there, landing on free positions. If the two plates are already disjoint,
+   leave it unchecked — nothing needs remapping.
+3. Press **Merge**. A live plate map fills in, colouring dataset 1's wells
+   and dataset 2's wells differently so a remap is visually confirmable.
+
+When nothing needs remapping, the merge is a pure copy — nothing about a
+well's images, measurements, or filenames is rewritten. When wells are
+remapped, every value tied to that well moves together: the images' file
+names, the measurements' `well` column, the archive names, and any saved
+cell-inclusion overrides. Gating thresholds carry over from dataset 1 (same
+"set under dataset 1's imaging conditions, worth reviewing" caveat as
+Concatenate); sample definitions from both datasets are merged, with dataset
+2's group/replicate-set names disambiguated rather than overwritten if they
+happen to share a name with one of dataset 1's.
+
+It refuses when the two datasets weren't analysed the same way (same checks
+Concatenate applies), when a remap target isn't a valid 96-well position, or
+when a remap would push a well past the edge of the plate. Timepoints
+differing between the two plates is only a warning, not a refusal — the
+merged plate is legitimately ragged in that case, and plots will show gaps
+for the combinations one plate doesn't have.
 
 ---
 

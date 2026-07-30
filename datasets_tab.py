@@ -32,6 +32,7 @@ from widgets.rail_nav import RailNav
 from well_viewer.core.centre_view import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.import_loose.controller import ImportLooseController
+from datasets.merge_plates.controller import MergePlatesController
 from datasets.ome_import.controller import OmeImportController
 from datasets.subset.controller import SubsetController
 from datasets.validate.controller import ValidateController
@@ -75,12 +76,18 @@ def _build_import_loose(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None]
     return controller.page, controller.shutdown
 
 
+def _build_merge_plates(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = MergePlatesController(on_open_in_review=tab._open_in_review)
+    return controller.page, controller.shutdown
+
+
 _FEATURES: tuple[_Feature, ...] = (
     _Feature(name="Concatenate datasets", icon="copy", build=_build_concatenate),
     _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
     _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate),
     _Feature(name="Subset / Split", icon="boxes", build=_build_subset),
     _Feature(name="Import Loose Folder", icon="download", build=_build_import_loose),
+    _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates),
 )
 
 

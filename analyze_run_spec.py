@@ -62,3 +62,40 @@ class AnalyzeRunMixin:
             selective_channels=spec.selective_channels,
         )
         return None
+
+    # ── job queue (QueueableController hooks) ───────────────────────────────
+    def collect_spec(self) -> dict:
+        """The current form's run, as a job queue's JSON spec."""
+        return self._collect_run_spec().to_json()
+
+    def show_job(self, spec: dict) -> None:
+        """Populate the input field so switching to this tab shows what a
+        queued job will run against, without starting it. Doesn't hydrate
+        every form field — the queue re-derives a full RunSpec from the
+        persisted JSON at dequeue time regardless, so the live form only
+        needs to look right, not be authoritative."""
+        raw = (spec.get("opts") or {}).get("raw")
+        if raw and hasattr(self, "_input_edit"):
+            self._input_edit.setText(str(raw))
+
+    def start_from_queue(self, spec: dict) -> None:
+        """Build a RunSpec from the persisted JSON and launch it exactly as
+        start_run() would from the live form. A remote that no longer
+        resolves, or a missing pipeline script, reports failure through
+        jobFinished rather than raising — there is no dialog to show it to."""
+        run_spec = RunSpec.from_json(spec)
+        error = self.start_run(run_spec)
+        if error is not None:
+            self.jobFinished.emit(False, error, "")
+
+    def stop(self) -> None:
+        """QueueableController hook: cancel without waiting — callable from
+        a queue bridge, which isn't a widget event."""
+        self._runner.stop()
+
+    def was_cancelled(self) -> bool:
+        """Whether the most recent run's failure was a user-requested Stop
+        rather than a genuine failure — both surface as the same kind of
+        ``error`` event, so a queue bridge needs this to tell a cancel apart
+        from a failure when deciding whether to cascade-block successors."""
+        return self._runner.was_stopped

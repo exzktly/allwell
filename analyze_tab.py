@@ -104,6 +104,14 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
     # inferred from "no error seen" — see the _run_ok / _run_error latch below.
     runFinished = Signal(bool, str)
 
+    # QueueableController hook (ok, message, out_dir — "" for none). Kept
+    # distinct from runFinished (whose (bool, str) shape is pinned by
+    # tests/test_analyze_run_finished.py) rather than changed in place, and
+    # emitted strictly after it — see _poll_log's "finished" branch, where
+    # this is truly the last statement so a queue bridge's slot starting the
+    # next job can't race anything after its own emit.
+    jobFinished = Signal(bool, str, str)
+
     @staticmethod
     def _log_color(tag: str) -> str:
         return {
@@ -972,13 +980,19 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
                     self._refresh_last_run_summary()  # C4: show the just-finished run
-                    # Last statement of this branch, by construction: a
-                    # directly-connected slot that starts the next queued run
-                    # calls _set_running_ui_state() re-entrantly, and anything
-                    # below the emit here would clobber that new run's state.
+                    # A directly-connected slot on either signal below may
+                    # start the next queued run re-entrantly (calling
+                    # _set_running_ui_state() from inside the emit), so
+                    # nothing after jobFinished's emit may touch run state —
+                    # it is truly the last statement of this branch.
                     ok, message = self._run_ok, (self._run_error or "")
+                    out_dir = str(self._last_output_dir) if ok and self._last_output_dir else ""
                     try:
                         self.runFinished.emit(ok, "" if ok else message)
+                    except Exception:
+                        swallowed()
+                    try:
+                        self.jobFinished.emit(ok, "" if ok else message, out_dir)
                     except Exception:
                         swallowed()
         except queue.Empty:

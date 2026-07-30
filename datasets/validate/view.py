@@ -50,6 +50,7 @@ class ValidatePage(QWidget):
     checkRequested = Signal()
     applyRepairsRequested = Signal()
     completeRunRequested = Signal(str)
+    queueRequested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -98,6 +99,12 @@ class ValidatePage(QWidget):
         self._repair_btn.setEnabled(False)
         self._repair_btn.clicked.connect(self.applyRepairsRequested)
         bl.addWidget(self._repair_btn)
+        self._queue_btn = QPushButton("+ Queue", self)
+        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setToolTip("Add this check to the Job Queue instead of running it now.")
+        self._queue_btn.setEnabled(False)
+        self._queue_btn.clicked.connect(self.queueRequested)
+        bl.addWidget(self._queue_btn)
         self._complete_btn = QPushButton("Complete this run in Analyze", self)
         self._complete_btn.setProperty("variant", "secondary")
         self._complete_btn.setVisible(False)
@@ -152,6 +159,9 @@ class ValidatePage(QWidget):
     def dataset_path(self) -> str:
         return self._dataset_field.path()
 
+    def set_dataset_path(self, path: str) -> None:
+        self._dataset_field.set_path(path)
+
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
 
@@ -160,6 +170,7 @@ class ValidatePage(QWidget):
 
     def set_running(self, running: bool) -> None:
         self._check_btn.setEnabled(not running and bool(self.dataset_path()))
+        self._queue_btn.setEnabled(not running and bool(self.dataset_path()))
         if running:
             # Only force-disable while starting a run — leave it alone on
             # stop, since show_report() (driven by the worker's `succeeded`,
@@ -183,10 +194,12 @@ class ValidatePage(QWidget):
         needs_completion = any(w.missing for w in report.wells)
         self._complete_btn.setVisible(needs_completion)
         self._check_btn.setEnabled(bool(self.dataset_path()))
+        self._queue_btn.setEnabled(bool(self.dataset_path()))
 
     # ── internals ────────────────────────────────────────────────────────────
     def _on_dataset_changed(self) -> None:
         self._check_btn.setEnabled(bool(self.dataset_path()))
+        self._queue_btn.setEnabled(bool(self.dataset_path()))
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
         self.dashboard.reset()

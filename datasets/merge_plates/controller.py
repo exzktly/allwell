@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
@@ -27,28 +27,38 @@ from datasets.merge_plates.worker import MergePlatesWorker
 class MergePlatesController(QObject):
     """Behaviour for the Merge Plates feature."""
 
+    # QueueableController hook: (ok, message, dest_root — "" for none).
+    jobFinished = Signal(bool, str, str)
+
     def __init__(
         self,
         *,
         on_open_in_review: Callable[[str], None] | None = None,
+        on_add_to_queue: Callable[[str, dict], None] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
+        self._on_add_to_queue = on_add_to_queue
         self._worker: MergePlatesWorker | None = None
         self._last_well_map: dict[str, str] = {}
+        self._last_result: tuple[bool, str, str] = (False, "", "")
 
         self.page = MergePlatesPage()
         self.page.runRequested.connect(self._on_run)
+        self.page.queueRequested.connect(self._on_queue_requested)
         self.page.openInReviewRequested.connect(self._on_open_in_review_requested)
 
     def _on_run(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            return
         dest_path = self.page.destination_path()
         if dest_path and self._destination_is_restart(dest_path) and not self._confirm_restart(dest_path):
             return
+        self._launch()
 
+    def _launch(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        dest_path = self.page.destination_path()
         well_map: dict[str, str] = {}
         if self.page.remap_enabled():
             try:
@@ -58,6 +68,14 @@ class MergePlatesController(QObject):
             except MergePlatesError as exc:
                 self.page.append_log(f"✗ {exc}")
                 self.page.dashboard.set_failed(str(exc))
+                self._last_result = (False, str(exc), "")
+                # No worker gets started on this path, so _on_finished never
+                # fires — emit directly, or a queued run would hang waiting
+                # for a jobFinished that was never coming.
+                try:
+                    self.jobFinished.emit(False, str(exc), "")
+                except Exception:
+                    swallowed()
                 return
 
         self.page.clear_log()
@@ -77,6 +95,35 @@ class MergePlatesController(QObject):
         self._worker = worker
         self._last_well_map = well_map
         worker.start()
+
+    # ── job queue ────────────────────────────────────────────────────────────
+    def collect_spec(self) -> dict:
+        return {
+            "dataset1": self.page.dataset1_path(),
+            "dataset2": self.page.dataset2_path(),
+            "destination": self.page.destination_path(),
+            "remap_enabled": self.page.remap_enabled(),
+            "remap_origin": self.page.remap_origin(),
+        }
+
+    def _on_queue_requested(self) -> None:
+        if self._on_add_to_queue is not None:
+            self._on_add_to_queue("merge_plates", self.collect_spec())
+
+    def show_job(self, spec: dict) -> None:
+        self.page.set_dataset1_path(spec.get("dataset1", ""))
+        self.page.set_dataset2_path(spec.get("dataset2", ""))
+        self.page.set_destination_path(spec.get("destination", ""))
+        self.page.set_remap_enabled(bool(spec.get("remap_enabled", False)))
+        self.page.set_remap_origin(spec.get("remap_origin", ""))
+
+    def start_from_queue(self, spec: dict) -> None:
+        self.show_job(spec)
+        self._launch()
+
+    def stop(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.requestInterruption()
 
     def _on_wells_planned(self, wells: list) -> None:
         # Distinguish origin using the well map applied for this run: any
@@ -99,6 +146,7 @@ class MergePlatesController(QObject):
         self.page.append_log(f"✓ {summary}")
         self.page.dashboard.set_done(summary)
         self.page.show_open_in_review(dest_root)
+        self._last_result = (True, summary, dest_root)
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log(f"✗ {message}")
@@ -106,10 +154,16 @@ class MergePlatesController(QObject):
             self.page.dashboard.set_cancelled(message)
         else:
             self.page.dashboard.set_failed(message)
+        self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
         self.page.revalidate_fields()
+        ok, message, dest_root = self._last_result
+        try:
+            self.jobFinished.emit(ok, message, dest_root)
+        except Exception:
+            swallowed()
 
     def _on_open_in_review_requested(self, dest_root: str) -> None:
         if self._on_open_in_review is not None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
@@ -25,27 +25,37 @@ from datasets.subset.worker import SubsetWorker
 class SubsetController(QObject):
     """Behaviour for the Subset / Split Dataset feature."""
 
+    # QueueableController hook: (ok, message, dest_root — "" for none).
+    jobFinished = Signal(bool, str, str)
+
     def __init__(
         self,
         *,
         on_open_in_review: Callable[[str], None] | None = None,
+        on_add_to_queue: Callable[[str, dict], None] | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
+        self._on_add_to_queue = on_add_to_queue
         self._worker: SubsetWorker | None = None
+        self._last_result: tuple[bool, str, str] = (False, "", "")
 
         self.page = SubsetPage()
         self.page.runRequested.connect(self._on_run)
+        self.page.queueRequested.connect(self._on_queue_requested)
         self.page.openInReviewRequested.connect(self._on_open_in_review_requested)
 
     def _on_run(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            return
         dest_path = self.page.destination_path()
         if dest_path and self._destination_is_restart(dest_path) and not self._confirm_restart(dest_path):
             return
+        self._launch()
 
+    def _launch(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        dest_path = self.page.destination_path()
         wells = frozenset(w for w in (canonical_well_label(w) for w in self.page.selected_wells()) if w)
         tps = None if self.page.all_timepoints_selected() else frozenset(self.page.selected_timepoints())
         fovs = None if self.page.all_fovs_selected() else frozenset(self.page.selected_fovs())
@@ -66,6 +76,37 @@ class SubsetController(QObject):
         self._worker = worker
         worker.start()
 
+    # ── job queue ────────────────────────────────────────────────────────────
+    def collect_spec(self) -> dict:
+        return {
+            "source": self.page.source_path(),
+            "destination": self.page.destination_path(),
+            "wells": self.page.selected_wells() or None,
+            "timepoint_labels": (
+                None if self.page.all_timepoints_selected() else self.page.selected_timepoints()
+            ),
+            "fovs": None if self.page.all_fovs_selected() else self.page.selected_fovs(),
+        }
+
+    def _on_queue_requested(self) -> None:
+        if self._on_add_to_queue is not None:
+            self._on_add_to_queue("subset", self.collect_spec())
+
+    def show_job(self, spec: dict) -> None:
+        self.page.set_source_path(spec.get("source", ""))
+        self.page.set_destination_path(spec.get("destination", ""))
+        self.page.set_selected_wells(spec.get("wells"))
+        self.page.set_selected_timepoints(spec.get("timepoint_labels"))
+        self.page.set_selected_fovs(spec.get("fovs"))
+
+    def start_from_queue(self, spec: dict) -> None:
+        self.show_job(spec)
+        self._launch()
+
+    def stop(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.requestInterruption()
+
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Copying {len(wells)} well(s)…")
@@ -74,6 +115,7 @@ class SubsetController(QObject):
         self.page.append_log(f"✓ {summary}")
         self.page.dashboard.set_done(summary)
         self.page.show_open_in_review(dest_root)
+        self._last_result = (True, summary, dest_root)
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log(f"✗ {message}")
@@ -81,10 +123,16 @@ class SubsetController(QObject):
             self.page.dashboard.set_cancelled(message)
         else:
             self.page.dashboard.set_failed(message)
+        self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
         self.page.revalidate_fields()
+        ok, message, dest_root = self._last_result
+        try:
+            self.jobFinished.emit(ok, message, dest_root)
+        except Exception:
+            swallowed()
 
     def _on_open_in_review_requested(self, dest_root: str) -> None:
         if self._on_open_in_review is not None:

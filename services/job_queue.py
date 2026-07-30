@@ -4,11 +4,11 @@ Persists a list of :class:`JobSpec` records — each one a JSON-shaped spec for
 a specific tool ("analyze", "concatenate", "validate", "subset",
 "import_loose", "merge_plates") plus optional chain metadata linking it to a
 predecessor job. :class:`JobQueue` only ever orders and gates jobs; it never
-runs one itself. The thing that actually launches a job is whatever adapter
-implements :class:`JobRunner` for that job's ``kind`` — a Datasets controller
-or ``AnalyzeRunMixin`` — and that adapter is responsible for marshalling its
-completion callback onto the GUI thread before calling it, which is what lets
-this module stay import-clean of Qt and ``well_viewer``.
+runs one itself. The thing that actually launches a job is
+``datasets.job_queue.controller.QueueBridge``, driving whichever controller
+(a Datasets controller, or ``AnalyzeTab`` via ``AnalyzeRunMixin``) is
+registered for that job's ``kind`` — kept in a separate, Qt-touching module
+so this one stays import-clean of Qt and ``well_viewer``.
 
 Persisted, never auto-started. Loading a queue interrupts any job that was
 recorded as ``running`` (the process that owned it is gone) and repairs a
@@ -23,10 +23,9 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
 from services.remote_config import default_state_dir
 
@@ -107,31 +106,6 @@ class JobSpec:
             dataset_root=data.get("dataset_root"),
             in_dir=data.get("in_dir"),
         )
-
-
-class JobRunner(Protocol):
-    """Implementations MUST marshal completion onto the GUI thread before
-    calling ``on_done`` — that rule is what lets :class:`JobQueue` stay
-    Qt-free. A ``QThread``-based worker gets this for free via queued
-    signals; ``AnalyzeRunMixin`` gets it for free because completion is
-    observed inside ``_poll_log``, a main-thread ``QTimer`` callback.
-
-    ``on_done(ok, message, produced)`` — ``produced`` is a dict with whichever
-    of ``"out_dir"`` / ``"dataset_root"`` / ``"in_dir"`` keys (as ``str``
-    paths) this job actually made, empty on failure or cancellation.
-    """
-
-    def start(
-        self,
-        job: JobSpec,
-        spec: dict,
-        *,
-        on_line: Callable[[str], None],
-        on_status: Callable[[str], None],
-        on_done: Callable[[bool, str, dict], None],
-    ) -> None: ...
-
-    def stop(self) -> None: ...
 
 
 def _set_dotted(target: dict, dotted: str, value: Any) -> None:

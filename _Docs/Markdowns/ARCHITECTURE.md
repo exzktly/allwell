@@ -1551,6 +1551,45 @@ The Run path:
 5. The Analyze tab streams stdout/stderr into its log view (`tail -f`-style).
 6. On completion, the dataset folder is offered to the Review tab.
 
+**Collecting a run's configuration is split from starting it**, in
+`analyze_run_spec.py`'s `AnalyzeInputMixin`-style mixin `AnalyzeRunMixin`
+(mixed into `AnalyzeTab` alongside `AnalyzeInputMixin`/`AnalyzeTabFormMixin`).
+`_collect_run_spec()` turns the live form into a `services.run_spec.RunSpec` —
+a frozen, JSON-round-trippable dataclass (`opts`, the chosen remote's *name*
+rather than its resolved `RemoteHost`, cleanup/dry-run flags, output filter,
+selective-channels flag). `start_run(spec)` launches a `RunSpec` on the tab's
+own `PipelineRunner`, re-resolving the remote by name through
+`services.remote_config.get_remote` at call time (so a `remotes.toml` edited
+between collection and launch is honoured, and a deleted remote fails the run
+with a clear message via `RunSpecError` rather than silently running locally)
+and re-resolving the pipeline script fresh rather than trusting a stored path
+(which would break across a relaunch from a different install location).
+`start_run` never raises and never shows a dialog — it returns an error
+string, so it stays callable with no form on screen; `_run()` itself is a
+three-line delegation (`_collect_run_spec()` → `start_run()` → show a dialog
+on failure). This split exists so the Job Queue (§6b) can persist a run's
+configuration as plain JSON and start it later, independent of whatever the
+live form happens to hold at that moment.
+
+`AnalyzeTab.runFinished(ok: bool, message: str)` is a **positive-latch**
+completion signal: `_poll_log`'s `"done"` branch sets a per-run `_run_ok`
+latch, `"error"` records the first message seen, and the `"finished"` branch
+emits based on that latch — never on "no error was seen", since several of
+`PipelineRunner._run_pipeline_thread`'s early-return paths (stopped before
+launch, a cancelled zipper spawn) reach `"finished"` having emitted neither
+`"done"` nor `"error"`. The emit is the **last statement** of that branch,
+because a job-queue-driven slot connected to it may start the next run
+synchronously, re-entering `_set_running_ui_state()` — anything after the
+emit would clobber that new run's state. `AnalyzeTab.jobFinished(ok, message,
+out_dir)` is a second, separate signal for the Job Queue specifically (kept
+distinct so `runFinished`'s two-argument shape stays exactly what it always
+was), emitted immediately after `runFinished` for the same reason. A user
+Stop makes the pipeline subprocess exit non-zero, which surfaces as the same
+kind of `"error"` event a genuine failure would — `PipelineRunner.was_stopped`
+(readable after completion, cleared only at the *start* of the next run) is
+how a caller tells a cancel apart from a real failure; `AnalyzeRunMixin.was_cancelled()`
+exposes it under the name the Job Queue's bridge looks for.
+
 **Single packed OME-TIFF input — the Datasets converter.** A plate scan can
 arrive as one OME-TIFF holding every timepoint, channel, Z-plane and stage
 position. De-interleaving it is a **standalone converter** in the Datasets pane
@@ -2302,6 +2341,94 @@ conditions, worth reviewing" note Concatenate gives. Cell overrides remap
 their `well` key through the well map before the `seg_fp` restamp (from the
 destination `<well>_out.zip`, as the last write to that archive) —
 Concatenate's own precedent, not reinvented.
+
+**Job Queue** (`datasets/job_queue/`) lines up Analyze and Datasets-tool runs
+to work through unattended, built on a Qt-free scheduler
+(`services/job_queue.py`) so ordering/gating logic is unit-testable with no
+Qt event loop. Three layers:
+
+- **`services/job_queue.py`** — `JobSpec` (one persisted queue entry: `id`,
+  `kind`, `label`, a JSON-shaped `spec` for that tool, optional chain
+  metadata, `state`, `message`, and whichever of `output_dir`/`dataset_root`/
+  `in_dir` it produced), `JobState` (plain string constants — `pending`,
+  `running`, `succeeded`, `failed`, `cancelled`, `blocked`, `interrupted` —
+  not an `Enum`, so the persisted JSON needs no encode/decode step), and
+  `JobQueue`, which only orders and gates jobs; it never runs one itself.
+  Chaining links a job to a predecessor by **id**, never a list index (an
+  index would silently re-point on reorder), a dotted path into its own
+  `spec` to set (`"opts.raw"` for Analyze, `"source"`/`"dataset"` for a
+  Datasets tool), and which of the predecessor's three possible outputs it
+  wants (`chain_kind`). Resolution happens at **dequeue**, via
+  `JobQueue.materialise(job_id)`, never at enqueue — Analyze's own output
+  location is only knowable after `resolve_input_output` runs. A failed or
+  cancelled predecessor cascades every transitive successor still `pending`
+  to `blocked` rather than `failed`, so a retry-failed action leaves them
+  alone (they never ran); reordering a dependent before its predecessor is
+  refused; `set_chain()` rejects a self-chain or a cycle before writing the
+  link. `JobQueue.from_json` never auto-starts a loaded queue (a relaunch
+  always comes up paused — `is_started` is never persisted), maps a stale
+  `running` state to `interrupted`, and topologically repairs — or, on a
+  genuine cycle, drops every chain link in — a hand-edited file whose stored
+  order violates its own links, so `next_runnable()` can never deadlock on
+  bad persisted data. Persistence goes through
+  `services.remote_config.default_state_dir()` (a tmp-file-then-`os.replace`
+  write of `job_queue.json`), deliberately **not** derived from
+  `default_config_path()` — that function honours `$ALLWELL_REMOTES`, an
+  override meaning "where my remotes live" rather than "where my app state
+  lives", and its Windows branch is conditional on whether `remotes.toml`
+  exists, which would silently relocate an already-written queue the day a
+  user first creates one.
+- **`datasets/job_queue/controller.py`** — the Qt-touching layer.
+  `QueueableController` is the duck-typed protocol every runnable `kind`
+  implements: `start_from_queue(spec)`, `show_job(spec)` (populate the tool's
+  own page without running it — driven by clicking a queued row), `stop()`,
+  and a `jobFinished(ok: bool, message: str, output_path: str)` signal that
+  **must** be emitted only once per run, as the true last statement of that
+  run's completion handler (mirroring `AnalyzeTab.runFinished`'s re-entrancy
+  rule, since a bridge slot may start the next job synchronously from inside
+  the emit). Each of the five Datasets controllers implements this directly
+  (a `_launch()` split out of `_on_run()` so `start_from_queue` can skip the
+  interactive restart/in-place confirmation a queued, unattended run has no
+  one to answer — the same trade-off every tool's queue path makes); so does
+  `AnalyzeTab`, via `AnalyzeRunMixin`. `QueueBridge` owns the persisted
+  `JobQueue` and a `kind -> QueueableController` registry, and is the only
+  thing that actually starts a job: strictly serial, tracking the in-flight
+  job as `(job_id, kind)` so a `jobFinished` from a controller that isn't the
+  queue's own current job — e.g. the user pressed that tool's own Run button
+  by hand while a *different* job was running — is dropped rather than
+  misattributed. On completion it looks up `was_cancelled()` on the
+  finishing controller (falling back to the Datasets convention that a
+  cancelled worker's failure message starts with `"Cancelled"`) to tell a
+  user-requested Stop apart from a genuine failure, since the queue's own
+  decision is that cancelling the running job **pauses the queue** — resuming
+  is explicit — while a genuine failure just cascades-blocks that job's own
+  successors and keeps going. `JobQueueController` is the page-level
+  controller (the usual page/worker shape, with `QueueBridge` standing in for
+  a `QThread` worker): it owns the page, turns button clicks into bridge
+  calls, and refreshes the page on `queueChanged`.
+- **`datasets/job_queue/view.py`** — `JobQueuePage`: one compact row per job
+  (kind icon, label, a `widgets.status_dot.StatusDot` state chip, a
+  one-line message, a link glyph on chained rows, ↑/↓/× controls) under a
+  header with Start/Pause and — since `analyze_tab_form.py` has no
+  line-budget headroom for its own "+ Queue" button (§6.1) — a
+  **"+ Queue current Analyze run"** button that lives on this page instead,
+  wired through `JobQueueController.set_analyze_provider` (a bound
+  `AnalyzeTab.collect_spec` method injected the same way `on_open_in_review`
+  is). Each of the five Datasets tool pages gets its own "+ Queue" button
+  beside Run, calling the controller's `collect_spec()` and handing the
+  result up through an injected `on_add_to_queue(kind, spec)` callback to
+  `DatasetsTab._add_to_queue`, which looks up the (always-last-built)
+  `JobQueueController` in `tab._controllers`.
+
+`datasets_tab.py` wires all of this: each of the five Datasets controllers is
+constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
+`tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
+so `_build_job_queue` can register every already-built controller (plus the
+injected `AnalyzeTab`, under kind `"analyze"`) against a single
+`JobQueueController`. `allwell.py` injects the already-built `AnalyzeTab` as
+`DatasetsTab(analyze_controller=...)` the same way it injects
+`on_open_in_review`/`on_open_in_analyze` — so neither `datasets_tab.py` nor
+anything under `datasets/job_queue/` ever imports `analyze_tab`.
 
 ---
 

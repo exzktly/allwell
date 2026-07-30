@@ -51,7 +51,8 @@ to add features, how to debug, and build / environment troubleshooting), see
      [Validate & Repair Dataset](#validate--repair-dataset) ·
      [Subset / Split Dataset](#subset--split-dataset) ·
      [Import Loose Folder](#import-loose-folder) ·
-     [Merge Plates](#merge-plates)
+     [Merge Plates](#merge-plates) ·
+     [Job Queue](#job-queue)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -1675,6 +1676,45 @@ when a remap would push a well past the edge of the plate. Timepoints
 differing between the two plates is only a warning, not a refusal — the
 merged plate is legitimately ragged in that case, and plots will show gaps
 for the combinations one plate doesn't have.
+
+### Job Queue
+
+Lines up Analyze runs and Datasets-tool runs to work through unattended,
+instead of babysitting each one. Every Datasets tool page has a **+ Queue**
+button beside its normal run button — press it to add the current settings
+as a queued job instead of running immediately. Analyze itself doesn't have
+room for its own button, so queuing an Analyze run happens from the Job
+Queue page instead: press **+ Queue current Analyze run** there to capture
+whatever the Analyze form currently holds.
+
+The queue runs strictly one job at a time, in the order shown, and never
+starts on its own — press **▶ Start queue** to begin working through it, and
+**⏸ Pause queue** (the same button) to stop after the current job. Queued
+jobs persist across app restarts, but a relaunch always comes up paused —
+you always decide when unattended work resumes.
+
+Each row shows the job's tool, a status chip (pending / running / succeeded
+/ failed / cancelled / blocked / interrupted), and a one-line message. Click
+a row to open that job on its own tool's page (without running it) so you
+can double-check what it will do. Use ↑ / ↓ to reorder, or × to remove a job
+— reordering a job ahead of one it depends on, or removing the job currently
+running, is refused.
+
+**Chaining** links one job's input to another's output: queue a Subset (or
+Merge Plates, or Analyze) run, then a Validate run chained to run against
+whatever folder the first one actually produces — the second job's input
+folder is filled in only once the first one finishes, not when you queue it.
+If a job fails, everything chained after it is marked **blocked**, not
+failed — those jobs never ran, so there's nothing to retry; fix whatever
+failed and re-queue instead. Stopping the currently-running job pauses the
+queue rather than skipping ahead to the next one, so a run you meant to
+cancel can't be silently followed by one you didn't get to review.
+
+A queued run proceeds without the confirmation dialog its own page would
+normally show for a destructive step (resuming into a partially-written
+destination, or grouping loose TIFs in place) — there's no one there to
+answer it, so queuing a job is an implicit "yes, go ahead" for whatever that
+step would have asked.
 
 ---
 

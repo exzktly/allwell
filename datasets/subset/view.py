@@ -54,6 +54,7 @@ class SubsetPage(QWidget):
     """The Subset / Split Dataset feature body."""
 
     runRequested = Signal()
+    queueRequested = Signal()
     openInReviewRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -110,11 +111,23 @@ class SubsetPage(QWidget):
         self._fov_flow = FlowLayout(self._fov_host)
         outer.addWidget(self._fov_host)
 
+        run_row = QWidget(self)
+        run_row_l = QHBoxLayout(run_row)
+        run_row_l.setContentsMargins(0, 0, 0, 0)
+        run_row_l.setSpacing(theme.Spacing.sm)
         self._run_btn = QPushButton("▶  Subset", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
-        outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
+        run_row_l.addWidget(self._run_btn)
+        self._queue_btn = QPushButton("+ Queue", self)
+        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
+        self._queue_btn.setEnabled(False)
+        self._queue_btn.clicked.connect(self.queueRequested)
+        run_row_l.addWidget(self._queue_btn)
+        run_row_l.addStretch(1)
+        outer.addWidget(run_row, 0, Qt.AlignLeft)
 
         self._build_status_section(outer)
 
@@ -181,6 +194,35 @@ class SubsetPage(QWidget):
     def all_fovs_selected(self) -> bool:
         return len(self.selected_fovs()) == len(self._fov_checks)
 
+    def set_source_path(self, path: str) -> None:
+        self._src_field.set_path(path)
+        self._reload_source_metadata()
+        self._refresh_run_enabled()
+
+    def set_destination_path(self, path: str) -> None:
+        self._dest_field.set_path(path)
+
+    def set_selected_wells(self, wells: list[str] | None) -> None:
+        """``None`` keeps whatever _reload_source_metadata already selected
+        (everything) — a queued job with no explicit well filter subsets
+        nothing away rather than silently selecting zero wells."""
+        if wells:
+            self._plate.setSelectedWellIds(list(wells))
+
+    def set_selected_timepoints(self, labels: list[str] | None) -> None:
+        if labels is None:
+            return
+        wanted = set(labels)
+        for label, cb in self._tp_checks.items():
+            cb.setChecked(label in wanted)
+
+    def set_selected_fovs(self, labels: list[str] | None) -> None:
+        if labels is None:
+            return
+        wanted = set(labels)
+        for label, cb in self._fov_checks.items():
+            cb.setChecked(label in wanted)
+
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
 
@@ -189,6 +231,7 @@ class SubsetPage(QWidget):
 
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._inputs_ready())
+        self._queue_btn.setEnabled(not running and self._inputs_ready())
         self._run_btn.setText("Subsetting…" if running else "▶  Subset")
         if running:
             self._open_btn.setVisible(False)
@@ -269,3 +312,4 @@ class SubsetPage(QWidget):
 
     def _refresh_run_enabled(self) -> None:
         self._run_btn.setEnabled(self._inputs_ready())
+        self._queue_btn.setEnabled(self._inputs_ready())

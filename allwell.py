@@ -364,11 +364,14 @@ class AllWellApp(QMainWindow):
         # dataset-level features; it has no well picker. A completed
         # concatenation hands its output to Review via _open_dataset_in_review;
         # the OME-TIFF converter hands its produced input folder to Analyze via
-        # _open_dataset_in_analyze.
+        # _open_dataset_in_analyze. The already-built AnalyzeTab is injected so
+        # the Datasets pane's Job Queue page can queue and start Analyze runs
+        # without datasets_tab.py importing analyze_tab.
         self._datasets = DatasetsTab(
             parent=None,
             on_open_in_review=self._open_dataset_in_review,
             on_open_in_analyze=self._open_dataset_in_analyze,
+            analyze_controller=self._analyze,
         )
         self._review.mountDatasetsPane(self._datasets)
 

@@ -75,6 +75,7 @@ class ConcatenatePage(QWidget):
     """The Concatenate Datasets feature body."""
 
     runRequested = Signal()
+    queueRequested = Signal()
     openInReviewRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -107,11 +108,23 @@ class ConcatenatePage(QWidget):
 
         self._build_equation_row(outer)
 
+        run_row = QWidget(self)
+        run_row_l = QHBoxLayout(run_row)
+        run_row_l.setContentsMargins(0, 0, 0, 0)
+        run_row_l.setSpacing(theme.Spacing.sm)
         self._run_btn = QPushButton("▶  Concatenate", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
-        outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
+        run_row_l.addWidget(self._run_btn)
+        self._queue_btn = QPushButton("+ Queue", self)
+        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setToolTip("Add this run to the Job Queue instead of running it now.")
+        self._queue_btn.setEnabled(False)
+        self._queue_btn.clicked.connect(self.queueRequested)
+        run_row_l.addWidget(self._queue_btn)
+        run_row_l.addStretch(1)
+        outer.addWidget(run_row, 0, Qt.AlignLeft)
 
         self._build_status_section(outer)
 
@@ -216,6 +229,15 @@ class ConcatenatePage(QWidget):
     def destination_path(self) -> str:
         return self._dest_field.path()
 
+    def set_dataset1_path(self, path: str) -> None:
+        self._ds1_field.set_path(path)
+
+    def set_dataset2_path(self, path: str) -> None:
+        self._ds2_field.set_path(path)
+
+    def set_destination_path(self, path: str) -> None:
+        self._dest_field.set_path(path)
+
     def revalidate_fields(self) -> None:
         """Re-run every field's validator against current disk state.
 
@@ -237,6 +259,7 @@ class ConcatenatePage(QWidget):
 
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._inputs_ready())
+        self._queue_btn.setEnabled(not running and self._inputs_ready())
         self._run_btn.setText("Concatenating…" if running else "Concatenate")
         if running:
             self._open_btn.setVisible(False)
@@ -268,3 +291,4 @@ class ConcatenatePage(QWidget):
 
     def _refresh_run_enabled(self) -> None:
         self._run_btn.setEnabled(self._inputs_ready())
+        self._queue_btn.setEnabled(self._inputs_ready())

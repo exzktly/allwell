@@ -2283,7 +2283,16 @@ Two conversion modes, one code path each, both in `apply.py`:
 
 - **New destination** (default) — writes `<dest>/in/<WELL>.zip` directly via
   `util.zip_write.atomic_zip`, never publishing a member-less archive. The
-  source folder is left untouched.
+  source folder is left untouched. Wells are converted in parallel — a
+  `ThreadPoolExecutor` sized by `_pick_workers` (0 = auto, capped at 8 and at
+  the CPU count, mirroring `pipeline.ome_explode._pick_workers`), since each
+  well's zip is an independent file with no shared state. `log`/`progress`
+  calls are serialised behind a lock so a caller's own closure (e.g.
+  `ImportLooseWorker`'s `nonlocal done` counter) never sees two wells'
+  callbacks execute at once — the lock protects individual callback
+  invocations from corruption, not the overall run from wells' "writing"..
+  "done" spans overlapping in time, which is expected under real
+  parallelism.
 - **In-place** (opt-in, destructive — "group in place, delete sources on
   success") — shells out through the existing
   `services.input_resolution_service.run_zipper` (which invokes

@@ -6,7 +6,11 @@ Two modes, one code path each:
   (:func:`~datasets.import_loose.import_loose_compute.group_files_by_well`,
   the same walk the preview uses) and write `<dest>/in/<WELL>.zip` directly
   via :func:`util.zip_write.atomic_zip`, never publishing a member-less
-  archive. The source folder is untouched.
+  archive. The source folder is untouched. Wells are converted in
+  parallel — each one is an independent file with its own `atomic_zip`
+  handle and no shared state, the same disjoint-ownership shape
+  `pipeline.ome_explode.explode_ome_tiff` uses for its own per-well thread
+  pool.
 * **In-place** (opt-in, destructive) — shells out through the existing
   ``services.input_resolution_service.run_zipper`` (which invokes
   ``WellPlateZipper.py`` as a subprocess) so this destructive path stays the
@@ -19,7 +23,10 @@ Two modes, one code path each:
 
 from __future__ import annotations
 
+import os
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.zip_write import atomic_zip
@@ -38,6 +45,19 @@ def _null_progress(_well: str, _stage: str) -> None:
     return None
 
 
+def _pick_workers(workers: int, n_wells: int) -> int:
+    """Resolve the worker-thread count (0 = auto), capped at the well count.
+
+    Mirrors ``pipeline.ome_explode._pick_workers`` — more threads than wells
+    just contend for the same disk I/O with nothing left to parallelise.
+    """
+    if n_wells <= 0:
+        return 1
+    if workers > 0:
+        return max(1, min(workers, n_wells))
+    return max(1, min(8, os.cpu_count() or 4, n_wells))
+
+
 def convert_to_new_destination(
     search_dir: Path | str,
     dest_root: Path | str,
@@ -45,12 +65,20 @@ def convert_to_new_destination(
     filename_schema: str,
     filename_sep: str,
     recursive: bool = False,
+    workers: int = 0,
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
 ) -> str:
     """Write ``<dest_root>/in/<WELL>.zip`` for every well matched under
     *search_dir*, leaving *search_dir* untouched. Returns a summary line.
+
+    *workers* threads convert wells in parallel (0 = auto — see
+    :func:`_pick_workers`). ``log``/``progress`` are called under a lock so
+    two wells' events are never interleaved or racing — a caller's own
+    closure (e.g. ``ImportLooseWorker``'s ``done`` counter) can keep
+    mutating a plain, un-locked variable across calls exactly as it does
+    today, since only one well's callback runs at a time.
     """
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
@@ -69,18 +97,28 @@ def convert_to_new_destination(
     dest_in = Path(dest_root) / "in"
     dest_in.mkdir(parents=True, exist_ok=True)
 
-    written_wells = 0
-    for well in sorted(by_well):
+    callback_lock = threading.Lock()
+
+    def _write_well(well: str) -> None:
         if cancelled():
             raise ValueError("Cancelled.")
-        report(well, "writing")
-        emit(f"  {well}: {len(by_well[well])} file(s)")
+        with callback_lock:
+            report(well, "writing")
+            emit(f"  {well}: {len(by_well[well])} file(s)")
         target = dest_in / f"{well}.zip"
         with atomic_zip(target) as zf:
             for path in by_well[well]:
                 zf.write(path, arcname=path.name)
-        written_wells += 1
-        report(well, "done")
+        with callback_lock:
+            report(well, "done")
+
+    wells = sorted(by_well)
+    written_wells = 0
+    with ThreadPoolExecutor(max_workers=_pick_workers(workers, len(wells))) as ex:
+        futures = [ex.submit(_write_well, well) for well in wells]
+        for fut in as_completed(futures):
+            fut.result()  # re-raises the first well's exception, incl. Cancelled
+            written_wells += 1
 
     return f"Wrote {written_wells} well(s) into {dest_in}."
 

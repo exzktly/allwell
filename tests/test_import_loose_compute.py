@@ -116,6 +116,90 @@ def test_convert_refuses_when_nothing_matches(tmp_path):
         il_apply.convert_to_new_destination(src, dest, filename_schema=SCHEMA, filename_sep=SEP)
 
 
+def test_convert_to_new_destination_writes_every_well_in_parallel(tmp_path):
+    """Enough wells to force >1 worker (default auto-sizing), each written
+    from its own thread — every well's archive must still land intact with
+    no cross-well interference."""
+    src = tmp_path / "loose"
+    dest = tmp_path / "dest"
+    wells = [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 3)]  # 16 wells
+    _write_loose(src, wells, timepoints=("0h", "24h"))
+
+    summary = il_apply.convert_to_new_destination(
+        src, dest, filename_schema=SCHEMA, filename_sep=SEP,
+    )
+    assert f"{len(wells)} well(s)" in summary
+
+    for well in wells:
+        with zipfile.ZipFile(dest / "in" / f"{well}.zip") as zf:
+            members = set(zf.namelist())
+        assert members == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}
+
+
+def test_convert_to_new_destination_respects_explicit_worker_count(tmp_path):
+    src = tmp_path / "loose"
+    dest = tmp_path / "dest"
+    _write_loose(src, ["A01", "B02", "C03"], timepoints=("0h",))
+
+    summary = il_apply.convert_to_new_destination(
+        src, dest, filename_schema=SCHEMA, filename_sep=SEP, workers=1,
+    )
+    assert "3 well(s)" in summary
+    assert (dest / "in" / "B02.zip").exists()
+
+
+def test_convert_to_new_destination_stops_on_cancellation(tmp_path):
+    src = tmp_path / "loose"
+    dest = tmp_path / "dest"
+    _write_loose(src, ["A01", "B02", "C03", "D04"], timepoints=("0h",))
+
+    with pytest.raises(ValueError, match="Cancelled"):
+        il_apply.convert_to_new_destination(
+            src, dest, filename_schema=SCHEMA, filename_sep=SEP,
+            is_cancelled=lambda: True,
+        )
+    # Nothing not-yet-started when cancellation hit gets written.
+    assert not (dest / "in").exists() or not any((dest / "in").iterdir())
+
+
+def test_convert_to_new_destination_callback_invocations_are_not_corrupted(tmp_path):
+    """Each individual report()/log() call fires under a lock — protecting a
+    caller's own shared counter (e.g. ImportLooseWorker._report's `nonlocal
+    done`) from a torn increment — not preventing two different wells'
+    "writing"..."done" spans from overlapping in time, which is expected and
+    is the whole point of running them in parallel. What must hold
+    regardless of thread interleaving: every well reports exactly one
+    "writing" then one "done", with nothing duplicated, dropped, or
+    corrupted by a concurrent append."""
+    src = tmp_path / "loose"
+    dest = tmp_path / "dest"
+    wells = [f"{r}{c:02d}" for r in "ABCD" for c in range(1, 5)]  # 16 wells
+    _write_loose(src, wells, timepoints=("0h",))
+
+    events: list[tuple[str, str]] = []
+
+    def _progress(well: str, stage: str) -> None:
+        events.append((well, stage))
+
+    il_apply.convert_to_new_destination(
+        src, dest, filename_schema=SCHEMA, filename_sep=SEP, progress=_progress,
+    )
+
+    assert len(events) == 2 * len(wells)
+    by_well: dict[str, list[str]] = {}
+    for well, stage in events:
+        by_well.setdefault(well, []).append(stage)
+    assert set(by_well) == set(wells)
+    assert all(stages == ["writing", "done"] for stages in by_well.values())
+
+
+def test_pick_workers_caps_at_well_count_and_explicit_request():
+    assert il_apply._pick_workers(0, 0) == 1
+    assert il_apply._pick_workers(0, 1) == 1
+    assert il_apply._pick_workers(4, 2) == 2
+    assert il_apply._pick_workers(0, 100) <= 8
+
+
 def test_group_files_by_well_and_scan_agree(tmp_path):
     _write_loose(tmp_path, ["A01", "B02", "C03"], timepoints=("0h", "24h"))
     preview = ilc.scan_folder(tmp_path, filename_schema=SCHEMA, filename_sep=SEP)

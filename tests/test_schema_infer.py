@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import zipfile
-from pathlib import Path
 
 from util.schema_infer import infer_from_dir, infer_schema, sample_stems
 

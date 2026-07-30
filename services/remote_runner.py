@@ -64,6 +64,7 @@ from services.remote_config import (
 # Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
 # This module import must stay imaging-stack-free; incremental_keys is csv/
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
+from util.fov import sort_key as fov_sort_key
 from util.timepoint import sort_key as tp_sort_key
 from pipeline.incremental_keys import (
     fov_tp_from_name,
@@ -247,6 +248,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # the completeness guard (test_remote_manifest) passes.
     "util/plate_grid.py",
     "util/schema.py",
+    # FOV-token numeric ordering, imported by process_microscopy
+    # (``_collect_available_fovs``) so the remote run needs it.
+    "util/fov.py",
     "util/timepoint.py",
     "util/well_token.py",
     # Atomic + verified publication of the per-well archives, imported by
@@ -1274,14 +1278,6 @@ def _tp_sort_key(tok: str):
     return tp_sort_key(tok)
 
 
-def _fov_sort_key(tok: str):
-    s = str(tok or "").strip()
-    try:
-        return (False, float(s), s)
-    except ValueError:
-        return (True, 0.0, s)
-
-
 def refresh_pipeline_info_available_from_outputs(
     local_output_dir: Path, *, log_fn: Callable[[str], None] | None = None,
 ) -> bool:
@@ -1312,7 +1308,7 @@ def refresh_pipeline_info_available_from_outputs(
         tp_union = sorted(set(tps) | set(info.get("available_timepoints") or []),
                           key=_tp_sort_key)
         fov_union = sorted(set(fovs) | set(info.get("available_fovs") or []),
-                           key=_fov_sort_key)
+                           key=fov_sort_key)
         if tp_union == list(info.get("available_timepoints") or []) \
                 and fov_union == list(info.get("available_fovs") or []):
             return False  # already complete

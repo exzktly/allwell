@@ -139,6 +139,9 @@ allwell/
 │   │                              (shared by process_microscopy and WellPlateZipper)
 │   ├── timepoint.py            ← timepoint token → hours + the shared sort key
 │   │                              (pipeline, services and well_viewer all use it)
+│   ├── fov.py                  ← FOV token → number + the shared sort key, so a
+│   │                              prefixed token ("f10") orders numerically, not
+│   │                              lexicographically (pipeline, services, viewer)
 │   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote)

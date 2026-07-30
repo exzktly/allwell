@@ -94,6 +94,43 @@ def test_convert_to_new_destination_through_the_page(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_group_in_place_through_the_page_zips_and_deletes_sources(qapp, tmp_path):
+    """Regression for the reported "sits stuck, no zips made" bug (fixed in
+    apply.py's convert_in_place/_zip_well_folders) plus the adjacent bug found
+    alongside it: the checkbox label ("delete loose TIFs on success") and the
+    confirm dialog both promise deletion, but the controller used to hardcode
+    move_source_tifs=False regardless of in_place — so WellPlateZipper's
+    folder_well() always copied (never moved) originals, leaving them behind
+    even on a fully successful run. Drives the real page + worker +
+    subprocess-backed run_zipper end to end (stdlib-only, no imaging stack)."""
+    import zipfile
+
+    from datasets.import_loose.controller import ImportLooseController
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01", "B02"], timepoints=("0h", "24h"))
+
+    ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
+    ctrl._confirm_in_place = lambda: True  # bypass the modal QMessageBox
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._in_place_cb.setChecked(True)
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    for well in ("A01", "B02"):
+        zip_path = src / f"{well}.zip"
+        assert zip_path.exists(), f"{well}: expected a zip, found none"
+        with zipfile.ZipFile(zip_path) as zf:
+            assert set(zf.namelist()) == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}
+    assert not list(src.glob("*.tif")), "loose TIF originals should be deleted, not copied, on success"
+    assert not page._open_btn.isHidden()
+    ctrl.shutdown()
+
+
 def test_no_match_reports_failure_not_crash(qapp, tmp_path):
     from datasets.import_loose.controller import ImportLooseController
 

@@ -2308,9 +2308,22 @@ Two conversion modes, one code path each, both in `apply.py`:
   success") — shells out through the existing
   `services.input_resolution_service.run_zipper` (which invokes
   `WellPlateZipper.py` as a subprocess) rather than reimplementing the same
-  grouping a second time, then `_consolidate_mixed_to_zips` to normalise the
-  per-well folders `run_zipper` produces into the same `<well>.zip` layout
-  the new-destination mode writes.
+  grouping a second time; `run_zipper` produces per-well *folders* only
+  (`WellPlateZipper.py` never zips anything itself), so `apply.py`'s own
+  `_zip_well_folders` then converts every one of them into `<well>.zip`,
+  removing the folder once packed, so the result lands in the same
+  ready-to-run layout the new-destination mode writes. This is deliberately
+  **not** `services.input_resolution_service._consolidate_mixed_to_zips` —
+  that helper only tops up a *mixed* zips+folders state (Analyze's own
+  loose-TIF handling, which is happy to read pure per-well folders directly)
+  and is a documented no-op when zero zips exist yet, which is exactly the
+  state a fresh `run_zipper` call produces; calling it here left every well
+  as a bare folder forever, with the run still reporting success.
+  `move_source_tifs` is threaded through unconditionally from the
+  in-place checkbox (`ImportLooseController._launch`) so the "delete loose
+  TIFs on success" promise in the checkbox label and confirm dialog is
+  actually honored — `WellPlateZipper.py`'s `folder_well()` copies rather
+  than moving originals when this is left false.
 
 **Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
 Concatenate. Concatenate joins the same plate imaged at different times (a

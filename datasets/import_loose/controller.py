@@ -56,7 +56,7 @@ class ImportLooseController(QObject):
             filename_schema=self.page.filename_schema(),
             filename_sep=self.page.filename_sep(),
             in_place=self.page.in_place(),
-            move_source_tifs=False,
+            move_source_tifs=self.page.in_place(),
         )
         worker.logLine.connect(self.page.append_log)
         worker.progress.connect(self.page.set_progress)

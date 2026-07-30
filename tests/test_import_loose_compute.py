@@ -193,6 +193,45 @@ def test_convert_to_new_destination_callback_invocations_are_not_corrupted(tmp_p
     assert all(stages == ["writing", "done"] for stages in by_well.values())
 
 
+def test_convert_in_place_writes_real_zips_not_bare_folders(tmp_path):
+    """Regression for the reported "sits stuck, no zips made" bug: apply.py's
+    convert_in_place() used to call
+    services.input_resolution_service._consolidate_mixed_to_zips after
+    run_zipper, which is a documented no-op when zero zips already exist —
+    exactly the state after a fresh WellPlateZipper.py run (it only ever
+    produces per-well folders, never zips). Every well was left as a bare
+    folder forever, with the run still reporting success. This test drives
+    the real subprocess-backed run_zipper (stdlib-only, no imaging stack, the
+    same real path tests/test_loose_in_folder.py exercises) end to end and
+    asserts actual .zip files land on disk."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01", "B02", "C03"], timepoints=("0h", "24h"))
+
+    summary = il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert "3 per-well zip(s)" in summary
+    for well in ("A01", "B02", "C03"):
+        zip_path = src / f"{well}.zip"
+        assert zip_path.exists(), f"{well}: expected {zip_path} on disk, found a bare folder instead"
+        assert not (src / well).exists()  # folder consumed by the zip step
+        with zipfile.ZipFile(zip_path) as zf:
+            members = set(zf.namelist())
+        assert members == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}
+
+
+def test_convert_in_place_is_idempotent_on_rerun(tmp_path):
+    """A well already zipped from a prior run is left alone, not re-zipped or
+    duplicated, on a second convert_in_place() pass over the same folder."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"], timepoints=("0h",))
+
+    il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP)
+    first_mtime = (src / "A01.zip").stat().st_mtime_ns
+
+    summary = il_apply.convert_in_place(src, filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert "0 per-well zip(s)" in summary
+    assert (src / "A01.zip").stat().st_mtime_ns == first_mtime
 
 
 def test_group_files_by_well_and_scan_agree(tmp_path):

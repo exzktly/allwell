@@ -46,6 +46,19 @@ def test_dataset_wells_union_of_in_and_out(tmp_path):
     assert dp.dataset_wells(paths) == {"A01", "B02"}
 
 
+def test_dataset_wells_includes_folder_mode_output(tmp_path):
+    """Regression guard: dataset_wells's own docstring claims "every 96-well
+    position present in a dataset's in or out", but its body used to union
+    only in_containers/out_csvs/out_zips -- never out_folders (the
+    compressed_output=False layout out_folders() reads, see
+    has_folder_mode_output). A well present only as a folder-mode out/<WELL>/
+    -- no zip, no CSV -- was silently missing from the result."""
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0"])
+    (tmp_path / "out" / "H12").mkdir()  # folder-mode QC output, no zip/CSV
+    paths = dp.resolve_dataset(tmp_path, label="d")
+    assert dp.dataset_wells(paths) == {"A01", "H12"}
+
+
 def test_out_csvs_duplicate_prefix_overwrites_by_glob_order(tmp_path):
     build_dataset(tmp_path, wells=["A01"], timepoints=["0"], csv_prefix="measurements")
     (tmp_path / "out" / "run2_A01.csv").write_text("well,fov,timepoint,timepoint_hours\n")

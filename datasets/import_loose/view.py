@@ -228,6 +228,12 @@ class ImportLoosePage(QWidget):
     def set_in_place(self, in_place: bool) -> None:
         self._in_place_cb.setChecked(bool(in_place))
 
+    def set_filename_schema(self, schema: str) -> None:
+        self._schema_edit.setText(schema or DEFAULT_SCHEMA)
+
+    def set_filename_sep(self, sep: str) -> None:
+        self._sep_edit.setText(sep or DEFAULT_SEP)
+
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
 
@@ -240,6 +246,15 @@ class ImportLoosePage(QWidget):
         self._run_btn.setText("Converting…" if running else "▶  Convert")
         if running:
             self._open_btn.setVisible(False)
+        # Locked alongside the run (ImportLooseController._launch captures
+        # source_path() once at launch and never re-reads it afterward, but
+        # the field itself must not drift out from under the user mid-run
+        # either — same class of bug as Subset's source/destination fields).
+        self._src_field.setEnabled(not running)
+        self._dest_field.setEnabled(not running)
+        self._schema_edit.setEnabled(not running)
+        self._sep_edit.setEnabled(not running)
+        self._in_place_cb.setEnabled(not running)
 
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root

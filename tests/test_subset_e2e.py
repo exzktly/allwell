@@ -28,10 +28,16 @@ def test_subset_end_to_end_then_reopen_in_review(tmp_path):
     )
     overrides = {
         "version": 2,
+        # tp values are already normalized ("48", not "48h") -- the shape
+        # save_to_data_dir actually writes (CellKey.as_tuple(), not the raw
+        # CSV timepoint label). A fixture using the raw label here would mask
+        # the exact bug this dataset covers: kept_keys used to be built from
+        # unnormalized CSV values, so it only ever agreed with an (unrealistic)
+        # unnormalized override fixture.
         "overrides": [
-            {"well": "A01", "fov": "F001", "tp": "48h", "nucleus_id": "1",
+            {"well": "A01", "fov": "F001", "tp": "48", "nucleus_id": "1",
              "included": "0", "seg_fp": "stale"},
-            {"well": "A01", "fov": "F001", "tp": "999h", "nucleus_id": "2",
+            {"well": "A01", "fov": "F001", "tp": "999", "nucleus_id": "2",
              "included": "0", "seg_fp": "stale"},  # filtered out by timepoint
         ],
     }
@@ -70,7 +76,7 @@ def test_subset_end_to_end_then_reopen_in_review(tmp_path):
     assert len(dest_overrides) == 1
     ((well, fov, tp, nid), included) = next(iter(dest_overrides.items()))
     assert well == "A01"
-    assert tp == "48"  # CellKey normalises "48h" -> "48"
+    assert tp == "48"
     assert included == "0"
 
     # Source untouched.

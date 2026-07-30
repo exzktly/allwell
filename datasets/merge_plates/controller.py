@@ -43,6 +43,8 @@ class MergePlatesController(QObject):
         self._worker: MergePlatesWorker | None = None
         self._last_well_map: dict[str, str] = {}
         self._last_result: tuple[bool, str, str] = (False, "", "")
+        self._launch_ds1_path = ""
+        self._launch_ds2_path = ""
 
         self.page = MergePlatesPage()
         self.page.runRequested.connect(self._on_run)
@@ -88,9 +90,16 @@ class MergePlatesController(QObject):
         self.page.clear_log()
         self.page.dashboard.set_headline("Validating…")
         self.page.set_running(True)
+        # Captured at launch, not re-read from the page afterward — the
+        # fields are locked for the run's duration (MergePlatesPage.set_running),
+        # but _on_wells_planned's origin-colouring must still use the paths
+        # this specific run actually resolved, not whatever the (now-unlocked)
+        # fields hold once wellsPlanned fires.
+        self._launch_ds1_path = self.page.dataset1_path()
+        self._launch_ds2_path = self.page.dataset2_path()
 
         worker = MergePlatesWorker(
-            self.page.dataset1_path(), self.page.dataset2_path(), dest_path, well_map,
+            self._launch_ds1_path, self._launch_ds2_path, dest_path, well_map,
         )
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
@@ -138,8 +147,8 @@ class MergePlatesController(QObject):
         # only needs the two source lists, which the worker doesn't expose
         # directly, so re-derive them from the datasets on disk.
         try:
-            ds1 = resolve_dataset(self.page.dataset1_path(), label="dataset 1")
-            ds2 = resolve_dataset(self.page.dataset2_path(), label="dataset 2")
+            ds1 = resolve_dataset(self._launch_ds1_path, label="dataset 1")
+            ds2 = resolve_dataset(self._launch_ds2_path, label="dataset 2")
             wells1 = dataset_wells(ds1)
             wells2_src = dataset_wells(ds2)
             wells2_dest = {self._last_well_map.get(w, w) for w in wells2_src}

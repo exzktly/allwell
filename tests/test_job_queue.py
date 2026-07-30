@@ -157,6 +157,26 @@ def test_load_leaves_pending_job_alone():
     assert q.get("a").state == JobState.PENDING
 
 
+def test_load_cascades_block_to_successors_of_an_interrupted_job():
+    """Regression guard: _repair_after_load used to mark a crashed RUNNING
+    job INTERRUPTED without calling _cascade_block, unlike mark_finished's
+    own FAILED/CANCELLED path. INTERRUPTED never equals SUCCEEDED, so
+    next_runnable() would never select the chained successor either way —
+    but without the cascade the successor was left stuck at PENDING forever
+    with no visible reason, instead of BLOCKED with a message naming why."""
+    data = {"jobs": [
+        _job("a", state=JobState.RUNNING).to_json(),
+        _job("b", chain_from="a", chain_target="opts.raw", chain_kind="out_dir").to_json(),
+        _job("c", chain_from="b", chain_target="opts.raw", chain_kind="out_dir").to_json(),
+    ]}
+    q = JobQueue.from_json(data)
+    assert q.get("a").state == JobState.INTERRUPTED
+    assert q.get("b").state == JobState.BLOCKED
+    assert q.get("c").state == JobState.BLOCKED
+    assert "predecessor a" in q.get("b").message
+    assert q.next_runnable() is None
+
+
 def test_load_repairs_persisted_order_that_violates_chain_link():
     # b is stored before its predecessor a — a hand edit or a bug elsewhere.
     data = {"jobs": [

@@ -2049,7 +2049,7 @@ deletable:
 
 | Module | What it holds |
 |---|---|
-| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. |
+| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. |
 | `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. |
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
 | `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
@@ -2254,6 +2254,18 @@ through the existing `on_open_in_analyze` seam — the same one `Convert
 OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
 incremental) Analyze run, not a new execution path.
 
+`ValidatePage.set_running` locks the dataset `PathField` for the run's
+duration, the same as Subset's source/destination fields — `_on_succeeded`
+records the finished report's `report.root` (the path the worker actually
+scanned) rather than re-reading the page's live field, but the field itself
+must still not drift out from under the user mid-scan. `ValidateController._run`'s
+"no dataset path" early return also emits `jobFinished(False, …)` directly
+(mirroring `MergePlatesController._launch`'s remap-failure branch) instead of
+silently returning: a queued job whose persisted `spec["dataset"]` is empty or
+missing (a hand-edited `job_queue.json`, per §Job Queue's own repair
+discipline) would otherwise never start a worker and never signal completion,
+stalling `QueueBridge._current` forever.
+
 **Subset / Split Dataset** (`datasets/subset/`) copies a filtered slice of a
 dataset — chosen wells, timepoints, and/or FOVs — into a fresh destination,
 leaving the source untouched. It deliberately **keeps every kept row's
@@ -2266,13 +2278,28 @@ about a kept row or member is rewritten at all; filtering is a pure predicate
 (`subset_compute.member_matches` / `row_matches`) over what's already there.
 
 `build_subset_plan` reuses the destination-state predicates with its own
-marker (`.aw_subset_in_progress`) and refuses a filter matching zero wells.
-`apply.execute_plan` follows Concatenate's skeleton — marker written first,
-per-well copy through a `ThreadPoolExecutor` (`pick_workers`, same
+marker (`.aw_subset_in_progress`), refuses a filter matching zero wells, and
+refuses a folder-mode source (`out/<WELL>/`, `compressed_output=False`) the
+same way Concatenate and Merge Plates do — nothing here copies member-by-member
+out of a folder, so a folder-mode source's QC images would otherwise be
+silently absent from the destination while `execute_plan` still reported
+success. `apply.execute_plan` follows Concatenate's skeleton — marker written
+first, per-well copy through a `ThreadPoolExecutor` (`pick_workers`, same
 lock-only-around-the-pre-work-callback shape Concatenate uses), `_verify`
 (currently: at least one measurement row written, and every kept row's
 `filename` present in the filtered `in/` archive), sidecar write, marker
 cleared last.
+
+`subset_compute.member_matches` resolves each zip member through
+`_common.member_names.discover_parsed_member` — trying each of the source
+dataset's known channel tokens (`SubsetPlan.channels`, built the same way
+`merge_plates_compute.known_channel_tokens` is, from `fluor_tokens`/
+`smfish_tokens`/`phase_token`) as the role-suffix discriminator — rather than
+a bare `parse_image_filename`. A channel-scoped role suffix like `_tophat_gfp`
+doesn't resolve its role without that discovery loop; without it, a
+filtered-out timepoint's `_tophat_<chan>`/`_smfish_<chan>` image fails the
+field-count check and falls through the "unparseable ⇒ keep" fallback below,
+leaking into the destination.
 
 Cell overrides need one thing Concatenate's carry-over doesn't: **filtering
 before restamping**. `_merge_cell_overrides` there carries every entry
@@ -2281,7 +2308,15 @@ and FOVs, so an override for a filtered-out cell is dropped too — copying
 Concatenate's restamp verbatim would otherwise stat a well's destination zip
 for an override that doesn't belong there. The restamp itself (`seg_fp` set
 to the destination `<well>_out.zip`'s own mtime, as the **last** write to
-that archive) is unchanged from Concatenate's pattern.
+that archive) is unchanged from Concatenate's pattern. The membership-test
+keys `_copy_one_well` builds from each kept row's raw CSV `fov`/`timepoint`
+values are normalized (`well_viewer.data.image_identity.normalize_fov`/
+`normalize_tp`) before the comparison in `_copy_filtered_overrides` — a
+`cell_overrides.json` entry's `fov`/`tp` are already normalized on write
+(`CellKey.as_tuple()`, per `well_viewer/persistence/cell_overrides.py`), so
+comparing them against *raw* CSV values (`"24h"` vs. the stored `"24"`)
+silently failed the match for any override whose timepoint label parses,
+dropping every one of them with no log line about the loss.
 
 Subset's page is the one place a Datasets tool already has an interactive
 plate map before a run even starts — the well picker above the Run button.
@@ -2375,7 +2410,40 @@ Two conversion modes, one code path each, both in `apply.py`:
   "writing" stage; `_zip_well_folders` then reports "done" once that well's
   zip actually lands on disk, giving both conversion modes the same
   `(well, "writing"|"done")` callback shape off one `ImportLooseWorker.wellStage`
-  signal.
+  signal. A well already zipped from an earlier, crash-interrupted attempt
+  (`_zip_well_folders`'s idempotent-rerun skip) still reports "done" rather
+  than being silently skipped — if `wellsPlanned` (seeded from the pre-run
+  scan) already listed it, skipping the report left it stuck showing
+  "writing" on the dashboard forever despite the run overall succeeding.
+
+`ImportLooseController._launch` captures the source path once at launch
+(`self._launch_source_root`) rather than re-reading `self.page.source_path()`
+inside `_on_succeeded` afterward, and `ImportLoosePage.set_running` locks the
+source/destination `PathField`s and the schema/separator/in-place controls
+for the run's duration — the same field-locking discipline Subset's picker
+uses, closing off a source change mid-run from misattributing the produced
+root in-place mode reports (what a chained queue successor uses, and what
+"Open in Analyze" opens). `collect_spec`/`show_job` round-trip
+`filename_schema`/`filename_sep` through the persisted queue spec too — they
+used to be silently dropped, so a queued run always converted with the page's
+default schema/separator regardless of what the user had actually set when
+they queued it.
+
+**Stop is worker-tracked, not just interruption-flagged, for in-place mode.**
+`convert_to_new_destination`'s `ThreadPoolExecutor` loop polls
+`isInterruptionRequested` cooperatively between wells, but `convert_in_place`
+blocks inside `services.input_resolution_service.run_zipper`'s subprocess
+stdout-read loop, which never polls anything — `QThread.requestInterruption()`
+alone was a no-op there. `ImportLooseWorker.request_stop()` also signals the
+tracked `WellPlateZipper.py` subprocess directly (`_track_proc`, wired through
+`convert_in_place`'s existing `proc_hook` parameter, via
+`services.subprocess_kill.signal_subprocess` — the same cross-platform
+pgid-aware kill `PipelineRunner.stop()` uses for its own zipper subprocess).
+`ImportLooseController.stop()`/`shutdown()` call `request_stop()`, not
+`requestInterruption()` alone. The resulting nonzero-exit `RuntimeError` is
+rewritten to the "Cancelled" convention every other Datasets worker's
+`failed()` message uses for a Stop-driven exit, so `QueueBridge._was_cancelled`
+recognises it instead of marking the queued job `FAILED`.
 
 **Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
 Concatenate. Concatenate joins the same plate imaged at different times (a
@@ -2388,6 +2456,15 @@ not merged, unless the user remaps dataset 2's wells onto free positions
 first (a block-placement control — "place dataset 2 starting at well E01" —
 translating dataset 2's occupied wells as a rigid block via
 `merge_plates_compute.block_shift_well_map`).
+
+`MergePlatesPage.set_running` locks the dataset 1/dataset 2/destination
+`PathField`s and the remap controls for the run's duration, and
+`MergePlatesController._launch` captures `dataset1_path()`/`dataset2_path()`
+once at launch (`self._launch_ds1_path`/`_launch_ds2_path`) for
+`_on_wells_planned` to re-derive origin colours from, rather than re-reading
+the (now field-locked, but still worth being defensive about) live page —
+the same class of mid-run-field-change bug already fixed on Subset's and
+Validate's own source fields.
 
 A well is carried by four values, and all four must move together — the
 same lock-step discipline this section documents for Concatenate's
@@ -2471,10 +2548,16 @@ Qt event loop. Three layers:
   refused; `set_chain()` rejects a self-chain or a cycle before writing the
   link. `JobQueue.from_json` never auto-starts a loaded queue (a relaunch
   always comes up paused — `is_started` is never persisted), maps a stale
-  `running` state to `interrupted`, and topologically repairs — or, on a
-  genuine cycle, drops every chain link in — a hand-edited file whose stored
-  order violates its own links, so `next_runnable()` can never deadlock on
-  bad persisted data. Persistence goes through
+  `running` state to `interrupted` **and cascades that same job to `blocked`
+  every transitive successor still `pending`** (`_repair_after_load` calls
+  `_cascade_block` exactly like `mark_finished`'s own failed/cancelled path
+  does) — an interrupted predecessor never reaches `succeeded`, so
+  `next_runnable()` would never have selected the successor either way, but
+  without the cascade it sat at `pending` forever with no visible reason,
+  instead of `blocked` with a message naming why — and topologically repairs
+  — or, on a genuine cycle, drops every chain link in — a hand-edited file
+  whose stored order violates its own links, so `next_runnable()` can never
+  deadlock on bad persisted data. Persistence goes through
   `services.remote_config.default_state_dir()` (a tmp-file-then-`os.replace`
   write of `job_queue.json`), deliberately **not** derived from
   `default_config_path()` — that function honours `$ALLWELL_REMOTES`, an
@@ -2500,7 +2583,17 @@ Qt event loop. Three layers:
   job as `(job_id, kind)` so a `jobFinished` from a controller that isn't the
   queue's own current job — e.g. the user pressed that tool's own Run button
   by hand while a *different* job was running — is dropped rather than
-  misattributed. On completion it looks up `was_cancelled()` on the
+  misattributed. The `(job_id, kind)` tuple can only actually distinguish by
+  `kind` (`jobFinished` doesn't carry a job id), so this guard's soundness
+  depends on every controller's `start_from_queue` path eventually emitting
+  `jobFinished` exactly once — a launch path that silently no-ops on invalid
+  input (a queued job whose spec has an empty/corrupted required field) would
+  otherwise leave `_current` stuck on that job forever, and a later unrelated
+  manual run of the *same kind* would then complete against the stale
+  `_current` instead. `MergePlatesController._launch`'s remap-failure branch
+  and `ValidateController._run`'s "no dataset path" branch both emit
+  `jobFinished` directly for exactly this reason, rather than returning
+  silently before a worker ever starts. On completion it looks up `was_cancelled()` on the
   finishing controller (falling back to the Datasets convention that a
   cancelled worker's failure message starts with `"Cancelled"`) to tell a
   user-requested Stop apart from a genuine failure, since the queue's own

@@ -215,3 +215,73 @@ def test_remap_run_places_dataset_two_at_origin(qapp, tmp_path):
     assert (dest / "out" / "measurements_E01.csv").exists()
     assert (dest / "out" / "measurements_A01.csv").exists()
     ctrl.shutdown()
+
+
+def test_fields_locked_during_a_run(qapp, tmp_path):
+    """Regression guard: the dataset1/dataset2/destination PathFields and the
+    remap controls stayed enabled for the whole run, unlike Subset's own
+    fields -- MergePlatesController._on_wells_planned re-resolves
+    dataset1_path()/dataset2_path() live to colour the dashboard by origin,
+    so a mid-run change could misattribute which wells came from which
+    dataset."""
+    from datasets.merge_plates.controller import MergePlatesController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"])
+
+    ctrl = MergePlatesController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    assert page._ds1_field.isEnabled() is False
+    assert page._ds2_field.isEnabled() is False
+    assert page._dest_field.isEnabled() is False
+    assert page._remap_cb.isEnabled() is False
+    _run_worker_to_completion(ctrl)
+    assert page._ds1_field.isEnabled() is True
+    assert page._ds2_field.isEnabled() is True
+    assert page._dest_field.isEnabled() is True
+    assert page._remap_cb.isEnabled() is True
+    ctrl.shutdown()
+
+
+def test_origin_colours_use_the_launched_paths_not_a_since_changed_field(qapp, tmp_path):
+    """Regression guard: _on_wells_planned used to re-read
+    dataset2_path() live instead of the path this run actually launched
+    with -- if dataset 2's field changed after the run started but before
+    wellsPlanned fired, the dashboard's per-well origin colouring would be
+    computed against a dataset this run never touched."""
+    from datasets.merge_plates.controller import MergePlatesController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    ds2_other = tmp_path / "ds2_other"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"])
+    build_dataset(ds2_other, wells=["C03"], timepoints=["0h"])
+
+    ctrl = MergePlatesController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    # The field changes after the run is launched but before it finishes —
+    # possible even though the field is disabled, since setPath() is a
+    # direct call, not a click through the (locked) widget.
+    page._ds2_field.set_path(str(ds2_other))
+    _run_worker_to_completion(ctrl)
+
+    assert page.dashboard._well_origin.get("B02") == "ds2"
+    assert "C03" not in page.dashboard._well_origin
+    ctrl.shutdown()

@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from util.aw_safe import swallow
+from well_viewer.data.image_identity import normalize_fov, normalize_tp
 from datasets._common.concurrency import pick_workers
 from datasets._common.containers import (
     FILENAME_COLUMN,
@@ -178,14 +179,20 @@ def execute_plan(
         kept_in_names: frozenset[str] = frozenset()
         if container is not None:
             members = read_members(container)
-            kept = [(n, d) for n, d in members if member_matches(n, schema=plan.schema, filt=plan.filt)]
+            kept = [
+                (n, d) for n, d in members
+                if member_matches(n, schema=plan.schema, channels=plan.channels, filt=plan.filt)
+            ]
             if kept:
                 kept_in_names, _dropped = write_zip(plan.dest.in_dir / f"{well}.zip", kept)
 
         out_zip = zip_map.get(well)
         if out_zip is not None:
             members = read_members(out_zip)
-            kept = [(n, d) for n, d in members if member_matches(n, schema=plan.schema, filt=plan.filt)]
+            kept = [
+                (n, d) for n, d in members
+                if member_matches(n, schema=plan.schema, channels=plan.channels, filt=plan.filt)
+            ]
             if kept:
                 write_zip(plan.dest.out_dir / f"{well}_out.zip", kept)
 
@@ -205,7 +212,12 @@ def execute_plan(
                             f"Verification failed: well {well}'s row references "
                             f"{fname!r}, which isn't in the filtered in/{well}.zip."
                         )
-                    keys.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
+                    # cell_overrides.json stores fov/tp already normalized (via
+                    # CellKey.as_tuple, well_viewer/data/image_identity.py), so
+                    # this set must be normalized the same way or a parseable
+                    # timepoint label like "24h" never matches its normalized
+                    # "24" and _copy_filtered_overrides drops the override.
+                    keys.add((normalize_fov(row.get("fov", "")), normalize_tp(row.get("timepoint", ""))))
         return well, row_count, kept_in_names, keys
 
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(plan.wells_kept))) as ex:

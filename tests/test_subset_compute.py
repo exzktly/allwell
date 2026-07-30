@@ -143,15 +143,22 @@ def test_marker_survives_cancel(tmp_path):
 
 
 def test_cell_overrides_filtered_and_restamped(tmp_path):
+    """Regression guard: cell_overrides.json stores fov/tp already normalized
+    (CellKey.as_tuple, well_viewer/data/image_identity.py) -- "0h"/"24h"
+    normalize to "0"/"24" -- while the source CSV's raw timepoint column
+    stays "0h"/"24h". _copy_one_well used to key its membership-test set off
+    the raw CSV values unnormalized, so this exact comparison failed for
+    every override with a parseable timepoint label and silently dropped
+    every one of them (0 carried over, no log line about the loss)."""
     src = tmp_path / "src"
     dest = tmp_path / "dest"
     _build(src, wells=["A01"], timepoints=["0h", "24h"], fovs=("F001",))
     overrides = {
         "version": 2,
         "overrides": [
-            {"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+            {"well": "A01", "fov": "F001", "tp": "0", "nucleus_id": "1",
              "included": "0", "seg_fp": "old"},
-            {"well": "A01", "fov": "F001", "tp": "24h", "nucleus_id": "2",
+            {"well": "A01", "fov": "F001", "tp": "24", "nucleus_id": "2",
              "included": "0", "seg_fp": "old"},
         ],
     }
@@ -164,7 +171,7 @@ def test_cell_overrides_filtered_and_restamped(tmp_path):
     result = json.loads((dest / "out" / "cell_overrides.json").read_text())
     assert len(result["overrides"]) == 1
     kept = result["overrides"][0]
-    assert kept["tp"] == "0h"
+    assert kept["tp"] == "0"
     dest_zip = dest / "out" / "A01_out.zip"
     assert kept["seg_fp"] == f"{dest_zip.stat().st_mtime_ns}"
     assert kept["seg_fp"] != "old"
@@ -218,3 +225,42 @@ def test_execute_plan_respects_explicit_worker_count(tmp_path):
     plan = sc.build_subset_plan(src, dest, sc.SubsetFilter())
     summary = subset_apply.execute_plan(plan, workers=1)
     assert "3 well(s)" in summary
+
+
+def test_folder_mode_source_refused(tmp_path):
+    """Regression guard: build_subset_plan used to never check
+    has_folder_mode_output (unlike Concatenate and Merge plates, which both
+    refuse folder-mode input outright) -- the source's out/<WELL>/ QC images
+    were silently dropped from the destination while apply.execute_plan still
+    reported success."""
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    _build(src, wells=["A01"], timepoints=["0h"])
+    (src / "out" / "A01").mkdir()  # folder-mode QC output alongside the zip
+    with pytest.raises(sc.SubsetError, match="per-well folders"):
+        sc.build_subset_plan(src, dest, sc.SubsetFilter())
+
+
+def test_channel_scoped_role_image_filtered_by_timepoint(tmp_path):
+    """Regression guard: member_matches used to call parse_image_filename
+    directly with no channel/fluor-token discovery. A channel-scoped role
+    suffix like "_tophat_gfp" (dataset_builder writes one per well/fov/tp,
+    mirroring what the real pipeline's tophat-correction step writes)
+    doesn't resolve its role without trying each known channel token as the
+    discriminator, so len(parts) != len(schema.fields) fired and the
+    "unparseable -> keep" fallback let a filtered-out timepoint's tophat
+    image leak into the destination zip."""
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    _build(src, wells=["A01"], timepoints=["0h", "24h"], fovs=("F001",))
+    filt = sc.SubsetFilter(timepoint_labels=frozenset({"0h"}))
+    plan = sc.build_subset_plan(src, dest, filt)
+    subset_apply.execute_plan(plan)
+
+    with zipfile.ZipFile(dest / "out" / "A01_out.zip") as zf:
+        members = set(zf.namelist())
+    assert any("_tophat_gfp" in m for m in members), "kept timepoint's tophat image should survive"
+    assert not any("_24h_tophat_gfp" in m for m in members), (
+        f"filtered-out 24h tophat image leaked into destination: {members}"
+    )
+    assert not any("_24h_labels" in m for m in members)

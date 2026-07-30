@@ -21,7 +21,6 @@ from well_viewer.data.image_identity import (
     PipelineSchema,
     load_schema,
     normalize_fov,
-    parse_image_filename,
 )
 from well_viewer.domain.tp_match import tp_close
 from datasets._common.dataset_paths import (
@@ -32,12 +31,15 @@ from datasets._common.dataset_paths import (
     destination_has_unrecognized_content as _destination_has_unrecognized_content,
     destination_is_complete_dataset,
     destination_is_failed_run as _destination_is_failed_run,
+    has_folder_mode_output,
     in_containers,
     out_csvs,
     out_zips,
     read_info as _read_info,
     resolve_dataset as _resolve_dataset,
 )
+from datasets._common.member_names import discover_parsed_member
+from datasets.concatenate.concatenate_compute import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 
@@ -100,6 +102,7 @@ class SubsetPlan:
     src: DatasetPaths
     dest: DatasetPaths
     schema: PipelineSchema
+    channels: tuple[str, ...]
     filt: SubsetFilter
     wells_kept: tuple[str, ...]
     merged_info: dict
@@ -133,8 +136,17 @@ def build_subset_plan(
         )
     dest_is_restart = destination_is_failed_run(dest)
 
+    if has_folder_mode_output(src):
+        raise SubsetError(
+            "The source dataset stores its QC images as per-well folders "
+            "(out/<WELL>/) instead of <WELL>_out.zip archives — Subset only "
+            "supports the zipped output layout. Re-run the pipeline with "
+            "compressed output, or zip the folders manually, then try again."
+        )
+
     info = read_info(src, label="source dataset")
     schema = load_schema(info)
+    channels = known_channel_tokens(info, info)
 
     all_wells = dataset_wells(src)
     wells_kept = tuple(sorted(all_wells if filt.wells is None else (all_wells & filt.wells)))
@@ -155,24 +167,33 @@ def build_subset_plan(
         ]
 
     return SubsetPlan(
-        src=src, dest=dest, schema=schema, filt=filt,
+        src=src, dest=dest, schema=schema, channels=channels, filt=filt,
         wells_kept=wells_kept, merged_info=merged_info, dest_is_restart=dest_is_restart,
     )
 
 
 # ── member/row filter predicates ─────────────────────────────────────────────
-def member_matches(name: str, *, schema: PipelineSchema, filt: SubsetFilter) -> bool:
+def member_matches(
+    name: str, *, schema: PipelineSchema, channels: tuple[str, ...], filt: SubsetFilter,
+) -> bool:
     """Whether a zip member's schema-parsed fields satisfy *filt*.
 
-    A member the schema can't parse (a non-conformant name — the same gate
-    ``rewrite_member_field`` applies) is **kept** rather than dropped: since
-    nothing here rewrites anything, an unparseable member is exactly the kind
-    of "not this dataset's business" file Concatenate also passes through
-    untouched, not a reason to lose data silently.
+    Resolves the member through :func:`~datasets._common.member_names.discover_parsed_member`
+    rather than a bare ``parse_image_filename`` — a channel-scoped role suffix
+    (``_tophat_gfp``, ``_smfish_nir``) doesn't resolve without trying each
+    known channel token as the role-suffix discriminator, and without that a
+    filtered-out timepoint's role-suffixed image falls through the
+    unparseable-member fallback below and leaks into the destination.
+
+    A member the schema can't parse at all (a non-conformant name — the same
+    gate ``rewrite_member_field`` applies) is **kept** rather than dropped:
+    since nothing here rewrites anything, an unparseable member is exactly the
+    kind of "not this dataset's business" file Concatenate also passes
+    through untouched, not a reason to lose data silently.
     """
     if filt.fovs is None and filt.timepoint_hours is None:
         return True
-    parsed = parse_image_filename(name, schema=schema)
+    parsed, _discovered_channel = discover_parsed_member(name, schema, channels)
     parts = parsed.stem.split(schema.sep)
     if len(parts) != len(schema.fields):
         return True

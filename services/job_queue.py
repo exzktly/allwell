@@ -350,6 +350,12 @@ class JobQueue:
                 j.state = JobState.INTERRUPTED
                 j.message = "interrupted by an app restart"
                 notes.append(f"{j.id}: was running at last save, marked interrupted")
+                # An interrupted job never reached SUCCEEDED, so next_runnable()
+                # will never select a chained successor -- but without this the
+                # successor is left stuck at PENDING forever with no visible
+                # reason why, instead of the same BLOCKED-with-a-message state a
+                # FAILED/CANCELLED predecessor already produces via mark_finished.
+                self._cascade_block(j.id)
         if not self._chain_order_valid(self._jobs):
             fixed = self._topological_order(self._jobs)
             if fixed is not None:

@@ -220,7 +220,10 @@ def out_folders(paths: DatasetPaths) -> dict[str, Path]:
 
 def dataset_wells(paths: DatasetPaths) -> set[str]:
     """Every 96-well position present in a dataset's ``in`` or ``out``."""
-    return set(in_containers(paths)) | set(out_csvs(paths)) | set(out_zips(paths))
+    return (
+        set(in_containers(paths)) | set(out_csvs(paths))
+        | set(out_zips(paths)) | set(out_folders(paths))
+    )
 
 
 # ── input-side availability scan ─────────────────────────────────────────────

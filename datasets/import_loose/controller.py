@@ -33,6 +33,7 @@ class ImportLooseController(QObject):
         self._on_add_to_queue = on_add_to_queue
         self._worker: ImportLooseWorker | None = None
         self._last_result: tuple[bool, str, str] = (False, "", "")
+        self._launch_source_root = ""
 
         self.page = ImportLoosePage()
         self.page.runRequested.connect(self._on_run)
@@ -52,9 +53,14 @@ class ImportLooseController(QObject):
         self.page.dashboard.set_headline("Scanning…")
         self.page.dashboard.setVisible(True)
         self.page.set_running(True)
+        # Captured at launch, not re-read from the page afterward — the
+        # source field is locked for the run's duration (ImportLoosePage.set_running),
+        # but _on_succeeded still needs the root this specific run actually
+        # converted, not whatever the (now-unlocked) field holds once it fires.
+        self._launch_source_root = self.page.source_path()
 
         worker = ImportLooseWorker(
-            self.page.source_path(), self.page.destination_path(),
+            self._launch_source_root, self.page.destination_path(),
             filename_schema=self.page.filename_schema(),
             filename_sep=self.page.filename_sep(),
             in_place=self.page.in_place(),
@@ -75,6 +81,8 @@ class ImportLooseController(QObject):
             "source": self.page.source_path(),
             "destination": self.page.destination_path(),
             "in_place": self.page.in_place(),
+            "filename_schema": self.page.filename_schema(),
+            "filename_sep": self.page.filename_sep(),
         }
 
     def _on_queue_requested(self) -> None:
@@ -85,6 +93,8 @@ class ImportLooseController(QObject):
         self.page.set_source_path(spec.get("source", ""))
         self.page.set_destination_path(spec.get("destination", ""))
         self.page.set_in_place(bool(spec.get("in_place", False)))
+        self.page.set_filename_schema(spec.get("filename_schema", ""))
+        self.page.set_filename_sep(spec.get("filename_sep", ""))
 
     def start_from_queue(self, spec: dict) -> None:
         """A queued in-place import proceeds without the interactive
@@ -95,7 +105,7 @@ class ImportLooseController(QObject):
 
     def stop(self) -> None:
         if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
+            self._worker.request_stop()
 
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
@@ -108,7 +118,7 @@ class ImportLooseController(QObject):
         if dest_root:
             self.page.show_open_in_analyze(dest_root)
         elif self.page.in_place():
-            produced = self.page.source_path()
+            produced = self._launch_source_root
             self.page.show_open_in_analyze(produced)
         self._last_result = (True, summary, produced)
 
@@ -150,7 +160,7 @@ class ImportLooseController(QObject):
         if worker is None or not worker.isRunning():
             return
         try:
-            worker.requestInterruption()
+            worker.request_stop()
             worker.wait(2000)
         except RuntimeError:
             swallowed("import-loose worker shutdown")

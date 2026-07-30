@@ -167,3 +167,67 @@ def test_apply_repairs_rebuilds_availability(qapp, tmp_path):
     new_info = json.loads(info_path.read_text())
     assert new_info["available_timepoints"] == ["0h", "24h"]
     ctrl.shutdown()
+
+
+def test_dataset_field_locked_during_a_run(qapp, tmp_path):
+    """Regression guard: the dataset PathField stayed enabled for the whole
+    run, unlike Subset's source/destination fields -- a user could pick a
+    different dataset while a scan was still in flight."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._dataset_field.set_path(str(tmp_path))
+    page._on_dataset_changed()
+
+    page.checkRequested.emit()
+    assert page._dataset_field.isEnabled() is False
+    _run_worker_to_completion(ctrl)
+    assert page._dataset_field.isEnabled() is True
+    ctrl.shutdown()
+
+
+def test_last_result_reports_the_scanned_root_not_a_since_changed_field(qapp, tmp_path):
+    """Regression guard: ValidateController._on_succeeded used to read
+    self.page.dataset_path() (the live PathField) instead of the finished
+    report's own root -- if the field changed between the scan starting and
+    its succeeded signal being handled, jobFinished's dataset_root (what the
+    job queue chains a successor job on) would name a folder the just-
+    finished scan never actually ran against."""
+    from datasets.validate.controller import ValidateController
+    from datasets.validate.validate_compute import DatasetReport
+
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    build_dataset(root_a, wells=["A01"], timepoints=["0h"])
+    build_dataset(root_b, wells=["B02"], timepoints=["0h"])
+
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._dataset_field.set_path(str(root_a))
+    page._on_dataset_changed()
+
+    # The field changes after the scan of root_a is under way but before its
+    # succeeded signal is handled.
+    page._dataset_field.set_path(str(root_b))
+    ctrl._on_succeeded(DatasetReport(root=root_a), None)
+
+    assert ctrl._last_result[2] == str(root_a)
+    ctrl.shutdown()
+
+
+def test_start_from_queue_with_empty_spec_emits_job_finished_instead_of_stalling(qapp):
+    """Regression guard: _run's "no dataset path" early return used to bail
+    out before a worker was ever created and before jobFinished was ever
+    emitted -- a queued job with an empty/corrupted "dataset" spec value
+    (e.g. a hand-edited persisted queue file) would stall QueueBridge's
+    _current forever, since nothing would ever signal the job as done."""
+    from datasets.validate.controller import ValidateController
+
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    seen = []
+    ctrl.jobFinished.connect(lambda ok, msg, path: seen.append((ok, msg, path)))
+    ctrl.start_from_queue({})
+    assert seen and seen[0][0] is False
+    ctrl.shutdown()

@@ -289,6 +289,15 @@ class MergePlatesPage(QWidget):
         self._run_btn.setText("Merging…" if running else "▶  Merge")
         if running:
             self._open_btn.setVisible(False)
+        # Locked for the run's duration — MergePlatesController._on_wells_planned
+        # re-resolves dataset1_path()/dataset2_path() live to colour the
+        # dashboard by origin, so a mid-run change would misattribute the
+        # colours (same class of bug as Subset's picker/source-field lock).
+        self._ds1_field.setEnabled(not running)
+        self._ds2_field.setEnabled(not running)
+        self._dest_field.setEnabled(not running)
+        self._remap_cb.setEnabled(not running)
+        self._remap_origin_edit.setEnabled(not running and self._remap_cb.isChecked())
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root

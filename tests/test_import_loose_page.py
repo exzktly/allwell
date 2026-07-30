@@ -175,6 +175,98 @@ def test_group_in_place_through_the_page_zips_and_deletes_sources(qapp, tmp_path
     ctrl.shutdown()
 
 
+def test_queue_spec_round_trips_filename_schema_and_separator(qapp, tmp_path):
+    """Regression guard: collect_spec()/show_job() used to leave out
+    filename_schema/filename_sep entirely -- a queued Import Loose job
+    always converted with the page's default schema/separator regardless of
+    what the user had actually typed when they queued it."""
+    from datasets.import_loose.controller import ImportLooseController
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(tmp_path / "dest"))
+    page._schema_edit.setText("plate:marker:well:site:tp")
+    page._sep_edit.setText("-")
+
+    spec = ctrl.collect_spec()
+    assert spec["filename_schema"] == "plate:marker:well:site:tp"
+    assert spec["filename_sep"] == "-"
+
+    page.set_filename_schema("")
+    page.set_filename_sep("")
+    ctrl.show_job(spec)
+    assert page.filename_schema() == "plate:marker:well:site:tp"
+    assert page.filename_sep() == "-"
+    ctrl.shutdown()
+
+
+def test_in_place_success_reports_the_launched_source_not_a_since_changed_field(qapp, tmp_path):
+    """Regression guard: the source PathField used to stay enabled for the
+    whole run (unlike Subset's/Validate's locked fields), and
+    _on_succeeded used to read self.page.source_path() (the live field)
+    for in-place mode's "produced" root instead of what this run actually
+    converted -- so a source change mid-run would make jobFinished's third
+    argument (what "Open in Analyze" opens, and what a chained queue
+    successor uses) name a folder this run never touched."""
+    from datasets.import_loose.controller import ImportLooseController
+
+    root_a = tmp_path / "a"
+    root_b = tmp_path / "b"
+    _write_loose(root_a, ["A01"])
+    _write_loose(root_b, ["B02"])
+
+    ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
+    ctrl._confirm_in_place = lambda: True  # bypass the modal QMessageBox
+    page = ctrl.page
+    page._src_field.set_path(str(root_a))
+    page._on_source_changed()
+    page._in_place_cb.setChecked(True)
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    assert page._src_field.isEnabled() is False
+
+    # The field changes after the run is launched but before it finishes.
+    page._src_field.set_path(str(root_b))
+    page._on_source_changed()
+    _run_worker_to_completion(ctrl)
+    assert page._src_field.isEnabled() is True
+
+    assert ctrl._last_result[2] == str(root_a)
+    ctrl.shutdown()
+
+
+def test_request_stop_terminates_tracked_subprocess(tmp_path):
+    """Regression guard: ImportLooseController.stop() used to call only
+    QThread.requestInterruption() -- a no-op while run() is blocked inside
+    convert_in_place's WellPlateZipper.py subprocess, since nothing on that
+    path ever polls the interruption flag. request_stop() must also reach
+    the tracked subprocess directly."""
+    import subprocess
+    import time
+
+    from datasets.import_loose.worker import ImportLooseWorker
+
+    worker = ImportLooseWorker(
+        str(tmp_path), "", filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_", in_place=True,
+    )
+    proc = subprocess.Popen(["sleep", "30"])
+    worker._track_proc(proc)
+    worker.request_stop()
+
+    for _ in range(50):
+        if proc.poll() is not None:
+            break
+        time.sleep(0.1)
+    assert proc.poll() is not None, "tracked subprocess should have been terminated"
+    proc.wait(timeout=5)
+
+
 def test_no_match_reports_failure_not_crash(qapp, tmp_path):
     from datasets.import_loose.controller import ImportLooseController
 

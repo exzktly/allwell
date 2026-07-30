@@ -160,7 +160,15 @@ def _zip_well_folders(
         if not p.is_dir():
             continue
         well = canonical_well_label(p.name)
-        if not well or well in zipped_wells:
+        if not well:
+            continue
+        if well in zipped_wells:
+            # Already zipped by an earlier attempt this folder is resuming
+            # from -- still report "done" so a well the scan's wellsPlanned
+            # included (its loose TIFs hadn't all been moved/deleted yet
+            # when the previous attempt crashed) doesn't sit stuck at
+            # "writing" on the dashboard forever despite the run succeeding.
+            report(well, "done")
             continue
         tifs = sorted(
             f for f in p.iterdir()

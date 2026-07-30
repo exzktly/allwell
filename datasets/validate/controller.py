@@ -54,6 +54,16 @@ class ValidateController(QObject):
             return
         root = self.page.dataset_path()
         if not root:
+            # No worker gets started on this path, so _on_finished never
+            # fires — emit directly (matching MergePlatesController's
+            # remap-failure branch), or a queued job with an empty/corrupted
+            # "dataset" spec value would stall the queue's _current forever,
+            # with no jobFinished ever arriving to clear it.
+            self._last_result = (False, "No dataset folder selected.", "")
+            try:
+                self.jobFinished.emit(False, "No dataset folder selected.", "")
+            except Exception:
+                swallowed()
             return
         self.page.clear_log()
         self.page.dashboard.reset()
@@ -107,7 +117,7 @@ class ValidateController(QObject):
         )
         self.page.dashboard.set_done(summary)
         self.page.show_report(report)
-        self._last_result = (True, summary, self.page.dataset_path())
+        self._last_result = (True, summary, str(report.root))
 
     def _on_failed(self, message: str) -> None:
         self.page.append_log(f"✗ {message}")

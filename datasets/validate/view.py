@@ -195,6 +195,12 @@ class ValidatePage(QWidget):
             # already set the correct enabled state for the fresh report.
             self._repair_btn.setEnabled(False)
         self._check_btn.setText("Checking…" if running else "▶  Check")
+        # Locked for the run's duration — picking a new dataset mid-run would
+        # let the running worker's report land against a path the user has
+        # already moved on from (ValidateController._on_succeeded uses the
+        # worker's own report.root, not this field, but the field itself must
+        # not drift out from under the user while a scan is in flight).
+        self._dataset_field.setEnabled(not running)
 
     def show_report(self, report: DatasetReport) -> None:
         self._dataset_root = str(report.root)

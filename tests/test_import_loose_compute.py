@@ -234,6 +234,26 @@ def test_convert_in_place_is_idempotent_on_rerun(tmp_path):
     assert (src / "A01.zip").stat().st_mtime_ns == first_mtime
 
 
+def test_zip_well_folders_reports_done_for_an_already_zipped_well(tmp_path):
+    """Regression guard: _zip_well_folders used to silently skip the
+    progress report for a well that already has a matching zip (the
+    idempotent-rerun/crash-resume case) -- if that well was still part of
+    wellsPlanned (its loose TIFs hadn't all been moved/deleted when a prior
+    attempt crashed), the dashboard would sit stuck showing it at "writing"
+    forever even though the overall run succeeded."""
+    well_dir = tmp_path / "A01"
+    well_dir.mkdir()
+    (well_dir / "exp_GFP_A01_F001_0h.tif").write_bytes(b"img")
+    with zipfile.ZipFile(tmp_path / "A01.zip", "w") as zf:
+        zf.writestr("exp_GFP_A01_F001_0h.tif", b"img")  # already zipped
+
+    reports = []
+    zipped = il_apply._zip_well_folders(tmp_path, progress=lambda w, s: reports.append((w, s)))
+
+    assert zipped == 0  # not re-zipped
+    assert reports == [("A01", "done")]
+
+
 def test_group_files_by_well_and_scan_agree(tmp_path):
     _write_loose(tmp_path, ["A01", "B02", "C03"], timepoints=("0h", "24h"))
     preview = ilc.scan_folder(tmp_path, filename_schema=SCHEMA, filename_sep=SEP)

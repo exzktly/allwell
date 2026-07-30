@@ -1655,6 +1655,10 @@ def test_required_files_list_is_what_we_promised():
         # FOV-token numeric ordering, imported by process_microscopy
         # (``_collect_available_fovs``).
         "util/fov.py",
+        # Channel-name → role heuristic (converter + Analyze).
+        "util/channel_roles.py",
+        # Filename-schema inference for the Analyze input scan.
+        "util/schema_infer.py",
         "util/timepoint.py",
         "util/well_token.py",
         # Atomic + verified per-well archive publication (util.zip_write),

@@ -142,6 +142,10 @@ allwell/
 │   ├── fov.py                  ← FOV token → number + the shared sort key, so a
 │   │                              prefixed token ("f10") orders numerically, not
 │   │                              lexicographically (pipeline, services, viewer)
+│   ├── channel_roles.py        ← channel-name → role heuristic (nuclear/fluor/
+│   │                              phase), shared by the OME converter + Analyze
+│   ├── schema_infer.py         ← guess a filename schema + channels by scanning an
+│   │                              input folder (loose TIFs / zips); Analyze pre-fill
 │   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote)
@@ -1511,6 +1515,17 @@ validators and the entry-boundary numeric parsers (`_safe_qc_float`,
 keeps only the run/log/dashboard orchestration. Both files carry a line budget
 (`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
 behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
+
+Picking an input folder through the browse dialog also **auto-fills the schema
+and channel fields** from what the folder's filenames look like:
+`_browse_input` → `_autofill_from_input_scan` briefly samples the names (loose
+TIFs, a zip, or the per-well-zip layout) via `util.schema_infer.infer_from_dir`,
+which guesses the separator, slot layout, channel tokens and their roles (roles
+via `util.channel_roles`, the same heuristic the OME converter uses), and applies
+the guess through the existing `_apply_pipeline_info` path. It is best-effort and
+editable — a folder whose names don't parse leaves the form as the user set it —
+and only the interactive picker triggers it, so the converter's "Open in Analyze"
+handoff keeps supplying its own channel roles instead of being re-guessed.
 
 The optional sections fold by default; **Auto-threshold** is one of them, and it
 owns every threshold-related control: a checkbox driving the pipeline's

@@ -258,8 +258,11 @@ A common end-to-end run, from raw images to plots, takes five clicks:
 
 1. Launch the app and switch to **Analyze** (title-bar segmented control).
 2. **Open input folder** — point at the folder of raw TIFs (or a folder of
-   per-well ZIPs).
-3. Fill the schema and channel tokens. Click **Run**.
+   per-well ZIPs). All-Well briefly scans the filenames and **auto-fills the
+   filename schema and channel tokens** it detects (including a best-guess
+   nuclear/fluorescent/phase role per channel); check them and adjust if the
+   guess is off.
+3. Confirm the schema and channel tokens. Click **Run**.
 4. When the log prints "Processing complete" the app auto-switches to
    **Review** and loads the output folder.
 5. Pick wells in the plate map; the plots redraw immediately.
@@ -277,7 +280,9 @@ The Analyze tab is one tall scrollable form. Top to bottom:
 
 A colon-separated list of field names, applied left-to-right against the
 underscore-separated tokens in each filename. The `Schema string` field is
-editable directly; the picker chips above it mirror it.
+editable directly; the picker chips above it mirror it. When you pick an input
+folder All-Well guesses this schema (and the separator) from a sample of the
+filenames and fills it in — a starting point you can correct, not a lock.
 
 Recognised field names: `experiment`, `channel`, `well`, `fov`, `timepoint`,
 `ignore`.

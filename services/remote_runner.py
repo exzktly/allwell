@@ -251,6 +251,11 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # FOV-token numeric ordering, imported by process_microscopy
     # (``_collect_available_fovs``) so the remote run needs it.
     "util/fov.py",
+    # Channel-name → role heuristic (converter + Analyze). Client-side only, but
+    # the manifest mirrors every ``util/`` file.
+    "util/channel_roles.py",
+    # Filename-schema inference for the Analyze input scan; client-side only.
+    "util/schema_infer.py",
     "util/timepoint.py",
     "util/well_token.py",
     # Atomic + verified publication of the per-well archives, imported by

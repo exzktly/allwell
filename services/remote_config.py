@@ -477,6 +477,27 @@ def default_config_path() -> Path:
     return _DEFAULT_CONFIG_PATH.expanduser()
 
 
+def default_state_dir() -> Path:
+    """Return the directory for All-Well's persisted app state (the job
+    queue's JSON record).
+
+    Deliberately **not** derived from :func:`default_config_path`, despite
+    the obvious similarity. That function honors ``$ALLWELL_REMOTES``, an
+    override meaning "where my remotes live" — routing unrelated state
+    through it would relocate the job queue any time a user or test sets
+    that variable, possibly to a read-only path. Its Windows branch is also
+    conditional on whether ``remotes.toml`` already exists, so the directory
+    it resolves to would flip the day a user creates one — a job queue
+    written before that day would silently vanish. This function does the
+    platform branch alone, with no override and no file-existence check.
+    """
+    if _is_windows():
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            return Path(appdata) / "allwell"
+    return Path("~/.config/allwell").expanduser()
+
+
 def load_remotes(path: Path | None = None) -> dict[str, RemoteHost]:
     """Parse the remotes.toml file. Returns an empty dict if missing.
 

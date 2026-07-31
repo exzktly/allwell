@@ -54,3 +54,45 @@ def test_wraps_to_second_line_when_narrow(qapp):
     host, widgets = _build(qapp, [(120, 24)] * 4, 260, 400)
     tops = sorted({w.geometry().top() for w in widgets})
     assert len(tops) >= 2, "row did not wrap onto multiple lines when narrow"
+
+
+def test_the_visibility_watcher_keeps_no_per_instance_state(qapp):
+    """The watcher must find its layout through ``parent()``, not an attribute.
+
+    Its C++ object belongs to the layout, which belongs to the host widget, so
+    it outlives the Python instance ``__init__`` ran on: once that instance is
+    collected PySide builds a *fresh* wrapper the next time an event reaches the
+    watcher, and that wrapper never ran ``__init__``. Anything stashed on
+    ``self`` is therefore gone by the time it is read — the watcher raised
+    ``AttributeError`` inside the Qt event loop on every show and hide from that
+    point on, and the row silently stopped reflowing around the item that
+    changed.
+
+    Asserting the absence of instance state rather than simulating the re-wrap:
+    PySide decides when to discard a wrapper and there is no supported way to
+    force it, so the reachable invariant is that there is nothing to lose.
+    """
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QLabel, QWidget
+    from widgets.flow_layout import FlowLayout, _FlowItemVisibility
+
+    host = QWidget()
+    layout = FlowLayout(host, h_spacing=6, v_spacing=4)
+    label = QLabel("x", host)
+    label.setFixedSize(120, 24)
+    layout.addWidget(label)
+
+    watcher = next(child for child in layout.children()
+                   if isinstance(child, _FlowItemVisibility))
+    # PySide caches a SignalInstance per signal in ``__dict__``; those are
+    # rebuilt with the wrapper. Anything else was put there by our own code.
+    from PySide6.QtCore import SignalInstance
+    ours = {name: value for name, value in vars(watcher).items()
+            if not isinstance(value, SignalInstance)}
+    assert ours == {}, (
+        f"the visibility watcher stores {sorted(ours)} on the instance; a "
+        "re-wrapped watcher will not have it. Resolve the layout from "
+        "self.parent()."
+    )
+    # And it still does its job: consumes nothing, raises nothing.
+    assert watcher.eventFilter(label, QEvent(QEvent.Hide)) is False

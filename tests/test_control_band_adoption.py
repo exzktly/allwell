@@ -24,6 +24,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Modules that build their tab's controls through the shared band. Add a module
 #: here in the same commit that adopts the band in it; never remove one.
+#: The two ways a module gets its control row. A page that owns the row builds a
+#: ``ControlBand``; a leaf sharing a page's row claims a slot in it. Either is
+#: adoption — building both, or building two of either, is the stacking of
+#: control rows the band exists to remove.
+_BAND_CALLS = ("ControlBand", "plotting_band_slot")
+
 ADOPTED = (
     "well_viewer/core/centre_view.py",          # Plotting — all five sub-tabs
     "well_viewer/features/barplot/tab_view.py",
@@ -63,14 +69,15 @@ def _call_names(tree: ast.AST) -> list[str]:
 
 
 def test_adopted_modules_build_exactly_one_band():
-    """One band per module — a second one is a bespoke row wearing the name."""
+    """One control row per module — a second one is a bespoke row wearing the name."""
     for rel in ADOPTED:
         names = _call_names(_tree(rel))
-        count = names.count("ControlBand")
+        count = sum(names.count(fn) for fn in _BAND_CALLS)
         assert count == 1, (
-            f"{rel} constructs ControlBand {count} times; a tab has one control "
-            "band, and a second row of controls beside it is the layout drift "
-            "the band exists to stop."
+            f"{rel} builds a control row {count} times "
+            f"({' / '.join(_BAND_CALLS)}); a tab has one control band, and a "
+            "second row of controls beside it is the layout drift the band "
+            "exists to stop."
         )
 
 
@@ -117,9 +124,44 @@ def test_adoption_list_only_grows():
             f"{rel} is in ADOPTED but does not exist. If the module moved, "
             "update the entry; do not delete it."
         )
-        assert "ControlBand" in _call_names(_tree(rel)), (
-            f"{rel} is listed as having adopted the shared control band but no "
-            "longer constructs one."
+        names = _call_names(_tree(rel))
+        assert any(fn in names for fn in _BAND_CALLS), (
+            f"{rel} is listed as having adopted the shared control band but "
+            f"calls none of {' / '.join(_BAND_CALLS)}."
+        )
+
+
+#: The Plotting page's five sub-tabs share the page's one band. Each claims its
+#: own slot in it; a leaf that constructed a band instead would put a second
+#: control row directly under the page's.
+PLOTTING_LEAVES = (
+    "well_viewer/features/barplot/tab_view.py",
+    "well_viewer/features/distribution/tab_view.py",
+    "well_viewer/features/heatmap/tab_view.py",
+    "well_viewer/features/lineplot/tab_view.py",
+    "well_viewer/features/scatter/agg_tab_view.py",
+    "well_viewer/features/scatter/cells_tab_view.py",
+)
+
+
+def test_plotting_leaves_share_the_page_band():
+    """No Plotting sub-tab builds a band of its own.
+
+    This is the specific regression: the page band carries what every sub-tab
+    scopes by (channel, property, threshold) and each sub-tab band carried the
+    rest, so Bar Plots showed two full-width control rows stacked above the
+    plot instead of one.
+    """
+    for rel in PLOTTING_LEAVES:
+        names = _call_names(_tree(rel))
+        assert "ControlBand" not in names, (
+            f"{rel} constructs its own ControlBand. Plotting's sub-tabs share "
+            "the page's band — claim a slot with plotting_band_slot(ctx, …) so "
+            "the controls land in the one row."
+        )
+        assert "plotting_band_slot" in names, (
+            f"{rel} is a Plotting sub-tab but never claims a slot in the page "
+            "band, so its controls have nowhere to go."
         )
 
 

@@ -65,14 +65,23 @@ class _FlowItemVisibility(QObject):
     """
 
     def __init__(self, layout: QLayout) -> None:
+        # The layout is the parent, and the parent is also how the layout is
+        # found again in ``eventFilter`` — deliberately, rather than stashing it
+        # on ``self``. The watcher outlives its Python wrapper: the C++ object
+        # belongs to the layout, which belongs to the host widget, so once the
+        # FlowLayout's own wrapper is collected PySide builds a *fresh* wrapper
+        # for the watcher on the next event. That new instance never ran
+        # ``__init__``, so any attribute set here would be gone and every
+        # show/hide would raise inside the event loop.
         super().__init__(layout)
-        self._layout = layout
 
     def eventFilter(self, obj, event) -> bool:  # Qt naming
         if isinstance(event, QEvent) and event.type() in (
             QEvent.Show, QEvent.Hide, QEvent.ShowToParent, QEvent.HideToParent,
         ):
-            self._layout.invalidate()
+            layout = self.parent()
+            if isinstance(layout, QLayout):
+                layout.invalidate()
         return False
 
 

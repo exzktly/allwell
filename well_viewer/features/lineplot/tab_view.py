@@ -17,7 +17,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
-    make_band_controls, make_plot_with_right_dock, make_properties_button)
+    make_band_controls, make_plot_with_right_dock, make_properties_button,
+    plotting_band_slot)
 from functools import partial
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.export.service import export_plot_data
@@ -27,7 +28,6 @@ from well_viewer.features.lineplot.controller import on_fig_click
 _FIG_W, _FIG_H, _DPI = 7.2, 14.0, 100
 
 
-from widgets.control_band import ControlBand
 
 def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -48,7 +48,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     parent = plot_area
 
     # ── the shared control band above the card ──────────────────────────────
-    line_ctrl = ControlBand(parent)
+    line_ctrl = plotting_band_slot(ctx, "Line Graphs")
 
     # Channel combo: kept as an offscreen widget so the rest of the app can
     # still read/write the per-renderer channel through ``app._chan_cb_line``
@@ -107,7 +107,6 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
                     lambda: save_card_to_gallery(ctx, "_line_card"))
     line_ctrl.add_action(export_btn)
     line_ctrl.add_action(make_properties_button(ctx, line_ctrl, "line"))
-    layout.addWidget(line_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,

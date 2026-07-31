@@ -673,12 +673,18 @@ tabs and is what every plot / aggregate / export consumes.
 #### One band across the top
 
 The window's top row is one band: **Review / Analyze / Datasets** on the left,
-spanning the rail's width, and the current page's tabs — *Bar Plots · Line
-Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell Browser ·
-Playground* — immediately to their right on the same line. Pages without
-sub-tabs (Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots)
-leave that side empty; the band keeps its height so nothing below it shifts when
-you switch pages.
+spanning the width of the panel below it, and the current page's tabs — *Bar
+Plots · Line Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell
+Browser · Playground* — immediately to their right on the same line. Pages
+without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved
+Plots) leave that side empty; the band keeps its height so nothing below it
+shifts when you switch pages.
+
+The mode selector stays the width of whatever panel sits under it, so the two
+read as one column: Review's well-picker rail, the Analyze form (which you can
+drag wider in its splitter), and the Datasets rail are three different widths,
+and the bar follows each. Analyze and Datasets leave the tab side of the band
+empty — those tabs name Review's pages.
 
 #### One controls row on every tab
 
@@ -693,6 +699,11 @@ its controls, so nothing ever becomes unreachable.
 The Image Table is the one deliberate exception. Its crop and ON-threshold
 controls act on the images directly below them, so they stay in a strip beside
 the images rather than moving to a row at the top of the tab.
+
+One row means one row. The five Plotting tabs share it: the controls common to
+all of them — channel, property, threshold — stay put as you move between Bar
+Plots, Line Graphs, Scatter, Distribution and Heat Map, and only the part that
+belongs to the tab you are on changes beside them.
 
 #### Figure actions — the Export dropdown · Properties
 

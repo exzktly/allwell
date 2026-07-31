@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, make_action_menu_button, make_band_controls,
-    make_plot_with_right_dock, make_properties_button)
+    make_plot_with_right_dock, make_properties_button, plotting_band_slot)
 from well_viewer.features.export.service import export_distribution_data
 from well_viewer.data.data_loading import get_all_timepoints
 
@@ -28,7 +28,6 @@ _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per
 _LAYOUT_OPTIONS = ["Overlay", "Faceted (one per group)"]
 
 
-from widgets.control_band import ControlBand
 
 def build_distribution_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -49,7 +48,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_export_dock", export_dock)
     parent = plot_area
 
-    ctrl = ControlBand(parent)
+    ctrl = plotting_band_slot(ctx, "Distribution")
 
     # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
@@ -130,7 +129,6 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
                     lambda: save_card_to_gallery(ctx, "_distribution_card"))
     ctrl.add_action(export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "distribution"))
-    layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators

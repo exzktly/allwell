@@ -20,6 +20,14 @@ instead, and label/control pairs added through :meth:`add_scope` are bundled wit
 ``flow_group`` so a label can never be stranded on a different line from the
 control it names.
 
+A page whose body is a stack of leaf views — one page, several sub-tabs — still
+gets **one** band, shared by every leaf. A leaf claims a :class:`ControlBandSlot`
+from the band, adds its own scope groups and actions through the slot exactly as
+it would through the band, and :meth:`ControlBand.show_slot` shows one leaf's
+contributions while hiding the rest. Without that, a page-level band carrying the
+controls common to every leaf plus a per-leaf band under it puts two strips of
+chrome above the plot, which is the stacking the band exists to remove.
+
 Two details that are easy to get wrong and are handled here:
 
 * The action zone is aligned to the top. Without that it centres itself against
@@ -40,11 +48,76 @@ import theme
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
 
+#: Sentinel for "this band's page has not chosen a leaf yet" — distinct from
+#: ``None``, which is the page explicitly showing no leaf's controls at all.
+_NO_SLOT = object()
+
+
+class ControlBandSlot(QWidget):
+    """One leaf view's contribution to a band shared by several leaves.
+
+    Built by :meth:`ControlBand.slot`. It mirrors the band's own building API, so
+    a leaf that used to own a whole band changes only where it gets that object
+    from — every ``add_scope`` / ``add_action`` call below reads the same.
+
+    It is also a real widget, and leaves rely on that: they pass their band to
+    ``QComboBox(band)`` and friends as a parent for controls that live inside a
+    popover rather than in the row. A slot is a child of the band that is never
+    put in a layout, so it is never shown and never painted; it exists to own
+    those widgets and to remember which of the band's items belong to this leaf.
+    """
+
+    def __init__(self, band: "ControlBand", name: str) -> None:
+        super().__init__(band)
+        self.setObjectName("ControlBandSlot")
+        self._band = band
+        self._name = name
+        self._items: list[QWidget] = []
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def add_scope(self, label: str, *widgets: QWidget) -> QWidget:
+        return self._claim(self._band.add_scope(label, *widgets))
+
+    def add_action(self, widget: QWidget) -> QWidget:
+        return self._claim(self._band.add_action(widget))
+
+    def _claim(self, item: QWidget) -> QWidget:
+        """Record *item* as this leaf's, and hide it if another leaf is current.
+
+        ``QLayout.addWidget`` shows what it is given, and leaves are built
+        lazily — the first time each is switched to. Without this, a leaf built
+        while a *different* leaf is on screen would drop its controls into the
+        visible row and stay there, because the switch that would have hidden
+        them already happened.
+        """
+        self._items.append(item)
+        item.setVisible(self._band.is_slot_current(self._name))
+        return item
+
+    def setSlotVisible(self, visible: bool) -> None:  # Qt-ish naming
+        """Show or hide everything this leaf put in the band.
+
+        Not ``setVisible`` — that is the slot's own (never-shown) widget
+        visibility, and overriding it would hide the controls the moment Qt
+        polished the slot itself.
+        """
+        for item in self._items:
+            item.setVisible(visible)
+
+
 class ControlBand(QWidget):
     """One row: scope controls left (flowing), actions right (flush)."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._slots: dict[str, ControlBandSlot] = {}
+        #: Which leaf's controls the row is showing. ``_NO_SLOT`` until the page
+        #: first selects one, which is what lets a band with no leaves at all
+        #: behave exactly as it did before slots existed.
+        self._current_slot: str | None | object = _NO_SLOT
         self.setObjectName("ControlBand")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
@@ -103,6 +176,45 @@ class ControlBand(QWidget):
         widget.setParent(self)
         self._actions.addWidget(widget)
         return widget
+
+    # ── per-leaf slots ──────────────────────────────────────────────────────
+    def slot(self, name: str) -> ControlBandSlot:
+        """The :class:`ControlBandSlot` called *name*, created on first ask.
+
+        Controls the whole page shares are added to the band directly and are
+        never hidden; controls belonging to one leaf go through that leaf's slot.
+        Because the band adds items in call order and the shared controls are
+        added when the band is built, a leaf's controls always follow them.
+        """
+        existing = self._slots.get(name)
+        if existing is not None:
+            return existing
+        created = ControlBandSlot(self, name)
+        self._slots[name] = created
+        return created
+
+    def show_slot(self, name: str | None) -> None:
+        """Show slot *name*'s controls and hide every other slot's.
+
+        Pass ``None`` to hide them all. A name with no slot is not an error: the
+        leaf that would own it is built lazily and may not exist yet. The choice
+        is remembered either way, so that leaf's controls are hidden on arrival
+        if the page has since moved on to another one.
+        """
+        self._current_slot = name
+        for slot_name, slot in self._slots.items():
+            slot.setSlotVisible(slot_name == name)
+
+    def current_slot(self) -> str | None:
+        """The slot the row is showing, or ``None`` if it is showing none."""
+        return None if self._current_slot is _NO_SLOT else self._current_slot
+
+    def is_slot_current(self, name: str) -> bool:
+        """Whether slot *name*'s controls belong in the row right now."""
+        return self._current_slot is _NO_SLOT or self._current_slot == name
+
+    def slot_names(self) -> tuple[str, ...]:
+        return tuple(self._slots)
 
     # ── geometry ────────────────────────────────────────────────────────────
     @property

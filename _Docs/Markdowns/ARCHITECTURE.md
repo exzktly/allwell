@@ -591,6 +591,28 @@ group widget, and `centre_view` keeps those on `app._plotting_channel_grp`,
 `_plotting_metric_grp`, `_plotting_thresh_frac_grp` and `_plotting_scatter_grp`
 so the sub-tab handler can swap which ones are in the row.
 
+The five sub-tabs share that one band; none builds its own. A sub-tab claims a
+`ControlBandSlot` through `ui_helpers.plotting_band_slot(ctx, title[, mode])` and
+adds its controls to it exactly as it would to a band — the slot mirrors
+`add_scope` / `add_action` and is a real widget, so the sub-tab can still parent
+popover contents to it. `ControlBand.show_slot` then shows one sub-tab's
+contributions and hides the rest. Scatter is two leaves behind one sub-tab, a
+Cells page and a Wells page, so its slots are named per mode and
+`scatter/tab_view._show_mode_controls` swaps them — guarded on scatter being the
+sub-tab on screen, since the mode is also set from a restored session and from
+the build itself.
+
+Two ordering rules make that work. Controls the whole page scopes by are added to
+the band when the page is built, before any leaf exists, so a leaf's controls
+always follow them in the row. And a slot's items arrive **hidden** unless that
+slot is the current one: `QLayout.addWidget` shows what it is handed, and
+sub-tabs build lazily, so a sub-tab built while another is on screen would
+otherwise drop its controls into the visible row and leave them there.
+
+The alternative — a page band carrying the shared controls with a per-sub-tab
+band beneath it — is what this replaced. It put two full-width control rows above
+every plot, 97px of chrome where the row now costs 53.
+
 That swap is what the band buys on the **Scatter Plot** sub-tab. Scatter has
 per-axis channel and property selectors of its own, so the global
 Channel / Property / Threshold controls do not drive its plot; they are removed
@@ -693,12 +715,22 @@ than the tab asked for.
 #### The rail head
 
 The window's left column is one thing from the top down. `app_shell_view.RAIL_W`
-is the single statement of its width — the rail reads it, and so does the app
-header's mode bar, which spans exactly that and fills the header strip's height
-(`ModeBar.setFillHeight`). Flush, with no inset: the topbar's left content
-margin is zero and the widgets after the bar carry their own leading pad, so the
-bar and the rail below it are one column rather than a chip row floating over
-one.
+is the single statement of the Review rail's width, and the mode bar starts
+there; it fills the header strip's height (`ModeBar.setFillHeight`) and sits
+flush, with no inset — the topbar's left content margin is zero and the widgets
+after the bar carry their own leading pad, so the bar and the panel below it are
+one column rather than a chip row floating over one.
+
+Its **width follows whichever panel is under it**. All three modes put a panel
+down the left edge and they are three different widths: Review's rail is fixed,
+the Datasets rail is its own, and Analyze's form is wider still and draggable in
+its splitter. `AllWellApp._sync_mode_bar_width` matches the bar to the current
+one, re-running on every mode switch and on any resize of the three panels it
+watches. Pinned to any single width the bar stopped short of the column's edge
+in the other two modes, and the page tabs beside it started at a boundary that
+matched nothing on screen. It floors at the bar's own natural width, so a panel
+narrower than the three segments elides their labels rather than shrinking the
+bar, and falls back to that width when every panel is hidden.
 
 **The page tab bars are in this band too**, to the right of the mode bar and
 sharing its bottom edge. They used to sit inside each tab's own body, one row
@@ -715,7 +747,10 @@ band height.
 
 `build_page_tabs_host` is the slot — a `QStackedWidget` keyed by top-level page
 name, whose page 0 is blank and is what the six pages with no sub-tabs
-(Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots) show. The
+(Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots) show, and
+what **Analyze and Datasets** show: the strip names Review's pages, and left
+carrying whatever Review was on it offered Bar Plots / Line Graphs / Heat Map
+beside the Analyze form. `show_page_tabs` gates on the current mode for that. The
 band keeps its height there rather than collapsing, so switching pages never
 shifts the content below it. `register_page_tabs` mounts a bar and
 `on_notebook_current_changed` swaps them; because pages build lazily a bar can
@@ -732,7 +767,7 @@ readers to change where a strip of tabs is drawn.
 The band is pinned to `tab_bar_height()` and carries no vertical padding of its
 own, and holds nothing but the mode bar and the current page's tabs.
 
-The rail's **collapse toggle** is not in the band. It floats on the rail's own
+The **collapse toggle** is not in the band. It floats on the left panel's own
 right margin, straddling the boundary with the centre pane
 (`_build_rail_toggle`, `position_rail_toggle`). It is parented to the **window**
 and positioned by hand, which is the whole trick: a toggle inside the rail would
@@ -742,14 +777,31 @@ reachable in both states — it slides to the window's left edge once the rail i
 gone. Straddling rather than sitting inside the rail's content also keeps it
 clear of the dataset head and the plate picker.
 
-It is placed **level with the rail head**, not centred on the splitter. The rail
-is full-bleed from top to bottom, so a button on its edge always covers
+The same toggle collapses all three modes' panels, so it has to find the one on
+screen rather than assume Review's rail: `visible_left_panel` returns the first
+visible of the rail and the Analyze / Datasets panes' `_left_sidebar`, and the
+edge is **mapped** into window coordinates rather than read off `geometry()` —
+the button is an overlay on the window while the panels sit at different depths,
+Analyze's and Datasets' inside their own pane's splitter rather than the shell's.
+
+In Review it is placed **level with the rail head**, not centred on the splitter.
+The rail is full-bleed from top to bottom, so a button on its edge always covers
 something; the head's row is the one band there that is chrome rather than
 content. Centred on the splitter it sat squarely over the plate picker — the
 thing in this rail you click most — and drifted further onto it as the window
 grew; one row lower it clipped the active nav item instead. The rail head
 carries an `xl` right inset so its caret clears the button rather than sitting
-under it.
+under it. Analyze and Datasets have no such head, so there the toggle sits just
+inside the top of their panel.
+
+A mode switch re-parks it twice: once immediately, and once through a
+`QTimer.singleShot(0, …)`. The first call runs while the pane being shown still
+carries the geometry it had before it was laid out into the stack, so it parks
+against a width that is about to change; the queued call sees the settled
+layout. `position_rail_toggle` also installs the placement filter on whichever
+panel is current, so a splitter drag re-parks it too — re-installing an
+already-installed filter only moves it to the front, which is why that is safe to
+run on every reposition rather than tracked.
 
 Two things follow from it being an overlay. It has no layout to size it, so
 `position_rail_toggle` calls `adjustSize()` — left at Qt's default a widget with
@@ -796,8 +848,11 @@ The band carries the object name `ControlBand`, which is in
 `ui_helpers._DATA_GATED_OBJECT_NAMES`, so a tab picks up "grey the controls
 until a dataset is loaded" by adopting the band rather than by remembering a
 name. `tests/test_control_band_adoption.py` is an AST ratchet over the modules
-that have adopted it: one band per module, no hand-rolled `FlowLayout` control
-row beside it, no plot-card header built only to be hidden. It is a static scan
+that have adopted it: one control row per module — a `ControlBand` or a
+`plotting_band_slot`, never both and never two — no hand-rolled `FlowLayout`
+control row beside it, and no plot-card header built only to be hidden. It also
+asserts the specific shape of the Plotting page: every one of its five sub-tabs
+claims a slot and none constructs a band. It is a static scan
 on purpose — a test that builds a tab needs the `viewer_app` fixture, which
 `conftest.py` auto-marks `slow`, and `scripts/test.sh` runs `-m "not slow"`, so
 such a test would never run in CI.
@@ -3167,7 +3222,7 @@ Notable members worth knowing about by name:
 | Widget | What it is |
 |--------|-----------|
 | `CropTool` (`well_viewer/data/crop_tool.py`) | The drag-a-region crop shared by Image Table and Segmentation. `set_status_widget(widget, template=…)` writes the crop state into an existing control's text — the Image Table's Crop button reads `Crop · (full FOV)` — instead of a separate caption beside it; `make_status_label` still returns a standalone label for call sites that want one. |
-| `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). |
+| `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. |
 | `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
@@ -3182,7 +3237,7 @@ Notable members worth knowing about by name:
 | `LutSelector`, `GradientStrip`, `ColorPickerPopover` | The colour-map picker + its preview strip + the freeform colour-picker popover. |
 | `lut_cmaps.lut_cmap` | Qt-free resolver that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
 | `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
-| `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
+| `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. That watcher resolves the layout from its own `parent()` and keeps **no** per-instance state: its C++ object belongs to the layout, so it outlives the Python instance `__init__` ran on, and PySide builds a fresh wrapper for it once that instance is collected. Anything stashed on `self` is gone by then — a watcher that remembered its layout in an attribute raised `AttributeError` inside the Qt event loop on every subsequent show and hide, and the row stopped reflowing. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |
 | `WrapCheckBox` | A checkbox whose label word-wraps, for the Analyze form's long-labelled options. A plain `QCheckBox` reports its full text width as its minimum, which pins the whole scroll-area sidebar that wide; this composites a text-less indicator with a wrapped `QLabel`. Because the label wraps, the composite's height depends on its width — and a `QWidget` inherits neither its child's `heightForWidth` nor a size policy advertising one, so it implements both. Without them a parent column sizes the row from a single line and a label that wraps to two spills over whatever sits below it. The indicator↔label gap is the app-wide checkbox `spacing` token (`theme.Spacing.sm`), not a hand-picked constant — the composite draws its own label, so a smaller gap read tighter to the box than every native checkbox beside it, and with no Fusion pin the app renders under the platform style (native QMacStyle on macOS, Fusion only on CI), where that shortfall put the first word on top of the indicator. Same lesson as `FlowLayout`'s spacing rule: a control gap comes from the token scale, never from an off-scale constant or the platform style. |
 | `BrandTile`, `IconButton`, `StatusDot`, `KbdHint`, `SelectionChip` | Misc small bits. |

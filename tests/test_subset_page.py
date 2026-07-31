@@ -215,6 +215,40 @@ def test_dashboard_has_no_plate_map_of_its_own(qapp):
     ctrl.shutdown()
 
 
+def test_picker_plate_renders_at_the_same_cell_size_as_a_dashboard_plate(qapp):
+    """Regression guard (UX audit P2-5): the picker plate shared the
+    dashboard plate's 210px height cap, but unlike the dashboard's plate
+    (setActionsVisible(False)) it keeps its own All/Invert/Clear action row
+    visible inside that same budget — eating room the grid itself would
+    otherwise get, so the same cap produced a visibly smaller grid here than
+    on every other plate map in the pane. The two must render their wells at
+    the same pixel cell size, not just share a maximumHeight number that
+    means different things once one plate's chrome eats into it."""
+    from datasets.concatenate.dashboard import ConcatDashboard
+    from datasets.subset.controller import SubsetController
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._plate.resize(330, 258)
+    page._plate.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    _lab, picker_cell, _ox, _oy = page._plate._grid._metrics()
+
+    dashboard = ConcatDashboard()
+    dashboard.resize(1300, 600)  # generous height so the plate reaches its own cap
+    dashboard.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    _lab2, dashboard_cell, _ox2, _oy2 = dashboard._plate._grid._metrics()
+
+    assert abs(picker_cell - dashboard_cell) < 0.5, (
+        f"picker cell {picker_cell}px vs dashboard cell {dashboard_cell}px "
+        "-- the two plate maps no longer render at the same scale"
+    )
+    ctrl.shutdown()
+
+
 def test_dashboard_hidden_until_a_run_starts(qapp, tmp_path):
     """Regression guard: the status strip below the Run button used to be
     visible from the moment the page loaded, showing an idle headline over

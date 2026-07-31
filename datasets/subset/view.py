@@ -148,15 +148,22 @@ class SubsetPage(QWidget):
 
         outer.addWidget(QLabel("Wells", self))
         self._plate = WellPlateSelector(self)
-        # Same cap as PlateProgress's own plate map (widgets/plate_progress.py)
-        # and a matching width cap so this picker and the dashboard's status
-        # plate at the bottom of this same page render at the same cell
-        # scale, rather than this one spreading across the full page width
-        # with dead space padding a tiny grid. Left-aligned since an
-        # unconstrained QVBoxLayout item would otherwise stretch to fill —
-        # and then immediately clip back down to maxWidth, floating it
-        # wherever Qt's default alignment happens to land it.
-        self._plate.setMaximumHeight(210)
+        # A matching width cap (330, same as PlateProgress's own plate map)
+        # so this picker and the dashboard's status plate at the bottom of
+        # this same page render at the same cell scale, rather than this one
+        # spreading across the full page width with dead space padding a
+        # tiny grid. The height cap is *not* the dashboard's own 210 — this
+        # picker keeps its All/Invert/Clear action row (the dashboard's
+        # plate hides it, setActionsVisible(False)), which eats ~48px of
+        # that budget from the grid itself. Matched empirically (offscreen
+        # geometry measurement, both plates' actual cell size in pixels) so
+        # the two plates read as the same control at the same scale rather
+        # than this one's wells rendering visibly smaller for no visible
+        # reason. Left-aligned since an unconstrained QVBoxLayout item would
+        # otherwise stretch to fill — and then immediately clip back down to
+        # maxWidth, floating it wherever Qt's default alignment happens to
+        # land it.
+        self._plate.setMaximumHeight(258)
         self._plate.setMaximumWidth(330)
         self._plate.selectionChanged.connect(self._on_plate_selection_changed)
         outer.addWidget(self._plate, 0, Qt.AlignLeft)

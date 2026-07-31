@@ -116,6 +116,33 @@ def test_convert_refuses_when_nothing_matches(tmp_path):
         il_apply.convert_to_new_destination(src, dest, filename_schema=SCHEMA, filename_sep=SEP)
 
 
+def test_convert_refuses_a_destination_that_already_has_content(tmp_path):
+    """Regression guard: convert_to_new_destination had no destination-state
+    check at all, unlike Concatenate/Subset/Merge Plates -- atomic_zip
+    publishes onto <dest>/in/<WELL>.zip unconditionally on success, so
+    pointing it at an existing analyzed dataset silently overwrote that
+    well's raw-input archive with the loose folder's unrelated images while
+    out/ (CSVs, QC zips, pipeline_info.json) was left untouched: a dataset
+    whose measurements no longer correspond to its inputs, reporting
+    success."""
+    from tests.fixtures.dataset_builder import build_dataset
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    existing = tmp_path / "existing"
+    build_dataset(existing, wells=["A01"], timepoints=["0h"])
+
+    with zipfile.ZipFile(existing / "in" / "A01.zip") as zf:
+        before = zf.read(zf.namelist()[0])
+
+    with pytest.raises(ValueError, match="already has files"):
+        il_apply.convert_to_new_destination(src, existing, filename_schema=SCHEMA, filename_sep=SEP)
+
+    with zipfile.ZipFile(existing / "in" / "A01.zip") as zf:
+        after = zf.read(zf.namelist()[0])
+    assert after == before, "existing dataset's raw input must not be touched"
+
+
 def test_convert_to_new_destination_writes_every_well_in_parallel(tmp_path):
     """Enough wells to force >1 worker (default auto-sizing), each written
     from its own thread — every well's archive must still land intact with

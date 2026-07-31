@@ -45,6 +45,7 @@ from pathlib import Path
 from util.well_token import canonical_well_label
 from util.zip_write import atomic_zip
 from datasets._common.concurrency import pick_workers
+from datasets._common.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.import_loose_compute import group_files_by_well
 
 
@@ -58,6 +59,27 @@ def _null_cancelled() -> bool:
 
 def _null_progress(_well: str, _stage: str) -> None:
     return None
+
+
+def _check_new_destination(dest_root: Path | str) -> None:
+    """Refuse a destination that already has any file under ``in``/``out``.
+
+    Unlike Concatenate/Subset/Merge Plates, this mode writes directly via
+    ``atomic_zip`` with no destination-state check at all — ``atomic_zip``
+    publishes onto ``<dest>/in/<WELL>.zip`` unconditionally on success, so
+    pointing this mode at an *existing analyzed dataset* silently overwrote
+    that well's raw-input archive with the loose folder's (likely unrelated)
+    images, while ``out/`` — its CSVs, QC zips, ``pipeline_info.json`` — was
+    left untouched: a dataset whose measurements no longer correspond to its
+    inputs, with the run still reporting success.
+    """
+    dest = Path(dest_root)
+    paths = DatasetPaths(root=dest, in_dir=dest / "in", out_dir=dest / "out")
+    if destination_has_content(paths):
+        raise ValueError(
+            f"The destination ({dest}) already has files under 'in' or "
+            "'out' — choose a new, empty folder."
+        )
 
 
 def convert_to_new_destination(
@@ -85,6 +107,8 @@ def convert_to_new_destination(
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
     report = progress or _null_progress
+
+    _check_new_destination(dest_root)
 
     by_well = group_files_by_well(
         search_dir, filename_schema=filename_schema, filename_sep=filename_sep,

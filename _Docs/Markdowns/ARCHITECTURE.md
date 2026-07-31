@@ -2247,7 +2247,16 @@ on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
 `__aw_tmp_*` staging files. `services.remote_runner.refresh_pipeline_info_available_from_outputs`
 is deliberately not reused here — it only ever *unions* into the existing
 availability lists, so a stale entry can never be dropped, which is the
-opposite of what a repair needs to do.
+opposite of what a repair needs to do. Resolves `schema_fields` through
+`load_schema(info)` — the same call `build_report` makes for its own
+stale/missing diff — rather than a bare `info.get("schema_fields") or []`: a
+sidecar with no `schema_fields` key at all (only the legacy `schema`
+colon-string, or `fov_index`/`tp_index`, or nothing — every one of them a
+fallback `load_schema` itself handles) resolved to `[]` under the bare form,
+and `collect_available_schema_values([], ...)` returns `[]` unconditionally
+for a schema that doesn't have `field_name` — silently wiping a real, correct
+`available_timepoints`/`available_fovs` list to empty on a dataset
+`build_report` had just diffed correctly.
 
 The page's **Complete this run** button hands the dataset off to Analyze
 through the existing `on_open_in_analyze` seam — the same one `Convert
@@ -2276,6 +2285,21 @@ four coupled timepoint-derived values §6b documents for Concatenate (the
 column, and the zip member's own name) never diverge here because nothing
 about a kept row or member is rewritten at all; filtering is a pure predicate
 (`subset_compute.member_matches` / `row_matches`) over what's already there.
+`SubsetFilter.fovs` are the raw `available_fovs` strings the page's FOV
+checkboxes carry; `fov_tokens` (a derived property, mirroring `timepoint_hours`'s
+relationship to `timepoint_labels`) resolves them through
+`normalize_fov` once, and every comparison site (`member_matches`,
+`row_matches`, `build_subset_plan`'s `merged_info["available_fovs"]` rebuild)
+compares against `fov_tokens`, not `fovs` directly — a row's/member's own FOV
+is always read through `normalize_fov` too (`ParsedName.fov`, the CSV `fov`
+column), so comparing either against the *raw* label set silently matched
+nothing for any dataset with purely-numeric FOV tokens (`"001"` normalizes to
+`"1"`, which was never a member of `{"001"}`): every row and member for the
+selected FOV was dropped, `available_fovs` in the merged sidecar went to
+`[]`, and the run died at `_verify` with a "wrote zero measurement rows"
+message that pointed at the wrong cause. Non-numeric tokens (`"F001"`) pass
+`normalize_fov` unchanged, which is why a dataset built with `"F001"`-style
+FOVs never surfaced this.
 
 `build_subset_plan` reuses the destination-state predicates with its own
 marker (`.aw_subset_in_progress`), refuses a filter matching zero wells, and
@@ -2445,6 +2469,24 @@ rewritten to the "Cancelled" convention every other Datasets worker's
 `failed()` message uses for a Stop-driven exit, so `QueueBridge._was_cancelled`
 recognises it instead of marking the queued job `FAILED`.
 
+**New-destination mode refuses a destination that already has any content**
+(`apply._check_new_destination`, mirrored by a page-side `PathField`
+validator, `datasets/import_loose/view.py::_is_destination`). Unlike
+Concatenate/Subset/Merge Plates, this mode has no destination-state check of
+its own — it writes `<dest>/in/<WELL>.zip` directly via `atomic_zip`, which
+publishes onto that path unconditionally on success. Pointing it at an
+*existing analyzed dataset* silently overwrote that well's raw-input archive
+with the loose folder's unrelated images while `out/` (its CSVs, QC zips,
+`pipeline_info.json`) was left untouched — a dataset whose measurements no
+longer correspond to its inputs, with the run still reporting success. The
+guard is deliberately simpler than the sibling tools' marker-based
+restart-detection (`destination_is_failed_run` / a resume confirmation) —
+it refuses *any* pre-existing content under `in`/`out`, full stop, rather
+than distinguishing a crash-interrupted attempt of its own from someone
+else's dataset; the `.aw_import_in_progress` marker this module's docstring
+in `datasets/_common/dataset_paths.py` names is not written by anything, so
+there is no restart-resume feature here to preserve.
+
 **Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
 Concatenate. Concatenate joins the same plate imaged at different times (a
 well present in both datasets is stitched — more timepoints for the same
@@ -2564,7 +2606,14 @@ Qt event loop. Three layers:
   override meaning "where my remotes live" rather than "where my app state
   lives", and its Windows branch is conditional on whether `remotes.toml`
   exists, which would silently relocate an already-written queue the day a
-  user first creates one.
+  user first creates one. `load_queue`'s malformed-file guard wraps
+  `JobQueue.from_json`/`JobSpec.from_json` too, not just the `json.loads`
+  call — a well-formed-JSON-but-malformed-*queue* file (a job entry missing
+  `id`/`kind`, a `jobs` value that isn't a list of objects) raised
+  `KeyError`/`TypeError`/`AttributeError` uncaught, and `load_queue` runs
+  unconditionally and synchronously from `QueueBridge.__init__` at
+  `DatasetsTab` construction — so a hand-edited or truncated-but-valid-JSON
+  file didn't just break the queue page, it crashed the whole app's startup.
 - **`datasets/job_queue/controller.py`** — the Qt-touching layer.
   `QueueableController` is the duck-typed protocol every runnable `kind`
   implements: `start_from_queue(spec)`, `show_job(spec)` (populate the tool's

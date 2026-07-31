@@ -204,6 +204,37 @@ def test_stale_available_timepoints_flagged_and_repaired(tmp_path):
     assert not report_after.repairable
 
 
+def test_repair_rebuilds_correctly_on_a_legacy_schema_sidecar(tmp_path):
+    """Regression guard: apply_repairs used to resolve schema_fields via a
+    bare info.get("schema_fields") or [] -- unlike build_report, which
+    resolves it through load_schema (legacy "schema" colon-string / index-only
+    / default-fields fallbacks). A sidecar with no schema_fields key at all
+    (only the legacy "schema" string) still diffs correctly in build_report,
+    but apply_repairs's own schema_fields resolved to [], and
+    collect_available_schema_values([], ...) returns [] unconditionally --
+    silently wiping a real, correct available_timepoints list to empty
+    instead of rebuilding it from what's actually on disk."""
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h", "24h"])
+    info_path = tmp_path / "out" / "pipeline_info.json"
+    info = json.loads(info_path.read_text())
+    assert info.get("schema") == "experiment:channel:well:fov:timepoint"
+    del info["schema_fields"]  # legacy sidecar: only the colon-string form
+    info["available_timepoints"] = ["0h", "24h", "999h"]
+    info_path.write_text(json.dumps(info))
+
+    report = vc.build_report(tmp_path)
+    assert report.stale_available_timepoints == ("999h",)
+    assert report.repairable
+
+    result = apply_repairs(tmp_path, report)
+    assert result.rebuilt_availability
+
+    new_info = json.loads(info_path.read_text())
+    assert new_info["available_timepoints"] == ["0h", "24h"], (
+        f"expected the real on-disk timepoints, got {new_info['available_timepoints']!r}"
+    )
+
+
 def test_repair_is_idempotent(tmp_path):
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
     report = vc.build_report(tmp_path)

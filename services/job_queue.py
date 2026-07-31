@@ -410,15 +410,25 @@ def load_queue(state_dir: Path | None = None) -> JobQueue:
     """Load the persisted queue, or return an empty one if it's never been
     written. A malformed file is treated the same as a missing one — a
     corrupt job_queue.json must not block the app from opening the queue
-    page, it should just start the user from an empty queue."""
+    page, it should just start the user from an empty queue.
+
+    ``JobQueue.from_json``/``JobSpec.from_json`` are included in the guarded
+    section, not just the JSON parse itself — well-formed JSON that isn't a
+    well-formed *queue* (a job entry missing ``id``/``kind``, or a ``jobs``
+    value that isn't a list of objects) raised ``KeyError``/``TypeError``
+    uncaught here, and ``load_queue`` runs unconditionally and synchronously
+    from ``QueueBridge.__init__`` at ``DatasetsTab`` construction — so a
+    hand-edited or truncated file didn't just break the queue page, it took
+    down the whole app's startup.
+    """
     path = queue_path(state_dir)
     if not path.is_file():
         return JobQueue()
     try:
         data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+        return JobQueue.from_json(data)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError, AttributeError):
         return JobQueue()
-    return JobQueue.from_json(data)
 
 
 def save_queue(queue: JobQueue, state_dir: Path | None = None) -> None:

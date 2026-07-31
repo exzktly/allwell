@@ -101,6 +101,39 @@ def test_run_gate_requires_destination_unless_in_place(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_run_gate_refuses_a_destination_that_already_has_content(qapp, tmp_path):
+    """Regression guard: the destination PathField had no validator at all
+    (unlike Concatenate's/Merge Plates'), and _can_run() only checked
+    bool(destination_path()) -- a destination already holding another
+    dataset's files was accepted by the run gate, and the actual convert
+    would then silently overwrite that dataset's in/<WELL>.zip (see
+    tests/test_import_loose_compute.py's apply.py-level regression test)."""
+    from tests.fixtures.dataset_builder import build_dataset
+
+    from datasets.import_loose.controller import ImportLooseController
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    existing = tmp_path / "existing"
+    build_dataset(existing, wells=["A01"], timepoints=["0h"])
+
+    ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    page._dest_field.set_path(str(existing))
+    page._refresh_run_enabled()
+    assert not page._run_btn.isEnabled()
+    assert not page._dest_field.isHidden()
+    assert "already has files" in page._dest_field.message().lower()
+
+    page._dest_field.set_path(str(tmp_path / "fresh_dest"))
+    page._refresh_run_enabled()
+    assert page._run_btn.isEnabled()
+    ctrl.shutdown()
+
+
 def test_convert_to_new_destination_through_the_page(qapp, tmp_path):
     import zipfile
 

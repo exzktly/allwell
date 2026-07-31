@@ -36,8 +36,20 @@ from PySide6.QtWidgets import (
 import theme
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets.path_field import PathField, folder_picker
+from datasets._common.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import scan_folder
+
+
+def _is_destination(root: Path) -> str:
+    """Return "" if *root* is usable as a new-destination target, else a
+    short reason — the page-side early warning for the same guard
+    ``apply.py::_check_new_destination`` enforces authoritatively before any
+    write happens."""
+    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    if destination_has_content(dest):
+        return "Already has files under 'in' or 'out' — choose an empty folder."
+    return ""
 
 
 def _hrule(parent: QWidget) -> QFrame:
@@ -126,7 +138,8 @@ class ImportLoosePage(QWidget):
         outer.addWidget(self._in_place_cb)
 
         self._dest_field = PathField(
-            "Destination folder", pick=folder_picker("Select destination folder"))
+            "Destination folder", pick=folder_picker("Select destination folder"),
+            validator=_is_destination)
         self._dest_field.changed.connect(self._refresh_run_enabled)
         outer.addWidget(self._dest_field)
 
@@ -295,7 +308,7 @@ class ImportLoosePage(QWidget):
             return False
         if self.in_place():
             return True
-        return bool(self.destination_path())
+        return bool(self.destination_path()) and self._dest_field.is_valid()
 
     def _refresh_run_enabled(self) -> None:
         self._run_btn.setEnabled(self._can_run())

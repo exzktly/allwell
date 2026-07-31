@@ -241,6 +241,29 @@ def test_folder_mode_source_refused(tmp_path):
         sc.build_subset_plan(src, dest, sc.SubsetFilter())
 
 
+def test_zero_padded_numeric_fov_tokens_filter_correctly(tmp_path):
+    """Regression guard: row_matches/member_matches/build_subset_plan compared
+    each row's/member's own FOV -- always read through normalize_fov -- against
+    filt.fovs raw (the unnormalized UI checkbox labels the page's
+    selected_fovs() carries). A purely-numeric FOV token like "001" normalizes
+    to "1", so selecting FOV "001" in the UI silently matched nothing: every
+    row and member was dropped, available_fovs became [], and the run died at
+    _verify with "wrote zero measurement rows" -- pointing at the wrong cause.
+    Non-numeric tokens ("F001") pass normalize_fov unchanged, which is why the
+    existing fixture's default fovs=("F001",) never exercised this."""
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    _build(src, wells=["A01"], timepoints=["0h"], fovs=("001", "002"))
+    filt = sc.SubsetFilter(fovs=frozenset({"001"}))
+    plan = sc.build_subset_plan(src, dest, filt)
+    assert plan.merged_info["available_fovs"] == ["001"]
+    subset_apply.execute_plan(plan)
+
+    with (dest / "out" / "measurements_A01.csv").open() as f:
+        rows = list(csv.DictReader(f))
+    assert rows and {r["fov"] for r in rows} == {"001"}
+
+
 def test_channel_scoped_role_image_filtered_by_timepoint(tmp_path):
     """Regression guard: member_matches used to call parse_image_filename
     directly with no channel/fluor-token discovery. A channel-scoped role

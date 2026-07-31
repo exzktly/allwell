@@ -82,7 +82,13 @@ class SubsetFilter:
     lets the user check — resolved to hours (via :func:`util.timepoint.parse_hours`)
     once here, so every downstream comparison is numeric and tolerant of
     floating-point drift the way ``well_viewer.domain.tp_match.tp_close``
-    already is everywhere else in the app.
+    already is everywhere else in the app. ``fovs`` are likewise the raw
+    ``available_fovs`` strings the UI checkboxes carry — resolved to
+    :func:`~well_viewer.data.image_identity.normalize_fov` tokens once here
+    (:attr:`fov_tokens`) rather than at each comparison site, since every row/
+    member's own FOV is read through the same normalizer (a purely-numeric
+    label like ``"001"`` normalizes to ``"1"``; comparing that against a raw,
+    unnormalized ``fovs`` set silently matched nothing).
     """
 
     wells: frozenset[str] | None = None
@@ -95,6 +101,12 @@ class SubsetFilter:
             return None
         hours = {parse_hours(t) for t in self.timepoint_labels}
         return frozenset(h for h in hours if h is not None)
+
+    @property
+    def fov_tokens(self) -> frozenset[str] | None:
+        if self.fovs is None:
+            return None
+        return frozenset(normalize_fov(f) for f in self.fovs)
 
 
 @dataclass(frozen=True)
@@ -163,7 +175,7 @@ def build_subset_plan(
     if filt.fovs is not None:
         merged_info["available_fovs"] = [
             f for f in (info.get("available_fovs", []) or [])
-            if normalize_fov(str(f)) in filt.fovs
+            if normalize_fov(str(f)) in filt.fov_tokens
         ]
 
     return SubsetPlan(
@@ -197,7 +209,7 @@ def member_matches(
     parts = parsed.stem.split(schema.sep)
     if len(parts) != len(schema.fields):
         return True
-    if filt.fovs is not None and parsed.fov not in filt.fovs:
+    if filt.fovs is not None and parsed.fov not in filt.fov_tokens:
         return False
     if filt.timepoint_hours is not None:
         hours = parse_hours(parsed.fields.get("timepoint", ""))
@@ -207,7 +219,7 @@ def member_matches(
 
 
 def row_matches(row: dict, filt: SubsetFilter) -> bool:
-    if filt.fovs is not None and normalize_fov(row.get("fov", "")) not in filt.fovs:
+    if filt.fovs is not None and normalize_fov(row.get("fov", "")) not in filt.fov_tokens:
         return False
     if filt.timepoint_hours is not None:
         try:

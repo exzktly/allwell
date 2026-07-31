@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from util.timepoint import parse_hours, sort_key as tp_sort_key
+from well_viewer.data.image_identity import load_schema
 from datasets._common.dataset_paths import (
     collect_available_schema_values,
     out_zips,
@@ -106,18 +107,26 @@ def apply_repairs(root: Path | str, report: DatasetReport) -> RepairResult:
     info_path = paths.out_dir / "pipeline_info.json"
     info = json.loads(info_path.read_text())
 
+    # Resolved through load_schema, exactly as validate_compute.build_report
+    # does for its own stale/missing diff -- a bare info.get("schema_fields")
+    # here (no legacy-schema-string / index-only / default-fields fallback)
+    # would silently disagree with the schema build_report actually diffed
+    # against, and for any sidecar relying on one of those fallbacks (no
+    # schema_fields key at all) would resolve to [], which
+    # collect_available_schema_values treats as "field not in schema" and
+    # returns [] for -- wiping a real, correct availability list to empty.
+    schema = load_schema(info)
+    schema_fields = list(schema.fields)
+    sep = schema.sep
+
     rebuilt = False
     if report.stale_available_timepoints or report.missing_available_timepoints:
-        schema_fields = info.get("schema_fields") or []
-        sep = str(info.get("separator", "_")) or "_"
         info["available_timepoints"] = collect_available_schema_values(
             paths.in_dir, schema_fields=schema_fields, sep=sep,
             field_name="timepoint", sort_key=tp_sort_key,
         )
         rebuilt = True
     if report.stale_available_fovs or report.missing_available_fovs:
-        schema_fields = info.get("schema_fields") or []
-        sep = str(info.get("separator", "_")) or "_"
         info["available_fovs"] = collect_available_schema_values(
             paths.in_dir, schema_fields=schema_fields, sep=sep,
             field_name="fov", sort_key=_fov_sort_key,

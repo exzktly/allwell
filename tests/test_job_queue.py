@@ -222,3 +222,25 @@ def test_load_queue_corrupt_file_returns_empty_queue(tmp_path):
     (tmp_path / "job_queue.json").write_text("{not json")
     q = load_queue(tmp_path)
     assert q.jobs == []
+
+
+def test_load_queue_well_formed_json_but_malformed_queue_returns_empty_queue(tmp_path):
+    """Regression guard: load_queue's try/except used to wrap only the
+    json.loads() call -- JobQueue.from_json/JobSpec.from_json (a job entry
+    missing "id"/"kind", or a "jobs" value that isn't a list of objects)
+    raised KeyError/TypeError/AttributeError uncaught. load_queue runs
+    unconditionally and synchronously from QueueBridge.__init__ at
+    DatasetsTab construction, so a hand-edited or truncated-but-valid-JSON
+    file crashed the whole app's startup, not just the queue page."""
+    cases = [
+        {"jobs": [{"kind": "subset", "label": "x"}]},  # entry missing "id"
+        {"jobs": {"a": 1}},                             # "jobs" isn't a list
+        {"jobs": "nope"},                                # "jobs" is a string
+        [1, 2, 3],                                       # top level isn't a dict
+    ]
+    for i, payload in enumerate(cases):
+        d = tmp_path / f"case{i}"
+        d.mkdir()
+        (d / "job_queue.json").write_text(json.dumps(payload))
+        q = load_queue(d)
+        assert q.jobs == [], f"case {i} ({payload!r}) should yield an empty queue, not raise"

@@ -139,6 +139,22 @@ class ModeBar(QWidget):
         # full-height tab row.
         self.setFixedHeight(tab_bar_height() if height is None else height)
 
+    def setFillHeight(self, fill: bool = True) -> None:  # Qt naming
+        """Stretch to the host row's height instead of pinning one.
+
+        The default is a pinned height matched to a tab bar, which is right when
+        the bar sits beside one. When it sits *inside* a taller strip, a pinned
+        height leaves a gap above and below and the bar reads as a floating chip
+        row rather than one solid band down the left edge.
+        """
+        if fill:
+            self.setMinimumHeight(0)
+            self.setMaximumHeight(16_777_215)   # Qt's QWIDGETSIZE_MAX
+            self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        else:
+            self.setFixedHeight(tab_bar_height())
+            self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+
     def addSegment(self, text: str, icon: str | None = None,
                    data: object | None = None) -> int:
         """Add a mode. *icon* is a ``widgets.icons`` glyph name, not a QIcon —

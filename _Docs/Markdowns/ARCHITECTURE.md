@@ -690,6 +690,33 @@ to add a literal `110` commented "header / controls / toolbar rows" — the kind
 of number that goes stale silently, giving the figure a little more or less room
 than the tab asked for.
 
+#### The rail head
+
+The window's left column is one thing from the top down. `app_shell_view.RAIL_W`
+is the single statement of its width — the rail reads it, and so does the app
+header's mode bar, which spans exactly that and fills the header strip's height
+(`ModeBar.setFillHeight`). Flush, with no inset: the topbar's left content
+margin is zero and the widgets after the bar carry their own leading pad, so the
+bar and the rail below it are one column rather than a chip row floating over
+one.
+
+The mode bar is a `ModeBar`, not the `SegmentedControl` the rest of the app uses
+for view toggles. Review / Analyze / Datasets are three applications sharing a
+window; switching replaces the whole interface, and the control says so at rest
+by keeping every segment filled (§7).
+
+Directly beneath it, as the rail's own head, is the **dataset control**:
+`app_shell_view._dataset_button`, full rail width, naming the loaded folder and
+carrying `Open…`. It replaces both the `SECTION` caption (the rail's items are
+self-evidently sections) and the `Open…` button that sat alone at the far end of
+the topbar — the action and the thing it acts on are now in one place, and the
+loaded dataset finally has a durable on-screen identity rather than living in a
+hidden label and the OS window title. `refresh_dataset_button` is called from
+`load_controller` on every load. Long names elide in the **middle**, because
+dataset folders differ in their tail as often as their head
+(`plate3_run2_2024-06-11` against `…-12`) and a right-elided name can leave two
+datasets indistinguishable; the full path is on the tooltip.
+
 #### Empty states and build failures
 
 `ui_helpers.wrap_with_empty_state` now wraps Statistics, Spatial, Review CSV and

@@ -447,6 +447,8 @@ def load_directory(ctx, d: Path, label=None) -> None:
             swallowed()  # was: pass (silent except)
     display = label or str(d)
     app._dir_label.setText(display)
+    from well_viewer.core.app_shell_view import refresh_dataset_button
+    refresh_dataset_button(app)
     app._set_status(f"Loaded {n} well(s) — {display}")
     recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from

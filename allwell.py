@@ -232,21 +232,23 @@ class AllWellApp(QMainWindow):
         hl.addWidget(self._version_pill)
 
         hl.addSpacing(theme_v2.Spacing.md)
-        # Mode segmented control (Review / Analyze) lives in the titlebar
-        # strip where the redundant dataset chip used to sit. The dataset
-        # name is set on the OS window title instead.
-        from widgets.segmented_control import SegmentedControl as _SegmentedControl
-        from widgets import icons as _icons
-        dpr = self.devicePixelRatioF() if hasattr(self, "devicePixelRatioF") else 1.0
-        _eye_icon = _icons.make_icon("eye", 14, dpr=dpr or 1.0)
-        _slider_icon = _icons.make_icon("sliders-horizontal", 14, dpr=dpr or 1.0)
-        _boxes_icon = _icons.make_icon("boxes", 14, dpr=dpr or 1.0)
-        self._mode_seg = _SegmentedControl()
-        self._mode_seg.addSegment("Review", icon=_eye_icon, data="review")
-        self._mode_seg.addSegment("Analyze", icon=_slider_icon, data="analyze")
-        self._mode_seg.addSegment("Datasets", icon=_boxes_icon, data="datasets")
+        # Review / Analyze / Datasets — the app's top-level interface switch.
+        # It is a ``ModeBar``, not the ``SegmentedControl`` the rest of the app
+        # uses for view toggles: these three are separate applications sharing a
+        # window, and switching between them replaces the whole interface. Every
+        # segment is a filled control at all times so the bar says that at rest,
+        # rather than reading as a third strip of tabs (see widgets/mode_bar.py).
+        # It spans the rail's width exactly and fills the strip's height, so it
+        # is one solid band down the left edge rather than a floating chip row.
+        from widgets.mode_bar import ModeBar as _ModeBar
+        self._mode_seg = _ModeBar()
+        self._mode_seg.addSegment("Review", icon="eye", data="review")
+        self._mode_seg.addSegment("Analyze", icon="sliders-horizontal", data="analyze")
+        self._mode_seg.addSegment("Datasets", icon="boxes", data="datasets")
         self._mode_seg.currentChanged.connect(self._on_titlebar_mode_seg)
-        self._mode_seg.setFixedWidth(330)
+        from well_viewer.core.app_shell_view import RAIL_W as _RAIL_W
+        self._mode_seg.setFixedWidth(_RAIL_W)
+        self._mode_seg.setFillHeight(True)
         hl.addWidget(self._mode_seg)
 
         hl.addStretch(1)

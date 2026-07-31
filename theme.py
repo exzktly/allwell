@@ -335,6 +335,26 @@ QFrame#Titlebar {{
    chrome, not content, so it takes the rail's fill rather than the canvas's and
    is separated from the content below by the same hairline every other divider
    uses. See ``widgets/control_band.py``. */
+/* The rail head: the loaded dataset's name plus its actions, spanning the rail.
+   Flat and full-bleed rather than an inset button — it is the rail's heading,
+   and an inset control there reads as one more item in the nav below it. */
+QToolButton#DatasetButton {{
+    background-color: {c.rail};
+    color: {c.text_primary};
+    border: none;
+    border-bottom: 1px solid {c.border_subtle};
+    border-radius: 0px;
+    padding: {s.sm}px {s.md}px;
+    text-align: left;
+    font-weight: {t.semibold};
+}}
+QToolButton#DatasetButton:hover {{ background-color: {c.hover}; }}
+QToolButton#DatasetButton::menu-indicator {{
+    subcontrol-position: right center;
+    subcontrol-origin: padding;
+    right: {s.sm}px;
+}}
+
 QWidget#ControlBand {{
     background-color: {c.rail};
     border-bottom: 1px solid {c.border_subtle};

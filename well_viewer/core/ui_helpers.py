@@ -184,7 +184,7 @@ def wrap_with_empty_state(
     host: QWidget,
     *,
     text: str = "Load a directory.",
-    hint: str = "Use the Open button at the top-right (⌘O) to pick a folder.",
+    hint: str = "Open… is at the top of the left rail (⌘O).",
     icon: str = "line-chart",
 ) -> QStackedWidget:
     """Wrap *host* (a plot canvas / scroll area / card) in a ``QStackedWidget``

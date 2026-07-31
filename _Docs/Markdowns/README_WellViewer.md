@@ -267,8 +267,9 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    **Review** and loads the output folder.
 5. Pick wells in the plate map; the plots redraw immediately.
 
-Reopen a previous output folder any time with the `Open…` button in Review
-or `Ctrl+O`.
+Reopen a previous output folder any time from the dataset control at the top of
+Review's left rail — it names the folder you have loaded and drops `Open…` — or
+with `Ctrl+O`.
 
 ---
 

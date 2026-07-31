@@ -188,3 +188,40 @@ def test_success_headline_shows_a_basename_full_path_in_the_tooltip(qapp, tmp_pa
     assert page.dashboard._headline.toolTip() == summary
     # The log line (and jobFinished's own message) are untouched.
     assert str(dest) in page._status.toPlainText()
+
+
+def test_fields_locked_during_a_run(qapp, tmp_path):
+    """Regression guard (UX audit P2-4): Concatenate was the one Datasets
+    tool that locked none of its fields at all for a run's duration — a
+    dataset picked mid-run wouldn't affect the run already in flight (each
+    ConcatenateWorker captures its own paths at launch), but nothing stopped
+    the picker from disagreeing with what was actually running the whole
+    time it ran. Locked means the Browse button, not the whole field
+    (PathField.setLocked) — the path text stays fully legible."""
+    from datasets.concatenate.controller import ConcatenateController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"])
+    build_dataset(ds2, wells=["A01"], timepoints=["48h"])
+
+    ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._revalidate_cross()
+
+    page.runRequested.emit()
+    assert page._ds1_field.isEnabled() is True
+    assert page._ds2_field.isEnabled() is True
+    assert page._dest_field.isEnabled() is True
+    assert page._ds1_field._browse_btn.isEnabled() is False
+    assert page._ds2_field._browse_btn.isEnabled() is False
+    assert page._dest_field._browse_btn.isEnabled() is False
+    _run_worker_to_completion(ctrl)
+    assert page._ds1_field._browse_btn.isEnabled() is True
+    assert page._ds2_field._browse_btn.isEnabled() is True
+    assert page._dest_field._browse_btn.isEnabled() is True
+    ctrl.shutdown()

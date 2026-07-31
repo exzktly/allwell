@@ -315,13 +315,17 @@ def test_in_place_success_reports_the_launched_source_not_a_since_changed_field(
     page._refresh_run_enabled()
 
     page.runRequested.emit()
-    assert page._src_field.isEnabled() is False
+    # Locked means the Browse button, not the whole field (UX audit P2-4) —
+    # doesn't change what this test is actually about: the field's *value*
+    # can still be driven programmatically below regardless of lock state,
+    # which is exactly the path _on_succeeded must not trust.
+    assert page._src_field._browse_btn.isEnabled() is False
 
     # The field changes after the run is launched but before it finishes.
     page._src_field.set_path(str(root_b))
     page._on_source_changed()
     _run_worker_to_completion(ctrl)
-    assert page._src_field.isEnabled() is True
+    assert page._src_field._browse_btn.isEnabled() is True
 
     assert ctrl._last_result[2] == str(root_a)
     ctrl.shutdown()

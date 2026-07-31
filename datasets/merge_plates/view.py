@@ -301,9 +301,10 @@ class MergePlatesPage(QWidget):
         # re-resolves dataset1_path()/dataset2_path() live to colour the
         # dashboard by origin, so a mid-run change would misattribute the
         # colours (same class of bug as Subset's picker/source-field lock).
-        self._ds1_field.setEnabled(not running)
-        self._ds2_field.setEnabled(not running)
-        self._dest_field.setEnabled(not running)
+        # setLocked(), not setEnabled(False) — see PathField.setLocked.
+        self._ds1_field.setLocked(running)
+        self._ds2_field.setLocked(running)
+        self._dest_field.setLocked(running)
         self._remap_cb.setEnabled(not running)
         self._remap_origin_edit.setEnabled(not running and self._remap_cb.isChecked())
 

@@ -236,7 +236,8 @@ class ValidatePage(QWidget):
         # already moved on from (ValidateController._on_succeeded uses the
         # worker's own report.root, not this field, but the field itself must
         # not drift out from under the user while a scan is in flight).
-        self._dataset_field.setEnabled(not running)
+        # setLocked(), not setEnabled(False) — see PathField.setLocked.
+        self._dataset_field.setLocked(running)
 
     def show_report(self, report: DatasetReport) -> None:
         self._dataset_root = str(report.root)

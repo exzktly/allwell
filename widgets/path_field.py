@@ -91,12 +91,12 @@ class PathField(QWidget):
         self._edit.setPlaceholderText("(not set)")
         self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         row_layout.addWidget(self._edit, 1)
-        browse = QToolButton(row)
-        browse.setIcon(make_icon("folder-open"))
-        browse.setAutoRaise(True)
-        browse.setToolTip("Browse…")
-        browse.clicked.connect(self._browse)
-        row_layout.addWidget(browse)
+        self._browse_btn = QToolButton(row)
+        self._browse_btn.setIcon(make_icon("folder-open"))
+        self._browse_btn.setAutoRaise(True)
+        self._browse_btn.setToolTip("Browse…")
+        self._browse_btn.clicked.connect(self._browse)
+        row_layout.addWidget(self._browse_btn)
         col.addWidget(row)
 
         self._hint = QLabel("", self)
@@ -152,6 +152,20 @@ class PathField(QWidget):
         style = self._hint.style()
         style.unpolish(self._hint)
         style.polish(self._hint)
+
+    def setLocked(self, locked: bool) -> None:
+        """Disable only the Browse button, not the whole widget.
+
+        ``setEnabled(False)`` used to be how every page locked a field for a
+        run's duration — it dims the *entire* widget, including the path
+        text, which is already read-only (``self._edit`` above) and has
+        nothing interactive about it to disable in the first place. The
+        result was the one piece of context a user watching a long run most
+        wants to check — which folder is this actually running against —
+        rendered at the lowest contrast on the page. Locking only the
+        button that actually does something keeps the path fully legible.
+        """
+        self._browse_btn.setEnabled(not locked)
 
     def path(self) -> str:
         return self._path

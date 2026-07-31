@@ -266,8 +266,9 @@ class ImportLoosePage(QWidget):
         # source_path() once at launch and never re-reads it afterward, but
         # the field itself must not drift out from under the user mid-run
         # either — same class of bug as Subset's source/destination fields).
-        self._src_field.setEnabled(not running)
-        self._dest_field.setEnabled(not running)
+        # setLocked(), not setEnabled(False) — see PathField.setLocked.
+        self._src_field.setLocked(running)
+        self._dest_field.setLocked(running)
         self._schema_edit.setEnabled(not running)
         self._sep_edit.setEnabled(not running)
         self._in_place_cb.setEnabled(not running)

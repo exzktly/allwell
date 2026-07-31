@@ -312,6 +312,15 @@ class ConcatenatePage(QWidget):
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
+        # Locked for the run's duration — Concatenate used to lock none of
+        # its fields at all, the one Datasets tool where a mid-run pick
+        # could silently change what a subsequent Run press would act on.
+        # setLocked(), not setEnabled(False): the latter dims the whole
+        # field (including its already-read-only path text) rather than
+        # just disabling the one truly interactive control (Browse).
+        self._ds1_field.setLocked(running)
+        self._ds2_field.setLocked(running)
+        self._dest_field.setLocked(running)
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root

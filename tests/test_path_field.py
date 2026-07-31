@@ -108,6 +108,27 @@ def test_show_note_overrides_the_validator_hint_until_the_next_revalidate(qapp):
     assert field._hint.text() == "Already has content — choose an empty folder."
 
 
+def test_set_locked_disables_only_browse_not_the_whole_field(qapp):
+    """Regression guard (UX audit P2-4): every page used to lock a field for
+    a run's duration with setEnabled(False), which disables the *whole*
+    widget — including self._edit, which is already read-only and has
+    nothing interactive about it to disable. The visible effect was the
+    path text (exactly what a user watching a long run most wants to check)
+    rendered at the lowest-contrast, disabled-looking style on the page.
+    setLocked() must disable only the Browse button."""
+    field = PathField("Label", pick=lambda current, parent=None: "/picked")
+    field.set_path("/tmp/dest")
+    assert field.isEnabled() is True
+    assert field._browse_btn.isEnabled() is True
+
+    field.setLocked(True)
+    assert field.isEnabled() is True  # the field itself stays fully legible
+    assert field._browse_btn.isEnabled() is False
+
+    field.setLocked(False)
+    assert field._browse_btn.isEnabled() is True
+
+
 def test_folder_picker_forwards_parent(monkeypatch, qapp):
     from PySide6.QtWidgets import QFileDialog
 

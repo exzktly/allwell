@@ -310,12 +310,17 @@ def test_source_and_destination_fields_are_locked_during_a_run(qapp, tmp_path):
     page._dest_field.set_path(str(dest))
     page._refresh_run_enabled()
 
-    assert page._src_field.isEnabled() is True
-    assert page._dest_field.isEnabled() is True
+    # Locked means the Browse button, not the whole field (UX audit P2-4) —
+    # the path text is already read-only and stays at full contrast so a
+    # user watching a long run can still read what it's running against.
+    assert page._src_field._browse_btn.isEnabled() is True
+    assert page._dest_field._browse_btn.isEnabled() is True
     page.runRequested.emit()
-    assert page._src_field.isEnabled() is False
-    assert page._dest_field.isEnabled() is False
-    _run_worker_to_completion(ctrl)
     assert page._src_field.isEnabled() is True
     assert page._dest_field.isEnabled() is True
+    assert page._src_field._browse_btn.isEnabled() is False
+    assert page._dest_field._browse_btn.isEnabled() is False
+    _run_worker_to_completion(ctrl)
+    assert page._src_field._browse_btn.isEnabled() is True
+    assert page._dest_field._browse_btn.isEnabled() is True
     ctrl.shutdown()

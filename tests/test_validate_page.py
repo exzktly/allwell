@@ -283,9 +283,13 @@ def test_dataset_field_locked_during_a_run(qapp, tmp_path):
     page._on_dataset_changed()
 
     page.checkRequested.emit()
-    assert page._dataset_field.isEnabled() is False
-    _run_worker_to_completion(ctrl)
+    # Locked means the Browse button, not the whole field (UX audit P2-4) —
+    # the path text is already read-only and stays at full contrast so a
+    # user watching a long scan can still read what it's running against.
     assert page._dataset_field.isEnabled() is True
+    assert page._dataset_field._browse_btn.isEnabled() is False
+    _run_worker_to_completion(ctrl)
+    assert page._dataset_field._browse_btn.isEnabled() is True
     ctrl.shutdown()
 
 

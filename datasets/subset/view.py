@@ -312,9 +312,13 @@ class SubsetPage(QWidget):
         # for the new dataset while the old run's worker keeps executing in
         # the background; its still-arriving wellStage signals would then
         # paint the *previous* dataset's progress onto wells the user now
-        # believes belong to the newly-selected one.
-        self._src_field.setEnabled(not running)
-        self._dest_field.setEnabled(not running)
+        # believes belong to the newly-selected one. setLocked(), not
+        # setEnabled(False) — the source path is exactly what a user
+        # watching a long run most wants to check, and the latter dims it
+        # to the lowest-contrast text on the page for no functional reason
+        # (the path display is already read-only; only Browse needs locking).
+        self._src_field.setLocked(running)
+        self._dest_field.setLocked(running)
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")

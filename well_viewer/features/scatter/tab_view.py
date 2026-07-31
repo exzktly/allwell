@@ -38,6 +38,27 @@ _MODE_CELLS = "cells"
 _MODE_AGG = "aggregate"
 
 
+def _show_mode_controls(ctx, mode: str) -> None:
+    """Show the Plotting band's controls for the scatter *mode* now on screen.
+
+    Both scatter pages are built up front, so both have already put their
+    per-axis selectors and their Export button into the shared band. Only the
+    mode being shown should carry its controls in the row.
+
+    Guarded on scatter actually being the sub-tab on screen. The mode is set
+    from outside the tab too — restoring a saved view, and the build itself —
+    and unguarded that would pull scatter's controls into the row over whichever
+    other plot the user is looking at.
+    """
+    from well_viewer.core.ui_helpers import PLOTTING_BAND_KEY, plotting_slot_name
+    band = ctx.widgets.get_or_none(PLOTTING_BAND_KEY)
+    if band is None:
+        return
+    ours = {plotting_slot_name("Scatter Plot", m) for m in (_MODE_CELLS, _MODE_AGG)}
+    if band.current_slot() in ours:
+        band.show_slot(plotting_slot_name("Scatter Plot", mode))
+
+
 def build_scatter_tab(ctx, parent: QWidget) -> None:
     """Construct the unified Scatter Plot tab inside *parent*."""
     layout = parent.layout()
@@ -80,6 +101,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
                 toggle.setCurrentByData(mode)
             finally:
                 toggle.blockSignals(blocked)
+        _show_mode_controls(ctx, mode)
         try:
             update_scatter_menus(ctx)
         except Exception:
@@ -95,6 +117,7 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
     # Adopt whichever mode a restored session left in state, so the page and the
     # band's toggle agree from the first paint.
     pages.setCurrentByName(ctx.state.scatter.mode or _MODE_CELLS)
+    _show_mode_controls(ctx, ctx.state.scatter.mode or _MODE_CELLS)
 
 
 def scatter_active_mode(ctx) -> str:

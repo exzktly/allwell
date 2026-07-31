@@ -333,6 +333,41 @@ def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
     return btn
 
 
+#: Registry key of the Plotting page's single control band, built by
+#: ``core/centre_view.py`` before any of the page's leaves.
+PLOTTING_BAND_KEY = "_plotting_band"
+
+
+def plotting_slot_name(title: str, mode: str | None = None) -> str:
+    """The Plotting band's slot name for sub-tab *title* in *mode*.
+
+    Most sub-tabs are one leaf and one slot. Scatter is two leaves behind one
+    sub-tab — a Cells page and a Wells page it switches between — so its slots
+    are named per mode, and the page shows whichever the mode selects.
+    """
+    return f"{title}/{mode}" if mode else title
+
+
+def plotting_band_slot(ctx, title: str, mode: str | None = None):
+    """The Plotting band's :class:`~widgets.control_band.ControlBandSlot` for a leaf.
+
+    The five Plotting sub-tabs share one band. The controls every one of them
+    scopes by — channel, property, threshold — are added to the band when the
+    page is built; each leaf adds its own on top through a slot of its own, and
+    the page shows one leaf's slot at a time. A leaf that built its own band
+    instead put a second strip of chrome under the first.
+
+    Falls back to a free-standing band if the page band is missing, so a leaf
+    built in isolation (a unit test, a one-off harness) still gets a working
+    control row rather than an ``AttributeError``.
+    """
+    from widgets.control_band import ControlBand
+    band = ctx.widgets.get_or_none(PLOTTING_BAND_KEY)
+    if band is None:
+        band = ControlBand()
+    return band.slot(plotting_slot_name(title, mode))
+
+
 def build_hline_separator(parent: QWidget) -> QFrame:
     """Return the project's standard 1-px horizontal separator frame."""
     sep = QFrame(parent)

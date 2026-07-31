@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
-    make_band_controls, make_plot_with_right_dock, make_properties_button)
+    make_band_controls, make_plot_with_right_dock, make_properties_button,
+    plotting_band_slot)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
     on_bar_drag_motion,
@@ -39,7 +40,6 @@ import theme
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
 
 
-from widgets.control_band import ControlBand
 
 def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -66,7 +66,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     outer_layout.addWidget(bar_right, 1)
 
     # ── controls bar ─────────────────────────────────────────────────────────
-    bar_ctrl = ControlBand(bar_right)
+    bar_ctrl = plotting_band_slot(ctx, "Bar Plots")
 
     # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
@@ -238,7 +238,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
                     lambda: save_card_to_gallery(ctx, "_bar_card"))
     bar_ctrl.add_action(export_btn)
     bar_ctrl.add_action(make_properties_button(ctx, bar_ctrl, "bar"))
-    right_l.addWidget(bar_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
     card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False,

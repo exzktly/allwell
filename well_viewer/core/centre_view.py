@@ -510,6 +510,17 @@ def build_centre(win, parent: QWidget) -> None:
                     toggle.setCurrentByData(mode)
                 finally:
                     toggle.blockSignals(blocked)
+            # Swap in the sub-tab's own controls. Every Plotting leaf adds its
+            # scope groups and actions to this one band through a slot of its
+            # own (see ``ui_helpers.plotting_band_slot``), so switching sub-tab
+            # is a matter of showing one slot and hiding the rest — a leaf with
+            # its own band under this one would stack two control rows above
+            # every plot, which is what the band replaced.
+            from well_viewer.core.ui_helpers import plotting_slot_name
+            band.show_slot(plotting_slot_name(
+                "Scatter Plot" if is_scatter else title,
+                mode if is_scatter else None,
+            ))
             # Keep the quick-edit showing the active channel's value on every
             # sub-tab switch (guarded; no-op before the stepper is built).
             win._refresh_thresh_frac_quick_edit()

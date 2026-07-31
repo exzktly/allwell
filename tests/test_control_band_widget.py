@@ -363,3 +363,116 @@ def test_page_tab_bar_is_flush_with_the_band_bottom(styled_app, band_h, point_si
         )
     finally:
         styled_app.setFont(previous)
+
+
+# ── per-leaf slots: one band, several sub-tabs ───────────────────────────────
+def _slotted(styled_app):
+    """A band with shared controls plus two leaves, as the Plotting page has."""
+    from PySide6.QtWidgets import QComboBox, QPushButton
+    from widgets.control_band import ControlBand
+
+    band = ControlBand()
+    shared = QComboBox()
+    shared.addItem("GFP")
+    band.add_scope("Channel", shared)
+
+    left = band.slot("left")
+    left.add_scope("Timepoints", QComboBox())
+    left.add_action(QPushButton("Export ▾"))
+
+    right = band.slot("right")
+    right.add_scope("Bins", QComboBox())
+
+    return band, left, right
+
+
+def test_a_slot_is_returned_again_for_the_same_name(styled_app):
+    """Leaves are built lazily and may ask for their slot more than once."""
+    band, left, _ = _slotted(styled_app)
+    assert band.slot("left") is left
+    assert band.slot_names() == ("left", "right")
+
+
+def test_showing_one_slot_hides_the_others(styled_app):
+    band, left, right = _slotted(styled_app)
+    band.show_slot("left")
+    band.show()
+    styled_app.processEvents()
+
+    assert all(w.isVisible() for w in left._items)
+    assert not any(w.isVisible() for w in right._items)
+
+
+def test_shared_controls_survive_every_slot_switch(styled_app):
+    """The page's own controls are not owned by any leaf and never hide."""
+    band, _, _ = _slotted(styled_app)
+    shared = band._scope.itemAt(0).widget()
+    band.show()
+    for name in ("left", "right", None):
+        band.show_slot(name)
+        styled_app.processEvents()
+        assert shared.isVisible(), f"shared control hidden while showing {name!r}"
+
+
+def test_a_slot_built_after_the_switch_arrives_hidden(styled_app):
+    """The regression that makes lazy sub-tabs work.
+
+    ``QLayout.addWidget`` shows what it is handed. A sub-tab is built the first
+    time it is switched to — but Split View and a restored session both build
+    one while a *different* sub-tab is on screen, and its controls would then
+    appear in the row beside the current tab's and stay there.
+    """
+    from PySide6.QtWidgets import QPushButton
+
+    band, _, _ = _slotted(styled_app)
+    band.show_slot("left")
+    band.show()
+
+    late = band.slot("late")
+    button = late.add_action(QPushButton("Late"))
+    styled_app.processEvents()
+
+    assert not button.isVisible()
+    band.show_slot("late")
+    styled_app.processEvents()
+    assert button.isVisible()
+
+
+def test_a_band_with_no_slots_behaves_as_before(styled_app):
+    """Most tabs are a single leaf and never touch the slot API."""
+    band = _band(styled_app)
+    band.show()
+    styled_app.processEvents()
+    assert band.current_slot() is None
+    assert band.slot_names() == ()
+    assert all(band._scope.itemAt(i).widget().isVisible()
+               for i in range(band.scope_count()))
+
+
+def test_the_band_is_one_row_shorter_for_hiding_a_slot(styled_app):
+    """The point of the exercise: the row carries one leaf's controls, not all.
+
+    With every leaf's controls in the row at once, Plotting's band wrapped to
+    three lines — taller than the two separate bands it replaced.
+    """
+    band, _, _ = _slotted(styled_app)
+    band.resize(420, band.sizeHint().height())
+    band.show()
+
+    band.show_slot(None)
+    styled_app.processEvents()
+    bare = band.heightForWidth(420)
+
+    for name in band.slot_names():
+        band.show_slot(name)
+        styled_app.processEvents()
+        assert band.heightForWidth(420) >= bare
+
+    for slot in band._slots.values():
+        slot.setSlotVisible(True)
+    styled_app.processEvents()
+    everything = band.heightForWidth(420)
+
+    band.show_slot("left")
+    styled_app.processEvents()
+    assert band.heightForWidth(420) <= everything

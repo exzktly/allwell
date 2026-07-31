@@ -25,8 +25,8 @@ from well_viewer.core.ui_helpers import (
     make_plot_with_right_dock,
     make_popover_button,
     make_properties_button,
+    plotting_band_slot,
 )
-from widgets.control_band import ControlBand
 from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
 from well_viewer.features.export.service import export_heatmap_data
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
@@ -68,7 +68,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # they moved into a Display popover, and what is left fits one row at every
     # width. The grid layout itself is still edited from the sidebar
     # configurator on the left (``views/heatmap_layout_sidebar_view.py``).
-    band = ControlBand(parent)
+    band = plotting_band_slot(ctx, "Heat Map")
 
     # Channel combo hidden — the Plotting band's channel combo is the only
     # visible channel control. See line_graphs_tab_view.py for rationale.
@@ -179,7 +179,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     band.add_action(make_properties_button(ctx, band, "heatmap"))
 
-    layout.addWidget(band)
 
     # ── Figure (in a v2 PlotCard — card chrome + MplToolbar) ────────────────
     from widgets.plot_card import PlotCard

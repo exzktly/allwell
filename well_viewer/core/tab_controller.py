@@ -433,10 +433,30 @@ def apply_sidebar_visibility(ctx) -> None:
     sidebar = getattr(app, "_sidebar_root", None)
     if sidebar is not None:
         sidebar.setVisible(mode == "review" and not collapsed)
-    # The collapse toggle floats over the rail's right edge, so it has to move
-    # to the window edge when the rail goes away and back when it returns.
-    from well_viewer.core.app_shell_view import position_rail_toggle
+    # The collapse toggle floats over the visible panel's right edge, so it has
+    # to move when the panel changes width, goes away, or is replaced by another
+    # mode's. The page tab strip is Review's, and rides the same switch.
+    from well_viewer.core.app_shell_view import position_rail_toggle, show_page_tabs
     position_rail_toggle(app)
+    # …and again once the incoming pane's splitter has laid out. A mode switch
+    # runs this while the pane being shown still carries the geometry it had
+    # before it was laid out into the stack, so the first call parks the toggle
+    # against a width that is about to change. Queued on the GUI thread, so the
+    # second call sees the settled layout.
+    from PySide6.QtCore import QTimer
+
+    def _repark_when_laid_out() -> None:
+        try:
+            position_rail_toggle(app)
+        except RuntimeError:
+            # The window can be torn down between the switch and this callback
+            # (a test's app going out of scope), leaving a deleted C++ widget.
+            swallowed()  # window gone before the queued reposition ran
+
+    QTimer.singleShot(0, _repark_when_laid_out)
+    notebook = getattr(app, "_notebook", None)
+    if notebook is not None:
+        show_page_tabs(app, notebook.currentName())
     # The Analyze and Datasets panes each host their own left sidebar (only ever
     # visible when their pane is the current stack page); the same toggle hides
     # whichever is showing.

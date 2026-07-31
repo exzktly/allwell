@@ -45,6 +45,11 @@ UNSTYLED_NAMES = frozenset({
     # The shell band's slot for the current page's tab strip: a QStackedWidget
     # that only swaps which bar is shown. The bars carry their own styled names.
     "PageTabsHost",
+    # One Plotting sub-tab's claim on the shared control band: a child of the
+    # band that is never put in a layout, so it is never shown and never
+    # painted. It exists to own the widgets a sub-tab parents to it and to
+    # remember which of the band's items are that sub-tab's.
+    "ControlBandSlot",
     "PlotGroupsDrawer", "PlotToolbar", "Sidebar", "VersionPill",
     # Widget-internal handles; these widgets paint themselves in code rather
     # than through a stylesheet string the scan can see.

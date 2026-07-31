@@ -118,15 +118,43 @@ def _build_rail_toggle(win) -> None:
     return btn
 
 
+def visible_left_panel(win):
+    """The left panel currently on screen, whichever mode owns it.
+
+    All three modes put a panel down the left edge and the one collapse toggle
+    hides whichever is showing, so the toggle has to find the current one rather
+    than assume Review's rail. Returns ``None`` when every panel is hidden.
+    """
+    candidates = [getattr(win, "_sidebar_root", None)]
+    candidates += [getattr(getattr(win, attr, None), "_left_sidebar", None)
+                   for attr in ("_analyze_pane", "_datasets_pane")]
+    for panel in candidates:
+        if panel is not None and panel.isVisible():
+            return panel
+    return None
+
+
 def position_rail_toggle(win) -> None:
-    """Park the collapse toggle on the rail's right edge (or the window's, when
-    the rail is hidden). Called on every resize and on every collapse."""
+    """Park the collapse toggle on the left panel's right edge (or the window's,
+    when every panel is hidden). Called on every resize and on every collapse."""
     btn = getattr(win, "_sidebar_toggle_btn", None)
     pane = getattr(win, "_h_pane", None)
     if btn is None or pane is None:
         return
-    rail = getattr(win, "_sidebar_root", None)
-    edge = rail.geometry().right() if (rail is not None and rail.isVisible()) else 0
+    panel = visible_left_panel(win)
+    # Watch whatever panel is current. A mode switch re-parks the toggle before
+    # the incoming pane's splitter has laid out, so the width read here is the
+    # outgoing one's; the panel's own resize is what corrects it. Re-installing
+    # an already-installed filter only moves it to the front, so this is safe to
+    # run on every reposition and saves tracking which panels exist yet.
+    placement = getattr(win, "_rail_toggle_filter", None)
+    if placement is not None and panel is not None:
+        panel.installEventFilter(placement)
+    # Mapped, not read off ``geometry()``: the button is an overlay on the
+    # window while the panels sit at different depths of the tree, and Analyze's
+    # and Datasets' are inside their own pane's splitter rather than the shell's.
+    edge = (panel.mapTo(win, QPoint(panel.width(), 0)).x()
+            if panel is not None else 0)
     # An overlay has no layout to size it, so it would otherwise keep Qt's
     # default 100x30 and paint its chrome around an off-centre glyph.
     btn.adjustSize()
@@ -141,6 +169,10 @@ def position_rail_toggle(win) -> None:
     if head is not None and head.isVisible():
         origin = head.mapTo(win, QPoint(0, 0)).y()
         top = origin + (head.height() - size.height()) // 2
+    elif panel is not None:
+        # Analyze and Datasets have no dataset head; sit just inside the top of
+        # whichever panel is showing.
+        top = panel.mapTo(win, QPoint(0, 0)).y() + theme.Spacing.sm
     else:
         top = pane.geometry().top() + theme.Spacing.sm
     # Straddle the rail's right boundary.
@@ -204,6 +236,11 @@ def register_page_tabs(win, name: str, bar) -> None:
 def show_page_tabs(win, name: str) -> None:
     """Swap the band to *name*'s tab bar, or to the blank page if it has none.
 
+    The strip belongs to Review's pages, and the band is shared by all three
+    modes — so Analyze and Datasets show the blank page. Left carrying whatever
+    Review was on, the row offered Bar Plots / Line Graphs / Heat Map beside the
+    Analyze form, naming views that mode cannot show.
+
     Split View shows two top-level pages at once and detaches both from the
     notebook, so ``currentName()`` names neither. The band can only carry one
     strip, so it carries the **focused** pane's — the same pane the sidebar and
@@ -212,6 +249,9 @@ def show_page_tabs(win, name: str) -> None:
     """
     host = getattr(win, "_page_tabs_host", None)
     if host is None:
+        return
+    if hasattr(win, "currentMode") and win.currentMode() != "review":
+        host.setCurrentWidget(host.widget(0))
         return
     split = getattr(getattr(win, "_ctx", None), "runtime", None)
     split = getattr(split, "split", None)

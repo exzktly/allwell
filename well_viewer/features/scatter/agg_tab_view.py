@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, make_action_menu_button, make_band_controls,
-    make_plot_with_right_dock, make_popover_button, make_properties_button)
-from widgets.control_band import ControlBand
+    make_plot_with_right_dock, make_popover_button, make_properties_button,
+    plotting_band_slot)
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.tp_selector_view import open_timepoint_selector
 from well_viewer.features.scatter.controller import on_scatter_agg_axis_change
@@ -41,7 +41,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_agg_export_dock", export_dock)
     parent = plot_area
 
-    ctrl = ControlBand(parent)
+    ctrl = plotting_band_slot(ctx, "Scatter Plot", "aggregate")
 
     # Per-axis channel + property selectors mirror the cells scatter tab.
     # The previous monolithic stat-string combo ("Mean Fluorescence GFP")
@@ -112,7 +112,6 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
                     lambda: save_card_to_gallery(ctx, "_scatter_agg_card"))
     ctrl.add_action(_export_btn)
     ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_agg"))
-    layout.addWidget(ctrl)
 
     card = PlotCard(parent, figsize=(8, 6), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators

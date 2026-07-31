@@ -40,6 +40,25 @@ def _run_worker_to_completion(ctrl) -> None:
         QApplication.processEvents()
 
 
+def test_queue_button_is_second_in_the_run_row(qapp):
+    """Regression guard: +Queue used to sit third, after Apply repairs, the
+    only Datasets tool whose secondary action came before the queue button —
+    every other tool's run row is Run, then +Queue, then anything tool-
+    specific. Buried third, +Queue also used to fall past the point where
+    Apply repairs' 240px-wide ToolTip made a narrow window need a horizontal
+    scroll to reach it."""
+    from datasets.validate.controller import ValidateController
+
+    ctrl = ValidateController()
+    page = ctrl.page
+    btn_row = page._check_btn.parentWidget()
+    widgets = [btn_row.layout().itemAt(i).widget() for i in range(btn_row.layout().count())]
+    widgets = [w for w in widgets if w is not None]
+    assert widgets.index(page._queue_btn) == 1
+    assert widgets.index(page._check_btn) == 0
+    assert widgets.index(page._repair_btn) > widgets.index(page._queue_btn)
+
+
 def test_check_gate_requires_a_path(qapp, tmp_path):
     from datasets.validate.controller import ValidateController
 

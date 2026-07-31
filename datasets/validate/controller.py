@@ -116,8 +116,16 @@ class ValidateController(QObject):
             self.page.dashboard.set_well_state(w.well, state, missing_count=len(w.missing))
         if result is not None:
             self.page.append_log(f"✓ {result.summary}")
-        summary = "Clean — no issues found." if report.is_clean else (
-            f"{len(report.findings)} finding(s)."
+        # Built from the finding count directly, not report.is_clean --
+        # is_clean ignores warning-severity findings (a "no_csv" warning on a
+        # well that legitimately segmented zero cells at every timepoint), so
+        # a dataset with exactly that one warning used to show a green
+        # "Clean — no issues found." headline above the very well the plate
+        # painted red and the findings list explained. "Clean" now means what
+        # the page's own findings list shows: zero findings, full stop.
+        summary = (
+            "Clean — no issues found." if not report.findings
+            else f"{len(report.findings)} finding(s)."
         )
         self.page.dashboard.set_done(summary)
         self.page.show_report(report)
@@ -126,6 +134,12 @@ class ValidateController(QObject):
     def _on_failed(self, message: str) -> None:
         self.page.append_log(f"✗ {message}")
         self.page.dashboard.set_failed(message)
+        # A failed re-check left the previous run's findings on screen under
+        # the new red "Failed" headline -- reachable in production, not just
+        # back-to-back manual runs: QueueBridge.show_job populates the page
+        # via set_dataset_path(), which (unlike interactively editing the
+        # field) never runs _on_dataset_changed's own findings-list clear.
+        self.page.clear_findings()
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:

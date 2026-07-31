@@ -136,6 +136,20 @@ def test_dashboard_reset_clears_previous_run_state(qapp):
     assert d._headline.text() == "Idle"
 
 
+def test_reset_disables_all_wells_instead_of_a_false_96_well_pending_grid(qapp):
+    """Regression guard: reset() used to call setEnabledWells(None), which
+    enables all 96 wells -- an enabled-but-uncolored well renders as
+    "pending", so the plate misstated scope (implying 96 queued wells) from
+    the moment the page loaded, before set_wells() ever narrows it to the
+    real, run-specific well list. The same reset() runs on a real planning
+    failure that lands before set_wells() arrives too, so a genuine failure
+    also used to paint a full plate of phantom pending wells."""
+    from datasets.concatenate.dashboard import ConcatDashboard
+    d = ConcatDashboard()
+    d.reset()
+    assert d._plate._grid._enabled == set()
+
+
 def test_dashboard_phase_rail_marks_earlier_phases_done(qapp):
     from datasets.concatenate.dashboard import ConcatDashboard
     import theme

@@ -102,6 +102,41 @@ def test_check_reports_clean_dataset(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_headline_does_not_say_clean_when_a_warning_finding_exists(qapp, tmp_path):
+    """Regression guard: the dashboard headline used to be built from
+    report.is_clean, which ignores warning-severity findings -- a well with
+    no measurements CSV at all but full image evidence for every intended
+    (fov, timepoint) (a legitimate "segmented zero cells" well) has no
+    missing pairs, so is_clean read True even though a "no_csv" warning
+    finding existed and the plate painted that exact well red with a "!"
+    marker. The headline must agree with what the findings list and the
+    plate actually show: "Clean" only when there are zero findings."""
+    import zipfile
+
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h"])
+    # B02: delete its CSV entirely but keep its out-zip images intact, so
+    # csv_state == "missing" while (intent - done) stays empty via the
+    # out-zip's own evidence -- exactly the "zero cells segmented" case.
+    (tmp_path / "out" / "measurements_B02.csv").unlink()
+    with zipfile.ZipFile(tmp_path / "out" / "B02_out.zip") as zf:
+        assert zf.namelist()  # sanity: image evidence still there
+
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._dataset_field.set_path(str(tmp_path))
+    page._on_dataset_changed()
+
+    page.checkRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert page._findings_list.count() >= 1
+    assert "Clean" not in page.dashboard._headline.text()
+    assert "1 finding" in page.dashboard._headline.text()
+    ctrl.shutdown()
+
+
 def test_check_reports_missing_fov_and_offers_completion(qapp, tmp_path):
     import csv
     import zipfile
@@ -214,6 +249,37 @@ def test_last_result_reports_the_scanned_root_not_a_since_changed_field(qapp, tm
     ctrl._on_succeeded(DatasetReport(root=root_a), None)
 
     assert ctrl._last_result[2] == str(root_a)
+    ctrl.shutdown()
+
+
+def test_failed_check_clears_the_previous_runs_findings(qapp, tmp_path):
+    """Regression guard: _on_failed used to leave the previous successful
+    check's findings rendered under the new red "Failed" headline --
+    _on_dataset_changed (fired by editing the field interactively) already
+    cleared them, but set_dataset_path() (what QueueBridge.show_job uses to
+    repopulate the page) never runs it, so a failed re-check reachable via
+    the job queue kept showing stale findings from an unrelated dataset."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h", "24h"])
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._dataset_field.set_path(str(tmp_path))
+    page._on_dataset_changed()
+    page.checkRequested.emit()
+    _run_worker_to_completion(ctrl)
+    assert page._findings_list.count() >= 1
+
+    # Repopulate via set_dataset_path (the show_job path), pointed at a
+    # non-dataset folder, then run a check that fails.
+    bogus = tmp_path / "not_a_dataset"
+    bogus.mkdir()
+    page.set_dataset_path(str(bogus))
+    page.checkRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert "Failed" in page.dashboard._headline.text()
+    assert page._findings_list.count() == 0
     ctrl.shutdown()
 
 

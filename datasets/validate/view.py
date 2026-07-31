@@ -185,6 +185,9 @@ class ValidatePage(QWidget):
     def clear_log(self) -> None:
         self._status.clear()
 
+    def clear_findings(self) -> None:
+        self._findings_list.clear()
+
     def set_running(self, running: bool) -> None:
         self._check_btn.setEnabled(not running and bool(self.dataset_path()))
         self._queue_btn.setEnabled(not running and bool(self.dataset_path()))

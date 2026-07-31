@@ -35,7 +35,10 @@ class MergePlatesDashboard(PlateProgress):
         self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
-        self._plate.setEnabledWells(None)
+        # Empty, not None -- see ConcatDashboard.reset for why a full 96-well
+        # "enabled but uncolored" plate misstates scope before set_wells()
+        # (or a failure that lands before it ever arrives) has a real answer.
+        self._plate.setEnabledWells([])
         self._build_rail()
         self._build_legend()
         self._headline.setText("Idle")

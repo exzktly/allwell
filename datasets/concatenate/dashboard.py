@@ -55,7 +55,13 @@ class ConcatDashboard(PlateProgress):
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
-        self._plate.setEnabledWells(None)
+        # Empty, not None -- None means "all 96 enabled", which an enabled-
+        # but-uncolored well renders as a full plate of "pending" cells. That
+        # falsely claims scope (a 14-well merge painted as 96 wells queued)
+        # from the moment the page loads, and — since a real planning
+        # failure can land here too, before set_wells() ever arrives — a
+        # failed run's plate implied 96 wells were queued rather than none.
+        self._plate.setEnabledWells([])
         self._build_rail(); self._build_legend()
         self._headline.setText("Idle")
         self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")

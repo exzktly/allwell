@@ -59,6 +59,7 @@ class OmeImportPage(QWidget):
     """The Convert OME-TIFF feature body."""
 
     runRequested = Signal()
+    queueRequested = Signal()
     openInAnalyzeRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -123,13 +124,25 @@ class OmeImportPage(QWidget):
         self._readout.setWordWrap(True)
         outer.addWidget(self._readout)
 
+        run_row = QWidget(self)
+        run_row_l = QHBoxLayout(run_row)
+        run_row_l.setContentsMargins(0, 0, 0, 0)
+        run_row_l.setSpacing(theme.Spacing.sm)
         self._run_btn = QPushButton("▶  Convert", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
-        outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
+        run_row_l.addWidget(self._run_btn)
+        self._queue_btn = QPushButton("+ Queue", self)
+        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setToolTip("Add this conversion to the Job Queue instead of running it now.")
+        self._queue_btn.setEnabled(False)
+        self._queue_btn.clicked.connect(self.queueRequested)
+        run_row_l.addWidget(self._queue_btn)
+        run_row_l.addStretch(1)
+        outer.addWidget(run_row, 0, Qt.AlignLeft)
 
-        # The readout and Convert button sit above the acquisition plate, not
+        # The readout and Convert/Queue buttons sit above the acquisition plate, not
         # below it -- every other Datasets page puts its primary action above
         # a capped plate map, and an uncapped PlateOrderEditor (see _build_plate)
         # used to push both off the bottom of the fold.
@@ -339,6 +352,18 @@ class OmeImportPage(QWidget):
     def destination_path(self) -> str:
         return self._dest_field.path()
 
+    def set_source_path(self, path: str) -> None:
+        """Programmatic set (job-queue ``show_job``) — unlike ``_browse()``,
+        does not flip ``_dest_user_set``, so a later change still auto-fills
+        the destination exactly as an interactive pick would."""
+        self._src_field.set_path(path)
+        self.refresh_readout()
+
+    def set_destination_path(self, path: str) -> None:
+        self._dest_user_set = True
+        self._dest_field.set_path(path)
+        self.refresh_readout()
+
     def params(self) -> ConversionParams:
         return ConversionParams(
             grid_rows=_as_int(self._rows_edit.text()),
@@ -350,6 +375,27 @@ class OmeImportPage(QWidget):
             well_order=tuple(self._plate.order()) if hasattr(self, "_plate") else (),
             workers=max(0, _as_int(self._workers_edit.text())),
         )
+
+    def set_params(self, params: ConversionParams) -> None:
+        """Restores every field ``params()`` reads from — the job-queue
+        counterpart to ``params()``, used by ``show_job`` to repopulate a
+        queued conversion's settings."""
+        self._rows_edit.setText(str(params.grid_rows))
+        self._cols_edit.setText(str(params.grid_cols))
+        self._origin_edit.setText(params.origin or "A01")
+        idx = self._direction_cb.findData(params.direction)
+        if idx >= 0:
+            self._direction_cb.setCurrentIndex(idx)
+        self._fovs_edit.setText(str(params.fovs_per_well) if params.fovs_per_well else "")
+        idx = self._frame_order_cb.findData(params.frame_order)
+        if idx >= 0:
+            self._frame_order_cb.setCurrentIndex(idx)
+        self._workers_edit.setText(str(params.workers) if params.workers else "")
+        if params.well_order:
+            self._plate.set_order(list(params.well_order))
+        else:
+            self._plate.clear()
+        self.refresh_readout()
 
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
@@ -365,8 +411,9 @@ class OmeImportPage(QWidget):
         self._progress.setValue(done)
 
     def set_running(self, running: bool) -> None:
-        self._run_btn.setText("Converting…" if running else "Convert")
+        self._run_btn.setText("Converting…" if running else "▶  Convert")
         self._run_btn.setEnabled(not running and self._can_convert())
+        self._queue_btn.setEnabled(not running and self._can_convert())
         if running:
             self._open_btn.setVisible(False)
 
@@ -405,6 +452,7 @@ class OmeImportPage(QWidget):
         self._frame_order_cb.setVisible(single)
         self._readout.setText(message)
         self._run_btn.setEnabled(can)
+        self._queue_btn.setEnabled(can)
 
     # ── internals ────────────────────────────────────────────────────────────
     def _can_convert(self) -> bool:

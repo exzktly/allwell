@@ -41,7 +41,7 @@ from datasets.validate.controller import ValidateController
 # Kinds a Datasets controller can queue itself under — registered against the
 # Job Queue page once every controller (including Analyze, injected from
 # outside) has been built.
-_QUEUEABLE_KINDS = ("concatenate", "validate", "subset", "import_loose", "merge_plates")
+_QUEUEABLE_KINDS = ("concatenate", "ome_import", "validate", "subset", "import_loose", "merge_plates")
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,9 @@ def _build_concatenate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] 
 
 
 def _build_ome_import(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
-    controller = OmeImportController(on_open_in_analyze=tab._open_in_analyze)
+    controller = OmeImportController(
+        on_open_in_analyze=tab._open_in_analyze, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["ome_import"] = controller
     return controller.page, controller.shutdown
 
 

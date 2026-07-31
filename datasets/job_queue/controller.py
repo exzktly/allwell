@@ -33,6 +33,7 @@ from datasets.job_queue.view import KIND_LABEL, JobQueuePage
 _PRODUCED_KEY = {
     "analyze": "out_dir",
     "concatenate": "dataset_root",
+    "ome_import": "dataset_root",
     "validate": "dataset_root",
     "subset": "dataset_root",
     "import_loose": "dataset_root",

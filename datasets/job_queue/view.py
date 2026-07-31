@@ -34,6 +34,7 @@ from services.job_queue import JobSpec, JobState
 _KIND_ICON = {
     "analyze": "sliders-horizontal",
     "concatenate": "copy",
+    "ome_import": "folder-open",
     "validate": "scan-line",
     "subset": "boxes",
     "import_loose": "download",
@@ -43,6 +44,7 @@ _KIND_ICON = {
 KIND_LABEL = {
     "analyze": "Analyze",
     "concatenate": "Concatenate",
+    "ome_import": "Convert OME-TIFF",
     "validate": "Validate",
     "subset": "Subset",
     "import_loose": "Import loose",

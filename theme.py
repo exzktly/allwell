@@ -335,6 +335,20 @@ QFrame#Titlebar {{
    chrome, not content, so it takes the rail's fill rather than the canvas's and
    is separated from the content below by the same hairline every other divider
    uses. See ``widgets/control_band.py``. */
+/* The rail's collapse toggle. It floats over the boundary between the rail and
+   the centre pane with nothing behind it, so unlike every other icon button it
+   needs its own fill and edge — without them it is a glyph hanging in mid-air
+   over whichever pane happens to be underneath. */
+QToolButton#RailToggle {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.border};
+    border-radius: {r.sm}px;
+}}
+QToolButton#RailToggle:hover {{
+    background-color: {c.hover};
+    border-color: {c.border_strong};
+}}
+
 /* The rail head: the loaded dataset's name plus its actions, spanning the rail.
    Flat and full-bleed rather than an inset button — it is the rail's heading,
    and an inset control there reads as one more item in the nav below it. */

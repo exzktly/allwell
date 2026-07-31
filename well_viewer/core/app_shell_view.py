@@ -7,7 +7,7 @@ from ``runtime_app.py`` (teardown Phase 8).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -79,6 +79,64 @@ def refresh_dataset_button(win) -> None:
     room = max(btn.width() - 64, 80)
     btn.setText(metrics.elidedText(name, Qt.ElideMiddle, room))
     btn.setToolTip(path)
+
+
+class _RailTogglePlacement(QObject):
+    """Re-park the floating rail toggle whenever the window changes size."""
+
+    def __init__(self, win) -> None:
+        super().__init__(win)
+        self._win = win
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Resize, QEvent.Show):
+            position_rail_toggle(self._win)
+        return False
+
+
+def _build_rail_toggle(win) -> None:
+    """The rail's collapse toggle, floating on the rail's right margin.
+
+    Parented to the **window**, not to the rail, and positioned by hand. That is
+    the whole trick: a toggle inside the rail would be hidden along with it, so
+    the control that collapses the rail would be the one control the collapse
+    takes away. Floating it over the boundary keeps it reachable in both states
+    — it simply slides to the window's left edge once the rail is gone.
+
+    It straddles the divider rather than sitting inside the rail's content, so
+    it never collides with the dataset head or the plate picker, and it reads as
+    belonging to the edge it moves.
+    """
+    from widgets.icon_button import IconButton
+    btn = IconButton("panel-right-close", win, tooltip="Hide sidebar",
+                     checkable=True)
+    btn.setObjectName("RailToggle")
+    btn.setCursor(Qt.PointingHandCursor)
+    btn.clicked.connect(win._toggle_sidebar)
+    win._sidebar_toggle_btn = btn
+    btn.raise_()
+    return btn
+
+
+def position_rail_toggle(win) -> None:
+    """Park the collapse toggle on the rail's right edge (or the window's, when
+    the rail is hidden). Called on every resize and on every collapse."""
+    btn = getattr(win, "_sidebar_toggle_btn", None)
+    pane = getattr(win, "_h_pane", None)
+    if btn is None or pane is None:
+        return
+    rail = getattr(win, "_sidebar_root", None)
+    edge = rail.geometry().right() if (rail is not None and rail.isVisible()) else 0
+    top = pane.geometry().top()
+    # An overlay has no layout to size it, so it would otherwise keep Qt's
+    # default 100x30 and paint its chrome around an off-centre glyph.
+    btn.adjustSize()
+    size = btn.size()
+    # Straddle the boundary, vertically centred on the splitter.
+    btn.move(max(edge - size.width() // 2, 0),
+             top + max((pane.height() - size.height()) // 2, 0))
+    btn.raise_()
+    btn.show()
 
 
 def build_page_tabs_host(win, parent):
@@ -212,18 +270,10 @@ def build_ui(win) -> None:
     win._dir_label.setObjectName("Muted")
     win._dir_label.hide()
     top_layout.addWidget(win._dir_label)
-    # Left-rail collapse toggle. Checked == the rail is hidden; the glyph flips
-    # between panel-open / panel-close. It sits at the far right of the band
-    # rather than immediately after the mode bar: there it was a lone icon
-    # hovering over the left edge of the tab row below it, reading as that row's
-    # first control. It cannot move into the rail itself — collapsing the rail
-    # would take the only control that brings it back with it.
-    from widgets.icon_button import IconButton as _IconButton
-    win._sidebar_toggle_btn = _IconButton(
-        "panel-right-close", tooltip="Hide sidebar", checkable=True)
-    win._sidebar_toggle_btn.clicked.connect(win._toggle_sidebar)
-    top_layout.addWidget(win._sidebar_toggle_btn)
-    # "Open…" is not here any more. It moved into the rail's dataset control
+    # The rail's collapse toggle is not in this band — it floats on the rail's
+    # own right margin (see ``_build_rail_toggle``).
+    #
+    # "Open…" is not here any more either. It moved into the rail's dataset control
     # (below), where the folder it opens is also *named* — the button and the
     # thing it acts on in one place, instead of a button at one end of the
     # window and a caption at the other.
@@ -335,7 +385,14 @@ def build_ui(win) -> None:
 
     win._h_pane.addWidget(sidebar)
     win._sidebar_root = sidebar  # so mode toggles can hide/show the whole rail
-    win._sidebar_collapsed = False  # user-driven collapse state (Ctrl+B / top-bar btn)
+    win._sidebar_collapsed = False  # user-driven collapse state (Ctrl+B / rail btn)
+    _build_rail_toggle(win)
+    # The toggle is positioned by hand over the splitter, so it has to be
+    # re-parked whenever the window resizes. A filter rather than a
+    # ``resizeEvent`` override: ``win`` is the app's own QWidget subclass and
+    # this module builds into it rather than subclassing it.
+    win._rail_toggle_filter = _RailTogglePlacement(win)
+    win.installEventFilter(win._rail_toggle_filter)
     build_sidebar(win, win._sidebar_main_frame)
 
     # Centre stack — wraps the existing plots widget so allwell can

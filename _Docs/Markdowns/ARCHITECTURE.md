@@ -721,10 +721,26 @@ Converting them to a bar plus a page stack would have broken every one of those
 readers to change where a strip of tabs is drawn.
 
 The band is pinned to `tab_bar_height()` and carries no vertical padding of its
-own. The collapse toggle sits at its far right rather than immediately after the
-mode bar, where it was a lone icon hovering over the left edge of the tab row and
-reading as that row's first control. It cannot move into the rail — collapsing
-the rail would take the only control that brings it back with it.
+own, and holds nothing but the mode bar and the current page's tabs.
+
+The rail's **collapse toggle** is not in the band. It floats on the rail's own
+right margin, straddling the boundary with the centre pane
+(`_build_rail_toggle`, `position_rail_toggle`). It is parented to the **window**
+and positioned by hand, which is the whole trick: a toggle inside the rail would
+be hidden along with it, so the one control that collapses the rail would be the
+one control the collapse takes away. Floating it over the boundary keeps it
+reachable in both states — it slides to the window's left edge once the rail is
+gone. Straddling rather than sitting inside the rail's content also keeps it
+clear of the dataset head and the plate picker.
+
+Two things follow from it being an overlay. It has no layout to size it, so
+`position_rail_toggle` calls `adjustSize()` — left at Qt's default a widget with
+no layout keeps 100×30 and paints its chrome around an off-centre glyph. And it
+needs its own fill and border in `theme.qss` (`#RailToggle`), unlike every other
+`IconButton` in the app, because there is nothing behind it: without them it is
+a glyph hanging in mid-air over whichever pane is underneath. `_RailTogglePlacement`
+re-parks it on every window resize, and `apply_sidebar_visibility` re-parks it on
+every collapse and mode change.
 
 The mode bar is a `ModeBar`, not the `SegmentedControl` the rest of the app uses
 for view toggles. Review / Analyze / Datasets are three applications sharing a
@@ -1085,7 +1101,7 @@ Statistics group editor is `features/stats/tab_view.build_stats_group_editor`. T
 and shown/hidden by `core/tab_controller.on_tab_change` based on the
 active tab.
 
-The top-bar collapse toggle (`Ctrl+B` / the panel button) routes through
+The collapse toggle (`Ctrl+B` / the button floating on the rail's edge) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
 belongs to the current mode from one flag: the Review rail (`_sidebar_root`) in
 Review mode, and each secondary pane's own `_left_sidebar` (the Analyze form

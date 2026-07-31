@@ -599,14 +599,17 @@ the viewer always tracks the schema + channel tokens the dataset was built with
   the icons to its right are Refresh (re-read the folder), presentation
   toggle (flip every plot Screen ↔ Publication), Open, and the **`i`** Help
   drawer.
-- **Section rail** — the left "SECTION" navigator lists every centre tab
-  (Plotting, etc.), grouped into **Analysis**, **Images**, and **Data**. Tabs
-  that own sub-tabs (e.g. Plotting) show a sub-tab bar across the top of the
-  centre pane. `Ctrl+B` collapses the rail.
+- **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
+  grouped into **Analysis**, **Images**, and **Data**, under the dataset control
+  at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
+  beside the mode selector. `Ctrl+B` collapses the rail, as does the small
+  button floating on the rail's right edge — it stays put when the rail hides,
+  so it is also how you bring the rail back.
 - **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
   well selection they drive is what every tab plots (see below).
-- **Context bar** — the row directly above the plot canvas: the shared channel
-  selector plus the current tab's own controls and figure-action buttons.
+- **Controls band** — the row directly above the plot canvas: what is shown on
+  the left (channel, property, timepoint, threshold), what to do with it on the
+  right (`Display ▾`, `Export ▾`, Properties).
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
 - **Tab history** — `Ctrl+←` / `Ctrl+→` step back and forward through the tabs

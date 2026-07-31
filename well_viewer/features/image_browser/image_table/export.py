@@ -26,6 +26,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     cell_display_rgb,
     draw_cell_chrome,
     overlay_cell_rgb,
+    reset_scan_misses,
     resolve_chrome_plan,
 )
 from well_viewer.features.image_browser.image_table.grid_layout import _axis_dim_values
@@ -318,6 +319,9 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
     if not isinstance(cache, dict):
         cache = {}
         ctx.state.image_table.image_cache = cache
+    # Empty scans are suppressed for this pass only, so an export that runs while
+    # the source drive is stalled doesn't write those wells off for the session.
+    reset_scan_misses(ctx)
     # Warm every distinct cell's image in parallel first (same helper
     # image_table_generate's prefetch pass uses) -- otherwise an export run
     # without a prior Generate decodes every cell sequentially below, on the

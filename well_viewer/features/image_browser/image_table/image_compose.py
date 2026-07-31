@@ -382,6 +382,32 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
     spec = _channel_opts_for(ctx, chan)
     return bool(spec.get("log", False)) if spec is not None else False
 
+def reset_scan_misses(ctx) -> None:
+    """Start a render pass with a clean set of empty-scan results.
+
+    Called at the top of every Generate / export run. Without the reset a
+    well/channel that came up empty once would stay written off for the rest of
+    the session; with it, the suppression lasts exactly one pass.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    if st is not None and isinstance(getattr(st, "scan_misses", None), set):
+        st.scan_misses.clear()
+
+
+def _scan_misses(ctx) -> set:
+    """The current render pass's set of (well, channel, variant) scans that came
+    up empty — see :func:`_load_well_channel`.
+
+    Lives on ``ctx.state.image_table.scan_misses`` and is cleared at the top of
+    every ``image_table_generate`` / export run. A ctx without that field (a
+    stub, or a caller outside the Image Table) gets a throwaway set, which
+    suppresses nothing.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    misses = getattr(st, "scan_misses", None)
+    return misses if isinstance(misses, set) else set()
+
+
 def _load_well_channel(
     ctx,
     cache: dict[tuple[str, str, str], dict],
@@ -401,6 +427,18 @@ def _load_well_channel(
     to the raw fluor lookup. Cells whose (fov, tp) are missing from the
     tophat dict also fall back to raw at lookup time (handled in
     ``_load_array``).
+
+    **Only non-empty results are cached.** ``cache`` outlives every Generate
+    (it is dropped on dataset load, not per render), so storing an empty scan
+    in it pins "this well/channel has no images" for the rest of the session —
+    and a scan can come up empty for reasons that are not permanent: a drive
+    that stalled or briefly unmounted, a directory being rewritten by a
+    running pipeline, a transient OSError inside the walk. Once pinned, the
+    affected cells read "(no image)" forever while their neighbours render,
+    which is exactly the half-empty grid this avoids. An empty result is
+    instead recorded in the per-pass :func:`_scan_misses` set, so one render
+    pass still scans a genuinely-absent well/channel only once, and the next
+    Generate retries it.
     """
     from well_viewer.data.image_discovery import find_well_images_and_masks
 
@@ -409,6 +447,9 @@ def _load_well_channel(
     key = (well, chan_lower, variant)
     if key in cache:
         return cache[key]
+    misses = _scan_misses(ctx)
+    if key in misses:
+        return {}
     info = ctx.state.dataset.pipeline_info or {}
     # Overlay images aren't keyed by a fluor channel; pass the nuclear token
     # as a sensible default so any token-based filtering inside the loader
@@ -427,20 +468,38 @@ def _load_well_channel(
             _pipeline_info=ctx.state.dataset.pipeline_info,
         )
     except Exception:
+        # Not fatal — the caller renders "(no image)" for this cell — but never
+        # silent, and never cached: the retry below is what lets a stalled drive
+        # recover on the next Generate instead of leaving a permanent hole.
+        logger.warning(
+            "image_table: image discovery failed for well=%r channel=%r; "
+            "will retry on the next Generate", well, chan_lower, exc_info=True,
+        )
         fluor, overlay, mask, tophat = {}, {}, {}, {}
     # Cache the mask dict (keyed by a sentinel channel token) so
     # boundary/binary overlays can access it without a second IO round-trip.
-    cache.setdefault((well, "__mask__", "raw"), mask)
+    # An empty scan is not cached — the first channel to be scanned would
+    # otherwise pin "this well has no masks" for the session, and every binary /
+    # boundary cell in the well would silently lose its overlay.
+    if mask:
+        cache.setdefault((well, "__mask__", "raw"), mask)
     if is_overlay:
         result = overlay
     elif use_tophat:
         result = tophat
     else:
         result = fluor
-    cache[key] = result
+    if result:
+        cache[key] = result
+    else:
+        misses.add(key)
+        logger.info(
+            "image_table: no %s images found for well=%r channel=%r "
+            "(retried on the next Generate)", variant, well, chan_lower,
+        )
     # Stash the raw fluor dict alongside the tophat dict so _load_array can
     # fall back to raw for any (fov, tp) the tophat scan missed.
-    if use_tophat and not is_overlay:
+    if use_tophat and not is_overlay and fluor:
         cache.setdefault((well, chan_lower, "raw"), fluor)
     return result
 
@@ -557,22 +616,31 @@ def _load_mask_array(ctx, cache, well, tp, fov):
 
     The mask dict is populated as a side effect of any prior ``_load_array``
     call for the same well, so this will usually hit the cache immediately.
+
+    Resolution goes through :func:`_match_image_ref` — the *same* matcher the
+    fluorescence lookup uses. The two must agree cell for cell: a mask lookup
+    that resolved fewer keys than the image lookup produced cells whose image
+    loaded but whose mask did not, and a binary / boundary render with no mask
+    used to fall back to the plain intensity image, so a threshold view came
+    out half switched. It also inherits the ambiguous-FOV refusal, so an empty
+    FOV no longer quietly returns an arbitrary field's mask (which would draw
+    one field's outlines over another field's pixels).
     """
     mask_dict = cache.get((well, "__mask__", "raw"))
     if not mask_dict:
         return None
-    ref = mask_dict.get((str(fov), str(tp)))
+    ref, kind = _match_image_ref(mask_dict, fov, tp)
     if ref is None:
-        target_fov = _norm_token(fov)
-        target_tp = _norm_token(tp)
-        for (cache_fov, cache_tp), val in mask_dict.items():
-            tp_match = (not target_tp) or _norm_token(cache_tp) == target_tp
-            fov_match = (not target_fov) or _norm_token(cache_fov) == target_fov
-            if tp_match and fov_match:
-                ref = val
-                break
-    if ref is None:
+        logger.debug(
+            "image_table: no mask for well=%r tp=%r fov=%r (%s)",
+            well, tp, fov, kind or "no match",
+        )
         return None
+    if kind != "exact":
+        logger.debug(
+            "image_table: mask (%s, tp=%r, fov=%r) resolved via %s fallback",
+            well, tp, fov, kind,
+        )
     try:
         import numpy as _np
         from well_viewer.data.image_discovery import open_imgref_as_array
@@ -774,6 +842,18 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
         binary_mask = _export_binary_mask(
             ctx, cache, well, chan, tp, fov, binary_mode, crop_tool,
         )
+        if binary_mask is None:
+            # No segmentation mask for this cell. Falling through would render
+            # the intensity image instead — indistinguishable from a cell that
+            # simply has no signal above threshold, and the reason a mask that
+            # resolves for only some cells reads as "half the grid ignored the
+            # switch". Report it as unrenderable and let the caller label it.
+            logger.warning(
+                "image_table: no segmentation mask for well=%r channel=%r "
+                "tp=%r fov=%r — cannot render the %s view for this cell",
+                well, chan, tp, fov, binary_mode,
+            )
+            return None
     return _compose_image_table_rgb(
         cropped, mask_arr,
         lo=lo, hi=hi,

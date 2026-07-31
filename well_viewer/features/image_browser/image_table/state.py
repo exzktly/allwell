@@ -147,6 +147,13 @@ class ImageTableState:
     # so a second Generate on an unchanged grid skips re-submitting work to the
     # thread pool instead of just cheaply re-hitting _load_array's own caches.
     prefetched_cells: set = field(default_factory=set)
+    # (well, chan_lower, variant) scans that came up empty during the CURRENT
+    # render pass, cleared at the top of each Generate / export run. It stops one
+    # pass from re-scanning the same missing well/channel once per cell without
+    # writing the miss into ``image_cache``, which outlives the pass — an empty
+    # scan there would pin "no images here" for the session, so a drive that
+    # stalled for a moment would leave a permanently half-empty grid.
+    scan_misses: set = field(default_factory=set)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
@@ -154,6 +161,7 @@ class ImageTableState:
         self.image_cache.clear()
         self.auto_lut_by_channel.clear()
         self.prefetched_cells.clear()
+        self.scan_misses.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

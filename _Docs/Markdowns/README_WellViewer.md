@@ -1331,6 +1331,17 @@ channel for every well).
   report. Save to Saved Plots also reuses whatever the last **Generate** already
   decoded, and warms anything it hasn't with the same parallel prefetch Generate uses —
   saving right after generating decodes nothing twice.
+- **Cells that can't be drawn say so** — a cell never shows a different picture
+  than the one you asked for. `(no image)` means nothing decoded for that well /
+  channel / timepoint / FOV; `(no mask)` means the cell's **Mask** or
+  **≥ threshold** view has no segmentation mask for that frame (the intensity
+  image is *not* shown in its place, so a threshold view is never half
+  silhouettes and half pictures); `(render failed)` means that one cell errored —
+  the rest of the table still draws, and the status line counts how many cells
+  could not be drawn. A cell that failed because the source was briefly
+  unavailable (an external drive spinning down, a folder still being written)
+  comes back the next time you press **Generate** — nothing is written off for
+  the session, so there is no need to reload the dataset.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
   one is set under Sample Definitions → Well Labels.

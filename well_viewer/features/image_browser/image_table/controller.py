@@ -15,13 +15,14 @@ and drive the Image Table tab:
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel, QVBoxLayout, QWidget,
 )
-from well_viewer.core.safe import swallowed
+from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import set_combo_values
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.channel_state_controller import set_thresh_frac_on
@@ -70,11 +71,14 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     composite_column_rgb,
     draw_cell_chrome,
     overlay_cell_rgb,
+    reset_scan_misses,
     resolve_chrome_plan,
 )
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
 from well_viewer.features.image_browser.image_table import facet_view as _facet
+
+_logger = logging.getLogger("well_viewer.image_table")
 
 
 
@@ -613,24 +617,29 @@ def _prefetch_cell_arrays(ctx, cells, cache) -> None:
     import os
     from concurrent.futures import ThreadPoolExecutor
 
-    def _warm(spec) -> None:
+    def _warm(spec) -> bool:
         well, chan, tp, fov, th = spec
         try:
-            _load_array(ctx, cache, well, chan, tp, fov, use_tophat=th)
+            return _load_array(ctx, cache, well, chan, tp, fov, use_tophat=th) is not None
         except Exception:
             swallowed()  # in-loop load (with its own handling) is the fallback
+            return False
 
+    keys = list(todo)
+    ok: list = []
     try:
         with ThreadPoolExecutor(max_workers=min(8, (os.cpu_count() or 4))) as ex:
-            list(ex.map(_warm, list(todo.values())))
+            ok = list(ex.map(_warm, [todo[k] for k in keys]))
     except Exception:
         import logging as _logging
         _logging.getLogger("well_viewer.image_table").debug(
             "image_table: parallel prefetch failed", exc_info=True)
-    # Mark every attempted key regardless of per-item success -- a failed
-    # decode won't succeed on an identical retry this session either, and
-    # _load_array's own None-return already handles that downstream.
-    warmed.update(todo)
+    # Mark only the keys that actually decoded. Marking a failure would skip it
+    # on every later Generate too, which is wrong for the failures that are not
+    # permanent -- a drive that stalled mid-pass, a file still being written.
+    # The cost of retrying a genuinely missing image is one more scan per
+    # Generate; the cost of not retrying is a cell that never comes back.
+    warmed.update(k for k, good in zip(keys, ok) if good)
 
 
 def _cell_override_menu(ctx, r: int, c: int, global_pos) -> None:
@@ -653,7 +662,7 @@ def _cell_title(ctx, cell, overlay_chans) -> str:
 
 def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb,
                  chrome_kwargs=None):
-    """Load + render one cell → ``(pixmap, representative_array, ok)``.
+    """Load + render one cell → ``(pixmap, representative_array, ok, note)``.
 
     ``ok`` gates whether the cell shows an image and installs interaction. For an
     OVERLAY_CHAN cell the pixmap is the additive blend of every channel in
@@ -663,13 +672,19 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     array is the first overlay channel's (or the cell's own) so crop-drag
     coordinate conversion still has a source.
 
+    ``note`` is the placeholder text for a cell that produced no pixmap — it
+    names the reason ("(no image)" when nothing decoded, "(no mask)" when the
+    cell asks for a mask / threshold view the segmentation output can't supply),
+    so a partly-rendered grid says which cells are missing what instead of
+    quietly showing a different picture than the one that was asked for.
+
     ``chrome_kwargs`` (when given) burns the scale bar / identity label into the
     composed RGB before it's thumbnailed, so the live thumbnail matches the export
     figure (which burns the same chrome into its own RGB)."""
     well, chan, tp, fov = cell["well"], cell["chan"], cell["tp"], cell["fov"]
     if chan == OVERLAY_CHAN:
         if not (well and tp and overlay_chans):
-            return None, None, False
+            return None, None, False, "(no image)"
         # A representative single-channel array so crop-drag coordinate conversion
         # has a source; the DISPLAY is the blend of every channel.
         arr = _load_array(ctx, cache, well, overlay_chans[0], tp, fov,
@@ -678,10 +693,12 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         if rgb is not None and chrome_kwargs:
             rgb = draw_cell_chrome(rgb, **chrome_kwargs)
         pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
-        return pix, arr, rgb is not None
+        return pix, arr, rgb is not None, "(no image)"
 
     # Which base image to load (raw vs corrected) is a per-channel render option.
-    use_tophat = _row_display_opts(ctx, r, chan)[0]
+    use_tophat, _bnd, binary_mode = _row_display_opts(ctx, r, chan)
+    if _is_binary_variant(chan):
+        binary_mode = "threshold"
     arr = None
     if well and chan and tp:
         ratio = _find_ratio_for_channel(ctx, chan)
@@ -690,7 +707,11 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         else:
             arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
     if arr is None:
-        return None, None, False
+        return None, None, False, "(no image)"
+    # A mask / threshold cell that can't resolve its mask is reported as such
+    # (cell_display_rgb returns None rather than rendering the intensity image
+    # the user did not ask for).
+    note = "(no mask)" if binary_mode in ("mask", "threshold") else "(render failed)"
     # cell_display_rgb resolves render / boundary / LUT / colormap so live and
     # exported thumbnails always agree. A pre-rendered RGB that isn't NUC+SEG goes
     # straight to the overlay thumbnailer (cell_display_rgb only treats NUC+SEG as
@@ -710,7 +731,7 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         # aren't black and white (viridis bottoms out around 68, tops out at 253),
         # where the live thumbnail then disagreed with the exported cell.
         pix = make_overlay_thumb(rgb, sz, sz, 0.0, 255.0) if rgb is not None else None
-    return pix, arr, True
+    return pix, arr, True, note
 
 
 def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
@@ -743,11 +764,20 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
             # map is empty here, so _parse_lut gives the pre-pooling answer.
             if _parse_lut(ctx, r, chan) != (None, None):
                 continue
-            ratio = _find_ratio_for_channel(ctx, chan)
-            if ratio is not None:
-                arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
-            else:
-                arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+            # Per cell, so one unreadable frame costs the pooling that cell's
+            # contribution and nothing more — pooling the rest still beats
+            # dropping every channel back to per-cell auto-fit.
+            try:
+                ratio = _find_ratio_for_channel(ctx, chan)
+                if ratio is not None:
+                    arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov,
+                                            use_tophat=use_tophat)
+                else:
+                    arr = _load_array(ctx, cache, well, chan, tp, fov,
+                                      use_tophat=use_tophat)
+            except Exception:
+                swallowed()  # the render loop reports this cell
+                continue
             if arr is None or getattr(arr, "ndim", 2) >= 3:
                 continue
             a = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
@@ -797,25 +827,42 @@ def image_table_generate(ctx) -> None:
     if not isinstance(cache, dict):
         cache = {}
         ctx.state.image_table.image_cache = cache
+    # Empty scans are remembered for THIS pass only (image_compose._load_well_channel),
+    # so one Generate scans a missing well/channel once and the next Generate
+    # gives a drive that had stalled another chance.
+    reset_scan_misses(ctx)
     rendered: dict[tuple[int, int], Any] = {}
+    # Cells that produced no picture, and the subset of those whose render raised.
+    unrendered = 0
+    failed = 0
     crop_tool = getattr(ctx.runtime.image_table, "crop_tool", None)
     # Per-cell thumbnail size, scaled by the zoom factor (240 px = 1.0×).
     zoom = float(getattr(ctx.state.image_table, "zoom", 1.0) or 1.0)
     sz = max(80, int(round(240 * zoom)))
 
-    _prefetch_cell_arrays(ctx, cells, cache)
+    # Every pass below this point is wrapped: the grid has already been cleared,
+    # so an exception escaping any of them leaves the user staring at an empty
+    # pane with the previous table gone. Each one degrades to a usable default
+    # instead — a lost brightness pooling or a lost scale bar beats no images.
+    with swallow("image table: parallel prefetch"):
+        _prefetch_cell_arrays(ctx, cells, cache)
 
     # Pool one Auto-LUT window per channel across the grid so Auto cells of the same
     # channel are brightness-comparable (must run before any cell renders, since
-    # _parse_lut reads the pooled map).
-    _compute_auto_luts(ctx, cells, cache, crop_tool)
+    # _parse_lut reads the pooled map). Falling back means per-cell auto-fit.
+    with swallow("image table: pooled auto-LUT"):
+        _compute_auto_luts(ctx, cells, cache, crop_tool)
 
     # Scale-bar length + which cells carry the bar / identity label, resolved once.
-    chrome_plan = resolve_chrome_plan(ctx, cells)
+    chrome_plan = (0, set(), set())
+    with swallow("image table: chrome plan"):
+        chrome_plan = resolve_chrome_plan(ctx, cells)
 
     # Faceted placement: group cells by the builder's nesting, label the row/col
     # axes once, and space groups apart (falls back to a plain grid when absent).
-    plan = _facet.plan_facets(ctx, cells)
+    plan = None
+    with swallow("image table: facet plan"):
+        plan = _facet.plan_facets(ctx, cells)
 
     def _pos(r, c):
         if plan is None:
@@ -836,10 +883,25 @@ def image_table_generate(ctx) -> None:
             if is_overlay and not overlay_chans:
                 overlay_chans = _axis_dim_values(ctx, "channel", collapse_overlay=False)
 
-            chrome_kwargs = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
-            pix, arr, ok = _render_cell(
-                ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb,
-                chrome_kwargs)
+            # One bad cell must not take the pass down with it. The grid is
+            # already cleared by the time this loop runs, so an exception here
+            # used to abandon every remaining cell — a corrupt frame, a read
+            # that failed mid-pass, or a shape the composer rejects left a
+            # half-drawn (or entirely empty) table with no message saying why.
+            try:
+                chrome_kwargs = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan,
+                                                   overlay_chans)
+                pix, arr, ok, note = _render_cell(
+                    ctx, cache, cell, r, crop_tool, sz, overlay_chans,
+                    make_overlay_thumb, chrome_kwargs)
+            except Exception:
+                _logger.warning(
+                    "image_table: cell (row=%d, col=%d) well=%r channel=%r tp=%r "
+                    "fov=%r failed to render", r, c, cell.get("well"),
+                    cell.get("chan"), cell.get("tp"), cell.get("fov"), exc_info=True,
+                )
+                failed += 1
+                pix, arr, ok, note = None, None, False, "(render failed)"
             # Overlay cells recompute their blend from the live channel set, so
             # don't cache a single array under them (export re-blends too).
             rendered[(r, c)] = None if is_overlay else arr
@@ -875,10 +937,12 @@ def image_table_generate(ctx) -> None:
                     # leave large blank bands that read as huge gaps between rows.
                     img_label.setFixedSize(pix.width(), pix.height())
                 else:
-                    img_label.setText("(render failed)")
+                    unrendered += 1
+                    img_label.setText(note)
                     img_label.setFixedSize(sz, sz)
             else:
-                img_label.setText("(no image)")
+                unrendered += 1
+                img_label.setText(note)
                 img_label.setFixedSize(sz, sz)
             cl.addWidget(img_label)
 
@@ -891,10 +955,16 @@ def image_table_generate(ctx) -> None:
 
     ctx.state.image_table.last_render = rendered
     ctx.state.image_table.image_cache = cache
-    # Fill the per-channel LUT min/max boxes with the actual pooled numbers so
-    # the user sees real values instead of "auto" (skips manually-edited rows).
-    n = sum(1 for v in rendered.values() if v is not None)
-    ctx.notify.set_status(f"Image Table: generated {n} of {len(rendered)} cell(s).")
+    # Count the cells that actually show a picture — not the ones whose source
+    # array loaded. A cell that loaded its image but could not render the view
+    # it was asked for (no mask for a threshold cell) is a hole in the grid, and
+    # the status line is the only place that says so without reading the log.
+    n = len(rendered) - unrendered
+    msg = f"Image Table: generated {n} of {len(rendered)} cell(s)."
+    if unrendered:
+        msg += f" {unrendered} could not be drawn"
+        msg += f" ({failed} raised)." if failed else " — see the log."
+    ctx.notify.set_status(msg)
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log
         # both the (tp, fov) values the user picked and a sample of the

@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, make_action_menu_button, make_band_controls,
-    make_plot_with_right_dock, make_popover_button, make_plot_view_switcher)
-from widgets.flow_layout import FlowLayout
+    make_plot_with_right_dock, make_popover_button, make_properties_button)
+from widgets.control_band import ControlBand
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
 from well_viewer.features.scatter.tp_selector_view import open_timepoint_selector
 from well_viewer.features.scatter.controller import on_scatter_agg_axis_change
@@ -41,12 +41,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_agg_export_dock", export_dock)
     parent = plot_area
 
-    ctrl = QWidget(parent)
-    ctrl.setObjectName("TabCtrl")
-    # FlowLayout so the control row wraps rather than clipping when Split View
-    # narrows the pane (see cells_tab_view for the same treatment).
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    ctrl = ControlBand(parent)
 
     # Per-axis channel + property selectors mirror the cells scatter tab.
     # The previous monolithic stat-string combo ("Mean Fluorescence GFP")
@@ -58,31 +53,25 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     from well_viewer.data.metric_labels import METRIC_ORDER as _BASE_METRIC_ORDER
     AGG_METRIC_ORDER = list(_BASE_METRIC_ORDER) + ["Fraction above threshold"]
 
-    cl.addWidget(QLabel("X-axis:", ctrl))
-    cl.addWidget(QLabel("Channel:", ctrl))
-    agg_ch_x_cb = reg.register("_scatter_agg_ch_x_cb", QComboBox(ctrl))
+    agg_ch_x_cb = reg.register("_scatter_agg_ch_x_cb", QComboBox())
     agg_ch_x_cb.addItems(["GFP"])
     agg_ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_agg_axis_change(ctx, "x"))
-    cl.addWidget(agg_ch_x_cb)
+    ctrl.add_scope("X-axis · channel", agg_ch_x_cb)
 
-    cl.addWidget(QLabel("Property:", ctrl))
-    agg_metric_x_cb = reg.register("_scatter_agg_metric_x_cb", QComboBox(ctrl))
+    agg_metric_x_cb = reg.register("_scatter_agg_metric_x_cb", QComboBox())
     agg_metric_x_cb.addItems(AGG_METRIC_ORDER)
     agg_metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
-    cl.addWidget(agg_metric_x_cb)
+    ctrl.add_scope("property", agg_metric_x_cb)
 
-    cl.addWidget(QLabel("Y-axis:", ctrl))
-    cl.addWidget(QLabel("Channel:", ctrl))
-    agg_ch_y_cb = reg.register("_scatter_agg_ch_y_cb", QComboBox(ctrl))
+    agg_ch_y_cb = reg.register("_scatter_agg_ch_y_cb", QComboBox())
     agg_ch_y_cb.addItems(["GFP"])
     agg_ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_agg_axis_change(ctx, "y"))
-    cl.addWidget(agg_ch_y_cb)
+    ctrl.add_scope("Y-axis · channel", agg_ch_y_cb)
 
-    cl.addWidget(QLabel("Property:", ctrl))
-    agg_metric_y_cb = reg.register("_scatter_agg_metric_y_cb", QComboBox(ctrl))
+    agg_metric_y_cb = reg.register("_scatter_agg_metric_y_cb", QComboBox())
     agg_metric_y_cb.addItems(AGG_METRIC_ORDER)
     agg_metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_agg_orchestrate(ctx))
-    cl.addWidget(agg_metric_y_cb)
+    ctrl.add_scope("property", agg_metric_y_cb)
 
     # Legacy stat combos — hidden, kept in sync for back-compat. Export
     # / save-figure code still reads from these by name (+ ``_var`` aliases).
@@ -93,14 +82,12 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     stat_y_cb.hide()
     reg.register("_scatter_agg_stat_y_var", stat_y_cb)
 
-    cl.addWidget(QLabel("Timepoints:", ctrl))
-    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Select Timepoints", ctrl))
+    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Select Timepoints"))
     agg_tp_button.setProperty("variant", "secondary")
     agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
-    cl.addWidget(agg_tp_button)
-    agg_tp_label = reg.register("_scatter_agg_tp_label", QLabel("(0 selected)", ctrl))
+    agg_tp_label = reg.register("_scatter_agg_tp_label", QLabel("(0 selected)"))
     agg_tp_label.setObjectName("Muted")
-    cl.addWidget(agg_tp_label)
+    ctrl.add_scope("Timepoints", agg_tp_button, agg_tp_label)
     ctx.runtime.scatter.agg_tp_selections = {}
     # Stash the aggregate tp-selection summary refresher so view_state restore can
     # repaint the "(X selected)" label without importing this feature module.
@@ -111,7 +98,7 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
     _disp_btn.setToolTip("Error band (SEM/SD) for the aggregate points")
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=False))
-    cl.addWidget(_disp_btn)
+    ctrl.add_action(_disp_btn)
 
     # Export / copy / save collapse into one "Export ▾" menu (mirrors the
     # per-cell scatter tab).
@@ -123,22 +110,13 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     _export_menu.addSeparator()
     add_menu_action(_export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_scatter_agg_card"))
-    cl.addWidget(_export_btn)
-    # Figure-properties button, pinned to the right edge of the plot area (where
-    # the export-style dock slides out) — matching every other plot tab. The
-    # FlowLayout control row can't right-align it, so wrap the row.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl, lambda: ctx.figures.open_style_panel("scatter_agg")))
+    ctrl.add_action(_export_btn)
+    ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_agg"))
+    layout.addWidget(ctrl)
 
-    card = PlotCard(parent, figsize=(8, 6), constrained=False)
+    card = PlotCard(parent, figsize=(8, 6), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Scatter Plot")
-    _sw = make_plot_view_switcher(ctx, 'Scatter Plot')
-    if _sw is not None:
-        card.setLeftHeaderWidget(_sw)
-    # Hide the per-card header — the ctxbar above already carries the same controls.
-    card.setHeaderVisible(False)
     card.setFigureTitle("")
     reg.register("_scatter_agg_card", card)
     fig = reg.register("_scatter_agg_fig", card.figure)

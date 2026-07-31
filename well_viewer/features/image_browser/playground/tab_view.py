@@ -1,8 +1,11 @@
 """Playground tab — Qt builder.
 
 ``build_playground_tab(ctx, parent)`` assembles the single-frame correction
-testbed: a left controls column (frame selectors, correction method + params,
-display options) and a right zoomable canvas. Per ARCHITECTURE.md §5.3 it reads
+testbed: a zoomable canvas with its controls in a right-hand dock (frame
+selectors, correction method + params, display options). The dock takes the
+same fill, hairline and width as the Properties sidebar, and sits on the same
+side, so every per-tab inspector in the pane reads as one kind of panel rather
+than two. Per ARCHITECTURE.md §5.3 it reads
 the app handle directly (no ``app =`` unwrap) and wires every signal to the
 controller via ``functools.partial`` — no new ``runtime_app`` proxies.
 """
@@ -17,6 +20,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QVBoxLayout, QWidget,
 )
 
+import theme
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from well_viewer.features.image_browser.playground.controller import (
     playground_on_change, playground_repopulate_dropdowns,
@@ -50,9 +54,17 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         QHBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
     on_change = partial(playground_on_change, ctx)
 
-    # ── Left: controls column ────────────────────────────────────────────────
+    # ── The controls dock (mounted on the right, below) ──────────────────────
+    # Dressed as a right-hand inspector, matching ``ExportStyleSidebar``: the
+    # rail fill, a hairline down its left edge, and the shared dock width.
     controls = QWidget(parent)
-    controls.setFixedWidth(320)
+    controls.setObjectName("PropertyPanel")
+    controls.setAttribute(Qt.WA_StyledBackground, True)
+    controls.setStyleSheet(
+        f"#PropertyPanel {{ background-color: {theme.Colors.rail};"
+        f" border-left: 1px solid {theme.Colors.border_subtle}; }}"
+    )
+    controls.setFixedWidth(theme.Metrics.dock_w)
     cl = QVBoxLayout(controls)
     cl.setContentsMargins(10, 10, 10, 10)
     cl.setSpacing(4)
@@ -269,9 +281,8 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(status)
     app._playground_status = status
     cl.addStretch(1)
-    parent.layout().addWidget(controls)
 
-    # ── Right: zoomable canvas ───────────────────────────────────────────────
+    # ── The canvas, then the dock — the dock is on the right ─────────────────
     canvas = QScrollArea(parent)
     canvas.setWidgetResizable(False)
     canvas.setAlignment(Qt.AlignCenter)
@@ -280,6 +291,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     label.setMouseTracking(True)
     canvas.setWidget(label)
     parent.layout().addWidget(canvas, 1)
+    parent.layout().addWidget(controls)
     app._playground_image_canvas = canvas
     app._playground_image_label = label
 

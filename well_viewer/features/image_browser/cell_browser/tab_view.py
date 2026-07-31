@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
-from widgets.flow_layout import FlowLayout
+from widgets.control_band import ControlBand
 
 from well_viewer.features.image_browser.cell_browser import controller as ctl
 from well_viewer.features.image_browser.cell_browser.criteria_view import (  # re-export
@@ -53,17 +53,11 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     ctx.runtime.cell_browser.state = CellBrowserState()
 
     # ── controls row ────────────────────────────────────────────────────────
-    ctrl = QWidget(parent)
-    ctrl.setObjectName("TabCtrl")
-    # FlowLayout so this control row wraps rather than clipping when Split View
-    # narrows the pane. Secondary display toggles are grouped behind "Display ▾".
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    ctrl = ControlBand(parent)
 
-    cl.addWidget(QLabel("Channels:", ctrl))
-    chan_host = QWidget(ctrl)
+    chan_host = QWidget()
     QHBoxLayout(chan_host).setContentsMargins(0, 0, 0, 0)
-    cl.addWidget(chan_host)
+    ctrl.add_scope("Channels", chan_host)
     reg.register("_cell_browser_channel_host", chan_host)
     ctx.runtime.cell_browser.channel_chips = {}
 
@@ -76,7 +70,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     lut_btn.setToolTip(
         "Per-channel display brightness (min/max). Blank / Auto = auto-scale each "
         "cell. Shared with the other image viewers.")
-    cl.addWidget(lut_btn)
+    ctrl.add_action(lut_btn)
     reg.register("_cell_browser_lut_btn", lut_btn)
     reg.register("_cell_browser_lut_panel", lut_panel)
     reg.register("_cell_browser_lut_layout", lut_lay)
@@ -87,7 +81,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     # widths — Channels / LUT / Generate are the controls that matter inline.
     disp_btn, disp_panel, disp_lay = make_popover_button("Display ▾", ctrl)
     disp_btn.setToolTip("Cell display options: boundaries, spot counts, image source")
-    cl.addWidget(disp_btn)
+    ctrl.add_action(disp_btn)
 
     boundary_cb = QCheckBox("Boundaries", disp_panel)
     boundary_cb.setChecked(True)
@@ -124,17 +118,21 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     disp_lay.addWidget(_src_row)
     reg.register("_cell_browser_source_seg", source_seg)
 
-    cl.addWidget(QLabel("Per page:", ctrl))
-    pagesize_edit = QLineEdit("50", ctrl)
+    pagesize_edit = QLineEdit("50")
     pagesize_edit.setFixedWidth(48)
-    cl.addWidget(pagesize_edit)
+    ctrl.add_scope("Per page", pagesize_edit)
     reg.register("_cell_browser_pagesize_edit", pagesize_edit)
+
+    count_lbl = QLabel("Showing 0 / 0 cells")
+    count_lbl.setObjectName("Muted")
+    ctrl.add_scope("", count_lbl)
+    reg.register("_cell_browser_count_label", count_lbl)
 
     load_more = QPushButton("Load next", ctrl)
     load_more.setProperty("variant", "secondary")
     load_more.clicked.connect(lambda _=False: ctl.load_next_page(ctx))
     load_more.setEnabled(False)
-    cl.addWidget(load_more)
+    ctrl.add_action(load_more)
     reg.register("_cell_browser_load_more_btn", load_more)
 
     # Generate: the display controls (channels / LUT / color / source /
@@ -146,13 +144,8 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
         "Re-render the gallery with the current channels / LUT / colors / "
         "source. Display settings are staged until you press this.")
     generate_btn.clicked.connect(lambda _=False: ctl.apply_filters(ctx))
-    cl.addWidget(generate_btn)
+    ctrl.add_action(generate_btn)
     reg.register("_cell_browser_generate_btn", generate_btn)
-
-    count_lbl = QLabel("Showing 0 / 0 cells", ctrl)
-    count_lbl.setObjectName("Muted")
-    cl.addWidget(count_lbl)
-    reg.register("_cell_browser_count_label", count_lbl)
     layout.addWidget(ctrl)
 
     # ── scrollable grid ──────────────────────────────────────────────────────

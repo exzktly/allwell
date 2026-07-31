@@ -130,6 +130,7 @@ class Colors:
     # same colours every other tab uses for the matching well-rank.
     trace           = WELL_COLORS_TUPLE
     threshold       = "#F5A524"   # --threshold  : dashed line + threshold chip
+    threshold_dim   = "#3A2E12"   # --threshold-dim : fill behind threshold-coloured text
     gate            = "#E24A4A"   # scatter gate outline / rubber-band selector
     err_bar         = "#4A5568"   # bar-chart error-bar color
     plot_bg         = "#131A24"   # plot card fill (== panel)
@@ -269,6 +270,10 @@ class Metrics:
     toolbtn_pad_h = 4  # QToolButton horizontal padding (kept compact)
     input_pad_v  = 4   # QLineEdit / QSpinBox / QComboBox vertical padding
     input_pad_h  = 8   # …horizontal padding
+    # Width of a right-hand inspector dock. One number for every dock in the
+    # Review pane, so the Properties sidebar and the Playground's controls do
+    # not open to different widths and read as two different kinds of panel.
+    dock_w       = 360
 
 
 def _icon_path(name: str) -> str:
@@ -333,6 +338,57 @@ QFrame#Titlebar {{
     background-color: {c.titlebar};
     border-bottom: 1px solid {c.border_subtle};
 }}
+/* The shared control band that sits under every Review tab's name row. It is
+   chrome, not content, so it takes the rail's fill rather than the canvas's and
+   is separated from the content below by the same hairline every other divider
+   uses. See ``widgets/control_band.py``. */
+/* The rail's collapse toggle. It floats over the boundary between the rail and
+   the centre pane with nothing behind it, so unlike every other icon button it
+   needs its own fill and edge — without them it is a glyph hanging in mid-air
+   over whichever pane happens to be underneath. */
+QToolButton#RailToggle {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.border};
+    border-radius: {r.sm}px;
+}}
+QToolButton#RailToggle:hover {{
+    background-color: {c.hover};
+    border-color: {c.border_strong};
+}}
+
+/* The rail head: the loaded dataset's name plus its actions, spanning the rail.
+   Flat and full-bleed rather than an inset button — it is the rail's heading,
+   and an inset control there reads as one more item in the nav below it. */
+QToolButton#DatasetButton {{
+    background-color: {c.rail};
+    color: {c.text_primary};
+    border: none;
+    border-bottom: 1px solid {c.border_subtle};
+    border-radius: 0px;
+    /* Extra room on the right: the rail's collapse toggle floats over this
+       row's outer corner, and without the inset it sat on top of the caret. */
+    padding: {s.sm}px {s.xl}px {s.sm}px {s.md}px;
+    text-align: left;
+    font-weight: {t.semibold};
+}}
+QToolButton#DatasetButton:hover {{ background-color: {c.hover}; }}
+QToolButton#DatasetButton::menu-indicator {{
+    subcontrol-position: right center;
+    subcontrol-origin: padding;
+    right: {s.xl}px;
+}}
+
+QWidget#ControlBand {{
+    background-color: {c.rail};
+    border-bottom: 1px solid {c.border_subtle};
+}}
+/* The band's flow host and its label/control groups are pure containers. The
+   blanket ``QWidget`` rule above would fill each of them with the app canvas
+   colour, painting a lighter rectangle over the band; naming them lets that be
+   undone here without the rule also reaching the controls they contain. */
+QWidget#ControlBandScope, QWidget#ControlBandGroup {{
+    background-color: transparent;
+}}
 /* Divider hairlines. Every divider in the app funnels through this rule so a
    rule drawn in one pane can never read differently from the same rule in
    another. ``HRule`` / ``VRule`` are the Analyze pane's and the run
@@ -390,6 +446,40 @@ QLabel#Secondary, QLabel[secondary="true"] {{
 QLabel#Mono, QLabel[mono="true"] {{
     font-family: {t.family_mono};
     font-size: {t.small_size}px;
+}}
+QLabel#Muted, QLabel[muted="true"] {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+}}
+QLabel#Accent, QLabel[accent="true"] {{
+    color: {c.accent};
+}}
+/* Text roles that were named at their call sites but styled nowhere. */
+QLabel#MutedCaption {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+    font-weight: {t.medium};
+}}
+QLabel#SectionTitle, QLabel#SidebarHeader {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_muted};
+    letter-spacing: 0.08em;
+}}
+QLabel#PlotCardTitle {{
+    font-size: {t.h3_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_primary};
+}}
+QLabel#RailHead {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_muted};
+    letter-spacing: 0.08em;
+}}
+QWidget#ActiveGroupBanner {{
+    background-color: {c.panel};
+    border-radius: {r.sm}px;
 }}
 QLabel#Danger  {{ color: {c.danger}; }}
 QLabel#Success {{ color: {c.success}; }}
@@ -505,6 +595,99 @@ QToolButton[variant="toggle"]:checked:hover {{
     background-color: {c.accent};
     border-color: {c.accent};
     color: {c.accent_fg};
+}}
+
+/* ── `variant` values set by ui_helpers._btn and friends ──────────────── */
+/* Every value below is set somewhere in the app; before these rules existed
+   only `toggle` resolved, so `primary`, `secondary`, `danger`, `muted`,
+   `sem`/`sem_warn` and `toggle_muted`/`toggle_accent` rendered as plain
+   default buttons. `secondary` is deliberately the default control look —
+   naming it keeps the value live and stops it drifting.
+   Runtime changes to the property need unpolish()/polish() to repaint;
+   values set once at construction do not. */
+QPushButton[variant="primary"], QToolButton[variant="primary"] {{
+    background-color: {c.accent};
+    border-color: {c.accent};
+    color: {c.accent_fg};
+    font-weight: {t.semibold};
+}}
+QPushButton[variant="primary"]:hover, QToolButton[variant="primary"]:hover {{
+    background-color: {c.accent_hover};
+    border-color: {c.accent_hover};
+}}
+QPushButton[variant="primary"]:pressed, QToolButton[variant="primary"]:pressed {{
+    background-color: {c.accent_pressed};
+    border-color: {c.accent_pressed};
+}}
+QPushButton[variant="primary"]:disabled, QToolButton[variant="primary"]:disabled {{
+    background-color: {c.accent_dim};
+    border-color: {c.accent_dim};
+    color: {c.text_muted};
+}}
+
+QPushButton[variant="secondary"], QToolButton[variant="secondary"] {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.control_border};
+    color: {c.text_primary};
+}}
+
+QPushButton[variant="danger"], QToolButton[variant="danger"] {{
+    background-color: transparent;
+    border-color: {c.border_subtle};
+    color: {c.danger};
+}}
+QPushButton[variant="danger"]:hover, QToolButton[variant="danger"]:hover {{
+    background-color: {c.panel};
+}}
+
+QPushButton[variant="muted"], QToolButton[variant="muted"], QLabel[variant="muted"] {{
+    background-color: transparent;
+    border-color: transparent;
+    color: {c.text_muted};
+}}
+
+/* SEM / SD toggle on the bar + batch-export panels: `sem` is the settled
+   state, `sem_warn` flags a spread that cannot be computed as SEM. */
+QPushButton[variant="sem"], QToolButton[variant="sem"] {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.control_border};
+    color: {c.text_primary};
+}}
+QPushButton[variant="sem_warn"], QToolButton[variant="sem_warn"] {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.warn};
+    color: {c.warn};
+}}
+
+/* Bar Plots' Reset Order: `toggle_accent` while a manual order is in force,
+   `toggle_muted` when there is nothing to reset. */
+QPushButton[variant="toggle_accent"], QToolButton[variant="toggle_accent"] {{
+    background-color: {c.accent_dim};
+    border: 1px solid {c.accent};
+    color: {c.text_primary};
+}}
+QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
+    background-color: transparent;
+    border: 1px solid {c.control_border};
+    color: {c.text_muted};
+}}
+
+/* Nested sub-tab bars (Plotting / Image Browser / Sample Definitions). The call
+   sites carried comments claiming this name "picks up the existing
+   rectangular-tab QSS"; no such rule existed, so all of them fell through to the
+   generic QTabBar::tab rule and were indistinguishable from the top level. */
+QTabBar#SampleDefinitionsSubTabs::tab,
+QTabBar#ImageBrowserSubTabs::tab,
+QTabBar#PlottingSubTabs::tab {{
+    padding: {s.xs}px {s.md}px;
+    min-width: 72px;
+    color: {c.text_secondary};
+}}
+QTabBar#SampleDefinitionsSubTabs::tab:selected,
+QTabBar#ImageBrowserSubTabs::tab:selected,
+QTabBar#PlottingSubTabs::tab:selected {{
+    color: {c.text_primary};
+    border-bottom: 2px solid {c.accent};
 }}
 
 /* ── Plate-map well buttons (WellButton grid) ─────────────────────────── */

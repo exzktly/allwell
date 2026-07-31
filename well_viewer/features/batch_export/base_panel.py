@@ -420,7 +420,7 @@ class BatchExportPanel(QWidget):
         ratios are listed alongside real fluor channels. The Property combo
         lets the batch export pick the intensity flavour (Mean / Total /
         Max / Min / Std / smFISH Count) independently of the plot-tab
-        ctxbar — and collapses to ``Calculated Val`` when the channel
+        Plotting's band — and collapses to ``Calculated Val`` when the channel
         resolves to a ratio key.
 
         The two combos are stashed at ``self.<attr>`` and ``self.<attr +
@@ -1535,7 +1535,7 @@ class BatchExportPanel(QWidget):
 
             # Resolve the panel's (Channel, Property) selection into a
             # column / ratio key — independent of whatever the plot-tab
-            # ctxbar has picked.
+            # Plotting's band has picked.
             _val_col = self._export_val_col_for("_line_channel_cb")
             _ch = _ch_selected
             _metric = self._selected_export_metric_key("_line_channel_cb")

@@ -4,7 +4,7 @@ The CSV produced by ``process_microscopy`` carries five intensity columns
 per fluorescence channel (``_total_intensity``, ``_mean_intensity``,
 ``_max_intensity``, ``_min_intensity``, ``_std_intensity``) plus an optional
 ``_smfish_count`` for smFISH channels. The global "Property" combo in the
-plotting ctxbar lets the user pick which of these drives every plot, stat,
+Plotting's control band lets the user pick which of these drives every plot, stat,
 and CSV export — by swapping the ``_active_metric`` suffix that
 ``_active_val_col`` is built from.
 

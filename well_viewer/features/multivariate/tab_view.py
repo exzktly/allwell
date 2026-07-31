@@ -41,12 +41,26 @@ _FACET_FACTORS = (("well", "Well"), ("timepoint", "Timepoint"), ("group", "Group
 _AGGS = ("mean", "median", "count", "std")
 
 
-from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+from widgets.control_band import ControlBand
+
+def _muted(text: str, parent) -> QLabel:
+    """A control label in the band's own idiom — muted, no trailing colon.
+
+    ``ControlBand.add_scope`` styles the labels it creates this way; the per-mode
+    option groups build their own inner labels, and without this they read as a
+    different weight and punctuation from the ones beside them in the same row.
+    """
+    lbl = QLabel(text, parent)
+    lbl.setObjectName("Muted")
+    return lbl
+
 
 def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
-    from well_viewer.core.ui_helpers import make_popover_button, wrap_with_empty_state
+    from well_viewer.core.ui_helpers import (
+        make_plot_with_right_dock, make_popover_button, wrap_with_empty_state,
+    )
 
     st = ctx.state.feature_slice("multivariate")
     # A8 burn-down: widget handles go through the WidgetRegistry
@@ -60,38 +74,48 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
-    # ── controls row 1: mode + features + standardize + actions ──────────────
-    row1 = QWidget(parent)
-    row1.setObjectName("TabCtrl")
-    r1 = FlowLayout(row1)
-    r1.setContentsMargins(10, 6, 10, 4)
+    # The Properties sidebar needs a dock to slide out of, exactly as the other
+    # plot tabs have. Without one this tab had no Properties button at all, and
+    # its figure was the only one in the pane that could not be styled.
+    plot_area, layout, export_dock = make_plot_with_right_dock(parent)
+    reg.register("_mv_export_dock", export_dock)
+    parent = plot_area
 
-    mode_seg = SegmentedControl(row1)
+    # ── the control band ────────────────────────────────────────────────────
+    # One row where there were two: mode / features / standardize on the first
+    # and the per-mode option groups plus the timepoint filter on the second.
+    # Only one mode's option group is ever visible, and the band's flow skips a
+    # hidden group, so the scope zone carries the mode's own controls and no
+    # more.
+    band = ControlBand(parent)
+
+    mode_seg = SegmentedControl()
     for key, label in _MODE_ORDER:
         mode_seg.addSegment(text=label, data=key)
     mode_seg.setCurrentByData(st.mode)
     mode_seg.currentChanged.connect(
         lambda idx: mv_ctrl.mv_set_mode(ctx, _MODE_ORDER[idx][0]))
     reg.register("_mv_mode_seg", mode_seg)
-    r1.addWidget(mode_seg)
+    band.add_scope("Mode", mode_seg)
 
-    feat_btn, _feat_panel, feat_lay = make_popover_button("Features ▾", row1)
+    feat_btn, _feat_panel, feat_lay = make_popover_button("Features ▾", band)
     feat_btn.setToolTip("Choose which per-cell feature columns form the matrix")
     build_feature_picker(ctx, feat_lay)
-    r1.addWidget(feat_btn)
+    band.add_action(feat_btn)
 
-    std_cb = QCheckBox("Standardize", row1)
+    std_cb = QCheckBox("Standardize")
     std_cb.setChecked(bool(st.standardize))
     std_cb.setToolTip("Z-score each feature before PCA / clustering "
                       "(essential when features span different units)")
     std_cb.toggled.connect(lambda on: mv_ctrl.mv_set_standardize(ctx, on))
     reg.register("_mv_standardize_cb", std_cb)
-    r1.addWidget(std_cb)
+    band.add_scope("", std_cb)
 
-    r1.addStretch(1)
-
-    from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
-    export_btn, export_menu = make_action_menu_button("Export", row1, tooltip="Export this plot")
+    from well_viewer.core.ui_helpers import (
+        add_menu_action, make_action_menu_button, make_properties_button,
+    )
+    export_btn, export_menu = make_action_menu_button("Export ▾", band,
+                                                      tooltip="Export this plot")
     add_menu_action(export_menu, "Export CSV…", lambda: mv_ctrl.mv_export_csv(ctx),
                     tooltip="Export feature matrix")
     add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
@@ -99,18 +123,12 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_mv_card"))
-    r1.addWidget(export_btn)
-    layout.addWidget(row1)
-    sync_flow_height(row1)   # reserve the wrapped height (see sync_flow_height)
+    band.add_action(export_btn)
+    band.add_action(make_properties_button(ctx, band, "multivariate"))
 
-    # ── controls row 2: per-mode options + timepoint ─────────────────────────
-    row2 = QWidget(parent)
-    row2.setObjectName("TabCtrl")
-    r2 = FlowLayout(row2)
-    r2.setContentsMargins(10, 2, 10, 6)
-
+    # ── per-mode option groups + the timepoint filter ───────────────────────
     # Correlation: heatmap / SPLOM.
-    corr_frame = QWidget(row2)
+    corr_frame = QWidget()
     cf = QHBoxLayout(corr_frame)
     cf.setContentsMargins(0, 0, 0, 0)
     corr_seg = SegmentedControl(corr_frame)
@@ -121,13 +139,13 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         lambda idx: mv_ctrl.mv_set_corr_view(ctx, "heatmap" if idx == 0 else "splom"))
     cf.addWidget(corr_seg)
     reg.register("_mv_corr_frame", corr_frame)
-    r2.addWidget(corr_frame)
+    band.add_scope("", corr_frame)
 
     # Dim-reduction: method + colour-by.
-    dr_frame = QWidget(row2)
+    dr_frame = QWidget()
     df = QHBoxLayout(dr_frame)
     df.setContentsMargins(0, 0, 0, 0)
-    df.addWidget(QLabel("Method:", dr_frame))
+    df.addWidget(_muted("Method", dr_frame))
     method_cb = QComboBox(dr_frame)
     avail = mv_ctrl.mv_dimred_methods_available()
     for key, label in (("pca", "PCA"), ("umap", "UMAP"), ("tsne", "t-SNE")):
@@ -144,7 +162,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         lambda _i: mv_ctrl.mv_set_dimred_method(ctx, method_cb.currentData()))
     reg.register("_mv_method_cb", method_cb)
     df.addWidget(method_cb)
-    df.addWidget(QLabel("Colour by:", dr_frame))
+    df.addWidget(_muted("Colour by", dr_frame))
     color_cb = QComboBox(dr_frame)
     for key, label in _COLOR_BY:
         color_cb.addItem(label, key)
@@ -154,13 +172,13 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_color_cb", color_cb)
     df.addWidget(color_cb)
     reg.register("_mv_dimred_frame", dr_frame)
-    r2.addWidget(dr_frame)
+    band.add_scope("", dr_frame)
 
     # Clustering: method + count + linkage.
-    cl_frame = QWidget(row2)
+    cl_frame = QWidget()
     clf = QHBoxLayout(cl_frame)
     clf.setContentsMargins(0, 0, 0, 0)
-    clf.addWidget(QLabel("Cluster:", cl_frame))
+    clf.addWidget(_muted("Cluster", cl_frame))
     cmethod_cb = QComboBox(cl_frame)
     cmethod_cb.addItem("k-means", "kmeans")
     cmethod_cb.addItem("Hierarchical", "hierarchical")
@@ -169,7 +187,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         lambda _i: mv_ctrl.mv_set_cluster_method(ctx, cmethod_cb.currentData()))
     reg.register("_mv_cmethod_cb", cmethod_cb)
     clf.addWidget(cmethod_cb)
-    clf.addWidget(QLabel("k:", cl_frame))
+    clf.addWidget(_muted("k", cl_frame))
     kspin = QSpinBox(cl_frame)
     kspin.setRange(2, 20)
     # Reserve room for two digits + the up/down arrows; without a minimum the
@@ -189,20 +207,20 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_linkage_cb", linkage_cb)
     clf.addWidget(linkage_cb)
     reg.register("_mv_cluster_frame", cl_frame)
-    r2.addWidget(cl_frame)
+    band.add_scope("", cl_frame)
 
     # Faceting: value + row + col + agg.
-    fc_frame = QWidget(row2)
+    fc_frame = QWidget()
     fcf = QHBoxLayout(fc_frame)
     fcf.setContentsMargins(0, 0, 0, 0)
-    fcf.addWidget(QLabel("Value:", fc_frame))
+    fcf.addWidget(_muted("Value", fc_frame))
     fvalue_cb = QComboBox(fc_frame)
     fvalue_cb.setMinimumWidth(140)
     fvalue_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_facet_value(ctx, fvalue_cb.currentData() or ""))
     reg.register("_mv_facet_value_cb", fvalue_cb)
     fcf.addWidget(fvalue_cb)
-    fcf.addWidget(QLabel("Rows:", fc_frame))
+    fcf.addWidget(_muted("Rows", fc_frame))
     frow_cb = QComboBox(fc_frame)
     for key, label in _FACET_FACTORS:
         frow_cb.addItem(label, key)
@@ -210,7 +228,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     frow_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_facet_row(ctx, frow_cb.currentData()))
     fcf.addWidget(frow_cb)
-    fcf.addWidget(QLabel("Cols:", fc_frame))
+    fcf.addWidget(_muted("Cols", fc_frame))
     fcol_cb = QComboBox(fc_frame)
     for key, label in _FACET_FACTORS:
         fcol_cb.addItem(label, key)
@@ -226,28 +244,25 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
         lambda _i: mv_ctrl.mv_set_facet_agg(ctx, agg_cb.currentData()))
     fcf.addWidget(agg_cb)
     reg.register("_mv_facet_frame", fc_frame)
-    r2.addWidget(fc_frame)
+    band.add_scope("", fc_frame)
 
-    r2.addStretch(1)
-
-    # Timepoint filter — shared across modes. Label and combo go in as ONE
-    # ``flow_group`` item: added separately they are two flow items, and the row
-    # wraps between them the moment the per-mode option group ahead of them is a
-    # wide one (Faceting), stranding "Timepoint:" at the end of one line and its
-    # combo at the start of the next.
-    tp_cb = QComboBox(row2)
+    # Timepoint filter — shared across modes. ``add_scope`` bundles the label
+    # and the combo as ONE flow item, so the row can never wrap between them
+    # and strand "Timepoint" at the end of a line with its combo on the next —
+    # which is what happened when the wide Faceting option group sat ahead of
+    # them.
+    tp_cb = QComboBox()
     tp_cb.addItem("All timepoints", None)
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
             ctx, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
     reg.register("_mv_tp_cb", tp_cb)
-    r2.addWidget(flow_group(row2, "Timepoint:", tp_cb))
-    layout.addWidget(row2)
-    sync_flow_height(row2)   # Faceting's option group wraps this row at narrow widths
+    band.add_scope("Timepoint", tp_cb)
+    layout.addWidget(band)
 
     # ── the figure ───────────────────────────────────────────────────────────
-    card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
-    card.setHeaderVisible(False)
+    card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
+                    header=False)
     card.setFigureTitle("")
     try:
         card.setStatsChipVisible(False)

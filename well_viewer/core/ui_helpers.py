@@ -184,7 +184,7 @@ def wrap_with_empty_state(
     host: QWidget,
     *,
     text: str = "Load a directory.",
-    hint: str = "Use the Open button at the top-right (⌘O) to pick a folder.",
+    hint: str = "Open… is at the top of the left rail (⌘O).",
     icon: str = "line-chart",
 ) -> QStackedWidget:
     """Wrap *host* (a plot canvas / scroll area / card) in a ``QStackedWidget``
@@ -216,9 +216,10 @@ def wrap_with_empty_state(
 #: Object names of per-tab control-bar containers that act on the loaded
 #: dataset. They are greyed out until a dataset is present (see
 #: ``refresh_plot_empty_states``) so the empty state isn't a wall of live-looking
-#: controls that do nothing. ``TabCtrl`` is the shared marker every tab's control
-#: row already uses; ``PlottingActionRow`` is the plotting ctxbar's channel row.
-_DATA_GATED_OBJECT_NAMES = ("TabCtrl", "PlottingActionRow")
+#: controls that do nothing. ``TabCtrl`` is the marker a tab's own control row
+#: uses; ``ControlBand`` is the shared band (``widgets/control_band.py``), so a
+#: tab picks the gating up by adopting it rather than by remembering a name.
+_DATA_GATED_OBJECT_NAMES = ("TabCtrl", "ControlBand")
 
 
 def refresh_plot_empty_states(win: Any) -> None:
@@ -315,6 +316,21 @@ def wrap_ctrl_row_with_properties(ctrl_row, on_click, *,
     btn.clicked.connect(lambda _=False: on_click())
     hl.addWidget(btn, 0, Qt.AlignTop | Qt.AlignRight)
     return wrap
+
+
+def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
+                           tooltip="Show / hide the figure properties panel"):
+    """The Properties toggle, for a tab whose controls are a ``ControlBand``.
+
+    The band right-aligns its action zone itself, so a tab on the band adds this
+    with ``band.add_action(...)`` and needs none of the
+    :func:`wrap_ctrl_row_with_properties` scaffolding that a ``FlowLayout`` row
+    required to get a button to the right edge.
+    """
+    from widgets.icon_button import IconButton
+    btn = IconButton("sliders-horizontal", parent, tooltip=tooltip)
+    btn.clicked.connect(lambda _=False: ctx.figures.open_style_panel(figure_key))
+    return btn
 
 
 def build_hline_separator(parent: QWidget) -> QFrame:
@@ -508,6 +524,19 @@ def send_plot_to_batch_export(win, mode: str) -> None:
     win._set_status(f"Batch Export → {label}: using the current plot settings.")
 
 
+def _with_caret(text: str) -> str:
+    """Append the drop-down caret unless the caller already wrote one.
+
+    Both menu-button factories hide QToolButton's native menu indicator, on the
+    grounds that the label carries a caret of its own. That was a claim about
+    the call sites rather than something the helpers guaranteed, and six of them
+    passed a bare "Export" — so those buttons dropped a menu with nothing on
+    them to say so. Adding it here makes the comment true by construction.
+    """
+    text = str(text)
+    return text if text.rstrip().endswith("▾") else f"{text} ▾"
+
+
 def make_popover_button(text: str, parent: QWidget):
     """A compact toolbar button that opens a small panel ("popover") on click.
 
@@ -519,12 +548,13 @@ def make_popover_button(text: str, parent: QWidget):
     from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
 
     btn = QToolButton(parent)
-    btn.setText(text)
+    btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     btn.setProperty("variant", "secondary")
-    # The label already carries a ▾ caret; hide QToolButton's native
-    # menu-indicator so the two don't render as overlapping double arrows.
+    # The label carries the ▾ caret (added above if the caller left it off), so
+    # hide QToolButton's native menu-indicator — the two would otherwise render
+    # as overlapping double arrows.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     menu = QMenu(btn)
     content = QWidget(menu)
@@ -550,14 +580,14 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     from PySide6.QtWidgets import QToolButton, QMenu
 
     btn = QToolButton(parent)
-    btn.setText(text)
+    btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     btn.setProperty("variant", "secondary")
     if tooltip:
         btn.setToolTip(tooltip)
-    # The label already carries a ▾ caret; hide the native indicator so they
-    # don't render as overlapping double arrows (mirrors make_popover_button).
+    # The label carries the ▾ caret (added above if the caller left it off), so
+    # hide the native indicator — mirrors make_popover_button.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     menu = QMenu(btn)
     btn.setMenu(menu)
@@ -719,15 +749,6 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     return w
 
 
-_PLOT_VIEWS = [
-    ("Line", "Line Graphs"),
-    ("Bar", "Bar Plots"),
-    ("Scatter", "Scatter Plot"),
-    ("Dist", "Distribution"),
-    ("Heat", "Heat Map"),
-]
-
-
 def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
     """Apply every feature-registered plot-card decorator to *card*.
 
@@ -744,35 +765,6 @@ def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
             import logging
             logging.getLogger("well_viewer").exception(
                 "plot-card decorator from %r failed", descriptor.name)
-
-
-def make_plot_view_switcher(ctx, current_name: str):
-    """The 5-segment per-card view-switcher (Line / Bar / Scatter / Dist / Heat).
-
-    Switches the Plotting sub-notebook (the app's ``_plotting_notebook``) to the
-    picked tab when the user changes the segment. Returns the ``SegmentedControl``
-    (or ``None`` if it's not importable). Each plot tab mounts one of these in its
-    PlotCard's left-header slot, pre-selected to its own outer tab name. Owns the
-    notebook-navigation concern so feature builders pass ``ctx`` and never wire it.
-    """
-    try:
-        from widgets.segmented_control import SegmentedControl
-    except Exception:  # pragma: no cover
-        return None
-    sc = SegmentedControl()
-    for label, data in _PLOT_VIEWS:
-        sc.addSegment(label, data=data)
-    sc.setCurrentByData(current_name)
-
-    def _on_change(_idx=None) -> None:
-        target = sc.currentData()
-        nb = getattr(ctx.window, "_plotting_notebook", None)
-        if not target or nb is None:
-            return
-        nb.setCurrentByName(target)
-
-    sc.currentChanged.connect(_on_change)
-    return sc
 
 
 def attach_plot_toolbar(

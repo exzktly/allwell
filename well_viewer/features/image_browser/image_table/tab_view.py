@@ -6,7 +6,7 @@ it with per-channel ⚙ render options, and the table renders. This module just
 frames the shelf, the action strip, and the rendered grid:
 
 - Builder shelf (root + nested channels)
-- Action strip: Generate · Reset · Clear images · Crop▾ · ON-threshold · Export▾
+- Action strip: Generate · Table▾ · Crop▾ · ON-threshold · Export▾ · zoom
   · Zoom · Properties (right-dock toggle)
 - Rendered image-table area (built by the controller's Generate)
 
@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from well_viewer.data.crop_tool import CropTool
-from well_viewer.core.ui_helpers import btn_primary, btn_secondary
+from well_viewer.core.ui_helpers import btn_primary
 from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import (
@@ -91,7 +91,7 @@ def _build_properties_dock(ctx, dock) -> None:
     from widgets.icon_button import IconButton
     # Wide enough that the two-column rows fit a label + a full-text dropdown
     # ("Bottom-right") without truncating, even with the scrollbar shown. Still far
-    # narrower than the plotting Export panel (440), so it's a modest footprint.
+    # narrower than the plotting Export panel, so it's a modest footprint.
     dock.setFixedWidth(288)
     panel = QFrame(dock)
     panel.setObjectName("Panel")
@@ -338,32 +338,36 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     tr.addWidget(btn_primary(action_row, "Generate", _generate))
 
-    # Two independent clears. "Reset table" returns the builder to defaults (no
-    # roots/channels, 2×3) but leaves the rendered images. "Clear images" wipes
-    # only the rendered grid, keeping the layout so a re-Generate is one click away.
-    reset_btn = btn_secondary(action_row, "Reset table",
-                              partial(image_table_reset_layout, ctx))
-    reset_btn.setToolTip(
-        "Reset the builder to defaults. Leaves the rendered images below.")
-    tr.addWidget(reset_btn)
-    clear_img_btn = btn_secondary(action_row, "Clear images",
-                                  partial(image_table_clear_render, ctx))
-    clear_img_btn.setToolTip(
-        "Clear the rendered image grid. Keeps the layout so Generate "
-        "re-renders instantly.")
-    tr.addWidget(clear_img_btn)
+    # Two independent clears, under one menu. They are near-neighbours in name
+    # and opposite in effect, so as two buttons side by side the row spent its
+    # width teaching the difference; the menu states it once, in the entries.
+    # "Reset table" returns the builder to defaults (no roots/channels, 2×3) but
+    # leaves the rendered images. "Clear images" wipes only the rendered grid,
+    # keeping the layout so a re-Generate is one click away.
+    table_btn = _menu_button(action_row, "Table",
+                             tooltip="Reset the layout, or clear the images")
+    tmenu = table_btn.menu()
+    tmenu.addAction("Reset table layout").triggered.connect(
+        lambda _=False: image_table_reset_layout(ctx))
+    tmenu.addAction("Clear rendered images").triggered.connect(
+        lambda _=False: image_table_clear_render(ctx))
+    tr.addWidget(table_btn)
 
-    # Dataset-wide crop tool (per-channel display options live on the shelf's ⚙).
-    crop_btn = _menu_button(action_row, "Crop", tooltip="Crop region tool")
+    # Dataset-wide *display* crop (per-channel display options live on the
+    # shelf's ⚙). Named "Crop view" because Segmentation has a "Crop cells"
+    # that sounds the same and is not: that one excludes cells from every
+    # downstream number, this one only zooms the pixels every image shows.
+    crop_btn = _menu_button(action_row, "Crop view",
+                            tooltip="Crop the region every image shows")
     cmenu = crop_btn.menu()
     _crop = ctx.runtime.image_table.crop_tool
-    crop_act = QAction("Crop region (drag on image)", cmenu)
+    crop_act = QAction("Crop the view (drag on an image)", cmenu)
     crop_act.setCheckable(True)
     crop_act.setChecked(bool(_crop.mode))
     crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
     cmenu.addAction(crop_act)
     reg.register("_image_table_crop_act", crop_act)
-    reset_crop_act = cmenu.addAction("Reset crop")
+    reset_crop_act = cmenu.addAction("Show the full field again")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
     def _sync_crop_menu() -> None:
@@ -373,15 +377,20 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         finally:
             crop_act.blockSignals(blocked)
     cmenu.aboutToShow.connect(_sync_crop_menu)
+    # The crop state rides on the Crop button rather than in a loose caption
+    # beside it — the row read "Crop ▾  (full FOV)", two controls' worth of
+    # width for one control's worth of meaning.
+    _crop.set_status_widget(crop_btn, template="Crop view · {status}")
     tr.addWidget(crop_btn)
 
-    # Crop status, shown inline so an active crop is visible at a glance.
-    tr.addWidget(_crop.make_status_label(action_row))
-
     # ON/OFF intensity threshold quick-edit — drives the "≥ Thr" binary overlay.
-    # A channel dropdown chooses which channel it applies to (its own ThreshFracOn,
-    # shared with the Cell Gating tab / plot tabs); the stepper edits that channel.
-    tr.addWidget(QLabel("ON threshold:", action_row))
+    # Inline, not behind a menu: it is adjusted constantly while reviewing, and
+    # it belongs beside the images it thresholds. A channel dropdown chooses
+    # which channel it applies to (its own ThreshFracOn, shared with the Cell
+    # Gating tab / plot tabs); the stepper edits that channel.
+    _on_thr_lbl = QLabel("ON threshold", action_row)
+    _on_thr_lbl.setObjectName("Muted")
+    tr.addWidget(_on_thr_lbl)
     thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
     thresh_chan_cb.setToolTip("Which channel the ON threshold applies to.")
     thresh_chan_cb.setMinimumWidth(96)
@@ -462,8 +471,9 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         lambda _=False: image_table_open_export_settings(ctx))
     tr.addWidget(export_btn)
 
-    # Zoom: − [level] +  (clicking the % resets to 100%).
-    tr.addWidget(QLabel("Zoom:", action_row))
+    # Zoom: − [level] +  (clicking the % resets to 100%). No "Zoom:" caption —
+    # the readout in the middle already reads "100%", which says what the two
+    # buttons either side of it do.
     zoom_out = QPushButton("−", action_row)
     zoom_out.setProperty("variant", "secondary")
     zoom_out.setFixedWidth(32)

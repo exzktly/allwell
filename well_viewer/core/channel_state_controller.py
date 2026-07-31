@@ -264,7 +264,7 @@ def set_active_channel(ctx, channel: str) -> None:
     recalculate_threshold(ctx)
     invalidate_stats_cache(ctx)
     refresh_metric_combo_for_channel(ctx)
-    # Keep the ctxbar ThreshFracOn quick-edit showing the new channel's value.
+    # Keep the band's ThreshFracOn quick-edit showing the new channel's value.
     refresh_thresh_frac_quick_edit(ctx)
     # Announce on the bus. The RedrawCoordinator subscriber coalesces the
     # redraw — visible scope now, the other marked dirty for redraw on tab
@@ -414,7 +414,7 @@ def update_channel_selector(ctx) -> None:
             # No valid plot channel — clear active state explicitly.
             ctx.state.channel.active_channel = ""
 
-    # Force the visible global ctxbar combo to track the (now-valid)
+    # Force the visible Plotting's band combo to track the (now-valid)
     # active label.
     global_cb = ctx.widgets.get_or_none("_plotting_channel_cb")
     if global_cb is not None:
@@ -824,7 +824,7 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
         except Exception:
             swallowed()  # was: pass (silent except)
     # Ratio additions become virtual channel entries in every plot-tab
-    # combo (including the global ctxbar chip), so refresh those now —
+    # combo (including Plotting's band chip), so refresh those now —
     # otherwise the new ratio doesn't appear in the dropdown until the
     # next dataset reload.
     # ctx-native: update_channel_selector self-guards on missing widgets
@@ -859,7 +859,7 @@ def on_preview_channel_selected(ctx, _e=None) -> None:
 
 def on_metric_selected_global(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
-    """Handle the global Property combo (ctxbar) change."""
+    """Handle the global Property combo (Plotting's band) change."""
     from well_viewer.data.metric_labels import METRIC_LABEL_TO_KEY
     cb = getattr(app, "_plotting_metric_cb", None)
     if cb is None:
@@ -1020,7 +1020,7 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
     """Sync the ON-threshold quick-edit Steppers to the active channel's
     ThreshFracOn.
 
-    There are now three of these quick-edits — the Plotting ctxbar, the
+    There are now three of these quick-edits — Plotting's band, the
     Segmentation (Review Image) controls row, and the Image Table controls row —
     all editing the same per-channel value (the active channel's ON/OFF
     intensity threshold). Signals are blocked so this display sync doesn't loop

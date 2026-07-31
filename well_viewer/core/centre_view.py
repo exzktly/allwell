@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QStackedWidget, QVBoxLayout, QWidget,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.core.safe import swallowed
@@ -160,7 +160,18 @@ def build_centre(win, parent: QWidget) -> None:
         try:
             builder()
         except Exception:
+            # The log alone is not enough. A tab whose builder raises renders as
+            # an empty page with no explanation — indistinguishable from a tab
+            # with nothing to show — and the traceback lands in a drawer the
+            # user has no reason to open. Say so on the status bar too, which is
+            # where every other failure in the app reports itself.
             _logger.exception("Deferred build for %r failed", title)
+            try:
+                win._ctx.notify.set_status(
+                    f"{title} failed to build — see the log drawer for details."
+                )
+            except Exception:
+                swallowed()
 
     win._ctx.runtime.centre.build_pending = _build_pending
 
@@ -234,79 +245,82 @@ def build_centre(win, parent: QWidget) -> None:
         pending[_sub] = _registry_builder(_sub)
 
     def _build_plotting() -> None:
-        """Build the Plotting section: mockup-style ctxbar above a tab-bar-hidden
-        QTabWidget that hosts the five renderers (line / bar / scatter cells +
-        agg / distribution / heatmap). Phase 11 retires the visible plot-type
-        QTabBar in favour of the v2 ctxbar.subnav SegmentedControl (Q5: switch
-        governs the whole canvas — implemented here by routing through the
-        existing per-renderer pages); a global Channel chip lives in
-        ctxbar.right (A4); Add panel / Configure subplots / Edit axes-curve
-        buttons (B9, B11) sit alongside.
+        """Build the Plotting section: the shared control band above a
+        ``NamedPageStack`` hosting the five renderers (line / bar / scatter
+        cells + agg / distribution / heatmap).
 
-        The underlying per-renderer pages keep their existing rendering
-        contracts so we don't regress functionality. Phase 11b will collapse
-        them into a single shared PlotCanvas.
+        The plot-type selector is a ``QTabBar`` that does not live here — it is
+        registered into the shell's mode band, beside the Review / Analyze /
+        Datasets selector, so the two page selectors share one row (§5.2). The
+        stack still owns the content; the bar is purely a selector.
+
+        Each per-renderer page keeps its own rendering contract.
         """
         from PySide6.QtWidgets import QTabBar
 
-        # ── ctxbar ─ Row 1 (plot-type QTabBar, matching Sample Definitions style) ──
-        # Switched from SegmentedControl (pill style) to a styled QTabBar so
-        # the plot-type switcher matches the Sample Definitions sub-tabs.
-        # The bar is wired to ``plotting_nb`` (NamedPageStack) so the page
-        # stack still owns the actual content; the bar is purely a selector.
-        ctxbar = QWidget(plotting_container)
-        ctxbar.setObjectName("PlottingCtxbar")
-        ctxbar.setAttribute(Qt.WA_StyledBackground, True)
-        from theme import Colors as _C, Spacing as _S, Typography as _T, Radii as _R
-        ctxbar.setStyleSheet(
-            f"#PlottingCtxbar {{ background-color: {_C.surface}; "
-            f"border-bottom: 1px solid {_C.border_subtle}; }}"
-        )
-        cbl = QHBoxLayout(ctxbar)
-        cbl.setContentsMargins(0, 0, 0, 6)
-        cbl.setSpacing(_S.sm)
+        from theme import Colors as _C, Radii as _R, Typography as _T
 
-        # A standalone QTabBar with the SampleDefinitionsSubTabs object
-        # name picks up the existing rectangular-tab QSS — keeps the look
-        # consistent without duplicating styling rules.
+        # A standalone QTabBar carrying the nested-sub-tab object name, which
+        # theme.qss styles alongside Sample Definitions' bar — one rule, so the
+        # two nested tab strips cannot drift apart.
         sub_seg = QTabBar()
-        sub_seg.setObjectName("SampleDefinitionsSubTabs")
+        sub_seg.setObjectName("PlottingSubTabs")
         sub_seg.setExpanding(False)
         sub_seg.setElideMode(Qt.ElideNone)
         sub_seg.setUsesScrollButtons(True)
         sub_seg.setDrawBase(False)
         for title in _PLOT_SUBTABS:
             sub_seg.addTab(title)
-        cbl.addWidget(sub_seg, 1)
+        # The bar goes in the shell's mode band, beside the Review / Analyze /
+        # Datasets selector, not in this tab's body. Both are page selectors one
+        # level apart, so they belong on one row sharing a bottom edge — stacked,
+        # they were two strips of chrome above every plot.
+        from well_viewer.core.app_shell_view import register_page_tabs
+        register_page_tabs(win, "Plotting", sub_seg)
 
-        plotting_container.layout().addWidget(ctxbar, 0)
+        # ── The shared control band, above the canvas ────────────────────
+        # Every Review tab uses the same band, so the plotting row is built
+        # through the shared widget rather than as a bespoke QHBoxLayout: the
+        # scope controls left in a flow that wraps instead of squeezing labels
+        # over the control beside them, actions flush right. See
+        # ``widgets/control_band.py``.
+        from widgets.control_band import ControlBand
+        band = ControlBand(plotting_container)
+        win._plotting_band = win._ctx.widgets.register("_plotting_band", band)
 
-        # ── ctxbar ─ Row 2 (channel + actions, sits above the canvas) ────
-        action_row = QWidget(plotting_container)
-        action_row.setObjectName("PlottingActionRow")
-        action_row.setAttribute(Qt.WA_StyledBackground, True)
-        action_row.setStyleSheet(
-            f"#PlottingActionRow {{ background-color: {_C.surface}; "
-            f"border-bottom: 1px solid {_C.border_subtle}; }}"
-        )
-        arl = QHBoxLayout(action_row)
-        arl.setContentsMargins(12, 4, 12, 4)
-        arl.setSpacing(_S.sm)
+        # The Scatter sub-tab's two modes. It lives in the band's scope zone
+        # rather than as a tab bar inside the Scatter page: the page then holds
+        # nothing but its canvas, and the mode reads as one more thing scoping
+        # what is plotted, which is what it is. Driven through
+        # ``ctx.runtime.scatter.set_mode`` so the core never imports the
+        # feature; the group is shown only while a Scatter sub-tab is current.
+        from widgets.segmented_control import SegmentedControl as _Segmented
+        scatter_view = _Segmented()
+        scatter_view.addSegment("Cells", data="cells")
+        scatter_view.addSegment("Wells", data="aggregate")
+
+        def _on_scatter_view(_idx: int) -> None:
+            set_mode = getattr(getattr(win._ctx.runtime, "scatter", None),
+                               "set_mode", None)
+            if set_mode is None:
+                return          # the Scatter page has not been built yet
+            try:
+                set_mode(scatter_view.currentData())
+            except Exception:
+                swallowed()
+
+        scatter_view.currentChanged.connect(_on_scatter_view)
+        win._plotting_scatter_view = win._ctx.widgets.register(
+            "_plotting_scatter_view", scatter_view)
+        win._plotting_scatter_grp = band.add_scope("View", scatter_view)
+        win._plotting_scatter_grp.setVisible(False)
 
         # Phase 11b (A4): the channel selector is now a single global combo
-        # in the ctxbar. The per-renderer combos still exist for back-compat
+        # in the band. The per-renderer combos still exist for back-compat
         # but ``win._on_plot_channel_selected`` mirrors every change back to
         # all of them, so editing here re-renders every renderer's view
         # against the new channel.
         from PySide6.QtWidgets import QComboBox as _QComboBox
-        chan_lbl = QLabel("Channel")
-        chan_lbl.setStyleSheet(
-            f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
-            f"letter-spacing: 0.08em;"
-        )
-        arl.addWidget(chan_lbl)
-        # Expose the label so tab-switch logic can hide it on scatter tabs.
-        win._plotting_channel_lbl = chan_lbl
         win._plotting_channel_cb = win._ctx.widgets.register(
             "_plotting_channel_cb", _QComboBox())
         win._plotting_channel_cb.setMinimumContentsLength(8)
@@ -330,7 +344,7 @@ def build_centre(win, parent: QWidget) -> None:
                 swallowed()  # was: pass (silent except)
 
         win._plotting_channel_cb.currentIndexChanged.connect(_on_global_channel)
-        arl.addWidget(win._plotting_channel_cb)
+        win._plotting_channel_grp = band.add_scope("Channel", win._plotting_channel_cb)
         # Legacy display-only chip remains as an attribute for code that
         # still pokes at ``_plotting_channel_chip`` — point it at the new
         # combo so callers that read its text still work.
@@ -340,13 +354,6 @@ def build_centre(win, parent: QWidget) -> None:
         # combo styling. Drives ``win._app_state.channel.active_metric`` so every plot, stat,
         # and CSV export tracks the user's chosen intensity property.
         from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
-        prop_lbl = QLabel("Property")
-        prop_lbl.setStyleSheet(
-            f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
-            f"letter-spacing: 0.08em;"
-        )
-        arl.addWidget(prop_lbl)
-        win._plotting_metric_lbl = prop_lbl
         win._plotting_metric_cb = win._ctx.widgets.register(
             "_plotting_metric_cb", _QComboBox())
         win._plotting_metric_cb.setMinimumContentsLength(8)
@@ -371,7 +378,7 @@ def build_centre(win, parent: QWidget) -> None:
                 swallowed()  # was: pass (silent except)
 
         win._plotting_metric_cb.currentIndexChanged.connect(_on_global_metric)
-        arl.addWidget(win._plotting_metric_cb)
+        win._plotting_metric_grp = band.add_scope("Property", win._plotting_metric_cb)
 
         # Quick-edit for the active channel's ThreshFracOn (the per-channel
         # ON/OFF intensity threshold that drives the fraction-above- and
@@ -380,13 +387,6 @@ def build_centre(win, parent: QWidget) -> None:
         # user can tune it without leaving the plot. Hidden on scatter sub-tabs
         # (per-axis channels) by ``_refresh_channel_chip``.
         from widgets.stepper import Stepper as _Stepper
-        thresh_lbl = QLabel("Threshold")
-        thresh_lbl.setStyleSheet(
-            f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
-            f"letter-spacing: 0.08em;"
-        )
-        arl.addWidget(thresh_lbl)
-        win._plotting_thresh_frac_lbl = thresh_lbl
         win._plotting_thresh_frac_stepper = win._ctx.widgets.register(
             "_plotting_thresh_frac_stepper",
             _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
@@ -405,23 +405,8 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_thresh_frac_stepper.valueChanged.connect(
             lambda v: win._set_thresh_frac_on(v)
         )
-        arl.addWidget(win._plotting_thresh_frac_stepper)
-
-        # Caption shown only on the Scatter sub-tabs, where the global
-        # Channel/Property/Threshold controls don't drive the plot (it has
-        # per-axis selectors). The controls stay visible-but-dimmed rather than
-        # vanishing — a disappearing control row read as a glitch — and this
-        # note says where the live channels are.
-        scatter_note = QLabel("Scatter uses per-axis channels below")
-        scatter_note.setStyleSheet(
-            f"color: {_C.text_muted}; font-size: {_T.caption_size}px; "
-            f"font-style: italic;"
-        )
-        scatter_note.setVisible(False)
-        arl.addWidget(scatter_note)
-        win._plotting_scatter_note = scatter_note
-
-        arl.addStretch(1)
+        win._plotting_thresh_frac_grp = band.add_scope(
+            "Threshold", win._plotting_thresh_frac_stepper)
 
         # "+ Add panel" button retired — the underlying per-renderer
         # multi-subplot story was never wired (the _add_panel handler
@@ -435,7 +420,7 @@ def build_centre(win, parent: QWidget) -> None:
         # The handler is exposed on win below so per-tab buttons can
         # invoke it without re-importing centre_view.
 
-        plotting_container.layout().addWidget(action_row, 0)
+        plotting_container.layout().addWidget(band, 0)
 
         # ── renderer pages (per-tab views in a NamedPageStack — Phase 15) ─
         plotting_nb = NamedPageStack(plotting_container)
@@ -481,7 +466,7 @@ def build_centre(win, parent: QWidget) -> None:
         sub_seg.setCurrentIndex(0)
 
         def _refresh_channel_chip(title: str) -> None:
-            """Re-populate the global ctxbar channel combo on sub-tab switch.
+            """Re-populate Plotting's band channel combo on sub-tab switch.
 
             Reads from the canonical channel list (``win._app_state.channel.fluor_channels`` +
             ratios) rather than mirroring a per-renderer combo's items.
@@ -495,31 +480,36 @@ def build_centre(win, parent: QWidget) -> None:
             the dropdown two or three times to force a re-sync via
             ``_set_active_channel``.
 
-            ``title`` selects whether the global Channel / Property combos
-            are visible — the scatter tabs (cells + aggregate) have
-            per-axis selectors so the global combos are hidden there to
-            avoid confusion about which one drives the plot.
+            ``title`` selects which scope controls the band carries. The
+            scatter tabs own per-axis (channel, property) selectors, so the
+            global Channel / Property / Threshold groups do not drive the plot
+            there and are swapped out for the scatter View toggle. They used to
+            stay in place greyed, beside a note reading "Scatter uses per-axis
+            channels below" — three dead controls and an apology for them,
+            occupying the row every other tab uses for live controls.
             """
             global_cb = getattr(win, "_plotting_channel_cb", None)
-            metric_cb = getattr(win, "_plotting_metric_cb", None)
-            # On scatter sub-tabs the global Channel/Property/Threshold controls
-            # don't drive the plot — those tabs own per-axis (channel, property)
-            # selectors. Rather than HIDE the controls (a row that vanishes reads
-            # as a glitch), keep them visible but DIMMED and show an inline note
-            # pointing at the per-axis selectors.
             is_scatter = title in ("Scatter Plot", "Scatter Cells", "Scatter Agg")
-            for w in (global_cb, metric_cb,
-                      getattr(win, "_plotting_thresh_frac_stepper", None)):
-                if w is not None:
-                    w.setEnabled(not is_scatter)
-            for lbl_attr in ("_plotting_channel_lbl", "_plotting_metric_lbl",
-                             "_plotting_thresh_frac_lbl"):
-                lbl = getattr(win, lbl_attr, None)
-                if lbl is not None:
-                    lbl.setEnabled(not is_scatter)
-            note = getattr(win, "_plotting_scatter_note", None)
-            if note is not None:
-                note.setVisible(is_scatter)
+            for grp_attr in ("_plotting_channel_grp", "_plotting_metric_grp",
+                             "_plotting_thresh_frac_grp"):
+                grp = getattr(win, grp_attr, None)
+                if grp is not None:
+                    grp.setVisible(not is_scatter)
+            scatter_grp = getattr(win, "_plotting_scatter_grp", None)
+            if scatter_grp is not None:
+                scatter_grp.setVisible(is_scatter)
+            # The Scatter page is built lazily, so the toggle can outlive a
+            # window in which the feature's runtime hook does not exist yet.
+            # Mirror whichever mode the page settled on rather than assuming
+            # the toggle's own index is authoritative.
+            toggle = getattr(win, "_plotting_scatter_view", None)
+            mode = getattr(getattr(win._ctx.state, "scatter", None), "mode", None)
+            if is_scatter and toggle is not None and mode:
+                blocked = toggle.blockSignals(True)
+                try:
+                    toggle.setCurrentByData(mode)
+                finally:
+                    toggle.blockSignals(blocked)
             # Keep the quick-edit showing the active channel's value on every
             # sub-tab switch (guarded; no-op before the stepper is built).
             win._refresh_thresh_frac_quick_edit()
@@ -607,7 +597,7 @@ def build_centre(win, parent: QWidget) -> None:
     # group's tabs come from ``win._features.in_group(...)`` in declaration
     # order; the builder is the descriptor's registry builder, except the
     # bespoke "Plotting" composite (built by ``_build_plotting`` above, which
-    # owns the nested plot sub-tab notebook + ctxbar). Commenting a descriptor
+    # owns the nested plot sub-tab notebook + control band). Commenting a descriptor
     # out of ``features.registry.FEATURES`` removes its rail entry here — and
     # its dispatch / state / persistence — with no other edit.
     _bespoke_builders = {"Plotting": _build_plotting}

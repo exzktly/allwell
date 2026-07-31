@@ -25,7 +25,7 @@ from well_viewer.core.plot_style import apply_export_style_to_current
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
-NO_DATA_MSG = "Load a directory.\nUse the Open button at the top-right (⌘O) to pick a folder."
+NO_DATA_MSG = "Load a directory.\nOpen… is at the top of the left rail (⌘O)."
 
 
 # ── LineSeries data model ───────────────────────────────────────────────────

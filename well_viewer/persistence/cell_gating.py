@@ -219,7 +219,7 @@ def _mirror_gating_to_widgets(ctx, *, run_worker: bool = False) -> bool:
     )
     cell_gating_apply_persisted_state(ctx)
 
-    # Mirror the just-loaded value into the plotting ctxbar quick-edit so it
+    # Mirror the just-loaded value into Plotting's band quick-edit so it
     # shows the persisted threshold on load (guarded; no-op before it's built).
     refresh_thresh_frac_quick_edit(ctx)
 

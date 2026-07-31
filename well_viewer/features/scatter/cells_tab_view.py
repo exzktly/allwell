@@ -13,8 +13,8 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, make_action_menu_button, make_plot_with_right_dock,
-    make_popover_button, make_plot_view_switcher)
-from widgets.flow_layout import FlowLayout, flow_group
+    make_popover_button, make_properties_button)
+from widgets.control_band import ControlBand
 from well_viewer.features.scatter.controller import redraw_scatter_orchestrate
 from well_viewer.features.scatter.tp_selector_view import open_timepoint_selector
 from well_viewer.features.scatter.controller import on_scatter_axis_change
@@ -47,41 +47,35 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_export_dock", export_dock)
     parent = plot_area
 
-    ctrl = QWidget(parent)
-    ctrl.setObjectName("TabCtrl")
-    # FlowLayout (not QHBoxLayout) so this control row wraps onto extra lines
-    # instead of clipping its right-most controls when Split View halves the
-    # pane width — nothing becomes unreachable.
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    ctrl = ControlBand(parent)
 
     # Per-axis channel + property selectors. The scatter tab overrides
-    # the global ctxbar channel/property combos (those are hidden when
+    # Plotting's band channel/property combos (those are hidden when
     # Scatter Plot is the active plotting subtab) because each axis
     # needs to render an independent column.
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     ch_x_cb = reg.register("_scatter_ch_x_cb", QComboBox(ctrl))
     ch_x_cb.addItems(["GFP"])
     ch_x_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "x"))
-    cl.addWidget(flow_group(ctrl, "X-axis:", "Channel:", ch_x_cb))
+    ctrl.add_scope("X-axis · channel", ch_x_cb)
     reg.register("_scatter_ch_x_var", ch_x_cb)
 
     metric_x_cb = reg.register("_scatter_metric_x_cb", QComboBox(ctrl))
     metric_x_cb.addItems(_METRIC_ORDER)
     metric_x_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
-    cl.addWidget(flow_group(ctrl, "Property:", metric_x_cb))
+    ctrl.add_scope("property", metric_x_cb)
     reg.register("_scatter_metric_x_var", metric_x_cb)
 
     ch_y_cb = reg.register("_scatter_ch_y_cb", QComboBox(ctrl))
     ch_y_cb.addItems(["GFP"])
     ch_y_cb.currentIndexChanged.connect(lambda _i: on_scatter_axis_change(ctx, "y"))
-    cl.addWidget(flow_group(ctrl, "Y-axis:", "Channel:", ch_y_cb))
+    ctrl.add_scope("Y-axis · channel", ch_y_cb)
     reg.register("_scatter_ch_y_var", ch_y_cb)
 
     metric_y_cb = reg.register("_scatter_metric_y_cb", QComboBox(ctrl))
     metric_y_cb.addItems(_METRIC_ORDER)
     metric_y_cb.currentIndexChanged.connect(lambda _i: redraw_scatter_orchestrate(ctx))
-    cl.addWidget(flow_group(ctrl, "Property:", metric_y_cb))
+    ctrl.add_scope("property", metric_y_cb)
     reg.register("_scatter_metric_y_var", metric_y_cb)
 
     tp_button = reg.register("_scatter_tp_button", QPushButton("Select Timepoints", ctrl))
@@ -89,7 +83,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
     tp_label = reg.register("_scatter_tp_label", QLabel("(0 selected)", ctrl))
     tp_label.setObjectName("Muted")
-    cl.addWidget(flow_group(ctrl, "Timepoints:", tp_button, tp_label))
+    ctrl.add_scope("Timepoints", tp_button, tp_label)
     # Hidden legacy single-tp combo — kept so export / save-figure paths that
     # still read ``_scatter_tp_var.currentText()`` see a valid timepoint string
     # (the first selected one).
@@ -108,7 +102,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", ctrl)
     _disp_btn.setToolTip(
         "Scatter display options: layout, colour-by-time, and the gate filter")
-    cl.addWidget(_disp_btn)
+    ctrl.add_action(_disp_btn)
 
     # Layout: overlay every group on one axis (default, interactive) or stack
     # one group per axis below the other (view-only comparison) — mirrors the
@@ -198,22 +192,13 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     _export_menu.addSeparator()
     add_menu_action(_export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_scatter_card"))
-    cl.addWidget(_export_btn)
-    # Figure-properties button, pinned to the right edge of the plot area (where
-    # the export-style dock slides out) — matching every other plot tab. The
-    # FlowLayout control row can't right-align it, so wrap the row.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl, lambda: ctx.figures.open_style_panel("scatter_cells")))
+    ctrl.add_action(_export_btn)
+    ctrl.add_action(make_properties_button(ctx, ctrl, "scatter_cells"))
+    layout.addWidget(ctrl)
 
-    card = PlotCard(parent, figsize=(8, 6), constrained=False)
+    card = PlotCard(parent, figsize=(8, 6), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Scatter Plot")
-    _sw = make_plot_view_switcher(ctx, 'Scatter Plot')
-    if _sw is not None:
-        card.setLeftHeaderWidget(_sw)
-    # Hide the per-card header — the ctxbar above already carries the same controls.
-    card.setHeaderVisible(False)
     card.setFigureTitle("")
     reg.register("_scatter_card", card)
     fig = reg.register("_scatter_fig", card.figure)

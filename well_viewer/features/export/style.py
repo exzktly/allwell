@@ -103,6 +103,7 @@ def _resolve_export_dock(win, fig) -> QWidget | None:
         ("_heatmap_fig", "_heatmap_export_dock"),
         ("_distribution_fig", "_distribution_export_dock"),
         ("_sp_fig", "_spatial_export_dock"),
+        ("_mv_fig", "_mv_export_dock"),
     )
     for fig_attr, dock_attr in mapping:
         if getattr(win, fig_attr, None) is fig:
@@ -195,8 +196,8 @@ def launch_export_editor(win, fig, default_name: str, *, plot_bg: str = "",
 def open_export_style_panel(win, plot_key: str) -> None:
     """Open the floating Export Style sidebar for ``plot_key``'s figure.
 
-    Each plot tab (line / bar / scatter cells / scatter agg /
-    distribution / heatmap) pre-allocates a right-side dock when its
+    Each plot tab (line / bar / scatter cells / scatter agg / distribution /
+    heatmap / spatial / multivariate) pre-allocates a right-side dock when its
     view is built. This routes the per-card "▸" style button to the
     ExportStyleSidebar mounted in that dock.
     """
@@ -208,6 +209,7 @@ def open_export_style_panel(win, plot_key: str) -> None:
         "distribution":  ("_distribution_fig", "_distribution_canvas", "distribution_figure"),
         "heatmap":       ("_heatmap_fig",      "_heatmap_canvas",      "heatmap_figure"),
         "spatial":       ("_sp_fig",           "_sp_canvas",           "spatial_figure"),
+        "multivariate":  ("_mv_fig",           "_mv_canvas",           "multivariate_figure"),
     }
     spec = mapping.get(plot_key)
     if spec is None:

@@ -172,6 +172,8 @@ def on_notebook_current_changed(ctx, _idx) -> None:
     if nav is None or nb is None:
         return
     title = nb.currentName()
+    from well_viewer.core.app_shell_view import show_page_tabs
+    show_page_tabs(app, title)
     if title and nav.currentKey() != title:
         app._section_nav_building = True
         try:
@@ -413,8 +415,9 @@ def apply_sidebar_visibility(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Apply the effective left-rail visibility for the active mode.
 
-    The collapse toggle (``Ctrl+B`` / top-bar button) drives whichever left
-    sidebar belongs to the current mode, symmetrically:
+    The collapse toggle (``Ctrl+B`` / the button floating on the rail's
+    edge) drives whichever left sidebar belongs to the current mode,
+    symmetrically:
 
     * Review mode → the Review rail (``_sidebar_root``): shown unless collapsed.
       The rail carries Review-only affordances, so it is always hidden in
@@ -430,6 +433,10 @@ def apply_sidebar_visibility(ctx) -> None:
     sidebar = getattr(app, "_sidebar_root", None)
     if sidebar is not None:
         sidebar.setVisible(mode == "review" and not collapsed)
+    # The collapse toggle floats over the rail's right edge, so it has to move
+    # to the window edge when the rail goes away and back when it returns.
+    from well_viewer.core.app_shell_view import position_rail_toggle
+    position_rail_toggle(app)
     # The Analyze and Datasets panes each host their own left sidebar (only ever
     # visible when their pane is the current stack page); the same toggle hides
     # whichever is showing.
@@ -445,7 +452,7 @@ def toggle_sidebar(ctx) -> None:
     """User-driven collapse/expand of the left rail.
 
     Flips the persistent collapse flag, re-applies the effective visibility,
-    and syncs the top-bar toggle button's checked state / glyph.
+    and syncs the floating toggle button's checked state / glyph.
     """
     app._sidebar_collapsed = not getattr(app, "_sidebar_collapsed", False)
     apply_sidebar_visibility(ctx)

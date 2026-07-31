@@ -104,6 +104,10 @@ def enter_split(ctx, tab_a: str, tab_b: str) -> None:
         ctx.runtime.split.tab_a = ctx.runtime.split.tab_b = ctx.runtime.split.focused = None
         return
     ctx.runtime.split.pane_widgets = {tab_a: wa, tab_b: wb}
+    # Both panes are detached from the notebook now, so the band's usual source
+    # (``currentName()``) names neither — point it at the focused pane.
+    from well_viewer.core.app_shell_view import show_page_tabs
+    show_page_tabs(ctx.window, tab_a)
     split.addWidget(wa)
     split.addWidget(wb)
     # Cap each pane's minimum width so the divider has slack to move — otherwise
@@ -163,6 +167,10 @@ def exit_split(ctx) -> None:
                 nb.setCurrentByName(a)
         finally:
             nb.blockSignals(blocked)
+    # The reattach runs with the notebook's signals blocked, so the band's usual
+    # source never fires — resync it by hand to the page we land on.
+    from well_viewer.core.app_shell_view import show_page_tabs
+    show_page_tabs(app, a or "")
     on_tab_change(ctx, None)
 
 
@@ -173,6 +181,11 @@ def focus_split(ctx, top: str) -> None:
     if ctx.runtime.split.focused == top:
         return
     ctx.runtime.split.focused = top
+    # The shell band carries one tab strip; point it at the pane that now has
+    # focus, so the split pane you are working in is the one whose sub-tabs the
+    # band offers.
+    from well_viewer.core.app_shell_view import show_page_tabs
+    show_page_tabs(ctx.window, top)
     on_tab_change(ctx, None)
 
 

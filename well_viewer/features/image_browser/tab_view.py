@@ -38,10 +38,11 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
 
     sub_tabs = QTabWidget(parent)
-    # Reuse the SampleDefinitionsSubTabs QSS (rounded rectangular tabs with a
-    # min-width) so the bold selected-tab text isn't clipped — same pattern the
-    # plotting / old-Segmentation sub-tab bars use.
-    sub_tabs.setObjectName("SampleDefinitionsSubTabs")
+    # Every nested sub-tab bar in the pane — this one, Plotting's and Sample
+    # Definitions' — is named in one theme.qss rule, so the three cannot drift
+    # apart. The name is this bar's own; it used to borrow Sample Definitions',
+    # which made the rule read as if only that tab had a bar.
+    sub_tabs.setObjectName("ImageBrowserSubTabs")
     sub_tabs.tabBar().setExpanding(False)
     sub_tabs.tabBar().setElideMode(Qt.ElideNone)
     sub_tabs.tabBar().setUsesScrollButtons(True)
@@ -57,6 +58,13 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
 
     sub_tabs.currentChanged.connect(
         lambda idx: ctl.on_image_browser_subtab_changed(ctx, idx))
+
+    # The visible bar lives in the shell's mode band, beside the mode selector,
+    # not above this tab's body. ``mirror_tab_widget`` hides this widget's own
+    # bar and drives it from one up there, so every reader of the QTabWidget's
+    # API (the controller, view-state, the tests) is untouched.
+    from well_viewer.core.app_shell_view import mirror_tab_widget
+    mirror_tab_widget(ctx.window, "Image Browser", sub_tabs)
 
     # Eagerly build the initial sub-tab so it's ready on open, plus the
     # Segmentation review-image canvas (kept ready for the CSV / cell-review push

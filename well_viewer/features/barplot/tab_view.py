@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
-    make_band_controls, make_plot_with_right_dock, make_plot_view_switcher)
+    make_band_controls, make_plot_with_right_dock, make_properties_button)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
     on_bar_drag_motion,
@@ -39,7 +39,7 @@ import theme
 _FIG_W, _FIG_H, _DPI = 6.2, 11.0, 100
 
 
-from widgets.flow_layout import FlowLayout
+from widgets.control_band import ControlBand
 
 def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -66,12 +66,9 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     outer_layout.addWidget(bar_right, 1)
 
     # ── controls bar ─────────────────────────────────────────────────────────
-    bar_ctrl = QWidget(bar_right)
-    bar_ctrl.setObjectName("TabCtrl")
-    cl = FlowLayout(bar_ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    bar_ctrl = ControlBand(bar_right)
 
-    # Channel combo hidden — the global ctxbar combo is the only visible
+    # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
     chan_cb = reg.register("_chan_cb_bar", QComboBox())
     chan_cb.addItems(["GFP"])
@@ -81,7 +78,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     chan_cb.hide()
 
     # Hidden per-tab metric combo — back-compat shim only. The global
-    # plotting ctxbar's ``_plotting_metric_cb`` is the single visible
+    # Plotting band's ``_plotting_metric_cb`` is the single visible
     # source of truth for the active intensity property.
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     metric_frame = reg.register("_metric_selector_frame_bar", QWidget(bar_ctrl))
@@ -92,7 +89,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     metric_cb.addItems(_METRIC_ORDER)
     metric_cb.currentIndexChanged.connect(lambda _i: on_metric_selected(ctx))
     mf_l.addWidget(metric_cb)
-    cl.addWidget(metric_frame)
     metric_frame.hide()
 
     # Fold-change normalization collapses into a popover button (C1) so it no
@@ -102,23 +98,21 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", bar_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="bar")
-    cl.addWidget(_fc_btn)
+    bar_ctrl.add_action(_fc_btn)
 
     # Multi-timepoint picker — mirrors the scatter plot's
     # ``_open_timepoint_selector`` popup so the bar plot can show bars/
     # violins/beeswarms over multiple timepoints simultaneously. Shares the
-    # main control row with the other buttons (previously its own second row);
-    # the FlowLayout wraps them onto a new line only when the pane is too narrow.
-    cl.addWidget(QLabel("Timepoints:", bar_ctrl))
-    tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints", bar_ctrl))
+    # band's scope zone with the other selectors; the flow wraps them onto a new
+    # line only when the pane is too narrow.
+    tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints"))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(
         lambda _=False: open_bar_timepoint_selector(ctx)
     )
-    cl.addWidget(tp_button)
-    tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)", bar_ctrl))
+    tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)"))
     tp_label.setObjectName("Muted")
-    cl.addWidget(tp_label)
+    bar_ctrl.add_scope("Timepoints", tp_button, tp_label)
     # Hidden legacy single-tp combo — kept so export / save-figure code that
     # reads ``_bar_tp_cb.currentText()`` (export/service.py, view_state.py,
     # batch_export/bar_panel.py, plot_orchestrator.py) sees the first
@@ -136,7 +130,6 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import make_popover_button as _make_popover_button
     _disp_btn, _disp_panel, _disp_lay = _make_popover_button("Display ▾", bar_ctrl)
     _disp_btn.setToolTip("Bar/point display options: grouping, pooling, beeswarm, violin, error band")
-    cl.addWidget(_disp_btn)
 
     # Layout toggle: cluster bars by well or by timepoint.
     group_mode_btn = reg.register("_bar_group_mode_btn", QPushButton("Grouping: Well", bar_ctrl))
@@ -227,38 +220,31 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     _disp_lay.addWidget(_band_sep)
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
 
-    # ── action buttons, pushed to the right edge of the single control row ────
-    cl.addStretch(1)
+    # ── the band's action zone, flush right ─────────────────────────────────
+    bar_ctrl.add_action(_disp_btn)
 
     reset_order_btn = reg.register("_bar_reset_order_btn", QPushButton("Reset Order", bar_ctrl))
     reset_order_btn.setProperty("variant", "toggle_muted")
     reset_order_btn.clicked.connect(lambda _=False: bar_reset_order(ctx))
-    cl.addWidget(reset_order_btn)
+    bar_ctrl.add_action(reset_order_btn)
 
-    export_btn, export_menu = make_action_menu_button("Export", bar_ctrl, tooltip="Export this plot")
+    export_btn, export_menu = make_action_menu_button("Export ▾", bar_ctrl,
+                                                      tooltip="Export this plot")
     add_menu_action(export_menu, "Export CSV…", lambda: export_bar_plot_data(ctx))
     add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
     add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_bar_card"))
-    cl.addWidget(export_btn)
-    # Pin the figure-properties button to the right edge of the plot area (where
-    # the export-style dock slides out) — the FlowLayout control row can't
-    # right-align it, so wrap the row.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    right_l.addWidget(wrap_ctrl_row_with_properties(
-        bar_ctrl, lambda: ctx.figures.open_style_panel("bar")))
+    bar_ctrl.add_action(export_btn)
+    bar_ctrl.add_action(make_properties_button(ctx, bar_ctrl, "bar"))
+    right_l.addWidget(bar_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
-    card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False)
+    card = PlotCard(bar_right, figsize=(_FIG_W, _FIG_H), constrained=False,
+                    header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Bar Plots")
-    _sw = make_plot_view_switcher(ctx, 'Bar Plots')
-    if _sw is not None:
-        card.setLeftHeaderWidget(_sw)
-    # Hide the per-card header — the ctxbar above already carries the same controls.
-    card.setHeaderVisible(False)
     card.setFigureTitle("")
     reg.register("_bar_card", card)
     fig = reg.register("_bar_fig", card.figure)
@@ -270,7 +256,10 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     )
     canvas = reg.register("_bar_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
-    card.setMinimumHeight(int(_FIG_H * _DPI) + 110)
+    # The canvas' pin plus the card's own chrome, measured rather than a
+    # literal: this used to add a hardcoded 110 counting "header / controls /
+    # toolbar rows", and the card no longer builds a header.
+    card.setMinimumHeight(int(_FIG_H * _DPI) + card.chromeHeight())
 
     # Error band now lives in the "Display ▾" popover above (C1); no card row.
     card.plotThemeChanged.connect(lambda _m: redraw_bars(ctx))

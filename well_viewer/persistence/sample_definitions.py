@@ -232,7 +232,9 @@ def clear_all(ctx) -> None:
         ctx.window, "Clear sample definitions",
         "Discard all well labels, replicate sets, bar groups, ratio "
         "metrics, and cell-gating thresholds defined on this tab?\n\n"
-        "Saved JSON files are not touched until you click Save.",
+        "This writes to the dataset's saved state immediately — the cleared "
+        "plot groups, notes and ratios are persisted as part of the clear, "
+        "not held until you press Save.",
         QMessageBox.Yes | QMessageBox.No,
         QMessageBox.No,
     )

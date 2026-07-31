@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, make_action_menu_button, make_band_controls,
-    make_plot_with_right_dock, make_plot_view_switcher)
+    make_plot_with_right_dock, make_properties_button)
 from well_viewer.features.export.service import export_distribution_data
 from well_viewer.data.data_loading import get_all_timepoints
 
@@ -28,7 +28,7 @@ _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per
 _LAYOUT_OPTIONS = ["Overlay", "Faceted (one per group)"]
 
 
-from widgets.flow_layout import FlowLayout, flow_group
+from widgets.control_band import ControlBand
 
 def build_distribution_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -49,12 +49,9 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_export_dock", export_dock)
     parent = plot_area
 
-    ctrl = QWidget(parent)
-    ctrl.setObjectName("TabCtrl")
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    ctrl = ControlBand(parent)
 
-    # Channel combo hidden — global ctxbar combo is the only visible
+    # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
     chan_cb = reg.register("_chan_cb_distribution", QComboBox())
     chan_cb.addItems(["GFP"])
@@ -66,14 +63,14 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     tp_cb = reg.register("_distribution_tp_cb", QComboBox(ctrl))
     tp_cb.setMinimumContentsLength(8)
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
-    cl.addWidget(flow_group(ctrl, "t (h):", tp_cb))
+    ctrl.add_scope("Timepoint", tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
     mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))
     mode_cb.addItems(_MODE_OPTIONS)
     mode_cb.setCurrentText("Histogram + KDE")
     mode_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
-    cl.addWidget(flow_group(ctrl, "Mode:", mode_cb))
+    ctrl.add_scope("Mode", mode_cb)
     reg.register("_distribution_mode_var", mode_cb)   # legacy alias → same widget
 
     bins_spin = reg.register("_distribution_bins_spin", QSpinBox(ctrl))
@@ -89,7 +86,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         ctx.state.distribution.bins = int(val)
         _on_changed(ctx)
     bins_spin.valueChanged.connect(_on_bins_changed)
-    cl.addWidget(flow_group(ctrl, "Bins:", bins_spin))
+    ctrl.add_scope("Bins", bins_spin)
 
     # Histogram layout: overlay every group on one axis (default), or
     # face one axis per group stacked vertically with minimal padding.
@@ -100,7 +97,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     layout_cb.addItems(_LAYOUT_OPTIONS)
     layout_cb.setCurrentText("Overlay")
     layout_cb.currentIndexChanged.connect(lambda _i: _on_changed(ctx))
-    cl.addWidget(flow_group(ctrl, "Layout:", layout_cb))
+    ctrl.add_scope("Layout", layout_cb)
     reg.register("_distribution_layout_var", layout_cb)   # legacy alias → same widget
 
     log_x_cb = reg.register("_distribution_log_x_cb", QCheckBox("log x", ctrl))
@@ -113,7 +110,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         _set_distribution_log(ctx, "x", bool(state))
         _on_changed(ctx)
     log_x_cb.stateChanged.connect(_on_log_changed)
-    cl.addWidget(log_x_cb)
+    ctrl.add_scope("", log_x_cb)
 
     log_y_cb = reg.register("_distribution_log_y_cb", QCheckBox("log y", ctrl))
 
@@ -121,32 +118,23 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
         _set_distribution_log(ctx, "y", bool(state))
         _on_changed(ctx)
     log_y_cb.stateChanged.connect(_on_log_y_changed)
-    cl.addWidget(log_y_cb)
+    ctrl.add_scope("", log_y_cb)
 
-    cl.addStretch(1)
-
-    export_btn, export_menu = make_action_menu_button("Export", ctrl, tooltip="Export this plot")
+    export_btn, export_menu = make_action_menu_button("Export ▾", ctrl,
+                                                      tooltip="Export this plot")
     add_menu_action(export_menu, "Export CSV…", lambda: export_distribution_data(ctx))
     add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
     add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_distribution_card"))
-    cl.addWidget(export_btn)
-    # Pin the figure-properties button to the right edge of the plot area (where
-    # the export-style dock slides out); the FlowLayout row can't right-align it.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl, lambda: ctx.figures.open_style_panel("distribution")))
+    ctrl.add_action(export_btn)
+    ctrl.add_action(make_properties_button(ctx, ctrl, "distribution"))
+    layout.addWidget(ctrl)
 
-    card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False)
+    card = PlotCard(parent, figsize=(7.2, 5.4), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Distribution")
-    _sw = make_plot_view_switcher(ctx, 'Distribution')
-    if _sw is not None:
-        card.setLeftHeaderWidget(_sw)
-    # Hide the per-card header — the ctxbar above already carries the same controls.
-    card.setHeaderVisible(False)
     card.setFigureTitle("")
     reg.register("_distribution_card", card)
     fig = reg.register("_distribution_fig", card.figure)

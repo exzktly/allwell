@@ -581,6 +581,227 @@ the page stack is purely name-keyed.
 the stack and put back in its original slot — the reparenting primitive behind
 **Split View** (§5.10).
 
+#### The Plotting control band
+
+Below the plot-type tab bar, Plotting's controls are a single
+`widgets.control_band.ControlBand` — the shared band described in §7. Scope
+controls go in its left zone through `add_scope`, which bundles each label with
+its control as one flow item; actions sit flush right. `add_scope` returns the
+group widget, and `centre_view` keeps those on `app._plotting_channel_grp`,
+`_plotting_metric_grp`, `_plotting_thresh_frac_grp` and `_plotting_scatter_grp`
+so the sub-tab handler can swap which ones are in the row.
+
+That swap is what the band buys on the **Scatter Plot** sub-tab. Scatter has
+per-axis channel and property selectors of its own, so the global
+Channel / Property / Threshold controls do not drive its plot; they are removed
+from the band while Scatter is current, and a `Cells | Wells` **View** toggle
+takes their place. The band therefore only ever carries controls that do
+something.
+
+The View toggle lives in the band, which is core, while the Scatter page is a
+feature. They are wired through `ctx.runtime.scatter.set_mode` and the widget
+registry, never an import: the band calls `set_mode`, and `build_scatter_tab`
+mirrors the toggle back through `ctx.widgets.get_or_none("_plotting_scatter_view")`
+so a mode set from elsewhere — restoring a saved view calls `set_mode`
+directly — cannot leave the toggle showing the other mode. `ctx.state.scatter.mode`
+stays the record of which mode is live.
+
+Scatter's own page is a bare `NamedPageStack` with `cells` and `aggregate` pages
+and no tab bar of its own; the band's toggle is its only selector.
+
+#### Other tabs on the band
+
+**Heat Map** puts its Aggregation combo and its timepoint scrubber in the scope
+zone, and `Display ▾` / `Export ▾` / Properties in the action zone. Everything
+about how the grid is *coloured* — colour map, scale, vmin/vmax, transpose,
+rep-set averaging, log scale — is appearance rather than scope and lives in the
+`Display ▾` popover. Two details are load-bearing: the timepoint `StyledSlider`
+is a **fixed** width, because a slider with stretch takes every pixel the scope
+zone has and forces everything beside it onto a second row at any pane width;
+and the tab no longer wraps its row with `ui_helpers.wrap_ctrl_row_with_properties`,
+since that helper exists to right-align a button a `FlowLayout` cannot, which
+is what the band's action zone already does.
+
+**Statistics** states the same five selectors — Channel, Property, Statistic,
+Timepoint, Test — as scope groups, with **Run test** as the single action. It
+had been a five-row label/field `QGridLayout` with Run on a sixth row and a
+separator under it: a form, in a pane where every other tab has a control row.
+
+Every other plot tab — **Bar Plots**, **Line Graphs**, both **Scatter** views,
+**Distribution**, **Spatial** and **Multivariate** — is on the band too, and
+three of them lost a whole row to it. Spatial's second row held colony-detection
+and summary parameters; Multivariate's held the per-mode option group and the
+timepoint filter. Both are conditional: only the groups the current (level, viz)
+or mode consumes are visible, and a flow layout skips a hidden widget, so those
+groups now live in the band's scope zone and the row carries a handful of live
+controls rather than a second row of mostly-hidden ones. `ui_helpers.make_properties_button`
+replaces `wrap_ctrl_row_with_properties` at every one of these call sites.
+
+**Playground** keeps every control it had; what changed is which side they are
+on. Its column moved from the left to the right and took the `ExportStyleSidebar`
+chrome — `#PropertyPanel` fill, a hairline down its left edge, and
+`theme.Metrics.dock_w`, which is now the one width for every right-hand dock in
+the pane (the Properties sidebar reads the same token). A per-tab inspector on
+the left, when every other one in the app is on the right, is the kind of
+inconsistency that costs a user a second on every tab switch.
+
+The image and data tabs follow. **Segmentation** puts its well caption, channel,
+FOV, timepoint, zoom cluster and ON-threshold quick-edit in the scope zone and
+its Delete / Crop / Edit ▾ / View ▾ / LUT ▾ / Colors ▾ controls in the action
+zone. **Cell Browser** does the same with its channel chips and page size against
+LUT ▾ / Display ▾ / Load next / Generate. **smFISH** and **Review CSV** each
+collapse from two rows to one — selectors left, buttons right, which is the split
+they already had, stacked instead of side by side. Zoom on Segmentation goes in
+as a single scope group of four widgets, so a wrap can never separate the
+readout from the buttons that drive it.
+
+Two `TabCtrl` control rows remain, and both are deliberate: Sample Definitions'
+replicate-panel toolbar and its Cell Gating frame are inside a sub-tab and a
+sidebar, not a centre tab's control row.
+
+**Image Table** is the deliberate exception: its controls stay split between the
+builder shelf and an action strip directly above the images, because the strip's
+crop and ON-threshold controls act on the images below them and belong beside
+them. The strip is consolidated *in place* to one row — `Reset table` and
+`Clear images` became one `Table ▾` menu, the loose `(full FOV)` caption folded
+into the Crop button through `CropTool.set_status_widget`, and the `Zoom:`
+caption went, since the `100%` readout between the − and + buttons already says
+what they do.
+
+#### Plot cards without a header
+
+`PlotCard(header=False)` does not build the header at all, rather than building
+it and hiding it. Every tab on the band passes it: the band and the pane's tab
+bar carry the view switcher, the Screen/Publication toggle and the stats chip,
+so the header had nothing left to show and was hidden at every call site. The
+header accessors (`setFigureTitle`, `setStatsChipVisible`, `setLeftHeaderWidget`,
+…) are no-ops on a headerless card rather than raising, so a caller need not
+branch on how the card was built; `hasHeader()` answers if one needs to.
+
+`make_plot_view_switcher` is gone with them — it built a five-segment
+Line/Bar/Scatter/Dist/Heat control into each card's header, directly beneath the
+tab bar offering the same five choices.
+
+A tab that pins a minimum height for its figure adds `card.chromeHeight()`,
+which measures every pixel of the card that is not the canvas. That total is not
+a constant: it depends on the theme's spacing, on whether the controls row holds
+anything, and on whether the card has a header. Bar Plots and Line Graphs used
+to add a literal `110` commented "header / controls / toolbar rows" — the kind
+of number that goes stale silently, giving the figure a little more or less room
+than the tab asked for.
+
+#### The rail head
+
+The window's left column is one thing from the top down. `app_shell_view.RAIL_W`
+is the single statement of its width — the rail reads it, and so does the app
+header's mode bar, which spans exactly that and fills the header strip's height
+(`ModeBar.setFillHeight`). Flush, with no inset: the topbar's left content
+margin is zero and the widgets after the bar carry their own leading pad, so the
+bar and the rail below it are one column rather than a chip row floating over
+one.
+
+**The page tab bars are in this band too**, to the right of the mode bar and
+sharing its bottom edge. They used to sit inside each tab's own body, one row
+below, so the top of the window was two stacked strips of chrome; they are the
+same kind of control as the mode selector, one level down, and belong beside it.
+Each bar is **bottom-aligned** inside its page rather than filling it. A
+`QTabBar` sizes its tabs from the font and its padding and lays them from the
+top of whatever height it is given, so stretched to the band's height it drew
+its selected-tab underline part-way up — eight pixels clear of the band's bottom
+edge, while the mode bar's fill ran all the way down to it. Pinning the bar to
+its own height and pushing it to the bottom puts the underline on the band's
+bottom edge, level with the active mode segment beside it, at any font size or
+band height.
+
+`build_page_tabs_host` is the slot — a `QStackedWidget` keyed by top-level page
+name, whose page 0 is blank and is what the six pages with no sub-tabs
+(Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots) show. The
+band keeps its height there rather than collapsing, so switching pages never
+shifts the content below it. `register_page_tabs` mounts a bar and
+`on_notebook_current_changed` swaps them; because pages build lazily a bar can
+register *after* its page is current, so registering also shows it.
+
+Plotting's bar is a standalone `QTabBar` and simply moves. The other two — Image
+Browser's and Sample Definitions' — are `QTabWidget`s whose own API
+(`tabText` / `currentIndex` / `count` / `addTab` / `currentChanged`) is read by
+controllers, persistence and eight test modules, so `mirror_tab_widget` hides
+each one's own bar and drives it from a `QTabBar` in the band instead.
+Converting them to a bar plus a page stack would have broken every one of those
+readers to change where a strip of tabs is drawn.
+
+The band is pinned to `tab_bar_height()` and carries no vertical padding of its
+own, and holds nothing but the mode bar and the current page's tabs.
+
+The rail's **collapse toggle** is not in the band. It floats on the rail's own
+right margin, straddling the boundary with the centre pane
+(`_build_rail_toggle`, `position_rail_toggle`). It is parented to the **window**
+and positioned by hand, which is the whole trick: a toggle inside the rail would
+be hidden along with it, so the one control that collapses the rail would be the
+one control the collapse takes away. Floating it over the boundary keeps it
+reachable in both states — it slides to the window's left edge once the rail is
+gone. Straddling rather than sitting inside the rail's content also keeps it
+clear of the dataset head and the plate picker.
+
+It is placed **level with the rail head**, not centred on the splitter. The rail
+is full-bleed from top to bottom, so a button on its edge always covers
+something; the head's row is the one band there that is chrome rather than
+content. Centred on the splitter it sat squarely over the plate picker — the
+thing in this rail you click most — and drifted further onto it as the window
+grew; one row lower it clipped the active nav item instead. The rail head
+carries an `xl` right inset so its caret clears the button rather than sitting
+under it.
+
+Two things follow from it being an overlay. It has no layout to size it, so
+`position_rail_toggle` calls `adjustSize()` — left at Qt's default a widget with
+no layout keeps 100×30 and paints its chrome around an off-centre glyph. And it
+needs its own fill and border in `theme.qss` (`#RailToggle`), unlike every other
+`IconButton` in the app, because there is nothing behind it: without them it is
+a glyph hanging in mid-air over whichever pane is underneath. `_RailTogglePlacement`
+re-parks it on every window resize, and `apply_sidebar_visibility` re-parks it on
+every collapse and mode change.
+
+The mode bar is a `ModeBar`, not the `SegmentedControl` the rest of the app uses
+for view toggles. Review / Analyze / Datasets are three applications sharing a
+window; switching replaces the whole interface, and the control says so at rest
+by keeping every segment filled (§7).
+
+Directly beneath it, as the rail's own head, is the **dataset control**:
+`app_shell_view._dataset_button`, full rail width, naming the loaded folder and
+carrying `Open…`. It replaces both the `SECTION` caption (the rail's items are
+self-evidently sections) and the `Open…` button that sat alone at the far end of
+the topbar — the action and the thing it acts on are now in one place, and the
+loaded dataset finally has a durable on-screen identity rather than living in a
+hidden label and the OS window title. `refresh_dataset_button` is called from
+`load_controller` on every load. Long names elide in the **middle**, because
+dataset folders differ in their tail as often as their head
+(`plate3_run2_2024-06-11` against `…-12`) and a right-elided name can leave two
+datasets indistinguishable; the full path is on the tooltip.
+
+#### Empty states and build failures
+
+`ui_helpers.wrap_with_empty_state` now wraps Statistics, Spatial, Review CSV and
+Batch Export too, so a tab opened before a dataset is loaded shows the same
+placeholder every plot tab shows rather than an empty table or a blank panel
+that reads as a failure.
+
+An actual failure says so. A deferred tab builder that raises used to log a
+traceback and leave an empty page — indistinguishable from a tab with nothing to
+show, with the explanation in a drawer the user has no reason to open.
+`centre_view._build_pending` now also puts the tab's name on the status bar,
+where every other failure in the app reports itself.
+
+#### The band's gating and its ratchet
+
+The band carries the object name `ControlBand`, which is in
+`ui_helpers._DATA_GATED_OBJECT_NAMES`, so a tab picks up "grey the controls
+until a dataset is loaded" by adopting the band rather than by remembering a
+name. `tests/test_control_band_adoption.py` is an AST ratchet over the modules
+that have adopted it: one band per module, no hand-rolled `FlowLayout` control
+row beside it, no plot-card header built only to be hidden. It is a static scan
+on purpose — a test that builds a tab needs the `viewer_app` fixture, which
+`conftest.py` auto-marks `slow`, and `scripts/test.sh` runs `-m "not slow"`, so
+such a test would never run in CI.
+
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 
 Each module exposes a single `build_<name>_tab(ctx, parent)` function —
@@ -594,8 +815,9 @@ The function:
 1. Creates a `make_plot_with_right_dock(parent)` host (returns
    `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
    the Properties / Export Style sidebar.
-2. Adds the per-tab controls row (channel ctxbar, metric combo, timepoint
-   combo, an **Export** dropdown, **Properties**).
+2. Adds the per-tab controls row (channel, metric combo, timepoint combo, an
+   **Export** dropdown, **Properties**). Plotting's row is the shared
+   `ControlBand` (§5.2).
 3. Mounts a `PlotCard` from `widgets/plot_card.py` (matplotlib figure +
    custom toolbar inside a styled panel).
 4. Stashes the figure / canvas on `app` so controllers can reach them
@@ -897,7 +1119,7 @@ Statistics group editor is `features/stats/tab_view.build_stats_group_editor`. T
 and shown/hidden by `core/tab_controller.on_tab_change` based on the
 active tab.
 
-The top-bar collapse toggle (`Ctrl+B` / the panel button) routes through
+The collapse toggle (`Ctrl+B` / the button floating on the rail's edge) routes through
 `tab_controller.apply_sidebar_visibility`, which drives **whichever** sidebar
 belongs to the current mode from one flag: the Review rail (`_sidebar_root`) in
 Review mode, and each secondary pane's own `_left_sidebar` (the Analyze form
@@ -956,7 +1178,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The image pixel-value hover tooltip lives in `review_image/controller.py` next to its only caller. |
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` and `role_output_filename` both consume it. (As of the §6.2 self-sufficiency fix this catalog is **reader-side only** — the pipeline writer, `process_microscopy.build_processed_output_path`, uses explicit `suffix=` strings rather than importing `well_viewer`. If catalog-driven *writing* is revived, move `ROLE_CATALOG` into a Qt-free `*_core` module first so the pipeline can import it without breaking the contract.) The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. Progress crosses the same bridge: the worker's `progress_cb(done, total)` fires once per well in the counting pass and again per well in the CSV-write pass, `_WorkerBridge.progress` (a queued `Signal(int, int)`) marshals it onto the GUI thread, and the tab drives the shared status-row `_progress_bar` — the widget a dataset load steps — through `ctx.widgets.get_or_none`, so the bar is simply absent rather than fatal in a build without it. The bar is shown when the run is launched and hidden by the `done` signal, which every terminal path emits: success, cancel, a crash caught by `_run_guarded`, and the empty-channel guard (that guard returning on a status line alone left the tab's `apply_running` flag set, so the button rejected every later click as "already running"). The write loop reports from a `finally`, so a well skipped for an unresolvable or locked CSV still advances the bar instead of parking it short of its maximum. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
-| `features/image_browser/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `core.flatfield` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Segmentation and Image Table control rows each host an **ON-threshold quick-edit** `Stepper` (mirroring the Plotting ctxbar) that edits the active channel's `ThreshFracOn` via `set_thresh_frac_on` and re-renders so the binary "≥ ON threshold" overlay updates live; `channel_state_controller.refresh_thresh_frac_quick_edit` keeps all three steppers in sync on channel switch / edit. Double-clicking a Review-CSV row jumps to that cell: the handler switches to the Segmentation sub-tab, sets `preview.selected_well`, renders, drives the FOV and timepoint combos, and zooms to the nucleus. It ends by re-running the sidebar well picker's refresh — the sub-tab activation hook already refreshed it, but that ran before the row's well was chosen, so without the second pass the jump lands on the right image while the sidebar still reads "No well selected" with no well lit on the plate. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. The Segmentation control strip (`preview/panel_view.py`) is consolidated into a single `widgets.FlowLayout` row of **Edit / View / LUT / Colors ▾** menu-buttons (built with the shared `ui_helpers.make_action_menu_button` / `add_menu_action` helpers) so it wraps instead of clipping when Split View halves the pane; every widget keeps its registered name / runtime attribute, so the renderer and controllers reach them exactly as before. Zoom is the exception to the popover treatment: **− / readout / + / Fit** sit inline on that row, since zoom is in constant use while reviewing segmentation. The readout (`_review_image_zoom_lbl`) shows the factor relative to fit-to-window and is refreshed by `renderer.refresh_review_image_zoom_label` from inside `render_review_image_display` — the single point every zoom path funnels through, so the buttons, the scroll wheel, and the Review-CSV jump's zoom-to-nucleus all keep it honest. |
+| `features/image_browser/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `core.flatfield` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Segmentation and Image Table control rows each host an **ON-threshold quick-edit** `Stepper` (mirroring Plotting's band) that edits the active channel's `ThreshFracOn` via `set_thresh_frac_on` and re-renders so the binary "≥ ON threshold" overlay updates live; `channel_state_controller.refresh_thresh_frac_quick_edit` keeps all three steppers in sync on channel switch / edit. Double-clicking a Review-CSV row jumps to that cell: the handler switches to the Segmentation sub-tab, sets `preview.selected_well`, renders, drives the FOV and timepoint combos, and zooms to the nucleus. It ends by re-running the sidebar well picker's refresh — the sub-tab activation hook already refreshed it, but that ran before the row's well was chosen, so without the second pass the jump lands on the right image while the sidebar still reads "No well selected" with no well lit on the plate. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. The Segmentation control strip (`preview/panel_view.py`) is the shared `ControlBand`, with **Edit / View / LUT / Colors ▾** menu-buttons (built with the shared `ui_helpers.make_action_menu_button` / `add_menu_action` helpers) in its action zone so it wraps instead of clipping when Split View halves the pane; every widget keeps its registered name / runtime attribute, so the renderer and controllers reach them exactly as before. Zoom is the exception to the popover treatment: **− / readout / + / Fit** sit inline on that row, since zoom is in constant use while reviewing segmentation. The readout (`_review_image_zoom_lbl`) shows the factor relative to fit-to-window and is refreshed by `renderer.refresh_review_image_zoom_label` from inside `render_review_image_display` — the single point every zoom path funnels through, so the buttons, the scroll wheel, and the Review-CSV jump's zoom-to-nucleus all keep it honest. |
 | `features/image_browser/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods on a single raw frame chosen by well/channel/timepoint/FOV. Loads the raw frame + precomputed mask via the Image Table loaders (`_load_array` / `_load_mask_array`) and applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern); the correction itself stays synchronous on the GUI thread, so `playground_on_change` memoizes its result (`state.last_correction_key`/`last_corrected_arr`, keyed on the decoded frame's identity — safe because `image_discovery`'s decode cache returns the same array object on a hit — plus every correction parameter) and skips recomputing when nothing that affects the output changed; `build_playground_tab` triggers exactly one render on first open (via `registry._activate_playground`, which always follows the tab's construction in the same dispatch), not its own redundant call plus the activation hook's. Display reuses the LUT/colormap (`ui_helpers.lut_colormap_to_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. |
 | `features/image_browser/cell_browser/{controller,collect,worker,tab_view,criteria_view}.py` | Cell Browser gallery: a filtered grid of per-cell crops composed off-thread (`worker.CellImageLoader`, reusing the Image Table loaders + zip cache). Sources cells from the active **plate selection** (`collect.cell_browser_source_wells`). **Deferred render:** every control — filters (criteria/timepoint/FOV/sort), channel chips, the per-channel `LUT ▾` popover (LUT min/max + a colour swatch editing `tint_by_channel`), and the **Raw / Corrected** source `SegmentedControl` (`CellBrowserState.use_tophat`, threaded through `load_page` → `compose_cell_rgb` → `_load_array`) — only *stages* state; the single top-bar **Generate** button (`controller.apply_filters`) re-collects and re-composites. There is no separate "Apply filters" button. **Gate-source mode** (the sidebar's *From scatter gate* checkbox, `CellBrowserState.scatter_gate_mode`) swaps the numeric filter for the scatter gate(s): `criteria_view._set_criteria_enabled` disables the criteria rows + *Add criterion* and reveals a muted line stating why. The checkbox is deliberately sticky — nothing resets it on tab switch or dataset load — so that line is the only on-screen account of an editor that is otherwise inertly greyed out. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
@@ -2926,10 +3148,13 @@ anything under `datasets/job_queue/` ever imports `analyze_tab`.
 
 Every widget under `widgets/` is:
 
-- **Standalone.** It only imports from `theme` and Qt (plus `widgets._support`
-  for tiny RGB helpers and `set_variant`, a runtime dynamic-property + repolish
-  helper — see below). It does *not* know anything about
-  `WellViewerApp` or any tab.
+- **Standalone.** It only imports from `theme`, Qt, and the Qt-free repo-root
+  helpers under `util/` (`util.well_token`, `util.aw_safe`) — plus
+  `widgets._support` for tiny RGB helpers and `set_variant`, a runtime
+  dynamic-property + repolish helper (see below). It does *not* import
+  `well_viewer` and knows nothing about `WellViewerApp` or any tab. That is why
+  a widget's suppressed exceptions go through `util.aw_safe.swallowed`, the same
+  helper the pipeline uses, rather than `well_viewer.core.safe`.
 - **Token-styled.** Sizes derive from font metrics; colours come from
   `theme.Colors` / QSS object names. No hardcoded device pixels.
 - **DPI-aware.** Geometry is computed from `fontMetrics()`, so the widgets
@@ -2941,6 +3166,9 @@ Notable members worth knowing about by name:
 
 | Widget | What it is |
 |--------|-----------|
+| `CropTool` (`well_viewer/data/crop_tool.py`) | The drag-a-region crop shared by Image Table and Segmentation. `set_status_widget(widget, template=…)` writes the crop state into an existing control's text — the Image Table's Crop button reads `Crop · (full FOV)` — instead of a separate caption beside it; `make_status_label` still returns a standalone label for call sites that want one. |
+| `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). |
+| `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
 | `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. |
@@ -3242,10 +3470,10 @@ identically either way.
 ### 9.3 Switching channels
 
 ```
-Global ctxbar QComboBox.currentIndexChanged
+Plotting band QComboBox.currentIndexChanged
         │
         ▼
-WellViewerApp._on_plot_channel_selected(source=ctxbar)
+WellViewerApp._on_plot_channel_selected(source=band combo)
         └── _set_active_channel(channel)
               ├── update app._active_channel + app._active_val_col
               ├── sync every per-renderer combo
@@ -3928,7 +4156,7 @@ title bar, search `allwell.py`.
 In order of probability:
 
 1. **Stale `_active_channel`.** Check `_update_channel_selector` ran with
-   the current dataset's channel list and that the global ctxbar combo's
+   the current dataset's channel list and that the Plotting band combo's
    current text matches `_active_channel.upper()`.
 2. **A controller didn't get the redraw entry-point call.** Check the
    feature's `on_selection_changed` hook in `features/registry.py`, which
@@ -4066,10 +4294,14 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
 
 - **Never silently swallow exceptions.** Don't write `except Exception: pass`.
   Use `well_viewer.core.safe.swallow(...)` / `swallowed(...)` (GUI side) or
-  `aw_safe.swallow(...)` / `swallowed(...)` (pipeline/`services` side, Qt-free) so
-  a suppressed failure still leaves a DEBUG breadcrumb. Enforced by
-  `tests/test_no_silent_except.py`. (Two near-identical helpers exist on purpose:
-  the pipeline must not import `well_viewer` — see §6.2.)
+  `aw_safe.swallow(...)` / `swallowed(...)` (pipeline / `services` / `widgets`,
+  none of which may import `well_viewer`) so a suppressed failure still leaves a
+  DEBUG breadcrumb. Enforced by `tests/test_no_silent_except.py`, which guards
+  `well_viewer/`, `widgets/`, and the pipeline modules. (Two near-identical
+  helpers exist on purpose: the pipeline must not import `well_viewer` — see
+  §6.2.) `widgets/` is the newest of the three and was the last un-guarded body
+  of GUI code: a widget that quietly fails to paint or to recolour is
+  indistinguishable from one that was never asked to.
 - **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`

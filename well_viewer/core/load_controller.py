@@ -447,6 +447,8 @@ def load_directory(ctx, d: Path, label=None) -> None:
             swallowed()  # was: pass (silent except)
     display = label or str(d)
     app._dir_label.setText(display)
+    from well_viewer.core.app_shell_view import refresh_dataset_button
+    refresh_dataset_button(app)
     app._set_status(f"Loaded {n} well(s) — {display}")
     recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from
@@ -472,7 +474,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
     # the post-load plot redraw — the emit is the redraw trigger.
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)
-    # Sync the ctxbar ThreshFracOn quick-edit once everything has settled (the
+    # Sync the band's ThreshFracOn quick-edit once everything has settled (the
     # gating edits are now hydrated and the active channel is final), so the box
     # shows the loaded threshold instead of its 50.0 default.
     refresh = getattr(app, "_refresh_thresh_frac_quick_edit", None)

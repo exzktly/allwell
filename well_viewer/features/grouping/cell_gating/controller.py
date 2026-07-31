@@ -670,7 +670,7 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
         # ThreshFracOn edit leaves the (now default) Bar Plots tab stale.
         redraw_app(ctx)
         ctx.bus.plot_options_changed.emit(ctx.state.plot)
-        # Mirror the new value onto the plotting ctxbar quick-edit so it reflects
+        # Mirror the new value onto Plotting's band quick-edit so it reflects
         # the set threshold (e.g. after auto-threshold or a Cell Gating edit)
         # instead of showing its 50.0 default. Now ctx-native (D-thresh); it
         # no-ops per-stepper for any quick-edit not yet built.

@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 import theme
 from widgets.icon_button import IconButton
 from widgets.mpl_toolbar import MplToolbar
+from util.aw_safe import swallowed
 
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
     import matplotlib
@@ -127,7 +128,8 @@ if _HAVE_MPL:
         plotThemeChanged = Signal(str)    # "screen" | "publication"
         panelCopied = Signal(str)         # status text after a per-axis copy
 
-        def __init__(self, parent=None, *, figsize=(4.0, 3.0), constrained=True) -> None:
+        def __init__(self, parent=None, *, figsize=(4.0, 3.0), constrained=True,
+                     header: bool = True) -> None:
             super().__init__(parent)
             self.setObjectName("Panel")
             self.setAttribute(Qt.WA_StyledBackground, True)
@@ -162,7 +164,15 @@ if _HAVE_MPL:
             m = theme.Spacing.md
             root.setContentsMargins(m, m, m, theme.Spacing.sm)
             root.setSpacing(theme.Spacing.sm)
-            root.addWidget(self._build_header())
+            # ``header=False`` does not build the header at all, rather than
+            # building it and hiding it. Every tab whose controls are the shared
+            # ControlBand passes it: the band and the pane's tab bar already
+            # carry the view switcher, the Screen/Publication toggle and the
+            # stats chip, so the header had nothing left to show and was hidden
+            # at every one of those call sites anyway.
+            self._header = None
+            if header:
+                root.addWidget(self._build_header())
             root.addWidget(self._build_controls_row())
             root.addWidget(self.canvas, 1)
             root.addWidget(self.toolbar)
@@ -343,7 +353,7 @@ if _HAVE_MPL:
                 Toast.show_message(self.window(), msg,
                                    kind="danger" if failed else "success")
             except Exception:
-                pass
+                swallowed()
             self.panelCopied.emit(msg)
 
         def set_save_handler(self, handler) -> None:
@@ -443,7 +453,7 @@ if _HAVE_MPL:
                 Toast.show_message(self.window(), status,
                                    kind="danger" if failed else "success")
             except Exception:
-                pass
+                swallowed()
 
         def eventFilter(self, obj, event):
             # PySide6 can dispatch a non-QEvent here (e.g. a QStandardItem from
@@ -491,18 +501,31 @@ if _HAVE_MPL:
             self.draw()
 
         # ── figure header ────────────────────────────────────────────────
+        # Every method below is a no-op on a card built with ``header=False``:
+        # there is no header widget to reach into. They stay callable rather
+        # than raising so a caller does not have to branch on how the card was
+        # constructed.
+        def hasHeader(self) -> bool:
+            return self._header is not None
+
         def setFigureTitle(self, text: str) -> None:
+            if self._header is None:
+                return
             self._title_lbl.setText(str(text))
             self._title_lbl.setVisible(bool(text))
 
         def setStatsChipVisible(self, visible: bool) -> None:
             """Hide the ``Mean · SEM`` chip (e.g. on a tab whose stats UI lives
             elsewhere). The popover/stat/error API still works programmatically."""
+            if self._header is None:
+                return
             self._stats_chip.setVisible(bool(visible))
 
         def setThemeToggleVisible(self, visible: bool) -> None:
             """Hide the in-header ``Publication ↔ Screen`` toggle (and the
             'preview only' chip). ``setPlotTheme`` still works programmatically."""
+            if self._header is None:
+                return
             if getattr(self, "_theme_sc", None) is not None:
                 self._theme_sc.setVisible(bool(visible))
             if not visible:
@@ -510,18 +533,20 @@ if _HAVE_MPL:
             else:
                 self._sync_theme_ui()
 
-        def headerWidget(self) -> QWidget:
+        def headerWidget(self) -> QWidget | None:
             return self._header
 
         def setHeaderVisible(self, visible: bool) -> None:
-            """Hide the card header — the Plotting section's ctxbar already
-            carries the view-switcher / Pub-Screen toggle / stats chip, so
-            the per-card header would duplicate those controls."""
+            """Show or hide the card header."""
+            if self._header is None:
+                return
             self._header.setVisible(bool(visible))
 
         def setLeftHeaderWidget(self, widget) -> None:
             """Mount *widget* at the far left of the header (e.g. a per-card
             view-switcher ``SegmentedControl``). Pass ``None`` to clear."""
+            if self._header is None:
+                return
             lay = self._left_holder.layout()
             while lay.count():
                 it = lay.takeAt(0)
@@ -532,8 +557,8 @@ if _HAVE_MPL:
                 lay.addWidget(widget)
             self._left_holder.setVisible(widget is not None)
 
-        def leftHeaderWidget(self) -> QWidget:
-            return self._left_holder
+        def leftHeaderWidget(self) -> QWidget | None:
+            return getattr(self, "_left_holder", None)
 
         def setControlsWidget(self, widget) -> None:
             """Mount *widget* in the controls row beneath the header (e.g. the
@@ -610,6 +635,8 @@ if _HAVE_MPL:
             return self._header
 
         def _sync_theme_ui(self) -> None:
+            if self._header is None:
+                return
             self._preview_chip.setVisible(self._plot_theme == "screen")
             if getattr(self, "_theme_sc", None) is not None:
                 try:
@@ -719,7 +746,29 @@ if _HAVE_MPL:
                     for gridline in ax.get_xgridlines() + ax.get_ygridlines():
                         gridline.set_color(grid)
             except Exception:
-                pass
+                swallowed()
+
+        def chromeHeight(self) -> int:
+            """Every pixel of the card that is not the canvas.
+
+            A tab that pins a minimum height for its figure needs to add the
+            card's own chrome on top, and that total is not a constant: it
+            depends on the theme's spacing, on whether the controls row holds
+            anything, and on whether the card was built with a header at all.
+            Measuring it keeps a caller's pin correct through any of those
+            changing, where a literal goes stale silently — the figure simply
+            gets a little more or less room than the tab asked for.
+            """
+            lay = self.layout()
+            m = lay.contentsMargins()
+            total = m.top() + m.bottom()
+            parts = [w for w in (self._header, self._controls_row, self.toolbar)
+                     if w is not None and not w.isHidden()]
+            for w in parts:
+                total += w.sizeHint().height()
+            # One spacing gap per gap between the laid-out rows (canvas included).
+            total += lay.spacing() * len(parts)
+            return total
 
         def _build_qss(self) -> str:
             c, t, r = theme.Colors, theme.Typography, theme.Radii

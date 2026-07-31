@@ -71,7 +71,7 @@ _NO_SMFISH_MESSAGE = (
 )
 
 
-from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
+from widgets.control_band import ControlBand
 
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
@@ -129,76 +129,65 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(root)
     root.setContentsMargins(12, 12, 12, 12)
 
-    # Row 1: channel/fov/tp/threshold/LUT
-    ctrl = QWidget(parent)
-    ctrl.setObjectName("TabCtrl")
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(0, 0, 0, 6)
+    # One control band: the frame selectors and the two LUT bounds are scope,
+    # the four buttons are actions. This used to be two rows — selectors on the
+    # first, buttons on the second — which is the split the band makes anyway,
+    # only sideways instead of stacked.
+    ctrl = ControlBand(parent)
 
-    channel_cb = reg.register("_smfish_channel_cb", QComboBox(ctrl))
+    channel_cb = reg.register("_smfish_channel_cb", QComboBox())
     channel_cb.currentIndexChanged.connect(
         lambda _i: _smfish_on_channel_changed(ctx)
     )
-    cl.addWidget(flow_group(ctrl, "Channel:", channel_cb))
+    ctrl.add_scope("Channel", channel_cb)
 
-    fov_cb = reg.register("_smfish_fov_cb", QComboBox(ctrl))
+    fov_cb = reg.register("_smfish_fov_cb", QComboBox())
     fov_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    cl.addWidget(flow_group(ctrl, "FOV:", fov_cb))
+    ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_smfish_tp_cb", QComboBox(ctrl))
+    tp_cb = reg.register("_smfish_tp_cb", QComboBox())
     tp_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    cl.addWidget(flow_group(ctrl, "Timepoint:", tp_cb))
+    ctrl.add_scope("Timepoint", tp_cb)
 
-    threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500", ctrl))
+    threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
     threshold_edit.setFixedWidth(90)
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    cl.addWidget(flow_group(ctrl, "smFISH_Thresh:", threshold_edit))
+    ctrl.add_scope("Threshold", threshold_edit)
 
-    lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit("", ctrl))
+    lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
     lut_min_edit.setFixedWidth(70)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    cl.addWidget(flow_group(ctrl, "LUT Min:", lut_min_edit))
+    ctrl.add_scope("LUT Min", lut_min_edit)
 
-    lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit("", ctrl))
+    lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit(""))
     lut_max_edit.setFixedWidth(70)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    cl.addWidget(flow_group(ctrl, "LUT Max:", lut_max_edit))
-    cl.addStretch(1)
-    sync_flow_height(ctrl)   # reserve the wrapped height (see sync_flow_height)
-    root.addWidget(ctrl)
+    ctrl.add_scope("LUT Max", lut_max_edit)
 
-    # Row 2: action buttons
-    btn_row = QWidget(parent)
-    btn_row.setObjectName("TabCtrl")
-    bl = FlowLayout(btn_row)
-    bl.setContentsMargins(0, 2, 0, 2)
-
-    apply_btn = QPushButton("Apply Global Threshold", btn_row)
+    apply_btn = QPushButton("Apply Global Threshold", ctrl)
     apply_btn.setProperty("variant", "secondary")
     apply_btn.clicked.connect(lambda _=False: _smfish_apply_to_all(ctx))
-    bl.addWidget(apply_btn)
+    ctrl.add_action(apply_btn)
 
-    refresh_btn = QPushButton("Refresh", btn_row)
+    refresh_btn = QPushButton("Refresh", ctrl)
     refresh_btn.setProperty("variant", "secondary")
     refresh_btn.clicked.connect(lambda _=False: _smfish_redraw(ctx))
-    bl.addWidget(refresh_btn)
+    ctrl.add_action(refresh_btn)
 
-    overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", btn_row))
+    overlay_btn = reg.register("_smfish_overlay_btn", QPushButton("Hide Overlays", ctrl))
     overlay_btn.setProperty("variant", "secondary")
     overlay_btn.clicked.connect(lambda _=False: _smfish_toggle_overlays(ctx))
-    bl.addWidget(overlay_btn)
+    ctrl.add_action(overlay_btn)
 
-    cdf_btn = QPushButton("This Frame CDF", btn_row)
+    cdf_btn = QPushButton("This Frame CDF", ctrl)
     cdf_btn.setProperty("variant", "secondary")
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
-    bl.addWidget(cdf_btn)
-    bl.addStretch(1)
-    sync_flow_height(btn_row)   # reserve the wrapped height so no row hides
-    root.addWidget(btn_row)
+    ctrl.add_action(cdf_btn)
+    root.addWidget(ctrl)
 
     # Status row
     status_label = reg.register("_smfish_status_label", QLabel(

@@ -279,8 +279,9 @@ A common end-to-end run, from raw images to plots, takes five clicks:
    **Review** and loads the output folder.
 5. Pick wells in the plate map; the plots redraw immediately.
 
-Reopen a previous output folder any time with the `Open…` button in Review
-or `Ctrl+O`.
+Reopen a previous output folder any time from the dataset control at the top of
+Review's left rail — it names the folder you have loaded and drops `Open…` — or
+with `Ctrl+O`.
 
 ---
 
@@ -581,15 +582,15 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ All-Well   [Review|Analyze]    ↻  ⛶  ⌂  i                       │  ← title bar
+│ All-Well                       ↻  ⛶  ⌂  i                       │  ← title bar
 ├──────────────┬──────────────────────────────────────────────────┤
-│              │  Channel: [GFP ▾]                  ── ctxbar ──  │
-│ SECTION      │  ┌────────────────────────────────────────────┐  │
-│  ⊙ Plotting  │  │                                            │  │
-│   …          │  │            (plot canvas)                   │  │
+│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …  ⊟ │  ← one band
+├──────────────┼──────────────────────────────────────────────────┤
+│ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display ▾ ⚙  │  ← controls
+│  ⊙ Plotting  │  ┌────────────────────────────────────────────┐  │
 │   …          │  │                                            │  │
+│   …          │  │            (plot canvas)                   │  │
 │   …          │  └────────────────────────────────────────────┘  │
-│              │              Export ▾            Properties      │
 │              │                                                  │
 │              │                                                  │
 │              │                                                  │
@@ -610,14 +611,17 @@ the viewer always tracks the schema + channel tokens the dataset was built with
   the icons to its right are Refresh (re-read the folder), presentation
   toggle (flip every plot Screen ↔ Publication), Open, and the **`i`** Help
   drawer.
-- **Section rail** — the left "SECTION" navigator lists every centre tab
-  (Plotting, etc.), grouped into **Analysis**, **Images**, and **Data**. Tabs
-  that own sub-tabs (e.g. Plotting) show a sub-tab bar across the top of the
-  centre pane. `Ctrl+B` collapses the rail.
+- **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
+  grouped into **Analysis**, **Images**, and **Data**, under the dataset control
+  at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
+  beside the mode selector. `Ctrl+B` collapses the rail, as does the small
+  button floating on the rail's right edge — it stays put when the rail hides,
+  so it is also how you bring the rail back.
 - **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
   well selection they drive is what every tab plots (see below).
-- **Context bar** — the row directly above the plot canvas: the shared channel
-  selector plus the current tab's own controls and figure-action buttons.
+- **Controls band** — the row directly above the plot canvas: what is shown on
+  the left (channel, property, timepoint, threshold), what to do with it on the
+  right (`Display ▾`, `Export ▾`, Properties).
 - **Status bar** — a live status dot on the left, keyboard-shortcut chips on
   the right.
 - **Tab history** — `Ctrl+←` / `Ctrl+→` step back and forward through the tabs
@@ -666,6 +670,30 @@ tabs and is what every plot / aggregate / export consumes.
   well picker, and both panes refresh on a selection or channel change. It
   needs a second tab to show something; a tab can't be split against itself.
 
+#### One band across the top
+
+The window's top row is one band: **Review / Analyze / Datasets** on the left,
+spanning the rail's width, and the current page's tabs — *Bar Plots · Line
+Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell Browser ·
+Playground* — immediately to their right on the same line. Pages without
+sub-tabs (Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots)
+leave that side empty; the band keeps its height so nothing below it shifts when
+you switch pages.
+
+#### One controls row on every tab
+
+Every tab in the Review pane states its controls the same way, in one row above
+the content: **what is shown** on the left — channel, property, timepoint,
+threshold, and whatever else scopes the data — and **what to do with it** on the
+right, flush to the edge: `Display ▾`, `Export ▾`, and the **Properties** button.
+Nothing is centred; which view you are looking at is the tab bar's job. When the
+pane is too narrow the left side wraps onto a second line rather than squeezing
+its controls, so nothing ever becomes unreachable.
+
+The Image Table is the one deliberate exception. Its crop and ON-threshold
+controls act on the images directly below them, so they stay in a strip beside
+the images rather than moving to a row at the top of the tab.
+
 #### Figure actions — the Export dropdown · Properties
 
 Every plot tab (Bar Plot, Line Graphs, Scatter, Distribution, Heat Map,
@@ -690,8 +718,8 @@ row, holding four actions:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale, layout engine, and an
   export-profile picker. Axis **limits**, **log-scale** and the **line / marker
-  styling** are scoped to the one plot — the Scatter tab's Per-cell points and
-  Per-well aggregate are separate plots here, so sizing markers for five
+  styling** are scoped to the one plot — the Scatter tab's Cells and
+  Wells views are separate plots here, so sizing markers for five
   aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
   grid, legend and ticks stay shared** across tabs, so one setting still gives
   a whole figure set a consistent look. On the Bar Plots tab (a Value /
@@ -822,10 +850,15 @@ count) — plus a CDF.
 
 ### Scatter Plot
 
-**What it shows.** Two sub-views on a sub-tab bar — **Per-cell points** (one
-point per cell, X vs Y feature) and **Per-well aggregate** (one point per
-well/timepoint). Per-cell points can be coloured **by well** or, via **Color by
+**What it shows.** Two views, chosen with the **View** toggle at the left of the
+controls row — **Cells** (one point per cell, X vs Y feature) and **Wells** (one
+point per well/timepoint). Cells can be coloured **by well** or, via **Color by
 time**, by timepoint.
+
+The Channel, Property and Threshold controls that the other plot tabs share
+disappear from the controls row here, and the View toggle takes their place.
+That is because this tab picks its channels per axis, from the X-axis and
+Y-axis dropdowns below — the shared controls have nothing to act on.
 
 - **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis
@@ -888,10 +921,13 @@ place cells in a grid that mirrors your plate or your experimental design.
 
 - **Needs** — a well selection and a channel; a timepoint (**t (h)**) chosen
   with the slider.
-- **Controls** —
-  - **t (h)** timepoint slider (its position persists across reopen).
+- **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
     *Rep-set avg*).
+  - **t (h)** timepoint slider (its position persists across reopen).
+
+  Under **Display ▾**, since these set how the grid is coloured rather than what
+  it shows:
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
   - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
   - **Log scale** toggle — colours the map across orders of magnitude (values at
@@ -899,6 +935,10 @@ place cells in a grid that mirrors your plate or your experimental design.
     log scale. Needs at least two distinct positive values; when the data can't
     support it the status line says so and the linear scale stays.
   - **⇄ Transpose** — swap the rows and columns of the layout.
+  - **Rep-set avg** — show the whole rep-set's average in a cell whose well
+    belongs to one, instead of that single well.
+
+  And elsewhere:
   - **Value format** (in the **Properties** panel, under *Cell values*) — a
     printf-style format for the number written in each cell: `%.2f` for two
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
@@ -939,8 +979,10 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Sample Definitions](#sample-definitions).
-- **Controls** — the group editor (sidebar); the test selection; the timepoint;
-  an FOV-replicate indicator that mirrors the plot tabs' FOV mode.
+- **Controls** — the group editor is in the sidebar; everything else is on the
+  same one-row controls band every tab uses — **Channel**, **Property**,
+  **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
+  that mirrors the plot tabs' FOV mode, with **Run test** at the right.
 - **Replicate unit.** What counts as one replicate is the single rule shared
   with the bar / line error bars, so the test's `n` and the plotted spread never
   disagree. With FOV mode **off**, each well in a group is one replicate. With
@@ -952,6 +994,10 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
   > leave FOV mode off for well-level replicates.
 - **Optimal use** — define replicate sets first so the tests run on
   biologically meaningful groups rather than single wells.
+
+Statistics, Spatial, Review CSV and Batch Export show a placeholder until a
+dataset is loaded, the same one the plot tabs show, instead of an empty table
+or a blank panel that looks like something failed.
 
 ### Multivariate analysis
 
@@ -1070,7 +1116,7 @@ between colonies versus inside each one?"*.
 
 Everything runs on the **currently selected well and one timepoint** at a
 time (spatial statistics are per-frame). Pick a well in the plate map, open
-Spatial, and use the top-row controls:
+Spatial, and use the controls row:
 
 - **Level** — the scale of the analysis:
   - **Cell** — per-cell distance metrics and clustering statistics in the
@@ -1087,9 +1133,14 @@ Spatial, and use the top-row controls:
   or any user-defined ratio is eligible.
 - **Timepoint** — which frame to analyse. *First available* uses the
   smallest finite `timepoint_hours` in the well.
+- **Recompute** — forces a fresh compute. The per-frame levels (Cell, Colony,
+  Intra-colony) recompute on every control change, so this is only strictly
+  needed at Summary level, where changes are queued until you press it (one
+  DBSCAN per well × timepoint is expensive to run on every keystroke).
 
-The second row controls **colony detection** — colonies are computed, not
-manually annotated:
+The rest of the row controls **colony detection** — colonies are computed, not
+manually annotated. These controls appear only at the levels that use them, so
+the row stays short at Cell level and grows at Colony / Intra-colony / Summary:
 
 - **Method** — **DBSCAN** (default) is density-based: cells whose
   ε-neighbourhood contains ≥ min-samples other cells seed a colony; the
@@ -1218,11 +1269,16 @@ channel for every well).
   Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
   you want a plate view: Wrap only labels the first band, whereas Plate labels every
   row and column correctly.
-- **Action strip** — **Generate** · **Reset table** (back to defaults) · **Clear
-  images** · **Crop** (drag a region on any image) · an **ON threshold** value with
-  a **channel** dropdown choosing which channel it applies to (the same ThreshFracOn
-  shared with Cell Gating and the plot tabs) · **Export** (to file · Copy PNG / SVG ·
-  Save to Saved Plots) · **Zoom** · a **Properties** button that slides out a
+- **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
+  defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
+  in one click) · **Crop view ▾** (drag a region on any image — the button reads
+  the current crop, `Crop view · (full FOV)` when there is none). This crops what
+  the images *show*; it is not the Segmentation tab's **Crop cells**, which
+  excludes cells from every plot, statistic and export. · an **ON threshold** value
+  with a **channel** dropdown choosing which channel it applies to (the same
+  ThreshFracOn shared with Cell Gating and the plot tabs) · **Export ▾** (to file ·
+  Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
+  % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
 - **Scale bar** — **on by default**: enter the **pixel size (µm/px)** and a **bar
@@ -1299,9 +1355,11 @@ background-flattening / subtraction methods on a **single raw frame**, without
 re-running the pipeline (it shares the pipeline's exact correction code).
 
 - **Needs** — a loaded dataset with image ZIPs.
-- **Controls** — pick the frame's **well on the ever-present left-rail plate**
-  (single-well here — the tab has no plate of its own, it drives the sidebar
-  picker), and the **channel / timepoint / FOV** from the in-tab dropdowns;
+- **Controls** — all in the **right-hand panel**, where every other per-tab
+  inspector in the app sits. Pick the frame's **well on the ever-present
+  left-rail plate** (single-well here — the tab has no plate of its own, it
+  drives the sidebar picker), and the **channel / timepoint / FOV** from the
+  panel's dropdowns;
   choose any flat-field + background method and tune its parameters; a **Raw /
   Flat-field / Corrected** toggle; LUT / colormap / binary + precomputed-mask
   overlay; pan / zoom; per-source LUT memory; a frame-local binary threshold; a
@@ -1319,8 +1377,11 @@ Operates on **one well at a time** (spot detection is per-frame).
 - **Needs** — at least one channel configured as smFISH at pipeline time (its
   CSV carries a `_smfish_count` column) and image ZIPs. Selecting several wells
   collapses the view to a single well.
-- **Controls** — the detection parameters + threshold sweep; **Apply to All**
-  to push one threshold across the whole dataset.
+- **Controls** — **Channel / FOV / Timepoint** pick the frame, **Threshold**
+  sets the spot-detection cut-off (it writes the CSV's `smFISH_Thresh`), and
+  **LUT Min / LUT Max** set the display brightness. On the right: **Apply Global
+  Threshold** to push one threshold across the whole dataset, **Refresh**,
+  **Hide Overlays**, and **This Frame CDF**.
 - **Apply to All progress** — the run counts spots in every well, then writes
   the counts into the per-well CSVs. Both passes drive the progress bar in the
   status row at the bottom of the window — the same bar a dataset load uses —

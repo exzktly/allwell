@@ -60,7 +60,8 @@ from well_viewer.core.safe import swallowed
 #: centre column even on smaller screens — every internal row uses a
 #: narrow fixed label column (88 px) plus an expanding control column so
 #: the contents reflow within the panel rather than overflowing.
-EXPORT_STYLE_PANEL_WIDTH = 440
+#: One number for every right-hand dock in the Review pane (theme.Metrics).
+EXPORT_STYLE_PANEL_WIDTH = theme.Metrics.dock_w
 
 
 #: Figure-export formats offered by the Export… dialog, in display order.
@@ -822,7 +823,7 @@ class ExportStyleSidebar(QWidget):
         exp_btn.setObjectName("Primary")
         exp_btn.clicked.connect(lambda _=False: self._export())
         # Equal flex on the three action buttons so they share the row
-        # cleanly inside the 440-px panel; without this the QPushButton
+        # cleanly inside the panel's width; without this the QPushButton
         # default minimum-width can push Export… off the right edge.
         for btn in (reset_btn, save_btn, exp_btn):
             btn.setSizePolicy(btn.sizePolicy().horizontalPolicy(),

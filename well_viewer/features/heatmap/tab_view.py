@@ -15,16 +15,18 @@ from well_viewer.core.plot_card_actions import (
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QInputDialog, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QInputDialog, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
     add_menu_action,
     make_action_menu_button,
-    make_plot_view_switcher,
     make_plot_with_right_dock,
+    make_popover_button,
+    make_properties_button,
 )
+from widgets.control_band import ControlBand
 from well_viewer.core.channel_state_controller import refresh_metric_combo_for_channel
 from well_viewer.features.export.service import export_heatmap_data
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
@@ -35,7 +37,6 @@ _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
 _SCALE_OPTIONS = ["Auto", "Fixed"]
 
 
-from widgets.flow_layout import FlowLayout
 
 def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # Defer matplotlib + heatmap_controller imports until the tab actually
@@ -59,17 +60,18 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     reg.register("_heatmap_export_dock", export_dock)
     parent = plot_area
 
-    # ── Control row 1: channel / metric ─────────────────────────────────────
-    # The layout itself is edited from the sidebar configurator on the left
-    # (see ``views/heatmap_layout_sidebar_view.py``); this row is for the
-    # plotting parameters only.
-    ctrl1 = QWidget(parent)
-    ctrl1.setObjectName("TabCtrl")
-    cl1 = FlowLayout(ctrl1)
-    cl1.setContentsMargins(10, 6, 10, 6)
+    # ── The control band ────────────────────────────────────────────────────
+    # One row, the same one every Review tab uses. This tab used to spend three
+    # rows and a separator on its controls: channel/aggregation, then
+    # colour-map/scale/vmin/vmax/transpose/rep-set/log, then a full-width
+    # timepoint slider. The colouring controls are appearance, not scope, so
+    # they moved into a Display popover, and what is left fits one row at every
+    # width. The grid layout itself is still edited from the sidebar
+    # configurator on the left (``views/heatmap_layout_sidebar_view.py``).
+    band = ControlBand(parent)
 
-    # Channel combo hidden — global ctxbar combo is the only visible
-    # channel control. See line_graphs_tab_view.py for rationale.
+    # Channel combo hidden — the Plotting band's channel combo is the only
+    # visible channel control. See line_graphs_tab_view.py for rationale.
     chan_cb = reg.register("_chan_cb_heatmap", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.setMinimumWidth(220)
@@ -78,43 +80,43 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     )
     chan_cb.hide()
 
-    # The global ctxbar Property combo is the single source of truth for
+    # The Plotting band's Property combo is the single source of truth for
     # which CSV column drives the heatmap — the per-tab Property combo
-    # used to live here, but the duplicate (one in the ctxbar, one in
-    # this row) was confusing. Only the Aggregation combo stays local.
-    cl1.addWidget(QLabel("Aggregation:", ctrl1))
-    metric_cb = reg.register("_heatmap_metric_cb", QComboBox(ctrl1))
+    # used to live here, but the duplicate was confusing. Only the
+    # Aggregation combo stays local.
+    metric_cb = reg.register("_heatmap_metric_cb", QComboBox())
     metric_cb.addItems(METRIC_OPTIONS)
     metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx))
-    cl1.addWidget(metric_cb)
+    band.add_scope("Aggregation", metric_cb)
 
-    cl1.addStretch(1)
+    # The timepoint scrubber. It is deliberately a fixed width rather than a
+    # stretching one: a slider with stretch takes every pixel the scope zone
+    # has, so the controls beside it wrap to a second row at any pane width.
+    from widgets.styled_slider import StyledSlider as _StyledSlider
+    tp_slider = reg.register("_heatmap_tp_slider", _StyledSlider(Qt.Horizontal))
+    tp_slider.setMinimum(0)
+    tp_slider.setMaximum(0)
+    tp_slider.setFixedWidth(160)
+    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
+    tp_label = reg.register("_heatmap_tp_label", QLabel("—"))
+    tp_label.setMinimumWidth(64)
+    band.add_scope("Timepoint", tp_slider, tp_label)
 
-    export_btn, export_menu = make_action_menu_button("Export", ctrl1, tooltip="Export this plot")
-    add_menu_action(export_menu, "Export CSV…", lambda: export_heatmap_data(ctx))
-    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
-    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
-    export_menu.addSeparator()
-    add_menu_action(export_menu, "Save to Saved Plots",
-                    lambda: save_card_to_gallery(ctx, "_heatmap_card"))
-    cl1.addWidget(export_btn)
-    # Pin the figure-properties button to the right edge of the plot area (where
-    # the export-style dock slides out); the FlowLayout row can't right-align it.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    layout.addWidget(wrap_ctrl_row_with_properties(
-        ctrl1, lambda: ctx.figures.open_style_panel("heatmap")))
+    status_lbl = reg.register("_heatmap_status_lbl", QLabel(""))
+    status_lbl.setObjectName("Muted")
+    band.add_scope("", status_lbl)
 
-    # ── Control row 2: cmap / scale / log ───────────────────────────────────
-    ctrl2 = QWidget(parent)
-    ctrl2.setObjectName("TabCtrl")
-    cl2 = FlowLayout(ctrl2)
-    cl2.setContentsMargins(10, 0, 10, 6)
+    # ── Display popover: everything about how the grid is coloured ──────────
+    # These change the figure's appearance rather than what it is showing, and
+    # they are set once and left. One click is the right price for the row.
+    display_btn, disp, disp_l = make_popover_button("Display ▾", band)
+    display_btn.setToolTip("Colour map, scale and layout options")
 
-    cl2.addWidget(QLabel("Color map:", ctrl2))
+    disp_l.addWidget(QLabel("Color map:", disp))
     # v2: LutSelector (gradient strip + name + searchable popover + reverse-LUT
     # button) in place of the legacy QComboBox of mpl colormap names.
     from widgets.lut_selector import LutSelector
-    cmap_cb = reg.register("_heatmap_cmap_cb", LutSelector(ctrl2))
+    cmap_cb = reg.register("_heatmap_cmap_cb", LutSelector(disp))
     # Seed with the first option (matches the legacy default).
     _initial_cmap = _CMAP_OPTIONS[0] if _CMAP_OPTIONS else "viridis"
     _initial_rev = _initial_cmap.endswith("_r")
@@ -122,87 +124,71 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
                    reversed=_initial_rev)
     cmap_cb.setMaximumWidth(220)
     cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx))
-    cl2.addWidget(cmap_cb)
+    disp_l.addWidget(cmap_cb)
 
-    cl2.addWidget(QLabel("Scale:", ctrl2))
-    scale_cb = reg.register("_heatmap_scale_cb", QComboBox(ctrl2))
+    disp_l.addWidget(QLabel("Scale:", disp))
+    scale_cb = reg.register("_heatmap_scale_cb", QComboBox(disp))
     scale_cb.addItems(_SCALE_OPTIONS)
     scale_cb.currentIndexChanged.connect(lambda _i: _on_scale_changed(ctx))
-    cl2.addWidget(scale_cb)
+    disp_l.addWidget(scale_cb)
 
-    cl2.addWidget(QLabel("vmin:", ctrl2))
-    vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(ctrl2))
+    disp_l.addWidget(QLabel("vmin:", disp))
+    vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(disp))
     vmin_edit.setFixedWidth(70)
     vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
-    cl2.addWidget(vmin_edit)
+    disp_l.addWidget(vmin_edit)
 
-    cl2.addWidget(QLabel("vmax:", ctrl2))
-    vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(ctrl2))
+    disp_l.addWidget(QLabel("vmax:", disp))
+    vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(disp))
     vmax_edit.setFixedWidth(70)
     vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
-    cl2.addWidget(vmax_edit)
+    disp_l.addWidget(vmax_edit)
 
-    transpose_btn = QPushButton("⇄ Transpose", ctrl2)
+    transpose_btn = QPushButton("⇄ Transpose", disp)
     transpose_btn.setProperty("variant", "secondary")
     transpose_btn.setToolTip("Swap rows and columns of the heatmap layout")
     transpose_btn.clicked.connect(lambda _=False: _on_transpose(ctx))
-    cl2.addWidget(transpose_btn)
+    disp_l.addWidget(transpose_btn)
 
-    repset_avg_cb = reg.register("_heatmap_repset_avg_cb", QCheckBox("Rep-set avg", ctrl2))
+    repset_avg_cb = reg.register("_heatmap_repset_avg_cb", QCheckBox("Rep-set avg", disp))
     repset_avg_cb.setToolTip(
         "When checked, cells whose well belongs to a rep-set show the "
         "average of the whole rep-set instead of the single well."
     )
     repset_avg_cb.toggled.connect(lambda _v: _on_repset_avg_changed(ctx))
-    cl2.addWidget(repset_avg_cb)
+    disp_l.addWidget(repset_avg_cb)
 
-    log_scale_cb = reg.register("_heatmap_log_scale_cb", QCheckBox("Log scale", ctrl2))
+    log_scale_cb = reg.register("_heatmap_log_scale_cb", QCheckBox("Log scale", disp))
     log_scale_cb.setToolTip(
         "Color the heatmap on a log scale (values ≤ 0 are masked)."
     )
     log_scale_cb.toggled.connect(lambda _v: _on_log_scale_changed(ctx))
-    cl2.addWidget(log_scale_cb)
+    disp_l.addWidget(log_scale_cb)
 
-    cl2.addStretch(1)
+    band.add_action(display_btn)
 
-    status_lbl = reg.register("_heatmap_status_lbl", QLabel("", ctrl2))
-    status_lbl.setObjectName("Muted")
-    cl2.addWidget(status_lbl)
+    export_btn, export_menu = make_action_menu_button("Export ▾", band,
+                                                      tooltip="Export this plot")
+    add_menu_action(export_menu, "Export CSV…", lambda: export_heatmap_data(ctx))
+    add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
+    add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
+    export_menu.addSeparator()
+    add_menu_action(export_menu, "Save to Saved Plots",
+                    lambda: save_card_to_gallery(ctx, "_heatmap_card"))
+    band.add_action(export_btn)
 
-    layout.addWidget(ctrl2)
+    band.add_action(make_properties_button(ctx, band, "heatmap"))
 
-    # ── Timepoint slider (placed directly under the option rows) ────────────
-    slider_row = QWidget(parent)
-    slider_row.setObjectName("TabCtrl")
-    sl = FlowLayout(slider_row)
-    sl.setContentsMargins(10, 4, 10, 6)
-    sl.addWidget(QLabel("t (h):", slider_row))
-    from widgets.styled_slider import StyledSlider as _StyledSlider
-    tp_slider = reg.register("_heatmap_tp_slider", _StyledSlider(Qt.Horizontal, slider_row))
-    tp_slider.setMinimum(0)
-    tp_slider.setMaximum(0)
-    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
-    sl.addWidget(tp_slider, 1)
-    tp_label = reg.register("_heatmap_tp_label", QLabel("—", slider_row))
-    tp_label.setMinimumWidth(80)
-    sl.addWidget(tp_label)
-    layout.addWidget(slider_row)
-
-    sep = QFrame(parent)
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    layout.addWidget(sep)
+    layout.addWidget(band)
 
     # ── Figure (in a v2 PlotCard — card chrome + MplToolbar) ────────────────
     from widgets.plot_card import PlotCard
-    card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False)
+    card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Heat Map")
-    _sw = make_plot_view_switcher(ctx, 'Heat Map')
-    if _sw is not None:
-        card.setLeftHeaderWidget(_sw)
-    # Hide the per-card header — the ctxbar above already carries the same controls.
-    card.setHeaderVisible(False)
+    # No card header. It was built, given a plot-type switcher duplicating the
+    # tab bar directly above it, and then hidden — chrome that cost a widget
+    # tree and showed nothing.
     card.setFigureTitle("")
     reg.register("_heatmap_card", card)
     fig = reg.register("_heatmap_fig", card.figure)

@@ -756,7 +756,7 @@ def redraw_bars(ctx) -> None:
         draw_bar_empty_state(
             ctx, ax_mean, ax_frac,
             "Load a directory.\n"
-            "Use the Open button at the top-right (⌘O) to pick a folder.",
+            "Open… is at the top of the left rail (⌘O).",
             ax_n=ax_n,
         )
         return

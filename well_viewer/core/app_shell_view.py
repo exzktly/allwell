@@ -7,19 +7,267 @@ from ``runtime_app.py`` (teardown Phase 8).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
+import theme
 from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
+
+
+#: The left rail's width. Fixed, and the one place it is stated: the app
+#: header's mode bar spans exactly this so the two share a left column.
+RAIL_W = 340
+
+
+def _dataset_button(win, parent):
+    """The rail head: the loaded dataset's name, and the actions on it.
+
+    Full rail width, so it reads as the rail's own heading rather than a control
+    dropped into it. ``Open…`` lives here rather than at the far end of the
+    topbar, next to the name of the folder it would replace.
+
+    Long folder names elide in the *middle*: dataset folders differ in their
+    tail as often as their head (``plate3_run2_2024-06-11`` against
+    ``plate3_run2_2024-06-12``), so a right-elided name can leave two datasets
+    indistinguishable. The full path is on the tooltip either way.
+    """
+    from PySide6.QtWidgets import QMenu, QToolButton
+    btn = QToolButton(parent)
+    btn.setObjectName("DatasetButton")
+    btn.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    btn.setPopupMode(QToolButton.InstantPopup)
+    btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    from widgets.icons import make_icon
+    btn.setIcon(make_icon("folder-open", 14))
+    menu = QMenu(btn)
+    menu.addAction("Open…").triggered.connect(lambda _=False: win._browse())
+    btn.setMenu(menu)
+    win._dataset_menu = menu
+    # Assign before refreshing: ``refresh_dataset_button`` reads the button off
+    # ``win``, so refreshing here would silently no-op and leave it text-less
+    # until the first dataset load.
+    win._dataset_btn = btn
+    refresh_dataset_button(win)
+    return btn
+
+
+def refresh_dataset_button(win) -> None:
+    """Point the rail head at whatever dataset is currently loaded."""
+    btn = getattr(win, "_dataset_btn", None)
+    if btn is None:
+        return
+    state = getattr(win, "_app_state", None)
+    dataset = getattr(state, "dataset", None) if state is not None else None
+    path = str(getattr(dataset, "data_dir", "") or "")
+    if not path:
+        btn.setText("No dataset — Open…")
+        btn.setToolTip("No dataset loaded. Choose a folder to review.")
+        return
+    from pathlib import Path
+    name = Path(path).name or path
+    metrics = btn.fontMetrics()
+    # Reserve the icon, the caret and the button's own padding before eliding.
+    room = max(btn.width() - 64, 80)
+    btn.setText(metrics.elidedText(name, Qt.ElideMiddle, room))
+    btn.setToolTip(path)
+
+
+class _RailTogglePlacement(QObject):
+    """Re-park the floating rail toggle whenever the window changes size."""
+
+    def __init__(self, win) -> None:
+        super().__init__(win)
+        self._win = win
+
+    def eventFilter(self, obj, event) -> bool:  # Qt naming
+        if event.type() in (QEvent.Resize, QEvent.Show):
+            position_rail_toggle(self._win)
+        return False
+
+
+def _build_rail_toggle(win) -> None:
+    """The rail's collapse toggle, floating on the rail's right margin.
+
+    Parented to the **window**, not to the rail, and positioned by hand. That is
+    the whole trick: a toggle inside the rail would be hidden along with it, so
+    the control that collapses the rail would be the one control the collapse
+    takes away. Floating it over the boundary keeps it reachable in both states
+    — it simply slides to the window's left edge once the rail is gone.
+
+    It straddles the divider rather than sitting inside the rail's content, so
+    it never collides with the dataset head or the plate picker, and it reads as
+    belonging to the edge it moves.
+    """
+    from widgets.icon_button import IconButton
+    btn = IconButton("panel-right-close", win, tooltip="Hide sidebar",
+                     checkable=True)
+    btn.setObjectName("RailToggle")
+    btn.setCursor(Qt.PointingHandCursor)
+    btn.clicked.connect(win._toggle_sidebar)
+    win._sidebar_toggle_btn = btn
+    btn.raise_()
+    return btn
+
+
+def position_rail_toggle(win) -> None:
+    """Park the collapse toggle on the rail's right edge (or the window's, when
+    the rail is hidden). Called on every resize and on every collapse."""
+    btn = getattr(win, "_sidebar_toggle_btn", None)
+    pane = getattr(win, "_h_pane", None)
+    if btn is None or pane is None:
+        return
+    rail = getattr(win, "_sidebar_root", None)
+    edge = rail.geometry().right() if (rail is not None and rail.isVisible()) else 0
+    # An overlay has no layout to size it, so it would otherwise keep Qt's
+    # default 100x30 and paint its chrome around an off-centre glyph.
+    btn.adjustSize()
+    size = btn.size()
+    # Vertically: level with the rail head, NOT centred on the splitter. The
+    # rail is full-bleed top to bottom, so a button on its edge always covers
+    # *something*; the head's row is the one band that is chrome rather than
+    # content. Centred on the splitter it sat squarely over the plate picker —
+    # the thing in this rail you click most — and drifted further onto it as the
+    # window grew; one row down it clipped the active nav item instead.
+    head = getattr(win, "_dataset_btn", None)
+    if head is not None and head.isVisible():
+        origin = head.mapTo(win, QPoint(0, 0)).y()
+        top = origin + (head.height() - size.height()) // 2
+    else:
+        top = pane.geometry().top() + theme.Spacing.sm
+    # Straddle the rail's right boundary.
+    btn.move(max(edge - size.width() // 2, 0), top)
+    btn.raise_()
+    btn.show()
+
+
+def build_page_tabs_host(win, parent):
+    """The band's right-hand slot: whichever page's tab bar is current.
+
+    The page tab bars used to sit inside each tab's own body, one row below the
+    mode band, so the top of the window was two stacked strips of chrome. They
+    are the same *kind* of thing as the mode selector — one level down — so they
+    belong beside it on one row, sharing its bottom edge.
+
+    A ``QStackedWidget`` keyed by top-level page name. Page 0 is blank and is
+    what the six pages with no sub-tabs (Statistics, Spatial, smFISH, Review
+    CSV, Batch Export, Saved Plots) show; the band keeps its height there rather
+    than collapsing, so switching pages never shifts the content below it.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+    host = QStackedWidget(parent)
+    host.setObjectName("PageTabsHost")
+    host.addWidget(QWidget(host))          # index 0 — the blank page
+    win._page_tabs_host = host
+    win._page_tabs_by_name = {}
+    return host
+
+
+def register_page_tabs(win, name: str, bar) -> None:
+    """Mount *bar* as the band's tab strip for the top-level page *name*.
+
+    The bar is bottom-aligned inside its page rather than filling it. A
+    ``QTabBar`` sizes its tabs from the font and its padding, and lays them from
+    the top of whatever height it is given — so stretched to the band's height it
+    drew its selected-tab underline part-way up, eight pixels clear of the band's
+    bottom edge while the mode bar's fill ran all the way down to it. Pinning the
+    bar to its own height and pushing it to the bottom puts the underline on the
+    band's bottom edge, where it lines up with the active mode segment beside it,
+    at any font size or band height.
+    """
+    host = getattr(win, "_page_tabs_host", None)
+    if host is None or bar is None:
+        return
+    page = QWidget(host)
+    page_layout = QVBoxLayout(page)
+    page_layout.setContentsMargins(0, 0, 0, 0)
+    page_layout.setSpacing(0)
+    page_layout.addStretch(1)
+    page_layout.addWidget(bar, 0)
+    host.addWidget(page)
+    win._page_tabs_by_name[name] = page
+    # Pages build lazily, so a bar can register *after* its page is already
+    # current — show it now rather than waiting for the next page change.
+    nb = getattr(win, "_notebook", None)
+    if nb is not None and nb.currentName() == name:
+        show_page_tabs(win, name)
+
+
+def show_page_tabs(win, name: str) -> None:
+    """Swap the band to *name*'s tab bar, or to the blank page if it has none.
+
+    Split View shows two top-level pages at once and detaches both from the
+    notebook, so ``currentName()`` names neither. The band can only carry one
+    strip, so it carries the **focused** pane's — the same pane the sidebar and
+    the tab dispatch already follow. Without this the band would fall through to
+    its blank page and both panes' sub-tabs would be unreachable while split.
+    """
+    host = getattr(win, "_page_tabs_host", None)
+    if host is None:
+        return
+    split = getattr(getattr(win, "_ctx", None), "runtime", None)
+    split = getattr(split, "split", None)
+    if split is not None and getattr(split, "active", False):
+        name = getattr(split, "focused", None) or name
+    bar = (getattr(win, "_page_tabs_by_name", None) or {}).get(name)
+    host.setCurrentWidget(bar if bar is not None else host.widget(0))
+
+
+def mirror_tab_widget(win, name: str, tab_widget):
+    """Drive a ``QTabWidget`` from a ``QTabBar`` in the band, two ways.
+
+    The two nested ``QTabWidget``s (Image Browser, Sample Definitions) are read
+    through their own API by controllers, persistence and eight test modules —
+    ``tabText`` / ``currentIndex`` / ``count`` / ``addTab`` / ``currentChanged``.
+    Converting them to a bar plus a page stack would break every one of those.
+    Hiding their own bar and mirroring it instead keeps the widget and its API
+    exactly as they are, and costs one signal each way.
+    """
+    from PySide6.QtWidgets import QTabBar
+    bar = QTabBar()
+    # Carry the source widget's name so theme.qss's one nested-sub-tab rule
+    # styles the mirror exactly as it styled the bar it replaces.
+    bar.setObjectName(tab_widget.objectName() or "PlottingSubTabs")
+    bar.setDrawBase(False)
+    bar.setExpanding(False)
+    bar.setElideMode(Qt.ElideNone)
+    bar.setUsesScrollButtons(True)
+    tab_widget.tabBar().hide()
+
+    def _sync_bar_from_widget() -> None:
+        """Rebuild the mirror when tabs are added, renamed or removed."""
+        blocked = bar.blockSignals(True)
+        try:
+            while bar.count():
+                bar.removeTab(0)
+            for i in range(tab_widget.count()):
+                bar.addTab(tab_widget.tabText(i))
+            bar.setCurrentIndex(tab_widget.currentIndex())
+        finally:
+            bar.blockSignals(blocked)
+
+    def _on_widget_changed(idx: int) -> None:
+        if bar.currentIndex() != idx:
+            blocked = bar.blockSignals(True)
+            try:
+                bar.setCurrentIndex(idx)
+            finally:
+                bar.blockSignals(blocked)
+
+    bar.currentChanged.connect(tab_widget.setCurrentIndex)
+    tab_widget.currentChanged.connect(_on_widget_changed)
+    _sync_bar_from_widget()
+    tab_widget._aw_sync_mirror = _sync_bar_from_widget  # type: ignore[attr-defined]
+    register_page_tabs(win, name, bar)
+    return bar
 
 
 def build_ui(win) -> None:
@@ -27,26 +275,34 @@ def build_ui(win) -> None:
     outer.setContentsMargins(0, 0, 0, 0)
     outer.setSpacing(0)
 
-    # Topbar
+    # The mode band. The app header's mode bar is inserted at index 0 and spans
+    # the rail's width flush against the window edge, so it and the rail below
+    # it read as one column rather than a chip row floating over one.
+    #
+    # It is pinned to the page tab bar's height and carries no vertical padding
+    # of its own, because everything in this strip sits *above* the centre
+    # pane's tab row and pushes it down. Padded to the collapse button's natural
+    # height it cost 43px on every Review tab to show one icon; at the tab bar's
+    # height the band lines up with the tab row beside it and costs 10px less.
+    from widgets.mode_bar import tab_bar_height as _tab_bar_height
     top = QWidget()
+    top.setFixedHeight(_tab_bar_height())
     top_layout = QHBoxLayout(top)
-    top_layout.setContentsMargins(14, 8, 14, 8)
+    top_layout.setContentsMargins(0, 0, theme.Spacing.md, 0)
+    top_layout.setSpacing(theme.Spacing.sm)
     win._top_bar = top
-    # Left-rail collapse toggle. Checked == the rail is hidden; the glyph
-    # flips between panel-open / panel-close.
-    from widgets.icon_button import IconButton as _IconButton
-    win._sidebar_toggle_btn = _IconButton(
-        "panel-right-close", tooltip="Hide sidebar", checkable=True)
-    win._sidebar_toggle_btn.clicked.connect(win._toggle_sidebar)
-    top_layout.addWidget(win._sidebar_toggle_btn)
+    top_layout.addWidget(build_page_tabs_host(win, top), 1)
     win._dir_label = QLabel("No data loaded")
     win._dir_label.setObjectName("Muted")
+    win._dir_label.hide()
     top_layout.addWidget(win._dir_label)
-    top_layout.addStretch(1)
-    open_btn = QPushButton("Open…")
-    open_btn.setProperty("variant", "primary")
-    open_btn.clicked.connect(win._browse)
-    top_layout.addWidget(open_btn)
+    # The rail's collapse toggle is not in this band — it floats on the rail's
+    # own right margin (see ``_build_rail_toggle``).
+    #
+    # "Open…" is not here any more either. It moved into the rail's dataset control
+    # (below), where the folder it opens is also *named* — the button and the
+    # thing it acts on in one place, instead of a button at one end of the
+    # window and a caption at the other.
     outer.addWidget(top)
 
     # 1px separator under the topbar. objectName "Separator" so it fills with
@@ -67,8 +323,7 @@ def build_ui(win) -> None:
     # tab or its content (a wide row wraps/scales to fit instead of stretching
     # the rail). A single fixed value (min == max) keeps every tab's rail
     # identical.
-    _SIDEBAR_W = 340
-    sidebar.setFixedWidth(_SIDEBAR_W)
+    sidebar.setFixedWidth(RAIL_W)
     # A tab can stack more content than the rail is tall — the Cell Browser, for
     # instance, shows the well plate AND its filter frame together, which used to
     # overlap ("crushed sidebar"). Host the content in a VERTICAL scroll area so
@@ -105,17 +360,13 @@ def build_ui(win) -> None:
     win._section_nav = _RailNav(sidebar)
     win._section_nav_keys = []
     win._section_nav_building = False
-    nav_head = QLabel("SECTION", sidebar)
-    nav_head.setObjectName("RailHead")
-    nav_head.setContentsMargins(13, 10, 13, 4)
-    nav_head.setStyleSheet(
-        f"color: {_theme_v2.Colors.text_muted}; "
-        f"font-family: {_theme_v2.Typography.family}; "
-        f"font-size: 11px; "
-        f"font-weight: 600; "
-        f"letter-spacing: 0.08em;"
-    )
-    sidebar_layout.addWidget(nav_head)
+    # The rail head is the dataset control, not a "SECTION" caption. The rail's
+    # items are self-evidently sections; what the window had nowhere was a
+    # durable statement of *which dataset* is loaded — the folder name lived in
+    # a hidden label and on the OS window title. This names it, and carries the
+    # Open action that used to sit alone at the far end of the topbar.
+    win._dataset_btn = _dataset_button(win, sidebar)
+    sidebar_layout.addWidget(win._dataset_btn)
     sidebar_layout.addWidget(win._section_nav)
     sep_nav = QFrame()
     sep_nav.setObjectName("Separator")
@@ -160,7 +411,14 @@ def build_ui(win) -> None:
 
     win._h_pane.addWidget(sidebar)
     win._sidebar_root = sidebar  # so mode toggles can hide/show the whole rail
-    win._sidebar_collapsed = False  # user-driven collapse state (Ctrl+B / top-bar btn)
+    win._sidebar_collapsed = False  # user-driven collapse state (Ctrl+B / rail btn)
+    _build_rail_toggle(win)
+    # The toggle is positioned by hand over the splitter, so it has to be
+    # re-parked whenever the window resizes. A filter rather than a
+    # ``resizeEvent`` override: ``win`` is the app's own QWidget subclass and
+    # this module builds into it rather than subclassing it.
+    win._rail_toggle_filter = _RailTogglePlacement(win)
+    win.installEventFilter(win._rail_toggle_filter)
     build_sidebar(win, win._sidebar_main_frame)
 
     # Centre stack — wraps the existing plots widget so allwell can

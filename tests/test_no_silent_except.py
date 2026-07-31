@@ -18,6 +18,14 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WELL_VIEWER = REPO_ROOT / "well_viewer"
 
+# The reusable widget library. It may not import ``well_viewer`` (that is the
+# whole point of the package), so it uses ``util.aw_safe`` — the same helper the
+# Qt-free pipeline side uses — rather than ``well_viewer.core.safe``. It was the
+# last un-guarded body of GUI code in the repo, and it is where a swallowed
+# exception is hardest to notice: a widget that quietly fails to paint or to
+# recolour just looks like a widget that was never asked to.
+WIDGETS = REPO_ROOT / "widgets"
+
 # Pipeline / services side (Qt-free; uses aw_safe.swallowed instead of
 # well_viewer.core.safe). Guarded so these don't silently regress either.
 PIPELINE_DIRS = [REPO_ROOT / "services"]
@@ -70,6 +78,16 @@ def test_no_silent_broad_except_in_well_viewer():
         "well_viewer.core.safe.swallowed()/swallow() or catch a specific "
         "exception type instead of a bare pass/continue:\n  "
         + "\n  ".join(offenders)
+    )
+
+
+def test_no_silent_broad_except_in_widgets():
+    offenders = _offenders(_walk(WIDGETS))
+    assert not offenders, (
+        "Silent broad-except handler(s) found in widgets/. Use "
+        "util.aw_safe.swallowed()/swallow() — widgets/ cannot import "
+        "well_viewer.core.safe — or catch a specific exception type instead of "
+        "a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
 
 

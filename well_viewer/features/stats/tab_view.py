@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QGridLayout, QLabel, QTextEdit,
+    QComboBox, QFrame, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, build_hline_separator, build_section_header,
 )
+from widgets.control_band import ControlBand
 from well_viewer.features.stats.controller import stats_active_group
 from well_viewer.features.stats.controller import stats_apply_drag
 from well_viewer.features.stats.controller import stats_on_test_change
@@ -27,7 +27,6 @@ from well_viewer.core.channel_state_controller import refresh_stats_property_com
 from well_viewer.core.safe import swallowed
 
 
-from widgets.flow_layout import FlowLayout
 
 def build_stats_tab(ctx, parent: QWidget) -> None:
     ctx.state.stats.groups = []
@@ -155,15 +154,50 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(0)
 
-    stats_ctrl = reg.register("_stats_ctrl", QWidget(parent))
-    stats_ctrl.setObjectName("TabCtrl")  # data-gated until a dataset loads
-    cl = QGridLayout(stats_ctrl)
-    cl.setContentsMargins(0, 0, 0, 6)
+    # ── The control band ────────────────────────────────────────────────────
+    # This tab used to state its parameters as a five-row label/field grid with
+    # "Run test" on a sixth row and a separator under it — a form, where every
+    # other tab in the pane has a control row. The same five selectors fit one
+    # band: they are all scope (which cells the test runs on and what it
+    # measures), and Run is the action.
+    stats_ctrl = reg.register("_stats_ctrl", ControlBand(parent))
 
-    test_label = reg.register("_stats_test_label", QLabel("Test:", stats_ctrl))
-    cl.addWidget(test_label, 0, 0, Qt.AlignLeft)
+    channel_cb = reg.register("_stats_channel_cb", QComboBox())
+    channel_cb.addItems(["—"])
+    channel_cb.currentIndexChanged.connect(
+        lambda _i: stats_on_test_change(ctx)
+    )
+    stats_ctrl.add_scope("Channel", channel_cb)
 
-    test_cb = reg.register("_stats_test_cb", QComboBox(stats_ctrl))
+    # Per-tab Property combo — picks which CSV column drives the test.
+    # Mirrors the Plotting band's Property combo's state, kept local so it
+    # appears next to the channel/statistic selectors.
+    from well_viewer.data.metric_labels import METRIC_ORDER as _ST_METRIC_ORDER
+    property_cb = reg.register("_stats_property_cb", QComboBox())
+    property_cb.addItems(_ST_METRIC_ORDER)
+    property_cb.currentIndexChanged.connect(
+        lambda _i: ctx.runtime.stats.property_change()
+    )
+    stats_ctrl.add_scope("Property", property_cb)
+
+    statistic_cb = reg.register("_stats_statistic_cb", QComboBox())
+    statistic_cb.addItems([
+        "Mean (above threshold)",
+        "Mean (all cells)",
+        "Median (above threshold)",
+        "Fraction above threshold",
+    ])
+    statistic_cb.setCurrentText("Mean (above threshold)")
+    statistic_cb.currentIndexChanged.connect(
+        lambda _i: stats_on_test_change(ctx)
+    )
+    stats_ctrl.add_scope("Statistic", statistic_cb)
+
+    tp_cb = reg.register("_stats_tp_cb", QComboBox())
+    tp_cb.addItems(["—"])
+    stats_ctrl.add_scope("Timepoint", tp_cb)
+
+    test_cb = reg.register("_stats_test_cb", QComboBox())
     test_cb.addItems([
         "t-test (Welch, unequal var)",
         "t-test (Student, pooled var)",
@@ -175,87 +209,21 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     test_cb.currentIndexChanged.connect(
         lambda _i: stats_on_test_change(ctx)
     )
-    cl.addWidget(test_cb, 0, 1, Qt.AlignLeft)
+    stats_ctrl.add_scope("Test", test_cb)
 
-    tp_label = reg.register("_stats_tp_label", QLabel("Timepoint:", stats_ctrl))
-    cl.addWidget(tp_label, 1, 0, Qt.AlignLeft)
-
-    tp_cb = reg.register("_stats_tp_cb", QComboBox(stats_ctrl))
-    tp_cb.addItems(["—"])
-    cl.addWidget(tp_cb, 1, 1, Qt.AlignLeft)
-
-    channel_label = reg.register("_stats_channel_label", QLabel("Channel:", stats_ctrl))
-    cl.addWidget(channel_label, 2, 0, Qt.AlignLeft)
-
-    channel_cb = reg.register("_stats_channel_cb", QComboBox(stats_ctrl))
-    channel_cb.addItems(["—"])
-    channel_cb.currentIndexChanged.connect(
-        lambda _i: stats_on_test_change(ctx)
-    )
-    cl.addWidget(channel_cb, 2, 1, Qt.AlignLeft)
-
-    # Per-tab Property combo — picks which CSV column drives the test.
-    # Mirrors the global ctxbar Property combo's state, kept local so it
-    # appears next to the channel/statistic selectors.
-    from well_viewer.data.metric_labels import METRIC_ORDER as _ST_METRIC_ORDER
-    property_label = reg.register("_stats_property_label", QLabel("Property:", stats_ctrl))
-    cl.addWidget(property_label, 3, 0, Qt.AlignLeft)
-    property_cb = reg.register("_stats_property_cb", QComboBox(stats_ctrl))
-    property_cb.addItems(_ST_METRIC_ORDER)
-    property_cb.currentIndexChanged.connect(
-        lambda _i: ctx.runtime.stats.property_change()
-    )
-    cl.addWidget(property_cb, 3, 1, Qt.AlignLeft)
-
-    statistic_label = reg.register("_stats_statistic_label", QLabel("Statistic:", stats_ctrl))
-    cl.addWidget(statistic_label, 4, 0, Qt.AlignLeft)
-
-    statistic_cb = reg.register("_stats_statistic_cb", QComboBox(stats_ctrl))
-    statistic_cb.addItems([
-        "Mean (above threshold)",
-        "Mean (all cells)",
-        "Median (above threshold)",
-        "Fraction above threshold",
-    ])
-    statistic_cb.setCurrentText("Mean (above threshold)")
-    statistic_cb.currentIndexChanged.connect(
-        lambda _i: stats_on_test_change(ctx)
-    )
-    cl.addWidget(statistic_cb, 4, 1, Qt.AlignLeft)
-
-    # Keep the label/field columns tight against the left edge. Without a
-    # trailing stretch column the grid split its width evenly across all
-    # columns, leaving a large empty gap between every label and its field.
-    cl.setColumnStretch(2, 1)
-    layout.addWidget(stats_ctrl)
-
-    # "Run test" on its own row beneath the form — previously it spanned all
-    # five grid rows in a third column and rendered vertically centered (it
-    # appeared to float beside the Channel row, disconnected from the form).
-    run_row = QWidget(parent)
-    run_row.setObjectName("TabCtrl")  # data-gated with the stats form above
-    rrl = FlowLayout(run_row)
-    rrl.setContentsMargins(0, 0, 0, 6)
-    run_btn = btn_primary(run_row, "Run test", ctx.runtime.stats.run)
-    rrl.addWidget(run_btn)
-    rrl.addStretch(1)
     # Acknowledge the replicate mode the test will use (driven by the shared
     # per-FOV toggle) so the tab is explicit about the unit of replication.
-    fov_indicator = reg.register("_stats_fov_indicator", QLabel("", run_row))
-    fov_indicator.setObjectName("MutedCaption")
-    # No word-wrap: inside a FlowLayout a wrapped label reports its longest-word
-    # width as its minimum, so the flow allocates it narrow and the single-line
+    # No word-wrap: inside a flow a wrapped label reports its longest-word width
+    # as its minimum, so the row allocates it narrow and the single-line
     # "Replicates: …" caption wraps into a tall stack even with the whole row
     # free. Left un-wrapped it keeps one line and the flow places it whole.
-    rrl.addWidget(fov_indicator)
-    stats_refresh_fov_indicator(ctx)
-    layout.addWidget(run_row)
+    fov_indicator = reg.register("_stats_fov_indicator", QLabel(""))
+    fov_indicator.setObjectName("MutedCaption")
+    stats_ctrl.add_scope("", fov_indicator)
 
-    sep = reg.register("_stats_sep", QFrame(parent))
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    layout.addWidget(sep)
+    stats_ctrl.add_action(btn_primary(stats_ctrl, "Run test", ctx.runtime.stats.run))
+    stats_refresh_fov_indicator(ctx)
+    layout.addWidget(stats_ctrl)
 
     fig_frame = reg.register("_stats_fig_frame", QWidget(parent))
     ff_l = QVBoxLayout(fig_frame)
@@ -286,7 +254,10 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         "Run test to see results here."
     )
     rl.addWidget(result_text)
-    layout.addWidget(res_frame, 1)
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, res_frame, icon="sigma",
+    ), 1)
 
     stats_update_tp_menu(ctx)
 

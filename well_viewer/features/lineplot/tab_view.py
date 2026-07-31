@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.ui_helpers import (
     add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
-    make_band_controls, make_plot_with_right_dock, make_plot_view_switcher)
+    make_band_controls, make_plot_with_right_dock, make_properties_button)
 from functools import partial
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.features.export.service import export_plot_data
@@ -27,7 +27,7 @@ from well_viewer.features.lineplot.controller import on_fig_click
 _FIG_W, _FIG_H, _DPI = 7.2, 14.0, 100
 
 
-from widgets.flow_layout import FlowLayout
+from widgets.control_band import ControlBand
 
 def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
@@ -47,15 +47,12 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     reg.register("_line_export_dock", export_dock)
     parent = plot_area
 
-    # ── controls row above the card (Channel / Metric / style / Export CSV) ──
-    line_ctrl = QWidget(parent)
-    line_ctrl.setObjectName("TabCtrl")
-    cl = FlowLayout(line_ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
+    # ── the shared control band above the card ──────────────────────────────
+    line_ctrl = ControlBand(parent)
 
     # Channel combo: kept as an offscreen widget so the rest of the app can
     # still read/write the per-renderer channel through ``app._chan_cb_line``
-    # and ``_plot_chan_var``; the global ctxbar combo is the only visible
+    # and ``_plot_chan_var``; Plotting's band combo is the only visible
     # channel control.
     chan_cb = reg.register("_chan_cb_line", QComboBox())
     chan_cb.addItems(["GFP"])
@@ -67,7 +64,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
         reg.register("_plot_chan_var", chan_cb)   # legacy aliases → same widget
         reg.register("_chan_var", chan_cb)
 
-    # The visible metric selector now lives in the global plotting ctxbar
+    # The visible metric selector now lives in Plotting's band
     # (``_plotting_metric_cb``). This hidden per-tab combo stays as a
     # back-compat shim for code that still reads ``_metric_var`` /
     # ``_metric_cb``; the global combo wins when present.
@@ -82,51 +79,43 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     mfl.addWidget(metric_cb)
     _plotting_metric_cb = ctx.widgets.get_or_none("_plotting_metric_cb")
     reg.register("_metric_var", _plotting_metric_cb if _plotting_metric_cb is not None else metric_cb)
-    cl.addWidget(metric_frame)
     metric_frame.hide()
 
     # Fold-change normalization collapses into a popover button (C1) so it no
-    # longer needs its own row; the stretch pushes the action buttons right.
+    # longer needs its own row.
     from well_viewer.domain.fold_change_controls import install_fold_change_controls
     from well_viewer.core.ui_helpers import make_popover_button
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")
     install_fold_change_controls(ctx, _fc_panel, _fc_lay, scope="line")
-    cl.addWidget(_fc_btn)
+    line_ctrl.add_action(_fc_btn)
 
     # Error band (SEM/SD + Spread) collapses into a "Display ▾" popover (C1)
     # rather than a separate card-controls row beneath the figure.
     _disp_btn, _disp_panel, _disp_lay = make_popover_button("Display ▾", line_ctrl)
     _disp_btn.setToolTip("Error band (SEM/SD) and per-FOV spread")
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
-    cl.addWidget(_disp_btn)
+    line_ctrl.add_action(_disp_btn)
 
-    cl.addStretch(1)
-
-    export_btn, export_menu = make_action_menu_button("Export", line_ctrl, tooltip="Export this plot")
+    export_btn, export_menu = make_action_menu_button("Export ▾", line_ctrl,
+                                                      tooltip="Export this plot")
     add_menu_action(export_menu, "Export CSV…", lambda: export_plot_data(ctx))
     add_menu_action(export_menu, "Copy SVG", lambda: copy_active_card_as_svg(ctx))
     add_menu_action(export_menu, "Save Figure…", lambda: save_active_card_figure(ctx))
     export_menu.addSeparator()
     add_menu_action(export_menu, "Save to Saved Plots",
                     lambda: save_card_to_gallery(ctx, "_line_card"))
-    cl.addWidget(export_btn)
-    # Pin the figure-properties button to the right edge of the plot area (where
-    # the export-style dock slides out). The FlowLayout control row can't
-    # right-align it, so wrap the row via the shared helper.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    layout.addWidget(wrap_ctrl_row_with_properties(
-        line_ctrl, lambda: ctx.figures.open_style_panel("line")))
+    line_ctrl.add_action(export_btn)
+    line_ctrl.add_action(make_properties_button(ctx, line_ctrl, "line"))
+    layout.addWidget(line_ctrl)
 
     # ── the figure, in a v2 PlotCard (card chrome + MplToolbar) ──────────────
-    card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
+    card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
+                    header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Line Graphs")
-    _sw = make_plot_view_switcher(ctx, 'Line Graphs')
-    if _sw is not None:
-        card.setLeftHeaderWidget(_sw)
-    # Hide the per-card header — the ctxbar above already carries the same controls.
-    card.setHeaderVisible(False)
+    # No card header. It was built, given a plot-type switcher duplicating the
+    # tab bar directly above it, and then hidden.
     card.setFigureTitle("")          # the tab name is the title; keep the header lean
     # Widget handles go through the WidgetRegistry; legacy ``app._line_*``
     # reads are forwarded to it by WellViewerApp.__getattr__.
@@ -141,7 +130,10 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     )
     canvas = reg.register("_line_canvas", card.canvas)
     canvas.setMinimumHeight(int(_FIG_H * _DPI))
-    card.setMinimumHeight(int(_FIG_H * _DPI) + 110)   # + header / controls / toolbar rows
+    # The canvas' pin plus the card's own chrome, measured rather than a
+    # literal: this used to add a hardcoded 110 counting "header / controls /
+    # toolbar rows", and the card no longer builds a header.
+    card.setMinimumHeight(int(_FIG_H * _DPI) + card.chromeHeight())
 
     # Error band now lives in the "Display ▾" popover on the control row (C1);
     # no separate card-controls row beneath the header.

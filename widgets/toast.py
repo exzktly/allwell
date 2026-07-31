@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.status_dot import StatusDot
+from util.aw_safe import swallowed
 
 
 class Toast(QWidget):
@@ -99,7 +100,7 @@ class Toast(QWidget):
             app = QApplication.instance()
             app_qss = app.styleSheet() if app else ""
         except Exception:
-            pass
+            swallowed()
         t = cls(parent, text, kind=kind, msec=msec)
         if app_qss and not parent:
             # Top-level with no styled parent: make sure tokens still apply.

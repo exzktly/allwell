@@ -61,8 +61,10 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
     hdr.addWidget(title)
     hdr.addStretch(1)
     from widgets.icon_button import IconButton as _IconButton
-    reload_ib = _IconButton("download", parent)
-    reload_ib.setToolTip("Reload pipeline_info.json from the data folder.")
+    # "refresh-cw", not "download": this re-reads a file already on disk in the
+    # dataset folder. A download glyph promised a fetch that never happens.
+    reload_ib = _IconButton("refresh-cw", parent)
+    reload_ib.setToolTip("Re-read pipeline_info.json from the data folder.")
     hdr.addWidget(reload_ib)
     layout.addLayout(hdr)
 

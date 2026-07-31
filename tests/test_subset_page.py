@@ -46,6 +46,37 @@ def test_readout_seeds_wells_timepoints_fovs(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_selected_wells_get_a_uniform_pre_run_tint(qapp, tmp_path):
+    """Regression guard (UX audit P1-1): the picker's own default "selected"
+    rendering cycles a rank-based rainbow trace colour per selection order
+    (WellPlateSelector's generic multi-select look) -- distracting on its
+    own, and on this specific page it also risked reading as one of the
+    real post-run state colours (well_color("empty") is theme.Colors.accent,
+    the exact hue an unselected-but-enabled well already renders as a faint
+    default tint). Every selected well must instead get the same single
+    accent_dim tint, and an unselected well must get none."""
+    import theme
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01", "B02", "C03"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    page._plate.setSelectedWellIds(["A01"])
+    colors = dict(page._plate._grid._colors)
+    from PySide6.QtGui import QColor
+    from widgets.well_plate_selector import _parse_well_id
+    a01 = _parse_well_id("A01")
+    b02 = _parse_well_id("B02")
+    assert colors.get(a01) == QColor(theme.Colors.accent_dim)
+    assert colors.get(b02) is None
+    ctrl.shutdown()
+
+
 def test_run_gate_requires_destination_and_selection(qapp, tmp_path):
     from datasets.subset.controller import SubsetController
 

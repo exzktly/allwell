@@ -156,7 +156,7 @@ class SubsetPage(QWidget):
         # wherever Qt's default alignment happens to land it.
         self._plate.setMaximumHeight(210)
         self._plate.setMaximumWidth(330)
-        self._plate.selectionChanged.connect(self._refresh_run_enabled)
+        self._plate.selectionChanged.connect(self._on_plate_selection_changed)
         outer.addWidget(self._plate, 0, Qt.AlignLeft)
 
         outer.addWidget(QLabel("Timepoints", self))
@@ -324,6 +324,20 @@ class SubsetPage(QWidget):
         self._refresh_run_enabled()
 
     # ── internals ────────────────────────────────────────────────────────────
+    def _on_plate_selection_changed(self, wells: list[str]) -> None:
+        # A dedicated pre-run tint, not the picker's own default multi-select
+        # look -- WellPlateSelector's default "selected" rendering cycles a
+        # rank-based rainbow trace colour per selection order, and this same
+        # widget is also where SubsetController paints post-run state
+        # colours (pending/copying/done/empty — the last of which is
+        # theme.Colors.accent, the exact hue a plain unselected-but-enabled
+        # well already renders in a faint tint by default). accent_dim reads
+        # as "chosen, not yet run" without colliding with either.
+        self._plate.clearWellColors()
+        for w in wells:
+            self._plate.setWellColor(w, theme.Colors.accent_dim)
+        self._refresh_run_enabled()
+
     def _on_source_changed(self) -> None:
         self._open_btn.setVisible(False)
         self.dashboard.reset()

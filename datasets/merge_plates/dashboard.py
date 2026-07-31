@@ -56,6 +56,7 @@ class MergePlatesDashboard(PlateProgress):
         self._plate.setEnabledWells(wells)
         for w in wells:
             self._plate.setWellColor(w, self._well_color(w))
+            self._plate.setWellMarker(w, self._well_marker(w))
         self.set_overall_range(len(wells))
         self.set_overall(0)
         self._refresh_rail()
@@ -66,9 +67,23 @@ class MergePlatesDashboard(PlateProgress):
             return
         self._well_stage[w] = stage
         self._plate.setWellColor(w, self._well_color(w))
-        self._plate.setWellMarker(w, "⚙" if stage == "merging" else None)
+        self._plate.setWellMarker(w, self._well_marker(w))
         self.set_overall(sum(1 for s in self._well_stage.values() if s == "merged"))
         self._refresh_rail()
+
+    def _well_marker(self, w: str) -> str | None:
+        # "merging" always wins -- it's transient and every dashboard's own
+        # in-flight marker convention (see ConcatDashboard/ImportLooseDashboard's
+        # "⚙"). A dataset-2 well keeps its "2" marker in every other state so
+        # its origin survives independently of colour -- colour alone
+        # (success vs. accent2) is unreadable to anyone who can't distinguish
+        # the two hues, and it's also the only thing telling the two datasets
+        # apart once both are "merged" green/lilac dots on a small plate.
+        if self._well_stage.get(w) == "merging":
+            return "⚙"
+        if self._well_origin.get(w) == "ds2":
+            return "2"
+        return None
 
     def set_done(self, summary: str) -> None:
         self._outcome = "done"
@@ -90,7 +105,11 @@ class MergePlatesDashboard(PlateProgress):
         if stage == "merging":
             return theme.Colors.warn
         if stage == "merged":
-            return theme.Colors.success if self._well_origin.get(w) == "ds1" else theme.Colors.accent
+            # accent2, not accent -- accent already means "anomaly" on two
+            # other dashboards (Concatenate's merged-with-no-CSV, Subset's
+            # no-rows-matched), and a well merely belonging to "dataset 2" is
+            # not one (see theme.Colors.accent2's own docstring).
+            return theme.Colors.success if self._well_origin.get(w) == "ds1" else theme.Colors.accent2
         if stage == "pending":
             return theme.Colors.text_muted
         return None
@@ -135,7 +154,7 @@ class MergePlatesDashboard(PlateProgress):
             (theme.Colors.text_muted, "pending"),
             (theme.Colors.warn, "merging"),
             (theme.Colors.success, "merged — dataset 1"),
-            (theme.Colors.accent, "merged — dataset 2"),
+            (theme.Colors.accent2, "merged — dataset 2 (marked “2”)"),
         ]
         for color, txt in items:
             row_w = QWidget(self._legend_host)

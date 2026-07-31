@@ -309,3 +309,57 @@ def test_mode_bar_segments_are_flush(styled_app):
     segs = [bar.layout().itemAt(i).widget() for i in range(bar.count())]
     for a, b in zip(segs, segs[1:]):
         assert b.geometry().left() - a.geometry().right() <= 1, "gutter between segments"
+
+
+# ── the page tab strip sits on the band's bottom edge ───────────────────────
+@pytest.mark.parametrize("band_h,point_size", [(33, 9), (33, 12), (44, 9), (28, 8)])
+def test_page_tab_bar_is_flush_with_the_band_bottom(styled_app, band_h, point_size):
+    """The selected tab's underline must land on the band's bottom edge, level
+    with the active mode segment beside it.
+
+    A ``QTabBar`` sizes its tabs from the font and its padding and lays them
+    from the *top* of whatever height it is given. Stretched to the band's
+    height it drew the underline part-way up — measured at eight pixels clear
+    of the bottom edge, while the mode bar's fill ran all the way down to it.
+    The fix is to pin the bar to its own height and push it to the bottom, so
+    this holds at any band height or font size rather than at one tuned pair.
+    """
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QHBoxLayout, QTabBar, QWidget
+    from well_viewer.core.app_shell_view import (
+        build_page_tabs_host, register_page_tabs, show_page_tabs,
+    )
+
+    previous = styled_app.font()
+    font = QFont(previous)
+    font.setPointSize(point_size)
+    styled_app.setFont(font)
+    try:
+        win = QWidget()
+        layout = QHBoxLayout(win)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(build_page_tabs_host(win, win), 1)
+        win._notebook = None
+
+        bar = QTabBar()
+        bar.setObjectName("PlottingSubTabs")
+        bar.setDrawBase(False)
+        for name in ("Bar Plots", "Line Graphs"):
+            bar.addTab(name)
+        bar.setCurrentIndex(0)
+        register_page_tabs(win, "Plotting", bar)
+        show_page_tabs(win, "Plotting")
+
+        win.setFixedHeight(band_h)
+        win.show()
+        styled_app.processEvents()
+
+        page = win._page_tabs_by_name["Plotting"]
+        gap = page.height() - (bar.pos().y() + bar.height())
+        assert gap == 0, (
+            f"at a {band_h}px band and {point_size}pt text the tab bar ends "
+            f"{gap}px above the band's bottom edge, so the active tab's "
+            "underline floats clear of it"
+        )
+    finally:
+        styled_app.setFont(previous)

@@ -162,12 +162,28 @@ def build_page_tabs_host(win, parent):
 
 
 def register_page_tabs(win, name: str, bar) -> None:
-    """Mount *bar* as the band's tab strip for the top-level page *name*."""
+    """Mount *bar* as the band's tab strip for the top-level page *name*.
+
+    The bar is bottom-aligned inside its page rather than filling it. A
+    ``QTabBar`` sizes its tabs from the font and its padding, and lays them from
+    the top of whatever height it is given — so stretched to the band's height it
+    drew its selected-tab underline part-way up, eight pixels clear of the band's
+    bottom edge while the mode bar's fill ran all the way down to it. Pinning the
+    bar to its own height and pushing it to the bottom puts the underline on the
+    band's bottom edge, where it lines up with the active mode segment beside it,
+    at any font size or band height.
+    """
     host = getattr(win, "_page_tabs_host", None)
     if host is None or bar is None:
         return
-    host.addWidget(bar)
-    win._page_tabs_by_name[name] = bar
+    page = QWidget(host)
+    page_layout = QVBoxLayout(page)
+    page_layout.setContentsMargins(0, 0, 0, 0)
+    page_layout.setSpacing(0)
+    page_layout.addStretch(1)
+    page_layout.addWidget(bar, 0)
+    host.addWidget(page)
+    win._page_tabs_by_name[name] = page
     # Pages build lazily, so a bar can register *after* its page is already
     # current — show it now rather than waiting for the next page change.
     nb = getattr(win, "_notebook", None)

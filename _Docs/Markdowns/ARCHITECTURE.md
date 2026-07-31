@@ -704,6 +704,15 @@ one.
 sharing its bottom edge. They used to sit inside each tab's own body, one row
 below, so the top of the window was two stacked strips of chrome; they are the
 same kind of control as the mode selector, one level down, and belong beside it.
+Each bar is **bottom-aligned** inside its page rather than filling it. A
+`QTabBar` sizes its tabs from the font and its padding and lays them from the
+top of whatever height it is given, so stretched to the band's height it drew
+its selected-tab underline part-way up — eight pixels clear of the band's bottom
+edge, while the mode bar's fill ran all the way down to it. Pinning the bar to
+its own height and pushing it to the bottom puts the underline on the band's
+bottom edge, level with the active mode segment beside it, at any font size or
+band height.
+
 `build_page_tabs_host` is the slot — a `QStackedWidget` keyed by top-level page
 name, whose page 0 is blank and is what the six pages with no sub-tabs
 (Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots) show. The

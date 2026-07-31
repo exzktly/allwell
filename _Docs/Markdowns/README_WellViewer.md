@@ -654,6 +654,20 @@ tabs and is what every plot / aggregate / export consumes.
   well picker, and both panes refresh on a selection or channel change. It
   needs a second tab to show something; a tab can't be split against itself.
 
+#### One controls row on every tab
+
+Every tab in the Review pane states its controls the same way, in one row above
+the content: **what is shown** on the left — channel, property, timepoint,
+threshold, and whatever else scopes the data — and **what to do with it** on the
+right, flush to the edge: `Display ▾`, `Export ▾`, and the **Properties** button.
+Nothing is centred; which view you are looking at is the tab bar's job. When the
+pane is too narrow the left side wraps onto a second line rather than squeezing
+its controls, so nothing ever becomes unreachable.
+
+The Image Table is the one deliberate exception. Its crop and ON-threshold
+controls act on the images directly below them, so they stay in a strip beside
+the images rather than moving to a row at the top of the tab.
+
 #### Figure actions — the Export dropdown · Properties
 
 Every plot tab (Bar Plot, Line Graphs, Scatter, Distribution, Heat Map,
@@ -940,7 +954,7 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Sample Definitions](#sample-definitions).
 - **Controls** — the group editor is in the sidebar; everything else is on the
-  same one-row controls band the other tabs use — **Channel**, **Property**,
+  same one-row controls band every tab uses — **Channel**, **Property**,
   **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
   that mirrors the plot tabs' FOV mode, with **Run test** at the right.
 - **Replicate unit.** What counts as one replicate is the single rule shared
@@ -1072,7 +1086,7 @@ between colonies versus inside each one?"*.
 
 Everything runs on the **currently selected well and one timepoint** at a
 time (spatial statistics are per-frame). Pick a well in the plate map, open
-Spatial, and use the top-row controls:
+Spatial, and use the controls row:
 
 - **Level** — the scale of the analysis:
   - **Cell** — per-cell distance metrics and clustering statistics in the
@@ -1089,9 +1103,14 @@ Spatial, and use the top-row controls:
   or any user-defined ratio is eligible.
 - **Timepoint** — which frame to analyse. *First available* uses the
   smallest finite `timepoint_hours` in the well.
+- **Recompute** — forces a fresh compute. The per-frame levels (Cell, Colony,
+  Intra-colony) recompute on every control change, so this is only strictly
+  needed at Summary level, where changes are queued until you press it (one
+  DBSCAN per well × timepoint is expensive to run on every keystroke).
 
-The second row controls **colony detection** — colonies are computed, not
-manually annotated:
+The rest of the row controls **colony detection** — colonies are computed, not
+manually annotated. These controls appear only at the levels that use them, so
+the row stays short at Cell level and grows at Colony / Intra-colony / Summary:
 
 - **Method** — **DBSCAN** (default) is density-based: cells whose
   ε-neighbourhood contains ≥ min-samples other cells seed a colony; the
@@ -1220,11 +1239,14 @@ channel for every well).
   Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
   you want a plate view: Wrap only labels the first band, whereas Plate labels every
   row and column correctly.
-- **Action strip** — **Generate** · **Reset table** (back to defaults) · **Clear
-  images** · **Crop** (drag a region on any image) · an **ON threshold** value with
-  a **channel** dropdown choosing which channel it applies to (the same ThreshFracOn
-  shared with Cell Gating and the plot tabs) · **Export** (to file · Copy PNG / SVG ·
-  Save to Saved Plots) · **Zoom** · a **Properties** button that slides out a
+- **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
+  defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
+  in one click) · **Crop ▾** (drag a region on any image — the button reads the
+  current crop, `Crop · (full FOV)` when there is none) · an **ON threshold** value
+  with a **channel** dropdown choosing which channel it applies to (the same
+  ThreshFracOn shared with Cell Gating and the plot tabs) · **Export ▾** (to file ·
+  Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
+  % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
   plus the **Scale bar** and **Cell labels** options below.
 - **Scale bar** — **on by default**: enter the **pixel size (µm/px)** and a **bar
@@ -1301,9 +1323,11 @@ background-flattening / subtraction methods on a **single raw frame**, without
 re-running the pipeline (it shares the pipeline's exact correction code).
 
 - **Needs** — a loaded dataset with image ZIPs.
-- **Controls** — pick the frame's **well on the ever-present left-rail plate**
-  (single-well here — the tab has no plate of its own, it drives the sidebar
-  picker), and the **channel / timepoint / FOV** from the in-tab dropdowns;
+- **Controls** — all in the **right-hand panel**, where every other per-tab
+  inspector in the app sits. Pick the frame's **well on the ever-present
+  left-rail plate** (single-well here — the tab has no plate of its own, it
+  drives the sidebar picker), and the **channel / timepoint / FOV** from the
+  panel's dropdowns;
   choose any flat-field + background method and tune its parameters; a **Raw /
   Flat-field / Corrected** toggle; LUT / colormap / binary + precomputed-mask
   overlay; pan / zoom; per-source LUT memory; a frame-local binary threshold; a
@@ -1321,8 +1345,11 @@ Operates on **one well at a time** (spot detection is per-frame).
 - **Needs** — at least one channel configured as smFISH at pipeline time (its
   CSV carries a `_smfish_count` column) and image ZIPs. Selecting several wells
   collapses the view to a single well.
-- **Controls** — the detection parameters + threshold sweep; **Apply to All**
-  to push one threshold across the whole dataset.
+- **Controls** — **Channel / FOV / Timepoint** pick the frame, **Threshold**
+  sets the spot-detection cut-off (it writes the CSV's `smFISH_Thresh`), and
+  **LUT Min / LUT Max** set the display brightness. On the right: **Apply Global
+  Threshold** to push one threshold across the whole dataset, **Refresh**,
+  **Hide Overlays**, and **This Frame CDF**.
 - **Apply to All progress** — the run counts spots in every well, then writes
   the counts into the per-well CSVs. Both passes drive the progress bar in the
   status row at the bottom of the window — the same bar a dataset load uses —

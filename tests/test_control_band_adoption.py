@@ -26,7 +26,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 #: here in the same commit that adopts the band in it; never remove one.
 ADOPTED = (
     "well_viewer/core/centre_view.py",          # Plotting — all five sub-tabs
+    "well_viewer/features/barplot/tab_view.py",
+    "well_viewer/features/distribution/tab_view.py",
     "well_viewer/features/heatmap/tab_view.py",
+    "well_viewer/features/lineplot/tab_view.py",
+    "well_viewer/features/multivariate/tab_view.py",
+    "well_viewer/features/scatter/agg_tab_view.py",
+    "well_viewer/features/scatter/cells_tab_view.py",
+    "well_viewer/features/image_browser/cell_browser/tab_view.py",
+    "well_viewer/features/preview/panel_view.py",          # Segmentation
+    "well_viewer/features/review_csv/tab_view.py",
+    "well_viewer/features/smfish/tab_view.py",
+    "well_viewer/features/spatial/tab_view.py",
     "well_viewer/features/stats/tab_view.py",
 )
 

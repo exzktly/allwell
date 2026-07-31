@@ -262,6 +262,10 @@ class Metrics:
     toolbtn_pad_h = 4  # QToolButton horizontal padding (kept compact)
     input_pad_v  = 4   # QLineEdit / QSpinBox / QComboBox vertical padding
     input_pad_h  = 8   # …horizontal padding
+    # Width of a right-hand inspector dock. One number for every dock in the
+    # Review pane, so the Properties sidebar and the Playground's controls do
+    # not open to different widths and read as two different kinds of panel.
+    dock_w       = 360
 
 
 def _icon_path(name: str) -> str:
@@ -629,12 +633,14 @@ QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
    rectangular-tab QSS"; no such rule existed, so all of them fell through to the
    generic QTabBar::tab rule and were indistinguishable from the top level. */
 QTabBar#SampleDefinitionsSubTabs::tab,
+QTabBar#ImageBrowserSubTabs::tab,
 QTabBar#PlottingSubTabs::tab {{
     padding: {s.xs}px {s.md}px;
     min-width: 72px;
     color: {c.text_secondary};
 }}
 QTabBar#SampleDefinitionsSubTabs::tab:selected,
+QTabBar#ImageBrowserSubTabs::tab:selected,
 QTabBar#PlottingSubTabs::tab:selected {{
     color: {c.text_primary};
     border-bottom: 2px solid {c.accent};

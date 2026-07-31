@@ -12,10 +12,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QLabel, QSpinBox, QWidget,
+    QComboBox, QDoubleSpinBox, QPushButton, QSpinBox, QWidget,
 )
 
-from widgets.flow_layout import FlowLayout
+from widgets.control_band import ControlBand
+from widgets.icons import make_icon
 
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
@@ -126,30 +127,30 @@ _METHOD_TOOLTIPS = {
 
 def build_spatial_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
-    from widgets.icon_button import IconButton
     from widgets.segmented_control import SegmentedControl
-    from well_viewer.core.ui_helpers import make_plot_with_right_dock
+    from well_viewer.core.ui_helpers import (
+        make_plot_with_right_dock, make_properties_button,
+    )
 
     st = ctx.state.feature_slice("spatial")
     reg = ctx.widgets
 
     # The tab body builds inside the plot area (left of the Properties dock).
-    # The two control rows use FlowLayout, so when the dock opens — or Split View
-    # narrows the pane — they wrap onto extra lines instead of crushing / hiding
-    # the dense combos.
+    # There is one control row: the shared band. This tab used to spend two —
+    # level/viz/metric/timepoint on the first, colony-detection and summary
+    # parameters on the second — but the parameter groups are shown only when
+    # the current (level, viz) actually consumes them, and the band's flow skips
+    # a hidden group, so at any one setting the row carries a handful of live
+    # controls and wraps only when the pane is genuinely too narrow.
     plot_area, layout, export_dock = make_plot_with_right_dock(parent)
     reg.register("_spatial_export_dock", export_dock)
     parent = plot_area
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
-    # ── row 1: level + viz + metric + timepoint + actions ────────────────────
-    row1 = QWidget(parent)
-    row1.setObjectName("TabCtrl")
-    r1 = FlowLayout(row1)
-    r1.setContentsMargins(10, 6, 10, 4)
+    band = ControlBand(parent)
 
-    level_seg = SegmentedControl(row1)
+    level_seg = SegmentedControl()
     for key, label in _LEVEL_ORDER:
         level_seg.addSegment(text=label, data=key)
     level_seg.setCurrentByData(st.level)
@@ -157,10 +158,9 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     level_seg.currentChanged.connect(
         lambda idx: sp_ctrl.sp_set_level(ctx, _LEVEL_ORDER[idx][0]))
     reg.register("_sp_level_seg", level_seg)
-    r1.addWidget(level_seg)
+    band.add_scope("Level", level_seg)
 
-    r1.addWidget(QLabel("Viz:", row1))
-    viz_cb = QComboBox(row1)
+    viz_cb = QComboBox()
     viz_cb.setMinimumWidth(180)
     viz_cb.setToolTip(
         "Visualisation of the current level. Hover any option in the "
@@ -169,19 +169,17 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     viz_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_viz(ctx, viz_cb.currentData() or ""))
     reg.register("_sp_viz_cb", viz_cb)
-    r1.addWidget(viz_cb)
+    band.add_scope("Viz", viz_cb)
 
-    r1.addWidget(QLabel("Metric:", row1))
-    metric_cb = QComboBox(row1)
+    metric_cb = QComboBox()
     metric_cb.setMinimumWidth(160)
     metric_cb.setToolTip(_METRIC_PICKER_TOOLTIP)
     metric_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_metric(ctx, metric_cb.currentData() or ""))
     reg.register("_sp_metric_cb", metric_cb)
-    r1.addWidget(metric_cb)
+    band.add_scope("Metric", metric_cb)
 
-    r1.addWidget(QLabel("Timepoint:", row1))
-    tp_cb = QComboBox(row1)
+    tp_cb = QComboBox()
     tp_cb.addItem("First available", None)
     tp_cb.setToolTip(
         "Spatial analysis is per frame — pick which timepoint to analyse. "
@@ -190,27 +188,28 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     tp_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_timepoint(ctx, tp_cb.currentData()))
     reg.register("_sp_tp_cb", tp_cb)
-    r1.addWidget(tp_cb)
+    band.add_scope("Timepoint", tp_cb)
 
-    r1.addStretch(1)
-
-    recompute_btn = IconButton(
-        "check", row1,
-        tooltip=(
+    # Labelled, not a bare tick. A "✓" button says nothing about what it does;
+    # this one forces a fresh compute, and the glyph now says so too.
+    recompute_btn = QPushButton("Recompute")
+    recompute_btn.setProperty("variant", "secondary")
+    recompute_btn.setIcon(make_icon("refresh-cw", 14))
+    recompute_btn.setToolTip(
             "Force a fresh compute.\n"
             "Per-frame levels (Cell / Colony / Intra-colony) auto-recompute "
             "on every control change, so the button is only strictly needed "
             "at Summary level — where colony parameter / metric / well-"
             "selection changes are queued until you click it (one DBSCAN "
             "per (well × timepoint) frame is expensive to run on every "
-            "keystroke)."
-        ))
+            "keystroke).")
     recompute_btn.clicked.connect(lambda _=False: sp_ctrl.sp_recompute(ctx))
     reg.register("_sp_recompute_btn", recompute_btn)
-    r1.addWidget(recompute_btn)
+    band.add_action(recompute_btn)
 
     from well_viewer.core.ui_helpers import add_menu_action, make_action_menu_button
-    export_btn, export_menu = make_action_menu_button("Export", row1, tooltip="Export this plot")
+    export_btn, export_menu = make_action_menu_button("Export ▾", band,
+                                                      tooltip="Export this plot")
     export_csv_act = add_menu_action(
         export_menu, "Export Summary CSV…",
         lambda: sp_ctrl.sp_export_summary_csv(ctx),
@@ -222,30 +221,14 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
                     lambda: save_card_to_gallery(ctx, "_sp_card"))
     reg.register("_sp_export_btn", export_btn)
     reg.register("_sp_export_csv_act", export_csv_act)
-    r1.addWidget(export_btn)
+    band.add_action(export_btn)
+    band.add_action(make_properties_button(ctx, band, "spatial"))
 
-    # Pin the figure-properties button to the right edge of the plot area (where
-    # the export-style dock slides out); the FlowLayout row can't right-align it.
-    from well_viewer.core.ui_helpers import wrap_ctrl_row_with_properties
-    layout.addWidget(wrap_ctrl_row_with_properties(
-        row1, lambda: ctx.figures.open_style_panel("spatial")))
-
-    # ── row 2: parameters (colony detection + summary display + boundary) ────
-    # Row 2 hosts every parameter control. Groups are shown / hidden based on
-    # what the current (level, viz) actually consumes, so the row never gets
-    # crowded with irrelevant knobs.
-    row2 = QWidget(parent)
-    row2.setObjectName("TabCtrl")
-    r2 = FlowLayout(row2)
-    r2.setContentsMargins(10, 2, 10, 6)
-
-    colonies_label = QLabel("Colonies:", row2)
-    colonies_label.setToolTip(
-        "Colonies are auto-detected — no manual annotation. Adjust the "
-        "controls in this row to sweep detection sensitivity live."
-    )
-    r2.addWidget(colonies_label)
-    method_cb = QComboBox(row2)
+    # ── parameters: colony detection, boundary, summary display ─────────────
+    # Each group is shown only when the current (level, viz) actually consumes
+    # it, and the band's flow skips a hidden group, so the row never carries an
+    # irrelevant knob.
+    method_cb = QComboBox()
     for key, label in _METHOD_ORDER:
         method_cb.addItem(label, key)
         idx = method_cb.count() - 1
@@ -258,10 +241,14 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     method_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_colony_method(ctx, method_cb.currentData()))
     reg.register("_sp_method_cb", method_cb)
-    r2.addWidget(method_cb)
+    method_cb.setToolTip(
+        method_cb.toolTip()
+        + "\n\nColonies are auto-detected — no manual annotation. Sweep these "
+        "controls to change detection sensitivity live."
+    )
+    grp_colonies = band.add_scope("Colonies", method_cb)
 
-    eps_label = QLabel("ε ×median NND:", row2)
-    eps_label.setToolTip(
+    _EPS_TIP = (
         "Colony-membership radius ε as a multiple of the median "
         "nearest-neighbour distance in this frame. Self-scales to the "
         "well's density — the same multiplier gives roughly the same "
@@ -269,63 +256,52 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
         "Larger ε → fewer, bigger colonies. Smaller ε → more, tighter "
         "colonies (and more noise cells under DBSCAN)."
     )
-    r2.addWidget(eps_label)
-    eps_spin = QDoubleSpinBox(row2)
+    eps_spin = QDoubleSpinBox()
     eps_spin.setRange(0.5, 20.0)
     eps_spin.setSingleStep(0.5)
     eps_spin.setDecimals(2)
     eps_spin.setValue(float(st.colony_eps_mult))
-    eps_spin.setToolTip(eps_label.toolTip())
+    eps_spin.setToolTip(_EPS_TIP)
     eps_spin.valueChanged.connect(
         lambda v: sp_ctrl.sp_set_colony_eps_mult(ctx, v))
     reg.register("_sp_eps_spin", eps_spin)
-    r2.addWidget(eps_spin)
+    grp_eps = band.add_scope("ε ×median NND", eps_spin)
 
-    ms_label = QLabel("Min. samples:", row2)
-    ms_label.setToolTip(
+    _MS_TIP = (
         "DBSCAN 'min-samples' — the minimum count of cells within ε "
         "required for a cell to seed a colony. Cells with fewer neighbours "
         "are marked noise (drawn grey on the spatial map).\n"
         "Ignored by Single-linkage (which never rejects a point)."
     )
-    r2.addWidget(ms_label)
-    ms_spin = QSpinBox(row2)
+    ms_spin = QSpinBox()
     ms_spin.setRange(1, 50)
     ms_spin.setValue(int(st.colony_min_samples))
-    ms_spin.setToolTip(ms_label.toolTip())
+    ms_spin.setToolTip(_MS_TIP)
     ms_spin.valueChanged.connect(
         lambda v: sp_ctrl.sp_set_colony_min_samples(ctx, v))
     reg.register("_sp_min_samples_spin", ms_spin)
-    r2.addWidget(ms_spin)
+    grp_ms = band.add_scope("Min. samples", ms_spin)
 
-    bnd_label = QLabel("Boundary %:", row2)
-    bnd_label.setToolTip(
+    _BND_TIP = (
         "Fraction of each colony's cells (per colony, by percentile of "
         "distance-to-hull-edge) tagged 'boundary'. Drives the "
         "Boundary-vs-Interior violin split; 20 % is a sensible default."
     )
-    r2.addWidget(bnd_label)
-    bnd_spin = QDoubleSpinBox(row2)
+    bnd_spin = QDoubleSpinBox()
     bnd_spin.setRange(1.0, 50.0)
     bnd_spin.setSingleStep(1.0)
     bnd_spin.setDecimals(1)
     bnd_spin.setValue(float(st.boundary_pct))
-    bnd_spin.setToolTip(bnd_label.toolTip())
+    bnd_spin.setToolTip(_BND_TIP)
     bnd_spin.valueChanged.connect(
         lambda v: sp_ctrl.sp_set_boundary_pct(ctx, v))
     reg.register("_sp_boundary_spin", bnd_spin)
-    r2.addWidget(bnd_spin)
-
-    # A visible spacer between colony-detection and summary-display groups so
-    # they read as separate clusters when both are visible at Summary level.
-    r2.addSpacing(18)
+    grp_bnd = band.add_scope("Boundary %", bnd_spin)
 
     # Summary-only controls: which FrameSummary field to project + heatmap /
     # line-plot toggle. Shown only at Summary level, alongside the colony
     # detection params (which still matter — one DBSCAN per frame).
-    summary_metric_label = QLabel("Summary:", row2)
-    r2.addWidget(summary_metric_label)
-    summary_metric_cb = QComboBox(row2)
+    summary_metric_cb = QComboBox()
     summary_metric_cb.setMinimumWidth(180)
     for key, label, units in _summary_metric_catalog():
         summary_metric_cb.addItem(
@@ -333,17 +309,15 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     _select_combo_by_data(summary_metric_cb, st.summary_metric_key)
     summary_metric_cb.setToolTip(
         "Which per-frame scalar to summarise across the (well × timepoint) "
-        "grid. ICC needs a per-cell Metric selected (row 1)."
+        "grid. ICC needs a per-cell Metric selected."
     )
     summary_metric_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_summary_metric(
             ctx, summary_metric_cb.currentData() or "nnd_median"))
     reg.register("_sp_summary_metric_cb", summary_metric_cb)
-    r2.addWidget(summary_metric_cb)
+    grp_summary = band.add_scope("Summary", summary_metric_cb)
 
-    summary_display_label = QLabel("Display:", row2)
-    r2.addWidget(summary_display_label)
-    summary_display_cb = QComboBox(row2)
+    summary_display_cb = QComboBox()
     summary_display_cb.addItem("Heatmap", sp_state.SUMMARY_DISPLAY_HEATMAP)
     summary_display_cb.addItem("Line plot", sp_state.SUMMARY_DISPLAY_LINE)
     _select_combo_by_data(summary_display_cb, st.summary_display)
@@ -356,18 +330,16 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
             ctx, summary_display_cb.currentData()
             or sp_state.SUMMARY_DISPLAY_HEATMAP))
     reg.register("_sp_summary_display_cb", summary_display_cb)
-    r2.addWidget(summary_display_cb)
+    grp_display = band.add_scope("Display", summary_display_cb)
 
-    r2.addStretch(1)
-
-    layout.addWidget(row2)
+    layout.addWidget(band)
 
     # ── level / viz visibility sync (colony vs summary vs metric-driven) ─────
-    _colony_widgets = (colonies_label, method_cb, eps_label, eps_spin,
-                        ms_label, ms_spin)
-    _boundary_widgets = (bnd_label, bnd_spin)
-    _summary_widgets = (summary_metric_label, summary_metric_cb,
-                         summary_display_label, summary_display_cb)
+    # Toggle the band's scope *groups*, not the bare controls: a group holds a
+    # label and its control, and the flow lays out whichever groups are visible.
+    _colony_widgets = (grp_colonies, grp_eps, grp_ms)
+    _boundary_widgets = (grp_bnd,)
+    _summary_widgets = (grp_summary, grp_display)
 
     def _sync_visibility() -> None:
         level = st.level
@@ -386,13 +358,9 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
                           and viz == sp_state.VIZ_BOUNDARY_INTERIOR)
         for w in _boundary_widgets:
             w.setVisible(show_boundary)
-        # Summary metric + display live in row 2 (used to crowd row 1).
         for w in _summary_widgets:
             w.setVisible(is_summary)
-        # Whole row 2 hides when nothing in it applies.
-        row2.setVisible(show_colonies or show_boundary or is_summary)
 
-        # Row 1 tweaks:
         # - Metric picker is greyed on vizs that don't consume it. Stops the
         #   tab from promising an effect it can't deliver.
         metric_enabled = viz not in sp_state.METRIC_IGNORED_VIZS
@@ -415,8 +383,8 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     _sync_visibility()
 
     # ── the figure ───────────────────────────────────────────────────────────
-    card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False)
-    card.setHeaderVisible(False)
+    card = PlotCard(parent, figsize=(_FIG_W, _FIG_H), constrained=False,
+                    header=False)
     card.setFigureTitle("")
     try:
         card.setStatsChipVisible(False)

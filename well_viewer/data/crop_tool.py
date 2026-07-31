@@ -71,6 +71,8 @@ class CropTool:
         self._button: QPushButton | None = None
         self._reset_button: QPushButton | None = None
         self._status_label: QLabel | None = None
+        self._status_target = None
+        self._status_template = "{status}"
 
     # ── public state ────────────────────────────────────────────────────────
 
@@ -125,6 +127,24 @@ class CropTool:
         lbl.setObjectName("Muted")
         self._status_label = lbl
         return lbl
+
+    def status_text(self) -> str:
+        """The crop state as one short phrase — ``(full FOV)`` or the region."""
+        if self._crop is None:
+            return self._idle_status
+        y0, x0, y1, x1 = self._crop
+        return f"{x1 - x0}×{y1 - y0} px @ ({x0},{y0})"
+
+    def set_status_widget(self, widget, *, template: str = "{status}") -> None:
+        """Write the crop state into *widget*'s text instead of a loose label.
+
+        A control row that already carries a Crop button does not also need a
+        separate caption beside it reading "(full FOV)" — the state belongs on
+        the control it describes. *template* is formatted with ``status``.
+        """
+        self._status_target = widget
+        self._status_template = template
+        self._refresh_indicator()
 
     # ── array helpers ───────────────────────────────────────────────────────
 
@@ -291,11 +311,11 @@ class CropTool:
             btn.setToolTip(self._tooltip_for(on))
         lbl = self._status_label
         if lbl is not None:
-            if self._crop is None:
-                lbl.setText(self._idle_status)
-            else:
-                y0, x0, y1, x1 = self._crop
-                lbl.setText(f"Crop: {x1 - x0}×{y1 - y0} px @ ({x0},{y0})")
+            lbl.setText(self._idle_status if self._crop is None
+                        else f"Crop: {self.status_text()}")
+        target = self._status_target
+        if target is not None:
+            target.setText(self._status_template.format(status=self.status_text()))
 
     def _tooltip_for(self, on: bool) -> str:
         if on:

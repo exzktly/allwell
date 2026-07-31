@@ -266,11 +266,11 @@ def build_centre(win, parent: QWidget) -> None:
         cbl.setContentsMargins(0, 0, 0, 6)
         cbl.setSpacing(_S.sm)
 
-        # A standalone QTabBar with the SampleDefinitionsSubTabs object
-        # name picks up the existing rectangular-tab QSS — keeps the look
-        # consistent without duplicating styling rules.
+        # A standalone QTabBar carrying the nested-sub-tab object name, which
+        # theme.qss styles alongside Sample Definitions' bar — one rule, so the
+        # two nested tab strips cannot drift apart.
         sub_seg = QTabBar()
-        sub_seg.setObjectName("SampleDefinitionsSubTabs")
+        sub_seg.setObjectName("PlottingSubTabs")
         sub_seg.setExpanding(False)
         sub_seg.setElideMode(Qt.ElideNone)
         sub_seg.setUsesScrollButtons(True)

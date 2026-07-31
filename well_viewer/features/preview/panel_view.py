@@ -17,7 +17,7 @@ from well_viewer.core.ui_helpers import (
     add_menu_action, btn_card, btn_secondary,
     make_action_menu_button, make_popover_button,
 )
-from widgets.flow_layout import FlowLayout
+from widgets.control_band import ControlBand
 from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
@@ -75,41 +75,33 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     il.setContentsMargins(0, 0, 0, 0)
     layout.addWidget(inner, 1)
 
-    ctrl = QWidget(inner)
-    ctrl.setObjectName("TabCtrl")  # data-gated: greyed out until a dataset loads
-    # FlowLayout so this dense control row wraps onto extra lines instead of
-    # clipping its right-most controls (zoom / stage selector) when Split View
-    # halves the pane width — the reported "options collapsed and not visible".
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
-    cl.addWidget(reg.register("_review_image_well_lbl", QLabel("No well selected", ctrl)))
+    ctrl = ControlBand(inner)
+    ctrl.add_scope("", reg.register("_review_image_well_lbl",
+                                    QLabel("No well selected")))
 
-    cl.addWidget(QLabel("Channel:", ctrl))
-    chan_cb = reg.register("_review_image_chan_cb", QComboBox(ctrl))
+    chan_cb = reg.register("_review_image_chan_cb", QComboBox())
     chan_cb.addItems(["GFP"])
     chan_cb.currentIndexChanged.connect(
         lambda _i: on_review_image_channel_selected(ctx, None)
     )
-    cl.addWidget(chan_cb)
+    ctrl.add_scope("Channel", chan_cb)
     # ``_review_image_chan_var`` is a legacy alias of the same combo; register it
     # under both names so ctx.widgets resolves either.
     reg.register("_review_image_chan_var", chan_cb)
 
-    cl.addWidget(QLabel("FOV:", ctrl))
-    fov_menu = reg.register("_review_image_fov_menu", QComboBox(ctrl))
+    fov_menu = reg.register("_review_image_fov_menu", QComboBox())
     fov_menu.addItems(["—"])
     fov_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    cl.addWidget(fov_menu)
+    ctrl.add_scope("FOV", fov_menu)
 
-    cl.addWidget(QLabel("Timepoint:", ctrl))
-    tp_menu = reg.register("_review_image_tp_menu", QComboBox(ctrl))
+    tp_menu = reg.register("_review_image_tp_menu", QComboBox())
     tp_menu.addItems(["—"])
     tp_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    cl.addWidget(tp_menu)
+    ctrl.add_scope("Timepoint", tp_menu)
     rt.tp_var = tp_menu
     rt.tp_cb = tp_menu  # alias for review_image_controller
 
@@ -119,21 +111,19 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # current factor relative to fit-to-window (100% = Fit) and tracks every
     # zoom path — buttons, scroll wheel, and the jump-to-nucleus zoom the
     # Review-CSV double-click performs — because the renderer refreshes it on
-    # each display pass. The FlowLayout wraps this group when the pane is narrow.
-    cl.addWidget(QLabel("Zoom:", ctrl))
+    # each display pass. The four go in as ONE scope group, so a wrap can never
+    # split the readout from the buttons that drive it. No "Zoom:" caption —
+    # the readout reads "100%", which says what the buttons either side do.
     zoom_out_btn = btn_card(ctrl, "−", lambda: review_image_zoom_step(ctx, -1))
     zoom_out_btn.setToolTip("Zoom out (scroll wheel works on the image too)")
-    cl.addWidget(zoom_out_btn)
-    zoom_lbl = reg.register("_review_image_zoom_lbl", QLabel("100%", ctrl))
+    zoom_lbl = reg.register("_review_image_zoom_lbl", QLabel("100%"))
     zoom_lbl.setObjectName("Muted")
     zoom_lbl.setToolTip("Current zoom, relative to fit-to-window (100% = Fit)")
-    cl.addWidget(zoom_lbl)
     zoom_in_btn = btn_card(ctrl, "+", lambda: review_image_zoom_step(ctx, +1))
     zoom_in_btn.setToolTip("Zoom in (scroll wheel works on the image too)")
-    cl.addWidget(zoom_in_btn)
     zoom_fit_btn = btn_secondary(ctrl, "Fit", lambda: review_image_zoom_fit(ctx))
     zoom_fit_btn.setToolTip("Fit the whole image in the view (100%) and recentre")
-    cl.addWidget(zoom_fit_btn)
+    ctrl.add_scope("", zoom_out_btn, zoom_lbl, zoom_in_btn, zoom_fit_btn)
 
     from PySide6.QtWidgets import QPushButton
     delete_btn = QPushButton("Delete Cell", ctrl)
@@ -149,7 +139,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     delete_btn.clicked.connect(
         lambda _=False: toggle_selected_review_cell(ctx)
     )
-    cl.addWidget(delete_btn)
+    ctrl.add_action(delete_btn)
 
     # Crop region: drag a rectangle to keep only cells whose centroid is inside;
     # applies to every FOV/timepoint/channel/well. Clear crop removes just the
@@ -168,7 +158,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     crop_btn.clicked.connect(
         lambda _=False: toggle_crop_edit_mode(ctx)
     )
-    cl.addWidget(crop_btn)
+    ctrl.add_action(crop_btn)
 
     # ── Edit ▾ menu — the one-shot crop / reset actions ─────────────────
     edit_btn, edit_menu = make_action_menu_button(
@@ -176,7 +166,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     add_menu_action(edit_menu, "Clear crop", lambda: clear_crop_region(ctx))
     add_menu_action(edit_menu, "Reset — restore all cells & remove crop",
                     lambda: reset_crop_and_overrides(ctx))
-    cl.addWidget(edit_btn)
+    ctrl.add_action(edit_btn)
 
     # ── View ▾ popover — image stage · zoom · overlay toggles ───────────
     from widgets.segmented_control import SegmentedControl as _SegmentedControl
@@ -237,7 +227,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     )
     view_lay.addWidget(binary_btn)
     refresh_review_image_binary_btn(ctx)
-    cl.addWidget(view_btn)
+    ctrl.add_action(view_btn)
     il.addWidget(ctrl)
 
     # The QC debris-gate controls now live on the Sample Definitions → Cell
@@ -273,18 +263,20 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                                           lambda: review_image_auto_lut(ctx)))
     lut_lay.addWidget(lut_range_row)
 
-    cl.addWidget(lut_btn)
+    ctrl.add_action(lut_btn)
 
     # ON/OFF intensity threshold quick-edit — inline on the control row (its
     # original home), not tucked inside the LUT ▾ popover. Edits the active
     # channel's ThreshFracOn — the same value the Cell Gating tab and the
     # Plotting quick-edit own — and re-renders, so the Binary (≥ ON threshold)
     # overlay updates live without leaving the tab.
-    thr_row = QWidget(ctrl)
+    thr_row = QWidget()
     thr_lay = QHBoxLayout(thr_row)
     thr_lay.setContentsMargins(0, 0, 0, 0)
     thr_lay.setSpacing(6)
-    thr_lay.addWidget(QLabel("ON threshold:", thr_row))
+    _thr_lbl = QLabel("ON threshold", thr_row)
+    _thr_lbl.setObjectName("Muted")   # the band's own captions read this way
+    thr_lay.addWidget(_thr_lbl)
     thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",
         Stepper(thr_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
@@ -302,7 +294,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         lambda v: (set_thresh_frac_on(ctx, v), refresh_review_image_ctx(ctx))
     )
     thr_lay.addWidget(thresh_stepper)
-    cl.addWidget(thr_row)
+    ctrl.add_scope("", thr_row)
 
     # ── Colors ▾ popover — per-element display colours + reset ──────────
     colors_btn, colors_panel, colors_lay = make_popover_button("Colors ▾", ctrl)
@@ -337,7 +329,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
                 "channel by the chosen RGB.")
     colors_lay.addWidget(btn_secondary(colors_panel, "Reset colors",
                                        lambda: reset_review_image_colors(ctx)))
-    cl.addWidget(colors_btn)
+    ctrl.add_action(colors_btn)
 
     canvas = QScrollArea(inner)
     rt.canvas = canvas

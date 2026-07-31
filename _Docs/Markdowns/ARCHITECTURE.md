@@ -627,6 +627,69 @@ Timepoint, Test — as scope groups, with **Run test** as the single action. It
 had been a five-row label/field `QGridLayout` with Run on a sixth row and a
 separator under it: a form, in a pane where every other tab has a control row.
 
+Every other plot tab — **Bar Plots**, **Line Graphs**, both **Scatter** views,
+**Distribution**, **Spatial** and **Multivariate** — is on the band too, and
+three of them lost a whole row to it. Spatial's second row held colony-detection
+and summary parameters; Multivariate's held the per-mode option group and the
+timepoint filter. Both are conditional: only the groups the current (level, viz)
+or mode consumes are visible, and a flow layout skips a hidden widget, so those
+groups now live in the band's scope zone and the row carries a handful of live
+controls rather than a second row of mostly-hidden ones. `ui_helpers.make_properties_button`
+replaces `wrap_ctrl_row_with_properties` at every one of these call sites.
+
+**Playground** keeps every control it had; what changed is which side they are
+on. Its column moved from the left to the right and took the `ExportStyleSidebar`
+chrome — `#PropertyPanel` fill, a hairline down its left edge, and
+`theme.Metrics.dock_w`, which is now the one width for every right-hand dock in
+the pane (the Properties sidebar reads the same token). A per-tab inspector on
+the left, when every other one in the app is on the right, is the kind of
+inconsistency that costs a user a second on every tab switch.
+
+The image and data tabs follow. **Segmentation** puts its well caption, channel,
+FOV, timepoint, zoom cluster and ON-threshold quick-edit in the scope zone and
+its Delete / Crop / Edit ▾ / View ▾ / LUT ▾ / Colors ▾ controls in the action
+zone. **Cell Browser** does the same with its channel chips and page size against
+LUT ▾ / Display ▾ / Load next / Generate. **smFISH** and **Review CSV** each
+collapse from two rows to one — selectors left, buttons right, which is the split
+they already had, stacked instead of side by side. Zoom on Segmentation goes in
+as a single scope group of four widgets, so a wrap can never separate the
+readout from the buttons that drive it.
+
+Two `TabCtrl` control rows remain, and both are deliberate: Sample Definitions'
+replicate-panel toolbar and its Cell Gating frame are inside a sub-tab and a
+sidebar, not a centre tab's control row.
+
+**Image Table** is the deliberate exception: its controls stay split between the
+builder shelf and an action strip directly above the images, because the strip's
+crop and ON-threshold controls act on the images below them and belong beside
+them. The strip is consolidated *in place* to one row — `Reset table` and
+`Clear images` became one `Table ▾` menu, the loose `(full FOV)` caption folded
+into the Crop button through `CropTool.set_status_widget`, and the `Zoom:`
+caption went, since the `100%` readout between the − and + buttons already says
+what they do.
+
+#### Plot cards without a header
+
+`PlotCard(header=False)` does not build the header at all, rather than building
+it and hiding it. Every tab on the band passes it: the band and the pane's tab
+bar carry the view switcher, the Screen/Publication toggle and the stats chip,
+so the header had nothing left to show and was hidden at every call site. The
+header accessors (`setFigureTitle`, `setStatsChipVisible`, `setLeftHeaderWidget`,
+…) are no-ops on a headerless card rather than raising, so a caller need not
+branch on how the card was built; `hasHeader()` answers if one needs to.
+
+`make_plot_view_switcher` is gone with them — it built a five-segment
+Line/Bar/Scatter/Dist/Heat control into each card's header, directly beneath the
+tab bar offering the same five choices.
+
+A tab that pins a minimum height for its figure adds `card.chromeHeight()`,
+which measures every pixel of the card that is not the canvas. That total is not
+a constant: it depends on the theme's spacing, on whether the controls row holds
+anything, and on whether the card has a header. Bar Plots and Line Graphs used
+to add a literal `110` commented "header / controls / toolbar rows" — the kind
+of number that goes stale silently, giving the figure a little more or less room
+than the tab asked for.
+
 #### The band's gating and its ratchet
 
 The band carries the object name `ControlBand`, which is in
@@ -2240,6 +2303,7 @@ Notable members worth knowing about by name:
 
 | Widget | What it is |
 |--------|-----------|
+| `CropTool` (`well_viewer/data/crop_tool.py`) | The drag-a-region crop shared by Image Table and Segmentation. `set_status_widget(widget, template=…)` writes the crop state into an existing control's text — the Image Table's Crop button reads `Crop · (full FOV)` — instead of a separate caption beside it; `make_status_label` still returns a standalone label for call sites that want one. |
 | `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). |
 | `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |

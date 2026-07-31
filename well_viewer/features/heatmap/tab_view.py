@@ -100,7 +100,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
     tp_label = reg.register("_heatmap_tp_label", QLabel("—"))
     tp_label.setMinimumWidth(64)
-    band.add_scope("t (h)", tp_slider, tp_label)
+    band.add_scope("Timepoint", tp_slider, tp_label)
 
     status_lbl = reg.register("_heatmap_status_lbl", QLabel(""))
     status_lbl.setObjectName("Muted")
@@ -183,7 +183,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     # ── Figure (in a v2 PlotCard — card chrome + MplToolbar) ────────────────
     from widgets.plot_card import PlotCard
-    card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False)
+    card = PlotCard(parent, figsize=(8.0, 6.0), constrained=False, header=False)
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Heat Map")
     # No card header. It was built, given a plot-type switcher duplicating the

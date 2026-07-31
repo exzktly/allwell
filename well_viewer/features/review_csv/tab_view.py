@@ -15,7 +15,7 @@ refresh_review_csv = _lazy(_RCSV, "refresh_review_csv")
 refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 
-from widgets.flow_layout import FlowLayout
+from widgets.control_band import ControlBand
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
@@ -32,39 +32,30 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
         parent.setLayout(layout)
     layout.setContentsMargins(12, 12, 12, 12)
 
-    ctrl = QWidget(parent)
-    ctrl.setObjectName("TabCtrl")
-    cl = FlowLayout(ctrl)
-    cl.setContentsMargins(0, 0, 0, 6)
+    ctrl = ControlBand(parent)
 
-    cl.addWidget(QLabel("Well:", ctrl))
-    well_lbl = reg.register("_review_well_lbl", QLabel("(select one well)", ctrl))
+    well_lbl = reg.register("_review_well_lbl", QLabel("(select one well)"))
     well_lbl.setObjectName("Muted")
-    cl.addWidget(well_lbl)
+    ctrl.add_scope("Well", well_lbl)
 
-    cl.addSpacing(8)
-    cl.addWidget(QLabel("FOV:", ctrl))
-    fov_cb = reg.register("_review_fov_cb", QComboBox(ctrl))
+    fov_cb = reg.register("_review_fov_cb", QComboBox())
     fov_cb.setFixedWidth(120)
     fov_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    cl.addWidget(fov_cb)
+    ctrl.add_scope("FOV", fov_cb)
 
-    cl.addSpacing(8)
-    cl.addWidget(QLabel("Timepoint:", ctrl))
-    tp_cb = reg.register("_review_tp_cb", QComboBox(ctrl))
+    tp_cb = reg.register("_review_tp_cb", QComboBox())
     tp_cb.setFixedWidth(140)
     tp_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    cl.addWidget(tp_cb)
+    ctrl.add_scope("Timepoint", tp_cb)
 
     refresh_btn = QPushButton("Refresh", ctrl)
     refresh_btn.setProperty("variant", "secondary")
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
-    cl.addWidget(refresh_btn)
-    cl.addStretch(1)
+    ctrl.add_action(refresh_btn)
     layout.addWidget(ctrl)
 
     table = reg.register("_review_csv_table", QTableWidget(0, 0, parent))

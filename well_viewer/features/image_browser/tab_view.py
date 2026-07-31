@@ -38,10 +38,11 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
 
     sub_tabs = QTabWidget(parent)
-    # Reuse the SampleDefinitionsSubTabs QSS (rounded rectangular tabs with a
-    # min-width) so the bold selected-tab text isn't clipped — same pattern the
-    # plotting / old-Segmentation sub-tab bars use.
-    sub_tabs.setObjectName("SampleDefinitionsSubTabs")
+    # Every nested sub-tab bar in the pane — this one, Plotting's and Sample
+    # Definitions' — is named in one theme.qss rule, so the three cannot drift
+    # apart. The name is this bar's own; it used to borrow Sample Definitions',
+    # which made the rule read as if only that tab had a bar.
+    sub_tabs.setObjectName("ImageBrowserSubTabs")
     sub_tabs.tabBar().setExpanding(False)
     sub_tabs.tabBar().setElideMode(Qt.ElideNone)
     sub_tabs.tabBar().setUsesScrollButtons(True)

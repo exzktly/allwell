@@ -524,6 +524,19 @@ def send_plot_to_batch_export(win, mode: str) -> None:
     win._set_status(f"Batch Export → {label}: using the current plot settings.")
 
 
+def _with_caret(text: str) -> str:
+    """Append the drop-down caret unless the caller already wrote one.
+
+    Both menu-button factories hide QToolButton's native menu indicator, on the
+    grounds that the label carries a caret of its own. That was a claim about
+    the call sites rather than something the helpers guaranteed, and six of them
+    passed a bare "Export" — so those buttons dropped a menu with nothing on
+    them to say so. Adding it here makes the comment true by construction.
+    """
+    text = str(text)
+    return text if text.rstrip().endswith("▾") else f"{text} ▾"
+
+
 def make_popover_button(text: str, parent: QWidget):
     """A compact toolbar button that opens a small panel ("popover") on click.
 
@@ -535,12 +548,13 @@ def make_popover_button(text: str, parent: QWidget):
     from PySide6.QtWidgets import QToolButton, QMenu, QWidgetAction
 
     btn = QToolButton(parent)
-    btn.setText(text)
+    btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     btn.setProperty("variant", "secondary")
-    # The label already carries a ▾ caret; hide QToolButton's native
-    # menu-indicator so the two don't render as overlapping double arrows.
+    # The label carries the ▾ caret (added above if the caller left it off), so
+    # hide QToolButton's native menu-indicator — the two would otherwise render
+    # as overlapping double arrows.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     menu = QMenu(btn)
     content = QWidget(menu)
@@ -566,14 +580,14 @@ def make_action_menu_button(text: str, parent: QWidget, tooltip: str = ""):
     from PySide6.QtWidgets import QToolButton, QMenu
 
     btn = QToolButton(parent)
-    btn.setText(text)
+    btn.setText(_with_caret(text))
     btn.setPopupMode(QToolButton.InstantPopup)
     btn.setToolButtonStyle(Qt.ToolButtonTextOnly)
     btn.setProperty("variant", "secondary")
     if tooltip:
         btn.setToolTip(tooltip)
-    # The label already carries a ▾ caret; hide the native indicator so they
-    # don't render as overlapping double arrows (mirrors make_popover_button).
+    # The label carries the ▾ caret (added above if the caller left it off), so
+    # hide the native indicator — mirrors make_popover_button.
     btn.setStyleSheet("QToolButton::menu-indicator { image: none; width: 0px; }")
     menu = QMenu(btn)
     btn.setMenu(menu)
@@ -735,15 +749,6 @@ def make_band_controls(ctx, parent: QWidget, *, with_fov: bool = False) -> QWidg
     return w
 
 
-_PLOT_VIEWS = [
-    ("Line", "Line Graphs"),
-    ("Bar", "Bar Plots"),
-    ("Scatter", "Scatter Plot"),
-    ("Dist", "Distribution"),
-    ("Heat", "Heat Map"),
-]
-
-
 def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
     """Apply every feature-registered plot-card decorator to *card*.
 
@@ -760,35 +765,6 @@ def apply_plot_card_decorators(ctx, card, tab_name: str) -> None:
             import logging
             logging.getLogger("well_viewer").exception(
                 "plot-card decorator from %r failed", descriptor.name)
-
-
-def make_plot_view_switcher(ctx, current_name: str):
-    """The 5-segment per-card view-switcher (Line / Bar / Scatter / Dist / Heat).
-
-    Switches the Plotting sub-notebook (the app's ``_plotting_notebook``) to the
-    picked tab when the user changes the segment. Returns the ``SegmentedControl``
-    (or ``None`` if it's not importable). Each plot tab mounts one of these in its
-    PlotCard's left-header slot, pre-selected to its own outer tab name. Owns the
-    notebook-navigation concern so feature builders pass ``ctx`` and never wire it.
-    """
-    try:
-        from widgets.segmented_control import SegmentedControl
-    except Exception:  # pragma: no cover
-        return None
-    sc = SegmentedControl()
-    for label, data in _PLOT_VIEWS:
-        sc.addSegment(label, data=data)
-    sc.setCurrentByData(current_name)
-
-    def _on_change(_idx=None) -> None:
-        target = sc.currentData()
-        nb = getattr(ctx.window, "_plotting_notebook", None)
-        if not target or nb is None:
-            return
-        nb.setCurrentByName(target)
-
-    sc.currentChanged.connect(_on_change)
-    return sc
 
 
 def attach_plot_toolbar(

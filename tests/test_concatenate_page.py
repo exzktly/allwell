@@ -153,3 +153,38 @@ def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path)
     page._ds1_field.changed.emit()
     assert page._run_btn.property("variant") == "primary"
     ctrl.shutdown()
+
+
+def test_success_headline_shows_a_basename_full_path_in_the_tooltip(qapp, tmp_path):
+    """Regression guard (UX audit P2-3): a completed run's own summary
+    string embeds the full destination path -- built for the log line,
+    where the path is expected reading. Reused verbatim as the dashboard
+    headline, it pushed the actually useful "N well(s)" result off to the
+    side or off-screen on anything but a very wide window. The headline
+    must show just the destination's basename; the full text still reaches
+    the log line unshortened and now also the headline's own tooltip."""
+    from datasets.concatenate.controller import ConcatenateController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "a_very_long_destination_folder_name_for_this_merge"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"])
+    build_dataset(ds2, wells=["A01"], timepoints=["48h"])
+
+    ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._revalidate_cross()
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    ok, summary, dest_root = ctrl._last_result
+    assert ok is True
+    assert str(dest) in summary  # the full path really is in the raw summary
+    assert str(dest) not in page.dashboard._headline.text()
+    assert dest.name in page.dashboard._headline.text()
+    assert page.dashboard._headline.toolTip() == summary
+    # The log line (and jobFinished's own message) are untouched.
+    assert str(dest) in page._status.toPlainText()

@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
+from datasets._common.dataset_paths import shorten_headline
 from datasets.merge_plates.merge_plates_compute import (
     DatasetPaths,
     MergePlatesError,
@@ -163,7 +164,7 @@ class MergePlatesController(QObject):
 
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")
-        self.page.dashboard.set_done(summary)
+        self.page.dashboard.set_done(shorten_headline(summary, dest_root), tooltip=summary)
         self.page.show_open_in_review(dest_root)
         self._last_result = (True, summary, dest_root)
 

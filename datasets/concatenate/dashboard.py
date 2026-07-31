@@ -98,9 +98,13 @@ class ConcatDashboard(PlateProgress):
         self._phase = phase
         self._refresh_rail()
 
-    def set_done(self, summary: str) -> None:
+    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
         self._outcome = "done"
         self._headline.setText(summary or "Done")
+        # The full text (often a full destination path baked into the
+        # summary string) survives as a tooltip even when the caller has
+        # shortened the displayed headline to a basename.
+        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
         self._headline.setStyleSheet(f"color:{theme.Colors.success};")
         self._refresh_rail()
 

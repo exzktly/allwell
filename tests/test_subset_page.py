@@ -144,6 +144,12 @@ def test_subset_run_end_to_end_through_the_page(qapp, tmp_path):
     assert (dest / "out" / "measurements_A01.csv").exists()
     assert not (dest / "out" / "measurements_B02.csv").exists()
     assert not page._open_btn.isHidden()
+    # Regression guard (UX audit P2-3): the dashboard headline shows a
+    # basename, not the full destination path buried in the raw summary
+    # ("Subset written to <dest_root> (...)").
+    assert str(dest) not in page.dashboard._headline.text()
+    assert dest.name in page.dashboard._headline.text()
+    assert str(dest) in page.dashboard._headline.toolTip()
     ctrl.shutdown()
 
 

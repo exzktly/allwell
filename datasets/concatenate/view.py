@@ -343,12 +343,17 @@ class ConcatenatePage(QWidget):
     def _on_field_changed(self) -> None:
         # A dataset picked again is the point a fresh run becomes the
         # relevant next action once more — hand the primary emphasis back
-        # from a still-visible post-success Open button (show_open_in_review).
+        # from a still-visible post-success Open button (show_open_in_review),
+        # and let the dashboard go back to previewing the (now different)
+        # inputs instead of continuing to show the previous run's result.
         # Deliberately not inside _revalidate_cross() itself: revalidate_fields()
-        # (called from _on_finished, right after show_open_in_review already
-        # promoted Open/demoted Concatenate) calls _revalidate_cross() too,
-        # and doing the reset there would immediately undo that promotion.
+        # (called from _on_finished, right after show_open_in_review/set_done
+        # already set the post-run state) calls _revalidate_cross() too, and
+        # doing either reset there would immediately undo that run's own
+        # result — self._running is already False by then, so a guard on it
+        # doesn't help; only a genuine field edit may clear a shown result.
         set_variant(self._run_btn, "primary")
+        self._update_status_preview()
         self._revalidate_cross()
 
     def _revalidate_cross(self) -> None:
@@ -356,7 +361,6 @@ class ConcatenatePage(QWidget):
         self._cross_hint.setText(message)
         self._cross_hint.setVisible(bool(message))
         self._refresh_run_enabled()
-        self._update_status_preview()
 
     def _update_status_preview(self) -> None:
         # Never touches the dashboard once a run has actually started — a

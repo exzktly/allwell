@@ -242,6 +242,27 @@ def preview_wells(root: Path | str) -> list[str]:
     return []
 
 
+def shorten_headline(text: str, *full_paths: str) -> str:
+    """Replace every occurrence of each of *full_paths* in *text* with its
+    basename.
+
+    A ``execute_plan``/``apply`` success summary is built by formatting a
+    full destination (or source) path into a sentence — right for the log
+    line, unreadable as a dashboard headline, where it pushed the actual
+    "N well(s)" result off to the side or off-screen. The caller keeps the
+    original *text* for the log and passes it again as the dashboard's
+    tooltip, so nothing is actually lost — only the headline itself is
+    shortened. Skips any path that is empty (the in-place Import Loose
+    case, whose ``dest_root`` is ``""``) — ``"".replace`` would otherwise
+    insert its basename between every character of *text*.
+    """
+    shortened = text
+    for full_path in full_paths:
+        if full_path:
+            shortened = shortened.replace(full_path, Path(full_path).name)
+    return shortened
+
+
 # ── input-side availability scan ─────────────────────────────────────────────
 # Mirrors process_microscopy._collect_image_stems / _collect_available_schema_
 # values, generalised so a Datasets feature can ask "what timepoints/FOVs does

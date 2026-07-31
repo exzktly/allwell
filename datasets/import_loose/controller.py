@@ -11,6 +11,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
+from datasets._common.dataset_paths import shorten_headline
 from datasets.import_loose.view import ImportLoosePage
 from datasets.import_loose.worker import ImportLooseWorker
 
@@ -117,7 +118,11 @@ class ImportLooseController(QObject):
 
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")
-        self.page.dashboard.set_done(summary)
+        # In-place mode's dest_root is "" (worker.py) -- shorten_headline
+        # skips empty paths, so the launched source root covers that case's
+        # own embedded path ("Grouped loose TIFs in <source> into...").
+        self.page.dashboard.set_done(
+            shorten_headline(summary, dest_root, self._launch_source_root), tooltip=summary)
         produced = dest_root
         if dest_root:
             self.page.show_open_in_analyze(dest_root)

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QMessageBox
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
 from widgets.plate_progress import canon_well
+from datasets._common.dataset_paths import shorten_headline
 from datasets.subset.dashboard import well_color, well_tooltip_label
 from datasets.subset.subset_compute import (
     DatasetPaths,
@@ -164,7 +165,7 @@ class SubsetController(QObject):
 
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")
-        self.page.dashboard.set_done(summary)
+        self.page.dashboard.set_done(shorten_headline(summary, dest_root), tooltip=summary)
         self.page.show_open_in_review(dest_root)
         self._last_result = (True, summary, dest_root)
 

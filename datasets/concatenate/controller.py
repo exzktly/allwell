@@ -16,6 +16,7 @@ from PySide6.QtCore import QObject, Signal
 from PySide6.QtWidgets import QMessageBox
 
 from well_viewer.core.safe import swallowed
+from datasets._common.dataset_paths import shorten_headline
 from datasets.concatenate.concatenate_compute import DatasetPaths, destination_has_marker
 from datasets.concatenate.view import ConcatenatePage
 from datasets.concatenate.worker import ConcatenateWorker
@@ -116,7 +117,10 @@ class ConcatenateController(QObject):
         self.page.append_log("")
         self.page.append_log(f"✓ {summary}")
         self.page.dashboard.set_phase("finalize")
-        self.page.dashboard.set_done(summary)
+        # The dashboard headline gets a basename, not the full destination
+        # path buried in a sentence — the log line above (and the tooltip)
+        # keeps the untouched original.
+        self.page.dashboard.set_done(shorten_headline(summary, dest_root), tooltip=summary)
         self.page.show_open_in_review(dest_root)
         self._last_result = (True, summary, dest_root)
 

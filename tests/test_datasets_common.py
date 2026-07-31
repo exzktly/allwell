@@ -194,3 +194,26 @@ def test_rewrite_member_field_preserves_channel_scoped_role_suffix():
     )
     assert rewrote
     assert new_name == "exp_GFP_A01_F001_24h_tophat_gfp.tif"
+
+
+def test_shorten_headline_replaces_full_path_with_basename():
+    text = "Concatenated 3 well(s) into /home/user/data/plate7_merged (shifted +24h)."
+    assert dp.shorten_headline(text, "/home/user/data/plate7_merged") == (
+        "Concatenated 3 well(s) into plate7_merged (shifted +24h)."
+    )
+
+
+def test_shorten_headline_shortens_a_path_prefix_even_when_a_suffix_follows():
+    # Import Loose's summary embeds dest_in (dest_root + "/in"), a longer
+    # string than dest_root itself -- str.replace still finds it as a prefix.
+    text = "Wrote 2 well(s) into /home/user/data/dest/in."
+    assert dp.shorten_headline(text, "/home/user/data/dest") == "Wrote 2 well(s) into dest/in."
+
+
+def test_shorten_headline_ignores_empty_paths():
+    # In-place Import Loose emits dest_root="" -- "".replace(...) would
+    # otherwise insert the basename between every character of the text.
+    text = "Grouped loose TIFs in /home/user/data/loose into 2 per-well zip(s)."
+    assert dp.shorten_headline(text, "", "/home/user/data/loose") == (
+        "Grouped loose TIFs in loose into 2 per-well zip(s)."
+    )

@@ -177,6 +177,12 @@ def test_convert_to_new_destination_through_the_page(qapp, tmp_path):
     assert page.dashboard._wells == ["A01", "B02"]
     assert page.dashboard._well_stage == {"A01": "done", "B02": "done"}
     assert page.dashboard.overall_maximum() == 2
+    # Regression guard (UX audit P2-3): the dashboard headline shows a
+    # basename, not the full destination path buried in the raw summary
+    # ("Wrote N well(s) into <dest_root>/in.").
+    assert str(dest) not in page.dashboard._headline.text()
+    assert dest.name in page.dashboard._headline.text()
+    assert str(dest) in page.dashboard._headline.toolTip()
     ctrl.shutdown()
 
 

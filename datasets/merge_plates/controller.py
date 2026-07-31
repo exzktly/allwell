@@ -177,8 +177,8 @@ class MergePlatesController(QObject):
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
-        self.page.revalidate_fields()
         ok, message, dest_root = self._last_result
+        self.page.revalidate_fields(ok=ok)
         try:
             self.jobFinished.emit(ok, message, dest_root)
         except Exception:

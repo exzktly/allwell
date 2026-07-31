@@ -273,7 +273,7 @@ class ConcatenatePage(QWidget):
     def set_destination_path(self, path: str) -> None:
         self._dest_field.set_path(path)
 
-    def revalidate_fields(self) -> None:
+    def revalidate_fields(self, *, ok: bool = False) -> None:
         """Re-run every field's validator against current disk state.
 
         A run changes what's on disk under the destination path (and the
@@ -281,9 +281,20 @@ class ConcatenatePage(QWidget):
         call this once a run finishes to refresh the inline hints too —
         otherwise a destination that just became "already holds a finished
         dataset" silently disables Concatenate without saying why.
+
+        *ok*: after a successful run, the destination's validator message is
+        this exact "already holds a finished dataset" wording — technically
+        true, but it's the *expected* result of the run that just succeeded,
+        not a problem with the pick. Swap it for a neutral note instead of
+        re-showing the pre-run warning verbatim.
         """
         for field in (self._ds1_field, self._ds2_field, self._dest_field):
             field.revalidate()
+        if ok and self._dest_field.message():
+            self._dest_field.show_note(
+                "This destination now holds the merged dataset from that "
+                "run — pick a new folder to merge again."
+            )
         self._revalidate_cross()
 
     def append_log(self, text: str) -> None:

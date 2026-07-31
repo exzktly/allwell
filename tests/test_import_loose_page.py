@@ -180,6 +180,39 @@ def test_convert_to_new_destination_through_the_page(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_files_warning(qapp, tmp_path):
+    """Regression guard (UX audit P1-3): a completed new-destination convert
+    writes its output into the destination, but nothing ever re-ran the
+    destination validator afterward -- the button just silently disabled on
+    a second Convert attempt with the field's inline hint still blank, and
+    once fixed to revalidate, the raw validator wording ("Already has files
+    under 'in' or 'out' — choose an empty folder.") would describe the run's
+    own success as an error. It must show a neutral note instead."""
+    from datasets.import_loose.controller import ImportLooseController
+
+    src = tmp_path / "loose"
+    dest = tmp_path / "dest"
+    _write_loose(src, ["A01"])
+
+    ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert ctrl._last_result[0] is True
+    assert page._dest_field._hint.objectName() == "Muted"
+    assert "already has files" not in page._dest_field._hint.text().lower()
+    assert "now holds the converted dataset" in page._dest_field._hint.text()
+    assert not page._dest_field.is_valid()
+    assert not page._run_btn.isEnabled()  # the run gate itself is unaffected
+    ctrl.shutdown()
+
+
 def test_group_in_place_through_the_page_zips_and_deletes_sources(qapp, tmp_path):
     """Regression for the reported "sits stuck, no zips made" bug (fixed in
     apply.py's convert_in_place/_zip_well_folders) plus the adjacent bug found

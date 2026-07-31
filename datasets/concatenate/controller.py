@@ -131,15 +131,16 @@ class ConcatenateController(QObject):
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
+        ok, message, dest_root = self._last_result
         # Disk state under the destination (and possibly the marker file)
         # just changed — refresh the fields' inline hints so a destination
         # that's now "already holds a finished dataset" explains itself
-        # instead of just quietly disabling the button.
-        self.page.revalidate_fields()
+        # instead of just quietly disabling the button. ok=True swaps that
+        # explanation for a neutral post-run note (ConcatenatePage.revalidate_fields).
+        self.page.revalidate_fields(ok=ok)
         # Last statement, by construction — mirrors AnalyzeTab.runFinished's
         # re-entrancy rule: a queue bridge slot connected to this may launch
         # the next job synchronously, so nothing here may run after it.
-        ok, message, dest_root = self._last_result
         try:
             self.jobFinished.emit(ok, message, dest_root)
         except Exception:

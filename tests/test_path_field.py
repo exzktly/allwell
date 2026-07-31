@@ -78,6 +78,36 @@ def test_changed_signal_emits_on_browse(qapp):
     assert seen == [True]
 
 
+def test_show_note_overrides_the_validator_hint_until_the_next_revalidate(qapp):
+    """Regression guard (UX audit P1-3): a destination field's validator
+    hint is styled "Danger" (red) regardless of what it says -- reusing it
+    verbatim right after a successful run to explain "this folder now has
+    content" reads as an error about the run that just succeeded, not the
+    neutral, expected fact it actually is. show_note() must display instead,
+    styled "Muted" not "Danger", and a later revalidate() must discard it
+    and fall back to the real validator message again."""
+    field = PathField(
+        "Label", pick=lambda current, parent=None: "",
+        validator=lambda p: "Already has content — choose an empty folder.",
+    )
+    field.set_path("/tmp/dest")
+    assert field.message() == "Already has content — choose an empty folder."
+    assert field._hint.objectName() == "Danger"
+
+    field.show_note("This destination now holds this run's output.")
+    assert field._hint.text() == "This destination now holds this run's output."
+    assert field._hint.objectName() == "Muted"
+    # The validator's own verdict (is_valid()/message()) is untouched by the
+    # note -- only the displayed hint text/style changes. The run gate must
+    # still correctly refuse to run again into this same folder.
+    assert not field.is_valid()
+    assert field.message() == "Already has content — choose an empty folder."
+
+    field.revalidate()
+    assert field._hint.objectName() == "Danger"
+    assert field._hint.text() == "Already has content — choose an empty folder."
+
+
 def test_folder_picker_forwards_parent(monkeypatch, qapp):
     from PySide6.QtWidgets import QFileDialog
 

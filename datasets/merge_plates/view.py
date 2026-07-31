@@ -309,9 +309,20 @@ class MergePlatesPage(QWidget):
         self._dest_root = dest_root
         self._open_btn.setVisible(True)
 
-    def revalidate_fields(self) -> None:
+    def revalidate_fields(self, *, ok: bool = False) -> None:
+        """*ok*: after a successful run, the destination's validator message
+        would be the exact "already holds a finished dataset" wording a
+        pre-run pick gets — technically true, but it's the expected result
+        of the run that just succeeded. Swap it for a neutral note instead
+        of re-showing the pre-run warning verbatim (mirrors
+        ConcatenatePage.revalidate_fields)."""
         for field in (self._ds1_field, self._ds2_field, self._dest_field):
             field.revalidate()
+        if ok and self._dest_field.message():
+            self._dest_field.show_note(
+                "This destination now holds the merged plate from that run "
+                "— pick a new folder to merge again."
+            )
         self._refresh_run_enabled()
 
     # ── internals ────────────────────────────────────────────────────────────

@@ -123,9 +123,35 @@ class PathField(QWidget):
         return self._validator(Path(self._path))
 
     def revalidate(self) -> None:
+        """Re-run the validator and show its message, if any. Also clears
+        any :meth:`show_note` override — a real re-validation (a fresh path,
+        or the host explicitly re-checking) always wins over a stale note."""
+        self._set_hint_style("Danger")
         message = self._validity_message()
         self._hint.setText(message)
         self._hint.setVisible(bool(message))
+
+    def show_note(self, text: str) -> None:
+        """Show *text* as a neutral, non-error inline note in place of the
+        validator's own hint, until the next :meth:`revalidate` call.
+
+        For a destination whose validator would otherwise re-show the exact
+        "already has content" wording a *pre-run* pick gets — except the
+        content is now this run's own successful output, so the same red
+        warning reads as "something went wrong" rather than "this destination
+        is now spoken for; pick a new one to run again."
+        """
+        self._set_hint_style("Muted")
+        self._hint.setText(text)
+        self._hint.setVisible(bool(text))
+
+    def _set_hint_style(self, object_name: str) -> None:
+        if self._hint.objectName() == object_name:
+            return
+        self._hint.setObjectName(object_name)
+        style = self._hint.style()
+        style.unpolish(self._hint)
+        style.polish(self._hint)
 
     def path(self) -> str:
         return self._path

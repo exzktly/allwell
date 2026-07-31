@@ -136,8 +136,9 @@ class ImportLooseController(QObject):
 
     def _on_finished(self) -> None:
         self.page.set_running(False)
-        self.page.refresh_readout()
         ok, message, dataset_root = self._last_result
+        self.page.revalidate_fields(ok=ok)
+        self.page.refresh_readout()
         try:
             self.jobFinished.emit(ok, message, dataset_root)
         except Exception:

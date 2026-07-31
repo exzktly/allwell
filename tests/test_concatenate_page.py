@@ -22,6 +22,14 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+def _run_worker_to_completion(ctrl) -> None:
+    worker = ctrl._worker
+    assert worker is not None
+    worker.wait(5000)
+    for _ in range(10):
+        QApplication.processEvents()
+
+
 def test_run_button_restores_its_play_glyph_when_not_running(qapp):
     """Regression guard: every other Datasets tool's run button restores its
     "▶ " glyph once a run finishes (Validate's "▶  Check", Subset's
@@ -68,4 +76,40 @@ def test_dashboard_hidden_until_both_datasets_are_valid_then_previews_real_wells
     assert page.dashboard.isHidden() is False
     assert page.dashboard._wells == ["A01", "B02"]
     assert "Ready" in page.dashboard._headline.text()
+    ctrl.shutdown()
+
+
+def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_warning(qapp, tmp_path):
+    """Regression guard (UX audit P1-3): a completed Concatenate run writes
+    its merged output into the destination, so revalidate_fields() (called
+    from _on_finished to refresh the fields' inline hints) used to re-run
+    the destination validator and land right back on "Already holds a
+    finished dataset — choose an empty folder." -- the exact pre-run warning
+    wording, now describing the run's own success as if something were
+    wrong. It must show a neutral note instead."""
+    from datasets.concatenate.controller import ConcatenateController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"])
+    build_dataset(ds2, wells=["A01"], timepoints=["48h"])
+
+    ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._revalidate_cross()
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert ctrl._last_result[0] is True  # the run actually succeeded
+    assert page._dest_field._hint.objectName() == "Muted"
+    assert "Already holds a finished dataset" not in page._dest_field._hint.text()
+    assert "now holds the merged dataset" in page._dest_field._hint.text()
+    # The run gate itself is unaffected by the note -- Concatenate is still
+    # correctly disabled against the same now-occupied destination.
+    assert not page._dest_field.is_valid()
     ctrl.shutdown()

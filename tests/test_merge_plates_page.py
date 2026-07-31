@@ -75,6 +75,40 @@ def test_identity_merge_through_the_page(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_warning(qapp, tmp_path):
+    """Regression guard (UX audit P1-3): a completed Merge Plates run writes
+    its merged output into the destination, so revalidate_fields() (called
+    from _on_finished to refresh the fields' inline hints) used to re-run
+    the destination validator and land right back on "Already holds a
+    finished dataset — choose an empty folder." -- the exact pre-run warning
+    wording, now describing the run's own success as if something were
+    wrong. It must show a neutral note instead."""
+    from datasets.merge_plates.controller import MergePlatesController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"])
+
+    ctrl = MergePlatesController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert ctrl._last_result[0] is True
+    assert page._dest_field._hint.objectName() == "Muted"
+    assert "Already holds a finished dataset" not in page._dest_field._hint.text()
+    assert "now holds the merged plate" in page._dest_field._hint.text()
+    assert not page._dest_field.is_valid()
+    ctrl.shutdown()
+
+
 def test_collision_without_remap_fails_gracefully(qapp, tmp_path):
     from datasets.merge_plates.controller import MergePlatesController
 

@@ -274,6 +274,29 @@ class ImportLoosePage(QWidget):
         self._dest_root = dest_root
         self._open_btn.setVisible(bool(dest_root))
 
+    def revalidate_fields(self, *, ok: bool = False) -> None:
+        """Re-run the destination field's validator against current disk
+        state, called once a run finishes (mirrors
+        ConcatenatePage.revalidate_fields / MergePlatesPage.revalidate_fields).
+
+        Without this, a new-destination run's own success silently disabled
+        a second Convert into the same folder — the destination genuinely
+        now has content, but nothing had ever re-run the validator to say
+        so, so the button just went dark with no visible reason. *ok*: swap
+        the validator's alarming "already has files" wording for a neutral
+        note, since that's the expected result of the run that just
+        succeeded, not a problem with the pick.
+        """
+        if self.in_place():
+            return
+        self._dest_field.revalidate()
+        if ok and self._dest_field.message():
+            self._dest_field.show_note(
+                "This destination now holds the converted dataset from "
+                "that run — pick a new folder to convert again."
+            )
+        self._refresh_run_enabled()
+
     def refresh_readout(self) -> None:
         src = self.source_path()
         if not src or not Path(src).is_dir():

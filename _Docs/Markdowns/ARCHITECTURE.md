@@ -742,9 +742,21 @@ switch and on any resize of the three panels it watches, as a defensive floor
 rather than reconciling genuinely different widths: it floors at the bar's own
 natural width, so a panel narrower than the three segments elides their labels
 rather than shrinking the bar, and falls back to that width when every panel
-is hidden. `RAIL_W` itself is set by whichever mode's content actually needs
-the room, not by Review's — see `analyze_tab.py::_build_ui` for why it's 438,
-not narrower.
+is hidden. An earlier pass set `RAIL_W` to whichever mode's content needed the
+most room (Analyze's, at 438) and let the other two panes — neither of which
+needs anywhere near that width — inherit it unchanged; the result read as an
+oversized sidebar with no content to justify it in Review and Datasets.
+`RAIL_W` is now 329 (438 reduced 25%) with Analyze's own form narrowed to fit
+it instead: `analyze_tab_form.py`'s row label column shrank
+(`_row()`'s `_ROW_LABEL_W`, 150→108) and word-wraps instead of clipping a
+label that doesn't fit on one line, its two widest fixed-width combos
+(segmentation method, auto-threshold method) shrank to 165 and rely on Qt's
+built-in text eliding plus a tooltip carrying the full label, and the Compute
+Options page's inline "(…)" hints moved to their own wrapped line below the
+row instead of squeezing in beside a narrow field. `tests/test_analyze_narrow_sidebar_fit.py`
+drives every collapsible section open (a real `QTest.mouseClick`, since a
+collapsed section contributes nothing to the form's measured width until
+expanded) and asserts the form's laid-out minimum width fits inside `RAIL_W`.
 
 **The page tab bars are in this band too**, to the right of the mode bar and
 sharing its bottom edge. They used to sit inside each tab's own body, one row

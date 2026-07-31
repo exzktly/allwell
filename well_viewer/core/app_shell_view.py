@@ -25,14 +25,27 @@ from well_viewer.core.status_view import build_bottom
 
 #: The left panel's width, shared by all three modes — Review's own rail,
 #: Datasets' sidebar, and Analyze's form panel (``analyze_tab.py``) all pin to
-#: this one value, so switching modes never visibly resizes the window. 438,
-#: not Review's narrower original width, because it's the value Analyze's own
-#: per-channel rows need to avoid clipping (widened there twice, 280→350→438,
-#: before landing on it) — Review's plate and Datasets' nav list have no
-#: trouble being wider, so the shared width is set by whichever mode actually
-#: needs the room. The app header's mode bar spans exactly this too, so it and
-#: the rail beneath it share a left column.
-RAIL_W = 438
+#: this one value, so switching modes never visibly resizes the window. The
+#: app header's mode bar spans exactly this too, so it and the rail beneath it
+#: share a left column.
+#:
+#: 329, not the 438 an earlier pass unified on: that value was set by
+#: Analyze's own content (the per-channel rows and several label+field rows
+#: needed it to avoid clipping, widened there twice historically,
+#: 280→350→438), which made Review's plate and Datasets' nav list — neither of
+#: which needs anywhere near that much room — pinned exactly as wide, reading
+#: as an oversized sidebar with no content to justify it. Rather than let
+#: Analyze's widest row set the width for all three panes, its form itself was
+#: narrowed to fit: ``analyze_tab_form.py``'s row label column shrank
+#: (150→``_ROW_LABEL_W`` == 108) with word-wrap enabled instead of a hard
+#: clip, its widest fixed-width combos (segmentation method, auto-threshold
+#: method) shrank to 165 and rely on Qt's built-in text eliding plus a
+#: tooltip, and the two inline "(…)" hints on the Compute Options page moved
+#: to their own wrapped line below the row instead of squeezing in beside a
+#: narrow field. 329 is 438 reduced by 25%, and every row was re-verified
+#: (word-wrap included) to fit inside it — see
+#: ``tests/test_analyze_narrow_sidebar_fit.py``.
+RAIL_W = 329
 
 
 def _dataset_button(win, parent):

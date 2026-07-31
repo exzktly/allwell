@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -78,7 +80,9 @@ class _JobRow(QWidget):
     moveDownClicked = Signal(str)
     rowClicked = Signal(str)
 
-    def __init__(self, job: JobSpec, parent: QWidget | None = None) -> None:
+    def __init__(
+        self, job: JobSpec, parent: QWidget | None = None, *, ordinal: int | None = None,
+    ) -> None:
         super().__init__(parent)
         self.job_id = job.id
         # The whole row is a click target (rowClicked -> "show this job" on
@@ -87,10 +91,23 @@ class _JobRow(QWidget):
         # a user gets before clicking.
         self.setCursor(Qt.PointingHandCursor)
         self.setToolTip("Click to open this job on its own page.")
+        # A thin divider under every row -- eight nearly-identical lines with
+        # no separation at all read as one undifferentiated block.
+        self.setStyleSheet(f"border-bottom: 1px solid {theme.Colors.border_subtle};")
         hl = QHBoxLayout(self)
         hl.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs,
                                theme.Spacing.sm, theme.Spacing.xs)
         hl.setSpacing(theme.Spacing.sm)
+
+        # "What runs next" couldn't be read at a glance among interleaved
+        # pending/succeeded/failed rows with no position numbers at all.
+        # Only pending rows get one -- a number on a row that already has a
+        # final outcome doesn't mean "queue position" anymore.
+        ordinal_lbl = QLabel(f"{ordinal}." if ordinal is not None else "", self)
+        ordinal_lbl.setObjectName("Muted")
+        ordinal_lbl.setFixedWidth(20)
+        ordinal_lbl.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        hl.addWidget(ordinal_lbl)
 
         icon_lbl = QLabel(self)
         icon_lbl.setPixmap(make_icon(_KIND_ICON.get(job.kind, "boxes")).pixmap(16, 16))
@@ -110,6 +127,16 @@ class _JobRow(QWidget):
         dot.setLabel(job.state)
         hl.addWidget(dot)
 
+        if job.state == JobState.RUNNING:
+            # No per-job percentage is ever reported (a controller only ever
+            # sets a free-text status message), so the running row otherwise
+            # looked identical to an idle pending one until it finished.
+            progress = QProgressBar(self)
+            progress.setRange(0, 0)  # indeterminate
+            progress.setTextVisible(False)
+            progress.setFixedSize(60, 8)
+            hl.addWidget(progress)
+
         if job.message:
             msg = QLabel(self)
             msg.setObjectName("Muted")
@@ -123,19 +150,23 @@ class _JobRow(QWidget):
             msg.setText(metrics.elidedText(job.message, Qt.ElideRight, 240))
             hl.addWidget(msg)
 
-        up_btn = QToolButton(self)
-        up_btn.setIcon(make_icon("chevron-up"))
-        up_btn.setAutoRaise(True)
-        up_btn.setToolTip("Move up")
-        up_btn.clicked.connect(lambda: self.moveUpClicked.emit(self.job_id))
-        hl.addWidget(up_btn)
+        # Reordering a terminal row (it already ran, or never will without an
+        # explicit unchain/retry) means nothing -- shown only while a move
+        # could still do something.
+        if job.state not in JobState.TERMINAL:
+            up_btn = QToolButton(self)
+            up_btn.setIcon(make_icon("chevron-up"))
+            up_btn.setAutoRaise(True)
+            up_btn.setToolTip("Move up")
+            up_btn.clicked.connect(lambda: self.moveUpClicked.emit(self.job_id))
+            hl.addWidget(up_btn)
 
-        down_btn = QToolButton(self)
-        down_btn.setIcon(make_icon("chevron-down"))
-        down_btn.setAutoRaise(True)
-        down_btn.setToolTip("Move down")
-        down_btn.clicked.connect(lambda: self.moveDownClicked.emit(self.job_id))
-        hl.addWidget(down_btn)
+            down_btn = QToolButton(self)
+            down_btn.setIcon(make_icon("chevron-down"))
+            down_btn.setAutoRaise(True)
+            down_btn.setToolTip("Move down")
+            down_btn.clicked.connect(lambda: self.moveDownClicked.emit(self.job_id))
+            hl.addWidget(down_btn)
 
         remove_btn = QToolButton(self)
         remove_btn.setIcon(make_icon("x"))
@@ -164,7 +195,21 @@ class JobQueuePage(QWidget):
         self._build_ui()
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # Wrap in a scroll area — see datasets/concatenate/view.py's
+        # _build_ui for why. Job Queue was the one page of the seven left
+        # out of this pattern, with a long-enough job list able to run into
+        # the same "crushed into whatever space is left" problem the other
+        # six were already fixed against.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page_layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                                   theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
@@ -190,15 +235,19 @@ class JobQueuePage(QWidget):
         hl = QHBoxLayout(header)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.sm)
+        # Primary action at the left edge, matching every other Datasets
+        # page's Run/Check/Convert/Subset/Merge button -- Start queue used
+        # to sit far right with a secondary button on the left, the one
+        # page in the pane with its hierarchy backwards.
+        self._start_btn = QPushButton("▶  Start queue", self)
+        self._start_btn.setProperty("variant", "primary")
+        self._start_btn.clicked.connect(self.startToggled)
+        hl.addWidget(self._start_btn)
         self._add_analyze_btn = QPushButton("+ Queue current Analyze run", self)
         self._add_analyze_btn.setProperty("variant", "secondary")
         self._add_analyze_btn.clicked.connect(self.addAnalyzeRequested)
         hl.addWidget(self._add_analyze_btn)
         hl.addStretch(1)
-        self._start_btn = QPushButton("▶  Start queue", self)
-        self._start_btn.setProperty("variant", "primary")
-        self._start_btn.clicked.connect(self.startToggled)
-        hl.addWidget(self._start_btn)
         outer.addWidget(header)
 
         self._list = QListWidget(self)
@@ -230,8 +279,13 @@ class JobQueuePage(QWidget):
         if not jobs:
             self._show_empty_hint()
             return
+        pending_ordinal = 0
         for job in jobs:
-            row = _JobRow(job, self._list)
+            ordinal = None
+            if job.state == JobState.PENDING:
+                pending_ordinal += 1
+                ordinal = pending_ordinal
+            row = _JobRow(job, self._list, ordinal=ordinal)
             row.removeClicked.connect(self.removeRequested)
             row.moveUpClicked.connect(self.moveUpRequested)
             row.moveDownClicked.connect(self.moveDownRequested)

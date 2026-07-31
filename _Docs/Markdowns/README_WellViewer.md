@@ -1512,14 +1512,18 @@ How it works:
    each contain both an `in/` and an `out/` folder; **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
-2. Press **Concatenate**. A live plate map fills in below, coloured per well as
-   the merge progresses (grey → amber "merging" → green "merged", or blue if a
-   well's images survived without a matching measurements file on one side),
-   alongside a phase rail (Validate → Merge → Verify → Finalize) and an overall
-   progress bar. The full text log is still there if you want it — tick
-   **Show raw log** to reveal it below the plate.
+2. Once both folders are picked, a status panel appears below showing a
+   "Ready — N well(s)" plate preview of what the merge will actually touch —
+   before you've pressed anything. Press **Concatenate** and that same plate
+   starts colouring per well as the merge progresses (grey → amber "merging"
+   → green "merged" with a checkmark, or blue with a "!" if a well's images
+   survived without a matching measurements file on one side), alongside a
+   phase rail (Validate → Merge → Verify → Finalize) and an overall progress
+   bar. The full text log is still there if you want it — tick **Show raw
+   log** to reveal it below the plate.
 3. On success, click **Open merged dataset in Review** to load the result
-   straight into Review.
+   straight into Review (now the page's highlighted default action, in place
+   of Concatenate, until you change one of the source folders again).
 
 If something goes wrong — even before any well is touched, like an
 incompatible schema between the two datasets — the headline above the plate
@@ -1583,18 +1587,25 @@ partial run can leave `pipeline_info.json` advertising more timepoints than
 `out/` actually holds, so Review would show gaps with no obvious cause and a
 plain re-run would skip the very wells that need finishing.
 
-1. Pick the dataset folder and press **Check**. A per-well plate map fills in
-   (green = complete, yellow = missing some `(FOV, timepoint)` work, red = no
-   measurements recorded, grey = no output yet), and a findings list below it
-   names anything wrong — exactly which timepoints a well is missing, a
-   sidecar that's out of sync with what's on disk, a CSV that looks like a
-   well's data but isn't, or cell-inclusion overrides that no longer match the
-   current segmentation.
+1. Pick the dataset folder. As soon as it's recognized, a status panel
+   appears showing a "Ready — N well(s)" preview of the plate, before you've
+   pressed anything. Press **Check** and that same plate fills in with each
+   well's actual state (green with a checkmark = complete, yellow with a "!"
+   = missing some `(FOV, timepoint)` work, red with a "!" = no measurements
+   recorded, grey = no output yet), and a findings list below it names
+   anything wrong — exactly which timepoints a well is missing, a sidecar
+   that's out of sync with what's on disk, a CSV that looks like a well's
+   data but isn't, or cell-inclusion overrides that no longer match the
+   current segmentation. The findings list holds a placeholder ("Pick a
+   dataset folder and press Check.") until then, and clears back to it if a
+   re-check fails, rather than leaving an earlier check's results on screen.
 2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't
    match what's on disk, or stale cell overrides), **Apply repairs** fixes
    just that metadata. It never touches measurement CSVs or images — gating
    thresholds, sample definitions, and every other saved setting are
-   preserved untouched.
+   preserved untouched. If it's greyed out despite findings being listed,
+   hover it — the tooltip explains when a finding genuinely can't be
+   auto-repaired.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
    Analyze** opens the dataset there so you can re-run and pick up the
    missing pieces.
@@ -1609,8 +1620,12 @@ trimming a drifted tail of timepoints.
 1. Pick the **source dataset** folder. The well plate, timepoint checkboxes,
    and FOV checkboxes fill in from what's actually in that dataset, all
    selected by default (meaning "keep everything" until you narrow it down).
+   Selected wells get a distinct highlight colour on the picker, separate
+   from any colour a finished run leaves behind.
 2. Uncheck the wells, timepoints, or FOVs you don't want kept, and pick a
-   **destination folder** (must be new and empty).
+   **destination folder** (must be new and empty). A status panel below
+   shows "Ready — N well(s) selected" as you adjust the selection, before
+   you've pressed anything.
 3. Press **Subset**. The same well plate you picked wells with now shows
    each one being copied — locked against further clicks until the run
    finishes, so it can double as the progress view instead of a second
@@ -1636,10 +1651,15 @@ structure yet) into the layout Analyze reads directly.
    instead to group the files directly in the source folder and delete the
    loose TIFs once each well is safely zipped — the same thing Analyze itself
    does when it's pointed at a folder of loose TIFs, exposed here as its own
-   step; you're asked to confirm before anything is deleted.
-3. Press **Convert**. A live plate map fills in as each well converts,
-   the same graphical progress view Analyze itself uses. On success, **Open
-   in Analyze** sends the resulting folder there.
+   step. Checking it shows an explicit warning under the checkbox spelling out
+   that this deletes the originals and can't be undone, and the destination
+   field (unused in this mode) stays visible but greyed out rather than
+   disappearing; you're still asked to confirm before anything is deleted.
+3. As soon as the scan finds any wells, a status panel appears below showing
+   a "Ready — N well(s) to convert" plate preview. Press **Convert** and that
+   same plate fills in as each well actually converts, the same graphical
+   progress view Analyze itself uses. On success, **Open dataset in Analyze**
+   sends the resulting folder there.
 
 Files that don't match the schema are left alone and reported rather than
 guessed at; a broken symlink is skipped and counted rather than crashing the
@@ -1661,8 +1681,13 @@ time.
    well (e.g. `E01`) to shift all of dataset 2's wells as a block to start
    there, landing on free positions. If the two plates are already disjoint,
    leave it unchecked — nothing needs remapping.
-3. Press **Merge**. A live plate map fills in, colouring dataset 1's wells
-   and dataset 2's wells differently so a remap is visually confirmable.
+3. Once both folders (and any remap) are valid, a status panel appears below
+   showing a "Ready — N well(s)" plate preview, with dataset 2's wells shown
+   at their remapped positions if you checked the block-placement option.
+   Press **Merge** and that same plate colours dataset 1's wells and dataset
+   2's wells differently as the merge progresses — dataset 2's wells also
+   carry a small "2" marker so the two are distinguishable even without
+   relying on colour.
 
 When nothing needs remapping, the merge is a pure copy — nothing about a
 well's images, measurements, or filenames is rewritten. When wells are
@@ -1698,11 +1723,16 @@ jobs persist across app restarts, but a relaunch always comes up paused —
 you always decide when unattended work resumes.
 
 Each row shows the job's tool, a status chip (pending / running / succeeded
-/ failed / cancelled / blocked / interrupted), and a one-line message. Click
-a row to open that job on its own tool's page (without running it) so you
-can double-check what it will do. Use ↑ / ↓ to reorder, or × to remove a job
-— reordering a job ahead of one it depends on, or removing the job currently
-running, is refused.
+/ failed / cancelled / blocked / interrupted), and a one-line message
+(truncated with "…" if it's long — hover the row for the full text). A
+pending job also shows its position in line ("1.", "2.", …); the currently
+running job shows a moving progress strip instead. The whole row is a click
+target — hover it and the pointer changes to say so — click it to open that
+job on its own tool's page (without running it) so you can double-check what
+it will do. Use ↑ / ↓ to reorder, or × to remove a job — reordering a job
+ahead of one it depends on, or removing the job currently running, is
+refused; the ↑ / ↓ controls disappear once a job has reached a final outcome
+(succeeded, failed, cancelled), since there's nothing left to reorder.
 
 **Chaining** links one job's input to another's output: queue a Subset (or
 Merge Plates, or Analyze) run, then a Validate run chained to run against

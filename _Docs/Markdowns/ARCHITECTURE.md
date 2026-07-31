@@ -2425,25 +2425,63 @@ Rather than drawing a second, separate status plate below it the way every
 other dashboard does, `SubsetController` paints per-well progress directly
 onto that same `WellPlateSelector` (`page._plate.setWellColor(...)`, the
 `pending`/`copying`/`done`/`empty` states `SubsetWorker.wellStage` already
-reports), locking it (`setEnabled(False)`) for the run's duration so the
+reports, each also carrying a terminal marker glyph — `✓` for `done`, `!` for
+`empty` — alongside the transient `copying` state's `⚙`, so a stage reads
+without relying on distinguishing success-green from accent-lilac by colour
+alone), locking it (`setEnabled(False)`) for the run's duration so the
 overlay can't be disturbed by further clicks, then unlocking it once
 finished. `SubsetDashboard` itself is built with
-`PlateProgress(show_plate=False)` — see that widget's own entry below — so it
-keeps only the headline, overall bar, per-well-state counts rail, and colour
-legend; `datasets/subset/dashboard.py` exports `well_color`/
-`well_tooltip_label` so the controller's plate overlay and the dashboard's
-rail/legend can't disagree on what a stage looks like. Source-dataset changes
-clear the overlay (`SubsetPage.sourceChanged` → the controller's
-`_on_source_changed`) so a stale colour from a previous run's wells can never
-survive onto a newly-picked dataset that happens to reuse the same tokens —
-but that alone only handles a source change *between* runs. `SubsetPage.
-set_running` also locks `_src_field`/`_dest_field` (not just the plate) for
-the run's duration: picking a *different* source mid-run does not stop the
-still-running `SubsetWorker`, so without the lock, `sourceChanged` would
-repaint the plate for the newly-picked dataset while the old run keeps
-executing in the background — its still-arriving `wellStage` signals would
-then paint the *previous* dataset's progress onto wells the user now believes
-belong to the new one.
+`PlateProgress(show_plate=False, show_legend=False)` — see that widget's own
+entry below — so it keeps only the headline, overall bar, and per-well-state
+counts rail; the separate legend column was dropped (`_build_legend` no
+longer overridden) because the rail's own rows already pair a coloured dot
+with a state label, so a second column repeating the same four dot+label
+pairs added nothing a glance at the rail didn't already say.
+`datasets/subset/dashboard.py` exports `well_color`/`well_tooltip_label` so
+the controller's plate overlay and the dashboard's rail can't disagree on
+what a stage looks like. Source-dataset changes clear the overlay
+(`SubsetPage.sourceChanged` → the controller's `_on_source_changed`) so a
+stale colour from a previous run's wells can never survive onto a
+newly-picked dataset that happens to reuse the same tokens — but that alone
+only handles a source change *between* runs. `SubsetPage.set_running` also
+locks `_src_field`/`_dest_field` (`setLocked`, not the plate's own
+`setEnabled(False)` — disabling only each field's Browse button rather than
+dimming the already-read-only path text) for the run's duration: picking a
+*different* source mid-run does not stop the still-running `SubsetWorker`,
+so without the lock, `sourceChanged` would repaint the plate for the
+newly-picked dataset while the old run keeps executing in the background —
+its still-arriving `wellStage` signals would then paint the *previous*
+dataset's progress onto wells the user now believes belong to the new one.
+
+The picker plate's own "selected" wells get a dedicated `theme.Colors.
+accent_dim` tint (`SubsetPage._on_plate_selection_changed`) rather than
+`WellPlateSelector`'s default multi-select rendering, which cycles a
+rank-based rainbow colour per selection order — indistinguishable at a
+glance from the same widget's own post-run state colours, one of which
+(`empty`) is `theme.Colors.accent`, the exact hue an unselected-but-enabled
+well already renders in a faint default tint. `accent_dim` reads as "chosen,
+not yet run" without colliding with either. The picker plate and every
+dashboard's own status plate render wells at the same pixel cell size: the
+picker's height cap is 258px (not the dashboards' 210px) because it also
+carries a visible All/Invert/Clear action row the dashboards' own plates hide
+(`setActionsVisible(False)`) — 258 was matched empirically (offscreen
+geometry measurement of each plate's actual rendered cell size) against
+210's grid scale, so the two plates read as the same control rather than the
+picker's wells rendering visibly smaller for no visible reason. The
+destination field carries the same folder-shape validator every other
+dataset-folder/destination field in the pane already had
+(`view.py::_is_destination`, mirroring Concatenate's) — Subset used to be
+the one destination field with none, leaving "▶ Subset" silently disabled
+against an already-finished destination with no inline reason.
+`SubsetPage._update_status_preview` reveals `SubsetDashboard` as soon as the
+inputs are otherwise ready, seeded with the picker's *current selection*
+(not `preview_wells` — Subset already has the wells in front of it) and a
+"Ready — N well(s) selected" headline, rather than staying hidden until "▶
+Subset" is pressed; a heading above the Timepoints/FOVs checkbox rows reads
+"Pick a source dataset to preview timepoints/FOVs." until a source is
+chosen, matching the pattern Import Loose's own readout already used, so an
+empty checkbox row doesn't read as broken before there's a source to derive
+it from.
 
 **Import Loose Folder** (`datasets/import_loose/`) groups a folder of loose,
 ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
@@ -2459,7 +2497,20 @@ Conversion progress is a per-well plate map
 a plain progress bar: `ImportLooseWorker.wellsPlanned` seeds the plate with
 the wells `scan_folder` already found for the preview, and `wellStage`
 colours each one `pending` → `writing` → `done` as its zip actually lands on
-disk.
+disk, marking `writing` with the transient `⚙` glyph and `done` with a
+terminal `✓` (accessibility — colour alone doesn't distinguish success-green
+from `pending`'s text-muted grey). The rail's own "Done" count row reads
+"Converted" instead, matching the vocabulary the dashboard's own well-state
+marker and every other reference to this state on the page already use — it
+used to be the one place on this page still saying "Done" for the same
+state. `ImportLoosePage._update_status_preview` reveals the dashboard as
+soon as the source folder's live scan (`scan_folder`, the same call the
+readout already makes on every schema/separator keystroke) finds at least
+one well, seeded with those wells and a "Ready — N well(s) to convert."
+headline, rather than staying hidden until "▶ Convert" is pressed; a scan
+that finds nothing yet leaves the dashboard hidden rather than showing an
+empty "Ready — 0 well(s)" plate, which would read as "broken" rather than
+"not ready yet".
 
 The preview (`import_loose_compute.scan_folder`) mirrors
 `WellPlateZipper._extract_well_from_filename`'s rule exactly — schema-index
@@ -2486,7 +2537,14 @@ Two conversion modes, one code path each, both in `apply.py`:
   parallelism. `progress` reports `(well, "writing"|"done")` — the shape
   `ImportLooseDashboard.set_well_stage` expects.
 - **In-place** (opt-in, destructive — "group in place, delete sources on
-  success") — shells out through the existing
+  success") — checking the "Group in place" box shows an explicit inline
+  "Danger"-styled warning beneath it ("This deletes the original loose TIFs
+  once each well is safely zipped. This can't be undone.") for as long as
+  it's checked, and disables rather than hides the destination field
+  (`_dest_field.setEnabled(not checked)`, not `setVisible`) — the field
+  disappearing outright used to be the only signal this destructive mode had
+  just been armed, easy to miss since a layout jump is the only thing that
+  changes. Behaviourally it shells out through the existing
   `services.input_resolution_service.run_zipper` (which invokes
   `WellPlateZipper.py` as a subprocess) rather than reimplementing the same
   grouping a second time; `run_zipper` produces per-well *folders* only
@@ -2565,25 +2623,57 @@ in `datasets/_common/dataset_paths.py` names is not written by anything, so
 there is no restart-resume feature here to preserve.
 
 **Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
-Concatenate. Concatenate joins the same plate imaged at different times (a
+Concatenate. Concatenate joins the same dataset imaged at different times (a
 well present in both datasets is stitched — more timepoints for the same
-sample); this joins **different plates at the same times** (two 24-well
-runs becoming one 96-well dataset). The semantics are the inverse of
-Concatenate's on the point that matters most: a well present in both
-datasets here is **two different biological samples**, so it is **refused**,
-not merged, unless the user remaps dataset 2's wells onto free positions
-first (a block-placement control — "place dataset 2 starting at well E01" —
-translating dataset 2's occupied wells as a rigid block via
-`merge_plates_compute.block_shift_well_map`).
+sample); this joins **two different datasets at the same times** (two
+24-well runs becoming one 96-well dataset). The page's own blurb calls both
+sources "datasets", not "plates" — the codebase's own convention (§1)
+reserves "plate" for the physical 96-well grid and "dataset" for the on-disk
+folder — and states the same distinction without ALL-CAPS emphasis. The
+semantics are the inverse of Concatenate's on the point that matters most: a
+well present in both datasets here is **two different biological samples**,
+so it is **refused**, not merged, unless the user remaps dataset 2's wells
+onto free positions first (a block-placement control — "place dataset 2
+starting at well E01" — translating dataset 2's occupied wells as a rigid
+block via `merge_plates_compute.block_shift_well_map`).
 
 `MergePlatesPage.set_running` locks the dataset 1/dataset 2/destination
-`PathField`s and the remap controls for the run's duration, and
+`PathField`s (`setLocked`, disabling only each field's Browse button, not
+the whole field) and the remap controls for the run's duration, and
 `MergePlatesController._launch` captures `dataset1_path()`/`dataset2_path()`
 once at launch (`self._launch_ds1_path`/`_launch_ds2_path`) for
 `_on_wells_planned` to re-derive origin colours from, rather than re-reading
 the (now field-locked, but still worth being defensive about) live page —
 the same class of mid-run-field-change bug already fixed on Subset's and
-Validate's own source fields.
+Validate's own source fields. On success, `show_open_in_review` promotes
+"Open in Review" to `variant="primary"` and demotes "▶ Merge" to
+`variant="secondary"` (`widgets._support.set_variant`, see §7), and
+`revalidate_fields(ok=True)` swaps the destination field's post-run
+"already holds a finished dataset" validator message for a neutral note
+(`PathField.show_note`) instead of re-showing what reads as a warning about
+what the run just correctly produced — both mirror Concatenate's own
+post-run page behaviour.
+
+`MergePlatesPage._update_status_preview` reveals `MergePlatesDashboard` as
+soon as both dataset fields are valid, seeded via `preview_wells` on both
+roots — with the remap applied through `block_shift_well_map` when the
+"Place dataset 2 starting at well" checkbox is on, so the preview shows
+where dataset 2's wells will actually land, not their pre-remap positions
+(an out-of-range/invalid remap target falls back to the unmapped positions,
+since `_remap_message`'s own inline hint already surfaces that error) — with
+a "Ready — N well(s)" headline, rather than staying hidden until "▶ Merge"
+is pressed. Dataset 2's wells are painted with `theme.Colors.accent2`
+instead of `theme.Colors.accent` — a second, distinct hue reserved for "this
+belongs to the other of two normal groups", deliberately not `accent`, which
+several other dashboards (Concatenate's merged-with-no-CSV, Subset's
+no-rows-matched) already use to mean "anomaly"; a well merely belonging to
+dataset 2 is not one. Every dataset-2 well also keeps a persistent `"2"`
+marker glyph in every state past `merging` (whose transient `⚙` still wins),
+so which dataset a well came from survives independently of colour — the
+only other way to tell the two datasets apart, once both read as
+green/lilac dots on a small plate, was colour alone. A dataset-1 well's own
+terminal "merged" state gets a `✓` for the same reason, since the "2" marker
+above already covers dataset 2's own not-colour-alone signal.
 
 A well is carried by four values, and all four must move together — the
 same lock-step discipline this section documents for Concatenate's
@@ -2702,7 +2792,7 @@ Qt event loop. Three layers:
   **must** be emitted only once per run, as the true last statement of that
   run's completion handler (mirroring `AnalyzeTab.runFinished`'s re-entrancy
   rule, since a bridge slot may start the next job synchronously from inside
-  the emit). Each of the five Datasets controllers implements this directly
+  the emit). Each of the six Datasets controllers implements this directly
   (a `_launch()` split out of `_on_run()` so `start_from_queue` can skip the
   interactive restart/in-place confirmation a queued, unattended run has no
   one to answer — the same trade-off every tool's queue path makes); so does
@@ -2746,20 +2836,50 @@ Qt event loop. Three layers:
   persisted dict — no `show_job` implementation mutates its argument today,
   but nothing stopped one from silently corrupting the saved queue if it did.
 - **`datasets/job_queue/view.py`** — `JobQueuePage`: one compact row per job
-  (kind icon, label, a `widgets.status_dot.StatusDot` state chip, a
-  one-line message, a link glyph on chained rows, ↑/↓/× controls) under a
-  header with Start/Pause and — since `analyze_tab_form.py` has no
-  line-budget headroom for its own "+ Queue" button (§6.1) — a
-  **"+ Queue current Analyze run"** button that lives on this page instead,
-  wired through `JobQueueController.set_analyze_provider` (a bound
-  `AnalyzeTab.collect_spec` method injected the same way `on_open_in_review`
-  is). Each of the five Datasets tool pages gets its own "+ Queue" button
-  beside Run, calling the controller's `collect_spec()` and handing the
-  result up through an injected `on_add_to_queue(kind, spec)` callback to
-  `DatasetsTab._add_to_queue`, which looks up the (always-last-built)
+  (`_JobRow`: an ordinal, kind icon, label, a `widgets.status_dot.StatusDot`
+  state chip, an indeterminate progress strip on the currently-running row,
+  a one-line status message, a link glyph on chained rows, and ↑/↓/×
+  controls) under a header with Start/Pause and — since
+  `analyze_tab_form.py` has no line-budget headroom for its own "+ Queue"
+  button (§6.1) — a **"+ Queue current Analyze run"** button that lives on
+  this page instead, wired through `JobQueueController.set_analyze_provider`
+  (a bound `AnalyzeTab.collect_spec` method injected the same way
+  `on_open_in_review` is). "▶ Start queue" sits at the row's left edge,
+  matching the primary-action-on-the-left convention every other Datasets
+  page's own run row uses, with "+ Queue current Analyze run" second and
+  secondary. Each of the six Datasets tool pages gets its own "+ Queue"
+  button beside Run, calling the controller's `collect_spec()` and handing
+  the result up through an injected `on_add_to_queue(kind, spec)` callback
+  to `DatasetsTab._add_to_queue`, which looks up the (always-last-built)
   `JobQueueController` in `tab._controllers`.
 
-`datasets_tab.py` wires all of this: each of the five Datasets controllers is
+  `_JobRow`'s ordinal number ("1.", "2.", …) is shown only on `pending`
+  rows — a number on a row that already has a terminal outcome doesn't mean
+  "queue position" any more, so `set_jobs` counts only pending jobs into it.
+  The ↑/↓ reorder controls are hidden outright on any row in a
+  `JobState.TERMINAL` state (it already ran, or never will without an
+  explicit unchain/retry, so reordering it means nothing); a running row's
+  progress strip is indeterminate (`QProgressBar` ranged `(0, 0)`) since a
+  controller only ever reports a free-text status message, never a
+  percentage. The message label elides with `…` via `QFontMetrics`
+  (`Qt.ElideRight`) rather than hard-clipping at its fixed pixel width, with
+  the untruncated text reachable as the label's own tooltip. The whole row
+  is a click target (`rowClicked` → open that job on its own page) and now
+  carries a pointing-hand cursor and a hover tooltip to say so — previously
+  the only way to discover the row was clickable was to click it. A thin
+  divider (`border-bottom`) separates consecutive rows, which otherwise read
+  as one undifferentiated block. `JobQueuePage._build_ui` wraps its content
+  in a `QScrollArea` (mirroring every other Datasets tool page — see
+  `PlateProgress`'s own entry in §7) — Job Queue was the one page in the
+  pane left out of that pattern, with a long job list able to run into the
+  same "crushed into whatever space is left" problem the other six pages
+  were already fixed against. The empty-queue hint ("No jobs queued yet —
+  …") lives inside the (otherwise large, blank) job list itself as a
+  non-selectable list item, not as a separate caption below it — an empty
+  container that size with nothing inside it read as broken rather than
+  "nothing queued yet", the same fix Validate's own findings list got.
+
+`datasets_tab.py` wires all of this: each of the six Datasets controllers is
 constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
 `tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
 so `_build_job_queue` can register every already-built controller (plus the
@@ -2776,7 +2896,8 @@ anything under `datasets/job_queue/` ever imports `analyze_tab`.
 Every widget under `widgets/` is:
 
 - **Standalone.** It only imports from `theme` and Qt (plus `widgets._support`
-  for tiny RGB helpers). It does *not* know anything about
+  for tiny RGB helpers and `set_variant`, a runtime dynamic-property + repolish
+  helper — see below). It does *not* know anything about
   `WellViewerApp` or any tab.
 - **Token-styled.** Sizes derive from font metrics; colours come from
   `theme.Colors` / QSS object names. No hardcoded device pixels.
@@ -2791,9 +2912,9 @@ Notable members worth knowing about by name:
 |--------|-----------|
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
-| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. |
+| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | An 8×12 plate whose model is an *ordered list* of wells — the acquisition path — not an unordered selection set. Lit wells carry their 1-based visit number and a subtle alpha-blended arrow traces the order across the plate; clicking an off-path well appends it, clicking an on-path one removes it and the rest renumber (`orderChanged`). A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
-| `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, `ValidateDashboard`, and `ImportLooseDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. The plate map (`self._plate`, a `WellPlateSelector`) is `QSizePolicy.Preferred`/`Preferred`, **not** `Fixed` vertically, which used to lock its rendered height at its own small `sizeHint()` regardless of how wide the row actually was. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate rendered illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze_tab.py`'s own form panel) for the same reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. `self._plate` also carries a `maximumWidth(330)` alongside its `maximumHeight(210)` (`center.addWidget(self._plate, 0, Qt.AlignLeft)`, no layout stretch) — `WellPlateSelector` paints its panel background and border across its *entire* allocated widget box regardless of how much of that box the grid actually draws into, so once `maximumHeight` caps the grid's cell size, handing the widget extra width (the centre column is as wide as the page allows, shared only with the fixed-width rail and legend) doesn't grow the grid at all — it stretches the panel into a big, mostly-empty grey card with a small grid centred inside. The width cap keeps the card hugging its content. Each host page's own outer layout ends in a trailing `outer.addStretch(1)` after its last real widget (and adds the dashboard itself with no stretch factor) for the same class of reason one level up: `QScrollArea.setWidgetResizable(True)` grows the page's content widget to fill the viewport, and with the raw log hidden by default nothing else in the column was willing to absorb that leftover height — the dashboard was, turning into a growing dead zone below the plate via its own internal `center.addStretch(1)`. The trailing stretch outranks every 0-stretch item above it, so slack collects as blank page background below everything instead. (Validate's page needs neither fix itself — its findings list is always visible with its own stretch factor, so it was already absorbing the slack correctly.) `PlateProgress.__init__` also takes `show_plate: bool = True` — a page whose input already has its own interactive plate map (Subset) passes `False` to skip the centre column entirely rather than leave a redundant second plate map, or worse, an empty-but-still-stretch-1 dead column between the rail and legend; see `SubsetDashboard` above. The four dashboards on the tools added alongside this widget (`ValidateDashboard`, `SubsetDashboard`, `ImportLooseDashboard`, `MergePlatesDashboard`) are each constructed **hidden** (`setVisible(False)`) by their host page and only revealed once their controller's run/check method actually starts (and, where the page already resets on an input change, hidden again then) — an idle status strip showing "Idle" over an empty bar/plate before anything has happened reads as a stuck or broken state rather than "nothing has run yet". `RunDashboard` (Analyze) and `ConcatDashboard` predate this convention and stay visible from construction. |
+| `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, `ValidateDashboard`, and `ImportLooseDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. The plate map (`self._plate`, a `WellPlateSelector`) is `QSizePolicy.Preferred`/`Preferred`, **not** `Fixed` vertically, which used to lock its rendered height at its own small `sizeHint()` regardless of how wide the row actually was. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate rendered illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze_tab.py`'s own form panel) for the same reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. `self._plate` also carries a `maximumWidth(330)` alongside its `maximumHeight(210)` (`center.addWidget(self._plate, 0, Qt.AlignLeft)`, no layout stretch) — `WellPlateSelector` paints its panel background and border across its *entire* allocated widget box regardless of how much of that box the grid actually draws into, so once `maximumHeight` caps the grid's cell size, handing the widget extra width (the centre column is as wide as the page allows, shared only with the fixed-width rail and legend) doesn't grow the grid at all — it stretches the panel into a big, mostly-empty grey card with a small grid centred inside. The width cap keeps the card hugging its content. Each host page's own outer layout ends in a trailing `outer.addStretch(1)` after its last real widget (and adds the dashboard itself with no stretch factor) for the same class of reason one level up: `QScrollArea.setWidgetResizable(True)` grows the page's content widget to fill the viewport, and with the raw log hidden by default nothing else in the column was willing to absorb that leftover height — the dashboard was, turning into a growing dead zone below the plate via its own internal `center.addStretch(1)`. The trailing stretch outranks every 0-stretch item above it, so slack collects as blank page background below everything instead. (Validate's page needs neither fix itself — its findings list is always visible with its own stretch factor, so it was already absorbing the slack correctly.) `PlateProgress.__init__` also takes `show_plate: bool = True` — a page whose input already has its own interactive plate map (Subset) passes `False` to skip the centre column entirely rather than leave a redundant second plate map, or worse, an empty-but-still-stretch-1 dead column between the rail and legend; see `SubsetDashboard` above. A second parameter, `show_legend: bool = True`, independently skips the legend column — `SubsetDashboard` passes `show_legend=False` alongside `show_plate=False`, since its counts rail already pairs a coloured dot with a state label per row, and a separate legend column would only repeat those same pairs without the live counts. Skipping either column when the centre plate column is also skipped no longer leaves a wide dead gap between whatever's left: with no widget left carrying a layout stretch factor, a trailing `body.addStretch(1)` collects the leftover width at the row's own right edge instead of Qt distributing it as blank padding around the remaining fixed-width items. The five dashboards on the Datasets-pane tools (`ConcatDashboard`, `ValidateDashboard`, `SubsetDashboard`, `ImportLooseDashboard`, `MergePlatesDashboard`) are each constructed **hidden** (`setVisible(False)`) by their host page, then revealed by that page's own `_update_status_preview` as soon as its inputs are valid enough to answer "what would this actually touch" — seeded with the real wells a run would touch (via `_common.dataset_paths.preview_wells`, or the tool's own live preview — Import Loose's `scan_folder`, Subset's own picker selection, Merge Plates' remap-applied union of both sources) and a "Ready — N well(s)" headline, rather than gated on the tool's own run/check method actually starting; each page hides it again on the next input edit that invalidates the preview. This replaced an earlier convention, gating the same reveal on a run actually starting, that read as "something is wrong" — an idle, empty status strip before anything had happened looked like a stuck or broken state rather than "nothing has run yet" (and, for `ConcatDashboard` specifically, an even earlier construction-time-visible default that painted a coloured plate with *zero* wells enabled from the moment the page loaded). `RunDashboard` (Analyze) is the one dashboard that still stays visible from construction — Analyze's own form has no comparable "not yet valid" gate to key a reveal off. Every well-coloured dashboard also marks a well's *terminal* states with a glyph layer (`WellPlateSelector.setWellMarker`), not just its colour — a transient in-progress state already had one (`⚙`), but a terminal outcome (done/merged/complete vs. failed/warned/empty) used to be colour-only; colour alone doesn't distinguish success-green from a warning hue for a user who can't tell the two apart, so every terminal state now carries its own glyph too (`✓` for success, `!` for a problem, and Merge Plates' persistent `"2"` for "this well came from dataset 2"). |
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by its furthest-reached stage and overlays a gear glyph on the actively-computing well with its `FOV done/total` sub-progress. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `RailNav` | The left-rail section navigator. |
@@ -2840,6 +2961,18 @@ The app has two complementary theme surfaces:
 stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
 registry lives in `theme.py` (below), and `theme.qss()` is the one stylesheet
 builder.
+
+**`accent` and `accent2` mean two different things, and every caller has to
+pick the right one.** `Colors.accent` is used across several Datasets
+dashboards to flag an anomalous well — one whose state doesn't fit the normal
+run (Concatenate's "merged with no matching measurements CSV on one side",
+Subset's "no rows matched the filter"). `Colors.accent2` is a second, distinct
+hue for the unrelated case of "this belongs to the other of two normal
+groups" — currently only Merge Plates' dataset-2 wells — and must never be
+reused to mean an anomaly, or a well merely belonging to the other source
+would read as suspect on the same plate map. Both are `theme.Colors` tokens
+like any other; there's nothing structurally different about `accent2`, only
+this convention about what each is allowed to mean.
 
 ### Selecting a theme
 
@@ -2932,6 +3065,19 @@ and calls `widget.setStyleSheet(qss_factory())` (idempotent). It is currently
 the event filter's own `setStyleSheet` re-fired `StyleChange` recursively and
 caused a ~20 s load stall. Any future live-switch work must adopt it (with the
 equality guard) across the ~20 widgets that freeze inline QSS.
+
+`widgets/_support.set_variant(widget, variant)` is the smaller, everyday
+sibling of the same repolish problem: it changes a `QPushButton`'s
+`variant` dynamic property at runtime and forces `style().unpolish()` +
+`style().polish()`, so a `QPushButton[variant=...]` QSS selector picks up the
+new value immediately. `setProperty("variant", ...)` alone does nothing
+visible — Qt's stylesheet cache only re-evaluates property selectors on an
+explicit repolish. It generalises the precedent
+`well_viewer.core.plot_toggles.refresh_fov_btn_state` set (a checked-state
+button variant flipping live the same way) so call sites don't each
+reimplement the unpolish/polish pair by hand; every Datasets tool page uses it
+to swap its Run/Open buttons between `primary`/`secondary` once a run
+succeeds (§6b).
 
 ---
 

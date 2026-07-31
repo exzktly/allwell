@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 
 import theme
+from util.fov import sort_key as fov_sort_key
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
@@ -142,12 +143,6 @@ def _update_preview_impl(ctx, well_label: str | None) -> None:
             len(fluor), len(tophat_fluor), len(overlay), len(mask),
         )
 
-    def _fov_sort_key(token: str) -> tuple[int, float, str]:
-        try:
-            return (0, float(token), token)
-        except ValueError:
-            return (1, 0.0, token)
-
     all_fovs = sorted(
         {
             fov_norm
@@ -156,7 +151,7 @@ def _update_preview_impl(ctx, well_label: str | None) -> None:
             for fov_norm in [review_norm_fov(fov)]
             if fov_norm
         },
-        key=_fov_sort_key,
+        key=fov_sort_key,
     )
     if channel_switch_debug:
         fov_var = widgets.get_or_none("_preview_fov_var")

@@ -131,7 +131,7 @@ class DatasetsTab(QWidget):
         parent: QWidget | None = None,
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
-        on_open_in_analyze: Callable[[Path], None] | None = None,
+        on_open_in_analyze: Callable[[Path, dict], None] | None = None,
         analyze_controller: object | None = None,
         queue_state_dir: Path | None = None,
     ) -> None:
@@ -232,9 +232,9 @@ class DatasetsTab(QWidget):
         if self._on_open_in_review is not None and dest_root:
             self._on_open_in_review(Path(dest_root))
 
-    def _open_in_analyze(self, dataset_root: str) -> None:
+    def _open_in_analyze(self, dataset_root: str, channel_tokens: dict | None = None) -> None:
         if self._on_open_in_analyze is not None and dataset_root:
-            self._on_open_in_analyze(Path(dataset_root))
+            self._on_open_in_analyze(Path(dataset_root), channel_tokens or {})
 
     def shutdown(self) -> None:
         """Stop any running feature workers (called on app close)."""

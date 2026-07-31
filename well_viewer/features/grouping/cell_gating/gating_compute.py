@@ -23,6 +23,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from util.fov import sort_key as fov_sort_key
 from pipeline.threshold_optimize import (  # noqa: F401 (re-export)
     ThreshFracOptimizationResult,
     best_from_curves as _best_from_curves,
@@ -429,13 +430,7 @@ def _cell_gating_first_frame_rows(df) -> tuple:
                   if "fov" in df.columns
                   else pd.Series(["1"] * len(df), index=df.index))
 
-    def _fov_token(token: str) -> tuple:
-        try:
-            return (0, float(token))
-        except ValueError:
-            return (1, token.lower())
-
-    unique_fovs = sorted(fov_series.unique(), key=_fov_token)
+    unique_fovs = sorted(fov_series.unique(), key=fov_sort_key)
     first_fov = unique_fovs[0] if unique_fovs else "1"
     same_fov = df.loc[fov_series == first_fov]
     if same_fov.empty:

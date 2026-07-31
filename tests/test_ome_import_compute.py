@@ -11,9 +11,13 @@ from datasets.ome_import.apply import convert  # noqa: E402
 from datasets.ome_import.ome_import_compute import (  # noqa: E402
     ConversionParams,
     OmeImportError,
+    channel_tokens_from_roles,
+    default_channel_roles,
     default_dest,
+    guess_channel_role,
     plan_conversion,
     read_layout,
+    selection_target,
     strip_ome_suffix,
 )
 
@@ -121,6 +125,97 @@ def test_plan_well_order_duplicate_rejected(tmp_path):
             ConversionParams(grid_rows=1, grid_cols=1,
                              well_order=("A01", "A01")),
         )
+
+
+def test_selection_target_multi_image_reports_positions(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=6)
+    layout = read_layout(p)
+    # FOVs auto → target is the raw position budget, no implied well count.
+    t = selection_target(layout, ConversionParams(grid_rows=1, grid_cols=1))
+    assert t.positions == 6
+    assert t.noun == "stage position"
+    assert t.expected_wells is None
+    assert "6 stage position(s)" in t.hint()
+
+
+def test_selection_target_expected_wells_when_fovs_pinned(tmp_path):
+    p = _write_multi(tmp_path / "m.ome.tif", positions=6)
+    layout = read_layout(p)
+    # 6 positions ÷ 2 FOVs → expect 3 wells.
+    t = selection_target(layout, ConversionParams(grid_rows=1, grid_cols=1, fovs_per_well=2))
+    assert t.expected_wells == 3
+    assert "3 well(s) at 2 FOV(s)/well" in t.hint()
+
+
+def test_selection_target_single_image_packed_positions_unknown(tmp_path):
+    p = _write_packed(tmp_path / "p.ome.tif", n_frames=12)
+    layout = read_layout(p)
+    # "single" frame order → every frame is a position, so the budget is known.
+    single = selection_target(layout, ConversionParams(
+        grid_rows=1, grid_cols=1, frame_order="single"))
+    assert single.positions == 12
+    assert single.noun == "frame"
+    # Packed timepoints → positions fold with timepoints, budget not knowable.
+    packed = selection_target(layout, ConversionParams(
+        grid_rows=1, grid_cols=1, frame_order="pos_in_time"))
+    assert packed.positions is None
+    assert "timepoints" in packed.hint()
+
+
+def test_guess_channel_role_by_name():
+    assert guess_channel_role("DAPI") == "nuclear"
+    assert guess_channel_role("Hoechst 33342") == "nuclear"
+    assert guess_channel_role("NIR") == "nuclear"
+    assert guess_channel_role("RFP") == "nuclear"     # secondary segmentation guess
+    assert guess_channel_role("Phase") == "phase"
+    assert guess_channel_role("Brightfield") == "phase"
+    assert guess_channel_role("GFP") == "fluor"
+
+
+def test_default_channel_roles_picks_one_nuclear():
+    # DAPI is a strong nuclear stain; the rest fluorescent.
+    roles = default_channel_roles(["DAPI", "GFP", "RFP"])
+    assert roles == {"DAPI": "nuclear", "GFP": "fluor", "RFP": "fluor"}
+
+
+def test_default_channel_roles_uses_nir_or_rfp_when_no_strong_stain():
+    # No DAPI/Hoechst → NIR / RFP is the best-guess segmentation channel.
+    assert default_channel_roles(["GFP", "NIR"]) == {"GFP": "fluor", "NIR": "nuclear"}
+    assert default_channel_roles(["GFP", "RFP"]) == {"GFP": "fluor", "RFP": "nuclear"}
+
+
+def test_default_channel_roles_strong_stain_beats_secondary_regardless_of_order():
+    # RFP is a secondary nuclear guess, but a real DAPI stain wins even when RFP
+    # comes first.
+    roles = default_channel_roles(["RFP", "DAPI", "GFP"])
+    assert roles == {"RFP": "fluor", "DAPI": "nuclear", "GFP": "fluor"}
+
+
+def test_default_channel_roles_falls_back_to_first_channel():
+    # No nuclear-looking name at all → the first channel is assigned nuclear so
+    # segmentation has a channel to run on.
+    roles = default_channel_roles(["GFP", "YFP"])
+    assert roles["GFP"] == "nuclear"
+    assert roles["YFP"] == "fluor"
+
+
+def test_default_channel_roles_keeps_only_first_nuclear():
+    roles = default_channel_roles(["DAPI", "Hoechst", "GFP"])
+    assert roles["DAPI"] == "nuclear"
+    assert roles["Hoechst"] == "fluor"   # demoted — only one nuclear
+
+
+def test_channel_tokens_from_roles_aggregates():
+    tokens = channel_tokens_from_roles([
+        ("DAPI", "nuclear"), ("GFP", "fluor"), ("RFP", "fluor"),
+        ("Phase", "phase"), ("Junk", "skip"),
+    ])
+    assert tokens.nuclear_token == "DAPI"
+    assert tokens.fluor_tokens == ["GFP", "RFP"]
+    assert tokens.phase_token == "Phase"
+    info = tokens.as_pipeline_info()
+    assert info == {"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"],
+                    "phase_token": "Phase"}
 
 
 def test_convert_writes_dataset_folder(tmp_path):

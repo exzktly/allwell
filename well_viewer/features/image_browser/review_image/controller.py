@@ -19,6 +19,7 @@ from well_viewer.features.image_browser.review_image.box_select import (
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
 from well_viewer.core.ui_helpers import norm_timepoint
+from util.fov import sort_key as fov_sort_key
 from util.timepoint import sort_key as tp_sort_key
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.selections_model import active_replicate_sets
@@ -818,16 +819,11 @@ def _refresh_review_csv_impl(ctx) -> None:
     # a click calls setCurrentText("1"), the select silently no-ops, the filter
     # lands on the wrong (or an empty) FOV, and refresh_review_csv_rows falls
     # back to materialising *every* loaded row — the OOM that SIGKILLs the app.
-    def _fov_sort_key(s: str):
-        try:
-            return (0, float(s))
-        except (TypeError, ValueError):
-            return (1, s)
     fovs = sorted(
         {review_norm_fov(r.get("fov", r.get("FOV", "")))
          for r in rows
          if review_norm_fov(r.get("fov", r.get("FOV", "")))},
-        key=_fov_sort_key,
+        key=fov_sort_key,
     )
     tps: list[str] = []
     seen_tps: set[str] = set()

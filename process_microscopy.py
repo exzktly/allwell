@@ -68,6 +68,7 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
+from util.fov import sort_key as _fov_sort_key
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
     split_background_wells as _split_background_wells,
@@ -3711,11 +3712,6 @@ def _effective_fluor_tokens_for_sidecar(
     return out
 
 
-def _parse_numeric_token(value: str) -> float | None:
-    try:
-        return float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
 
 
 def _collect_image_stems(input_dir: Path) -> set[str]:
@@ -3793,15 +3789,12 @@ def _collect_available_fovs(
     filename_schema: str,
     filename_sep: str,
 ) -> list[str]:
-    def _sort_key(fov: str):
-        n = _parse_numeric_token(fov)
-        return (n is None, n or 0.0, fov)
     return _collect_available_schema_values(
         input_dir,
         filename_schema=filename_schema,
         filename_sep=filename_sep,
         field_name="fov",
-        sort_key=_sort_key,
+        sort_key=_fov_sort_key,
     )
 
 

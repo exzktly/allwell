@@ -29,7 +29,7 @@ class OmeImportController(QObject):
     def __init__(
         self,
         *,
-        on_open_in_analyze: Callable[[str], None] | None = None,
+        on_open_in_analyze: Callable[[str, dict], None] | None = None,
         on_add_to_queue: Callable[[str, dict], None] | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -124,7 +124,9 @@ class OmeImportController(QObject):
 
     def _on_open_in_analyze_requested(self, dest_root: str) -> None:
         if self._on_open_in_analyze is not None:
-            self._on_open_in_analyze(dest_root)
+            # Hand the channel-role assignment across so Analyze's channel tokens
+            # arrive pre-filled instead of retyped.
+            self._on_open_in_analyze(dest_root, self.page.channel_tokens_dict())
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def shutdown(self) -> None:

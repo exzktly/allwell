@@ -290,7 +290,7 @@ class OmeImportPage(QWidget):
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Conversion Output", hdr))
+        hl.addWidget(QLabel("Convert Output", hdr))
         hl.addStretch(1)
         self._raw_log_cb = QCheckBox("Show raw log", hdr)
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)

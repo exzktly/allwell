@@ -98,15 +98,19 @@ class ValidatePage(QWidget):
         outer.addWidget(_hrule(self))
 
         blurb = QLabel(
-            "Check what an Analyze run actually finished — a crash or a "
-            "partial run can leave pipeline_info.json advertising more than "
-            "out/ actually holds. Repairs here only touch metadata (the "
-            "availability lists, stale cell overrides, leftover staging "
-            "files) — never measurement data or images.",
+            "Check what an Analyze run actually finished, and repair the "
+            "metadata a crashed or partial run can leave stale — never "
+            "measurement data or images.",
             self,
         )
         blurb.setObjectName("Muted")
         blurb.setWordWrap(True)
+        blurb.setToolTip(
+            "A crash or partial run can leave pipeline_info.json advertising "
+            "more than out/ actually holds. Repairs touch only the "
+            "availability lists, stale cell overrides, and leftover staging "
+            "files."
+        )
         outer.addWidget(blurb)
 
         self._dataset_field = PathField(

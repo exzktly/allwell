@@ -104,11 +104,10 @@ class MergePlatesPage(QWidget):
         outer.addWidget(_hrule(self))
 
         blurb = QLabel(
-            "Join two DIFFERENT plates along the well axis into one dataset "
-            "— the well-axis sibling of Concatenate, which joins the SAME "
-            "plate across time. A well present in both datasets is treated "
-            "as two different samples and refused, not stitched: remap "
-            "dataset 2's wells onto free positions first if they overlap.",
+            "Join two different datasets along the well axis into one — the "
+            "well-axis sibling of Concatenate, which joins the same dataset "
+            "across time. A well present in both is refused, not stitched: "
+            "remap dataset 2's wells onto free positions first if they overlap.",
             self,
         )
         blurb.setObjectName("Muted")

@@ -43,7 +43,7 @@ class ConcatDashboard(PlateProgress):
         self._phase = ""
         self._outcome = ""            # "" | "done" | "failed" | "cancelled"
         self._rail: dict[str, tuple] = {}
-        super().__init__("Merge Progress", parent)
+        super().__init__("Concatenate Progress", parent)
         self.setObjectName("ConcatDashboard")
 
     # ── host-facing API ─────────────────────────────────────────────────────

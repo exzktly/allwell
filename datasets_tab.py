@@ -113,7 +113,7 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
 
 
 _FEATURES: tuple[_Feature, ...] = (
-    _Feature(name="Concatenate datasets", icon="copy", build=_build_concatenate),
+    _Feature(name="Concatenate Datasets", icon="copy", build=_build_concatenate),
     _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
     _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate),
     _Feature(name="Subset / Split", icon="boxes", build=_build_subset),

@@ -109,7 +109,7 @@ class ConcatenatePage(QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
-        heading = QLabel("Concatenate datasets", self)
+        heading = QLabel("Concatenate Datasets", self)
         heading.setObjectName("Heading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))
@@ -206,7 +206,7 @@ class ConcatenatePage(QWidget):
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Merge Output", hdr))
+        hl.addWidget(QLabel("Concatenate Output", hdr))
         hl.addStretch(1)
         # The dashboard below IS the summary view; the verbose text log is off
         # by default and revealed on demand, matching Analyze's own pattern

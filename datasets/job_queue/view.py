@@ -13,6 +13,7 @@ wires it to the real :class:`~datasets.job_queue.controller.QueueBridge`.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -80,6 +81,12 @@ class _JobRow(QWidget):
     def __init__(self, job: JobSpec, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.job_id = job.id
+        # The whole row is a click target (rowClicked -> "show this job" on
+        # its own page) with no other visual cue that it's interactive —
+        # a pointing-hand cursor and a tooltip on hover are the only signal
+        # a user gets before clicking.
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip("Click to open this job on its own page.")
         hl = QHBoxLayout(self)
         hl.setContentsMargins(theme.Spacing.sm, theme.Spacing.xs,
                                theme.Spacing.sm, theme.Spacing.xs)
@@ -104,10 +111,16 @@ class _JobRow(QWidget):
         hl.addWidget(dot)
 
         if job.message:
-            msg = QLabel(job.message, self)
+            msg = QLabel(self)
             msg.setObjectName("Muted")
             msg.setToolTip(job.message)
             msg.setMaximumWidth(240)
+            # Elided with "…", not hard-clipped -- setMaximumWidth alone cut
+            # the label off mid-character with no indication text was
+            # missing; the full message was reachable only via the tooltip,
+            # which nothing about the label's own appearance suggested existed.
+            metrics = QFontMetrics(msg.font())
+            msg.setText(metrics.elidedText(job.message, Qt.ElideRight, 240))
             hl.addWidget(msg)
 
         up_btn = QToolButton(self)

@@ -380,6 +380,35 @@ def _scan_one_well(
         has_out_folder=out_folder is not None,
     )
 
+    # A well with real recorded output (done) should have every one of its
+    # own (fov, timepoint) keys show up in intent too -- done describes
+    # finished *portions of the input*, so it's a subset by construction
+    # when both sides are parsed against the schema that actually matches
+    # this dataset's filenames. If most of done's own keys are absent from
+    # intent, that's not "most of this well is unfinished" -- it's a sign
+    # pipeline_info.json's schema_fields/separator don't actually match how
+    # this well's raw filenames are structured, so intent's positional
+    # parse is reading the wrong tokens as fov/timepoint. Left undetected,
+    # that silently turns into a wall of individually-wrong missing_fov_tp
+    # findings for a well that may well be genuinely complete.
+    if container is not None and len(done) >= 4:
+        unmatched_done = done - intent
+        if len(unmatched_done) >= 0.5 * len(done):
+            findings.append(Finding(
+                severity="error", code="schema_mismatch_suspected", well=well,
+                message=(
+                    f"Well {well}: {len(unmatched_done)} of {len(done)} "
+                    "recorded (fov, timepoint) pair(s) don't match anything "
+                    "parsed from the raw input filenames, even though this "
+                    "well has real recorded output. This usually means "
+                    "pipeline_info.json's 'schema_fields'/'separator' don't "
+                    "actually match how this dataset's images are named — "
+                    "compare them against a real filename in this well's "
+                    "in/ archive. The missing-pair count below is unreliable "
+                    "until that's fixed."
+                ),
+            ))
+
     if missing:
         if fov_field_present:
             sample = sorted(missing)[:5]

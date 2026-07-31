@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QStackedWidget, QVBoxLayout, QWidget,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.core.safe import swallowed
@@ -245,37 +245,20 @@ def build_centre(win, parent: QWidget) -> None:
         pending[_sub] = _registry_builder(_sub)
 
     def _build_plotting() -> None:
-        """Build the Plotting section: mockup-style ctxbar above a tab-bar-hidden
-        QTabWidget that hosts the five renderers (line / bar / scatter cells +
-        agg / distribution / heatmap). Phase 11 retires the visible plot-type
-        QTabBar in favour of the v2 ctxbar.subnav SegmentedControl (Q5: switch
-        governs the whole canvas — implemented here by routing through the
-        existing per-renderer pages); a global Channel chip lives in
-        ctxbar.right (A4); Add panel / Configure subplots / Edit axes-curve
-        buttons (B9, B11) sit alongside.
+        """Build the Plotting section: the shared control band above a
+        ``NamedPageStack`` hosting the five renderers (line / bar / scatter
+        cells + agg / distribution / heatmap).
 
-        The underlying per-renderer pages keep their existing rendering
-        contracts so we don't regress functionality. Phase 11b will collapse
-        them into a single shared PlotCanvas.
+        The plot-type selector is a ``QTabBar`` that does not live here — it is
+        registered into the shell's mode band, beside the Review / Analyze /
+        Datasets selector, so the two page selectors share one row (§5.2). The
+        stack still owns the content; the bar is purely a selector.
+
+        Each per-renderer page keeps its own rendering contract.
         """
         from PySide6.QtWidgets import QTabBar
 
-        # ── ctxbar ─ Row 1 (plot-type QTabBar, matching Sample Definitions style) ──
-        # Switched from SegmentedControl (pill style) to a styled QTabBar so
-        # the plot-type switcher matches the Sample Definitions sub-tabs.
-        # The bar is wired to ``plotting_nb`` (NamedPageStack) so the page
-        # stack still owns the actual content; the bar is purely a selector.
-        ctxbar = QWidget(plotting_container)
-        ctxbar.setObjectName("PlottingCtxbar")
-        ctxbar.setAttribute(Qt.WA_StyledBackground, True)
-        from theme import Colors as _C, Spacing as _S, Typography as _T, Radii as _R
-        ctxbar.setStyleSheet(
-            f"#PlottingCtxbar {{ background-color: {_C.surface}; "
-            f"border-bottom: 1px solid {_C.border_subtle}; }}"
-        )
-        cbl = QHBoxLayout(ctxbar)
-        cbl.setContentsMargins(0, 0, 0, 6)
-        cbl.setSpacing(_S.sm)
+        from theme import Colors as _C, Radii as _R, Typography as _T
 
         # A standalone QTabBar carrying the nested-sub-tab object name, which
         # theme.qss styles alongside Sample Definitions' bar — one rule, so the
@@ -288,11 +271,14 @@ def build_centre(win, parent: QWidget) -> None:
         sub_seg.setDrawBase(False)
         for title in _PLOT_SUBTABS:
             sub_seg.addTab(title)
-        cbl.addWidget(sub_seg, 1)
+        # The bar goes in the shell's mode band, beside the Review / Analyze /
+        # Datasets selector, not in this tab's body. Both are page selectors one
+        # level apart, so they belong on one row sharing a bottom edge — stacked,
+        # they were two strips of chrome above every plot.
+        from well_viewer.core.app_shell_view import register_page_tabs
+        register_page_tabs(win, "Plotting", sub_seg)
 
-        plotting_container.layout().addWidget(ctxbar, 0)
-
-        # ── ctxbar ─ Row 2 (the shared control band, above the canvas) ───
+        # ── The shared control band, above the canvas ────────────────────
         # Every Review tab uses the same band, so the plotting row is built
         # through the shared widget rather than as a bespoke QHBoxLayout: the
         # scope controls left in a flow that wraps instead of squeezing labels
@@ -330,7 +316,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_scatter_grp.setVisible(False)
 
         # Phase 11b (A4): the channel selector is now a single global combo
-        # in the ctxbar. The per-renderer combos still exist for back-compat
+        # in the band. The per-renderer combos still exist for back-compat
         # but ``win._on_plot_channel_selected`` mirrors every change back to
         # all of them, so editing here re-renders every renderer's view
         # against the new channel.
@@ -480,7 +466,7 @@ def build_centre(win, parent: QWidget) -> None:
         sub_seg.setCurrentIndex(0)
 
         def _refresh_channel_chip(title: str) -> None:
-            """Re-populate the global ctxbar channel combo on sub-tab switch.
+            """Re-populate Plotting's band channel combo on sub-tab switch.
 
             Reads from the canonical channel list (``win._app_state.channel.fluor_channels`` +
             ratios) rather than mirroring a per-renderer combo's items.
@@ -611,7 +597,7 @@ def build_centre(win, parent: QWidget) -> None:
     # group's tabs come from ``win._features.in_group(...)`` in declaration
     # order; the builder is the descriptor's registry builder, except the
     # bespoke "Plotting" composite (built by ``_build_plotting`` above, which
-    # owns the nested plot sub-tab notebook + ctxbar). Commenting a descriptor
+    # owns the nested plot sub-tab notebook + control band). Commenting a descriptor
     # out of ``features.registry.FEATURES`` removes its rail entry here — and
     # its dispatch / state / persistence — with no other edit.
     _bespoke_builders = {"Plotting": _build_plotting}

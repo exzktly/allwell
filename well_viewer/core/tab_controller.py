@@ -172,6 +172,8 @@ def on_notebook_current_changed(ctx, _idx) -> None:
     if nav is None or nb is None:
         return
     title = nb.currentName()
+    from well_viewer.core.app_shell_view import show_page_tabs
+    show_page_tabs(app, title)
     if title and nav.currentKey() != title:
         app._section_nav_building = True
         try:

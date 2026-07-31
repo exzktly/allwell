@@ -59,6 +59,13 @@ def build_image_browser_tab(ctx, parent: QWidget) -> None:
     sub_tabs.currentChanged.connect(
         lambda idx: ctl.on_image_browser_subtab_changed(ctx, idx))
 
+    # The visible bar lives in the shell's mode band, beside the mode selector,
+    # not above this tab's body. ``mirror_tab_widget`` hides this widget's own
+    # bar and drives it from one up there, so every reader of the QTabWidget's
+    # API (the controller, view-state, the tests) is untouched.
+    from well_viewer.core.app_shell_view import mirror_tab_widget
+    mirror_tab_widget(ctx.window, "Image Browser", sub_tabs)
+
     # Eagerly build the initial sub-tab so it's ready on open, plus the
     # Segmentation review-image canvas (kept ready for the CSV / cell-review push
     # flows) when present. Cell Browser / Playground stay lazy — built on first

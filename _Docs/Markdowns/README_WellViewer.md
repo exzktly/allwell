@@ -570,15 +570,15 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ All-Well   [Review|Analyze]    ↻  ⛶  ⌂  i                       │  ← title bar
+│ All-Well                       ↻  ⛶  ⌂  i                       │  ← title bar
 ├──────────────┬──────────────────────────────────────────────────┤
-│              │  Channel: [GFP ▾]                  ── ctxbar ──  │
-│ SECTION      │  ┌────────────────────────────────────────────┐  │
-│  ⊙ Plotting  │  │                                            │  │
-│   …          │  │            (plot canvas)                   │  │
+│ Review Analyze Datasets │ Bar Plots  Line Graphs  Scatter  …  ⊟ │  ← one band
+├──────────────┼──────────────────────────────────────────────────┤
+│ 📁 my_run  ▾ │  Channel [GFP ▾] Property [Mean ▾]  Display ▾ ⚙  │  ← controls
+│  ⊙ Plotting  │  ┌────────────────────────────────────────────┐  │
 │   …          │  │                                            │  │
+│   …          │  │            (plot canvas)                   │  │
 │   …          │  └────────────────────────────────────────────┘  │
-│              │              Export ▾            Properties      │
 │              │                                                  │
 │              │                                                  │
 │              │                                                  │
@@ -654,6 +654,16 @@ tabs and is what every plot / aggregate / export consumes.
   Click into a pane to focus it — the focused pane drives the sidebar and the
   well picker, and both panes refresh on a selection or channel change. It
   needs a second tab to show something; a tab can't be split against itself.
+
+#### One band across the top
+
+The window's top row is one band: **Review / Analyze / Datasets** on the left,
+spanning the rail's width, and the current page's tabs — *Bar Plots · Line
+Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell Browser ·
+Playground* — immediately to their right on the same line. Pages without
+sub-tabs (Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved Plots)
+leave that side empty; the band keeps its height so nothing below it shifts when
+you switch pages.
 
 #### One controls row on every tab
 

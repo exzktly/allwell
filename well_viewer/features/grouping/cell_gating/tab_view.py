@@ -138,7 +138,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
 
     # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
     # mean fluorescence intensity, regardless of which Property the user
-    # picks in the plotting ctxbar.
+    # picks in Plotting's band.
     mfi_note = QLabel(
         "Note: FluorGating (cell inclusion) and ThreshFracOn cuts are "
         "applied against per-cell mean fluorescence intensity (MFI) only, "

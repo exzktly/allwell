@@ -52,7 +52,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # Channel combo: kept as an offscreen widget so the rest of the app can
     # still read/write the per-renderer channel through ``app._chan_cb_line``
-    # and ``_plot_chan_var``; the global ctxbar combo is the only visible
+    # and ``_plot_chan_var``; Plotting's band combo is the only visible
     # channel control.
     chan_cb = reg.register("_chan_cb_line", QComboBox())
     chan_cb.addItems(["GFP"])
@@ -64,7 +64,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
         reg.register("_plot_chan_var", chan_cb)   # legacy aliases → same widget
         reg.register("_chan_var", chan_cb)
 
-    # The visible metric selector now lives in the global plotting ctxbar
+    # The visible metric selector now lives in Plotting's band
     # (``_plotting_metric_cb``). This hidden per-tab combo stays as a
     # back-compat shim for code that still reads ``_metric_var`` /
     # ``_metric_cb``; the global combo wins when present.

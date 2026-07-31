@@ -397,6 +397,12 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
             if ctx.widgets.has("_rep_active_group_lbl"):
                 update_active_group_label(ctx)
     sub_tabs.currentChanged.connect(_on_sample_def_subtab)
+    # The visible bar lives in the shell's mode band beside the mode selector,
+    # not above this tab's body. ``mirror_tab_widget`` hides this widget's own
+    # bar and drives it from one up there, leaving the QTabWidget's API — which
+    # the plate-commit guard, view-state and several tests read — untouched.
+    from well_viewer.core.app_shell_view import mirror_tab_widget
+    mirror_tab_widget(ctx.window, "Sample Definitions", sub_tabs)
     # Cell Gating leads and is the default tab, so build it now (currentChanged
     # won't fire for the already-current index 0).
     build_cell_gating_subtab(ctx)

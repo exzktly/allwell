@@ -81,34 +81,148 @@ def refresh_dataset_button(win) -> None:
     btn.setToolTip(path)
 
 
+def build_page_tabs_host(win, parent):
+    """The band's right-hand slot: whichever page's tab bar is current.
+
+    The page tab bars used to sit inside each tab's own body, one row below the
+    mode band, so the top of the window was two stacked strips of chrome. They
+    are the same *kind* of thing as the mode selector — one level down — so they
+    belong beside it on one row, sharing its bottom edge.
+
+    A ``QStackedWidget`` keyed by top-level page name. Page 0 is blank and is
+    what the six pages with no sub-tabs (Statistics, Spatial, smFISH, Review
+    CSV, Batch Export, Saved Plots) show; the band keeps its height there rather
+    than collapsing, so switching pages never shifts the content below it.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+    host = QStackedWidget(parent)
+    host.setObjectName("PageTabsHost")
+    host.addWidget(QWidget(host))          # index 0 — the blank page
+    win._page_tabs_host = host
+    win._page_tabs_by_name = {}
+    return host
+
+
+def register_page_tabs(win, name: str, bar) -> None:
+    """Mount *bar* as the band's tab strip for the top-level page *name*."""
+    host = getattr(win, "_page_tabs_host", None)
+    if host is None or bar is None:
+        return
+    host.addWidget(bar)
+    win._page_tabs_by_name[name] = bar
+    # Pages build lazily, so a bar can register *after* its page is already
+    # current — show it now rather than waiting for the next page change.
+    nb = getattr(win, "_notebook", None)
+    if nb is not None and nb.currentName() == name:
+        show_page_tabs(win, name)
+
+
+def show_page_tabs(win, name: str) -> None:
+    """Swap the band to *name*'s tab bar, or to the blank page if it has none.
+
+    Split View shows two top-level pages at once and detaches both from the
+    notebook, so ``currentName()`` names neither. The band can only carry one
+    strip, so it carries the **focused** pane's — the same pane the sidebar and
+    the tab dispatch already follow. Without this the band would fall through to
+    its blank page and both panes' sub-tabs would be unreachable while split.
+    """
+    host = getattr(win, "_page_tabs_host", None)
+    if host is None:
+        return
+    split = getattr(getattr(win, "_ctx", None), "runtime", None)
+    split = getattr(split, "split", None)
+    if split is not None and getattr(split, "active", False):
+        name = getattr(split, "focused", None) or name
+    bar = (getattr(win, "_page_tabs_by_name", None) or {}).get(name)
+    host.setCurrentWidget(bar if bar is not None else host.widget(0))
+
+
+def mirror_tab_widget(win, name: str, tab_widget):
+    """Drive a ``QTabWidget`` from a ``QTabBar`` in the band, two ways.
+
+    The two nested ``QTabWidget``s (Image Browser, Sample Definitions) are read
+    through their own API by controllers, persistence and eight test modules —
+    ``tabText`` / ``currentIndex`` / ``count`` / ``addTab`` / ``currentChanged``.
+    Converting them to a bar plus a page stack would break every one of those.
+    Hiding their own bar and mirroring it instead keeps the widget and its API
+    exactly as they are, and costs one signal each way.
+    """
+    from PySide6.QtWidgets import QTabBar
+    bar = QTabBar()
+    # Carry the source widget's name so theme.qss's one nested-sub-tab rule
+    # styles the mirror exactly as it styled the bar it replaces.
+    bar.setObjectName(tab_widget.objectName() or "PlottingSubTabs")
+    bar.setDrawBase(False)
+    bar.setExpanding(False)
+    bar.setElideMode(Qt.ElideNone)
+    bar.setUsesScrollButtons(True)
+    tab_widget.tabBar().hide()
+
+    def _sync_bar_from_widget() -> None:
+        """Rebuild the mirror when tabs are added, renamed or removed."""
+        blocked = bar.blockSignals(True)
+        try:
+            while bar.count():
+                bar.removeTab(0)
+            for i in range(tab_widget.count()):
+                bar.addTab(tab_widget.tabText(i))
+            bar.setCurrentIndex(tab_widget.currentIndex())
+        finally:
+            bar.blockSignals(blocked)
+
+    def _on_widget_changed(idx: int) -> None:
+        if bar.currentIndex() != idx:
+            blocked = bar.blockSignals(True)
+            try:
+                bar.setCurrentIndex(idx)
+            finally:
+                bar.blockSignals(blocked)
+
+    bar.currentChanged.connect(tab_widget.setCurrentIndex)
+    tab_widget.currentChanged.connect(_on_widget_changed)
+    _sync_bar_from_widget()
+    tab_widget._aw_sync_mirror = _sync_bar_from_widget  # type: ignore[attr-defined]
+    register_page_tabs(win, name, bar)
+    return bar
+
+
 def build_ui(win) -> None:
     outer = QVBoxLayout(win)
     outer.setContentsMargins(0, 0, 0, 0)
     outer.setSpacing(0)
 
-    # Topbar. No left inset: the app header's mode bar is inserted at index 0
-    # and must sit flush against the window edge and span the rail's full width,
-    # so the bar and the rail below it read as one column rather than a chip row
-    # floating over it. Everything after the bar carries its own leading pad.
+    # The mode band. The app header's mode bar is inserted at index 0 and spans
+    # the rail's width flush against the window edge, so it and the rail below
+    # it read as one column rather than a chip row floating over one.
+    #
+    # It is pinned to the page tab bar's height and carries no vertical padding
+    # of its own, because everything in this strip sits *above* the centre
+    # pane's tab row and pushes it down. Padded to the collapse button's natural
+    # height it cost 43px on every Review tab to show one icon; at the tab bar's
+    # height the band lines up with the tab row beside it and costs 10px less.
+    from widgets.mode_bar import tab_bar_height as _tab_bar_height
     top = QWidget()
+    top.setFixedHeight(_tab_bar_height())
     top_layout = QHBoxLayout(top)
-    top_layout.setContentsMargins(0, 8, 14, 8)
+    top_layout.setContentsMargins(0, 0, theme.Spacing.md, 0)
     top_layout.setSpacing(theme.Spacing.sm)
     win._top_bar = top
-    _lead = QWidget(top)
-    _lead.setFixedWidth(theme.Spacing.md)
-    top_layout.addWidget(_lead)
-    # Left-rail collapse toggle. Checked == the rail is hidden; the glyph
-    # flips between panel-open / panel-close.
+    top_layout.addWidget(build_page_tabs_host(win, top), 1)
+    win._dir_label = QLabel("No data loaded")
+    win._dir_label.setObjectName("Muted")
+    win._dir_label.hide()
+    top_layout.addWidget(win._dir_label)
+    # Left-rail collapse toggle. Checked == the rail is hidden; the glyph flips
+    # between panel-open / panel-close. It sits at the far right of the band
+    # rather than immediately after the mode bar: there it was a lone icon
+    # hovering over the left edge of the tab row below it, reading as that row's
+    # first control. It cannot move into the rail itself — collapsing the rail
+    # would take the only control that brings it back with it.
     from widgets.icon_button import IconButton as _IconButton
     win._sidebar_toggle_btn = _IconButton(
         "panel-right-close", tooltip="Hide sidebar", checkable=True)
     win._sidebar_toggle_btn.clicked.connect(win._toggle_sidebar)
     top_layout.addWidget(win._sidebar_toggle_btn)
-    win._dir_label = QLabel("No data loaded")
-    win._dir_label.setObjectName("Muted")
-    top_layout.addWidget(win._dir_label)
-    top_layout.addStretch(1)
     # "Open…" is not here any more. It moved into the rail's dataset control
     # (below), where the folder it opens is also *named* — the button and the
     # thing it acts on in one place, instead of a button at one end of the

@@ -474,7 +474,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     # Announce on the bus. RedrawCoordinator subscribes dataset_loaded and runs
     # the post-load plot redraw — the emit is the redraw trigger.
     app._event_bus.dataset_loaded.emit(app._app_state.dataset)
-    # Sync the ctxbar ThreshFracOn quick-edit once everything has settled (the
+    # Sync the band's ThreshFracOn quick-edit once everything has settled (the
     # gating edits are now hydrated and the active channel is final), so the box
     # shows the loaded threshold instead of its 50.0 default.
     refresh = getattr(app, "_refresh_thresh_frac_quick_edit", None)

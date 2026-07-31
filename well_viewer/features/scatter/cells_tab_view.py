@@ -50,7 +50,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctrl = ControlBand(parent)
 
     # Per-axis channel + property selectors. The scatter tab overrides
-    # the global ctxbar channel/property combos (those are hidden when
+    # Plotting's band channel/property combos (those are hidden when
     # Scatter Plot is the active plotting subtab) because each axis
     # needs to render an independent column.
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER

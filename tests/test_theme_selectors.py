@@ -42,6 +42,9 @@ UNSTYLED_NAMES = frozenset({
     "TabCtrl",
     # Structural handles used by findChild / split view / view-state restore.
     "CentralHost", "CentreSplit", "CentreTabs", "PlotEmptyStateStack",
+    # The shell band's slot for the current page's tab strip: a QStackedWidget
+    # that only swaps which bar is shown. The bars carry their own styled names.
+    "PageTabsHost",
     "PlotGroupsDrawer", "PlotToolbar", "Sidebar", "VersionPill",
     # Widget-internal handles; these widgets paint themselves in code rather
     # than through a stylesheet string the scan can see.

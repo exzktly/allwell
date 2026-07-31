@@ -51,7 +51,7 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
 
     ctrl = ControlBand(parent)
 
-    # Channel combo hidden — global ctxbar combo is the only visible
+    # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
     chan_cb = reg.register("_chan_cb_distribution", QComboBox())
     chan_cb.addItems(["GFP"])

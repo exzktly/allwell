@@ -68,7 +68,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # ── controls bar ─────────────────────────────────────────────────────────
     bar_ctrl = ControlBand(bar_right)
 
-    # Channel combo hidden — the global ctxbar combo is the only visible
+    # Channel combo hidden — Plotting's band combo is the only visible
     # channel control. See line_graphs_tab_view.py for rationale.
     chan_cb = reg.register("_chan_cb_bar", QComboBox())
     chan_cb.addItems(["GFP"])
@@ -78,7 +78,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     chan_cb.hide()
 
     # Hidden per-tab metric combo — back-compat shim only. The global
-    # plotting ctxbar's ``_plotting_metric_cb`` is the single visible
+    # Plotting band's ``_plotting_metric_cb`` is the single visible
     # source of truth for the active intensity property.
     from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
     metric_frame = reg.register("_metric_selector_frame_bar", QWidget(bar_ctrl))

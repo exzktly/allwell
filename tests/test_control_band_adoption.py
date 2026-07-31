@@ -121,3 +121,33 @@ def test_adoption_list_only_grows():
             f"{rel} is listed as having adopted the shared control band but no "
             "longer constructs one."
         )
+
+
+# ── the page tab bars live in the shell band, not in a tab body ─────────────
+#: Modules that build a top-level page's tab strip. Each must hand it to the
+#: shell band rather than adding it to its own body.
+PAGE_TAB_OWNERS = (
+    "well_viewer/core/centre_view.py",                       # Plotting
+    "well_viewer/features/image_browser/tab_view.py",        # Image Browser
+    "well_viewer/features/grouping/replicate_panel_view.py",  # Sample Definitions
+)
+
+_HOIST_CALLS = ("register_page_tabs", "mirror_tab_widget")
+
+
+def test_page_tab_bars_are_mounted_in_the_shell_band():
+    """The mode selector and the page tabs share one row across the top.
+
+    A tab strip added to its own tab's body instead puts a second strip of
+    chrome directly under the first, which is the stacking this replaced. Both
+    hoist calls take the bar to ``app_shell_view``'s band; a module that builds
+    a page tab strip must use one of them.
+    """
+    for rel in PAGE_TAB_OWNERS:
+        names = _call_names(_tree(rel))
+        assert any(fn in names for fn in _HOIST_CALLS), (
+            f"{rel} builds a page tab strip but calls neither "
+            f"{' nor '.join(_HOIST_CALLS)}. The strip belongs in the shell's "
+            "mode band beside the Review / Analyze / Datasets selector, not in "
+            "this tab's body."
+        )

@@ -495,7 +495,7 @@ def restore(ctx, state: dict) -> None:
         # pick up the saved metric for their initial render.
         ctx.state.channel.active_metric = metric
         # Push the value into every metric combo widget that exists right
-        # now (e.g. the global ctxbar's _plotting_metric_cb, built early
+        # now (e.g. Plotting's band combo _plotting_metric_cb, built early
         # during centre-view construction). Without this the dropdown
         # reverts to its default first item ("Mean Intensity") on app
         # reopen because set_active_metric — which usually drives the

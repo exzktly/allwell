@@ -93,6 +93,12 @@ class AnalyzeRunMixin:
         a queue bridge, which isn't a widget event."""
         self._runner.stop()
 
+    def is_busy(self) -> bool:
+        """QueueableController hook: whether a pipeline run is already in
+        flight — checked by QueueBridge.show_job before it repopulates the
+        input field from a clicked queued row."""
+        return self._runner.is_running
+
     def was_cancelled(self) -> bool:
         """Whether the most recent run's failure was a user-requested Stop
         rather than a genuine failure — both surface as the same kind of

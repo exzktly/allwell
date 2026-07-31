@@ -107,6 +107,10 @@ class ImportLooseController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.request_stop()
 
+    def is_busy(self) -> bool:
+        """QueueableController hook — see SubsetController.is_busy."""
+        return self._worker is not None and self._worker.isRunning()
+
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Converting {len(wells)} well(s)…")

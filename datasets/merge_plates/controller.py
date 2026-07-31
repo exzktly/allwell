@@ -140,6 +140,10 @@ class MergePlatesController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
 
+    def is_busy(self) -> bool:
+        """QueueableController hook — see SubsetController.is_busy."""
+        return self._worker is not None and self._worker.isRunning()
+
     def _on_wells_planned(self, wells: list) -> None:
         # Distinguish origin using the well map applied for this run: any
         # well that is a remap *target* came from dataset 2, as did any

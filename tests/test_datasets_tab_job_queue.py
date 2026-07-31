@@ -48,6 +48,9 @@ class _FakeAnalyzeController(QObject):
     def stop(self) -> None:
         pass
 
+    def is_busy(self) -> bool:
+        return False
+
 
 def _make_tab(tmp_path, *, analyze=True):
     fake_analyze = _FakeAnalyzeController() if analyze else None

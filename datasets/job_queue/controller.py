@@ -15,6 +15,7 @@ shape.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import Callable
 from typing import Protocol
@@ -54,6 +55,7 @@ class QueueableController(Protocol):
     def start_from_queue(self, spec: dict) -> None: ...
     def show_job(self, spec: dict) -> None: ...
     def stop(self) -> None: ...
+    def is_busy(self) -> bool: ...
 
 
 class QueueBridge(QObject):
@@ -113,8 +115,24 @@ class QueueBridge(QObject):
         if job is None:
             return
         runner = self._runners.get(job.kind)
-        if runner is not None:
-            runner.show_job(job.spec)
+        if runner is None or runner.is_busy():
+            # Populating a page mid-run doesn't just show stale information —
+            # for the Datasets tools, show_job() writes fields the controller
+            # is actively driving as its own run-progress display (Subset's
+            # plate map, its timepoint/FOV checkbox rows), and set_running's
+            # field locks only block user clicks, not this programmatic path.
+            # Silently ignored rather than queued/deferred: the click is a
+            # "preview this job" request, not something that needs to happen
+            # eventually.
+            return
+        # A deep copy, not the queue's own persisted dict — nothing here
+        # should be able to mutate what's actually saved by writing through a
+        # reference a show_job() implementation was only ever meant to read.
+        # job.spec is already guaranteed JSON-shaped (JobQueue.materialise
+        # makes the same assumption), so a json round-trip is a cheap, total
+        # deep copy rather than a shallow dict() that still shares nested
+        # dicts/lists (e.g. Analyze's spec["opts"]).
+        runner.show_job(json.loads(json.dumps(job.spec)))
 
     # ── run/pause ────────────────────────────────────────────────────────
     def start(self) -> None:

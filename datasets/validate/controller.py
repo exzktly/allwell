@@ -98,6 +98,10 @@ class ValidateController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
 
+    def is_busy(self) -> bool:
+        """QueueableController hook — see SubsetController.is_busy."""
+        return self._worker is not None and self._worker.isRunning()
+
     def _on_succeeded(self, report: DatasetReport, result) -> None:
         self.page.dashboard.set_wells([w.well for w in report.wells])
         for w in report.wells:

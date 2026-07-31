@@ -125,6 +125,15 @@ class SubsetController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
 
+    def is_busy(self) -> bool:
+        """QueueableController hook: whether a run is already in flight —
+        checked by QueueBridge.show_job before it repopulates this page from
+        a clicked queued row, since show_job() writes fields directly
+        (bypassing set_running's field locks, which only block user clicks)
+        and this controller is actively painting run progress onto the
+        picker plate those fields feed."""
+        return self._worker is not None and self._worker.isRunning()
+
     def _on_source_changed(self) -> None:
         self._well_stage = {}
         self.page._plate.clearWellColors()

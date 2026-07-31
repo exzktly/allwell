@@ -2618,7 +2618,10 @@ Qt event loop. Three layers:
   `QueueableController` is the duck-typed protocol every runnable `kind`
   implements: `start_from_queue(spec)`, `show_job(spec)` (populate the tool's
   own page without running it — driven by clicking a queued row), `stop()`,
-  and a `jobFinished(ok: bool, message: str, output_path: str)` signal that
+  `is_busy()` (`self._worker is not None and self._worker.isRunning()` for
+  every Datasets controller; `self._runner.is_running` for `AnalyzeTab` via
+  `AnalyzeRunMixin`), and a `jobFinished(ok: bool, message: str, output_path: str)`
+  signal that
   **must** be emitted only once per run, as the true last statement of that
   run's completion handler (mirroring `AnalyzeTab.runFinished`'s re-entrancy
   rule, since a bridge slot may start the next job synchronously from inside
@@ -2652,6 +2655,19 @@ Qt event loop. Three layers:
   controller (the usual page/worker shape, with `QueueBridge` standing in for
   a `QThread` worker): it owns the page, turns button clicks into bridge
   calls, and refreshes the page on `queueChanged`.
+
+  `QueueBridge.show_job` (clicking a queued row to preview it) checks
+  `runner.is_busy()` first and no-ops if the target controller already has a
+  run in flight — `show_job(spec)` writes page fields **directly**, which
+  bypasses `set_running`'s field locks (those only disable widgets against
+  user clicks, not this programmatic path) and, for a controller like
+  `SubsetController` that paints run progress onto the same picker plate
+  `show_job` would repopulate, could visibly corrupt the in-flight run's own
+  status display. It also hands the runner a deep copy of the job's spec
+  (`json.loads(json.dumps(job.spec))`, matching `JobQueue.materialise`'s own
+  assumption that a spec is JSON-shaped) rather than the queue's live
+  persisted dict — no `show_job` implementation mutates its argument today,
+  but nothing stopped one from silently corrupting the saved queue if it did.
 - **`datasets/job_queue/view.py`** — `JobQueuePage`: one compact row per job
   (kind icon, label, a `widgets.status_dot.StatusDot` state chip, a
   one-line message, a link glyph on chained rows, ↑/↓/× controls) under a

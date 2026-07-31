@@ -36,6 +36,7 @@ class _FakeController(QObject):
         self.stop_calls = 0
         self._cancelled = False
         self._cancellable = cancellable
+        self.busy = False
 
     def start_from_queue(self, spec: dict) -> None:
         self.started_specs.append(spec)
@@ -47,6 +48,9 @@ class _FakeController(QObject):
         self.stop_calls += 1
         if self._cancellable:
             self._cancelled = True
+
+    def is_busy(self) -> bool:
+        return self.busy
 
     def was_cancelled(self) -> bool:
         return self._cancelled
@@ -163,6 +167,43 @@ def test_show_job_delegates_to_matching_runner(qapp, tmp_path):
 
     bridge.show_job("a")
     assert runner.shown_specs == [{"n": "a"}]
+
+
+def test_show_job_does_nothing_while_the_runner_is_busy(qapp, tmp_path):
+    """Regression guard: QueueBridge.show_job used to call runner.show_job()
+    unconditionally, with no check that the runner was already mid-run (e.g.
+    from a manual Run press on that tool's own page). For the Datasets
+    controllers show_job() writes fields directly -- bypassing the run-time
+    field locks, which only block user clicks, not this programmatic path --
+    including fields a controller is actively repainting as its own run
+    progress display (Subset's plate map)."""
+    bridge = QueueBridge(state_dir=tmp_path)
+    runner = _FakeController()
+    runner.busy = True
+    bridge.register("widget", runner)
+    bridge.queue.add(_job("a"))
+
+    bridge.show_job("a")
+    assert runner.shown_specs == []
+
+
+def test_show_job_passes_a_copy_not_the_persisted_spec(qapp, tmp_path):
+    """Regression guard: QueueBridge.show_job used to hand a runner the
+    queue's own live persisted dict, not a copy -- a show_job()
+    implementation that mutated its argument (nothing does today, but
+    nothing prevented it either) would silently corrupt the saved queue."""
+    bridge = QueueBridge(state_dir=tmp_path)
+    runner = _FakeController()
+    bridge.register("widget", runner)
+    job = _job("a")
+    bridge.queue.add(job)
+
+    bridge.show_job("a")
+    received = runner.shown_specs[0]
+    assert received == job.spec
+    assert received is not job.spec
+    received["n"] = "mutated"
+    assert bridge.queue.get("a").spec == {"n": "a"}
 
 
 def test_remove_job_refuses_the_running_job(qapp, tmp_path):

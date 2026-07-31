@@ -103,6 +103,10 @@ class ConcatenateController(QObject):
         if self._worker is not None and self._worker.isRunning():
             self._worker.requestInterruption()
 
+    def is_busy(self) -> bool:
+        """QueueableController hook — see SubsetController.is_busy."""
+        return self._worker is not None and self._worker.isRunning()
+
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_phase("merge")

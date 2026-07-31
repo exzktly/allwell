@@ -154,6 +154,14 @@ class ValidatePage(QWidget):
         self._build_status_section(outer)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
+        # Two distinct panels below the run row, each with its own header so
+        # the "Clear" action can never be read as applying to the wrong one:
+        # "Findings" (the dashboard plate + the per-issue list a Check
+        # produces) and, only once the checkbox below reveals it, "Raw log"
+        # (the worker's own line-by-line output). The button used to sit in
+        # the Findings header while actually clearing the log underneath it
+        # — pressing "Clear" while reading findings looked like it did
+        # nothing, since the log it actually wiped was usually hidden.
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(12, 6, 12, 6)
@@ -162,10 +170,6 @@ class ValidatePage(QWidget):
         self._raw_log_cb = QCheckBox("Show raw log", hdr)
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
         hl.addWidget(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", hdr)
-        clear_btn.setProperty("variant", "secondary")
-        clear_btn.clicked.connect(self.clear_log)
-        hl.addWidget(clear_btn)
         outer.addWidget(hdr)
         outer.addWidget(_hrule(self))
 
@@ -183,6 +187,16 @@ class ValidatePage(QWidget):
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)
+        self._log_hdr = QWidget(self)
+        log_hl = QHBoxLayout(self._log_hdr)
+        log_hl.setContentsMargins(12, 6, 12, 6)
+        log_hl.addWidget(QLabel("Raw log", self._log_hdr))
+        log_hl.addStretch(1)
+        self._clear_log_btn = QPushButton("Clear log", self._log_hdr)
+        self._clear_log_btn.setProperty("variant", "secondary")
+        self._clear_log_btn.clicked.connect(self.clear_log)
+        log_hl.addWidget(self._clear_log_btn)
+        outer.addWidget(self._log_hdr)
         self._status = QPlainTextEdit(self)
         self._status.setObjectName("ValidateStatus")
         self._status.setReadOnly(True)
@@ -193,7 +207,10 @@ class ValidatePage(QWidget):
         self._on_toggle_raw_log(False)
 
     def _on_toggle_raw_log(self, show: bool) -> None:
-        for w in (getattr(self, "_status", None), getattr(self, "_log_sep", None)):
+        for w in (
+            getattr(self, "_status", None), getattr(self, "_log_sep", None),
+            getattr(self, "_log_hdr", None),
+        ):
             if w is not None:
                 w.setVisible(bool(show))
 

@@ -2571,6 +2571,18 @@ happened to glob last. A CSV that matches a well by filename but whose header
 lacks `timepoint_hours` is flagged as a phantom (an unrelated file, not
 broken data) rather than counted as that well's state.
 
+A schema with no `fov` field (a single-FOV pipeline — `PipelineSchema.has_fov`
+false, a normal and common configuration, not an edge case) can't diff on
+`(fov, timepoint)` pairs directly: the intent-side reader can only ever
+extract `fov=""` for such a schema (there's no positional slot for it in the
+filename), while a written CSV row's own `fov` column carries the separate
+`normalize_fov` single-FOV convention (`""` → `"1"`). `_scan_one_well` diffs
+on timepoint alone in that case instead of skipping the diff outright — `fov`
+carries no real information for a schema that doesn't declare it, so
+comparing intent's and done's timepoint sets is both correct and is what
+lets a single-FOV dataset's per-well completeness still be checked. An
+`info`-severity `no_fov_field` finding says so once per report.
+
 The per-well diff itself (`_scan_one_well`) runs on a `ThreadPoolExecutor`
 (`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads
 with no destination file and no live per-well dashboard, so there's no lock

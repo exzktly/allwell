@@ -2571,6 +2571,34 @@ happened to glob last. A CSV that matches a well by filename but whose header
 lacks `timepoint_hours` is flagged as a phantom (an unrelated file, not
 broken data) rather than counted as that well's state.
 
+A schema with no `fov` field (a single-FOV pipeline — `PipelineSchema.has_fov`
+false, a normal and common configuration, not an edge case) can't diff on
+`(fov, timepoint)` pairs directly: the intent-side reader can only ever
+extract `fov=""` for such a schema (there's no positional slot for it in the
+filename), while a written CSV row's own `fov` column carries the separate
+`normalize_fov` single-FOV convention (`""` → `"1"`). `_scan_one_well` diffs
+on timepoint alone in that case instead of skipping the diff outright — `fov`
+carries no real information for a schema that doesn't declare it, so
+comparing intent's and done's timepoint sets is both correct and is what
+lets a single-FOV dataset's per-well completeness still be checked. An
+`info`-severity `no_fov_field` finding says so once per report.
+
+A well's *done* keys should always be a subset of its *intent* keys when the
+schema actually matches how that well's real filenames are structured —
+*done* describes the finished portion of *intent*. If `pipeline_info.json`'s
+`schema_fields`/`separator` don't (drifted since the files were written, or
+were simply wrong for this dataset), `_well_intent`'s positional parse
+silently reads the wrong filename token as `fov`/`timepoint`, and most of
+*done*'s own keys stop appearing in *intent* at all — not "this well is
+mostly unfinished," but "these two sides aren't even parsing the same
+schema." `_scan_one_well` detects that shape directly (a well with at least
+4 done keys, at least half of which don't appear in intent) and reports a
+single `error`-severity `schema_mismatch_suspected` finding naming the exact
+mismatch count and pointing at `schema_fields`/`separator`, rather than
+letting the well's diff produce a wall of individually-false `missing_fov_tp`
+findings with nothing explaining why a well that's actually done reads as
+almost entirely missing.
+
 The per-well diff itself (`_scan_one_well`) runs on a `ThreadPoolExecutor`
 (`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads
 with no destination file and no live per-well dashboard, so there's no lock

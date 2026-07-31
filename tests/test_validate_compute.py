@@ -209,6 +209,65 @@ def test_no_fov_field_skips_fov_check_without_false_alarm(tmp_path):
     assert "missing_fov_tp" not in codes
 
 
+def test_no_fov_schema_still_detects_a_genuinely_partial_well(tmp_path):
+    """Regression guard: a schema with no 'fov' field used to skip
+    missing-timepoint detection entirely (`missing` was unconditionally
+    `set()`), so a well done at every declared timepoint and one done at
+    only half of them reported identically "complete" — exactly what a
+    single-FOV pipeline (a common real setup, not an edge case) always hits.
+    `build_dataset` always embeds a fov token in its filenames regardless of
+    the declared schema, so it can't exercise this — hand-build filenames
+    that genuinely match a 4-field, fov-less schema instead."""
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    info = {
+        "schema_fields": ["experiment", "channel", "well", "timepoint"],
+        "separator": "_",
+        "available_timepoints": ["0h", "8h", "16h", "24h"],
+        "available_fovs": ["1"],
+    }
+    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
+
+    all_tps = ["0h", "8h", "16h", "24h"]
+    hours = {"0h": 0, "8h": 8, "16h": 16, "24h": 24}
+
+    def write_well(well: str, done_tps: list[str]) -> None:
+        with zipfile.ZipFile(in_dir / f"{well}.zip", "w") as zf:
+            for tp in all_tps:
+                zf.writestr(f"exp_GFP_{well}_{tp}.tif", b"img")
+        with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
+            for tp in done_tps:
+                zf.writestr(f"exp_GFP_{well}_{tp}_labels.tif", b"mask")
+        with (out_dir / f"measurements_{well}.csv").open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=[
+                "filename", "experiment", "channel", "well", "fov",
+                "timepoint", "timepoint_hours", "nucleus_id", "area_px"])
+            writer.writeheader()
+            for tp in done_tps:
+                writer.writerow({
+                    "filename": f"exp_GFP_{well}_{tp}.tif", "experiment": "exp",
+                    "channel": "GFP", "well": well, "fov": "1", "timepoint": tp,
+                    "timepoint_hours": hours[tp], "nucleus_id": 1, "area_px": 150,
+                })
+
+    write_well("A01", all_tps)          # genuinely finished: all 4 timepoints
+    write_well("B02", ["0h", "8h"])     # genuinely partial: missing 16h, 24h
+
+    report = vc.build_report(tmp_path)
+    by_well = {w.well: w for w in report.wells}
+    assert by_well["A01"].complete
+    assert not by_well["B02"].complete
+    assert {tp for _fov, tp in by_well["B02"].missing} == {"16h", "24h"}
+    b02_findings = [
+        f for f in report.findings if f.code == "missing_fov_tp" and f.well == "B02"
+    ]
+    assert len(b02_findings) == 1
+    assert "16h" in b02_findings[0].message
+    assert "24h" in b02_findings[0].message
+
+
 def test_stale_available_timepoints_flagged_and_repaired(tmp_path):
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h", "24h"])
     info_path = tmp_path / "out" / "pipeline_info.json"
@@ -322,3 +381,65 @@ def test_build_report_respects_explicit_worker_count(tmp_path):
     report = vc.build_report(tmp_path, workers=1)
     assert report.is_clean
     assert {w.well for w in report.wells} == {"A01", "B02", "C03"}
+
+
+def test_schema_drift_reports_a_diagnostic_instead_of_a_wall_of_false_missing(tmp_path):
+    """Regression guard: intent (parsed from in/ filenames using the CURRENT
+    pipeline_info.json schema) and done's CSV-column values are only
+    guaranteed to agree when that schema actually matches how the well's
+    real filenames are structured. If it doesn't -- schema_fields drifted
+    since the files were written, or was simply wrong -- intent's positional
+    parse silently reads the wrong token as "fov"/"timepoint", producing
+    hundreds of individually-false missing_fov_tp findings for a well that
+    may be entirely done, with nothing telling the user why. Simulates the
+    drift directly: filenames written under a channel/fov field order that
+    doesn't match the CURRENT schema_fields, so intent's fov-position parse
+    grabs the channel token instead — while the CSV's own 'fov' column
+    (a literal recorded value, immune to schema drift) still holds the
+    real fov tokens."""
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    info = {
+        "schema_fields": ["experiment", "channel", "well", "fov", "timepoint"],
+        "separator": "_",
+        "available_timepoints": [f"t{i}" for i in range(13)],
+        "available_fovs": [f"f{i}" for i in range(6)],
+    }
+    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
+
+    fovs = [f"f{i}" for i in range(6)]
+    tps = [f"t{i}" for i in range(13)]
+
+    # Real filenames: experiment_well_fov_channel_timepoint -- channel comes
+    # AFTER fov here, not before it as schema_fields (declared above) assumes.
+    with zipfile.ZipFile(in_dir / "E11.zip", "w") as zf:
+        for fov in fovs:
+            for tp in tps:
+                zf.writestr(f"exp_E11_{fov}_GFP_{tp}.tif", b"img")
+    with zipfile.ZipFile(out_dir / "E11_out.zip", "w") as zf:
+        for fov in fovs:
+            for tp in tps:
+                zf.writestr(f"exp_E11_{fov}_GFP_{tp}_labels.tif", b"mask")
+    with (out_dir / "measurements_E11.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[
+            "filename", "experiment", "channel", "well", "fov",
+            "timepoint", "timepoint_hours", "nucleus_id", "area_px"])
+        writer.writeheader()
+        for fov in fovs:
+            for tp in tps:
+                writer.writerow({
+                    "filename": f"exp_E11_{fov}_GFP_{tp}.tif", "experiment": "exp",
+                    "channel": "GFP", "well": "E11", "fov": fov, "timepoint": tp,
+                    "timepoint_hours": int(tp[1:]), "nucleus_id": 1, "area_px": 150,
+                })
+
+    report = vc.build_report(tmp_path)
+    mismatch_findings = [
+        f for f in report.findings
+        if f.code == "schema_mismatch_suspected" and f.well == "E11"
+    ]
+    assert len(mismatch_findings) == 1
+    assert "pipeline_info.json" in mismatch_findings[0].message
+    assert "schema_fields" in mismatch_findings[0].message

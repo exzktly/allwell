@@ -353,22 +353,81 @@ def _scan_one_well(
     out_folder = folder_map.get(well)
     done, csv_state = _well_done(csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
 
-    missing = (intent - done) if (fov_field_present and container is not None) else set()
+    if container is None:
+        missing: set[tuple[str, str]] = set()
+    elif fov_field_present:
+        missing = intent - done
+    else:
+        # No 'fov' field in the schema (single-FOV pipelines): fov_tp_from_name
+        # can only return "" for every intent-side key, while a written CSV
+        # row's own 'fov' column is separately normalised to "1"
+        # (normalize_fov's single-FOV convention). Diffing the raw
+        # (fov, timepoint) pairs as-is would report every well missing
+        # everything the moment 'done' came from a CSV row. The previous fix
+        # for that avoided the false positive by skipping the diff outright —
+        # which meant a well missing every timepoint but one read as
+        # identically "complete" to a well with all of them, since 'missing'
+        # was unconditionally empty regardless of what was actually on disk.
+        # 'fov' carries no real information for a schema that doesn't have
+        # it, so diff on timepoint alone instead: correct, and it restores
+        # the per-timepoint completeness check a single-FOV dataset needs.
+        intent_tps = {tp for _fov, tp in intent}
+        done_tps = {tp for _fov, tp in done}
+        missing = {("", tp) for tp in (intent_tps - done_tps)}
     report = WellReport(
         well=well, missing=tuple(sorted(missing)), csv_state=csv_state,
         has_in_container=container is not None, has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
     )
 
+    # A well with real recorded output (done) should have every one of its
+    # own (fov, timepoint) keys show up in intent too -- done describes
+    # finished *portions of the input*, so it's a subset by construction
+    # when both sides are parsed against the schema that actually matches
+    # this dataset's filenames. If most of done's own keys are absent from
+    # intent, that's not "most of this well is unfinished" -- it's a sign
+    # pipeline_info.json's schema_fields/separator don't actually match how
+    # this well's raw filenames are structured, so intent's positional
+    # parse is reading the wrong tokens as fov/timepoint. Left undetected,
+    # that silently turns into a wall of individually-wrong missing_fov_tp
+    # findings for a well that may well be genuinely complete.
+    if container is not None and len(done) >= 4:
+        unmatched_done = done - intent
+        if len(unmatched_done) >= 0.5 * len(done):
+            findings.append(Finding(
+                severity="error", code="schema_mismatch_suspected", well=well,
+                message=(
+                    f"Well {well}: {len(unmatched_done)} of {len(done)} "
+                    "recorded (fov, timepoint) pair(s) don't match anything "
+                    "parsed from the raw input filenames, even though this "
+                    "well has real recorded output. This usually means "
+                    "pipeline_info.json's 'schema_fields'/'separator' don't "
+                    "actually match how this dataset's images are named — "
+                    "compare them against a real filename in this well's "
+                    "in/ archive. The missing-pair count below is unreliable "
+                    "until that's fixed."
+                ),
+            ))
+
     if missing:
-        sample = sorted(missing)[:5]
-        findings.append(Finding(
-            severity="error", code="missing_fov_tp", well=well,
-            message=(
-                f"Well {well}: {len(missing)} (fov, timepoint) pair(s) present "
-                f"in the input but not in the output — e.g. {sample}."
-            ),
-        ))
+        if fov_field_present:
+            sample = sorted(missing)[:5]
+            findings.append(Finding(
+                severity="error", code="missing_fov_tp", well=well,
+                message=(
+                    f"Well {well}: {len(missing)} (fov, timepoint) pair(s) "
+                    f"present in the input but not in the output — e.g. {sample}."
+                ),
+            ))
+        else:
+            sample = sorted(tp for _fov, tp in missing)[:5]
+            findings.append(Finding(
+                severity="error", code="missing_fov_tp", well=well,
+                message=(
+                    f"Well {well}: {len(missing)} timepoint(s) present in the "
+                    f"input but not in the output — e.g. {sample}."
+                ),
+            ))
     if csv_state == "missing" and (container is not None or out_zip is not None or out_folder is not None):
         findings.append(Finding(
             severity="warning", code="no_csv", well=well,
@@ -421,8 +480,8 @@ def _scan_wells(
             severity="info", code="no_fov_field",
             message=(
                 "This dataset's filename schema has no 'fov' field — "
-                "FOV-level completeness can't be checked, only that each "
-                "well has a measurements CSV."
+                "completeness below is checked by timepoint only, ignoring "
+                "FOV."
             ),
         ))
     return well_reports, findings

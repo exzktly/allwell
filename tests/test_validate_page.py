@@ -400,3 +400,53 @@ def test_start_from_queue_with_empty_spec_emits_job_finished_instead_of_stalling
     ctrl.start_from_queue({})
     assert seen and seen[0][0] is False
     ctrl.shutdown()
+
+
+def test_clear_log_button_clears_the_log_not_the_findings(qapp, tmp_path):
+    """Regression guard: the "Clear" button used to sit in the "Findings"
+    header while actually clearing the raw log underneath it -- pressing it
+    while looking at a findings list did nothing visible whenever the log
+    panel (hidden by default) wasn't shown, reading as broken. It's now
+    labelled "Clear log" and lives under the log's own "Raw log" header, and
+    it must still only ever touch the log, never the findings list."""
+    from datasets.validate.controller import ValidateController
+
+    root = tmp_path / "ds"
+    build_dataset(root, wells=["A01"], timepoints=["0h"])
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page._dataset_field.set_path(str(root))
+    page._on_dataset_changed()
+    page._raw_log_cb.setChecked(True)
+
+    page.checkRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert page._status.toPlainText() != ""
+    findings_count_before = page._findings_list.count()
+    assert findings_count_before > 0
+
+    page._clear_log_btn.click()
+
+    assert page._status.toPlainText() == ""
+    assert page._findings_list.count() == findings_count_before
+    ctrl.shutdown()
+
+
+def test_findings_and_log_panels_have_their_own_distinct_headers(qapp):
+    """The findings panel and the raw-log panel must each say what they are
+    -- previously only "Findings" was labelled at all, and the raw log
+    (revealed by its own checkbox) had no header of its own, just an hrule,
+    which is what made the mislabelled "Clear" button plausible in the
+    first place."""
+    from datasets.validate.controller import ValidateController
+
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    assert page._log_hdr.isHidden() is True  # not shown until requested
+    page._raw_log_cb.setChecked(True)
+    assert page._log_hdr.isHidden() is False
+    from PySide6.QtWidgets import QLabel
+    log_header_text = [c.text() for c in page._log_hdr.findChildren(QLabel)]
+    assert any("Raw log" in t for t in log_header_text)
+    ctrl.shutdown()

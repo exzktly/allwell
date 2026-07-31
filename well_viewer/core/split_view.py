@@ -374,11 +374,26 @@ def _nav_intercept(ctx, _key) -> bool:
     return False
 
 
-def _exit_on_mode(ctx) -> None:
-    """Leave Split View when the Review/Analyze mode switches."""
+def _exit_on_mode(ctx, mode: str = "review") -> None:
+    """Leave Split View when the Review/Analyze/Datasets mode switches, and
+    hide the toggle entirely outside Review — it's a Review-only feature
+    (both panes it splits are Review tabs), but the top bar it lives in is
+    shared across all three modes, so without this it kept sitting there in
+    Analyze and Datasets with nothing for it to act on."""
     if ctx.runtime.split.active:
         exit_split(ctx)
         sync_split_toggle_button(ctx, False)
+    _set_toggle_visible_for_mode(ctx, mode)
+
+
+def _set_toggle_visible_for_mode(ctx, mode: str) -> None:
+    is_review = mode == "review"
+    btn = getattr(ctx.runtime.split, "toggle_btn", None)
+    if btn is not None:
+        btn.setVisible(is_review)
+    combo = getattr(ctx.runtime.split, "pane_combo", None)
+    if combo is not None and not is_review:
+        combo.setVisible(False)
 
 
 # ── The single wiring entry point ────────────────────────────────────────────
@@ -431,16 +446,21 @@ def install_split_view(ctx) -> None:
         # Sit at the right end of the top bar (after the stretch + Open).
         top_layout.addWidget(btn)
         top_layout.addWidget(combo)
+        # Review-only, from the moment the app opens — install runs once,
+        # before any mode switch has happened to trigger the modeChanged
+        # handler below.
+        current_mode = app.currentMode() if hasattr(app, "currentMode") else "review"
+        _set_toggle_visible_for_mode(ctx, current_mode)
 
     # 3. Make the centre resolvers split-aware.
     tab_controller.split_focus_provider = _focused_leaf
     tab_controller.split_visible_provider = _visible_leaves
     tab_controller.split_nav_intercept = _nav_intercept
 
-    # 4. Exit split on a Review/Analyze mode switch.
+    # 4. Exit split (and hide the toggle) on a mode switch away from Review.
     sig = getattr(app, "modeChanged", None)
     if sig is not None:
         try:
-            sig.connect(lambda _m: _exit_on_mode(ctx))
+            sig.connect(lambda mode: _exit_on_mode(ctx, mode))
         except Exception:
             _logger.exception("Split: modeChanged connect failed")

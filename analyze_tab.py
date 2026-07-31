@@ -37,6 +37,7 @@ from services.pipeline_runner import (
 from services.pipeline_service import find_pipeline_script
 from services.remote_config import default_remote_index
 import theme
+from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
 from analyze_input import AnalyzeInputMixin
 from analyze_run_spec import AnalyzeRunMixin
@@ -176,11 +177,16 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
         # Left — scrollable form
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        # Analyze form sidebar expanded 25% (280→350) per redesign-bug-batch-2:
-        # the schema string + per-channel rows often clip at 280 px.
-        # Further +25% (350→438) per user feedback — the per-fluor rows
-        # were still tight when multiple channels were configured.
-        scroll.setMinimumWidth(438)
+        # Fixed, not just a minimum: RAIL_W (well_viewer/core/app_shell_view.py)
+        # is the one width shared by Review's rail, Datasets' sidebar, and this
+        # panel, so switching modes never visibly resizes the window. It was
+        # widened here twice before landing at its current value (280→350→438)
+        # because the schema string and per-channel rows clipped below it — that
+        # history is *why* this is the value the other two modes' panels match,
+        # not the other way around; don't narrow it without re-checking those
+        # rows. A QSplitter child still respects setFixedWidth's equal min/max,
+        # so the handle can't be dragged past it either.
+        scroll.setFixedWidth(RAIL_W)
         form_host = QWidget()
         self._form_layout = QVBoxLayout(form_host)
         self._form_layout.setContentsMargins(0, 8, 0, 8)
@@ -199,7 +205,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
         splitter.setStretchFactor(1, 1)
         self._build_log(right)
 
-        splitter.setSizes([450, 600])
+        splitter.setSizes([RAIL_W, 600])
 
     # ------------------------------------------------------------------
     # Layout helpers

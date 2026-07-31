@@ -591,6 +591,18 @@ group widget, and `centre_view` keeps those on `app._plotting_channel_grp`,
 `_plotting_metric_grp`, `_plotting_thresh_frac_grp` and `_plotting_scatter_grp`
 so the sub-tab handler can swap which ones are in the row.
 
+The Channel and Property combos are `widgets.labeled_combo.LabeledComboBox`
+rather than a bare `QComboBox`, so each is one self-describing widget — the
+closed box reads "Channel: RFP" / "Property: Mean Intensity" — instead of a
+separate `QLabel` caption beside a plain combo. `add_scope` is called with an
+empty label for both (`""`), which adds the combo alone rather than wrapping it
+in a `ControlBandGroup`; the widget paints its own prefix in `paintEvent` and
+leaves `currentText()` / `currentIndex()` / every Qt signal reporting the plain
+item value, so nothing downstream that reads the combo's value needed to
+change. The Threshold stepper keeps its separate `add_scope("Threshold", …)`
+caption — `LabeledComboBox` is a `QComboBox` specialisation, and folding a
+static label into an editable numeric field isn't the same operation.
+
 The five sub-tabs share that one band; none builds its own. A sub-tab claims a
 `ControlBandSlot` through `ui_helpers.plotting_band_slot(ctx, title[, mode])` and
 adds its controls to it exactly as it would to a band — the slot mirrors
@@ -721,16 +733,18 @@ flush, with no inset — the topbar's left content margin is zero and the widget
 after the bar carry their own leading pad, so the bar and the panel below it are
 one column rather than a chip row floating over one.
 
-Its **width follows whichever panel is under it**. All three modes put a panel
-down the left edge and they are three different widths: Review's rail is fixed,
-the Datasets rail is its own, and Analyze's form is wider still and draggable in
-its splitter. `AllWellApp._sync_mode_bar_width` matches the bar to the current
-one, re-running on every mode switch and on any resize of the three panels it
-watches. Pinned to any single width the bar stopped short of the column's edge
-in the other two modes, and the page tabs beside it started at a boundary that
-matched nothing on screen. It floors at the bar's own natural width, so a panel
-narrower than the three segments elides their labels rather than shrinking the
-bar, and falls back to that width when every panel is hidden.
+All three modes put a panel down the left edge, and all three pin to the same
+`RAIL_W` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
+there too, not merely a minimum inside a resizable splitter) — so switching
+modes never visibly resizes the window. `AllWellApp._sync_mode_bar_width`
+still matches the bar to whichever panel is current, re-running on every mode
+switch and on any resize of the three panels it watches, as a defensive floor
+rather than reconciling genuinely different widths: it floors at the bar's own
+natural width, so a panel narrower than the three segments elides their labels
+rather than shrinking the bar, and falls back to that width when every panel
+is hidden. `RAIL_W` itself is set by whichever mode's content actually needs
+the room, not by Review's — see `analyze_tab.py::_build_ui` for why it's 438,
+not narrower.
 
 **The page tab bars are in this band too**, to the right of the mode bar and
 sharing its bottom edge. They used to sit inside each tab's own body, one row
@@ -784,15 +798,19 @@ edge is **mapped** into window coordinates rather than read off `geometry()` —
 the button is an overlay on the window while the panels sit at different depths,
 Analyze's and Datasets' inside their own pane's splitter rather than the shell's.
 
-In Review it is placed **level with the rail head**, not centred on the splitter.
-The rail is full-bleed from top to bottom, so a button on its edge always covers
-something; the head's row is the one band there that is chrome rather than
-content. Centred on the splitter it sat squarely over the plate picker — the
-thing in this rail you click most — and drifted further onto it as the window
-grew; one row lower it clipped the active nav item instead. The rail head
-carries an `xl` right inset so its caret clears the button rather than sitting
-under it. Analyze and Datasets have no such head, so there the toggle sits just
-inside the top of their panel.
+It is **vertically centred on whichever panel is showing**, in all three modes
+— a user scanning down the panel's right edge for it finds it at the same
+predictable spot regardless of mode or what that panel currently contains,
+rather than pinned near the top the way an earlier "level with the rail head"
+placement read as stuck. Review's sidebar carries an 8×12 well-picker plate
+near the top of its content, and true centring lands on it at common window
+heights — turning a click-and-drag well selection into an accidental sidebar
+collapse. `position_rail_toggle` detects that specific overlap against
+`win._sidebar_plate`'s own bounds and nudges the toggle just below the plate
+instead of covering it; Analyze and Datasets have no such widget to dodge, so
+there it's a plain panel-height centre. The rail head still carries an `xl`
+right inset so its caret has room regardless of exactly where the toggle
+lands.
 
 A mode switch re-parks it twice: once immediately, and once through a
 `QTimer.singleShot(0, …)`. The first call runs while the pane being shown still
@@ -828,6 +846,18 @@ hidden label and the OS window title. `refresh_dataset_button` is called from
 dataset folders differ in their tail as often as their head
 (`plate3_run2_2024-06-11` against `…-12`) and a right-elided name can leave two
 datasets indistinguishable; the full path is on the tooltip.
+
+The name shown is not always `dataset.data_dir.name`. The standard
+Analyze-pipeline layout loads the sibling `out/` folder as `data_dir` (the
+`in/` + `out/` split `load_path` detects), so a naive last-path-component read
+would show the literal string "out" for every such dataset — useless for
+telling two datasets apart. `refresh_dataset_button` detects that layout
+structurally, the same way `load_path` does (`data_dir.name == "out"` and a
+sibling `in/` folder exists), and climbs one level to the dataset root's own
+name in that case; a folder that happens to be named `out` but has no `in/`
+sibling — a genuinely flat, non-split dataset — keeps showing its own name
+unchanged. The tooltip still shows the literal `data_dir` path that's actually
+loaded (the `.../out` path in the split case), not the climbed display name.
 
 #### Empty states and build failures
 
@@ -1579,12 +1609,20 @@ test_not_installed_is_single_tab`.)
   `MouseButtonPress` delivery (e.g. a click that lands while Image Table
   "Generate" is recompositing the focused pane) would mutate the widget tree
   mid-dispatch and crash — running it on the next event-loop turn lets the click
-  finish first. Split auto-exits on a Review/Analyze switch (connected to
+  finish first. Split auto-exits on a mode switch (connected to
   `app.modeChanged`), on rail navigation (`split_nav_intercept` in
   `_on_section_nav_changed`), and at the **start of a dataset load**
   (`load_controller.load_directory`) — the load restores view-state + redraws
   against the single-notebook layout, so leaving split first avoids driving
   detached pages (the reported open-dataset crash).
+
+  It is also a **Review-only feature**: both panes it splits are Review tabs,
+  but the top-bar toggle it lives in is shared across all three modes (Review,
+  Analyze, Datasets mount into the same `WellViewerApp` central-pane stack —
+  see §6b). The same `modeChanged` handler that exits an active split also
+  hides the toggle button (and its right-pane dropdown, if open) outside
+  Review and shows it again on returning — previously it just sat in the
+  Analyze/Datasets top bar with nothing for it to act on.
 
 ### 5.11 The Spatial feature
 
@@ -3250,6 +3288,7 @@ Notable members worth knowing about by name:
 | Widget | What it is |
 |--------|-----------|
 | `CropTool` (`well_viewer/data/crop_tool.py`) | The drag-a-region crop shared by Image Table and Segmentation. `set_status_widget(widget, template=…)` writes the crop state into an existing control's text — the Image Table's Crop button reads `Crop · (full FOV)` — instead of a separate caption beside it; `make_status_label` still returns a standalone label for call sites that want one. |
+| `LabeledComboBox` (`widgets/labeled_combo.py`) | A `QComboBox` that paints its own scope label as a fixed prefix inside the closed box ("Channel: RFP") rather than sitting beside a separate `QLabel`. Only `paintEvent` changes — it copies `initStyleOption()`'s `QStyleOptionComboBox`, prefixes `opt.currentText`, and draws that; `currentText()` / `currentIndex()` / every Qt signal still report the plain item value, so a caller that reads or drives the combo is unaffected. `sizeHint()` / `minimumSizeHint()` add the prefix's rendered width so the box doesn't clip its own label. Used for Plotting's Channel and Property combos in place of the `ControlBand.add_scope(label, combo)` pairing every other scope control uses — a plain per-item `QComboBox` has no room to paint a caption *inside* itself, so most scope controls still pair a `QLabel`; this one specifically packs its label into the widget instead. |
 | `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. |
 | `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |

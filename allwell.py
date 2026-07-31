@@ -981,12 +981,12 @@ class AllWellApp(QMainWindow):
     def _sync_mode_bar_width(self) -> None:
         """Match the mode bar's width to the left panel below it.
 
-        The bar and that panel form the window's left column, and the three
-        modes' panels are three different widths — Review's rail is fixed,
-        Analyze's form and the Datasets rail are their own widths and Analyze's
-        is draggable. Pinned to any one of them the bar stops short of the
-        column's edge in the other two, leaving the page tabs beside it starting
-        at a boundary that matches nothing on screen.
+        The bar and that panel form the window's left column. All three
+        modes' panels now pin to the same `RAIL_W`
+        (`well_viewer.core.app_shell_view`), so this is a defensive floor
+        rather than reconciling genuinely different widths — it still runs on
+        every mode switch and panel resize in case that ever changes, or a
+        panel is momentarily narrower than the bar's own natural width.
 
         Floored at the bar's natural width so a panel narrower than the three
         segments elides their labels rather than the bar shrinking to fit, and

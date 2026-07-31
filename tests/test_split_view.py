@@ -148,6 +148,62 @@ def test_install_registers_hooks_and_widgets():
     assert app._ctx.runtime.split.pane is not None
 
 
+def test_toggle_hidden_outside_review_mode():
+    """Regression guard: the split-view toggle lives in the top bar shared by
+    all three modes (Review/Analyze/Datasets mount into the same
+    WellViewerApp central-pane stack, see allwell.py), but splitting two
+    Review tabs makes no sense from Analyze or Datasets — the toggle used to
+    just sit there regardless of mode, with nothing for it to act on.
+    It must start visible on Review (the default mode), hide when the mode
+    switches away, and reappear on switching back."""
+    from PySide6.QtCore import QObject, Signal
+    from PySide6.QtWidgets import QApplication, QHBoxLayout, QWidget
+
+    from well_viewer.core import split_view as sv
+    from well_viewer.core.app_runtime import AppRuntime
+    from well_viewer.core.widget_registry import WidgetRegistry
+
+    QApplication.instance() or QApplication([])
+
+    class _ModedApp(QObject):
+        modeChanged = Signal(str)
+
+        def __init__(self):
+            super().__init__()
+            self._notebook = None  # install_split_view bails without one
+            self._mode = "review"
+
+        def currentMode(self):
+            return self._mode
+
+    app = _ModedApp()
+    from well_viewer.core.centre_view import NamedPageStack
+    app._notebook = NamedPageStack()
+    top = QWidget()
+    QHBoxLayout(top)
+    app._top_bar = top
+    from types import SimpleNamespace
+    app._ctx = SimpleNamespace(app=app, window=app, runtime=AppRuntime(app),
+                                widgets=WidgetRegistry(app))
+
+    sv.install_split_view(app._ctx)
+    btn = app._ctx.runtime.split.toggle_btn
+    assert btn is not None
+    assert btn.isHidden() is False  # visible on Review, the default mode
+
+    app._mode = "analyze"
+    app.modeChanged.emit("analyze")
+    assert btn.isHidden() is True
+
+    app._mode = "datasets"
+    app.modeChanged.emit("datasets")
+    assert btn.isHidden() is True
+
+    app._mode = "review"
+    app.modeChanged.emit("review")
+    assert btn.isHidden() is False
+
+
 def test_focus_watcher_reads_split_state_without_crashing():
     """Regression: ``_SplitFocusWatcher`` stores ``self._app`` (the window), so its
     focus slot must reach split state via ``self._app._ctx`` — not a bare

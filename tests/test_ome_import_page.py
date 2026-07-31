@@ -119,6 +119,30 @@ def test_page_content_is_wrapped_in_a_scroll_area(qapp):
     assert page._src_field.parent() is not page  # reparented under the scroll content
 
 
+def test_plate_is_capped_and_sits_below_the_readout_and_convert_button(qapp):
+    """Regression guard: PlateOrderEditor carries QSizePolicy.Expanding with no
+    cap of its own, so inside the page's scroll area it grew to fill the full
+    available width/height -- pushing the readout and Convert button (the
+    page's primary action) far below the fold, unlike every other Datasets
+    page, which caps its plate map and puts the action above it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+
+    assert page._plate.maximumWidth() == 330
+    assert page._plate.maximumHeight() == 210
+
+    content = page.layout().itemAt(0).widget().widget()
+    outer = content.layout()
+    widgets = [outer.itemAt(i).widget() for i in range(outer.count())]
+    readout_idx = widgets.index(page._readout)
+    run_btn_idx = widgets.index(page._run_btn)
+    plate_idx = widgets.index(page._plate)
+    assert readout_idx < plate_idx
+    assert run_btn_idx < plate_idx
+
+
 def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):
     from analyze_tab import AnalyzeTab
 

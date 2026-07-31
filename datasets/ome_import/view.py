@@ -117,7 +117,6 @@ class OmeImportPage(QWidget):
         outer.addWidget(self._dest_field)
 
         self._build_params(outer)
-        self._build_plate(outer)
 
         self._readout = QLabel("", self)
         self._readout.setObjectName("Muted")
@@ -129,6 +128,12 @@ class OmeImportPage(QWidget):
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
         outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
+
+        # The readout and Convert button sit above the acquisition plate, not
+        # below it -- every other Datasets page puts its primary action above
+        # a capped plate map, and an uncapped PlateOrderEditor (see _build_plate)
+        # used to push both off the bottom of the fold.
+        self._build_plate(outer)
 
         self._build_status_section(outer)
 
@@ -216,6 +221,12 @@ class OmeImportPage(QWidget):
 
         self._plate = PlateOrderEditor(self)
         self._plate.orderChanged.connect(lambda _=None: self.refresh_readout())
+        # Capped like every other Datasets/Analyze plate map (PlateProgress's
+        # own 330x210 convention) -- PlateOrderEditor's QSizePolicy.Expanding
+        # otherwise grows to fill the scroll area's full width/height, which
+        # used to push the Convert button (now above it) far below the fold.
+        self._plate.setMaximumWidth(330)
+        self._plate.setMaximumHeight(210)
         outer.addWidget(self._plate)
 
         btn_row = QWidget(self)

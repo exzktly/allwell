@@ -21,10 +21,12 @@ No All-Well coupling — a plain reusable widget.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 import theme
+from widgets import icons as _icons
+
+_ICON_PX = 14
 
 
 class _ModeSegment(QWidget):
@@ -32,11 +34,12 @@ class _ModeSegment(QWidget):
 
     clicked = Signal()
 
-    def __init__(self, text: str, icon: QIcon | None, parent: QWidget | None) -> None:
+    def __init__(self, text: str, icon: str | None, parent: QWidget | None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setCursor(Qt.PointingHandCursor)
         self._text = text
+        self._icon = icon
         self._active = False
 
         row = QHBoxLayout(self)
@@ -45,8 +48,7 @@ class _ModeSegment(QWidget):
         row.addStretch(1)
 
         self._icon_lbl = QLabel(self)
-        if icon is not None and not icon.isNull():
-            self._icon_lbl.setPixmap(icon.pixmap(14, 14))
+        self._icon_lbl.setVisible(bool(icon))
         row.addWidget(self._icon_lbl)
 
         self._text_lbl = QLabel(text, self)
@@ -65,6 +67,16 @@ class _ModeSegment(QWidget):
         self._text_lbl.setStyleSheet(
             f"color: {fg}; font-size: {t.caption_size}px; font-weight: {t.semibold};"
         )
+        # The glyph is repainted in the segment's own foreground colour rather
+        # than handed in as a fixed QIcon. A QIcon's Normal pixmap is drawn in
+        # ``text_secondary``, which on the accent-filled active segment is a
+        # dark glyph on a saturated blue — the icon all but disappears exactly
+        # where the control is meant to read loudest.
+        if self._icon:
+            self._icon_lbl.setPixmap(
+                _icons.make_pixmap(self._icon, fg, _ICON_PX,
+                                   self.devicePixelRatioF())
+            )
 
     def isActive(self) -> bool:
         return self._active
@@ -101,8 +113,10 @@ class ModeBar(QWidget):
         if height is not None:
             self.setFixedHeight(height)
 
-    def addSegment(self, text: str, icon: QIcon | None = None,
+    def addSegment(self, text: str, icon: str | None = None,
                    data: object | None = None) -> int:
+        """Add a mode. *icon* is a ``widgets.icons`` glyph name, not a QIcon —
+        the segment recolours it to match whichever state it is in."""
         idx = len(self._segments)
         seg = _ModeSegment(text, icon, self)
         seg.clicked.connect(lambda i=idx: self.setCurrentIndex(i))

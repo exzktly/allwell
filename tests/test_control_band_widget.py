@@ -118,6 +118,70 @@ def test_label_and_control_are_one_flow_item(styled_app):
     assert band.scope_count() == 1, "label and control were added as separate items"
 
 
+def test_band_height_recovers_after_being_shown_narrow(styled_app):
+    """The band must answer for the width it is *given*, not the width it
+    happened to have when first shown.
+
+    A tab built inside a stacked page is realised at a narrow transient width.
+    The flow layout wraps every control onto its own row there and
+    ``sync_flow_height`` pins that as the host's minimum; without an explicit
+    ``heightForWidth`` the band then inherits QWidget's cached hint and stays
+    that tall forever. This rendered a 45px band at 151px.
+    """
+    band = _band(styled_app, n_scope=6, n_actions=3)
+    band.setFixedWidth(180)          # the narrow transient width
+    band.show()
+    styled_app.processEvents()
+    tall = band.heightForWidth(180)
+
+    band.setFixedWidth(1400)
+    styled_app.processEvents()
+    wide = band.heightForWidth(1400)
+
+    assert band.hasHeightForWidth(), "the band must answer heightForWidth"
+    assert wide < tall, (
+        f"band still reports {wide}px at 1400px after being shown at 180px "
+        f"({tall}px); its height is stuck at the narrow layout"
+    )
+    assert band.sizeHint().height() == wide, (
+        f"sizeHint ({band.sizeHint().height()}px) disagrees with "
+        f"heightForWidth ({wide}px) — the cached hint is winning"
+    )
+    assert wide == band.minimumSizeHint().height(), (
+        "a band whose controls all fit on one row should be exactly its "
+        f"minimum height ({band.minimumSizeHint().height()}px), got {wide}px"
+    )
+
+
+def test_the_band_paints_one_continuous_fill(styled_app):
+    """theme.qss fills every plain ``QWidget`` with the app canvas colour, so
+    the flow host and the label/control groups painted a lighter rectangle over
+    the band. Sample the band's own margin against the strip the host covers.
+    """
+    band = _band(styled_app, n_scope=3, n_actions=2)
+    band.setFixedWidth(900)
+    band.show()
+    band.setFixedHeight(band.heightForWidth(900))
+    styled_app.processEvents()
+    img = band.grab().toImage()
+
+    margin = band.layout().contentsMargins().left() // 2   # band chrome only
+    host = band.scope_host.geometry()
+    inside = host.right() - 4          # inside the host, past the last control
+    y = img.height() // 2
+    last = max(band.scope_host.layout().itemAt(i).widget().geometry().right()
+               for i in range(band.scope_count()))
+    assert inside > last + 8, "no empty host strip to sample; widen the band"
+    assert img.pixelColor(margin, y) == img.pixelColor(inside, y), (
+        f"band fill {img.pixelColor(margin, y).name()} at x={margin} but "
+        f"{img.pixelColor(inside, y).name()} at x={inside}, over the scope "
+        "host — a container is painting its own background"
+    )
+    assert img.pixelColor(margin, y).name().lower() != theme.Colors.surface.lower(), (
+        "the band is painted in the canvas colour; it has no fill of its own"
+    )
+
+
 def test_scope_zone_wraps_rather_than_squeezing(styled_app):
     """Narrowing must add rows, not overlap controls."""
     band = _band(styled_app, n_scope=6, n_actions=1)
@@ -134,12 +198,13 @@ def test_scope_zone_wraps_rather_than_squeezing(styled_app):
 
 
 # ── ModeBar ──────────────────────────────────────────────────────────────────
-def _mode_bar(styled_app):
+def _mode_bar(styled_app, icons=False):
     from widgets.mode_bar import ModeBar
 
     bar = ModeBar(height=34)
+    glyphs = {"Review": "eye", "Analyze": "sliders-horizontal", "Datasets": "boxes"}
     for name in ("Review", "Analyze", "Datasets"):
-        bar.addSegment(name, data=name.lower())
+        bar.addSegment(name, icon=glyphs[name] if icons else None, data=name.lower())
     return bar
 
 
@@ -175,6 +240,25 @@ def test_mode_segments_carry_full_strength_text(styled_app):
                 assert muted not in lbl.styleSheet().lower(), (
                     f"segment '{bar.segmentText(i)}' uses muted text"
                 )
+
+
+def test_mode_icons_are_recoloured_for_the_active_fill(styled_app):
+    """A fixed QIcon paints its Normal pixmap in `text_secondary`, which on the
+    accent-filled active segment is a dark glyph on saturated blue. The segment
+    repaints the glyph in its own foreground instead."""
+    bar = _mode_bar(styled_app, icons=True)
+    bar.show()
+    styled_app.processEvents()
+    pix = [bar.layout().itemAt(i).widget()._icon_lbl.pixmap() for i in range(bar.count())]
+    assert all(not p.isNull() for p in pix), "a segment icon did not render"
+    same_glyph = _mode_bar(styled_app, icons=True)
+    same_glyph.setCurrentIndex(1)          # move the accent off segment 0
+    styled_app.processEvents()
+    other = same_glyph.layout().itemAt(0).widget()._icon_lbl.pixmap()
+    assert pix[0].toImage() != other.toImage(), (
+        "the 'Review' glyph looks identical active and inactive; it is not "
+        "being tinted to the segment's foreground"
+    )
 
 
 def test_mode_bar_selection_round_trips(styled_app):

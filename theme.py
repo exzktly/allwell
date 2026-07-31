@@ -326,6 +326,21 @@ QFrame#Titlebar {{
     background-color: {c.titlebar};
     border-bottom: 1px solid {c.border_subtle};
 }}
+/* The shared control band that sits under every Review tab's name row. It is
+   chrome, not content, so it takes the rail's fill rather than the canvas's and
+   is separated from the content below by the same hairline every other divider
+   uses. See ``widgets/control_band.py``. */
+QWidget#ControlBand {{
+    background-color: {c.rail};
+    border-bottom: 1px solid {c.border_subtle};
+}}
+/* The band's flow host and its label/control groups are pure containers. The
+   blanket ``QWidget`` rule above would fill each of them with the app canvas
+   colour, painting a lighter rectangle over the band; naming them lets that be
+   undone here without the rule also reaching the controls they contain. */
+QWidget#ControlBandScope, QWidget#ControlBandGroup {{
+    background-color: transparent;
+}}
 /* Divider hairlines. Every divider in the app funnels through this rule so a
    rule drawn in one pane can never read differently from the same rule in
    another. ``HRule`` / ``VRule`` are the Analyze pane's and the run

@@ -54,6 +54,11 @@ class ControlBand(QWidget):
         root.setContentsMargins(s.md, s.sm, s.md, s.sm)
         root.setSpacing(s.md)
 
+        # The host and the label/control groups are pure containers, but
+        # theme.qss's blanket ``QWidget`` rule fills every plain widget with the
+        # app canvas colour — so without an explicit transparent rule they paint
+        # a lighter rectangle over the band's own fill. Both carry a name so
+        # that rule can reach them without also reaching the controls inside.
         self._scope_host = QWidget(self)
         self._scope_host.setObjectName("ControlBandScope")
         self._scope = FlowLayout(self._scope_host)
@@ -83,11 +88,13 @@ class ControlBand(QWidget):
             cap = QLabel(label, self._scope_host)
             cap.setObjectName("Muted")
             item = flow_group(self._scope_host, cap, *widgets)
+            item.setObjectName("ControlBandGroup")
         elif len(widgets) == 1:
             item = widgets[0]
             item.setParent(self._scope_host)
         else:
             item = flow_group(self._scope_host, *widgets)
+            item.setObjectName("ControlBandGroup")
         self._scope.addWidget(item)
         return item
 
@@ -109,22 +116,48 @@ class ControlBand(QWidget):
     def scope_count(self) -> int:
         return self._scope.count()
 
-    def minimumSizeHint(self):  # Qt naming
-        """Never shorter than the action zone.
+    def _action_height(self) -> int:
+        hint = self._actions.sizeHint().height()
+        return hint if hint > 0 else 0
 
-        The scope flow reports ~0 height when empty, which would let the band
-        collapse behind its own buttons.
+    def _chrome_height(self) -> int:
+        m = self.layout().contentsMargins()
+        return m.top() + m.bottom()
+
+    def _scope_width_for(self, total_width: int) -> int:
+        """Width the scope zone gets once margins and the action zone are taken."""
+        m = self.layout().contentsMargins()
+        taken = m.left() + m.right() + self._actions.sizeHint().width()
+        if self._actions.count():
+            taken += self.layout().spacing()
+        return max(total_width - taken, 1)
+
+    # Qt asks the parent layout for our height at a given width; answer from the
+    # flow at the width the scope zone will actually get. Without this the band
+    # inherits QWidget's cached size hint, which is computed from whatever width
+    # it happened to have when first shown — for a tab built inside a stacked
+    # page that is a narrow transient width, and the flow's "everything wrapped
+    # onto one column" answer gets pinned as the band's height for good.
+    def hasHeightForWidth(self) -> bool:  # Qt naming
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # Qt naming
+        scope = self._scope.heightForWidth(self._scope_width_for(width))
+        return max(scope, self._action_height()) + self._chrome_height()
+
+    def minimumSizeHint(self):  # Qt naming
+        """One row of controls — never shorter than the action zone.
+
+        ``FlowLayout.heightForWidth`` returns ~0 for an empty scope zone, which
+        would let the band collapse behind its own buttons.
         """
         hint = super().minimumSizeHint()
-        s = theme.Spacing
-        floor = self._actions.sizeHint().height() + s.sm * 2
-        if hint.height() < floor:
-            hint.setHeight(floor)
+        row = self._scope.heightForWidth(1_000_000)   # unwrapped: a single row
+        hint.setHeight(max(row, self._action_height()) + self._chrome_height())
         return hint
 
     def sizeHint(self):  # Qt naming
         hint = super().sizeHint()
-        floor = self.minimumSizeHint().height()
-        if hint.height() < floor:
-            hint.setHeight(floor)
+        width = self.width() or hint.width()
+        hint.setHeight(self.heightForWidth(width))
         return hint

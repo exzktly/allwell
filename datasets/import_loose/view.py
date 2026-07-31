@@ -138,6 +138,15 @@ class ImportLoosePage(QWidget):
         self._in_place_cb.toggled.connect(self._on_in_place_toggled)
         outer.addWidget(self._in_place_cb)
 
+        self._in_place_warning = QLabel(
+            "This deletes the original loose TIFs once each well is safely "
+            "zipped. This can't be undone.", self,
+        )
+        self._in_place_warning.setObjectName("Danger")
+        self._in_place_warning.setWordWrap(True)
+        self._in_place_warning.setVisible(False)
+        outer.addWidget(self._in_place_warning)
+
         self._dest_field = PathField(
             "Destination folder", pick=folder_picker("Select destination folder"),
             validator=_is_destination)
@@ -366,7 +375,14 @@ class ImportLoosePage(QWidget):
         self._update_status_preview()
 
     def _on_in_place_toggled(self, checked: bool) -> None:
-        self._dest_field.setVisible(not checked)
+        # Disabled, not removed from the layout (UX audit P2-6) — the field
+        # disappearing outright when the checkbox is toggled used to be the
+        # only signal a destructive mode had just been armed; a layout jump
+        # is easy to miss, especially since nothing else on the page changes
+        # at the same moment. Kept visible-but-inert instead, right beside
+        # an explicit inline warning that states what checking the box does.
+        self._dest_field.setEnabled(not checked)
+        self._in_place_warning.setVisible(checked)
         self._refresh_run_enabled()
 
     def _can_run(self) -> bool:

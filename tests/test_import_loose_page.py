@@ -106,7 +106,16 @@ def test_run_gate_requires_destination_unless_in_place(qapp, tmp_path):
 
     page._in_place_cb.setChecked(True)
     assert page._run_btn.isEnabled()
-    assert page._dest_field.isHidden()
+    # Disabled, not hidden (UX audit P2-6) -- a layout jump was the only
+    # signal this destructive mode had been armed; the field stays visible
+    # but inert, next to an explicit inline warning.
+    assert not page._dest_field.isHidden()
+    assert not page._dest_field.isEnabled()
+    assert not page._in_place_warning.isHidden()
+
+    page._in_place_cb.setChecked(False)
+    assert page._dest_field.isEnabled()
+    assert page._in_place_warning.isHidden()
     ctrl.shutdown()
 
 

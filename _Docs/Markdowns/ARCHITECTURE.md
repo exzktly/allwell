@@ -2049,7 +2049,7 @@ deletable:
 
 | Module | What it holds |
 |---|---|
-| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. |
+| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. |
 | `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. |
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
 | `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
@@ -2064,22 +2064,38 @@ the well-grid / FOVs / frame-order against the file's `OmeLayout` for the live
 readout, `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
 runs it off the UI thread. On success
-the page's "Open in Analyze" button routes the produced folder to the Analyze
-pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
-dataset. Channel roles are left to Analyze's normal Channel Tokens section. The
-page also carries a `PlateOrderEditor` (§6.1): the grid fields seed a live
-serpentine preview, and the user can click wells to define an arbitrary
-`ConversionParams.well_order` (populated from `PlateOrderEditor.order()`) for a
-non-rectangular scan, which `plan_conversion` / `explode_ome_tiff` use in place of
-the serpentine. The page wraps its whole content in a `QScrollArea`, the same
-pattern every other Datasets tool page uses (mirroring `analyze_tab.py`'s own
-form panel): without it, growing the status section (the raw log filling with
-lines, the progress bar becoming visible) left no room in a fixed-height
-window for both it and the `PlateOrderEditor` above, so the plate quietly
-rendered at a fraction of its natural size instead of the page scrolling to
-reach the status section.
+the page's "Open dataset in Analyze" button routes the produced folder to the
+Analyze pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a
+Review dataset. Channel roles are left to Analyze's normal Channel Tokens
+section. The readout and the Convert/"+ Queue" buttons sit above the
+acquisition plate rather than below it — every other Datasets tool puts its
+primary action above a height-capped plate map, and here the uncapped
+`PlateOrderEditor` used to push both off the bottom of the fold before its own
+`setMaximumWidth(330)`/`setMaximumHeight(210)` pair (matching `PlateProgress`'s
+own convention) capped it to the same cell scale every other plate on the page
+uses. The page also carries that `PlateOrderEditor` (§6.1): the grid fields
+seed a live serpentine preview, and the user can click wells to define an
+arbitrary `ConversionParams.well_order` (populated from
+`PlateOrderEditor.order()`) for a non-rectangular scan, which `plan_conversion`
+/ `explode_ome_tiff` use in place of the serpentine. The page wraps its whole
+content in a `QScrollArea`, the same pattern every other Datasets tool page
+uses (mirroring `analyze_tab.py`'s own form panel): without it, growing the
+status section (the raw log filling with lines, the progress bar becoming
+visible) left no room in a fixed-height window for both it and the
+`PlateOrderEditor` above, so the plate quietly rendered at a fraction of its
+natural size instead of the page scrolling to reach the status section.
 
-**Concatenate datasets** (`datasets/concatenate/`) appends one dataset's
+Convert OME-TIFF is the sixth and last Datasets tool wired into the Job Queue
+(see the Job Queue entry below): `OmeImportController` implements the same
+`QueueableController` protocol as the five plate-driven tools —
+`collect_spec`/`show_job` round-trip `ConversionParams` (including
+`well_order`, serialised through `dataclasses.asdict`) alongside the source and
+destination paths, `start_from_queue` calls the same `_launch()` a manual "▶
+Convert" press does, and `jobFinished` fires once per run from `_on_finished`.
+Its own page carries a "+ Queue" button beside "▶ Convert", matching the other
+five tools' run rows.
+
+**Concatenate Datasets** (`datasets/concatenate/`) appends one dataset's
 timepoints after another's. Two datasets of the same plate, imaged in separate
 sessions, are stitched into one longer timelapse: dataset 2's timepoints are
 relabelled to continue after dataset 1's last timepoint, and the union of both
@@ -2097,7 +2113,7 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. |
 | `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (mirrors `analyze_tab_form.py`'s log panel). Emits `runRequested` / `openInReviewRequested`. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
-| `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. |
+| `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. Every well's terminal states carry a marker glyph too, not just its colour — `merged` gets `✓`, `warned` gets `!`, the transient `merging` state keeps its `⚙` — so state is legible without relying on distinguishing success-green from accent-blue by colour alone. `set_done(summary, *, tooltip=None)` shows a caller-shortened headline (via `_common.dataset_paths.shorten_headline`, stripping the destination path down to its basename) while the full original text — the one still written to the log — survives as the headline's own tooltip. |
 
 **A measurement row's timepoint is carried by three values, not one**, and a
 zip member's timepoint lives in its filename — a fourth. The `timepoint` CSV
@@ -2191,6 +2207,30 @@ On success the page offers to open the merged dataset in Review, routed through
 the destination root into Review and switches to it — the same path
 `_on_analyze_pipeline_complete` uses.
 
+`ConcatenatePage._update_status_preview` reveals `ConcatDashboard` as soon as
+both dataset fields are valid, rather than only once "▶ Concatenate" is
+pressed — seeded via `_common.dataset_paths.preview_wells` on both dataset
+roots with a "Ready — N well(s)" headline, so the plate answers "what would
+this actually touch" before a run starts rather than sitting invisible with
+nothing to show yet. It steps aside once a real run begins
+(`ConcatenateController` drives `set_wells`/`set_phase`/well colouring from
+that point on) and resets again on the next field edit
+(`_on_field_changed`), which also hands the "▶ Concatenate" button's primary
+emphasis back from a still-visible post-success "Open in Review" button — see
+below. `set_running(True)` locks all three fields
+(`PathField.setLocked`, disabling only each field's Browse button, not the
+whole field) for the run's duration — previously the one Datasets tool that
+locked none of its fields at all, leaving a mid-run pick free to change what a
+subsequent Concatenate press would act on. On success,
+`show_open_in_review` promotes "Open in Review" to `variant="primary"` and
+demotes "▶ Concatenate" to `variant="secondary"` (via `widgets._support.
+set_variant`, see §7) — the natural next step is opening the result, not
+re-running the same merge. The status section's header/dashboard title read
+"Concatenate Output"/"Concatenate Progress" rather than "Merge Output"/"Merge
+Progress" so they don't collide with Merge Plates' own identically-purposed
+labels; the page heading and the Datasets-pane sidebar entry are both
+"Concatenate Datasets", title-cased to match the other five tool headings.
+
 **Validate & Repair Dataset** (`datasets/validate/`) answers a question the
 GUI otherwise has no answer for: which `(well, fov, timepoint)` work an
 Analyze run actually finished, versus what `pipeline_info.json` — written
@@ -2263,7 +2303,8 @@ through the existing `on_open_in_analyze` seam — the same one `Convert
 OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
 incremental) Analyze run, not a new execution path.
 
-`ValidatePage.set_running` locks the dataset `PathField` for the run's
+`ValidatePage.set_running` locks the dataset `PathField` (`setLocked`,
+disabling only Browse — see `PathField` in §7) for the run's
 duration, the same as Subset's source/destination fields — `_on_succeeded`
 records the finished report's `report.root` (the path the worker actually
 scanned) rather than re-reading the page's live field, but the field itself
@@ -2274,6 +2315,42 @@ silently returning: a queued job whose persisted `spec["dataset"]` is empty or
 missing (a hand-edited `job_queue.json`, per §Job Queue's own repair
 discipline) would otherwise never start a worker and never signal completion,
 stalling `QueueBridge._current` forever.
+
+The dataset-folder field carries its own validator (`view.py::_is_dataset`,
+mirroring Concatenate's) — Validate used to be the one dataset-folder
+`PathField` in the whole pane with no validator at all, leaving "▶ Check"
+silently disabled with no inline reason when the folder was missing `in`/
+`out`. `ValidatePage._update_status_preview` reveals `ValidateDashboard` as
+soon as the field is valid, seeded via `preview_wells` with a "Ready — N
+well(s)" headline, the same reveal-on-valid-input pattern Concatenate's own
+dashboard uses (see above) rather than staying hidden until "▶ Check" is
+pressed. `ValidateDashboard.set_well_state` marks a well's terminal states
+with a glyph as well as colour — `!` for `partial`/`missing`, `✓` for
+`complete` — so a well's state reads without relying on distinguishing
+success-green from danger-red by colour alone; `set_done(summary, *,
+tooltip=None)` carries the same shortened-headline/full-tooltip split
+Concatenate's does. The **Clean — no issues found.** headline is built
+directly from whether `report.findings` is empty, not from
+`report.is_clean` — `is_clean` ignores warning-severity findings (e.g. a
+`no_csv` warning on a well that legitimately segmented zero cells at every
+timepoint), so a dataset with exactly that one warning used to show a green
+"Clean" headline directly above the very well the plate painted red and the
+findings list explained; "Clean" now means what the findings list itself
+shows, zero findings, full stop. The findings list shows a centred,
+non-selectable placeholder ("Pick a dataset folder and press Check.") while
+empty instead of rendering as a large blank box with no explanation, and
+`_on_failed` clears it back to that placeholder on a failed re-check so a
+stale success's findings can't linger under a fresh red "Failed" headline —
+reachable in production via `QueueBridge.show_job`, which populates the page
+through `set_dataset_path()` and so never runs the field's own interactive
+`changed` handler. **Apply repairs** carries a tooltip explaining why it's
+greyed out when `report.findings` is non-empty but `report.repairable` is
+false — previously a disabled button with findings still listed above it had
+no way to say whether that meant "nothing to repair" or "can't repair this".
+The "+ Queue" button sits second in the run row, immediately after "▶
+Check" and before "Apply repairs", matching every other Datasets tool's
+run-row ordering (primary action, then "+ Queue", then any tool-specific
+secondary actions).
 
 **Subset / Split Dataset** (`datasets/subset/`) copies a filtered slice of a
 dataset — chosen wells, timepoints, and/or FOVs — into a fresh destination,

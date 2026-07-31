@@ -201,7 +201,7 @@ def test_scope_zone_wraps_rather_than_squeezing(styled_app):
 def _mode_bar(styled_app, icons=False):
     from widgets.mode_bar import ModeBar
 
-    bar = ModeBar(height=34)
+    bar = ModeBar()          # no pinned height: it measures a QTabBar
     glyphs = {"Review": "eye", "Analyze": "sliders-horizontal", "Datasets": "boxes"}
     for name in ("Review", "Analyze", "Datasets"):
         bar.addSegment(name, icon=glyphs[name] if icons else None, data=name.lower())
@@ -240,6 +240,28 @@ def test_mode_segments_carry_full_strength_text(styled_app):
                 assert muted not in lbl.styleSheet().lower(), (
                     f"segment '{bar.segmentText(i)}' uses muted text"
                 )
+
+
+def test_mode_bar_matches_the_tab_bar_height(styled_app):
+    """The two bands share a bottom edge across the top of the window, so a few
+    pixels either way reads as a misalignment of the whole chrome.
+
+    A segment is a label plus a glyph, so left to its own content the bar is
+    about 14px and sits as a thin strip beside a full-height tab row.
+    """
+    from PySide6.QtWidgets import QTabBar
+
+    tabs = QTabBar()
+    for name in ("Bar Plots", "Line Graphs", "Scatter Plot"):
+        tabs.addTab(name)
+    bar = _mode_bar(styled_app, icons=True)
+    for w in (tabs, bar):
+        w.show()
+    styled_app.processEvents()
+    assert bar.height() == tabs.height(), (
+        f"mode bar is {bar.height()}px against a {tabs.height()}px tab bar; "
+        "the two bands will not line up"
+    )
 
 
 def test_mode_icons_are_recoloured_for_the_active_fill(styled_app):

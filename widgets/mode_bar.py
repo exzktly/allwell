@@ -12,8 +12,9 @@ selected"; borrowing it here would demote a switch between applications to a
 third tab strip, which is exactly how an earlier revision of this control read.
 
 The segments are flush — no gutters, no corner radius — so the bar is one solid
-band rather than three floating chips, and it is sized to the height of the
-centre pane's tab bar so the two share a bottom edge.
+band rather than three floating chips, and the bar's default height is measured
+off a ``QTabBar`` so it and the centre pane's tab bar share a bottom edge
+whatever the theme does to tab padding.
 
 No All-Well coupling — a plain reusable widget.
 """
@@ -21,12 +22,34 @@ No All-Well coupling — a plain reusable widget.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QTabBar, QWidget
 
 import theme
 from widgets import icons as _icons
 
 _ICON_PX = 14
+
+
+def tab_bar_height() -> int:
+    """The height a themed ``QTabBar`` takes, measured rather than guessed.
+
+    The mode bar has to line up with the centre pane's tab bar exactly — they
+    share a bottom edge, and a pixel either way reads as a misalignment across
+    the whole top of the window. Deriving the number from a throwaway tab bar
+    keeps the two in step through any theme change; a literal here would go
+    stale the first time the tab bar's padding moved.
+
+    Deliberately not cached. The result depends on the application stylesheet
+    and font, and a module-level cache freezes whichever of those happened to
+    be in force at the first call — which, for a widget built during startup,
+    is a stylesheet that has not been applied yet.
+    """
+    probe = QTabBar()
+    probe.addTab("Ag")               # ascender + descender: the tallest case
+    probe.ensurePolished()           # unpolished, a tab bar under-reports by 1px
+    height = probe.sizeHint().height()
+    probe.deleteLater()
+    return height
 
 
 class _ModeSegment(QWidget):
@@ -110,8 +133,11 @@ class ModeBar(QWidget):
         self._segments: list[_ModeSegment] = []
         self._data: list[object] = []
         self._current = -1
-        if height is not None:
-            self.setFixedHeight(height)
+        # Default to the tab bar's height rather than to the segments' own
+        # content height: a segment is a label and a glyph, so left to itself
+        # the bar collapses to about 14px and sits as a thin strip beside a
+        # full-height tab row.
+        self.setFixedHeight(tab_bar_height() if height is None else height)
 
     def addSegment(self, text: str, icon: str | None = None,
                    data: object | None = None) -> int:

@@ -80,7 +80,18 @@ def refresh_dataset_button(win) -> None:
         btn.setToolTip("No dataset loaded. Choose a folder to review.")
         return
     from pathlib import Path
-    name = Path(path).name or path
+    data_dir = Path(path)
+    # The standard Analyze-pipeline layout loads ``<dataset_root>/out`` as
+    # ``data_dir`` -- ``data_dir.name`` is then always the literal "out",
+    # useless for telling datasets apart. Climb one level for that layout
+    # specifically (detected structurally, the same way ``load_path`` itself
+    # decides whether a folder is an in/out split), and leave a genuinely
+    # flat dataset -- one whose own top-level folder happens to be named
+    # "out" -- showing its own name.
+    if data_dir.name == "out" and (data_dir.parent / "in").is_dir():
+        name = data_dir.parent.name or path
+    else:
+        name = data_dir.name or path
     metrics = btn.fontMetrics()
     # Reserve the icon, the caret and the button's own padding before eliding.
     room = max(btn.width() - 64, 80)

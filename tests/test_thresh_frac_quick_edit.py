@@ -273,3 +273,36 @@ def test_view_toggle_drives_the_scatter_mode(loaded_app):
     toggle.setCurrentIndex(0)
     assert loaded_app._ctx.state.scatter.mode == "cells"
     assert pages.currentName() == "cells"
+
+
+def test_channel_and_property_combos_fold_their_own_label(loaded_app):
+    """The band's Channel / Property combos paint their own "Channel: …" /
+    "Property: …" prefix (``widgets.labeled_combo.LabeledComboBox``) rather
+    than sitting beside a separate ``QLabel`` — the compact, one-widget-per-
+    control layout every other Review tab's control band already uses.
+
+    Regression: before this, ``ControlBand.add_scope("Channel", combo)``
+    wrapped the combo with a ``QLabel`` in a ``ControlBandGroup`` container,
+    so the row read as two widgets ("Channel" caption + dropdown) instead of
+    one self-describing dropdown.
+    """
+    from PySide6.QtWidgets import QLabel
+    from widgets.labeled_combo import LabeledComboBox
+
+    assert loaded_app._notebook.setCurrentByName("Plotting")
+
+    chan_cb = loaded_app._plotting_channel_cb
+    metric_cb = loaded_app._plotting_metric_cb
+    assert isinstance(chan_cb, LabeledComboBox)
+    assert isinstance(metric_cb, LabeledComboBox)
+    assert chan_cb.label() == "Channel"
+    assert metric_cb.label() == "Property"
+
+    # Added straight into the band's scope host, not wrapped in a
+    # ControlBandGroup + caption QLabel.
+    assert chan_cb.objectName() != "ControlBandGroup"
+    assert metric_cb.objectName() != "ControlBandGroup"
+    scope_host = loaded_app._plotting_band.scope_host
+    caption_texts = {lbl.text() for lbl in scope_host.findChildren(QLabel)}
+    assert "Channel" not in caption_texts
+    assert "Property" not in caption_texts

@@ -591,6 +591,18 @@ group widget, and `centre_view` keeps those on `app._plotting_channel_grp`,
 `_plotting_metric_grp`, `_plotting_thresh_frac_grp` and `_plotting_scatter_grp`
 so the sub-tab handler can swap which ones are in the row.
 
+The Channel and Property combos are `widgets.labeled_combo.LabeledComboBox`
+rather than a bare `QComboBox`, so each is one self-describing widget — the
+closed box reads "Channel: RFP" / "Property: Mean Intensity" — instead of a
+separate `QLabel` caption beside a plain combo. `add_scope` is called with an
+empty label for both (`""`), which adds the combo alone rather than wrapping it
+in a `ControlBandGroup`; the widget paints its own prefix in `paintEvent` and
+leaves `currentText()` / `currentIndex()` / every Qt signal reporting the plain
+item value, so nothing downstream that reads the combo's value needed to
+change. The Threshold stepper keeps its separate `add_scope("Threshold", …)`
+caption — `LabeledComboBox` is a `QComboBox` specialisation, and folding a
+static label into an editable numeric field isn't the same operation.
+
 The five sub-tabs share that one band; none builds its own. A sub-tab claims a
 `ControlBandSlot` through `ui_helpers.plotting_band_slot(ctx, title[, mode])` and
 adds its controls to it exactly as it would to a band — the slot mirrors
@@ -834,6 +846,18 @@ hidden label and the OS window title. `refresh_dataset_button` is called from
 dataset folders differ in their tail as often as their head
 (`plate3_run2_2024-06-11` against `…-12`) and a right-elided name can leave two
 datasets indistinguishable; the full path is on the tooltip.
+
+The name shown is not always `dataset.data_dir.name`. The standard
+Analyze-pipeline layout loads the sibling `out/` folder as `data_dir` (the
+`in/` + `out/` split `load_path` detects), so a naive last-path-component read
+would show the literal string "out" for every such dataset — useless for
+telling two datasets apart. `refresh_dataset_button` detects that layout
+structurally, the same way `load_path` does (`data_dir.name == "out"` and a
+sibling `in/` folder exists), and climbs one level to the dataset root's own
+name in that case; a folder that happens to be named `out` but has no `in/`
+sibling — a genuinely flat, non-split dataset — keeps showing its own name
+unchanged. The tooltip still shows the literal `data_dir` path that's actually
+loaded (the `.../out` path in the split case), not the climbed display name.
 
 #### Empty states and build failures
 
@@ -3264,6 +3288,7 @@ Notable members worth knowing about by name:
 | Widget | What it is |
 |--------|-----------|
 | `CropTool` (`well_viewer/data/crop_tool.py`) | The drag-a-region crop shared by Image Table and Segmentation. `set_status_widget(widget, template=…)` writes the crop state into an existing control's text — the Image Table's Crop button reads `Crop · (full FOV)` — instead of a separate caption beside it; `make_status_label` still returns a standalone label for call sites that want one. |
+| `LabeledComboBox` (`widgets/labeled_combo.py`) | A `QComboBox` that paints its own scope label as a fixed prefix inside the closed box ("Channel: RFP") rather than sitting beside a separate `QLabel`. Only `paintEvent` changes — it copies `initStyleOption()`'s `QStyleOptionComboBox`, prefixes `opt.currentText`, and draws that; `currentText()` / `currentIndex()` / every Qt signal still report the plain item value, so a caller that reads or drives the combo is unaffected. `sizeHint()` / `minimumSizeHint()` add the prefix's rendered width so the box doesn't clip its own label. Used for Plotting's Channel and Property combos in place of the `ControlBand.add_scope(label, combo)` pairing every other scope control uses — a plain per-item `QComboBox` has no room to paint a caption *inside* itself, so most scope controls still pair a `QLabel`; this one specifically packs its label into the widget instead. |
 | `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. |
 | `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |

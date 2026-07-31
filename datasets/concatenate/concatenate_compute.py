@@ -30,7 +30,6 @@ two label conventions in the same file, and dataset 1 stays byte-identical.
 
 from __future__ import annotations
 
-import json
 import math
 import re
 import statistics
@@ -39,14 +38,23 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.timepoint import parse_hours, sort_key
-from util.well_token import canonical_well_label
-from well_viewer.data.image_identity import (
-    ParsedName,
-    PipelineSchema,
-    ROLE_CATALOG,
-    load_schema,
-    parse_image_filename,
+from well_viewer.data.image_identity import PipelineSchema, load_schema
+from datasets._common.dataset_paths import (
+    DatasetPaths,
+    DatasetPathsError,
+    dataset_wells,
+    destination_has_marker as _destination_has_marker,
+    destination_has_unrecognized_content as _destination_has_unrecognized_content,
+    destination_is_complete_dataset,
+    destination_is_failed_run as _destination_is_failed_run,
+    has_folder_mode_output,
+    in_containers,  # noqa: F401 — re-exported for datasets.concatenate.apply
+    out_csvs,
+    out_zips,  # noqa: F401 — re-exported for datasets.concatenate.apply
+    resolve_dataset as _resolve_dataset,
+    read_info as _read_info,
 )
+from datasets._common.member_names import rewrite_member_field
 
 # Written at the start of a concatenation and removed only after the merged
 # sidecar is written — the sole authority for "a previous attempt into this
@@ -54,9 +62,6 @@ from well_viewer.data.image_identity import (
 # no pipeline_info.json is NOT a failed-run signature (it could be a zipped
 # but unanalyzed plate) and must never be auto-cleared.
 IN_PROGRESS_MARKER = ".aw_concat_in_progress"
-
-# A trailing 96-well token in a filename stem, e.g. "measurements_B10" -> B10.
-_TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
 
 # Structural sidecar fields that must be identical for two datasets to be
 # concatenatable: they describe *what* each measurement is and how filenames are
@@ -78,26 +83,40 @@ _COMPAT_KEYS = (
 # Sidecar list fields that are unioned (order-preserving) when merging.
 _UNION_LIST_KEYS = ("fluor_tokens", "smfish_tokens", "shape_features")
 
-# Every extension any catalogued image role writes or accepts — the
-# structural gate for "does this zip member look like a schema-conformant
-# image filename" (as opposed to some unrelated file a user dropped in).
-_IMAGE_EXTS = frozenset(
-    ext.lower() for spec in ROLE_CATALOG.values() for ext in spec.all_exts
-)
-
 
 class ConcatError(Exception):
     """A concatenation cannot proceed. The message is user-facing (shown in the
     status window), so it must read as a plain-English explanation."""
 
 
-@dataclass(frozen=True)
-class DatasetPaths:
-    """A dataset root and its ``in``/``out`` children."""
+def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
+    """:func:`datasets._common.dataset_paths.resolve_dataset`, translated to
+    :class:`ConcatError` so every raise in this module carries the same type."""
+    try:
+        return _resolve_dataset(root, label=label)
+    except DatasetPathsError as exc:
+        raise ConcatError(str(exc)) from exc
 
-    root: Path
-    in_dir: Path
-    out_dir: Path
+
+def read_info(paths: DatasetPaths, *, label: str) -> dict:
+    """:func:`datasets._common.dataset_paths.read_info`, translated to
+    :class:`ConcatError`."""
+    try:
+        return _read_info(paths, label=label)
+    except DatasetPathsError as exc:
+        raise ConcatError(str(exc)) from exc
+
+
+def destination_has_marker(dest: DatasetPaths) -> bool:
+    return _destination_has_marker(dest, IN_PROGRESS_MARKER)
+
+
+def destination_is_failed_run(dest: DatasetPaths) -> bool:
+    return _destination_is_failed_run(dest, IN_PROGRESS_MARKER)
+
+
+def destination_has_unrecognized_content(dest: DatasetPaths) -> bool:
+    return _destination_has_unrecognized_content(dest, IN_PROGRESS_MARKER)
 
 
 @dataclass(frozen=True)
@@ -211,102 +230,6 @@ def remap_timepoint_label(old_label: str, offset_hours: float, fmt: TimepointFor
     return render_timepoint(hours + offset_hours, fmt)
 
 
-# ── dataset resolution + sidecar IO ──────────────────────────────────────────
-def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
-    """Resolve *root* to a :class:`DatasetPaths`, or raise :class:`ConcatError`.
-
-    A dataset is a folder holding both an ``in`` and an ``out`` subfolder — the
-    same layout Review detects in ``load_controller.load_path``.
-    """
-    root = Path(root)
-    in_dir = root / "in"
-    out_dir = root / "out"
-    if not in_dir.is_dir() or not out_dir.is_dir():
-        raise ConcatError(
-            f"{label} ({root}) is not a dataset — it needs both an 'in' and an "
-            "'out' folder."
-        )
-    return DatasetPaths(root=root, in_dir=in_dir, out_dir=out_dir)
-
-
-def read_info(paths: DatasetPaths, *, label: str) -> dict:
-    """Read a dataset's ``out/pipeline_info.json`` as a raw dict."""
-    info_path = paths.out_dir / "pipeline_info.json"
-    if not info_path.exists():
-        raise ConcatError(f"{label}: no pipeline_info.json in its 'out' folder.")
-    try:
-        data = json.loads(info_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ConcatError(f"{label}: could not read pipeline_info.json ({exc}).") from exc
-    if not isinstance(data, dict):
-        raise ConcatError(f"{label}: pipeline_info.json is not a JSON object.")
-    return data
-
-
-def has_folder_mode_output(paths: DatasetPaths) -> bool:
-    """True if *paths* holds per-well QC output as ``out/<WELL>/`` folders
-    (``compressed_output=False``) rather than ``<WELL>_out.zip`` archives —
-    a layout Concatenate doesn't merge (see :func:`build_merge_plan`)."""
-    with swallow("scan out/ for folder-mode wells"):
-        for entry in paths.out_dir.iterdir():
-            if entry.is_dir() and canonical_well_label(entry.name):
-                return True
-    return False
-
-
-# ── destination state (crash/restart detection) ──────────────────────────────
-def destination_has_content(dest: DatasetPaths) -> bool:
-    """True if *dest*'s ``in`` or ``out`` folder exists and holds any file."""
-
-    def _has(folder: Path) -> bool:
-        return folder.is_dir() and any(folder.iterdir())
-
-    return _has(dest.in_dir) or _has(dest.out_dir)
-
-
-def destination_is_complete_dataset(dest: DatasetPaths) -> bool:
-    """True if *dest* already holds a finished dataset.
-
-    ``apply.execute_plan`` writes ``out/pipeline_info.json`` last, only after
-    every well has been copied and verified — so its presence means either a
-    prior concatenation into this folder ran to completion, or the folder is
-    an unrelated, already-analyzed dataset. Either way it must not be
-    silently overwritten.
-    """
-    return (dest.out_dir / "pipeline_info.json").exists()
-
-
-def destination_has_marker(dest: DatasetPaths) -> bool:
-    """True if a prior concatenation into *dest* started and never finished.
-
-    ``apply.execute_plan`` writes :data:`IN_PROGRESS_MARKER` as its first
-    action and removes it as its last (after the merged sidecar is written) —
-    this is the **only** signal that leftover content under ``in``/``out``
-    came from an interrupted attempt. Content without the marker is never
-    assumed to be a failed run (it could be a zipped-but-unanalyzed plate)
-    and is refused instead — see :func:`destination_has_unrecognized_content`.
-    """
-    return (dest.root / IN_PROGRESS_MARKER).exists()
-
-
-def destination_is_failed_run(dest: DatasetPaths) -> bool:
-    """True if *dest* holds leftovers from a concatenation that never
-    finished — safe to clear and rebuild. See :func:`destination_has_marker`."""
-    return destination_has_marker(dest) and not destination_is_complete_dataset(dest)
-
-
-def destination_has_unrecognized_content(dest: DatasetPaths) -> bool:
-    """True if *dest* has files under ``in``/``out`` that are neither a
-    finished dataset nor a marked in-progress attempt — e.g. a plate that's
-    been zipped but not yet analyzed. Never auto-cleared; the destination
-    field requires an empty folder."""
-    return (
-        destination_has_content(dest)
-        and not destination_has_marker(dest)
-        and not destination_is_complete_dataset(dest)
-    )
-
-
 # ── compatibility + timepoint remap ──────────────────────────────────────────
 def check_compatible(info1: dict, info2: dict) -> None:
     """Raise :class:`ConcatError` if the two sidecars aren't concatenatable."""
@@ -367,62 +290,6 @@ def compute_offset(info1: dict, info2: dict) -> tuple[float, float, float]:
     target_first = ds1_last + interval
     ds2_first = tp2[0][1]
     return target_first - ds2_first, ds1_last, interval
-
-
-# ── well enumeration ─────────────────────────────────────────────────────────
-def _well_from_stem(stem: str) -> str | None:
-    """Canonical well from a trailing token, e.g. ``measurements_a1`` -> A01."""
-    match = _TRAILING_WELL_RE.search(stem)
-    if not match:
-        return None
-    return f"{match.group(1).upper()}{int(match.group(2)):02d}"
-
-
-def in_containers(paths: DatasetPaths) -> dict[str, Path]:
-    """Map each well to its raw-input container (``<WELL>.zip`` or ``<WELL>/``).
-
-    Keys are canonical wells (``A01``); a zip wins over a same-well folder. This
-    is what lets the worker find a container from a canonical well even when the
-    file on disk is unpadded (``A1.zip``).
-    """
-    containers: dict[str, Path] = {}
-    for zip_path in paths.in_dir.glob("*.zip"):
-        well = canonical_well_label(zip_path.stem)
-        if well:
-            containers[well] = zip_path
-    with swallow("enumerate in/ well folders"):
-        for entry in paths.in_dir.iterdir():
-            if entry.is_dir():
-                well = canonical_well_label(entry.name)
-                if well:
-                    containers.setdefault(well, entry)
-    return containers
-
-
-def out_csvs(paths: DatasetPaths) -> dict[str, Path]:
-    """Map each well to its ``<prefix>_<WELL>.csv`` measurements file."""
-    csvs: dict[str, Path] = {}
-    for csv_path in paths.out_dir.glob("*.csv"):
-        well = _well_from_stem(csv_path.stem)
-        if well:
-            csvs[well] = csv_path
-    return csvs
-
-
-def out_zips(paths: DatasetPaths) -> dict[str, Path]:
-    """Map each well to its ``<WELL>_out.zip`` QC-image archive."""
-    zips: dict[str, Path] = {}
-    for zip_path in paths.out_dir.glob("*_out.zip"):
-        stem = zip_path.stem
-        well = canonical_well_label(stem[:-4]) if stem.endswith("_out") else None
-        if well:
-            zips[well] = zip_path
-    return zips
-
-
-def dataset_wells(paths: DatasetPaths) -> set[str]:
-    """Every 96-well position present in a dataset's ``in`` or ``out``."""
-    return set(in_containers(paths)) | set(out_csvs(paths)) | set(out_zips(paths))
 
 
 # ── sidecar merge ────────────────────────────────────────────────────────────
@@ -522,28 +389,6 @@ def column_warnings(ds1: DatasetPaths, ds2: DatasetPaths, wells_both: tuple[str,
 
 
 # ── zip-member filename rewrite ──────────────────────────────────────────────
-def _discover_parsed_member(
-    name: str, schema: PipelineSchema, channels: tuple[str, ...],
-) -> tuple[ParsedName, str]:
-    """Parse *name* against *schema*, trying each known channel token as the
-    role-suffix discriminator until one resolves a role. Returns
-    ``(parsed, discovered_channel)`` — *discovered_channel* is the exact
-    token that matched a channel-scoped role suffix (``""`` for an unscoped
-    role or a bare/raw image), which is NOT the same as ``parsed.channel``
-    (that property prefers the schema's own ``channel`` field and would
-    rename a ``_tophat_<chan>``/``_smfish_<chan>`` suffix to the wrong token
-    on rebuild).
-    """
-    best = parse_image_filename(name, schema=schema)
-    if best.role is not None:
-        return best, ""
-    for tok in channels:
-        candidate = parse_image_filename(name, schema=schema, fluor_token=tok)
-        if candidate.role is not None:
-            return candidate, tok
-    return best, ""
-
-
 def rewrite_member_name(
     name: str,
     *,
@@ -555,38 +400,20 @@ def rewrite_member_name(
     """Return ``(new_name, was_rewritten)`` with *name*'s timepoint field
     shifted by *offset_hours*.
 
-    Rewrites only when *name* is structurally conformant to *schema* —
-    recognised image extension, exactly as many separator-delimited fields as
-    the schema declares (after stripping any role suffix), and a timepoint
-    field that parses to a finite hour value. A name that fails any of those
-    checks is returned unchanged (``was_rewritten=False``) rather than risk a
-    positional rewrite landing on the wrong field — a non-schema member of a
-    user-supplied zip, or a role suffix this dataset's channel list doesn't
-    cover, passes through untouched instead of being silently corrupted.
+    A thin timepoint-shift wrapper over the field-agnostic
+    :func:`datasets._common.member_names.rewrite_member_field` — see that
+    module for the structural-conformance gate this shares with Merge
+    plates' well-token rewrite.
     """
-    from well_viewer.data.image_identity import build_image_filename
+    def _shift(old_token: str) -> str | None:
+        hours = parse_hours(old_token)
+        if hours is None or not math.isfinite(hours):
+            return None
+        return render_timepoint(hours + offset_hours, tp_format)
 
-    ext = Path(name).suffix.lower()
-    if ext not in _IMAGE_EXTS:
-        return name, False
-
-    parsed, discovered_channel = _discover_parsed_member(name, schema, channels)
-    parts = parsed.stem.split(schema.sep)
-    if len(parts) != len(schema.fields):
-        return name, False
-
-    old_token = parsed.fields.get("timepoint", "")
-    hours = parse_hours(old_token)
-    if hours is None or not math.isfinite(hours):
-        return name, False
-
-    new_fields = dict(parsed.fields)
-    new_fields["timepoint"] = render_timepoint(hours + offset_hours, tp_format)
-    new_name = build_image_filename(
-        fields=new_fields, schema=schema, role=parsed.role,
-        channel=discovered_channel, ext=parsed.ext,
+    return rewrite_member_field(
+        name, schema=schema, channels=channels, field="timepoint", new_value=_shift,
     )
-    return new_name, True
 
 
 # ── top-level plan ───────────────────────────────────────────────────────────

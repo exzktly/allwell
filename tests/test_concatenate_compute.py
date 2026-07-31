@@ -26,66 +26,10 @@ import pytest
 
 from datasets.concatenate import apply
 from datasets.concatenate import concatenate_compute as cc
+from tests.fixtures.dataset_builder import BASE_INFO as _BASE_INFO
+from tests.fixtures.dataset_builder import ROW_COLUMNS as _ROW_COLUMNS
+from tests.fixtures.dataset_builder import build_dataset as _make_dataset
 from util.timepoint import parse_hours
-
-
-# ── fixtures ─────────────────────────────────────────────────────────────────
-_BASE_INFO = {
-    "schema": "experiment:channel:well:fov:timepoint",
-    "separator": "_",
-    "schema_fields": ["experiment", "channel", "well", "fov", "timepoint"],
-    "well_index": 2,
-    "channel_index": 1,
-    "fov_index": 3,
-    "tp_index": 4,
-    "nuclear_token": "nir",
-    "segmentation_method": "stardist_nuclei",
-    "fluor_tokens": ["nir", "gfp"],
-    "smfish_tokens": [],
-    "shape_features": [],
-    "available_fovs": ["F001"],
-}
-
-_ROW_COLUMNS = [
-    "filename", "experiment", "channel", "well", "fov",
-    "timepoint", "timepoint_hours", "nucleus_id", "area_px",
-]
-
-
-def _make_dataset(root: Path, *, wells, timepoints, exp: str = "exp",
-                   info_extra=None, columns=_ROW_COLUMNS) -> Path:
-    """Build a dataset (in/ zips, out/ QC zips + measurements CSV + sidecar)
-    whose CSV matches the real pipeline's column shape."""
-    in_dir = root / "in"
-    out_dir = root / "out"
-    in_dir.mkdir(parents=True)
-    out_dir.mkdir(parents=True)
-
-    info = dict(_BASE_INFO)
-    info["available_timepoints"] = list(timepoints)
-    if info_extra:
-        info.update(info_extra)
-    (out_dir / "pipeline_info.json").write_text(json.dumps(info))
-
-    for well in wells:
-        with zipfile.ZipFile(in_dir / f"{well}.zip", "w") as zf:
-            for tp in timepoints:
-                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}.tif", b"img")
-        with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
-            for tp in timepoints:
-                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}_labels.tif", b"mask")
-                zf.writestr(f"{exp}_GFP_{well}_F001_{tp}_tophat_gfp.tif", b"tophat")
-        with (out_dir / f"measurements_{well}.csv").open("w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=columns)
-            writer.writeheader()
-            for tp in timepoints:
-                row = {
-                    "filename": f"{exp}_GFP_{well}_F001_{tp}.tif", "experiment": exp,
-                    "channel": "GFP", "well": well, "fov": "F001", "timepoint": tp,
-                    "timepoint_hours": parse_hours(tp), "nucleus_id": 1, "area_px": 150,
-                }
-                writer.writerow({k: v for k, v in row.items() if k in columns})
-    return root
 
 
 # ── timepoint math ───────────────────────────────────────────────────────────
@@ -409,6 +353,45 @@ def test_execute_plan_carries_over_cell_overrides_with_shifted_tp(tmp_path):
     assert all(o["seg_fp"] == real_mtime for o in merged["overrides"])
 
 
+def test_execute_plan_drops_malformed_dataset2_override_tp_rather_than_carry_it_over_wrong(tmp_path):
+    """_merge_cell_overrides's documented behaviour (its own module docstring:
+    "a malformed entry (unparseable tp) is dropped rather than carried over
+    with a wrong value") has no test anywhere in the suite. A stale override
+    file referencing an old, now-unparseable timepoint token is a realistic
+    real-world shape -- cell_overrides.json is hand/UI-edited independently of
+    the measurements CSVs -- and the alternative failure mode (silently
+    carrying the entry over with its original, un-shifted tp) would land a
+    cell override on the wrong timepoint after the merge with no error at all.
+    A dataset-1 entry is unaffected, since dataset 1's overrides are carried
+    over unshifted; only dataset-2 entries go through remap_timepoint_label."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
+    (tmp_path / "d1" / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [{"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+                       "included": "0", "seg_fp": "stale1"}],
+    }))
+    (tmp_path / "d2" / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [
+            {"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+             "included": "0", "seg_fp": "stale2"},
+            {"well": "A01", "fov": "F001", "tp": "not_a_timepoint", "nucleus_id": "2",
+             "included": "0", "seg_fp": "stale3"},
+        ],
+    }))
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    apply.execute_plan(plan)
+
+    merged = json.loads((dest / "out" / "cell_overrides.json").read_text())
+    nucleus_ids = sorted(o["nucleus_id"] for o in merged["overrides"])
+    assert nucleus_ids == ["1", "1"]  # nucleus_id "2" (the malformed entry) is gone, not mis-shifted
+    tps = sorted(o["tp"] for o in merged["overrides"])
+    assert tps == ["0h", "48h"]
+    assert all(o["tp"] != "not_a_timepoint" for o in merged["overrides"])
+
+
 def test_execute_plan_regression_guard_catches_a_broken_offset(tmp_path):
     """Simulates the shipped bug directly: force a MergePlan whose offset
     wasn't actually applied to timepoint_hours, and confirm verification
@@ -585,6 +568,46 @@ def test_execute_plan_progress_defaults_to_a_no_op(tmp_path):
     plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
     summary = apply.execute_plan(plan)
     assert "Concatenated 1 well(s)" in summary
+
+
+def test_execute_plan_merges_many_wells_in_parallel(tmp_path):
+    """Enough wells to force >1 worker (default auto-sizing) -- every well
+    must still land correctly with no cross-well interference, and every
+    well must still report exactly one merging + one terminal event."""
+    wells = [f"{r}{c:02d}" for r in "ABCD" for c in range(1, 5)]  # 16 wells
+    _make_dataset(tmp_path / "d1", wells=wells, timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=wells, timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    events: list[tuple[str, str]] = []
+    summary = apply.execute_plan(plan, progress=lambda well, stage: events.append((well, stage)))
+    assert f"Concatenated {len(wells)} well(s)" in summary
+
+    by_well: dict[str, list[str]] = {}
+    for well, stage in events:
+        by_well.setdefault(well, []).append(stage)
+    assert set(by_well) == set(wells)
+    for well, stages in by_well.items():
+        assert stages[0] == "merging"
+        assert stages[1] in ("merged", "warned")
+        assert len(stages) == 2
+
+    for well in wells:
+        with zipfile.ZipFile(dest / "in" / f"{well}.zip") as zf:
+            assert len(zf.namelist()) > 0
+        with (dest / "out" / f"measurements_{well}.csv").open() as f:
+            rows = list(csv.DictReader(f))
+        assert len(rows) == 4  # 2 timepoints x 2 datasets
+
+
+def test_execute_plan_respects_explicit_worker_count(tmp_path):
+    _make_dataset(tmp_path / "d1", wells=["A01", "B02", "C03"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01", "B02", "C03"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    summary = apply.execute_plan(plan, workers=1)
+    assert "Concatenated 3 well(s)" in summary
 
 
 # ── collision / silent-drop regression (reported bug) ─────────────────────────

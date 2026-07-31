@@ -20,8 +20,25 @@ from PySide6.QtGui import QColor
 
 __all__ = [
     "theme", "lerp_color", "with_alpha", "run_demo",
-    "install_qss_refresh",
+    "install_qss_refresh", "set_variant",
 ]
+
+
+def set_variant(widget, variant: str) -> None:
+    """Change *widget*'s ``variant`` dynamic property at runtime and force a
+    QSS repolish, so a property-selector rule (``QPushButton[variant=...]``)
+    picks up the new value immediately.
+
+    Changing ``setProperty("variant", ...)`` alone does nothing visible —
+    Qt's stylesheet cache only re-evaluates property selectors on an
+    explicit repolish. ``well_viewer.core.plot_toggles.refresh_fov_btn_state``
+    is the precedent this generalises (a QPushButton's checked-state variant
+    flips live the same way); kept here rather than duplicated per call site.
+    """
+    widget.setProperty("variant", variant)
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
 
 
 def lerp_color(a, b, t: float) -> QColor:

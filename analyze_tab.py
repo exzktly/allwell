@@ -17,7 +17,7 @@ import time as _time
 from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
@@ -39,6 +39,7 @@ from services.remote_config import default_remote_index
 import theme
 from well_viewer.core.safe import swallowed
 from analyze_input import AnalyzeInputMixin
+from analyze_run_spec import AnalyzeRunMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
@@ -96,8 +97,21 @@ def _has_well_content(folder: Path) -> bool:
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
+
+    # Positive-latch completion signal for a job queue: emitted exactly once
+    # per run, as the final statement of _poll_log's "finished" branch. Never
+    # inferred from "no error seen" — see the _run_ok / _run_error latch below.
+    runFinished = Signal(bool, str)
+
+    # QueueableController hook (ok, message, out_dir — "" for none). Kept
+    # distinct from runFinished (whose (bool, str) shape is pinned by
+    # tests/test_analyze_run_finished.py) rather than changed in place, and
+    # emitted strictly after it — see _poll_log's "finished" branch, where
+    # this is truly the last statement so a queue bridge's slot starting the
+    # next job can't race anything after its own emit.
+    jobFinished = Signal(bool, str, str)
 
     @staticmethod
     def _log_color(tag: str) -> str:
@@ -124,6 +138,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
         # re-arming its QTimer (audit L2) — AnalyzeTab is a child widget whose
         # own closeEvent never fires.
         self._alive = True
+        # runFinished latch: set by the "done"/"error" branches of _poll_log,
+        # read (and reset) by start_run. Initialised here, not just in
+        # start_run, since _poll_log self-arms below and can drain a
+        # "finished" event before any run has ever started.
+        self._run_ok = False
+        self._run_error: str | None = None
         self._well_total = 0
         self._well_done  = 0
         self._zipper_done = 0
@@ -634,44 +654,10 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
         pipeline = self._validate_run_request()
         if pipeline is None:
             return
-        self._set_running_ui_state()
-        opts = self._collect_run_options()
-        remote_name = self._remote_cb.currentData()
-        remote = None
-        if remote_name is not None:
-            try:
-                from services.remote_config import get_remote
-                remote = get_remote(remote_name)
-            except (ValueError, OSError) as exc:
-                QMessageBox.critical(
-                    self,
-                    "Remote Config Error",
-                    f"Could not load remote '{remote_name}':\n{exc}",
-                )
-                # Revert the running UI state set above so the user can
-                # try again. Mirrors the inline cleanup in _poll_log's
-                # "finished" branch.
-                self._running = False
-                self._run_btn.setEnabled(True)
-                self._stop_btn.setEnabled(False)
-                self._dashboard.set_headline("Idle")
-                self._dashboard.set_status("")
-                return
-        # v5.2.11: unchecked = "none" (safe default for shared
-        # machines). Checked = "all" (delete per-run output AND the
-        # dataset cache after a verified-successful run).
-        cleanup_mode = "all" if self._cleanup_remote_cb.isChecked() else "none"
-        dry_run_cleanup = self._dry_run_cleanup_cb.isChecked()
-        self._runner.start(
-            pipeline,
-            opts,
-            resolve_dirs=self._resolve_run_dirs_for_runner,
-            remote=remote,
-            output_filter="full",
-            cleanup_remote=cleanup_mode,
-            dry_run_cleanup=dry_run_cleanup,
-            selective_channels=True,
-        )
+        spec = self._collect_run_spec()
+        error = self.start_run(spec, pipeline=pipeline)
+        if error is not None:
+            QMessageBox.critical(self, "Run Error", error)
 
     def _validate_run_request(self) -> Path | None:
         if not self._input_edit.text().strip():
@@ -718,12 +704,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
             return None
         return pipeline
 
-    def _set_running_ui_state(self) -> None:
+    def _set_running_ui_state(self, *, remote=None) -> None:
         self._running = True
         self._well_total = 0
         self._well_done  = 0
         self._progress_tracker.reset()
-        self._dashboard.reset(remote=self._remote_cb.currentData() is not None)
+        self._dashboard.reset(remote=remote is not None)
         if getattr(self, "_last_run_card", None) is not None:
             self._last_run_card.setVisible(False)  # C4: hide stale summary while running
         self._eta_deadline = None
@@ -987,6 +973,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
                         pct = 0.0
                     self._dashboard.set_status(f"Transferring… {int(pct * 100)}%")
                 elif kind == "done":
+                    self._run_ok = True
                     self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
                     n = self._well_done or getattr(self, "_zipper_done", 0)
                     self._dashboard.set_headline(f"Complete — {n} well(s) processed")
@@ -1006,6 +993,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
                             self._log_line(f"[warn] Could not open Review tab: {exc}\n", "WARNING")
                 elif kind == "error":
                     self._log_line(payload, "ERROR")
+                    if self._run_error is None:  # keep the first message only
+                        self._run_error = str(payload)
                 elif kind == "finished":
                     self._running = False
                     self._run_btn.setEnabled(True)
@@ -1014,6 +1003,21 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeTabFormMixin, QWidget):
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
                     self._refresh_last_run_summary()  # C4: show the just-finished run
+                    # A directly-connected slot on either signal below may
+                    # start the next queued run re-entrantly (calling
+                    # _set_running_ui_state() from inside the emit), so
+                    # nothing after jobFinished's emit may touch run state —
+                    # it is truly the last statement of this branch.
+                    ok, message = self._run_ok, (self._run_error or "")
+                    out_dir = str(self._last_output_dir) if ok and self._last_output_dir else ""
+                    try:
+                        self.runFinished.emit(ok, "" if ok else message)
+                    except Exception:
+                        swallowed()
+                    try:
+                        self.jobFinished.emit(ok, "" if ok else message, out_dir)
+                    except Exception:
+                        swallowed()
         except queue.Empty:
             pass
         except Exception:  # a bad event must not kill the poller

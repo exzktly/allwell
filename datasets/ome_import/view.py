@@ -4,8 +4,8 @@ A source OME-TIFF picker + a destination-folder picker, the de-interleave
 controls (well grid, FOVs per well, origin, serpentine direction, and — for a
 single-image packed file — the frame order), a live readout of how the file will
 split into wells × FOVs × timepoints, and an Analyze-style status view (a
-progress bar + a collapsible raw log). On success an "Open in Analyze" button
-appears.
+progress bar + a collapsible raw log). On success an "Open dataset in Analyze"
+button appears.
 
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInAnalyzeRequested``); the worker wiring lives in
@@ -15,7 +15,6 @@ theme tokens — nothing hardcoded (CLAUDE.md §5).
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -31,15 +30,15 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
-    QSizePolicy,
-    QToolButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 import theme
 from util.plate_grid import serpentine_well_labels
-from widgets.icons import make_icon
+from widgets._support import set_variant
+from widgets.path_field import PathField
 from widgets.plate_order_editor import PlateOrderEditor
 from datasets.ome_import.ome_import_compute import (
     CHANNEL_ROLES,
@@ -68,66 +67,11 @@ def _hrule(parent: QWidget) -> QFrame:
     return rule
 
 
-class _PathField(QWidget):
-    """Caption + a compact read-only path box + an icon Browse button.
-
-    *pick* returns the chosen path string (a file or a folder dialog); the field
-    stores it, shows the basename with the full path on hover, and emits
-    ``changed``.
-    """
-
-    changed = Signal()
-
-    def __init__(
-        self, title: str, *, pick: Callable[[str], str], parent: QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
-        self._pick = pick
-        self._path = ""
-
-        col = QVBoxLayout(self)
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(theme.Spacing.xs)
-        label = QLabel(title, self)
-        label.setObjectName("Muted")
-        col.addWidget(label)
-
-        row = QWidget(self)
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(theme.Spacing.xs)
-        self._edit = QLineEdit(row)
-        self._edit.setReadOnly(True)
-        self._edit.setPlaceholderText("(not set)")
-        self._edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        rl.addWidget(self._edit, 1)
-        browse = QToolButton(row)
-        browse.setIcon(make_icon("folder-open"))
-        browse.setAutoRaise(True)
-        browse.setToolTip("Browse…")
-        browse.clicked.connect(self._browse)
-        rl.addWidget(browse)
-        col.addWidget(row)
-
-    def _browse(self) -> None:
-        chosen = self._pick(self._path)
-        if chosen:
-            self.set_path(chosen)
-            self.changed.emit()
-
-    def set_path(self, path: str) -> None:
-        self._path = path
-        self._edit.setText(Path(path).name or path)
-        self._edit.setToolTip(path)
-
-    def path(self) -> str:
-        return self._path
-
-
 class OmeImportPage(QWidget):
     """The Convert OME-TIFF feature body."""
 
     runRequested = Signal()
+    queueRequested = Signal()
     openInAnalyzeRequested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -140,7 +84,23 @@ class OmeImportPage(QWidget):
 
     # ── build ────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
+        # Wrap in a scroll area — see datasets/concatenate/view.py's
+        # _build_ui for why (the acquisition-order plate above the status
+        # section used to get crushed into whatever space the growing
+        # progress/log area left it, with no way to scroll down to see
+        # both). Qt's layout.addWidget() reparents regardless of any
+        # constructor-passed parent, so the widgets below can keep passing
+        # ``self`` without needing a bulk rewrite.
+        page_layout = QVBoxLayout(self)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        page_layout.addWidget(scroll)
+
+        content = QWidget(scroll)
+        scroll.setWidget(content)
+        outer = QVBoxLayout(content)
         outer.setContentsMargins(theme.Spacing.lg, theme.Spacing.lg,
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
@@ -162,15 +122,14 @@ class OmeImportPage(QWidget):
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
 
-        self._src_field = _PathField("OME-TIFF source", pick=self._pick_source)
+        self._src_field = PathField("OME-TIFF source", pick=self._pick_source)
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
-        self._dest_field = _PathField("Destination folder", pick=self._pick_dest)
+        self._dest_field = PathField("Destination folder", pick=self._pick_dest)
         self._dest_field.changed.connect(self._on_dest_changed)
         outer.addWidget(self._dest_field)
 
         self._build_params(outer)
-        self._build_plate(outer)
         self._build_channels(outer)
 
         self._readout = QLabel("", self)
@@ -178,11 +137,29 @@ class OmeImportPage(QWidget):
         self._readout.setWordWrap(True)
         outer.addWidget(self._readout)
 
+        run_row = QWidget(self)
+        run_row_l = QHBoxLayout(run_row)
+        run_row_l.setContentsMargins(0, 0, 0, 0)
+        run_row_l.setSpacing(theme.Spacing.sm)
         self._run_btn = QPushButton("▶  Convert", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
-        outer.addWidget(self._run_btn, 0, Qt.AlignLeft)
+        run_row_l.addWidget(self._run_btn)
+        self._queue_btn = QPushButton("+ Queue", self)
+        self._queue_btn.setProperty("variant", "secondary")
+        self._queue_btn.setToolTip("Add this conversion to the Job Queue instead of running it now.")
+        self._queue_btn.setEnabled(False)
+        self._queue_btn.clicked.connect(self.queueRequested)
+        run_row_l.addWidget(self._queue_btn)
+        run_row_l.addStretch(1)
+        outer.addWidget(run_row, 0, Qt.AlignLeft)
+
+        # The readout and Convert/Queue buttons sit above the acquisition plate, not
+        # below it -- every other Datasets page puts its primary action above
+        # a capped plate map, and an uncapped PlateOrderEditor (see _build_plate)
+        # used to push both off the bottom of the fold.
+        self._build_plate(outer)
 
         self._build_status_section(outer)
 
@@ -270,6 +247,12 @@ class OmeImportPage(QWidget):
 
         self._plate = PlateOrderEditor(self)
         self._plate.orderChanged.connect(lambda _=None: self.refresh_readout())
+        # Capped like every other Datasets/Analyze plate map (PlateProgress's
+        # own 330x210 convention) -- PlateOrderEditor's QSizePolicy.Expanding
+        # otherwise grows to fill the scroll area's full width/height, which
+        # used to push the Convert button (now above it) far below the fold.
+        self._plate.setMaximumWidth(330)
+        self._plate.setMaximumHeight(210)
         outer.addWidget(self._plate)
 
         btn_row = QWidget(self)
@@ -375,7 +358,7 @@ class OmeImportPage(QWidget):
         hdr = QWidget(self)
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Conversion Output", hdr))
+        hl.addWidget(QLabel("Convert Output", hdr))
         hl.addStretch(1)
         self._raw_log_cb = QCheckBox("Show raw log", hdr)
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
@@ -408,20 +391,21 @@ class OmeImportPage(QWidget):
                 w.setVisible(bool(show))
 
     # ── pickers ──────────────────────────────────────────────────────────────
-    def _pick_source(self, current: str) -> str:
+    def _pick_source(self, current: str, parent: QWidget | None = None) -> str:
         f, _ = QFileDialog.getOpenFileName(
-            self, "Select OME-TIFF file", current or "",
+            parent or self, "Select OME-TIFF file", current or "",
             "OME-TIFF (*.ome.tif *.ome.tiff);;All files (*)",
         )
         return f
 
-    def _pick_dest(self, current: str) -> str:
+    def _pick_dest(self, current: str, parent: QWidget | None = None) -> str:
         return QFileDialog.getExistingDirectory(
-            self, "Select destination folder", current or "",
+            parent or self, "Select destination folder", current or "",
             QFileDialog.ShowDirsOnly | QFileDialog.DontResolveSymlinks,
         )
 
     def _on_source_changed(self) -> None:
+        set_variant(self._run_btn, "primary")
         # Auto-fill the destination the first time (unless the user set one).
         if self._src_field.path() and not self._dest_user_set:
             self._dest_field.set_path(str(default_dest(self._src_field.path())))
@@ -438,6 +422,18 @@ class OmeImportPage(QWidget):
     def destination_path(self) -> str:
         return self._dest_field.path()
 
+    def set_source_path(self, path: str) -> None:
+        """Programmatic set (job-queue ``show_job``) — unlike ``_browse()``,
+        does not flip ``_dest_user_set``, so a later change still auto-fills
+        the destination exactly as an interactive pick would."""
+        self._src_field.set_path(path)
+        self.refresh_readout()
+
+    def set_destination_path(self, path: str) -> None:
+        self._dest_user_set = True
+        self._dest_field.set_path(path)
+        self.refresh_readout()
+
     def params(self) -> ConversionParams:
         return ConversionParams(
             grid_rows=_as_int(self._rows_edit.text()),
@@ -449,6 +445,27 @@ class OmeImportPage(QWidget):
             well_order=tuple(self._plate.order()) if hasattr(self, "_plate") else (),
             workers=max(0, _as_int(self._workers_edit.text())),
         )
+
+    def set_params(self, params: ConversionParams) -> None:
+        """Restores every field ``params()`` reads from — the job-queue
+        counterpart to ``params()``, used by ``show_job`` to repopulate a
+        queued conversion's settings."""
+        self._rows_edit.setText(str(params.grid_rows))
+        self._cols_edit.setText(str(params.grid_cols))
+        self._origin_edit.setText(params.origin or "A01")
+        idx = self._direction_cb.findData(params.direction)
+        if idx >= 0:
+            self._direction_cb.setCurrentIndex(idx)
+        self._fovs_edit.setText(str(params.fovs_per_well) if params.fovs_per_well else "")
+        idx = self._frame_order_cb.findData(params.frame_order)
+        if idx >= 0:
+            self._frame_order_cb.setCurrentIndex(idx)
+        self._workers_edit.setText(str(params.workers) if params.workers else "")
+        if params.well_order:
+            self._plate.set_order(list(params.well_order))
+        else:
+            self._plate.clear()
+        self.refresh_readout()
 
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)
@@ -464,14 +481,20 @@ class OmeImportPage(QWidget):
         self._progress.setValue(done)
 
     def set_running(self, running: bool) -> None:
-        self._run_btn.setText("Converting…" if running else "Convert")
+        self._run_btn.setText("Converting…" if running else "▶  Convert")
         self._run_btn.setEnabled(not running and self._can_convert())
+        self._queue_btn.setEnabled(not running and self._can_convert())
         if running:
             self._open_btn.setVisible(False)
+            set_variant(self._run_btn, "primary")
 
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root
         self._open_btn.setVisible(True)
+        # Promoted to the primary action on success, demoting Convert — see
+        # ConcatenatePage.show_open_in_review for the reasoning.
+        set_variant(self._open_btn, "primary")
+        set_variant(self._run_btn, "secondary")
 
     def refresh_readout(self) -> None:
         """Recompute the split readout and the frame-order visibility / Run gate."""
@@ -511,6 +534,7 @@ class OmeImportPage(QWidget):
         self._frame_order_cb.setVisible(single)
         self._readout.setText(message)
         self._run_btn.setEnabled(can)
+        self._queue_btn.setEnabled(can)
 
     # ── internals ────────────────────────────────────────────────────────────
     def _can_convert(self) -> bool:

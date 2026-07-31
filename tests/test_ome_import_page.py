@@ -11,7 +11,7 @@ import pytest
 
 tifffile = pytest.importorskip("tifffile")
 
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -158,6 +158,89 @@ def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
     page._cols_edit.setText("2")
     page.refresh_readout()
     assert page.params().well_order == ("A01", "A02", "A03", "H12")
+
+
+def test_page_content_is_wrapped_in_a_scroll_area(qapp):
+    """Regression guard: the page used to lay every section directly into
+    its own top-level QVBoxLayout with no scroll area, so once the status
+    section grew (the log filled with lines, the raw log toggled on), a
+    plain fixed-height window had no room left for both it and the
+    acquisition-order plate map above — the plate got silently squeezed down
+    to a fraction of its natural size instead of the page scrolling to
+    reach the status section. set_path() etc. must still resolve on widgets
+    reparented under the scroll area's inner content widget — Qt's
+    layout.addWidget() reparents regardless of constructor parent."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    outer_scroll = page.layout().itemAt(0).widget()
+    assert isinstance(outer_scroll, QScrollArea)
+    assert outer_scroll.widgetResizable() is True
+    assert page._src_field.parent() is not page  # reparented under the scroll content
+
+
+def test_plate_is_capped_and_sits_below_the_readout_and_convert_button(qapp):
+    """Regression guard: PlateOrderEditor carries QSizePolicy.Expanding with no
+    cap of its own, so inside the page's scroll area it grew to fill the full
+    available width/height -- pushing the readout and Convert button (the
+    page's primary action) far below the fold, unlike every other Datasets
+    page, which caps its plate map and puts the action above it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+
+    assert page._plate.maximumWidth() == 330
+    assert page._plate.maximumHeight() == 210
+
+    content = page.layout().itemAt(0).widget().widget()
+    outer = content.layout()
+    widgets = [outer.itemAt(i).widget() for i in range(outer.count())]
+    readout_idx = widgets.index(page._readout)
+    run_row_idx = widgets.index(page._run_btn.parentWidget())
+    plate_idx = widgets.index(page._plate)
+    assert readout_idx < plate_idx
+    assert run_row_idx < plate_idx
+
+
+def test_queue_button_round_trips_source_dest_and_params(qapp, tmp_path):
+    """Regression guard: Convert OME-TIFF used to have no "+ Queue" button and
+    no QueueableController wiring at all — the only Datasets tool the Job
+    Queue couldn't drive. collect_spec()/show_job() must round-trip every
+    field params() reads, including the click-defined well order, since
+    that's exactly the state a queued run needs to reproduce."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=2, channel_names=("DAPI",))
+    added = []
+    ctrl = OmeImportController(
+        on_open_in_analyze=lambda _p: None,
+        on_add_to_queue=lambda kind, spec: added.append((kind, spec)),
+    )
+    page = ctrl.page
+
+    page.set_source_path(str(p))
+    page.set_destination_path(str(tmp_path / "dest"))
+    page._plate.set_order(["B02", "B03"])
+    page.refresh_readout()
+    assert page._queue_btn.isEnabled()
+
+    page._queue_btn.click()
+    assert len(added) == 1
+    kind, spec = added[0]
+    assert kind == "ome_import"
+    assert spec["source"] == str(p)
+    assert spec["destination"] == str(tmp_path / "dest")
+    assert spec["params"]["well_order"] == ["B02", "B03"]
+
+    # A fresh controller's page restores from that exact spec.
+    ctrl2 = OmeImportController(on_open_in_analyze=lambda _p: None)
+    ctrl2.show_job(spec)
+    page2 = ctrl2.page
+    assert page2.source_path() == spec["source"]
+    assert page2.destination_path() == spec["destination"]
+    assert page2.params().well_order == ("B02", "B03")
 
 
 def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):

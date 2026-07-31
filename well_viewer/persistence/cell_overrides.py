@@ -22,6 +22,7 @@ import json
 import logging
 from pathlib import Path
 
+from util.well_token import canonical_well_label
 from well_viewer.data.image_identity import CellKey
 from well_viewer.persistence._io import atomic_write_json
 
@@ -40,14 +41,24 @@ def _well_zip_fingerprints(app) -> dict[str, str]:
     """Snapshot the ``<well>_out.zip`` mtimes for every loaded well.
 
     Used both at save time (stored alongside each override) and at load
-    time (compared against the file on disk).
+    time (compared against the file on disk). Keys are canonicalised
+    (``a1_out.zip`` -> ``"A01"``) to match ``CellKey.well`` — the override
+    map's own keys, which every well is normalised into via
+    ``normalize_well``. An unpadded on-disk filename previously left this
+    dict keyed by the raw, unpadded stem, so the lookup at both save and
+    load time missed on an unpadded dataset; both sides missed the same
+    way, so the staleness guard silently never fired instead of failing
+    loudly — stale overrides were kept rather than dropped.
     """
     out: dict[str, str] = {}
     data_dir = app._app_state.dataset.data_dir
     if not data_dir:
         return out
     for zip_path in Path(data_dir).glob("*_out.zip"):
-        well = zip_path.stem.replace("_out", "")
+        stem = zip_path.stem
+        well = canonical_well_label(stem[:-4]) if stem.endswith("_out") else None
+        if not well:
+            continue
         try:
             out[well] = f"{zip_path.stat().st_mtime_ns}"
         except OSError:
@@ -85,29 +96,53 @@ def save_to_data_dir(ctx) -> None:
         _logger.warning("Failed to save cell overrides to %s: %s", path, exc)
 
 
-def load_from_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    path = path_for(app)
-    if path is None or not path.exists():
-        return
+def _fingerprints_for_data_dir(data_dir: Path) -> dict[str, str]:
+    """Qt-free twin of ``_well_zip_fingerprints`` taking a plain path — lets
+    :func:`load_overrides` (and its tests) work from a data dir alone rather
+    than a live app object."""
+    out: dict[str, str] = {}
+    for zip_path in Path(data_dir).glob("*_out.zip"):
+        stem = zip_path.stem
+        well = canonical_well_label(stem[:-4]) if stem.endswith("_out") else None
+        if not well:
+            continue
+        try:
+            out[well] = f"{zip_path.stat().st_mtime_ns}"
+        except OSError:
+            pass
+    return out
+
+
+def load_overrides(data_dir: Path) -> dict[tuple[str, str, str, str], str]:
+    """Read ``<data_dir>/cell_overrides.json`` into a ``CellKey.as_tuple()``
+    keyed include-map, applying the same staleness/legacy rules
+    :func:`load_from_data_dir` does — extracted as a pure function (no
+    ``ctx``/``app``) so it is both the production reader and something a test
+    can call directly on a plain path, rather than driving a four-attribute
+    app stub to exercise the same logic.
+
+    Returns ``{}`` on a missing/corrupt/empty file — the caller decides
+    whether that means "nothing to load" or "don't touch existing state".
+    """
+    path = Path(data_dir) / "cell_overrides.json"
+    if not path.exists():
+        return {}
     try:
         with open(path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
         _logger.warning("Failed to load cell overrides from %s: %s", path, exc)
-        return
+        return {}
     overrides = data.get("overrides") if isinstance(data, dict) else None
     if not isinstance(overrides, list):
-        return
+        return {}
     file_version = 1
     try:
         file_version = int(data.get("version", 1))
     except (TypeError, ValueError):
         pass
 
-    fingerprints = _well_zip_fingerprints(app)
-    # Build the new map locally — only commit to in-memory state on success
-    # so a broken / empty file doesn't wipe unsaved edits.
+    fingerprints = _fingerprints_for_data_dir(data_dir)
     new_map: dict = {}
     dropped_stale = 0
     legacy_unfingerprinted = 0
@@ -156,6 +191,15 @@ def load_from_data_dir(ctx) -> None:
             "has been re-run since they were saved. Save to upgrade.",
             legacy_unfingerprinted,
         )
+    return new_map
+
+
+def load_from_data_dir(ctx) -> None:
+    app = ctx.window  # transitional bridge (B4)
+    data_dir = app._app_state.dataset.data_dir
+    if not data_dir:
+        return
+    new_map = load_overrides(data_dir)
     if not new_map:
         # Refuse to wipe a populated in-memory state with a no-op load.
         return

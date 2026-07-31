@@ -1569,6 +1569,45 @@ The Run path:
 5. The Analyze tab streams stdout/stderr into its log view (`tail -f`-style).
 6. On completion, the dataset folder is offered to the Review tab.
 
+**Collecting a run's configuration is split from starting it**, in
+`analyze_run_spec.py`'s `AnalyzeInputMixin`-style mixin `AnalyzeRunMixin`
+(mixed into `AnalyzeTab` alongside `AnalyzeInputMixin`/`AnalyzeTabFormMixin`).
+`_collect_run_spec()` turns the live form into a `services.run_spec.RunSpec` —
+a frozen, JSON-round-trippable dataclass (`opts`, the chosen remote's *name*
+rather than its resolved `RemoteHost`, cleanup/dry-run flags, output filter,
+selective-channels flag). `start_run(spec)` launches a `RunSpec` on the tab's
+own `PipelineRunner`, re-resolving the remote by name through
+`services.remote_config.get_remote` at call time (so a `remotes.toml` edited
+between collection and launch is honoured, and a deleted remote fails the run
+with a clear message via `RunSpecError` rather than silently running locally)
+and re-resolving the pipeline script fresh rather than trusting a stored path
+(which would break across a relaunch from a different install location).
+`start_run` never raises and never shows a dialog — it returns an error
+string, so it stays callable with no form on screen; `_run()` itself is a
+three-line delegation (`_collect_run_spec()` → `start_run()` → show a dialog
+on failure). This split exists so the Job Queue (§6b) can persist a run's
+configuration as plain JSON and start it later, independent of whatever the
+live form happens to hold at that moment.
+
+`AnalyzeTab.runFinished(ok: bool, message: str)` is a **positive-latch**
+completion signal: `_poll_log`'s `"done"` branch sets a per-run `_run_ok`
+latch, `"error"` records the first message seen, and the `"finished"` branch
+emits based on that latch — never on "no error was seen", since several of
+`PipelineRunner._run_pipeline_thread`'s early-return paths (stopped before
+launch, a cancelled zipper spawn) reach `"finished"` having emitted neither
+`"done"` nor `"error"`. The emit is the **last statement** of that branch,
+because a job-queue-driven slot connected to it may start the next run
+synchronously, re-entering `_set_running_ui_state()` — anything after the
+emit would clobber that new run's state. `AnalyzeTab.jobFinished(ok, message,
+out_dir)` is a second, separate signal for the Job Queue specifically (kept
+distinct so `runFinished`'s two-argument shape stays exactly what it always
+was), emitted immediately after `runFinished` for the same reason. A user
+Stop makes the pipeline subprocess exit non-zero, which surfaces as the same
+kind of `"error"` event a genuine failure would — `PipelineRunner.was_stopped`
+(readable after completion, cleared only at the *start* of the next run) is
+how a caller tells a cancel apart from a real failure; `AnalyzeRunMixin.was_cancelled()`
+exposes it under the name the Job Queue's bridge looks for.
+
 **Single packed OME-TIFF input — the Datasets converter.** A plate scan can
 arrive as one OME-TIFF holding every timepoint, channel, Z-plane and stage
 position. De-interleaving it is a **standalone converter** in the Datasets pane
@@ -2016,12 +2055,26 @@ one-line change, without pulling in Review's well/selection-scoped
 `FeatureRegistry`/`ViewerContext` machinery. The rail's `currentChanged` drives
 `NamedPageStack.setCurrentByName`.
 
-Two features live here today. Each is one `_Feature` entry in
-`datasets_tab.py::_FEATURES` and a `datasets/<name>/` package on the standard
-view/controller/worker + Qt-free compute/apply split; a completed run hands its
-output to another pane through an injected callback (`on_open_in_review` →
-`AllWellApp._open_dataset_in_review`; `on_open_in_analyze` →
-`_open_dataset_in_analyze`).
+Each feature is one `_Feature` entry in `datasets_tab.py::_FEATURES` and a
+`datasets/<name>/` package on the standard view/controller/worker + Qt-free
+compute/apply split; a completed run hands its output to another pane through
+an injected callback (`on_open_in_review` → `AllWellApp._open_dataset_in_review`;
+`on_open_in_analyze` → `_open_dataset_in_analyze`). Helpers shared across more
+than one feature — dataset-folder resolution, well-container IO, schema-safe
+filename rewriting — live in `datasets/_common/` rather than being imported
+from one feature package into another, so each feature stays independently
+deletable:
+
+| Module | What it holds |
+|---|---|
+| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. |
+| `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. |
+| `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
+| `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
+
+`datasets/concatenate/concatenate_compute.py` and `apply.py` re-export the
+names they lifted from `_common`, so their own public API (and every existing
+test against it) is unchanged.
 
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
@@ -2032,24 +2085,48 @@ count it implies, so the readout guides how many wells to place before any grid 
 entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
 runs it off the UI thread. On success
-the page's "Open in Analyze" button routes the produced folder to the Analyze
-pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a Review
-dataset. The page also carries a per-channel **role picker** (one row per OME
-channel name, seeded by `ome_import_compute.default_channel_roles`'s name
-heuristic — a strong nuclear stain (`DAPI`/`Hoechst`/…) wins the segmentation
-role, else a secondary `NIR`/`RFP` channel, else the first channel);
-`channel_tokens_from_roles` aggregates the picks into a minimal
+the page's "Open dataset in Analyze" button routes the produced folder to the
+Analyze pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a
+Review dataset. The page also carries a per-channel **role picker** (one row
+per OME channel name, seeded by `ome_import_compute.default_channel_roles`'s
+name heuristic — a strong nuclear stain (`DAPI`/`Hoechst`/…) wins the
+segmentation role, else a secondary `NIR`/`RFP` channel, else the first
+channel); `channel_tokens_from_roles` aggregates the picks into a minimal
 `pipeline_info`-shaped dict (`nuclear_token` / `fluor_tokens` / `phase_token`)
-that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds to
-`AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive pre-filled.
-The channel names are written into the output filenames regardless of the roles. The
-page also carries a `PlateOrderEditor` (§6.1): the grid fields seed a live
-serpentine preview, and the user can click wells to define an arbitrary
-`ConversionParams.well_order` (populated from `PlateOrderEditor.order()`) for a
-non-rectangular scan, which `plan_conversion` / `explode_ome_tiff` use in place of
-the serpentine.
+that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds
+to `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive
+pre-filled. The channel names are written into the output filenames regardless
+of the roles.
 
-**Concatenate datasets** (`datasets/concatenate/`) appends one dataset's
+The readout and the Convert/"+ Queue" buttons sit above the acquisition plate
+rather than below it — every other Datasets tool puts its primary action above
+a height-capped plate map, and here the uncapped `PlateOrderEditor` used to
+push both off the bottom of the fold before its own
+`setMaximumWidth(330)`/`setMaximumHeight(210)` pair (matching `PlateProgress`'s
+own convention) capped it to the same cell scale every other plate on the page
+uses. The page also carries that `PlateOrderEditor` (§6.1): the grid fields
+seed a live serpentine preview, and the user can click wells to define an
+arbitrary `ConversionParams.well_order` (populated from
+`PlateOrderEditor.order()`) for a non-rectangular scan, which `plan_conversion`
+/ `explode_ome_tiff` use in place of the serpentine. The page wraps its whole
+content in a `QScrollArea`, the same pattern every other Datasets tool page
+uses (mirroring `analyze_tab.py`'s own form panel): without it, growing the
+status section (the raw log filling with lines, the progress bar becoming
+visible) left no room in a fixed-height window for both it and the
+`PlateOrderEditor` above, so the plate quietly rendered at a fraction of its
+natural size instead of the page scrolling to reach the status section.
+
+Convert OME-TIFF is the sixth and last Datasets tool wired into the Job Queue
+(see the Job Queue entry below): `OmeImportController` implements the same
+`QueueableController` protocol as the five plate-driven tools —
+`collect_spec`/`show_job` round-trip `ConversionParams` (including
+`well_order`, serialised through `dataclasses.asdict`) alongside the source and
+destination paths, `start_from_queue` calls the same `_launch()` a manual "▶
+Convert" press does, and `jobFinished` fires once per run from `_on_finished`.
+Its own page carries a "+ Queue" button beside "▶ Convert", matching the other
+five tools' run rows.
+
+**Concatenate Datasets** (`datasets/concatenate/`) appends one dataset's
 timepoints after another's. Two datasets of the same plate, imaged in separate
 sessions, are stitched into one longer timelapse: dataset 2's timepoints are
 relabelled to continue after dataset 1's last timepoint, and the union of both
@@ -2063,11 +2140,11 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 | Module | Role |
 |--------|------|
 | `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
-| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. `write_zip` writes at `compresslevel=1` — a pure container-level merge of already-dense microscopy image data gains little from deeper DEFLATE effort, so the default level 6 was pure CPU waste — and tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback and a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard. |
+| `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. `write_zip` writes at `compresslevel=1` — a pure container-level merge of already-dense microscopy image data gains little from deeper DEFLATE effort, so the default level 6 was pure CPU waste — and tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback and a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. |
 | `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (mirrors `analyze_tab_form.py`'s log panel). Emits `runRequested` / `openInReviewRequested`. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
-| `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. |
+| `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. Every well's terminal states carry a marker glyph too, not just its colour — `merged` gets `✓`, `warned` gets `!`, the transient `merging` state keeps its `⚙` — so state is legible without relying on distinguishing success-green from accent-blue by colour alone. `set_done(summary, *, tooltip=None)` shows a caller-shortened headline (via `_common.dataset_paths.shorten_headline`, stripping the destination path down to its basename) while the full original text — the one still written to the log — survives as the headline's own tooltip. |
 
 **A measurement row's timepoint is carried by three values, not one**, and a
 zip member's timepoint lives in its filename — a fourth. The `timepoint` CSV
@@ -2161,6 +2238,688 @@ On success the page offers to open the merged dataset in Review, routed through
 the destination root into Review and switches to it — the same path
 `_on_analyze_pipeline_complete` uses.
 
+`ConcatenatePage._update_status_preview` reveals `ConcatDashboard` as soon as
+both dataset fields are valid, rather than only once "▶ Concatenate" is
+pressed — seeded via `_common.dataset_paths.preview_wells` on both dataset
+roots with a "Ready — N well(s)" headline, so the plate answers "what would
+this actually touch" before a run starts rather than sitting invisible with
+nothing to show yet. It steps aside once a real run begins
+(`ConcatenateController` drives `set_wells`/`set_phase`/well colouring from
+that point on) and resets again on the next field edit
+(`_on_field_changed`), which also hands the "▶ Concatenate" button's primary
+emphasis back from a still-visible post-success "Open in Review" button — see
+below. `set_running(True)` locks all three fields
+(`PathField.setLocked`, disabling only each field's Browse button, not the
+whole field) for the run's duration — previously the one Datasets tool that
+locked none of its fields at all, leaving a mid-run pick free to change what a
+subsequent Concatenate press would act on. On success,
+`show_open_in_review` promotes "Open in Review" to `variant="primary"` and
+demotes "▶ Concatenate" to `variant="secondary"` (via `widgets._support.
+set_variant`, see §7) — the natural next step is opening the result, not
+re-running the same merge. The status section's header/dashboard title read
+"Concatenate Output"/"Concatenate Progress" rather than "Merge Output"/"Merge
+Progress" so they don't collide with Merge Plates' own identically-purposed
+labels; the page heading and the Datasets-pane sidebar entry are both
+"Concatenate Datasets", title-cased to match the other five tool headings.
+
+**Validate & Repair Dataset** (`datasets/validate/`) answers a question the
+GUI otherwise has no answer for: which `(well, fov, timepoint)` work an
+Analyze run actually finished, versus what `pipeline_info.json` — written
+*before* any image work, per §6.2 — claims. A crashed or partial run leaves
+the sidecar advertising the full plate while `out/` holds a fraction, and a
+plain re-run then treats a partially-done well as complete
+(`output_exists_for_well`), so the FOV-level gap is otherwise invisible.
+
+`validate_compute.py::build_report(root)` is a read-only Qt-free scan.
+*Intent* — what a well's raw input actually contains — is read via
+`pipeline.incremental_keys.read_done_fov_keys_from_zip`/`_from_folder` pointed
+at `in/<WELL>.zip`/`<WELL>/` instead of the output archive those functions
+were written for; nothing about them cares which side of the pipeline a
+container sits on, they only parse `(fov, timepoint)` positionally off member
+names. *Done* is read the same way `incremental_done_fov_keys` composes it
+(CSV rows ∪ out-zip members ∪ output folder — `_well_done` unions all three,
+the last via `_common.dataset_paths.out_folders`, the `out_zips`-shaped
+well→path map for `compressed_output=False` datasets; a folder-mode well
+that legitimately segmented zero cells at a timepoint still writes an image
+there even with no CSV row for it, the same "done" evidence a zip-mode
+well's out-zip member supplies) but on the real, already-resolved CSV/zip
+paths rather than by reconstructing `f"{csv_prefix}_{safe_well}.csv"`
+— `csv_prefix` is a CLI arg never recorded in the sidecar, and `_safe_well`
+only strips path separators, so an unpadded on-disk CSV would reconstruct to a
+nonexistent filename and silently report "0 FOVs done". `out/*.csv` is globbed
+directly rather than through `out_csvs()` (which plainly overwrites on a
+duplicate well key) so a dataset holding CSVs from two different
+`--csv_prefix` runs is flagged rather than silently resolved to whichever file
+happened to glob last. A CSV that matches a well by filename but whose header
+lacks `timepoint_hours` is flagged as a phantom (an unrelated file, not
+broken data) rather than counted as that well's state.
+
+The per-well diff itself (`_scan_one_well`) runs on a `ThreadPoolExecutor`
+(`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads
+with no destination file and no live per-well dashboard, so there's no lock
+to take: `ThreadPoolExecutor.map()` (not `as_completed`) hands results back
+in the same order they were submitted regardless of which well's thread
+finishes first, so the report's well/finding ordering is identical to the
+old sequential loop's no matter the worker count.
+
+Beyond the per-well diff, `build_report` also checks: the sidecar's
+`available_timepoints`/`available_fovs` against what
+`_common.collect_available_schema_values` finds on disk (both directions —
+stale entries and missing ones); `timepoint` vs `timepoint_hours` agreement
+and `filename`-in-archive presence per row; zero-member or unreadable zips;
+and `cell_overrides.json` entries whose `seg_fp` no longer matches the
+current out-zip mtime (silently dropped on load regardless — see
+`well_viewer/persistence/cell_overrides.py`).
+
+`apply.py::apply_repairs` is metadata-only — it never rewrites a measurement
+CSV or a well archive. It read-modify-writes the already-loaded sidecar dict
+(replacing only `available_timepoints`/`available_fovs` with what's actually
+on disk), prunes stale `cell_overrides.json` entries, and sweeps leftover
+`__aw_tmp_*` staging files. `services.remote_runner.refresh_pipeline_info_available_from_outputs`
+is deliberately not reused here — it only ever *unions* into the existing
+availability lists, so a stale entry can never be dropped, which is the
+opposite of what a repair needs to do. Resolves `schema_fields` through
+`load_schema(info)` — the same call `build_report` makes for its own
+stale/missing diff — rather than a bare `info.get("schema_fields") or []`: a
+sidecar with no `schema_fields` key at all (only the legacy `schema`
+colon-string, or `fov_index`/`tp_index`, or nothing — every one of them a
+fallback `load_schema` itself handles) resolved to `[]` under the bare form,
+and `collect_available_schema_values([], ...)` returns `[]` unconditionally
+for a schema that doesn't have `field_name` — silently wiping a real, correct
+`available_timepoints`/`available_fovs` list to empty on a dataset
+`build_report` had just diffed correctly.
+
+The page's **Complete this run** button hands the dataset off to Analyze
+through the existing `on_open_in_analyze` seam — the same one `Convert
+OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
+incremental) Analyze run, not a new execution path.
+
+`ValidatePage.set_running` locks the dataset `PathField` (`setLocked`,
+disabling only Browse — see `PathField` in §7) for the run's
+duration, the same as Subset's source/destination fields — `_on_succeeded`
+records the finished report's `report.root` (the path the worker actually
+scanned) rather than re-reading the page's live field, but the field itself
+must still not drift out from under the user mid-scan. `ValidateController._run`'s
+"no dataset path" early return also emits `jobFinished(False, …)` directly
+(mirroring `MergePlatesController._launch`'s remap-failure branch) instead of
+silently returning: a queued job whose persisted `spec["dataset"]` is empty or
+missing (a hand-edited `job_queue.json`, per §Job Queue's own repair
+discipline) would otherwise never start a worker and never signal completion,
+stalling `QueueBridge._current` forever.
+
+The dataset-folder field carries its own validator (`view.py::_is_dataset`,
+mirroring Concatenate's) — Validate used to be the one dataset-folder
+`PathField` in the whole pane with no validator at all, leaving "▶ Check"
+silently disabled with no inline reason when the folder was missing `in`/
+`out`. `ValidatePage._update_status_preview` reveals `ValidateDashboard` as
+soon as the field is valid, seeded via `preview_wells` with a "Ready — N
+well(s)" headline, the same reveal-on-valid-input pattern Concatenate's own
+dashboard uses (see above) rather than staying hidden until "▶ Check" is
+pressed. `ValidateDashboard.set_well_state` marks a well's terminal states
+with a glyph as well as colour — `!` for `partial`/`missing`, `✓` for
+`complete` — so a well's state reads without relying on distinguishing
+success-green from danger-red by colour alone; `set_done(summary, *,
+tooltip=None)` carries the same shortened-headline/full-tooltip split
+Concatenate's does. The **Clean — no issues found.** headline is built
+directly from whether `report.findings` is empty, not from
+`report.is_clean` — `is_clean` ignores warning-severity findings (e.g. a
+`no_csv` warning on a well that legitimately segmented zero cells at every
+timepoint), so a dataset with exactly that one warning used to show a green
+"Clean" headline directly above the very well the plate painted red and the
+findings list explained; "Clean" now means what the findings list itself
+shows, zero findings, full stop. The findings list shows a centred,
+non-selectable placeholder ("Pick a dataset folder and press Check.") while
+empty instead of rendering as a large blank box with no explanation, and
+`_on_failed` clears it back to that placeholder on a failed re-check so a
+stale success's findings can't linger under a fresh red "Failed" headline —
+reachable in production via `QueueBridge.show_job`, which populates the page
+through `set_dataset_path()` and so never runs the field's own interactive
+`changed` handler. **Apply repairs** carries a tooltip explaining why it's
+greyed out when `report.findings` is non-empty but `report.repairable` is
+false — previously a disabled button with findings still listed above it had
+no way to say whether that meant "nothing to repair" or "can't repair this".
+The "+ Queue" button sits second in the run row, immediately after "▶
+Check" and before "Apply repairs", matching every other Datasets tool's
+run-row ordering (primary action, then "+ Queue", then any tool-specific
+secondary actions).
+
+**Subset / Split Dataset** (`datasets/subset/`) copies a filtered slice of a
+dataset — chosen wells, timepoints, and/or FOVs — into a fresh destination,
+leaving the source untouched. It deliberately **keeps every kept row's
+original timepoint hours** (no re-basing): a subset of 24h–72h stays
+labelled 24h–72h. That single decision is what keeps the feature small — the
+four coupled timepoint-derived values §6b documents for Concatenate (the
+`timepoint` label, the numeric `timepoint_hours` column, the `filename`
+column, and the zip member's own name) never diverge here because nothing
+about a kept row or member is rewritten at all; filtering is a pure predicate
+(`subset_compute.member_matches` / `row_matches`) over what's already there.
+`SubsetFilter.fovs` are the raw `available_fovs` strings the page's FOV
+checkboxes carry; `fov_tokens` (a derived property, mirroring `timepoint_hours`'s
+relationship to `timepoint_labels`) resolves them through
+`normalize_fov` once, and every comparison site (`member_matches`,
+`row_matches`, `build_subset_plan`'s `merged_info["available_fovs"]` rebuild)
+compares against `fov_tokens`, not `fovs` directly — a row's/member's own FOV
+is always read through `normalize_fov` too (`ParsedName.fov`, the CSV `fov`
+column), so comparing either against the *raw* label set silently matched
+nothing for any dataset with purely-numeric FOV tokens (`"001"` normalizes to
+`"1"`, which was never a member of `{"001"}`): every row and member for the
+selected FOV was dropped, `available_fovs` in the merged sidecar went to
+`[]`, and the run died at `_verify` with a "wrote zero measurement rows"
+message that pointed at the wrong cause. Non-numeric tokens (`"F001"`) pass
+`normalize_fov` unchanged, which is why a dataset built with `"F001"`-style
+FOVs never surfaced this.
+
+`build_subset_plan` reuses the destination-state predicates with its own
+marker (`.aw_subset_in_progress`), refuses a filter matching zero wells, and
+refuses a folder-mode source (`out/<WELL>/`, `compressed_output=False`) the
+same way Concatenate and Merge Plates do — nothing here copies member-by-member
+out of a folder, so a folder-mode source's QC images would otherwise be
+silently absent from the destination while `execute_plan` still reported
+success. `apply.execute_plan` follows Concatenate's skeleton — marker written
+first, per-well copy through a `ThreadPoolExecutor` (`pick_workers`, same
+lock-only-around-the-pre-work-callback shape Concatenate uses), `_verify`
+(currently: at least one measurement row written, and every kept row's
+`filename` present in the filtered `in/` archive), sidecar write, marker
+cleared last.
+
+`subset_compute.member_matches` resolves each zip member through
+`_common.member_names.discover_parsed_member` — trying each of the source
+dataset's known channel tokens (`SubsetPlan.channels`, built the same way
+`merge_plates_compute.known_channel_tokens` is, from `fluor_tokens`/
+`smfish_tokens`/`phase_token`) as the role-suffix discriminator — rather than
+a bare `parse_image_filename`. A channel-scoped role suffix like `_tophat_gfp`
+doesn't resolve its role without that discovery loop; without it, a
+filtered-out timepoint's `_tophat_<chan>`/`_smfish_<chan>` image fails the
+field-count check and falls through the "unparseable ⇒ keep" fallback below,
+leaking into the destination.
+
+Cell overrides need one thing Concatenate's carry-over doesn't: **filtering
+before restamping**. `_merge_cell_overrides` there carries every entry
+unconditionally because nothing is dropped; Subset drops wells, timepoints,
+and FOVs, so an override for a filtered-out cell is dropped too — copying
+Concatenate's restamp verbatim would otherwise stat a well's destination zip
+for an override that doesn't belong there. The restamp itself (`seg_fp` set
+to the destination `<well>_out.zip`'s own mtime, as the **last** write to
+that archive) is unchanged from Concatenate's pattern. The membership-test
+keys `_copy_one_well` builds from each kept row's raw CSV `fov`/`timepoint`
+values are normalized (`well_viewer.data.image_identity.normalize_fov`/
+`normalize_tp`) before the comparison in `_copy_filtered_overrides` — a
+`cell_overrides.json` entry's `fov`/`tp` are already normalized on write
+(`CellKey.as_tuple()`, per `well_viewer/persistence/cell_overrides.py`), so
+comparing them against *raw* CSV values (`"24h"` vs. the stored `"24"`)
+silently failed the match for any override whose timepoint label parses,
+dropping every one of them with no log line about the loss.
+
+Subset's page is the one place a Datasets tool already has an interactive
+plate map before a run even starts — the well picker above the Run button.
+Rather than drawing a second, separate status plate below it the way every
+other dashboard does, `SubsetController` paints per-well progress directly
+onto that same `WellPlateSelector` (`page._plate.setWellColor(...)`, the
+`pending`/`copying`/`done`/`empty` states `SubsetWorker.wellStage` already
+reports, each also carrying a terminal marker glyph — `✓` for `done`, `!` for
+`empty` — alongside the transient `copying` state's `⚙`, so a stage reads
+without relying on distinguishing success-green from accent-lilac by colour
+alone), locking it (`setEnabled(False)`) for the run's duration so the
+overlay can't be disturbed by further clicks, then unlocking it once
+finished. `SubsetDashboard` itself is built with
+`PlateProgress(show_plate=False, show_legend=False)` — see that widget's own
+entry below — so it keeps only the headline, overall bar, and per-well-state
+counts rail; the separate legend column was dropped (`_build_legend` no
+longer overridden) because the rail's own rows already pair a coloured dot
+with a state label, so a second column repeating the same four dot+label
+pairs added nothing a glance at the rail didn't already say.
+`datasets/subset/dashboard.py` exports `well_color`/`well_tooltip_label` so
+the controller's plate overlay and the dashboard's rail can't disagree on
+what a stage looks like. Source-dataset changes clear the overlay
+(`SubsetPage.sourceChanged` → the controller's `_on_source_changed`) so a
+stale colour from a previous run's wells can never survive onto a
+newly-picked dataset that happens to reuse the same tokens — but that alone
+only handles a source change *between* runs. `SubsetPage.set_running` also
+locks `_src_field`/`_dest_field` (`setLocked`, not the plate's own
+`setEnabled(False)` — disabling only each field's Browse button rather than
+dimming the already-read-only path text) for the run's duration: picking a
+*different* source mid-run does not stop the still-running `SubsetWorker`,
+so without the lock, `sourceChanged` would repaint the plate for the
+newly-picked dataset while the old run keeps executing in the background —
+its still-arriving `wellStage` signals would then paint the *previous*
+dataset's progress onto wells the user now believes belong to the new one.
+
+The picker plate's own "selected" wells get a dedicated `theme.Colors.
+accent_dim` tint (`SubsetPage._on_plate_selection_changed`) rather than
+`WellPlateSelector`'s default multi-select rendering, which cycles a
+rank-based rainbow colour per selection order — indistinguishable at a
+glance from the same widget's own post-run state colours, one of which
+(`empty`) is `theme.Colors.accent`, the exact hue an unselected-but-enabled
+well already renders in a faint default tint. `accent_dim` reads as "chosen,
+not yet run" without colliding with either. The picker plate and every
+dashboard's own status plate render wells at the same pixel cell size: the
+picker's height cap is 258px (not the dashboards' 210px) because it also
+carries a visible All/Invert/Clear action row the dashboards' own plates hide
+(`setActionsVisible(False)`) — 258 was matched empirically (offscreen
+geometry measurement of each plate's actual rendered cell size) against
+210's grid scale, so the two plates read as the same control rather than the
+picker's wells rendering visibly smaller for no visible reason. The
+destination field carries the same folder-shape validator every other
+dataset-folder/destination field in the pane already had
+(`view.py::_is_destination`, mirroring Concatenate's) — Subset used to be
+the one destination field with none, leaving "▶ Subset" silently disabled
+against an already-finished destination with no inline reason.
+`SubsetPage._update_status_preview` reveals `SubsetDashboard` as soon as the
+inputs are otherwise ready, seeded with the picker's *current selection*
+(not `preview_wells` — Subset already has the wells in front of it) and a
+"Ready — N well(s) selected" headline, rather than staying hidden until "▶
+Subset" is pressed; a heading above the Timepoints/FOVs checkbox rows reads
+"Pick a source dataset to preview timepoints/FOVs." until a source is
+chosen, matching the pattern Import Loose's own readout already used, so an
+empty checkbox row doesn't read as broken before there's a source to derive
+it from.
+
+**Import Loose Folder** (`datasets/import_loose/`) groups a folder of loose,
+ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
+wells × FOVs × timepoints × channels, plus unparsed and unreadable-symlink
+counts — that updates on every schema/separator keystroke, so a mismatch is
+caught before conversion rather than mid-run. It does **not** modify
+`WellPlateZipper.py` or `services.input_resolution_service.resolve_input_output`
+— Analyze's own loose-TIF handling keeps working exactly as it does today.
+Conversion progress is a per-well plate map
+(`dashboard.py::ImportLooseDashboard`, a `PlateProgress` subclass — see the
+`PlateProgress` row above) in the same Analyze-style graphical shape
+`ConcatDashboard`/`MergePlatesDashboard`/`ValidateDashboard` use, rather than
+a plain progress bar: `ImportLooseWorker.wellsPlanned` seeds the plate with
+the wells `scan_folder` already found for the preview, and `wellStage`
+colours each one `pending` → `writing` → `done` as its zip actually lands on
+disk, marking `writing` with the transient `⚙` glyph and `done` with a
+terminal `✓` (accessibility — colour alone doesn't distinguish success-green
+from `pending`'s text-muted grey). The rail's own "Done" count row reads
+"Converted" instead, matching the vocabulary the dashboard's own well-state
+marker and every other reference to this state on the page already use — it
+used to be the one place on this page still saying "Done" for the same
+state. `ImportLoosePage._update_status_preview` reveals the dashboard as
+soon as the source folder's live scan (`scan_folder`, the same call the
+readout already makes on every schema/separator keystroke) finds at least
+one well, seeded with those wells and a "Ready — N well(s) to convert."
+headline, rather than staying hidden until "▶ Convert" is pressed; a scan
+that finds nothing yet leaves the dashboard hidden rather than showing an
+empty "Ready — 0 well(s)" plate, which would read as "broken" rather than
+"not ready yet".
+
+The preview (`import_loose_compute.scan_folder`) mirrors
+`WellPlateZipper._extract_well_from_filename`'s rule exactly — schema-index
+lookup, `canonical_well_label`, and `os.path.isfile` to drop dangling
+symlinks the way `os.walk` lists them — rather than calling
+`WellPlateZipper.group_by_well` directly, which `print()`s unconditionally (a
+scan banner, a per-5000-files progress line, a completion line) for the
+Analyze log and would otherwise pollute this app's own captured output.
+`scan_folder` and the executor's `group_files_by_well` share one `_walk`
+helper, so the preview and what actually gets written can't disagree.
+
+Two conversion modes, one code path each, both in `apply.py`:
+
+- **New destination** (default) — writes `<dest>/in/<WELL>.zip` directly via
+  `util.zip_write.atomic_zip`, never publishing a member-less archive. The
+  source folder is left untouched. Wells are converted in parallel — a
+  `ThreadPoolExecutor` sized by `_pick_workers` (0 = auto, capped at 8 and at
+  the CPU count, mirroring `pipeline.ome_explode._pick_workers`), since each
+  well's zip is an independent file with no shared state. `log`/`progress`
+  calls are serialised behind a lock so a caller's own closure never sees two
+  wells' callbacks execute at once — the lock protects individual callback
+  invocations from corruption, not the overall run from wells' "writing"..
+  "done" spans overlapping in time, which is expected under real
+  parallelism. `progress` reports `(well, "writing"|"done")` — the shape
+  `ImportLooseDashboard.set_well_stage` expects.
+- **In-place** (opt-in, destructive — "group in place, delete sources on
+  success") — checking the "Group in place" box shows an explicit inline
+  "Danger"-styled warning beneath it ("This deletes the original loose TIFs
+  once each well is safely zipped. This can't be undone.") for as long as
+  it's checked, and disables rather than hides the destination field
+  (`_dest_field.setEnabled(not checked)`, not `setVisible`) — the field
+  disappearing outright used to be the only signal this destructive mode had
+  just been armed, easy to miss since a layout jump is the only thing that
+  changes. Behaviourally it shells out through the existing
+  `services.input_resolution_service.run_zipper` (which invokes
+  `WellPlateZipper.py` as a subprocess) rather than reimplementing the same
+  grouping a second time; `run_zipper` produces per-well *folders* only
+  (`WellPlateZipper.py` never zips anything itself), so `apply.py`'s own
+  `_zip_well_folders` then converts every one of them into `<well>.zip`,
+  removing the folder once packed, so the result lands in the same
+  ready-to-run layout the new-destination mode writes. This is deliberately
+  **not** `services.input_resolution_service._consolidate_mixed_to_zips` —
+  that helper only tops up a *mixed* zips+folders state (Analyze's own
+  loose-TIF handling, which is happy to read pure per-well folders directly)
+  and is a documented no-op when zero zips exist yet, which is exactly the
+  state a fresh `run_zipper` call produces; calling it here left every well
+  as a bare folder forever, with the run still reporting success.
+  `move_source_tifs` is threaded through unconditionally from the
+  in-place checkbox (`ImportLooseController._launch`) so the "delete loose
+  TIFs on success" promise in the checkbox label and confirm dialog is
+  actually honored — `WellPlateZipper.py`'s `folder_well()` copies rather
+  than moving originals when this is left false. `run_zipper`'s own
+  `progress_fn` only reports a well once WellPlateZipper.py finishes
+  grouping its files into a folder — there is no earlier "started" signal
+  from the subprocess — so that single event is reported as the dashboard's
+  "writing" stage; `_zip_well_folders` then reports "done" once that well's
+  zip actually lands on disk, giving both conversion modes the same
+  `(well, "writing"|"done")` callback shape off one `ImportLooseWorker.wellStage`
+  signal. A well already zipped from an earlier, crash-interrupted attempt
+  (`_zip_well_folders`'s idempotent-rerun skip) still reports "done" rather
+  than being silently skipped — if `wellsPlanned` (seeded from the pre-run
+  scan) already listed it, skipping the report left it stuck showing
+  "writing" on the dashboard forever despite the run overall succeeding.
+
+`ImportLooseController._launch` captures the source path once at launch
+(`self._launch_source_root`) rather than re-reading `self.page.source_path()`
+inside `_on_succeeded` afterward, and `ImportLoosePage.set_running` locks the
+source/destination `PathField`s and the schema/separator/in-place controls
+for the run's duration — the same field-locking discipline Subset's picker
+uses, closing off a source change mid-run from misattributing the produced
+root in-place mode reports (what a chained queue successor uses, and what
+"Open in Analyze" opens). `collect_spec`/`show_job` round-trip
+`filename_schema`/`filename_sep` through the persisted queue spec too — they
+used to be silently dropped, so a queued run always converted with the page's
+default schema/separator regardless of what the user had actually set when
+they queued it.
+
+**Stop is worker-tracked, not just interruption-flagged, for in-place mode.**
+`convert_to_new_destination`'s `ThreadPoolExecutor` loop polls
+`isInterruptionRequested` cooperatively between wells, but `convert_in_place`
+blocks inside `services.input_resolution_service.run_zipper`'s subprocess
+stdout-read loop, which never polls anything — `QThread.requestInterruption()`
+alone was a no-op there. `ImportLooseWorker.request_stop()` also signals the
+tracked `WellPlateZipper.py` subprocess directly (`_track_proc`, wired through
+`convert_in_place`'s existing `proc_hook` parameter, via
+`services.subprocess_kill.signal_subprocess` — the same cross-platform
+pgid-aware kill `PipelineRunner.stop()` uses for its own zipper subprocess).
+`ImportLooseController.stop()`/`shutdown()` call `request_stop()`, not
+`requestInterruption()` alone. The resulting nonzero-exit `RuntimeError` is
+rewritten to the "Cancelled" convention every other Datasets worker's
+`failed()` message uses for a Stop-driven exit, so `QueueBridge._was_cancelled`
+recognises it instead of marking the queued job `FAILED`.
+
+**New-destination mode refuses a destination that already has any content**
+(`apply._check_new_destination`, mirrored by a page-side `PathField`
+validator, `datasets/import_loose/view.py::_is_destination`). Unlike
+Concatenate/Subset/Merge Plates, this mode has no destination-state check of
+its own — it writes `<dest>/in/<WELL>.zip` directly via `atomic_zip`, which
+publishes onto that path unconditionally on success. Pointing it at an
+*existing analyzed dataset* silently overwrote that well's raw-input archive
+with the loose folder's unrelated images while `out/` (its CSVs, QC zips,
+`pipeline_info.json`) was left untouched — a dataset whose measurements no
+longer correspond to its inputs, with the run still reporting success. The
+guard is deliberately simpler than the sibling tools' marker-based
+restart-detection (`destination_is_failed_run` / a resume confirmation) —
+it refuses *any* pre-existing content under `in`/`out`, full stop, rather
+than distinguishing a crash-interrupted attempt of its own from someone
+else's dataset; the `.aw_import_in_progress` marker this module's docstring
+in `datasets/_common/dataset_paths.py` names is not written by anything, so
+there is no restart-resume feature here to preserve.
+
+**Merge Plates** (`datasets/merge_plates/`) is the well-axis sibling of
+Concatenate. Concatenate joins the same dataset imaged at different times (a
+well present in both datasets is stitched — more timepoints for the same
+sample); this joins **two different datasets at the same times** (two
+24-well runs becoming one 96-well dataset). The page's own blurb calls both
+sources "datasets", not "plates" — the codebase's own convention (§1)
+reserves "plate" for the physical 96-well grid and "dataset" for the on-disk
+folder — and states the same distinction without ALL-CAPS emphasis. The
+semantics are the inverse of Concatenate's on the point that matters most: a
+well present in both datasets here is **two different biological samples**,
+so it is **refused**, not merged, unless the user remaps dataset 2's wells
+onto free positions first (a block-placement control — "place dataset 2
+starting at well E01" — translating dataset 2's occupied wells as a rigid
+block via `merge_plates_compute.block_shift_well_map`).
+
+`MergePlatesPage.set_running` locks the dataset 1/dataset 2/destination
+`PathField`s (`setLocked`, disabling only each field's Browse button, not
+the whole field) and the remap controls for the run's duration, and
+`MergePlatesController._launch` captures `dataset1_path()`/`dataset2_path()`
+once at launch (`self._launch_ds1_path`/`_launch_ds2_path`) for
+`_on_wells_planned` to re-derive origin colours from, rather than re-reading
+the (now field-locked, but still worth being defensive about) live page —
+the same class of mid-run-field-change bug already fixed on Subset's and
+Validate's own source fields. On success, `show_open_in_review` promotes
+"Open in Review" to `variant="primary"` and demotes "▶ Merge" to
+`variant="secondary"` (`widgets._support.set_variant`, see §7), and
+`revalidate_fields(ok=True)` swaps the destination field's post-run
+"already holds a finished dataset" validator message for a neutral note
+(`PathField.show_note`) instead of re-showing what reads as a warning about
+what the run just correctly produced — both mirror Concatenate's own
+post-run page behaviour.
+
+`MergePlatesPage._update_status_preview` reveals `MergePlatesDashboard` as
+soon as both dataset fields are valid, seeded via `preview_wells` on both
+roots — with the remap applied through `block_shift_well_map` when the
+"Place dataset 2 starting at well" checkbox is on, so the preview shows
+where dataset 2's wells will actually land, not their pre-remap positions
+(an out-of-range/invalid remap target falls back to the unmapped positions,
+since `_remap_message`'s own inline hint already surfaces that error) — with
+a "Ready — N well(s)" headline, rather than staying hidden until "▶ Merge"
+is pressed. Dataset 2's wells are painted with `theme.Colors.accent2`
+instead of `theme.Colors.accent` — a second, distinct hue reserved for "this
+belongs to the other of two normal groups", deliberately not `accent`, which
+several other dashboards (Concatenate's merged-with-no-CSV, Subset's
+no-rows-matched) already use to mean "anomaly"; a well merely belonging to
+dataset 2 is not one. Every dataset-2 well also keeps a persistent `"2"`
+marker glyph in every state past `merging` (whose transient `⚙` still wins),
+so which dataset a well came from survives independently of colour — the
+only other way to tell the two datasets apart, once both read as
+green/lilac dots on a small plate, was colour alone. A dataset-1 well's own
+terminal "merged" state gets a `✓` for the same reason, since the "2" marker
+above already covers dataset 2's own not-colour-alone signal.
+
+A well is carried by four values, and all four must move together — the
+same lock-step discipline this section documents for Concatenate's
+timepoints, with a wider surface because three of these are filenames
+rather than file contents: the `well` field inside each zip member's name
+(rewritten through `datasets._common.member_names.rewrite_member_field`,
+whose predicate is `canonical_well_label(old) == expected_source_well` — a
+stricter gate than the timepoint case's `isfinite`, since a mismatch here
+means the member is sitting in the wrong well's archive), the `well` column
+in every CSV row, the three container names (`in/<WELL>.zip`,
+`out/<WELL>_out.zip`, `out/<csv_prefix>_<WELL>.csv` — the prefix derived
+from the actual filename, never reconstructed), and the `well` keys inside
+`cell_overrides.json` and `pipeline_info.json::sample_definitions`.
+
+`build_plate_merge_plan` reuses `check_compatible` and `known_channel_tokens`
+from `concatenate_compute` unchanged, gates on the same destination-state
+predicates with its own marker (`.aw_merge_in_progress`), refuses a
+well-remap target that isn't a valid 96-well position, refuses a post-remap
+collision against dataset 1 (naming the colliding tokens), and **warns**
+rather than refuses when the two datasets don't share the same timepoints (a
+merged plate is legitimately ragged — one plate imaged longer — but every
+plot will show gaps, so it must be said). It also refuses a `well_map` that
+maps two *different* dataset-2 wells onto the same destination position —
+checked on the raw list of mapped targets before it's deduplicated into a
+set, since deduplicating first (`{well_map.get(w, w) for w in wells2}`) would
+silently collapse the duplicate and let the collision check downstream see
+only one element, never firing. Not reachable through the shipping UI today
+(the only `well_map` the GUI ever builds, `block_shift_well_map`'s rigid
+translation, is always injective — it can't collapse two distinct wells), but
+`build_plate_merge_plan`'s own validation must hold regardless of what a
+future caller (a different remap UI, a persisted job-queue spec) passes in:
+without it, `execute_plan` would submit both source wells as separate
+`ThreadPoolExecutor` futures writing the same destination path concurrently —
+silent, non-deterministic last-writer-wins data loss.
+
+**When dataset 2's wells are already disjoint from dataset 1's (the identity
+map, the common case), nothing is rewritten at all** — containers are
+copied byte-for-byte and CSV rows verbatim, so the fast path is a pure copy.
+
+`apply.execute_plan` merges dataset 1's and dataset 2's wells through **one**
+`ThreadPoolExecutor` rather than two sequential rounds — a destination well
+only ever comes from one source (`build_plate_merge_plan` already refused a
+post-remap collision), so the two sides' per-well work is safe to run
+concurrently in the same pool. Sized by `pick_workers`, same
+lock-only-around-the-pre-work-callback shape Concatenate and Subset use.
+
+Curation is where this is genuinely harder than Concatenate, which simply
+carries dataset 1's forward unchanged: `merge_sample_definitions` remaps
+dataset 2's `well_labels`/`rep_sets`/`groups` well references through the
+well map and disambiguates dataset-2 rep-set/group names that collide with
+dataset 1's by suffixing with dataset 2's folder name, rather than silently
+overwriting a same-named definition. `cell_gating` still simply carries
+dataset 1's forward, with the same "set under dataset 1's imaging
+conditions, worth reviewing" note Concatenate gives. Cell overrides remap
+their `well` key through the well map before the `seg_fp` restamp (from the
+destination `<well>_out.zip`, as the last write to that archive) —
+Concatenate's own precedent, not reinvented.
+
+**Job Queue** (`datasets/job_queue/`) lines up Analyze and Datasets-tool runs
+to work through unattended, built on a Qt-free scheduler
+(`services/job_queue.py`) so ordering/gating logic is unit-testable with no
+Qt event loop. Three layers:
+
+- **`services/job_queue.py`** — `JobSpec` (one persisted queue entry: `id`,
+  `kind`, `label`, a JSON-shaped `spec` for that tool, optional chain
+  metadata, `state`, `message`, and whichever of `output_dir`/`dataset_root`/
+  `in_dir` it produced), `JobState` (plain string constants — `pending`,
+  `running`, `succeeded`, `failed`, `cancelled`, `blocked`, `interrupted` —
+  not an `Enum`, so the persisted JSON needs no encode/decode step), and
+  `JobQueue`, which only orders and gates jobs; it never runs one itself.
+  Chaining links a job to a predecessor by **id**, never a list index (an
+  index would silently re-point on reorder), a dotted path into its own
+  `spec` to set (`"opts.raw"` for Analyze, `"source"`/`"dataset"` for a
+  Datasets tool), and which of the predecessor's three possible outputs it
+  wants (`chain_kind`). Resolution happens at **dequeue**, via
+  `JobQueue.materialise(job_id)`, never at enqueue — Analyze's own output
+  location is only knowable after `resolve_input_output` runs. A failed or
+  cancelled predecessor cascades every transitive successor still `pending`
+  to `blocked` rather than `failed`, so a retry-failed action leaves them
+  alone (they never ran); reordering a dependent before its predecessor is
+  refused; `set_chain()` rejects a self-chain or a cycle before writing the
+  link. `JobQueue.from_json` never auto-starts a loaded queue (a relaunch
+  always comes up paused — `is_started` is never persisted), maps a stale
+  `running` state to `interrupted` **and cascades that same job to `blocked`
+  every transitive successor still `pending`** (`_repair_after_load` calls
+  `_cascade_block` exactly like `mark_finished`'s own failed/cancelled path
+  does) — an interrupted predecessor never reaches `succeeded`, so
+  `next_runnable()` would never have selected the successor either way, but
+  without the cascade it sat at `pending` forever with no visible reason,
+  instead of `blocked` with a message naming why — and topologically repairs
+  — or, on a genuine cycle, drops every chain link in — a hand-edited file
+  whose stored order violates its own links, so `next_runnable()` can never
+  deadlock on bad persisted data. Persistence goes through
+  `services.remote_config.default_state_dir()` (a tmp-file-then-`os.replace`
+  write of `job_queue.json`), deliberately **not** derived from
+  `default_config_path()` — that function honours `$ALLWELL_REMOTES`, an
+  override meaning "where my remotes live" rather than "where my app state
+  lives", and its Windows branch is conditional on whether `remotes.toml`
+  exists, which would silently relocate an already-written queue the day a
+  user first creates one. `load_queue`'s malformed-file guard wraps
+  `JobQueue.from_json`/`JobSpec.from_json` too, not just the `json.loads`
+  call — a well-formed-JSON-but-malformed-*queue* file (a job entry missing
+  `id`/`kind`, a `jobs` value that isn't a list of objects) raised
+  `KeyError`/`TypeError`/`AttributeError` uncaught, and `load_queue` runs
+  unconditionally and synchronously from `QueueBridge.__init__` at
+  `DatasetsTab` construction — so a hand-edited or truncated-but-valid-JSON
+  file didn't just break the queue page, it crashed the whole app's startup.
+- **`datasets/job_queue/controller.py`** — the Qt-touching layer.
+  `QueueableController` is the duck-typed protocol every runnable `kind`
+  implements: `start_from_queue(spec)`, `show_job(spec)` (populate the tool's
+  own page without running it — driven by clicking a queued row), `stop()`,
+  `is_busy()` (`self._worker is not None and self._worker.isRunning()` for
+  every Datasets controller; `self._runner.is_running` for `AnalyzeTab` via
+  `AnalyzeRunMixin`), and a `jobFinished(ok: bool, message: str, output_path: str)`
+  signal that
+  **must** be emitted only once per run, as the true last statement of that
+  run's completion handler (mirroring `AnalyzeTab.runFinished`'s re-entrancy
+  rule, since a bridge slot may start the next job synchronously from inside
+  the emit). Each of the six Datasets controllers implements this directly
+  (a `_launch()` split out of `_on_run()` so `start_from_queue` can skip the
+  interactive restart/in-place confirmation a queued, unattended run has no
+  one to answer — the same trade-off every tool's queue path makes); so does
+  `AnalyzeTab`, via `AnalyzeRunMixin`. `QueueBridge` owns the persisted
+  `JobQueue` and a `kind -> QueueableController` registry, and is the only
+  thing that actually starts a job: strictly serial, tracking the in-flight
+  job as `(job_id, kind)` so a `jobFinished` from a controller that isn't the
+  queue's own current job — e.g. the user pressed that tool's own Run button
+  by hand while a *different* job was running — is dropped rather than
+  misattributed. The `(job_id, kind)` tuple can only actually distinguish by
+  `kind` (`jobFinished` doesn't carry a job id), so this guard's soundness
+  depends on every controller's `start_from_queue` path eventually emitting
+  `jobFinished` exactly once — a launch path that silently no-ops on invalid
+  input (a queued job whose spec has an empty/corrupted required field) would
+  otherwise leave `_current` stuck on that job forever, and a later unrelated
+  manual run of the *same kind* would then complete against the stale
+  `_current` instead. `MergePlatesController._launch`'s remap-failure branch
+  and `ValidateController._run`'s "no dataset path" branch both emit
+  `jobFinished` directly for exactly this reason, rather than returning
+  silently before a worker ever starts. On completion it looks up `was_cancelled()` on the
+  finishing controller (falling back to the Datasets convention that a
+  cancelled worker's failure message starts with `"Cancelled"`) to tell a
+  user-requested Stop apart from a genuine failure, since the queue's own
+  decision is that cancelling the running job **pauses the queue** — resuming
+  is explicit — while a genuine failure just cascades-blocks that job's own
+  successors and keeps going. `JobQueueController` is the page-level
+  controller (the usual page/worker shape, with `QueueBridge` standing in for
+  a `QThread` worker): it owns the page, turns button clicks into bridge
+  calls, and refreshes the page on `queueChanged`.
+
+  `QueueBridge.show_job` (clicking a queued row to preview it) checks
+  `runner.is_busy()` first and no-ops if the target controller already has a
+  run in flight — `show_job(spec)` writes page fields **directly**, which
+  bypasses `set_running`'s field locks (those only disable widgets against
+  user clicks, not this programmatic path) and, for a controller like
+  `SubsetController` that paints run progress onto the same picker plate
+  `show_job` would repopulate, could visibly corrupt the in-flight run's own
+  status display. It also hands the runner a deep copy of the job's spec
+  (`json.loads(json.dumps(job.spec))`, matching `JobQueue.materialise`'s own
+  assumption that a spec is JSON-shaped) rather than the queue's live
+  persisted dict — no `show_job` implementation mutates its argument today,
+  but nothing stopped one from silently corrupting the saved queue if it did.
+- **`datasets/job_queue/view.py`** — `JobQueuePage`: one compact row per job
+  (`_JobRow`: an ordinal, kind icon, label, a `widgets.status_dot.StatusDot`
+  state chip, an indeterminate progress strip on the currently-running row,
+  a one-line status message, a link glyph on chained rows, and ↑/↓/×
+  controls) under a header with Start/Pause and — since
+  `analyze_tab_form.py` has no line-budget headroom for its own "+ Queue"
+  button (§6.1) — a **"+ Queue current Analyze run"** button that lives on
+  this page instead, wired through `JobQueueController.set_analyze_provider`
+  (a bound `AnalyzeTab.collect_spec` method injected the same way
+  `on_open_in_review` is). "▶ Start queue" sits at the row's left edge,
+  matching the primary-action-on-the-left convention every other Datasets
+  page's own run row uses, with "+ Queue current Analyze run" second and
+  secondary. Each of the six Datasets tool pages gets its own "+ Queue"
+  button beside Run, calling the controller's `collect_spec()` and handing
+  the result up through an injected `on_add_to_queue(kind, spec)` callback
+  to `DatasetsTab._add_to_queue`, which looks up the (always-last-built)
+  `JobQueueController` in `tab._controllers`.
+
+  `_JobRow`'s ordinal number ("1.", "2.", …) is shown only on `pending`
+  rows — a number on a row that already has a terminal outcome doesn't mean
+  "queue position" any more, so `set_jobs` counts only pending jobs into it.
+  The ↑/↓ reorder controls are hidden outright on any row in a
+  `JobState.TERMINAL` state (it already ran, or never will without an
+  explicit unchain/retry, so reordering it means nothing); a running row's
+  progress strip is indeterminate (`QProgressBar` ranged `(0, 0)`) since a
+  controller only ever reports a free-text status message, never a
+  percentage. The message label elides with `…` via `QFontMetrics`
+  (`Qt.ElideRight`) rather than hard-clipping at its fixed pixel width, with
+  the untruncated text reachable as the label's own tooltip. The whole row
+  is a click target (`rowClicked` → open that job on its own page) and now
+  carries a pointing-hand cursor and a hover tooltip to say so — previously
+  the only way to discover the row was clickable was to click it. A thin
+  divider (`border-bottom`) separates consecutive rows, which otherwise read
+  as one undifferentiated block. `JobQueuePage._build_ui` wraps its content
+  in a `QScrollArea` (mirroring every other Datasets tool page — see
+  `PlateProgress`'s own entry in §7) — Job Queue was the one page in the
+  pane left out of that pattern, with a long job list able to run into the
+  same "crushed into whatever space is left" problem the other six pages
+  were already fixed against. The empty-queue hint ("No jobs queued yet —
+  …") lives inside the (otherwise large, blank) job list itself as a
+  non-selectable list item, not as a separate caption below it — an empty
+  container that size with nothing inside it read as broken rather than
+  "nothing queued yet", the same fix Validate's own findings list got.
+
+`datasets_tab.py` wires all of this: each of the six Datasets controllers is
+constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
+`tab._controllers[kind]`; the `"Job Queue"` `_Feature` entry is built **last**
+so `_build_job_queue` can register every already-built controller (plus the
+injected `AnalyzeTab`, under kind `"analyze"`) against a single
+`JobQueueController`. `allwell.py` injects the already-built `AnalyzeTab` as
+`DatasetsTab(analyze_controller=...)` the same way it injects
+`on_open_in_review`/`on_open_in_analyze` — so neither `datasets_tab.py` nor
+anything under `datasets/job_queue/` ever imports `analyze_tab`.
+
 ---
 
 ## 7. The widget library (`widgets/`)
@@ -2168,7 +2927,8 @@ the destination root into Review and switches to it — the same path
 Every widget under `widgets/` is:
 
 - **Standalone.** It only imports from `theme` and Qt (plus `widgets._support`
-  for tiny RGB helpers). It does *not* know anything about
+  for tiny RGB helpers and `set_variant`, a runtime dynamic-property + repolish
+  helper — see below). It does *not* know anything about
   `WellViewerApp` or any tab.
 - **Token-styled.** Sizes derive from font metrics; colours come from
   `theme.Colors` / QSS object names. No hardcoded device pixels.
@@ -2183,8 +2943,9 @@ Notable members worth knowing about by name:
 |--------|-----------|
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
+| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | An 8×12 plate whose model is an *ordered list* of wells — the acquisition path — not an unordered selection set. Lit wells carry their 1-based visit number and a subtle alpha-blended arrow traces the order across the plate; clicking an off-path well appends it, clicking an on-path one removes it and the rest renumber (`orderChanged`). A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
-| `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind both live run dashboards: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` and `ConcatDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so the two can't visually drift apart. |
+| `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map (+ optional per-well sub-progress rails), and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, `ValidateDashboard`, and `ImportLooseDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. The plate map (`self._plate`, a `WellPlateSelector`) is `QSizePolicy.Preferred`/`Preferred`, **not** `Fixed` vertically, which used to lock its rendered height at its own small `sizeHint()` regardless of how wide the row actually was. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate rendered illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze_tab.py`'s own form panel) for the same reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. `self._plate` also carries a `maximumWidth(330)` alongside its `maximumHeight(210)` (`center.addWidget(self._plate, 0, Qt.AlignLeft)`, no layout stretch) — `WellPlateSelector` paints its panel background and border across its *entire* allocated widget box regardless of how much of that box the grid actually draws into, so once `maximumHeight` caps the grid's cell size, handing the widget extra width (the centre column is as wide as the page allows, shared only with the fixed-width rail and legend) doesn't grow the grid at all — it stretches the panel into a big, mostly-empty grey card with a small grid centred inside. The width cap keeps the card hugging its content. Each host page's own outer layout ends in a trailing `outer.addStretch(1)` after its last real widget (and adds the dashboard itself with no stretch factor) for the same class of reason one level up: `QScrollArea.setWidgetResizable(True)` grows the page's content widget to fill the viewport, and with the raw log hidden by default nothing else in the column was willing to absorb that leftover height — the dashboard was, turning into a growing dead zone below the plate via its own internal `center.addStretch(1)`. The trailing stretch outranks every 0-stretch item above it, so slack collects as blank page background below everything instead. (Validate's page needs neither fix itself — its findings list is always visible with its own stretch factor, so it was already absorbing the slack correctly.) `PlateProgress.__init__` also takes `show_plate: bool = True` — a page whose input already has its own interactive plate map (Subset) passes `False` to skip the centre column entirely rather than leave a redundant second plate map, or worse, an empty-but-still-stretch-1 dead column between the rail and legend; see `SubsetDashboard` above. A second parameter, `show_legend: bool = True`, independently skips the legend column — `SubsetDashboard` passes `show_legend=False` alongside `show_plate=False`, since its counts rail already pairs a coloured dot with a state label per row, and a separate legend column would only repeat those same pairs without the live counts. Skipping either column when the centre plate column is also skipped no longer leaves a wide dead gap between whatever's left: with no widget left carrying a layout stretch factor, a trailing `body.addStretch(1)` collects the leftover width at the row's own right edge instead of Qt distributing it as blank padding around the remaining fixed-width items. The five dashboards on the Datasets-pane tools (`ConcatDashboard`, `ValidateDashboard`, `SubsetDashboard`, `ImportLooseDashboard`, `MergePlatesDashboard`) are each constructed **hidden** (`setVisible(False)`) by their host page, then revealed by that page's own `_update_status_preview` as soon as its inputs are valid enough to answer "what would this actually touch" — seeded with the real wells a run would touch (via `_common.dataset_paths.preview_wells`, or the tool's own live preview — Import Loose's `scan_folder`, Subset's own picker selection, Merge Plates' remap-applied union of both sources) and a "Ready — N well(s)" headline, rather than gated on the tool's own run/check method actually starting; each page hides it again on the next input edit that invalidates the preview. This replaced an earlier convention, gating the same reveal on a run actually starting, that read as "something is wrong" — an idle, empty status strip before anything had happened looked like a stuck or broken state rather than "nothing has run yet" (and, for `ConcatDashboard` specifically, an even earlier construction-time-visible default that painted a coloured plate with *zero* wells enabled from the moment the page loaded). `RunDashboard` (Analyze) is the one dashboard that still stays visible from construction — Analyze's own form has no comparable "not yet valid" gate to key a reveal off. Every well-coloured dashboard also marks a well's *terminal* states with a glyph layer (`WellPlateSelector.setWellMarker`), not just its colour — a transient in-progress state already had one (`⚙`), but a terminal outcome (done/merged/complete vs. failed/warned/empty) used to be colour-only; colour alone doesn't distinguish success-green from a warning hue for a user who can't tell the two apart, so every terminal state now carries its own glyph too (`✓` for success, `!` for a problem, and Merge Plates' persistent `"2"` for "this well came from dataset 2"). |
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by its furthest-reached stage and overlays a gear glyph on the actively-computing well with its `FOV done/total` sub-progress. Driven entirely by `pipeline_runner.ProgressTracker` events; tracks each stage as an independent well-set (so a server-side `threshold` can't make `download` read N/N before anything is fetched) and goes blue=computed-on-server vs green=downloaded-locally on remote runs. The raw colour log stays underneath, collapsible. |
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `RailNav` | The left-rail section navigator. |
@@ -2231,6 +2992,18 @@ The app has two complementary theme surfaces:
 stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
 registry lives in `theme.py` (below), and `theme.qss()` is the one stylesheet
 builder.
+
+**`accent` and `accent2` mean two different things, and every caller has to
+pick the right one.** `Colors.accent` is used across several Datasets
+dashboards to flag an anomalous well — one whose state doesn't fit the normal
+run (Concatenate's "merged with no matching measurements CSV on one side",
+Subset's "no rows matched the filter"). `Colors.accent2` is a second, distinct
+hue for the unrelated case of "this belongs to the other of two normal
+groups" — currently only Merge Plates' dataset-2 wells — and must never be
+reused to mean an anomaly, or a well merely belonging to the other source
+would read as suspect on the same plate map. Both are `theme.Colors` tokens
+like any other; there's nothing structurally different about `accent2`, only
+this convention about what each is allowed to mean.
 
 ### Selecting a theme
 
@@ -2323,6 +3096,19 @@ and calls `widget.setStyleSheet(qss_factory())` (idempotent). It is currently
 the event filter's own `setStyleSheet` re-fired `StyleChange` recursively and
 caused a ~20 s load stall. Any future live-switch work must adopt it (with the
 equality guard) across the ~20 widgets that freeze inline QSS.
+
+`widgets/_support.set_variant(widget, variant)` is the smaller, everyday
+sibling of the same repolish problem: it changes a `QPushButton`'s
+`variant` dynamic property at runtime and forces `style().unpolish()` +
+`style().polish()`, so a `QPushButton[variant=...]` QSS selector picks up the
+new value immediately. `setProperty("variant", ...)` alone does nothing
+visible — Qt's stylesheet cache only re-evaluates property selectors on an
+explicit repolish. It generalises the precedent
+`well_viewer.core.plot_toggles.refresh_fov_btn_state` set (a checked-state
+button variant flipping live the same way) so call sites don't each
+reimplement the unpolish/polish pair by hand; every Datasets tool page uses it
+to swap its Run/Open buttons between `primary`/`secondary` once a run
+succeeds (§6b).
 
 ---
 

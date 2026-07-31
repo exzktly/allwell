@@ -47,7 +47,12 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
-   - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets)
+   - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
+     [Validate & Repair Dataset](#validate--repair-dataset) ·
+     [Subset / Split Dataset](#subset--split-dataset) ·
+     [Import Loose Folder](#import-loose-folder) ·
+     [Merge Plates](#merge-plates) ·
+     [Job Queue](#job-queue)
 7. [Filename schema](#filename-schema)
 7. [CSV output format](#csv-output-format)
 8. [Performance and GPU usage](#performance-and-gpu-usage)
@@ -71,9 +76,16 @@ to add features, how to debug, and build / environment troubleshooting), see
   to CSV + figures.
 - **Datasets tab.** Dataset-level operations that work on whole folders rather
   than one plate at a time: **Convert OME-TIFF** de-interleaves a single packed
-  OME-TIFF into a dataset folder, and **Concatenate datasets** appends one
+  OME-TIFF into a dataset folder; **Concatenate datasets** appends one
   dataset's timepoints after another's — for when the same plate was imaged in
-  two separate sessions and you want one continuous timelapse.
+  two separate sessions and you want one continuous timelapse; and
+  **Validate & Repair Dataset** checks whether an Analyze run actually
+  finished and fixes metadata drift without re-running the pipeline; and
+  **Subset / Split Dataset** copies a filtered slice of wells/timepoints/FOVs
+  into a new folder, leaving the source untouched; **Import Loose
+  Folder** groups a folder of loose TIFs into per-well zips with a live
+  preview before converting; and **Merge Plates** joins two different plates
+  along the well axis into one dataset.
 - **One window, one dataset folder.** Analyze writes a folder; Review opens
   it. The hand-off is automatic when an Analyze run completes successfully.
 - **Persistence baked in.** Channel-threshold defaults, saved selections,
@@ -1516,14 +1528,18 @@ How it works:
    each contain both an `in/` and an `out/` folder; **Destination** must be a
    new, empty folder, different from both datasets. Both originals are left
    untouched either way.
-2. Press **Concatenate**. A live plate map fills in below, coloured per well as
-   the merge progresses (grey → amber "merging" → green "merged", or blue if a
-   well's images survived without a matching measurements file on one side),
-   alongside a phase rail (Validate → Merge → Verify → Finalize) and an overall
-   progress bar. The full text log is still there if you want it — tick
-   **Show raw log** to reveal it below the plate.
+2. Once both folders are picked, a status panel appears below showing a
+   "Ready — N well(s)" plate preview of what the merge will actually touch —
+   before you've pressed anything. Press **Concatenate** and that same plate
+   starts colouring per well as the merge progresses (grey → amber "merging"
+   → green "merged" with a checkmark, or blue with a "!" if a well's images
+   survived without a matching measurements file on one side), alongside a
+   phase rail (Validate → Merge → Verify → Finalize) and an overall progress
+   bar. The full text log is still there if you want it — tick **Show raw
+   log** to reveal it below the plate.
 3. On success, click **Open merged dataset in Review** to load the result
-   straight into Review.
+   straight into Review (now the page's highlighted default action, in place
+   of Concatenate, until you change one of the source folders again).
 
 If something goes wrong — even before any well is touched, like an
 incompatible schema between the two datasets — the headline above the plate
@@ -1579,6 +1595,176 @@ and rebuilt. A destination that already looks like a finished dataset is
 refused outright rather than risked; a destination with files that were never
 part of any concatenation attempt (a plate zipped but not yet analyzed, say) is
 refused too, so nothing is deleted on a guess.
+
+### Validate & Repair Dataset
+
+Use this to check whether an Analyze run actually finished — a crash or a
+partial run can leave `pipeline_info.json` advertising more timepoints than
+`out/` actually holds, so Review would show gaps with no obvious cause and a
+plain re-run would skip the very wells that need finishing.
+
+1. Pick the dataset folder. As soon as it's recognized, a status panel
+   appears showing a "Ready — N well(s)" preview of the plate, before you've
+   pressed anything. Press **Check** and that same plate fills in with each
+   well's actual state (green with a checkmark = complete, yellow with a "!"
+   = missing some `(FOV, timepoint)` work, red with a "!" = no measurements
+   recorded, grey = no output yet), and a findings list below it names
+   anything wrong — exactly which timepoints a well is missing, a sidecar
+   that's out of sync with what's on disk, a CSV that looks like a well's
+   data but isn't, or cell-inclusion overrides that no longer match the
+   current segmentation. The findings list holds a placeholder ("Pick a
+   dataset folder and press Check.") until then, and clears back to it if a
+   re-check fails, rather than leaving an earlier check's results on screen.
+2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't
+   match what's on disk, or stale cell overrides), **Apply repairs** fixes
+   just that metadata. It never touches measurement CSVs or images — gating
+   thresholds, sample definitions, and every other saved setting are
+   preserved untouched. If it's greyed out despite findings being listed,
+   hover it — the tooltip explains when a finding genuinely can't be
+   auto-repaired.
+3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
+   Analyze** opens the dataset there so you can re-run and pick up the
+   missing pieces.
+
+### Subset / Split Dataset
+
+Use this to copy part of a dataset — some wells, some timepoints, some
+FOVs — into a new folder, without re-running the pipeline. Useful for
+sharing one condition with a collaborator, dropping a contaminated well, or
+trimming a drifted tail of timepoints.
+
+1. Pick the **source dataset** folder. The well plate, timepoint checkboxes,
+   and FOV checkboxes fill in from what's actually in that dataset, all
+   selected by default (meaning "keep everything" until you narrow it down).
+   Selected wells get a distinct highlight colour on the picker, separate
+   from any colour a finished run leaves behind.
+2. Uncheck the wells, timepoints, or FOVs you don't want kept, and pick a
+   **destination folder** (must be new and empty). A status panel below
+   shows "Ready — N well(s) selected" as you adjust the selection, before
+   you've pressed anything.
+3. Press **Subset**. The same well plate you picked wells with now shows
+   each one being copied — locked against further clicks until the run
+   finishes, so it can double as the progress view instead of a second
+   plate map elsewhere on the page.
+
+Timepoints keep their original hours — a subset spanning 24h–72h stays
+labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-
+inclusion overrides carry over for cells that survive the filter (dropped for
+ones that don't) and gating thresholds / sample definitions carry over from
+the source, same as Concatenate. The source dataset is never modified.
+
+### Import Loose Folder
+
+Use this to group a folder of loose, ungrouped TIFs (no `in/<WELL>.zip`
+structure yet) into the layout Analyze reads directly.
+
+1. Pick the folder of loose TIFs. A readout below the schema/separator fields
+   shows how the files split into wells × FOVs × timepoints × channels,
+   updating on every keystroke — so a wrong separator or schema is obvious
+   before you convert, not partway through.
+2. By default the result is written to a **new destination folder** you pick,
+   leaving the loose TIFs exactly where they are. Check **Group in place**
+   instead to group the files directly in the source folder and delete the
+   loose TIFs once each well is safely zipped — the same thing Analyze itself
+   does when it's pointed at a folder of loose TIFs, exposed here as its own
+   step. Checking it shows an explicit warning under the checkbox spelling out
+   that this deletes the originals and can't be undone, and the destination
+   field (unused in this mode) stays visible but greyed out rather than
+   disappearing; you're still asked to confirm before anything is deleted.
+3. As soon as the scan finds any wells, a status panel appears below showing
+   a "Ready — N well(s) to convert" plate preview. Press **Convert** and that
+   same plate fills in as each well actually converts, the same graphical
+   progress view Analyze itself uses. On success, **Open dataset in Analyze**
+   sends the resulting folder there.
+
+Files that don't match the schema are left alone and reported rather than
+guessed at; a broken symlink is skipped and counted rather than crashing the
+conversion.
+
+### Merge Plates
+
+Use this when the *same plate* imaged in two separate sessions isn't what
+you have — instead, you have **two different plates** you want to treat as
+one 96-well dataset (e.g. two 24-well runs of different conditions). This is
+the well-axis counterpart to Concatenate, which joins the same plate across
+time.
+
+1. Fill in **Dataset 1 + Dataset 2 = Destination**, the same way as
+   Concatenate.
+2. If the two plates used any of the same well positions, the merge refuses
+   — a well in both datasets is treated as two different samples, not one to
+   stitch together. Check **Place dataset 2 starting at well** and enter a
+   well (e.g. `E01`) to shift all of dataset 2's wells as a block to start
+   there, landing on free positions. If the two plates are already disjoint,
+   leave it unchecked — nothing needs remapping.
+3. Once both folders (and any remap) are valid, a status panel appears below
+   showing a "Ready — N well(s)" plate preview, with dataset 2's wells shown
+   at their remapped positions if you checked the block-placement option.
+   Press **Merge** and that same plate colours dataset 1's wells and dataset
+   2's wells differently as the merge progresses — dataset 2's wells also
+   carry a small "2" marker so the two are distinguishable even without
+   relying on colour.
+
+When nothing needs remapping, the merge is a pure copy — nothing about a
+well's images, measurements, or filenames is rewritten. When wells are
+remapped, every value tied to that well moves together: the images' file
+names, the measurements' `well` column, the archive names, and any saved
+cell-inclusion overrides. Gating thresholds carry over from dataset 1 (same
+"set under dataset 1's imaging conditions, worth reviewing" caveat as
+Concatenate); sample definitions from both datasets are merged, with dataset
+2's group/replicate-set names disambiguated rather than overwritten if they
+happen to share a name with one of dataset 1's.
+
+It refuses when the two datasets weren't analysed the same way (same checks
+Concatenate applies), when a remap target isn't a valid 96-well position, or
+when a remap would push a well past the edge of the plate. Timepoints
+differing between the two plates is only a warning, not a refusal — the
+merged plate is legitimately ragged in that case, and plots will show gaps
+for the combinations one plate doesn't have.
+
+### Job Queue
+
+Lines up Analyze runs and Datasets-tool runs to work through unattended,
+instead of babysitting each one. Every Datasets tool page has a **+ Queue**
+button beside its normal run button — press it to add the current settings
+as a queued job instead of running immediately. Analyze itself doesn't have
+room for its own button, so queuing an Analyze run happens from the Job
+Queue page instead: press **+ Queue current Analyze run** there to capture
+whatever the Analyze form currently holds.
+
+The queue runs strictly one job at a time, in the order shown, and never
+starts on its own — press **▶ Start queue** to begin working through it, and
+**⏸ Pause queue** (the same button) to stop after the current job. Queued
+jobs persist across app restarts, but a relaunch always comes up paused —
+you always decide when unattended work resumes.
+
+Each row shows the job's tool, a status chip (pending / running / succeeded
+/ failed / cancelled / blocked / interrupted), and a one-line message
+(truncated with "…" if it's long — hover the row for the full text). A
+pending job also shows its position in line ("1.", "2.", …); the currently
+running job shows a moving progress strip instead. The whole row is a click
+target — hover it and the pointer changes to say so — click it to open that
+job on its own tool's page (without running it) so you can double-check what
+it will do. Use ↑ / ↓ to reorder, or × to remove a job — reordering a job
+ahead of one it depends on, or removing the job currently running, is
+refused; the ↑ / ↓ controls disappear once a job has reached a final outcome
+(succeeded, failed, cancelled), since there's nothing left to reorder.
+
+**Chaining** links one job's input to another's output: queue a Subset (or
+Merge Plates, or Analyze) run, then a Validate run chained to run against
+whatever folder the first one actually produces — the second job's input
+folder is filled in only once the first one finishes, not when you queue it.
+If a job fails, everything chained after it is marked **blocked**, not
+failed — those jobs never ran, so there's nothing to retry; fix whatever
+failed and re-queue instead. Stopping the currently-running job pauses the
+queue rather than skipping ahead to the next one, so a run you meant to
+cancel can't be silently followed by one you didn't get to review.
+
+A queued run proceeds without the confirmation dialog its own page would
+normally show for a destructive step (resuming into a partially-written
+destination, or grouping loose TIFs in place) — there's no one there to
+answer it, so queuing a job is an implicit "yes, go ahead" for whatever that
+step would have asked.
 
 ---
 

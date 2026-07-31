@@ -169,11 +169,20 @@ class SubsetPage(QWidget):
         outer.addWidget(self._plate, 0, Qt.AlignLeft)
 
         outer.addWidget(QLabel("Timepoints", self))
+        # Matches Import Loose's own "Pick a folder to preview." -- an empty
+        # checkbox row under a heading, with nothing said about why, read as
+        # broken rather than "pick a source first".
+        self._tp_hint = QLabel("Pick a source dataset to preview timepoints.", self)
+        self._tp_hint.setObjectName("Muted")
+        outer.addWidget(self._tp_hint)
         self._tp_host = QWidget(self)
         self._tp_flow = FlowLayout(self._tp_host)
         outer.addWidget(self._tp_host)
 
         outer.addWidget(QLabel("FOVs", self))
+        self._fov_hint = QLabel("Pick a source dataset to preview FOVs.", self)
+        self._fov_hint.setObjectName("Muted")
+        outer.addWidget(self._fov_hint)
         self._fov_host = QWidget(self)
         self._fov_flow = FlowLayout(self._fov_host)
         outer.addWidget(self._fov_host)
@@ -395,12 +404,14 @@ class SubsetPage(QWidget):
             {str(t).strip() for t in info.get("available_timepoints", []) or [] if str(t).strip()},
             key=tp_sort_key,
         )
-        self._rebuild_checks(self._tp_flow, self._tp_checks, timepoints)
+        self._rebuild_checks(self._tp_flow, self._tp_checks, timepoints, self._tp_hint)
 
         fovs = sorted({str(f).strip() for f in info.get("available_fovs", []) or [] if str(f).strip()})
-        self._rebuild_checks(self._fov_flow, self._fov_checks, fovs)
+        self._rebuild_checks(self._fov_flow, self._fov_checks, fovs, self._fov_hint)
 
-    def _rebuild_checks(self, flow: FlowLayout, store: dict, labels: list[str]) -> None:
+    def _rebuild_checks(
+        self, flow: FlowLayout, store: dict, labels: list[str], hint: QLabel,
+    ) -> None:
         while flow.count():
             item = flow.takeAt(0)
             w = item.widget()
@@ -414,6 +425,7 @@ class SubsetPage(QWidget):
             cb.toggled.connect(self._on_input_changed)
             flow.addWidget(cb)
             store[label] = cb
+        hint.setVisible(not labels)
 
     def _inputs_ready(self) -> bool:
         return (

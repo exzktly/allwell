@@ -46,6 +46,27 @@ def test_readout_seeds_wells_timepoints_fovs(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_timepoints_and_fovs_show_a_pre_source_hint(qapp, tmp_path):
+    """Regression guard (UX audit P2-9): the Timepoints/FOVs checkbox rows
+    were just blank space under their headings before a source was picked —
+    Import Loose's equivalent readout already says "Pick a folder to
+    preview." in the same situation; Subset said nothing at all."""
+    from datasets.subset.controller import SubsetController
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    assert not page._tp_hint.isHidden()
+    assert not page._fov_hint.isHidden()
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01"], timepoints=["0h"], fovs=("F001",))
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    assert page._tp_hint.isHidden()
+    assert page._fov_hint.isHidden()
+    ctrl.shutdown()
+
+
 def test_selected_wells_get_a_uniform_pre_run_tint(qapp, tmp_path):
     """Regression guard (UX audit P1-1): the picker's own default "selected"
     rendering cycles a rank-based rainbow trace colour per selection order

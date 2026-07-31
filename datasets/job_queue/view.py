@@ -205,19 +205,31 @@ class JobQueuePage(QWidget):
         self._list.setObjectName("JobQueueList")
         self._list.setSelectionMode(QListWidget.NoSelection)
         outer.addWidget(self._list, 1)
-
-        self._empty_lbl = QLabel(
-            "No jobs queued yet — use “+ Queue” on any Datasets tool's page, "
-            "or “+ Queue current Analyze run” above.", self,
-        )
-        self._empty_lbl.setObjectName("Muted")
-        self._empty_lbl.setWordWrap(True)
-        outer.addWidget(self._empty_lbl)
+        self._show_empty_hint()
 
     # ── public API used by the controller ───────────────────────────────
+    def _show_empty_hint(self) -> None:
+        # Lives inside the (otherwise large, blank) list itself, not as a
+        # separate caption below it — an empty container that big with no
+        # explanation inside it reads as broken, not "nothing queued yet".
+        label = QLabel(
+            "No jobs queued yet — use “+ Queue” on any Datasets tool's page, "
+            "or “+ Queue current Analyze run” above.", self._list,
+        )
+        label.setObjectName("Muted")
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignCenter)
+        item = QListWidgetItem(self._list)
+        item.setFlags(item.flags() & ~(Qt.ItemIsSelectable | Qt.ItemIsEnabled))
+        item.setSizeHint(label.sizeHint())
+        self._list.addItem(item)
+        self._list.setItemWidget(item, label)
+
     def set_jobs(self, jobs: list[JobSpec]) -> None:
         self._list.clear()
-        self._empty_lbl.setVisible(not jobs)
+        if not jobs:
+            self._show_empty_hint()
+            return
         for job in jobs:
             row = _JobRow(job, self._list)
             row.removeClicked.connect(self.removeRequested)

@@ -40,6 +40,24 @@ def _run_worker_to_completion(ctrl) -> None:
         QApplication.processEvents()
 
 
+def test_findings_list_shows_an_empty_state_hint_before_any_check(qapp):
+    """Regression guard (UX audit P2-1): the findings list was a large,
+    entirely blank box until Check ran — its own empty-container problem,
+    the same class of "reads as broken" bug the dashboard hide/reveal fix
+    addressed. The hint text lives inside the list itself as a non-
+    selectable item, not as a separate caption elsewhere on the page."""
+    from datasets.validate.controller import ValidateController
+
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    assert page._findings_list.count() == 1
+    item = page._findings_list.item(0)
+    assert "Pick a dataset folder and press Check." == item.text()
+    from PySide6.QtCore import Qt
+    assert not (item.flags() & Qt.ItemIsSelectable)
+    ctrl.shutdown()
+
+
 def test_queue_button_is_second_in_the_run_row(qapp):
     """Regression guard: +Queue used to sit third, after Apply repairs, the
     only Datasets tool whose secondary action came before the queue button —
@@ -327,7 +345,11 @@ def test_failed_check_clears_the_previous_runs_findings(qapp, tmp_path):
     _run_worker_to_completion(ctrl)
 
     assert "Failed" in page.dashboard._headline.text()
-    assert page._findings_list.count() == 0
+    # clear_findings() shows the empty-state hint inside the list (P1-2),
+    # not literally zero items -- the stale findings from the unrelated
+    # dataset are still gone, which is what this test actually guards.
+    assert page._findings_list.count() == 1
+    assert "Pick a dataset folder" in page._findings_list.item(0).text()
     ctrl.shutdown()
 
 

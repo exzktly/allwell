@@ -1,4 +1,4 @@
-"""Bare-`QApplication` widget tests for `datasets.job_queue.view._JobRow`."""
+"""Bare-`QApplication` widget tests for `datasets.job_queue.view`."""
 
 from __future__ import annotations
 
@@ -23,6 +23,30 @@ def _job(**kw):
     defaults = dict(id="j-1", kind="subset", label="Subset", spec={}, state=JobState.FAILED)
     defaults.update(kw)
     return JobSpec(**defaults)
+
+
+def test_empty_state_text_lives_inside_the_list_not_below_it(qapp):
+    """Regression guard (UX audit P2-1): the "No jobs queued yet" caption
+    used to sit in a separate QLabel below a large, entirely blank
+    QListWidget -- the empty container itself said nothing, reading as
+    broken. It must instead be the list's own (sole, non-interactive) item,
+    so the explanation lives inside the space it's explaining."""
+    from datasets.job_queue.view import JobQueuePage
+
+    page = JobQueuePage()
+    assert page._list.count() == 1
+    item = page._list.item(0)
+    assert not (item.flags() & Qt.ItemIsSelectable)
+    label = page._list.itemWidget(item)
+    assert "No jobs queued yet" in label.text()
+
+    page.set_jobs([JobSpec(id="j-1", kind="subset", label="Subset", spec={})])
+    assert page._list.count() == 1
+    assert isinstance(page._list.itemWidget(page._list.item(0)), _JobRow)
+
+    page.set_jobs([])
+    assert page._list.count() == 1
+    assert "No jobs queued yet" in page._list.itemWidget(page._list.item(0)).text()
 
 
 def test_row_shows_a_pointing_hand_cursor_and_a_hover_hint(qapp):

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -175,6 +175,7 @@ class ValidatePage(QWidget):
         self._findings_list = QListWidget(self)
         self._findings_list.setObjectName("ValidateFindings")
         outer.addWidget(self._findings_list, 1)
+        self._show_empty_findings_hint()
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)
@@ -206,7 +207,18 @@ class ValidatePage(QWidget):
         self._status.clear()
 
     def clear_findings(self) -> None:
+        self._show_empty_findings_hint()
+
+    def _show_empty_findings_hint(self) -> None:
+        # Lives inside the (otherwise large, blank) findings list itself,
+        # not as a separate caption below it — an empty container that big
+        # with no explanation inside it read as broken, the same class of
+        # problem the dashboard's own hide-until-ready fix addressed.
         self._findings_list.clear()
+        item = QListWidgetItem("Pick a dataset folder and press Check.")
+        item.setTextAlignment(Qt.AlignCenter)
+        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        self._findings_list.addItem(item)
 
     def set_running(self, running: bool) -> None:
         self._running = running
@@ -252,7 +264,7 @@ class ValidatePage(QWidget):
         self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
-        self._findings_list.clear()
+        self._show_empty_findings_hint()
         self._update_status_preview()
 
     def _update_status_preview(self) -> None:

@@ -166,6 +166,37 @@ def test_folder_mode_output_counts_as_done_without_a_csv_row(tmp_path):
     assert b02.missing == (), f"expected no missing pairs, got {b02.missing}"
 
 
+def test_filename_not_in_input_flagged_for_a_stale_csv_row(tmp_path):
+    """A measurements-CSV row can reference an input image that no longer
+    exists in the well's raw ``in/<WELL>.zip`` (renamed or deleted after the
+    row was written). The (fov, timepoint) pair itself is still "done" --
+    the CSV row supplies that evidence, so no missing_fov_tp finding fires --
+    so ``_row_content_findings``'s filename_not_in_input check is the only
+    thing in the whole report that would ever catch this kind of stale row.
+    No existing test drove this code path (nor tp_hours_mismatch,
+    unreadable_in_container, or sidecar_fovs_drift, which are equally
+    untouched by the suite)."""
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    csv_path = tmp_path / "out" / "measurements_A01.csv"
+    with csv_path.open() as f:
+        rows = list(csv.DictReader(f))
+    fieldnames = list(rows[0].keys())
+    rows[0]["filename"] = "exp_GFP_A01_F001_0h_RENAMED.tif"
+    with csv_path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(rows)
+
+    report = vc.build_report(tmp_path)
+    a01 = next(w for w in report.wells if w.well == "A01")
+    assert a01.complete  # the (fov, timepoint) pair is still "done" via the CSV row
+    findings = [f for f in report.findings if f.code == "filename_not_in_input"]
+    assert len(findings) == 1
+    assert findings[0].well == "A01"
+    assert "exp_GFP_A01_F001_0h_RENAMED.tif" in findings[0].message
+    assert "A01.zip" in findings[0].message
+
+
 def test_no_fov_field_skips_fov_check_without_false_alarm(tmp_path):
     build_dataset(
         tmp_path, wells=["A01"], timepoints=["0h", "24h"],

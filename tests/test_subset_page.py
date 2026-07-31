@@ -346,6 +346,54 @@ def test_run_progress_overlays_onto_the_picker_plate(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_folder_mode_source_fails_the_run_not_the_field(qapp, tmp_path):
+    """Regression-gap guard: SubsetPage's own source-field validator
+    (``_is_dataset`` in datasets/subset/view.py) only checks for an ``in``
+    and an ``out`` directory -- it has no ``has_folder_mode_output`` check,
+    unlike ``build_subset_plan`` (subset_compute.py, guarded at the compute
+    layer by test_subset_compute.py::test_folder_mode_source_refused). So a
+    folder-mode source (``out/<WELL>/`` QC images alongside the zip) reads as
+    a perfectly valid source field, the Run button enables, and the refusal
+    only ever happens inside SubsetWorker.run() once Run is actually pressed.
+    Nothing previously drove that failure through the real controller/worker
+    to confirm it actually surfaces on the page — this exercises the whole
+    field-looks-fine-but-the-run-fails path end to end: the run must fail
+    with SubsetError's own "per-well folders" message landing in both the log
+    and the dashboard's failed state, and the source/destination fields must
+    unlock again afterwards rather than staying stuck mid-run."""
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    build_dataset(src, wells=["A01"], timepoints=["0h"])
+    (src / "out" / "A01").mkdir()  # folder-mode QC output alongside the zip
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    # The field itself sees nothing wrong -- confirms the gap this test closes.
+    assert page._src_field.is_valid() is True
+    assert page._run_btn.isEnabled() is True
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert "per-well folders" in page._status.toPlainText()
+    assert "Failed" in page.dashboard._headline.text()
+    assert "per-well folders" in page.dashboard._headline.text()
+    assert not (dest / "out" / "pipeline_info.json").exists()
+    # Fields unlock again once the failed run finishes.
+    assert page._src_field.isEnabled() is True
+    assert page._dest_field.isEnabled() is True
+    assert page._src_field._browse_btn.isEnabled() is True
+    assert page._dest_field._browse_btn.isEnabled() is True
+    ctrl.shutdown()
+
+
 def test_source_and_destination_fields_are_locked_during_a_run(qapp, tmp_path):
     """Regression guard: only the plate and Run/Queue buttons used to be
     locked during a run — the source field stayed clickable. Picking a

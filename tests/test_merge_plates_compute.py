@@ -238,6 +238,46 @@ def test_execute_plan_merges_many_wells_from_both_datasets_in_parallel(tmp_path)
             assert len(list(csv.DictReader(f))) == 2
 
 
+def test_execute_plan_carries_over_cell_overrides_with_well_remap(tmp_path):
+    """No merge_plates test previously touched cell_overrides.json at all —
+    Concatenate has an equivalent regression test for its own axis (a
+    timepoint shift), but this tool's own axis (a well remap) was untested.
+    dataset 1's override sits on a well that is NOT remapped (identity) and
+    must survive with its ``well`` key unchanged; dataset 2's override sits
+    on the well that collides with dataset 1's and must come through the
+    merge with its ``well`` key rewritten to the destination token, not left
+    as the stale source token."""
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["A01"], timepoints=["0h"])  # collides -> must remap
+    (ds1 / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [{"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+                       "included": "0", "seg_fp": "stale-ds1"}],
+    }))
+    (ds2 / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [{"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "2",
+                       "included": "1", "seg_fp": "stale-ds2"}],
+    }))
+
+    plan = mpc.build_plate_merge_plan(ds1, ds2, dest, well_map={"A01": "E01"})
+    mp_apply.execute_plan(plan)
+
+    merged = json.loads((dest / "out" / "cell_overrides.json").read_text())
+    wells = sorted(o["well"] for o in merged["overrides"])
+    assert wells == ["A01", "E01"]  # ds1's untouched well + ds2's remapped well
+    ds1_entry = next(o for o in merged["overrides"] if o["well"] == "A01")
+    ds2_entry = next(o for o in merged["overrides"] if o["well"] == "E01")
+    assert ds1_entry["nucleus_id"] == "1"
+    assert ds2_entry["nucleus_id"] == "2"
+    # seg_fp is re-stamped from the real destination zip's mtime, not left stale.
+    assert ds1_entry["seg_fp"] == str((dest / "out" / "A01_out.zip").stat().st_mtime_ns)
+    assert ds2_entry["seg_fp"] == str((dest / "out" / "E01_out.zip").stat().st_mtime_ns)
+
+
 def test_execute_plan_respects_explicit_worker_count(tmp_path):
     ds1 = tmp_path / "ds1"
     ds2 = tmp_path / "ds2"

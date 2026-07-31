@@ -353,6 +353,45 @@ def test_execute_plan_carries_over_cell_overrides_with_shifted_tp(tmp_path):
     assert all(o["seg_fp"] == real_mtime for o in merged["overrides"])
 
 
+def test_execute_plan_drops_malformed_dataset2_override_tp_rather_than_carry_it_over_wrong(tmp_path):
+    """_merge_cell_overrides's documented behaviour (its own module docstring:
+    "a malformed entry (unparseable tp) is dropped rather than carried over
+    with a wrong value") has no test anywhere in the suite. A stale override
+    file referencing an old, now-unparseable timepoint token is a realistic
+    real-world shape -- cell_overrides.json is hand/UI-edited independently of
+    the measurements CSVs -- and the alternative failure mode (silently
+    carrying the entry over with its original, un-shifted tp) would land a
+    cell override on the wrong timepoint after the merge with no error at all.
+    A dataset-1 entry is unaffected, since dataset 1's overrides are carried
+    over unshifted; only dataset-2 entries go through remap_timepoint_label."""
+    _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01"], timepoints=["0h", "24h"])
+    (tmp_path / "d1" / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [{"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+                       "included": "0", "seg_fp": "stale1"}],
+    }))
+    (tmp_path / "d2" / "out" / "cell_overrides.json").write_text(json.dumps({
+        "version": 2,
+        "overrides": [
+            {"well": "A01", "fov": "F001", "tp": "0h", "nucleus_id": "1",
+             "included": "0", "seg_fp": "stale2"},
+            {"well": "A01", "fov": "F001", "tp": "not_a_timepoint", "nucleus_id": "2",
+             "included": "0", "seg_fp": "stale3"},
+        ],
+    }))
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+    apply.execute_plan(plan)
+
+    merged = json.loads((dest / "out" / "cell_overrides.json").read_text())
+    nucleus_ids = sorted(o["nucleus_id"] for o in merged["overrides"])
+    assert nucleus_ids == ["1", "1"]  # nucleus_id "2" (the malformed entry) is gone, not mis-shifted
+    tps = sorted(o["tp"] for o in merged["overrides"])
+    assert tps == ["0h", "48h"]
+    assert all(o["tp"] != "not_a_timepoint" for o in merged["overrides"])
+
+
 def test_execute_plan_regression_guard_catches_a_broken_offset(tmp_path):
     """Simulates the shipped bug directly: force a MergePlan whose offset
     wasn't actually applied to timepoint_hours, and confirm verification

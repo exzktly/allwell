@@ -163,7 +163,7 @@ class ImportLoosePage(QWidget):
 
         self._build_status_section(outer)
 
-        self._open_btn = QPushButton("Open in Analyze", self)
+        self._open_btn = QPushButton("Open dataset in Analyze", self)
         self._open_btn.setProperty("variant", "secondary")
         self._open_btn.setVisible(False)
         self._open_btn.clicked.connect(lambda: self.openInAnalyzeRequested.emit(self._dest_root))

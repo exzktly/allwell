@@ -285,7 +285,7 @@ class ConcatenatePage(QWidget):
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
-        self._run_btn.setText("Concatenating…" if running else "Concatenate")
+        self._run_btn.setText("Concatenating…" if running else "▶  Concatenate")
         if running:
             self._open_btn.setVisible(False)
 

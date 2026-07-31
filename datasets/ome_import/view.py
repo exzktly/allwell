@@ -4,8 +4,8 @@ A source OME-TIFF picker + a destination-folder picker, the de-interleave
 controls (well grid, FOVs per well, origin, serpentine direction, and — for a
 single-image packed file — the frame order), a live readout of how the file will
 split into wells × FOVs × timepoints, and an Analyze-style status view (a
-progress bar + a collapsible raw log). On success an "Open in Analyze" button
-appears.
+progress bar + a collapsible raw log). On success an "Open dataset in Analyze"
+button appears.
 
 Pure view: it owns widgets and emits intent (``runRequested``,
 ``openInAnalyzeRequested``); the worker wiring lives in

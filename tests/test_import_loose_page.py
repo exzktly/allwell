@@ -156,6 +156,12 @@ def test_convert_to_new_destination_through_the_page(qapp, tmp_path):
     with zipfile.ZipFile(dest / "in" / "A01.zip") as zf:
         assert zf.namelist() == ["exp_GFP_A01_F001_0h.tif"]
     assert not page._open_btn.isHidden()
+    # Regression guard: the button used to read the generic "Open in
+    # Analyze" -- missing the noun every other tool's post-run open button
+    # names ("Open dataset in Analyze", "Open subset in Review", "Open
+    # merged dataset in Review") -- so it read as if nothing had been
+    # produced.
+    assert page._open_btn.text() == "Open dataset in Analyze"
     # The per-well plate map (Analyze-style graphical progress) reflects the
     # real conversion, not just a plain progress bar: both wells the scan
     # found are tracked and land in the "done" state.

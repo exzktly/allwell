@@ -246,6 +246,42 @@ def test_convert_in_place_writes_real_zips_not_bare_folders(tmp_path):
         assert members == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}
 
 
+def test_convert_in_place_with_move_source_tifs_deletes_originals(tmp_path):
+    """apply.py-level regression guard for the "delete loose TIFs on
+    success" promise: ``convert_in_place(..., move_source_tifs=True)`` is the
+    exact call ``ImportLooseController._launch`` makes whenever the "group in
+    place" checkbox is checked (it hardcodes ``move_source_tifs=self.page.in_place()``
+    -- see datasets/import_loose/controller.py). That full promise is
+    otherwise only exercised end-to-end through the Qt page/worker stack
+    (tests/test_import_loose_page.py::test_group_in_place_through_the_page_zips_and_deletes_sources);
+    this is the direct, Qt-free unit test of apply.convert_in_place's own
+    move_source_tifs plumbing, isolated from the dashboard/worker layers
+    above it. Without ``move_source_tifs=True`` (this module's default is
+    False, exercised by test_convert_in_place_writes_real_zips_not_bare_folders
+    above), WellPlateZipper.folder_well() copies rather than moves, so the
+    loose top-level originals survive a successful run despite the run_zipper
+    subprocess having already grouped them into a zip."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01", "B02"], timepoints=("0h", "24h"))
+
+    summary = il_apply.convert_in_place(
+        src, filename_schema=SCHEMA, filename_sep=SEP, move_source_tifs=True,
+    )
+
+    assert "2 per-well zip(s)" in summary
+    for well in ("A01", "B02"):
+        zip_path = src / f"{well}.zip"
+        assert zip_path.exists()
+        with zipfile.ZipFile(zip_path) as zf:
+            members = set(zf.namelist())
+        assert members == {f"exp_GFP_{well}_F001_0h.tif", f"exp_GFP_{well}_F001_24h.tif"}
+    assert not list(src.glob("*.tif")), (
+        "loose TIF originals should be deleted (moved into the per-well "
+        "folder that convert_in_place then consumes into a zip), not left "
+        "behind as top-level copies, when move_source_tifs=True"
+    )
+
+
 def test_convert_in_place_is_idempotent_on_rerun(tmp_path):
     """A well already zipped from a prior run is left alone, not re-zipped or
     duplicated, on a second convert_in_place() pass over the same folder."""

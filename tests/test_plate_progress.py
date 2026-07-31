@@ -13,6 +13,28 @@ from PySide6.QtWidgets import QApplication, QFrame  # noqa: E402
 
 from datasets.concatenate.dashboard import ConcatDashboard  # noqa: E402
 from datasets.subset.dashboard import SubsetDashboard  # noqa: E402
+from widgets.plate_progress import PlateProgress  # noqa: E402
+
+
+class _NoPlateWithLegend(PlateProgress):
+    """Minimal concrete subclass exercising show_plate=False with the legend
+    column left on (show_legend's default) -- no production dashboard uses
+    this exact combination today (Subset, the only show_plate=False
+    consumer, also turns the legend off), but the branch is still real,
+    public, shared-infra code, so it gets its own direct coverage rather than
+    riding on a subclass that no longer takes this path."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__("No Plate", parent, show_plate=False)
+
+    def _build_rail(self) -> None:
+        pass
+
+    def _build_legend(self) -> None:
+        pass
+
+    def _well_tooltip(self, well_id: str) -> str:
+        return ""
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +68,7 @@ def test_no_dead_gap_between_rail_and_legend_when_plate_is_skipped(qapp):
     reading as a ~190px dead void between the divider and the legend.
     A trailing stretch must collect that leftover at the row's own right
     edge so rail/divider/legend stay packed together at the left."""
-    d = SubsetDashboard()
+    d = _NoPlateWithLegend()
     d.resize(1300, 260)
     d.show()
     qapp.processEvents()
@@ -62,6 +84,29 @@ def test_no_dead_gap_between_rail_and_legend_when_plate_is_skipped(qapp):
 
     vrules = [c for c in d._body.findChildren(QFrame) if c.objectName() == "VRule"]
     assert len(vrules) == 1, "show_plate=False should carry exactly one divider, not two"
+
+
+def test_show_legend_false_drops_the_legend_column_and_its_divider(qapp):
+    """Regression guard (UX audit P1-8): Subset's status strip used to carry
+    a rail column AND a legend column that said the same four things twice
+    -- a coloured dot + state label in both, the rail's just adding a live
+    count. show_legend=False must remove the column and its divider
+    entirely, not just hide it, the same way show_plate=False removes the
+    centre column rather than leaving a blank one."""
+    d = SubsetDashboard()
+    assert not hasattr(d, "_legend_host")
+    assert not hasattr(d, "_legend_lay")
+    vrules = [c for c in d._body.findChildren(QFrame) if c.objectName() == "VRule"]
+    assert vrules == []
+
+    d.resize(1300, 260)
+    d.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    # The rail keeps its fixed width regardless of how much extra room the
+    # window has -- the trailing stretch (not the rail) absorbs the leftover,
+    # so the single remaining column doesn't stretch to fill the page.
+    assert d._rail_host.width() == 238
 
 
 def test_show_plate_true_still_has_two_dividers_and_a_stretchy_centre(qapp):

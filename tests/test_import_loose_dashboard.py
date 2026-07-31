@@ -8,7 +8,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel  # noqa: E402
 
 from datasets.import_loose.dashboard import ImportLooseDashboard  # noqa: E402
 
@@ -38,6 +38,22 @@ def test_reset_clears_state(qapp):
     assert d._wells == []
     assert d._bar.value() == 0
     assert d._headline.text() == "Idle"
+
+
+def test_rail_and_legend_use_the_same_word_for_the_done_state(qapp):
+    """Regression guard (UX audit P1-8): the rail counted the "done" state as
+    "Done: N" while the legend and the well tooltip both call the same state
+    "converted" -- two different words for one state, right next to each
+    other in the same status strip."""
+    d = ImportLooseDashboard()
+    d.set_wells(["A01"])
+    d.set_well_stage("A01", "done")
+
+    rail_text = " ".join(lbl.text() for lbl in d._rail_host.findChildren(QLabel))
+    legend_text = " ".join(lbl.text() for lbl in d._legend_host.findChildren(QLabel))
+    assert "Done" not in rail_text
+    assert "Converted: 1" in rail_text
+    assert "converted" in legend_text
 
 
 def test_unknown_stage_and_well_are_ignored(qapp):

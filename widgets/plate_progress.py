@@ -48,10 +48,14 @@ class PlateProgress(QWidget):
     ``_build_rail``/``_refresh_rail``/``_build_legend``, and provides
     ``_well_tooltip`` for the plate's hover text."""
 
-    def __init__(self, title: str, parent: QWidget | None = None, *, show_plate: bool = True) -> None:
+    def __init__(
+        self, title: str, parent: QWidget | None = None, *,
+        show_plate: bool = True, show_legend: bool = True,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("PlateProgress")
         self._show_plate = show_plate
+        self._show_legend = show_legend
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 8)
@@ -99,8 +103,9 @@ class PlateProgress(QWidget):
         self._rail_host.setFixedWidth(238)
         body.addWidget(self._rail_host)
 
-        d1 = QFrame(self._body); d1.setFrameShape(QFrame.VLine); d1.setObjectName("VRule")
-        body.addWidget(d1)
+        if show_plate or show_legend:
+            d1 = QFrame(self._body); d1.setFrameShape(QFrame.VLine); d1.setObjectName("VRule")
+            body.addWidget(d1)
 
         # A subclass whose page already has its own interactive plate map
         # for input (e.g. Subset's well picker) passes show_plate=False —
@@ -163,33 +168,37 @@ class PlateProgress(QWidget):
             center.addStretch(1)
             body.addWidget(self._center_host, 1)
 
-            d2 = QFrame(self._body); d2.setFrameShape(QFrame.VLine); d2.setObjectName("VRule")
-            body.addWidget(d2)
+            if show_legend:
+                d2 = QFrame(self._body); d2.setFrameShape(QFrame.VLine); d2.setObjectName("VRule")
+                body.addWidget(d2)
 
-        self._legend_host = QWidget(self._body)
-        self._legend_lay = QVBoxLayout(self._legend_host)
-        self._legend_lay.setContentsMargins(0, 0, 0, 0); self._legend_lay.setSpacing(8)
-        # Wide enough for the longest legend string in current use
-        # ("merged — no CSV on one side") without wrapping; subclasses'
-        # legend labels also carry setWordWrap(True) as a second line of
-        # defence, so a future longer label wraps to two lines instead of
-        # being silently clipped the way a fixed-but-too-narrow column did.
-        self._legend_host.setFixedWidth(190)
-        body.addWidget(self._legend_host)
+        if show_legend:
+            self._legend_host = QWidget(self._body)
+            self._legend_lay = QVBoxLayout(self._legend_host)
+            self._legend_lay.setContentsMargins(0, 0, 0, 0); self._legend_lay.setSpacing(8)
+            # Wide enough for the longest legend string in current use
+            # ("merged — no CSV on one side") without wrapping; subclasses'
+            # legend labels also carry setWordWrap(True) as a second line of
+            # defence, so a future longer label wraps to two lines instead of
+            # being silently clipped the way a fixed-but-too-narrow column did.
+            self._legend_host.setFixedWidth(190)
+            body.addWidget(self._legend_host)
         if not show_plate:
             # With the centre column skipped there is no widget carrying a
             # stretch factor left in this layout — every remaining item
-            # (rail_host, the one divider, legend_host) is fixed-width, so
-            # with nowhere explicit to put the page's leftover width Qt
+            # (rail_host, any divider, legend_host) is fixed-width, so with
+            # nowhere explicit to put the page's leftover width Qt
             # distributed it as blank padding around the fixed items instead,
-            # reading as a wide dead gap between the divider and the legend.
-            # A trailing stretch collects that leftover at the row's own
-            # right edge instead, keeping rail/divider/legend packed together
-            # at the left the way the three-column layout intends.
+            # reading as a wide dead gap. A trailing stretch collects that
+            # leftover at the row's own right edge instead, keeping
+            # rail/divider/legend packed together at the left the way the
+            # column layout intends.
             body.addStretch(1)
 
         root.addWidget(self._body)
-        self._build_rail(); self._build_legend()
+        self._build_rail()
+        if show_legend:
+            self._build_legend()
 
     # ── shared host-facing API ──────────────────────────────────────────────
     def set_headline(self, text: str) -> None:

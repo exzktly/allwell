@@ -107,7 +107,7 @@ class ImportLooseDashboard(PlateProgress):
         head = QLabel("Wells", self._rail_host)
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._rail_lay.addWidget(head)
-        for state, label in (("pending", "Pending"), ("writing", "Converting"), ("done", "Done")):
+        for state, label in (("pending", "Pending"), ("writing", "Converting"), ("done", "Converted")):
             n = sum(1 for s in self._well_stage.values() if s == state)
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w)

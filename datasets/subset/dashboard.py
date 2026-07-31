@@ -6,13 +6,14 @@ Datasets dashboards, this one carries **no plate map of its own**
 interactive :class:`~widgets.well_plate_selector.WellPlateSelector` above the
 Run button for choosing wells, so progress is overlaid directly onto that
 same widget (:mod:`~datasets.subset.controller`) instead of drawing a second,
-redundant plate here. This dashboard keeps only the counts rail and the
-colour legend — both still meaningful as plain text/dots without a plate
-alongside them — plus the shared header/headline/overall-bar chrome.
+redundant plate here. It also carries **no separate legend column**
+(``show_legend=False``) — the counts rail's own rows already pair a coloured
+dot with a state label, so a second column repeating the same four dot+label
+pairs added nothing a glance at the rail didn't already say.
 
 ``well_color``/``well_tooltip_label`` are exported so the controller colours
-the *input* plate with exactly the same mapping this rail and legend use,
-rather than each keeping its own copy that could drift.
+the *input* plate with exactly the same mapping this rail uses, rather than
+each keeping its own copy that could drift.
 """
 
 from __future__ import annotations
@@ -45,11 +46,17 @@ def well_tooltip_label(stage: str) -> str:
 
 
 class SubsetDashboard(PlateProgress):
+    """No plate map (see the module docstring) *and* no separate legend
+    column either — the rail's own rows already pair a coloured dot with a
+    state label, so a second column repeating the same four dot+label pairs
+    (just without the live count) added nothing but width. One column, both
+    pieces of information."""
+
     def __init__(self, parent: QWidget | None = None) -> None:
         self._wells: list[str] = []
         self._well_stage: dict[str, str] = {}
         self._outcome = ""
-        super().__init__("Subset Progress", parent, show_plate=False)
+        super().__init__("Subset Progress", parent, show_plate=False, show_legend=False)
         self.setObjectName("SubsetDashboard")
 
     def reset(self) -> None:
@@ -59,7 +66,6 @@ class SubsetDashboard(PlateProgress):
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._build_rail()
-        self._build_legend()
         self._headline.setText("Idle")
         self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
         self._eta.setText("")
@@ -118,22 +124,3 @@ class SubsetDashboard(PlateProgress):
 
     def _refresh_rail(self) -> None:
         self._build_rail()
-
-    def _build_legend(self) -> None:
-        self._clear(self._legend_lay)
-        head = QLabel("Legend", self._legend_host)
-        head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
-        self._legend_lay.addWidget(head)
-        for state, label in (("pending", "pending"), ("copying", "copying"),
-                              ("done", "copied"), ("empty", "no match")):
-            row_w = QWidget(self._legend_host)
-            r = QHBoxLayout(row_w)
-            r.setContentsMargins(0, 0, 0, 0)
-            r.setSpacing(7)
-            r.addWidget(status_dot(well_color(state) or theme.Colors.text_muted))
-            t = QLabel(label, row_w)
-            t.setStyleSheet(f"color:{theme.Colors.text_primary};")
-            r.addWidget(t)
-            r.addStretch(1)
-            self._legend_lay.addWidget(row_w)
-        self._legend_lay.addStretch(1)

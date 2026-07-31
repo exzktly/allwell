@@ -254,7 +254,10 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         "Run test to see results here."
     )
     rl.addWidget(result_text)
-    layout.addWidget(res_frame, 1)
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, res_frame, icon="sigma",
+    ), 1)
 
     stats_update_tp_menu(ctx)
 

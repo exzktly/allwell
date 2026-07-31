@@ -72,7 +72,10 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     table.itemDoubleClicked.connect(
         lambda item: on_review_csv_row_double_click(ctx, item)
     )
-    layout.addWidget(table, 1)
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, table, icon="file-spreadsheet",
+    ), 1)
 
     msg_lbl = reg.register("_review_csv_msg_lbl", QLabel(
         "Select a single well to inspect CSV rows.", parent,

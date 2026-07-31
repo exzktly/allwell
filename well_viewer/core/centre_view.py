@@ -160,7 +160,18 @@ def build_centre(win, parent: QWidget) -> None:
         try:
             builder()
         except Exception:
+            # The log alone is not enough. A tab whose builder raises renders as
+            # an empty page with no explanation — indistinguishable from a tab
+            # with nothing to show — and the traceback lands in a drawer the
+            # user has no reason to open. Say so on the status bar too, which is
+            # where every other failure in the app reports itself.
             _logger.exception("Deferred build for %r failed", title)
+            try:
+                win._ctx.notify.set_status(
+                    f"{title} failed to build — see the log drawer for details."
+                )
+            except Exception:
+                swallowed()
 
     win._ctx.runtime.centre.build_pending = _build_pending
 

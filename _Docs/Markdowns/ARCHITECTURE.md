@@ -690,6 +690,19 @@ to add a literal `110` commented "header / controls / toolbar rows" — the kind
 of number that goes stale silently, giving the figure a little more or less room
 than the tab asked for.
 
+#### Empty states and build failures
+
+`ui_helpers.wrap_with_empty_state` now wraps Statistics, Spatial, Review CSV and
+Batch Export too, so a tab opened before a dataset is loaded shows the same
+placeholder every plot tab shows rather than an empty table or a blank panel
+that reads as a failure.
+
+An actual failure says so. A deferred tab builder that raises used to log a
+traceback and leave an empty page — indistinguishable from a tab with nothing to
+show, with the explanation in a drawer the user has no reason to open.
+`centre_view._build_pending` now also puts the tab's name on the status bar,
+where every other failure in the app reports itself.
+
 #### The band's gating and its ratchet
 
 The band carries the object name `ControlBand`, which is in
@@ -2289,9 +2302,12 @@ the destination root into Review and switches to it — the same path
 
 Every widget under `widgets/` is:
 
-- **Standalone.** It only imports from `theme` and Qt (plus `widgets._support`
-  for tiny RGB helpers). It does *not* know anything about
-  `WellViewerApp` or any tab.
+- **Standalone.** It only imports from `theme`, Qt, and the Qt-free repo-root
+  helpers under `util/` (`util.well_token`, `util.aw_safe`) — plus
+  `widgets._support` for tiny RGB helpers. It does *not* import `well_viewer`
+  and knows nothing about `WellViewerApp` or any tab. That is why a widget's
+  suppressed exceptions go through `util.aw_safe.swallowed`, the same helper the
+  pipeline uses, rather than `well_viewer.core.safe`.
 - **Token-styled.** Sizes derive from font metrics; colours come from
   `theme.Colors` / QSS object names. No hardcoded device pixels.
 - **DPI-aware.** Geometry is computed from `fontMetrics()`, so the widgets
@@ -3405,10 +3421,14 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
 
 - **Never silently swallow exceptions.** Don't write `except Exception: pass`.
   Use `well_viewer.core.safe.swallow(...)` / `swallowed(...)` (GUI side) or
-  `aw_safe.swallow(...)` / `swallowed(...)` (pipeline/`services` side, Qt-free) so
-  a suppressed failure still leaves a DEBUG breadcrumb. Enforced by
-  `tests/test_no_silent_except.py`. (Two near-identical helpers exist on purpose:
-  the pipeline must not import `well_viewer` — see §6.2.)
+  `aw_safe.swallow(...)` / `swallowed(...)` (pipeline / `services` / `widgets`,
+  none of which may import `well_viewer`) so a suppressed failure still leaves a
+  DEBUG breadcrumb. Enforced by `tests/test_no_silent_except.py`, which guards
+  `well_viewer/`, `widgets/`, and the pipeline modules. (Two near-identical
+  helpers exist on purpose: the pipeline must not import `well_viewer` — see
+  §6.2.) `widgets/` is the newest of the three and was the last un-guarded body
+  of GUI code: a widget that quietly fails to paint or to recolour is
+  indistinguishable from one that was never asked to.
 - **Never hardcode colours.** Use `theme.Colors.*` or QSS object names.
 - **Never block the UI thread.** Heavy operations spawn workers (see
   `well_viewer/features/smfish/worker.py` and the `services.pipeline_runner`

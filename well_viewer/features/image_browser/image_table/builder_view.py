@@ -92,12 +92,12 @@ _QSS_TEMPLATE = Template("""
 QWidget#ITBShelf { background: transparent; }
 QLabel#ITBTitle { color: $text_primary; font-weight: 640; font-size: 12.5px; }
 QLabel#ITBShape { color: $text_secondary; font-size: 11px; }
-QLabel#ITBShape b { color: #B9C6FF; }
+QLabel#ITBShape b { color: $text_primary; }
 
 QFrame#ITBZone {
     border: 1px dashed $border; border-radius: 9px; background: $panel;
 }
-QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: #17203A; }
+QFrame#ITBZone[dropActive="true"] { border: 1px dashed $accent; background: $accent_dim; }
 QFrame#ITBFixed { border: 1px solid $border; border-radius: 9px; background: $panel; }
 QFrame#ITBTray { border: 1px solid $border_subtle; border-radius: 9px; background: $rail; }
 
@@ -106,16 +106,16 @@ QLabel#ITBSub  { color: $text_muted; font-size: 10px; }
 QLabel#ITBHint { color: $text_muted; font-style: italic; font-size: 11px; }
 
 QFrame#ITBRoot {
-    background: #202B4D; border: 1px solid #4560A8; border-radius: 7px;
+    background: $accent_dim; border: 1px solid $accent; border-radius: 7px;
 }
-QLabel#ITBRootLbl { color: #E9ECF5; font-weight: 640; font-size: 12px; }
+QLabel#ITBRootLbl { color: $text_primary; font-weight: 640; font-size: 12px; }
 
-QWidget#ITBNest { border-left: 2px solid #3A4E86; background: transparent; }
+QWidget#ITBNest { border-left: 2px solid $accent_dim; background: transparent; }
 
 QFrame#ITBChan, QFrame#ITBChip {
     background: $panel_elevated; border: 1px solid $border; border-radius: 7px;
 }
-QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: #4560A8; }
+QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: $accent; }
 QLabel#ITBChanLbl { color: $text_primary; font-size: 12px; font-weight: 560; }
 QLabel#ITBVar { color: $text_secondary; font-size: 10.5px; }
 QLabel#ITBGrip { color: $text_muted; font-size: 11px; }
@@ -140,7 +140,7 @@ QToolButton#ITBSeg {
 }
 QToolButton#ITBSeg:hover { color: $text_primary; }
 QToolButton#ITBSeg[on="true"] { background: $accent_dim; color: $accent_fg; }
-QToolButton#ITBSeg[on="true"][ov="true"] { background: #3A2E12; color: $threshold; }
+QToolButton#ITBSeg[on="true"][ov="true"] { background: $threshold_dim; color: $threshold; }
 
 QComboBox#ITBCombo {
     background: $panel_elevated; color: $text_primary; border: 1px solid $border;
@@ -833,8 +833,9 @@ def _refresh_shape(ctx, spec) -> None:
         chan = str(chans[0].channel).upper() if chans else "—"
         bits = [f"<b>Plate</b> · rows <b>A–H</b> ↓ · cols <b>1–12</b> → · {chan}"]
         if getattr(_rt(ctx), "builder_dirty", False):
-            bits.append("<span style='color:#F5A524;font-weight:640'>"
-                        "edited — press Generate</span>")
+            bits.append(
+                f"<span style='color:{theme.Colors.threshold};font-weight:640'>"
+                "edited — press Generate</span>")
         lbl.setText("  ·  ".join(bits))
         return
 
@@ -857,8 +858,9 @@ def _refresh_shape(ctx, spec) -> None:
     if fx:
         bits.append(f"fixed {fx}")
     if getattr(_rt(ctx), "builder_dirty", False):
-        bits.append("<span style='color:#F5A524;font-weight:640'>"
-                    "edited — press Generate</span>")
+        bits.append(
+            f"<span style='color:{theme.Colors.threshold};font-weight:640'>"
+            "edited — press Generate</span>")
     lbl.setText("  ·  ".join(bits))
 
 
@@ -896,7 +898,7 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
     h = QHBoxLayout(pill)
     h.setContentsMargins(9, 4, 5, 4)
     h.setSpacing(7)
-    h.addWidget(_swatch(_DIM_SWATCH.get(dim, "#98A2B3")))
+    h.addWidget(_swatch(_DIM_SWATCH.get(dim, theme.Colors.text_secondary)))
     lbl = _text(_ROOT_LABEL[dim], "ITBRootLbl")
     lbl.setAttribute(Qt.WA_TransparentForMouseEvents, False)  # clickable for filter
     lbl.setCursor(Qt.PointingHandCursor)
@@ -945,7 +947,8 @@ def _overlay_toggle(ctx, ax) -> QWidget:
     hl.setContentsMargins(11, 2, 0, 0)
     hl.setSpacing(0)
     seg = QFrame(wrap)
-    seg.setStyleSheet("QFrame{border:1px solid #2A3343;border-radius:7px;}")
+    seg.setStyleSheet(
+        f"QFrame{{border:1px solid {theme.Colors.border};border-radius:7px;}}")
     sl = QHBoxLayout(seg)
     sl.setContentsMargins(0, 0, 0, 0)
     sl.setSpacing(0)
@@ -992,7 +995,7 @@ def _build_fixed(ctx, spec) -> None:
         cl.setContentsMargins(9, 3, 9, 3)
         cl.setSpacing(7)
         cl.addWidget(_grip())
-        cl.addWidget(_swatch(_DIM_SWATCH.get(dim, "#98A2B3")))
+        cl.addWidget(_swatch(_DIM_SWATCH.get(dim, theme.Colors.text_secondary)))
         chip.setToolTip("Drag onto Rows or Columns to make it vary")
         cl.addWidget(_text(_ROOT_LABEL[dim], "ITBFixLbl"))
         cl.addWidget(_text("=", "ITBEq"))

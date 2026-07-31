@@ -396,7 +396,10 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Spatial")
     card.plotThemeChanged.connect(lambda _m: sp_ctrl.sp_recompute(ctx))
-    layout.addWidget(card, 1)
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, card, icon="waypoints",
+    ), 1)
 
     # ── refresh closures registered on the widget registry ──────────────────
     def _refresh_viz_menu() -> None:

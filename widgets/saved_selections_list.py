@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from util.well_token import canonical_well_label
+from util.aw_safe import swallowed
 
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"
@@ -432,7 +433,7 @@ class _SelectionRow(QFrame):
         try:
             plate.setActionsVisible(False)
         except Exception:
-            pass
+            swallowed()
         enabled = list(self._enabled_wells) or list(_ALL_WELLS)
         plate.setEnabledWells(enabled)
         try:
@@ -441,13 +442,13 @@ class _SelectionRow(QFrame):
             plate.setSingleSelectionMode(False)
             plate.setDragMode("rect")   # rubber-band rectangle, not freeform paint
         except Exception:
-            pass
+            swallowed()
         plate.setSelectedWellIds([w for w in self._wells if w in set(enabled)])
         state = {"ids": [w for w in self._wells if w in set(enabled)]}
         try:
             plate.selectionChanged.connect(lambda ids: state.__setitem__("ids", list(ids)))
         except Exception:
-            pass
+            swallowed()
 
         content = QWidget()
         cv = QVBoxLayout(content)
@@ -681,7 +682,7 @@ class SavedSelectionsList(QWidget):
             self._from_btn.setVisible(not on)
             self._import_btn.setVisible(not on)
         except Exception:
-            pass
+            swallowed()
 
     def isCompact(self) -> bool:
         return self._compact

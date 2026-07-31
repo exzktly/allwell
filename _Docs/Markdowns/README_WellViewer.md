@@ -969,6 +969,10 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
 - **Optimal use** — define replicate sets first so the tests run on
   biologically meaningful groups rather than single wells.
 
+Statistics, Spatial, Review CSV and Batch Export show a placeholder until a
+dataset is loaded, the same one the plot tabs show, instead of an empty table
+or a blank panel that looks like something failed.
+
 ### Multivariate analysis
 
 The **Multivariate** tab analyses *many* per-cell features together, on the
@@ -1241,8 +1245,10 @@ channel for every well).
   row and column correctly.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
-  in one click) · **Crop ▾** (drag a region on any image — the button reads the
-  current crop, `Crop · (full FOV)` when there is none) · an **ON threshold** value
+  in one click) · **Crop view ▾** (drag a region on any image — the button reads
+  the current crop, `Crop view · (full FOV)` when there is none). This crops what
+  the images *show*; it is not the Segmentation tab's **Crop cells**, which
+  excludes cells from every plot, statistic and export. · an **ON threshold** value
   with a **channel** dropdown choosing which channel it applies to (the same
   ThreshFracOn shared with Cell Gating and the plot tabs) · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the

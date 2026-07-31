@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 from contextlib import contextmanager
+from util.aw_safe import swallowed
 
 
 @contextmanager
@@ -235,7 +236,7 @@ def axis_tight_bbox_inches(ax, *, pad_in: float = 0.04):
     try:
         decorations += list(ax.get_yticklabels()) + list(ax.get_xticklabels())
     except Exception:
-        pass
+        swallowed()
     for art in decorations:
         try:
             if art is None or not art.get_visible():
@@ -246,6 +247,7 @@ def axis_tight_bbox_inches(ax, *, pad_in: float = 0.04):
             if ext.width > 0 and ext.height > 0:
                 extents.append(ext)
         except Exception:
+            swallowed()
             continue
 
     bb = Bbox.union(extents)

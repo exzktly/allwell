@@ -123,6 +123,7 @@ class Colors:
     # same colours every other tab uses for the matching well-rank.
     trace           = WELL_COLORS_TUPLE
     threshold       = "#F5A524"   # --threshold  : dashed line + threshold chip
+    threshold_dim   = "#3A2E12"   # --threshold-dim : fill behind threshold-coloured text
     gate            = "#E24A4A"   # scatter gate outline / rubber-band selector
     err_bar         = "#4A5568"   # bar-chart error-bar color
     plot_bg         = "#131A24"   # plot card fill (== panel)

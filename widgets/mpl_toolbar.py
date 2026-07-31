@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.icon_button import IconButton
+from util.aw_safe import swallowed
 
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
     import matplotlib
@@ -113,7 +114,7 @@ if _HAVE_MPL:
             try:
                 self._nav.hide()
             except Exception:
-                pass
+                swallowed()
 
             lay = QHBoxLayout(self)
             lay.setContentsMargins(0, 0, 0, 0)
@@ -166,7 +167,7 @@ if _HAVE_MPL:
                     "figure_leave_event", self._on_figure_leave
                 )
             except Exception:
-                pass
+                swallowed()
             self.setStyleSheet(self._qss())
 
         def closeEvent(self, event):  # Qt naming
@@ -174,7 +175,7 @@ if _HAVE_MPL:
             try:
                 super().closeEvent(event)
             except Exception:
-                pass
+                swallowed()
 
         def deleteLater(self):  # Qt naming
             self._detach_canvas()
@@ -189,14 +190,14 @@ if _HAVE_MPL:
                 try:
                     self.canvas.mpl_disconnect(cid)
                 except Exception:
-                    pass
+                    swallowed()
             chip = getattr(self, "_chip", None)
             if chip is not None:
                 self._chip = None
                 try:
                     chip.deleteLater()
                 except Exception:
-                    pass
+                    swallowed()
 
         # ── proxy the matplotlib handlers ───────────────────────────────────
         @property
@@ -266,7 +267,7 @@ if _HAVE_MPL:
                 # was reading as ~half an inch on retina screens).
                 self._chip.show_at(QCursor.pos() + QPoint(4, 2), text)
             except Exception:
-                pass
+                swallowed()
 
         def _on_figure_leave(self, _event) -> None:
             """Hide the hover chip when the cursor leaves the canvas."""

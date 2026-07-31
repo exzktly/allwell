@@ -151,7 +151,10 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     scroll.setWidget(host)
-    layout.addWidget(scroll, 1)
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, scroll, icon="download",
+    ), 1)
 
     ctx.runtime.batch_export.inline_state = {
         "host": host,

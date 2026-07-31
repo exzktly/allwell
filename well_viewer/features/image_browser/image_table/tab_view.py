@@ -353,17 +353,21 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
         lambda _=False: image_table_clear_render(ctx))
     tr.addWidget(table_btn)
 
-    # Dataset-wide crop tool (per-channel display options live on the shelf's ⚙).
-    crop_btn = _menu_button(action_row, "Crop", tooltip="Crop region tool")
+    # Dataset-wide *display* crop (per-channel display options live on the
+    # shelf's ⚙). Named "Crop view" because Segmentation has a "Crop cells"
+    # that sounds the same and is not: that one excludes cells from every
+    # downstream number, this one only zooms the pixels every image shows.
+    crop_btn = _menu_button(action_row, "Crop view",
+                            tooltip="Crop the region every image shows")
     cmenu = crop_btn.menu()
     _crop = ctx.runtime.image_table.crop_tool
-    crop_act = QAction("Crop region (drag on image)", cmenu)
+    crop_act = QAction("Crop the view (drag on an image)", cmenu)
     crop_act.setCheckable(True)
     crop_act.setChecked(bool(_crop.mode))
     crop_act.toggled.connect(lambda _c=False: _crop.toggle_mode())
     cmenu.addAction(crop_act)
     reg.register("_image_table_crop_act", crop_act)
-    reset_crop_act = cmenu.addAction("Reset crop")
+    reset_crop_act = cmenu.addAction("Show the full field again")
     reset_crop_act.triggered.connect(lambda _=False: _crop.clear())
 
     def _sync_crop_menu() -> None:
@@ -376,7 +380,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # The crop state rides on the Crop button rather than in a loose caption
     # beside it — the row read "Crop ▾  (full FOV)", two controls' worth of
     # width for one control's worth of meaning.
-    _crop.set_status_widget(crop_btn, template="Crop · {status}")
+    _crop.set_status_widget(crop_btn, template="Crop view · {status}")
     tr.addWidget(crop_btn)
 
     # ON/OFF intensity threshold quick-edit — drives the "≥ Thr" binary overlay.

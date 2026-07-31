@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 import theme
 from widgets.icon_button import IconButton
 from widgets.mpl_toolbar import MplToolbar
+from util.aw_safe import swallowed
 
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
     import matplotlib
@@ -352,7 +353,7 @@ if _HAVE_MPL:
                 Toast.show_message(self.window(), msg,
                                    kind="danger" if failed else "success")
             except Exception:
-                pass
+                swallowed()
             self.panelCopied.emit(msg)
 
         def set_save_handler(self, handler) -> None:
@@ -452,7 +453,7 @@ if _HAVE_MPL:
                 Toast.show_message(self.window(), status,
                                    kind="danger" if failed else "success")
             except Exception:
-                pass
+                swallowed()
 
         def eventFilter(self, obj, event):
             # PySide6 can dispatch a non-QEvent here (e.g. a QStandardItem from
@@ -745,7 +746,7 @@ if _HAVE_MPL:
                     for gridline in ax.get_xgridlines() + ax.get_ygridlines():
                         gridline.set_color(grid)
             except Exception:
-                pass
+                swallowed()
 
         def chromeHeight(self) -> int:
             """Every pixel of the card that is not the canvas.

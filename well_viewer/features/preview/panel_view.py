@@ -141,17 +141,22 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     )
     ctrl.add_action(delete_btn)
 
-    # Crop region: drag a rectangle to keep only cells whose centroid is inside;
+    # Crop cells: drag a rectangle to keep only cells whose centroid is inside;
     # applies to every FOV/timepoint/channel/well. Clear crop removes just the
     # box; Reset restores every cell (incl. manual deletes) and removes the crop.
-    crop_btn = QPushButton("Crop Region", ctrl)
+    #
+    # Named for what it does to the *data*. The Image Table has a "Crop view"
+    # that sounds the same and is not: that one crops the pixels shown, this one
+    # excludes cells from every downstream number.
+    crop_btn = QPushButton("Crop cells", ctrl)
     rt.crop_btn = crop_btn
     crop_btn.setProperty("variant", "toggle")
     crop_btn.setCheckable(True)
     crop_btn.setChecked(False)
     crop_btn.setToolTip(
         "Enter crop mode, then drag a rectangle.\n"
-        "• Cells whose centroid is inside are kept; cells outside are excluded.\n"
+        "• Cells whose centroid is inside are kept; cells outside are excluded "
+        "from every plot, statistic and export.\n"
         "• Applies to all FOVs / timepoints / channels / wells.\n"
         "Note: the box is drawn in the current FOV's pixel space and applied to all."
     )

@@ -17,6 +17,7 @@ if _ROOT not in _sys.path:
 import theme  # after the sys.path fix above
 from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QColor
+from util.aw_safe import swallowed
 
 __all__ = [
     "theme", "lerp_color", "with_alpha", "run_demo",
@@ -88,7 +89,7 @@ def install_qss_refresh(widget, qss_factory) -> None:
                     if new != current:
                         obj.setStyleSheet(new)
                 except Exception:
-                    pass
+                    swallowed()
             return False
 
     # Parent the filter to the widget so it lives exactly as long as

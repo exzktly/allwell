@@ -384,6 +384,40 @@ QLabel#Mono, QLabel[mono="true"] {{
     font-family: {t.family_mono};
     font-size: {t.small_size}px;
 }}
+QLabel#Muted, QLabel[muted="true"] {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+}}
+QLabel#Accent, QLabel[accent="true"] {{
+    color: {c.accent};
+}}
+/* Text roles that were named at their call sites but styled nowhere. */
+QLabel#MutedCaption {{
+    color: {c.text_muted};
+    font-size: {t.caption_size}px;
+    font-weight: {t.medium};
+}}
+QLabel#SectionTitle, QLabel#SidebarHeader {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_muted};
+    letter-spacing: 0.08em;
+}}
+QLabel#PlotCardTitle {{
+    font-size: {t.h3_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_primary};
+}}
+QLabel#RailHead {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_muted};
+    letter-spacing: 0.08em;
+}}
+QWidget#ActiveGroupBanner {{
+    background-color: {c.panel};
+    border-radius: {r.sm}px;
+}}
 QLabel#Danger  {{ color: {c.danger}; }}
 QLabel#Success {{ color: {c.success}; }}
 QLabel#Warn    {{ color: {c.warn}; }}
@@ -498,6 +532,99 @@ QToolButton[variant="toggle"]:checked:hover {{
     background-color: {c.accent};
     border-color: {c.accent};
     color: {c.accent_fg};
+}}
+
+/* ── `variant` values set by ui_helpers._btn and friends ──────────────── */
+/* Every value below is set somewhere in the app; before these rules existed
+   only `toggle` resolved, so `primary`, `secondary`, `danger`, `muted`,
+   `sem`/`sem_warn` and `toggle_muted`/`toggle_accent` rendered as plain
+   default buttons. `secondary` is deliberately the default control look —
+   naming it keeps the value live and stops it drifting.
+   Runtime changes to the property need unpolish()/polish() to repaint;
+   values set once at construction do not. */
+QPushButton[variant="primary"], QToolButton[variant="primary"] {{
+    background-color: {c.accent};
+    border-color: {c.accent};
+    color: {c.accent_fg};
+    font-weight: {t.semibold};
+}}
+QPushButton[variant="primary"]:hover, QToolButton[variant="primary"]:hover {{
+    background-color: {c.accent_hover};
+    border-color: {c.accent_hover};
+}}
+QPushButton[variant="primary"]:pressed, QToolButton[variant="primary"]:pressed {{
+    background-color: {c.accent_pressed};
+    border-color: {c.accent_pressed};
+}}
+QPushButton[variant="primary"]:disabled, QToolButton[variant="primary"]:disabled {{
+    background-color: {c.accent_dim};
+    border-color: {c.accent_dim};
+    color: {c.text_muted};
+}}
+
+QPushButton[variant="secondary"], QToolButton[variant="secondary"] {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.control_border};
+    color: {c.text_primary};
+}}
+
+QPushButton[variant="danger"], QToolButton[variant="danger"] {{
+    background-color: transparent;
+    border-color: {c.border_subtle};
+    color: {c.danger};
+}}
+QPushButton[variant="danger"]:hover, QToolButton[variant="danger"]:hover {{
+    background-color: {c.panel};
+}}
+
+QPushButton[variant="muted"], QToolButton[variant="muted"], QLabel[variant="muted"] {{
+    background-color: transparent;
+    border-color: transparent;
+    color: {c.text_muted};
+}}
+
+/* SEM / SD toggle on the bar + batch-export panels: `sem` is the settled
+   state, `sem_warn` flags a spread that cannot be computed as SEM. */
+QPushButton[variant="sem"], QToolButton[variant="sem"] {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.control_border};
+    color: {c.text_primary};
+}}
+QPushButton[variant="sem_warn"], QToolButton[variant="sem_warn"] {{
+    background-color: {c.panel_elevated};
+    border: 1px solid {c.warn};
+    color: {c.warn};
+}}
+
+/* Bar Plots' Reset Order: `toggle_accent` while a manual order is in force,
+   `toggle_muted` when there is nothing to reset. */
+QPushButton[variant="toggle_accent"], QToolButton[variant="toggle_accent"] {{
+    background-color: {c.accent_dim};
+    border: 1px solid {c.accent};
+    color: {c.text_primary};
+}}
+QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
+    background-color: transparent;
+    border: 1px solid {c.control_border};
+    color: {c.text_muted};
+}}
+
+/* Nested sub-tab bars (Plotting / Image Browser / Sample Definitions / Scatter).
+   Three call sites carried comments claiming this name "picks up the existing
+   rectangular-tab QSS"; no such rule existed, so all of them fell through to the
+   generic QTabBar::tab rule and were indistinguishable from the top level. */
+QTabBar#SampleDefinitionsSubTabs::tab,
+QTabBar#PlottingSubTabs::tab,
+QTabBar#ScatterSubTabs::tab {{
+    padding: {s.xs}px {s.md}px;
+    min-width: 72px;
+    color: {c.text_secondary};
+}}
+QTabBar#SampleDefinitionsSubTabs::tab:selected,
+QTabBar#PlottingSubTabs::tab:selected,
+QTabBar#ScatterSubTabs::tab:selected {{
+    color: {c.text_primary};
+    border-bottom: 2px solid {c.accent};
 }}
 
 /* ── Plate-map well buttons (WellButton grid) ─────────────────────────── */

@@ -39,6 +39,12 @@ from widgets.flow_layout import FlowLayout
 from widgets.path_field import PathField, folder_picker
 from widgets.well_plate_selector import WellPlateSelector
 from datasets.subset.dashboard import SubsetDashboard
+from datasets.subset.subset_compute import (
+    DatasetPaths,
+    destination_has_marker,
+    destination_has_unrecognized_content,
+    destination_is_complete_dataset,
+)
 
 
 def _hrule(parent: QWidget) -> QFrame:
@@ -51,6 +57,23 @@ def _hrule(parent: QWidget) -> QFrame:
 def _is_dataset(root: Path) -> str:
     if not (root / "in").is_dir() or not (root / "out").is_dir():
         return "Needs an 'in' and an 'out' folder."
+    return ""
+
+
+def _is_destination(root: Path) -> str:
+    """Return "" if *root* is usable as a subset destination, else a short
+    reason — mirrors ``datasets/concatenate/view.py``'s own ``_is_destination``.
+    Subset's destination field was the only one in the pane with no
+    validator: a folder that already held a finished dataset just left the
+    Subset button silently disabled with no inline reason, and
+    ``build_subset_plan`` (``subset_compute.py``) already refuses exactly
+    this at plan time — the field should say so before the user presses Run,
+    not after."""
+    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    if destination_is_complete_dataset(dest):
+        return "Already holds a finished dataset — choose an empty folder."
+    if destination_has_unrecognized_content(dest) and not destination_has_marker(dest):
+        return "Already has unrelated files — choose an empty folder."
     return ""
 
 
@@ -116,7 +139,8 @@ class SubsetPage(QWidget):
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
         self._dest_field = PathField(
-            "Destination folder", pick=folder_picker("Select destination folder"))
+            "Destination folder", pick=folder_picker("Select destination folder"),
+            validator=_is_destination)
         self._dest_field.changed.connect(self._refresh_run_enabled)
         outer.addWidget(self._dest_field)
 
@@ -359,7 +383,7 @@ class SubsetPage(QWidget):
     def _inputs_ready(self) -> bool:
         return (
             self._src_field.is_valid()
-            and bool(self.destination_path())
+            and self._dest_field.is_valid()
             and self.destination_path() != self.source_path()
             and bool(self.selected_wells())
             and bool(self.selected_timepoints() or not self._tp_checks)

@@ -13,6 +13,8 @@ in :mod:`~datasets.validate.controller`.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -40,6 +42,18 @@ def _hrule(parent: QWidget) -> QFrame:
     rule.setFrameShape(QFrame.HLine)
     rule.setObjectName("HRule")
     return rule
+
+
+def _is_dataset(root: Path) -> str:
+    """Return "" if *root* looks like a dataset, else a short reason --
+    mirrors ``datasets/concatenate/view.py``'s own ``_is_dataset``. Validate's
+    field was the one dataset-folder ``PathField`` in the whole pane with no
+    validator at all: every other tool's dataset picker says up front when a
+    folder is missing ``in``/``out``, while this one's Check button just
+    stayed silently disabled with no inline reason."""
+    if not (root / "in").is_dir() or not (root / "out").is_dir():
+        return "Needs an 'in' and an 'out' folder."
+    return ""
 
 
 _SEVERITY_PREFIX = {"error": "✗", "warning": "⚠", "info": "ℹ"}
@@ -94,7 +108,8 @@ class ValidatePage(QWidget):
         outer.addWidget(blurb)
 
         self._dataset_field = PathField(
-            "Dataset folder", pick=folder_picker("Select dataset folder"))
+            "Dataset folder", pick=folder_picker("Select dataset folder"),
+            validator=_is_dataset)
         self._dataset_field.changed.connect(self._on_dataset_changed)
         outer.addWidget(self._dataset_field)
 
@@ -192,8 +207,8 @@ class ValidatePage(QWidget):
         self._findings_list.clear()
 
     def set_running(self, running: bool) -> None:
-        self._check_btn.setEnabled(not running and bool(self.dataset_path()))
-        self._queue_btn.setEnabled(not running and bool(self.dataset_path()))
+        self._check_btn.setEnabled(not running and self._inputs_ready())
+        self._queue_btn.setEnabled(not running and self._inputs_ready())
         if running:
             # Only force-disable while starting a run — leave it alone on
             # stop, since show_report() (driven by the worker's `succeeded`,
@@ -222,13 +237,16 @@ class ValidatePage(QWidget):
         self._repair_btn.setEnabled(report.repairable)
         needs_completion = any(w.missing for w in report.wells)
         self._complete_btn.setVisible(needs_completion)
-        self._check_btn.setEnabled(bool(self.dataset_path()))
-        self._queue_btn.setEnabled(bool(self.dataset_path()))
+        self._check_btn.setEnabled(self._inputs_ready())
+        self._queue_btn.setEnabled(self._inputs_ready())
 
     # ── internals ────────────────────────────────────────────────────────────
+    def _inputs_ready(self) -> bool:
+        return self._dataset_field.is_valid()
+
     def _on_dataset_changed(self) -> None:
-        self._check_btn.setEnabled(bool(self.dataset_path()))
-        self._queue_btn.setEnabled(bool(self.dataset_path()))
+        self._check_btn.setEnabled(self._inputs_ready())
+        self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
         self.dashboard.reset()

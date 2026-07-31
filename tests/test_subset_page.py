@@ -63,6 +63,31 @@ def test_run_gate_requires_destination_and_selection(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_destination_field_flags_a_folder_that_already_holds_a_dataset(qapp, tmp_path):
+    """Regression guard (UX audit P1-10): Subset's destination field was the
+    only destination picker in the pane with no validator -- pointing it at
+    a folder that already holds a finished dataset (subset_compute.py's own
+    build_subset_plan already refuses this at plan time) just left the
+    Subset button silently disabled with no inline reason."""
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01"], timepoints=["0h"])
+    existing_dest = tmp_path / "dest"
+    build_dataset(existing_dest, wells=["B02"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(existing_dest))
+    page._refresh_run_enabled()
+
+    assert not page._run_btn.isEnabled()
+    assert page._dest_field.message() == "Already holds a finished dataset — choose an empty folder."
+    ctrl.shutdown()
+
+
 def test_subset_run_end_to_end_through_the_page(qapp, tmp_path):
     from datasets.subset.controller import SubsetController
 

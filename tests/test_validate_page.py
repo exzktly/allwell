@@ -59,6 +59,26 @@ def test_queue_button_is_second_in_the_run_row(qapp):
     assert widgets.index(page._repair_btn) > widgets.index(page._queue_btn)
 
 
+def test_dataset_field_flags_a_folder_missing_in_and_out(qapp, tmp_path):
+    """Regression guard (UX audit P1-10): Validate's dataset-folder PathField
+    was the one dataset picker in the whole Datasets pane with no validator
+    at all -- pointing it at a folder with no in/out just left the Check
+    button silently disabled, with none of the inline "Needs an 'in' and an
+    'out' folder" hint every other dataset-folder field gives."""
+    from datasets.validate.controller import ValidateController
+
+    not_a_dataset = tmp_path / "plain_folder"
+    not_a_dataset.mkdir()
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+
+    page._dataset_field.set_path(str(not_a_dataset))
+    page._on_dataset_changed()
+    assert not page._check_btn.isEnabled()
+    assert page._dataset_field.message() == "Needs an 'in' and an 'out' folder."
+    ctrl.shutdown()
+
+
 def test_check_gate_requires_a_path(qapp, tmp_path):
     from datasets.validate.controller import ValidateController
 

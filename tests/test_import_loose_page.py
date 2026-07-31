@@ -35,24 +35,33 @@ def _run_worker_to_completion(ctrl) -> None:
         QApplication.processEvents()
 
 
-def test_dashboard_hidden_until_convert_starts(qapp, tmp_path):
-    """Regression guard: the status strip below the Convert button used to
-    be visible from page load, showing an idle headline over an empty plate
-    map before anything had happened. Uses isHidden() (a local, explicit
-    hide/show flag) rather than isVisible(), since the page is never
-    actually shown in this test — isVisible() would report False for the
-    whole tree regardless of these setVisible() calls."""
+def test_dashboard_reveals_on_a_scanned_source_and_hides_without_one(qapp, tmp_path):
+    """Regression guard (UX audit P1-2): the status strip below the Convert
+    button used to either stay hidden until Convert was pressed (a source
+    folder already picked, already scanned by the live readout above — the
+    page had every fact needed to answer "what would this convert?" and
+    showed nothing), or, before that, be visible from page load with an
+    idle headline over an empty plate map (nothing to show at all yet).
+    It must hide with no matching source, and reveal seeded with the real
+    scanned wells the moment there is one. Uses isHidden() (a local,
+    explicit hide/show flag) rather than isVisible(), since the page is
+    never actually shown in this test — isVisible() would report False for
+    the whole tree regardless of these setVisible() calls."""
     from datasets.import_loose.controller import ImportLooseController
 
     src = tmp_path / "loose"
     _write_loose(src, ["A01"])
+    empty_dir = tmp_path / "empty"
+    empty_dir.mkdir()
     ctrl = ImportLooseController(on_open_in_analyze=lambda _p: None)
     page = ctrl.page
     assert page.dashboard.isHidden() is True
 
     page._src_field.set_path(str(src))
     page._on_source_changed()
-    assert page.dashboard.isHidden() is True  # still nothing has run
+    assert page.dashboard.isHidden() is False  # a real scan -> a real preview
+    assert page.dashboard._wells == ["A01"]
+    assert "Ready" in page.dashboard._headline.text()
 
     page._dest_field.set_path(str(tmp_path / "dest"))
     page._refresh_run_enabled()
@@ -61,9 +70,9 @@ def test_dashboard_hidden_until_convert_starts(qapp, tmp_path):
     _run_worker_to_completion(ctrl)
     assert page.dashboard.isHidden() is False  # stays up to show the result
 
-    page._src_field.set_path(str(src))
+    page._src_field.set_path(str(empty_dir))
     page._on_source_changed()
-    assert page.dashboard.isHidden() is True  # hidden again for the new selection
+    assert page.dashboard.isHidden() is True  # nothing scanned -> nothing to preview
     ctrl.shutdown()
 
 

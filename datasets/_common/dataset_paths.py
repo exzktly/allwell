@@ -226,6 +226,22 @@ def dataset_wells(paths: DatasetPaths) -> set[str]:
     )
 
 
+def preview_wells(root: Path | str) -> list[str]:
+    """Best-effort ``dataset_wells`` for a GUI status preview — sorted, and
+    ``[]`` for anything that isn't (yet) a real dataset folder, rather than
+    raising. Deliberately not :func:`resolve_dataset`: a page calls this on
+    every keystroke/field change while the user is still typing a path, and
+    "not a valid path yet" is the normal, expected state through most of
+    that, not an error to report."""
+    root = Path(root)
+    if not root.is_dir():
+        return []
+    paths = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
+    with swallow("preview dataset wells"):
+        return sorted(dataset_wells(paths))
+    return []
+
+
 # ── input-side availability scan ─────────────────────────────────────────────
 # Mirrors process_microscopy._collect_image_stems / _collect_available_schema_
 # values, generalised so a Datasets feature can ask "what timepoints/FOVs does

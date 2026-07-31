@@ -33,9 +33,12 @@ from PySide6.QtWidgets import (
 import theme
 from util.well_token import canonical_well_label
 from widgets.path_field import PathField, folder_picker
+from datasets._common.dataset_paths import preview_wells
 from datasets.merge_plates.dashboard import MergePlatesDashboard
 from datasets.merge_plates.merge_plates_compute import (
     DatasetPaths,
+    MergePlatesError,
+    block_shift_well_map,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
@@ -73,6 +76,7 @@ class MergePlatesPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._dest_root = ""
+        self._running = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -182,7 +186,7 @@ class MergePlatesPage(QWidget):
         outer.addWidget(self._cross_hint)
 
         for field in (self._ds1_field, self._ds2_field, self._dest_field):
-            field.changed.connect(self._refresh_run_enabled)
+            field.changed.connect(self._on_input_changed)
 
     def _build_remap_row(self, outer: QVBoxLayout) -> None:
         row = QWidget(self)
@@ -190,13 +194,13 @@ class MergePlatesPage(QWidget):
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(theme.Spacing.sm)
         self._remap_cb = QCheckBox("Place dataset 2 starting at well:", row)
-        self._remap_cb.toggled.connect(self._refresh_run_enabled)
+        self._remap_cb.toggled.connect(self._on_input_changed)
         hl.addWidget(self._remap_cb)
         self._remap_origin_edit = QLineEdit("E01", row)
         self._remap_origin_edit.setFixedWidth(60)
         self._remap_origin_edit.setEnabled(False)
         self._remap_cb.toggled.connect(self._remap_origin_edit.setEnabled)
-        self._remap_origin_edit.textChanged.connect(self._refresh_run_enabled)
+        self._remap_origin_edit.textChanged.connect(self._on_input_changed)
         hl.addWidget(self._remap_origin_edit)
         hl.addStretch(1)
         outer.addWidget(row)
@@ -224,9 +228,10 @@ class MergePlatesPage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = MergePlatesDashboard(self)
-        # Not shown until a run actually starts — an idle status strip above
-        # an empty log reads as "something is wrong" rather than "nothing
-        # has happened yet". MergePlatesController reveals it in _on_run().
+        # Hidden until both datasets are valid — _update_status_preview()
+        # reveals it seeded with the wells the merge would actually
+        # produce (remap applied), and MergePlatesController takes over
+        # colouring it once a run actually starts.
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
@@ -284,6 +289,7 @@ class MergePlatesPage(QWidget):
         self._status.clear()
 
     def set_running(self, running: bool) -> None:
+        self._running = running
         self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         self._run_btn.setText("Merging…" if running else "▶  Merge")
@@ -332,6 +338,45 @@ class MergePlatesPage(QWidget):
             and not self._cross_message()
             and not self._remap_message()
         )
+
+    def _on_input_changed(self, *_args) -> None:
+        self._refresh_run_enabled()
+        self._update_status_preview()
+
+    def _update_status_preview(self) -> None:
+        # Deliberately not called from _refresh_run_enabled() -- that
+        # function is also reached from revalidate_fields(), which
+        # MergePlatesController._on_finished calls right after a run
+        # completes (to refresh the fields' inline validity hints), by
+        # which point self._running is already False. Calling this from
+        # there would immediately overwrite the just-finished run's own
+        # result colours/headline with a plain pending-coloured preview.
+        # Wired instead to the specific interactive-change handler above,
+        # none of which fire mid-run (every field is locked for the run's
+        # duration) or as part of run completion.
+        if self._running:
+            return
+        if not (self._ds1_field.is_valid() and self._ds2_field.is_valid()):
+            self.dashboard.setVisible(False)
+            return
+        wells1 = set(preview_wells(self.dataset1_path()))
+        wells2 = self._preview_ds2_wells()
+        self.dashboard.reset()
+        self.dashboard.set_wells(wells1, wells2)
+        self.dashboard.set_headline(f"Ready — {len(wells1 | wells2)} well(s) to merge.")
+        self.dashboard.setVisible(True)
+
+    def _preview_ds2_wells(self) -> set[str]:
+        raw = set(preview_wells(self.dataset2_path()))
+        if not self.remap_enabled() or not canonical_well_label(self.remap_origin()):
+            return raw
+        try:
+            return set(block_shift_well_map(raw, target_origin=self.remap_origin()).values())
+        except MergePlatesError:
+            # An out-of-range/invalid remap is already surfaced by
+            # _remap_message()'s inline hint -- the preview just falls back
+            # to the unmapped positions rather than showing nothing.
+            return raw
 
     def _refresh_run_enabled(self) -> None:
         cross = self._cross_message()

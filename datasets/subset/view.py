@@ -88,6 +88,7 @@ class SubsetPage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._dest_root = ""
+        self._running = False
         self._tp_checks: dict[str, QCheckBox] = {}
         self._fov_checks: dict[str, QCheckBox] = {}
         self._build_ui()
@@ -141,7 +142,7 @@ class SubsetPage(QWidget):
         self._dest_field = PathField(
             "Destination folder", pick=folder_picker("Select destination folder"),
             validator=_is_destination)
-        self._dest_field.changed.connect(self._refresh_run_enabled)
+        self._dest_field.changed.connect(self._on_input_changed)
         outer.addWidget(self._dest_field)
 
         outer.addWidget(QLabel("Wells", self))
@@ -220,9 +221,10 @@ class SubsetPage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = SubsetDashboard(self)
-        # Not shown until a run actually starts — an idle status strip above
-        # an empty log reads as "something is wrong" rather than "nothing
-        # has happened yet". SubsetController reveals it in _launch().
+        # Hidden until the inputs are valid enough to answer "what would
+        # this subset?" — _update_status_preview() reveals it seeded with
+        # the current picker selection, and SubsetController.launch() takes
+        # over from there once a run actually starts.
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
@@ -300,6 +302,7 @@ class SubsetPage(QWidget):
         self._status.clear()
 
     def set_running(self, running: bool) -> None:
+        self._running = running
         self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         self._run_btn.setText("Subsetting…" if running else "▶  Subset")
@@ -337,13 +340,13 @@ class SubsetPage(QWidget):
         for w in wells:
             self._plate.setWellColor(w, theme.Colors.accent_dim)
         self._refresh_run_enabled()
+        self._update_status_preview()
 
     def _on_source_changed(self) -> None:
         self._open_btn.setVisible(False)
-        self.dashboard.reset()
-        self.dashboard.setVisible(False)
         self._reload_source_metadata()
         self._refresh_run_enabled()
+        self._update_status_preview()
         self.sourceChanged.emit()
 
     def _reload_source_metadata(self) -> None:
@@ -390,7 +393,7 @@ class SubsetPage(QWidget):
         for label in labels:
             cb = QCheckBox(label, flow.parentWidget())
             cb.setChecked(True)
-            cb.toggled.connect(self._refresh_run_enabled)
+            cb.toggled.connect(self._on_input_changed)
             flow.addWidget(cb)
             store[label] = cb
 
@@ -404,6 +407,36 @@ class SubsetPage(QWidget):
             and bool(self.selected_fovs() or not self._fov_checks)
         )
 
+    def _on_input_changed(self, *_args) -> None:
+        self._refresh_run_enabled()
+        self._update_status_preview()
+
     def _refresh_run_enabled(self) -> None:
         self._run_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())
+
+    def _update_status_preview(self) -> None:
+        # The status strip (no plate map of its own — see SubsetDashboard's
+        # own docstring) used to stay hidden until Run was pressed; reveal it
+        # as soon as there's a real answer to "what would this subset?" —
+        # the current picker selection — instead of gating it on the run
+        # having actually started. Deliberately NOT called from
+        # _refresh_run_enabled(): revalidate_fields() (called after a run
+        # finishes, to refresh the fields' inline validity hints) also goes
+        # through that function, and by then self._running is already False
+        # -- calling this from there would immediately overwrite the just-
+        # finished run's own result colours/headline with a plain
+        # pending-coloured "Ready" preview. Wired instead to the specific
+        # interactive-change handlers below, none of which fire mid-run
+        # (source/dest fields and the plate are all locked for the run's
+        # duration) or as part of run completion.
+        if self._running:
+            return
+        if not self._inputs_ready():
+            self.dashboard.setVisible(False)
+            return
+        wells = self.selected_wells()
+        self.dashboard.reset()
+        self.dashboard.set_wells(wells)
+        self.dashboard.set_headline(f"Ready — {len(wells)} well(s) selected.")
+        self.dashboard.setVisible(True)

@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.path_field import PathField, folder_picker
+from datasets._common.dataset_paths import preview_wells
 from datasets.concatenate.concatenate_compute import (
     DatasetPaths,
     destination_has_marker,
@@ -82,6 +83,7 @@ class ConcatenatePage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._dest_root = ""
+        self._running = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -220,6 +222,14 @@ class ConcatenatePage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = ConcatDashboard(self)
+        # Hidden until the two source datasets are both valid — the plate
+        # used to be visible from the moment the page loaded, painted with
+        # no wells at all (set_wells() is only ever called once a run's
+        # worker reports them), reading as "something is wrong" rather than
+        # "nothing has happened yet". _update_status_preview() reveals it
+        # once there's a real answer to show, seeded with the wells the run
+        # would actually touch.
+        self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
         self._log_sep = _hrule(self)
@@ -283,6 +293,7 @@ class ConcatenatePage(QWidget):
         self._status.clear()
 
     def set_running(self, running: bool) -> None:
+        self._running = running
         self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         self._run_btn.setText("Concatenating…" if running else "▶  Concatenate")
@@ -313,6 +324,28 @@ class ConcatenatePage(QWidget):
         self._cross_hint.setText(message)
         self._cross_hint.setVisible(bool(message))
         self._refresh_run_enabled()
+        self._update_status_preview()
+
+    def _update_status_preview(self) -> None:
+        # Never touches the dashboard once a run has actually started — a
+        # run's own worker (ConcatenateController) drives set_wells()/
+        # set_phase()/well colouring from that point on, and both source
+        # fields should already be locked for the run's duration; this only
+        # ever runs from a field's own changed() signal, so in practice a
+        # running worker's own dashboard state is never at risk here, but the
+        # guard costs nothing and keeps the two responsibilities visibly
+        # separate.
+        if self._running:
+            return
+        if not (self._ds1_field.is_valid() and self._ds2_field.is_valid()):
+            self.dashboard.setVisible(False)
+            self.dashboard.reset()
+            return
+        wells = sorted(set(preview_wells(self.dataset1_path())) | set(preview_wells(self.dataset2_path())))
+        self.dashboard.reset()
+        self.dashboard.set_wells(wells)
+        self.dashboard.set_headline(f"Ready — {len(wells)} well(s) to merge.")
+        self.dashboard.setVisible(True)
 
     def _refresh_run_enabled(self) -> None:
         self._run_btn.setEnabled(self._inputs_ready())

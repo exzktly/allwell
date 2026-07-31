@@ -98,6 +98,47 @@ def test_collision_without_remap_fails_gracefully(qapp, tmp_path):
     ctrl.shutdown()
 
 
+def test_interactive_input_reveals_a_preview_seeded_with_real_wells(qapp, tmp_path):
+    """Regression guard (UX audit P1-2): once both datasets are valid, the
+    status strip must reveal itself seeded with the wells the merge would
+    actually produce -- including the remap, when one is set -- rather than
+    staying hidden until Run is pressed. Drives the fields through their
+    real PathField.changed signal (an interactive pick), not a direct
+    set_path()+_refresh_run_enabled() call, since that's the path this
+    preview is wired to."""
+    from datasets.merge_plates.controller import MergePlatesController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"])
+
+    ctrl = MergePlatesController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    assert page.dashboard.isHidden() is True
+
+    page._ds1_field.set_path(str(ds1))
+    page._ds1_field.changed.emit()
+    assert page.dashboard.isHidden() is True  # dataset 2 not picked yet
+
+    page._ds2_field.set_path(str(ds2))
+    page._ds2_field.changed.emit()
+    assert page.dashboard.isHidden() is False
+    assert page.dashboard._wells == ["A01", "B02"]
+    assert page.dashboard._well_origin == {"A01": "ds1", "B02": "ds2"}
+    assert "Ready" in page.dashboard._headline.text()
+
+    # Enabling the remap shifts the preview's dataset-2 well, not just the
+    # eventual run's.
+    page._remap_cb.setChecked(True)
+    page._remap_origin_edit.setText("C03")
+    page._remap_origin_edit.textChanged.emit("C03")
+    assert page.dashboard._wells == ["A01", "C03"]
+    assert page.dashboard._well_origin == {"A01": "ds1", "C03": "ds2"}
+    ctrl.shutdown()
+
+
 def test_dashboard_hidden_until_run_starts(qapp, tmp_path):
     """Regression guard: the status strip below the button row used to be
     visible from page load. Uses isHidden() (a local, explicit hide/show

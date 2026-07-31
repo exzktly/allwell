@@ -118,12 +118,12 @@ class ImportLoosePage(QWidget):
         sl.setSpacing(theme.Spacing.sm)
         sl.addWidget(QLabel("Schema:", schema_row))
         self._schema_edit = QLineEdit(DEFAULT_SCHEMA, schema_row)
-        self._schema_edit.textChanged.connect(self.refresh_readout)
+        self._schema_edit.textChanged.connect(self._on_readout_input_changed)
         sl.addWidget(self._schema_edit, 1)
         sl.addWidget(QLabel("Separator:", schema_row))
         self._sep_edit = QLineEdit(DEFAULT_SEP, schema_row)
         self._sep_edit.setFixedWidth(40)
-        self._sep_edit.textChanged.connect(self.refresh_readout)
+        self._sep_edit.textChanged.connect(self._on_readout_input_changed)
         sl.addWidget(self._sep_edit)
         outer.addWidget(schema_row)
 
@@ -194,9 +194,10 @@ class ImportLoosePage(QWidget):
         outer.addWidget(_hrule(self))
 
         self.dashboard = ImportLooseDashboard(self)
-        # Not shown until a run actually starts — an idle status strip above
-        # an empty log reads as "something is wrong" rather than "nothing
-        # has happened yet". ImportLooseController reveals it in _launch().
+        # Hidden until the source folder scans to at least a real answer —
+        # _update_status_preview() reveals it seeded with the wells the scan
+        # actually found, and ImportLooseController takes over colouring it
+        # once a run actually starts.
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
@@ -294,9 +295,43 @@ class ImportLoosePage(QWidget):
         self._refresh_run_enabled()
 
     # ── internals ────────────────────────────────────────────────────────────
-    def _on_source_changed(self) -> None:
-        self.dashboard.setVisible(False)
+    def _on_readout_input_changed(self, *_args) -> None:
         self.refresh_readout()
+        self._update_status_preview()
+
+    def _update_status_preview(self) -> None:
+        # Deliberately separate from refresh_readout() -- ImportLooseController
+        # ._on_finished calls refresh_readout() right after a run completes
+        # (to refresh the readout text/run-gate against any now-changed
+        # destination state), and by then the dashboard already holds that
+        # run's own final result (set_done()/set_failed(), called before
+        # _on_finished). Folding this into refresh_readout() would
+        # immediately overwrite that with a plain pending-coloured preview.
+        # Wired instead to the specific interactive-change handlers, none of
+        # which fire mid-run (every relevant field is locked for the run's
+        # duration) or as part of run completion.
+        src = self.source_path()
+        if not src or not Path(src).is_dir():
+            self.dashboard.setVisible(False)
+            return
+        preview = scan_folder(
+            src, filename_schema=self.filename_schema(), filename_sep=self.filename_sep(),
+        )
+        if not preview.wells:
+            # Nothing the current schema/separator recognises yet -- an
+            # empty "Ready — 0 well(s)" plate would answer a question
+            # ("what will this convert?") with "nothing", which reads the
+            # same as "broken" rather than "not ready yet".
+            self.dashboard.setVisible(False)
+            return
+        self.dashboard.reset()
+        self.dashboard.set_wells(preview.wells)
+        self.dashboard.set_headline(f"Ready — {len(preview.wells)} well(s) to convert.")
+        self.dashboard.setVisible(True)
+
+    def _on_source_changed(self) -> None:
+        self.refresh_readout()
+        self._update_status_preview()
 
     def _on_in_place_toggled(self, checked: bool) -> None:
         self._dest_field.setVisible(not checked)

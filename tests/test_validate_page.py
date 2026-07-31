@@ -93,33 +93,42 @@ def test_check_gate_requires_a_path(qapp, tmp_path):
     ctrl.shutdown()
 
 
-def test_dashboard_hidden_until_check_starts(qapp, tmp_path):
-    """Regression guard: the status strip below the button row used to be
-    visible from the moment the page loaded, showing an idle headline and
-    an empty plate map before anything had happened — confusing, since it
-    reads as an in-between state rather than "nothing has run yet". Uses
-    isHidden() (a local, explicit hide/show flag) rather than isVisible(),
-    since the page is never actually shown in this test — isVisible() would
-    report False for the whole tree regardless of these setVisible() calls."""
+def test_dashboard_reveals_on_a_valid_dataset_and_hides_without_one(qapp, tmp_path):
+    """Regression guard: the status strip below the button row used to
+    either stay hidden until Check was pressed (a real dataset already
+    picked, and the page had every fact needed to answer "what would this
+    check?" — the picked dataset's own wells — yet stayed hidden and showed
+    nothing), or, before that, be visible from page load with an idle
+    headline and an empty plate map (nothing to show at all yet). Neither is
+    right: it must hide with no valid dataset picked, and reveal seeded with
+    the dataset's real wells (a "Ready" preview, not a run) the moment one
+    is. Uses isHidden() (a local, explicit hide/show flag) rather than
+    isVisible(), since the page is never actually shown in this test —
+    isVisible() would report False for the whole tree regardless of these
+    setVisible() calls."""
     from datasets.validate.controller import ValidateController
 
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    not_a_dataset = tmp_path.parent / "not_a_dataset"
+    not_a_dataset.mkdir()
     ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
     page = ctrl.page
     assert page.dashboard.isHidden() is True
 
     page._dataset_field.set_path(str(tmp_path))
     page._on_dataset_changed()
-    assert page.dashboard.isHidden() is True  # still nothing has run
+    assert page.dashboard.isHidden() is False  # a real dataset -> a real preview
+    assert page.dashboard._wells == ["A01"]
+    assert "Ready" in page.dashboard._headline.text()
 
     page.checkRequested.emit()
-    assert page.dashboard.isHidden() is False  # shown the moment Check starts
+    assert page.dashboard.isHidden() is False  # stays up while checking
     _run_worker_to_completion(ctrl)
     assert page.dashboard.isHidden() is False  # stays up to show the result
 
-    page._dataset_field.set_path(str(tmp_path))
+    page._dataset_field.set_path(str(not_a_dataset))
     page._on_dataset_changed()
-    assert page.dashboard.isHidden() is True  # hidden again for the new selection
+    assert page.dashboard.isHidden() is True  # not a dataset -> nothing to preview
     ctrl.shutdown()
 
 

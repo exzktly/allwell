@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.path_field import PathField, folder_picker
+from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport
 
@@ -70,6 +71,7 @@ class ValidatePage(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._dataset_root = ""
+        self._running = False
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -207,6 +209,7 @@ class ValidatePage(QWidget):
         self._findings_list.clear()
 
     def set_running(self, running: bool) -> None:
+        self._running = running
         self._check_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if running:
@@ -249,6 +252,22 @@ class ValidatePage(QWidget):
         self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
-        self.dashboard.reset()
-        self.dashboard.setVisible(False)
         self._findings_list.clear()
+        self._update_status_preview()
+
+    def _update_status_preview(self) -> None:
+        # Reveals the plate once there's a real dataset to show, seeded with
+        # its actual wells, instead of hiding until Check starts (an idle
+        # status strip above an empty findings list used to read as "nothing
+        # has happened yet" either way, so there was nothing lost by
+        # answering the wells question as soon as it has a real answer).
+        if self._running:
+            return
+        self.dashboard.reset()
+        if not self._inputs_ready():
+            self.dashboard.setVisible(False)
+            return
+        wells = preview_wells(self.dataset_path())
+        self.dashboard.set_wells(wells)
+        self.dashboard.set_headline(f"Ready — {len(wells)} well(s) to check.")
+        self.dashboard.setVisible(True)

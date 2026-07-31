@@ -358,7 +358,9 @@ QToolButton#DatasetButton {{
     border: none;
     border-bottom: 1px solid {c.border_subtle};
     border-radius: 0px;
-    padding: {s.sm}px {s.md}px;
+    /* Extra room on the right: the rail's collapse toggle floats over this
+       row's outer corner, and without the inset it sat on top of the caret. */
+    padding: {s.sm}px {s.xl}px {s.sm}px {s.md}px;
     text-align: left;
     font-weight: {t.semibold};
 }}
@@ -366,7 +368,7 @@ QToolButton#DatasetButton:hover {{ background-color: {c.hover}; }}
 QToolButton#DatasetButton::menu-indicator {{
     subcontrol-position: right center;
     subcontrol-origin: padding;
-    right: {s.sm}px;
+    right: {s.xl}px;
 }}
 
 QWidget#ControlBand {{

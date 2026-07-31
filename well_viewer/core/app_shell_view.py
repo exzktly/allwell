@@ -7,7 +7,7 @@ from ``runtime_app.py`` (teardown Phase 8).
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, QObject, Qt
+from PySide6.QtCore import QEvent, QObject, QPoint, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -127,14 +127,24 @@ def position_rail_toggle(win) -> None:
         return
     rail = getattr(win, "_sidebar_root", None)
     edge = rail.geometry().right() if (rail is not None and rail.isVisible()) else 0
-    top = pane.geometry().top()
     # An overlay has no layout to size it, so it would otherwise keep Qt's
     # default 100x30 and paint its chrome around an off-centre glyph.
     btn.adjustSize()
     size = btn.size()
-    # Straddle the boundary, vertically centred on the splitter.
-    btn.move(max(edge - size.width() // 2, 0),
-             top + max((pane.height() - size.height()) // 2, 0))
+    # Vertically: level with the rail head, NOT centred on the splitter. The
+    # rail is full-bleed top to bottom, so a button on its edge always covers
+    # *something*; the head's row is the one band that is chrome rather than
+    # content. Centred on the splitter it sat squarely over the plate picker —
+    # the thing in this rail you click most — and drifted further onto it as the
+    # window grew; one row down it clipped the active nav item instead.
+    head = getattr(win, "_dataset_btn", None)
+    if head is not None and head.isVisible():
+        origin = head.mapTo(win, QPoint(0, 0)).y()
+        top = origin + (head.height() - size.height()) // 2
+    else:
+        top = pane.geometry().top() + theme.Spacing.sm
+    # Straddle the rail's right boundary.
+    btn.move(max(edge - size.width() // 2, 0), top)
     btn.raise_()
     btn.show()
 

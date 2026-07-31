@@ -742,6 +742,15 @@ reachable in both states — it slides to the window's left edge once the rail i
 gone. Straddling rather than sitting inside the rail's content also keeps it
 clear of the dataset head and the plate picker.
 
+It is placed **level with the rail head**, not centred on the splitter. The rail
+is full-bleed from top to bottom, so a button on its edge always covers
+something; the head's row is the one band there that is chrome rather than
+content. Centred on the splitter it sat squarely over the plate picker — the
+thing in this rail you click most — and drifted further onto it as the window
+grew; one row lower it clipped the active nav item instead. The rail head
+carries an `xl` right inset so its caret clears the button rather than sitting
+under it.
+
 Two things follow from it being an overlay. It has no layout to size it, so
 `position_rail_toggle` calls `adjustSize()` — left at Qt's default a widget with
 no layout keeps 100×30 and paints its chrome around an off-centre glyph. And it

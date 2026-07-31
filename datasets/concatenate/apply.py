@@ -21,18 +21,29 @@ import csv
 import json
 import math
 import shutil
-import zipfile
+import threading
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
 from util.aw_safe import swallow
 from well_viewer.domain.tp_match import tp_close
+from datasets._common.concurrency import pick_workers
+from datasets._common.containers import (
+    FILENAME_COLUMN as _FILENAME_COLUMN,
+    OVERRIDES_FILENAME as _OVERRIDES_FILENAME,
+    OVERRIDES_SCHEMA_VERSION as _OVERRIDES_SCHEMA_VERSION,
+    TIMEPOINT_COLUMN as _TIMEPOINT_COLUMN,
+    TIMEPOINT_HOURS_COLUMN as _TIMEPOINT_HOURS_COLUMN,
+    clear_destination,
+    read_members,
+    write_zip,
+)
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
-    DatasetPaths,
     MergePlan,
     in_containers,
     out_csvs,
@@ -40,12 +51,6 @@ from datasets.concatenate.concatenate_compute import (
     remap_timepoint_label,
     rewrite_member_name,
 )
-
-_TIMEPOINT_COLUMN = "timepoint"
-_TIMEPOINT_HOURS_COLUMN = "timepoint_hours"
-_FILENAME_COLUMN = "filename"
-_OVERRIDES_FILENAME = "cell_overrides.json"
-_OVERRIDES_SCHEMA_VERSION = 2
 
 
 # A no-op progress sink, so callers that don't care can omit one.
@@ -62,60 +67,8 @@ def _null_progress(_well: str, _stage: str) -> None:
 
 
 # ── container IO ─────────────────────────────────────────────────────────────
-def read_members(container: Path) -> list[tuple[str, bytes]]:
-    """Read a well container's files as ``(member_name, bytes)``.
-
-    Works for both input layouts: a ``.zip`` (its entries) or a folder (its files
-    by POSIX-relative name). Directory entries are skipped.
-    """
-    if container.is_dir():
-        members: list[tuple[str, bytes]] = []
-        for path in sorted(container.rglob("*")):
-            if path.is_file():
-                members.append((path.relative_to(container).as_posix(), path.read_bytes()))
-        return members
-    with zipfile.ZipFile(container) as archive:
-        return [
-            (info.filename, archive.read(info.filename))
-            for info in archive.infolist()
-            if not info.is_dir()
-        ]
-
-
-def write_zip(dest: Path, members: list[tuple[str, bytes]]) -> tuple[frozenset[str], frozenset[str]]:
-    """Write ``(name, bytes)`` members into a fresh deflated zip at *dest*.
-
-    A later member whose name duplicates an earlier one is skipped rather than
-    overwriting it — since dataset 1's members are always listed first when
-    both datasets contribute to a well, this means a dataset-2 member that
-    failed the schema-conformance check in :func:`rewrite_member_name` (and so
-    kept its original name) can never silently clobber a same-named dataset-1
-    member. Returns ``(written, dropped)`` — *written* is the set of names
-    actually written (so callers can verify a CSV row's ``filename`` value
-    actually landed in the archive); *dropped* is the set of names that were
-    requested but skipped due to a collision, so a caller can tell a genuine
-    duplicate-write apart from data that never made it in at all (see
-    :func:`execute_plan` and :func:`_verify`, which both treat a nonzero
-    *dropped* as something that must never pass silently).
-
-    ``compresslevel=1``: microscopy image formats are already
-    information-dense, so re-deflating at the default level 6 spends a lot of
-    CPU for negligible size reduction — this is a pure container-level merge,
-    not a size-optimization pass.
-    """
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    written: set[str] = set()
-    dropped: set[str] = set()
-    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
-        for name, data in members:
-            if name in written:
-                dropped.add(name)
-                continue
-            written.add(name)
-            archive.writestr(name, data)
-    return frozenset(written), frozenset(dropped)
-
-
+# read_members / write_zip now live in datasets._common.containers — see the
+# import block above.
 def _rewrite_members(plan: MergePlan, members: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], int]:
     """Rewrite every member's timepoint field. Returns ``(members, unmatched)``
     — *unmatched* counts members that didn't match the filename schema and
@@ -332,19 +285,8 @@ def merge_measurements(
 
 
 # ── restart cleanup ───────────────────────────────────────────────────────────
-def clear_destination(dest: DatasetPaths) -> None:
-    """Remove a destination's ``in``/``out`` content (a failed prior attempt).
-
-    Every well is rebuilt from the two source datasets on each
-    :func:`execute_plan` call — nothing here is incremental — so the only
-    correct way to resume into a destination that already has leftovers is to
-    clear them first; otherwise a well from an earlier, differently-scoped
-    attempt (or a partially-written file) would linger in the "finished"
-    output.
-    """
-    for folder in (dest.in_dir, dest.out_dir):
-        if folder.exists():
-            shutil.rmtree(folder)
+# clear_destination now lives in datasets._common.containers — see the import
+# block above.
 
 
 # ── cell overrides carry-over ─────────────────────────────────────────────────
@@ -494,6 +436,7 @@ def execute_plan(
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    workers: int = 0,
 ) -> str:
     """Carry out *plan*, writing the merged dataset. Returns a summary line.
 
@@ -506,6 +449,16 @@ def execute_plan(
     then ``"merged"`` or ``"warned"`` (image data survived on one side with no
     matching measurements CSV) once it's done — for a live per-well status
     display (defaults to a no-op).
+
+    Wells are merged in parallel — *workers* threads (0 = auto, see
+    :func:`datasets._common.concurrency.pick_workers`), each owning one
+    well's own destination files (``in/<WELL>.zip``, ``out/<WELL>_out.zip``,
+    its measurements CSV) with nothing shared between wells. ``log``/
+    ``progress`` calls that happen before a well's work starts are
+    serialised behind a lock; aggregating each well's result into
+    ``well_stats``/``dropped_members``/etc. and reporting its "merged"/
+    "warned" outcome both happen back on this function's own thread as each
+    future completes, so that bookkeeping needs no lock at all.
 
     Writes :data:`~datasets.concatenate.concatenate_compute.IN_PROGRESS_MARKER`
     first and removes it only after the merged sidecar is written — the whole
@@ -562,19 +515,20 @@ def execute_plan(
     total_unmatched = 0
     images_without_csv: list[str] = []
     dropped_members: dict[str, frozenset[str]] = {}
-    for well in all_wells:
+
+    callback_lock = threading.Lock()
+
+    def _merge_one_well(well: str):
         if cancelled():
             raise ConcatError("Cancelled — the in-progress destination was left in place to resume later.")
-        emit(f"  {well}…")
-        report(well, "merging")
+        with callback_lock:
+            emit(f"  {well}…")
+            report(well, "merging")
         unmatched_in, in_names, dropped_in = merge_input(plan, well, in1.get(well), in2.get(well))
         unmatched_qc, dropped_qc = merge_qc_zip(plan, well, zip1.get(well), zip2.get(well))
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
-        well_stats[well] = stats
-        total_unmatched += unmatched_in + unmatched_qc + stats.unmatched_filenames
+        unmatched_total = unmatched_in + unmatched_qc + stats.unmatched_filenames
         well_dropped = dropped_in | dropped_qc
-        if well_dropped:
-            dropped_members[well] = well_dropped
         # A well's images (in/ input or out/ QC zip) existing without a
         # measurements CSV on that same side is legitimate on its own — the
         # well may have segmented zero cells at every timepoint — but it's
@@ -583,13 +537,25 @@ def execute_plan(
         # merge that copied images but wrote no data pass as an ordinary
         # success; _verify's zero-rows check below is the hard backstop.
         well_warned = bool(well_dropped)
+        well_images_without_csv: list[str] = []
         if (in1.get(well) or zip1.get(well)) and not csv1.get(well):
-            images_without_csv.append(f"{well} (dataset 1)")
+            well_images_without_csv.append(f"{well} (dataset 1)")
             well_warned = True
         if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
-            images_without_csv.append(f"{well} (dataset 2)")
+            well_images_without_csv.append(f"{well} (dataset 2)")
             well_warned = True
-        report(well, "warned" if well_warned else "merged")
+        return well, stats, unmatched_total, well_dropped, well_images_without_csv, well_warned
+
+    with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
+        futures = [ex.submit(_merge_one_well, well) for well in all_wells]
+        for fut in as_completed(futures):
+            well, stats, unmatched_total, well_dropped, well_images_without_csv, well_warned = fut.result()
+            well_stats[well] = stats
+            total_unmatched += unmatched_total
+            if well_dropped:
+                dropped_members[well] = well_dropped
+            images_without_csv.extend(well_images_without_csv)
+            report(well, "warned" if well_warned else "merged")
 
     if total_unmatched:
         emit(

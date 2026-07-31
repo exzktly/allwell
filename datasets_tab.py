@@ -9,8 +9,7 @@ sidebar is a plain :class:`~widgets.rail_nav.RailNav` page navigator over a
 
 Features are declared in one small local list (:data:`_FEATURES`) — adding a
 future Datasets feature is a one-line entry, mirroring Review's feature registry
-without pulling in its well/selection-scoped machinery. The first and only
-feature today is *Concatenate datasets*.
+without pulling in its well/selection-scoped machinery.
 """
 
 from __future__ import annotations
@@ -32,7 +31,17 @@ import theme
 from widgets.rail_nav import RailNav
 from well_viewer.core.centre_view import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
+from datasets.import_loose.controller import ImportLooseController
+from datasets.job_queue.controller import JobQueueController
+from datasets.merge_plates.controller import MergePlatesController
 from datasets.ome_import.controller import OmeImportController
+from datasets.subset.controller import SubsetController
+from datasets.validate.controller import ValidateController
+
+# Kinds a Datasets controller can queue itself under — registered against the
+# Job Queue page once every controller (including Analyze, injected from
+# outside) has been built.
+_QUEUEABLE_KINDS = ("concatenate", "ome_import", "validate", "subset", "import_loose", "merge_plates")
 
 
 @dataclass(frozen=True)
@@ -49,18 +58,68 @@ class _Feature:
 
 
 def _build_concatenate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
-    controller = ConcatenateController(on_open_in_review=tab._open_in_review)
+    controller = ConcatenateController(
+        on_open_in_review=tab._open_in_review, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["concatenate"] = controller
     return controller.page, controller.shutdown
 
 
 def _build_ome_import(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
-    controller = OmeImportController(on_open_in_analyze=tab._open_in_analyze)
+    controller = OmeImportController(
+        on_open_in_analyze=tab._open_in_analyze, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["ome_import"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_validate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = ValidateController(
+        on_open_in_analyze=tab._open_in_analyze, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["validate"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_subset(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = SubsetController(
+        on_open_in_review=tab._open_in_review, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["subset"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_import_loose(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = ImportLooseController(
+        on_open_in_analyze=tab._open_in_analyze, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["import_loose"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_merge_plates(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    controller = MergePlatesController(
+        on_open_in_review=tab._open_in_review, on_add_to_queue=tab._add_to_queue)
+    tab._controllers["merge_plates"] = controller
+    return controller.page, controller.shutdown
+
+
+def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
+    """Built last — every other feature's controller already exists in
+    ``tab._controllers`` by the time this registers them against the bridge."""
+    controller = JobQueueController(state_dir=tab._queue_state_dir)
+    for kind in _QUEUEABLE_KINDS:
+        controller.register(kind, tab._controllers[kind])
+    if tab._analyze_controller is not None:
+        controller.register("analyze", tab._analyze_controller)
+        controller.set_analyze_provider(tab._analyze_controller.collect_spec)
+    tab._controllers["job_queue"] = controller
     return controller.page, controller.shutdown
 
 
 _FEATURES: tuple[_Feature, ...] = (
-    _Feature(name="Concatenate datasets", icon="copy", build=_build_concatenate),
+    _Feature(name="Concatenate Datasets", icon="copy", build=_build_concatenate),
     _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
+    _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate),
+    _Feature(name="Subset / Split", icon="boxes", build=_build_subset),
+    _Feature(name="Import Loose Folder", icon="download", build=_build_import_loose),
+    _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates),
+    _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
 )
 
 
@@ -72,13 +131,32 @@ class DatasetsTab(QWidget):
         parent: QWidget | None = None,
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
-        on_open_in_analyze: Callable[[Path], None] | None = None,
+        on_open_in_analyze: Callable[[Path, dict], None] | None = None,
+        analyze_controller: object | None = None,
+        queue_state_dir: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
         self._on_open_in_analyze = on_open_in_analyze
+        # The already-built AnalyzeTab, injected by allwell.py the same way
+        # on_open_in_review/on_open_in_analyze are — duck-typed to
+        # datasets.job_queue.controller.QueueableController via
+        # AnalyzeRunMixin, never imported by name here (keeps this module
+        # and everything under datasets/job_queue/ free of an analyze_tab
+        # import).
+        self._analyze_controller = analyze_controller
+        # None in production (the Job Queue persists under
+        # services.remote_config.default_state_dir()); tests override it so
+        # a DatasetsTab built offscreen never touches the real user config dir.
+        self._queue_state_dir = queue_state_dir
+        self._controllers: dict[str, object] = {}
         self._teardowns: list[Callable[[], None]] = []
         self._build_ui()
+
+    def _add_to_queue(self, kind: str, spec: dict) -> None:
+        job_queue = self._controllers.get("job_queue")
+        if job_queue is not None:
+            job_queue.add_job(kind, spec)
 
     # ── layout ───────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -154,9 +232,9 @@ class DatasetsTab(QWidget):
         if self._on_open_in_review is not None and dest_root:
             self._on_open_in_review(Path(dest_root))
 
-    def _open_in_analyze(self, dataset_root: str) -> None:
+    def _open_in_analyze(self, dataset_root: str, channel_tokens: dict | None = None) -> None:
         if self._on_open_in_analyze is not None and dataset_root:
-            self._on_open_in_analyze(Path(dataset_root))
+            self._on_open_in_analyze(Path(dataset_root), channel_tokens or {})
 
     def shutdown(self) -> None:
         """Stop any running feature workers (called on app close)."""

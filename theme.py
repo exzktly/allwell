@@ -103,6 +103,13 @@ class Colors:
     accent_pressed  = "#5772E6"   # darkened --accent for :pressed (not a token)
     accent_dim      = "#2C3A66"   # --accent-dim : low-emphasis selected backgrounds
     accent_fg       = "#F0F4FF"   # --accent-fg  : text/icon on accent-filled buttons
+    # A second, distinct hue for "this belongs to the other of two normal
+    # groups" (e.g. Merge Plates' dataset-2 wells) — never used for an anomaly
+    # or a warning. Deliberately not ``accent``: several plate-map dashboards
+    # already use ``accent`` to flag an anomalous well (Concatenate's
+    # merged-with-no-CSV, Subset's no-rows-matched), so a well merely
+    # belonging to "the other source" must not read as suspect.
+    accent2         = "#B98CF7"   # --accent2 : second-group tint, never an anomaly colour
 
     # ── Brand cue (version pill) ─────────────────────────────────────────
     # A small, theme-swappable brand chip. The default (blue) palette keeps it a

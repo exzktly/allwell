@@ -254,3 +254,40 @@ def test_convert_output_is_ready_analyze_input(tmp_path):
     assert out_dir == dest / "out"
     assert on_success is None  # nothing to clean up — already grouped
     assert not any("zipper" in m.lower() for m in logs)
+
+
+def test_convert_multi_image_with_custom_origin_and_direction(tmp_path):
+    # Every other convert()-level test in this file drives a single-image
+    # packed file. apply.convert() forwards grid_rows/grid_cols/origin/
+    # direction to pipeline.ome_explode.explode_ome_tiff as separate keyword
+    # arguments (a different call chain than plan_conversion's dry-run math),
+    # and until now nothing exercised that forwarding for a multi-image
+    # (multi-position) source or a non-default origin/direction — a swapped
+    # grid_rows/grid_cols or a dropped origin/direction kwarg in apply.py
+    # would pass every existing convert()-level test here.
+    import io
+    import zipfile
+
+    p = tmp_path / "m.ome.tif"
+    with tifffile.TiffWriter(str(p), ome=True) as tw:
+        for pos in range(6):
+            arr = np.full((1, 1, 6, 6), pos, np.uint16)  # pixel value == position index
+            tw.write(arr, metadata={"axes": "TCYX", "Channel": {"Name": ["GFP"]}})
+    dest = tmp_path / "multi_ds"
+    params = ConversionParams(grid_rows=2, grid_cols=3, origin="B02", direction="col")
+    convert(p, dest, params)
+
+    # Hand-derived serpentine-by-column labels for a 2x3 block from B02:
+    # c=0 (even): B02, C02 -- c=1 (odd, reversed): C03, B03 -- c=2 (even): B04, C04.
+    expected = {
+        "B02.zip": (0, "B02"), "C02.zip": (1, "C02"), "C03.zip": (2, "C03"),
+        "B03.zip": (3, "B03"), "B04.zip": (4, "B04"), "C04.zip": (5, "C04"),
+    }
+    zips = sorted(z.name for z in (dest / "in").glob("*.zip"))
+    assert zips == sorted(expected)
+    for zname, (pos, well) in expected.items():
+        with zipfile.ZipFile(dest / "in" / zname) as zf:
+            members = zf.namelist()
+            assert members == [f"m_GFP_{well}_f0_t0.tif"]
+            arr = tifffile.imread(io.BytesIO(zf.read(members[0])))
+            assert int(arr.max()) == pos  # confirms position -> well mapping, not just naming

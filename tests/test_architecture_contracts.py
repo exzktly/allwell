@@ -90,6 +90,25 @@ def test_services_have_no_qt_imports():
     )
 
 
+def test_services_do_not_import_well_viewer():
+    """ARCHITECTURE §13: `services/` stays Qt-free specifically so it can be
+    reused headless — but nothing stopped a service from reaching into the
+    Review pane's package for a helper and dragging its whole (Qt-heavy)
+    import graph in transitively. `services/run_spec.py` and
+    `services/job_queue.py` are the modules this protects: a job queue that
+    imports `well_viewer` for a convenience helper stops being usable from a
+    headless worker even though it imports no Qt module directly itself."""
+    offenders = []
+    for path in _walk_py(REPO_ROOT / "services"):
+        for node, top in _all_imports(_parse(path)):
+            if top == "well_viewer":
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno} imports well_viewer")
+    assert not offenders, (
+        "services/ must not import well_viewer (would pull Qt in transitively "
+        "through a package the Qt-free contract can't see):\n  " + "\n  ".join(offenders)
+    )
+
+
 # ── widgets/ have no All-Well app coupling ────────────────────────────────────
 
 def test_widgets_do_not_import_the_app():

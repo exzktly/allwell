@@ -43,7 +43,7 @@ class ConcatDashboard(PlateProgress):
         self._phase = ""
         self._outcome = ""            # "" | "done" | "failed" | "cancelled"
         self._rail: dict[str, tuple] = {}
-        super().__init__("Merge Progress", parent)
+        super().__init__("Concatenate Progress", parent)
         self.setObjectName("ConcatDashboard")
 
     # ── host-facing API ─────────────────────────────────────────────────────
@@ -55,7 +55,13 @@ class ConcatDashboard(PlateProgress):
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
-        self._plate.setEnabledWells(None)
+        # Empty, not None -- None means "all 96 enabled", which an enabled-
+        # but-uncolored well renders as a full plate of "pending" cells. That
+        # falsely claims scope (a 14-well merge painted as 96 wells queued)
+        # from the moment the page loads, and — since a real planning
+        # failure can land here too, before set_wells() ever arrives — a
+        # failed run's plate implied 96 wells were queued rather than none.
+        self._plate.setEnabledWells([])
         self._build_rail(); self._build_legend()
         self._headline.setText("Idle")
         self._headline.setStyleSheet(f"color:{theme.Colors.text_primary};")
@@ -81,10 +87,18 @@ class ConcatDashboard(PlateProgress):
             return
         self._well_stage[w] = stage
         self._plate.setWellColor(w, self._well_color(w))
-        self._plate.setWellMarker(w, "⚙" if stage == "merging" else None)
+        self._plate.setWellMarker(w, self._well_marker(w))
         self.set_overall(sum(1 for s in self._well_stage.values()
                               if s in ("merged", "warned")))
         self._refresh_rail()
+
+    def _well_marker(self, w: str) -> str | None:
+        # Terminal states carry a marker too, not just colour (accessibility
+        # — colour alone is unreadable to anyone who can't distinguish
+        # success-green from accent-lilac).
+        return {
+            "merging": "⚙", "merged": "✓", "warned": "!",
+        }.get(self._well_stage.get(w))
 
     def set_phase(self, phase: str) -> None:
         if phase == self._phase:
@@ -92,9 +106,13 @@ class ConcatDashboard(PlateProgress):
         self._phase = phase
         self._refresh_rail()
 
-    def set_done(self, summary: str) -> None:
+    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
         self._outcome = "done"
         self._headline.setText(summary or "Done")
+        # The full text (often a full destination path baked into the
+        # summary string) survives as a tooltip even when the caller has
+        # shortened the displayed headline to a basename.
+        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
         self._headline.setStyleSheet(f"color:{theme.Colors.success};")
         self._refresh_rail()
 

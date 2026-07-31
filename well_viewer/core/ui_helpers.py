@@ -318,6 +318,21 @@ def wrap_ctrl_row_with_properties(ctrl_row, on_click, *,
     return wrap
 
 
+def make_properties_button(ctx, parent: QWidget, figure_key: str, *,
+                           tooltip="Show / hide the figure properties panel"):
+    """The Properties toggle, for a tab whose controls are a ``ControlBand``.
+
+    The band right-aligns its action zone itself, so a tab on the band adds this
+    with ``band.add_action(...)`` and needs none of the
+    :func:`wrap_ctrl_row_with_properties` scaffolding that a ``FlowLayout`` row
+    required to get a button to the right edge.
+    """
+    from widgets.icon_button import IconButton
+    btn = IconButton("sliders-horizontal", parent, tooltip=tooltip)
+    btn.clicked.connect(lambda _=False: ctx.figures.open_style_panel(figure_key))
+    return btn
+
+
 def build_hline_separator(parent: QWidget) -> QFrame:
     """Return the project's standard 1-px horizontal separator frame."""
     sep = QFrame(parent)

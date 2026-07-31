@@ -609,6 +609,26 @@ stays the record of which mode is live.
 Scatter's own page is a bare `NamedPageStack` with `cells` and `aggregate` pages
 and no tab bar of its own; the band's toggle is its only selector.
 
+#### Other tabs on the band
+
+**Heat Map** puts its Aggregation combo and its timepoint scrubber in the scope
+zone, and `Display ▾` / `Export ▾` / Properties in the action zone. Everything
+about how the grid is *coloured* — colour map, scale, vmin/vmax, transpose,
+rep-set averaging, log scale — is appearance rather than scope and lives in the
+`Display ▾` popover. Two details are load-bearing: the timepoint `StyledSlider`
+is a **fixed** width, because a slider with stretch takes every pixel the scope
+zone has and forces everything beside it onto a second row at any pane width;
+and the tab no longer wraps its row with `ui_helpers.wrap_ctrl_row_with_properties`,
+since that helper exists to right-align a button a `FlowLayout` cannot, which
+is what the band's action zone already does.
+
+**Statistics** states the same five selectors — Channel, Property, Statistic,
+Timepoint, Test — as scope groups, with **Run test** as the single action. It
+had been a five-row label/field `QGridLayout` with Run on a sixth row and a
+separator under it: a form, in a pane where every other tab has a control row.
+
+#### The band's gating and its ratchet
+
 The band carries the object name `ControlBand`, which is in
 `ui_helpers._DATA_GATED_OBJECT_NAMES`, so a tab picks up "grey the controls
 until a dataset is loaded" by adopting the band rather than by remembering a

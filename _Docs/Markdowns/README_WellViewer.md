@@ -881,10 +881,13 @@ place cells in a grid that mirrors your plate or your experimental design.
 
 - **Needs** — a well selection and a channel; a timepoint (**t (h)**) chosen
   with the slider.
-- **Controls** —
-  - **t (h)** timepoint slider (its position persists across reopen).
+- **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
     *Rep-set avg*).
+  - **t (h)** timepoint slider (its position persists across reopen).
+
+  Under **Display ▾**, since these set how the grid is coloured rather than what
+  it shows:
   - **Color map** (e.g. *Greys*, *RdYlBu_r*, *Muted*).
   - **Scale** — *Auto*, or *Fixed* with explicit **vmin** / **vmax**.
   - **Log scale** toggle — colours the map across orders of magnitude (values at
@@ -892,6 +895,10 @@ place cells in a grid that mirrors your plate or your experimental design.
     log scale. Needs at least two distinct positive values; when the data can't
     support it the status line says so and the linear scale stays.
   - **⇄ Transpose** — swap the rows and columns of the layout.
+  - **Rep-set avg** — show the whole rep-set's average in a cell whose well
+    belongs to one, instead of that single well.
+
+  And elsewhere:
   - **Value format** (in the **Properties** panel, under *Cell values*) — a
     printf-style format for the number written in each cell: `%.2f` for two
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
@@ -932,8 +939,10 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
 
 - **Needs** — at least two groups. On first visit the tab auto-populates from
   the replicate sets defined on [Sample Definitions](#sample-definitions).
-- **Controls** — the group editor (sidebar); the test selection; the timepoint;
-  an FOV-replicate indicator that mirrors the plot tabs' FOV mode.
+- **Controls** — the group editor is in the sidebar; everything else is on the
+  same one-row controls band the other tabs use — **Channel**, **Property**,
+  **Statistic**, **Timepoint** and **Test**, then an FOV-replicate indicator
+  that mirrors the plot tabs' FOV mode, with **Run test** at the right.
 - **Replicate unit.** What counts as one replicate is the single rule shared
   with the bar / line error bars, so the test's `n` and the plotted spread never
   disagree. With FOV mode **off**, each well in a group is one replicate. With

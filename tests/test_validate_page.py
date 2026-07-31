@@ -40,6 +40,35 @@ def _run_worker_to_completion(ctrl) -> None:
         QApplication.processEvents()
 
 
+def test_apply_repairs_tooltip_explains_why_when_findings_cant_be_repaired(qapp, tmp_path):
+    """Regression guard (UX audit P2-7): a greyed "Apply repairs" button
+    sitting under a findings list that isn't empty reads as broken -- "it
+    found problems, why won't it fix them?" -- with nothing on the page
+    saying this dataset's findings just aren't the metadata-only kind
+    apply.py knows how to repair (report.repairable is False even though
+    findings is non-empty, e.g. a genuine missing-FOV finding with correct
+    availability lists already)."""
+    from datasets.validate.controller import ValidateController
+    from datasets.validate.validate_compute import DatasetReport, Finding
+
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+
+    unrepairable = DatasetReport(
+        root=tmp_path,
+        findings=(Finding(severity="error", code="missing_fov", message="A01 missing 2 FOVs"),),
+    )
+    assert not unrepairable.repairable
+    page.show_report(unrepairable)
+    assert not page._repair_btn.isEnabled()
+    assert page._repair_btn.toolTip() == "These findings can't be repaired automatically."
+
+    clean = DatasetReport(root=tmp_path)
+    page.show_report(clean)
+    assert page._repair_btn.toolTip() == ""
+    ctrl.shutdown()
+
+
 def test_findings_list_shows_an_empty_state_hint_before_any_check(qapp):
     """Regression guard (UX audit P2-1): the findings list was a large,
     entirely blank box until Check ran — its own empty-container problem,

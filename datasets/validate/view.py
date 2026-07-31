@@ -251,6 +251,14 @@ class ValidatePage(QWidget):
             item = QListWidgetItem(text)
             self._findings_list.addItem(item)
         self._repair_btn.setEnabled(report.repairable)
+        # A greyed button with findings still listed above it looks broken
+        # ("it found problems, why won't it fix them?") with nothing on the
+        # page saying why not — state it directly rather than leaving the
+        # user to guess between "nothing to repair" and "can't repair this".
+        if report.findings and not report.repairable:
+            self._repair_btn.setToolTip("These findings can't be repaired automatically.")
+        else:
+            self._repair_btn.setToolTip("")
         needs_completion = any(w.missing for w in report.wells)
         self._complete_btn.setVisible(needs_completion)
         self._check_btn.setEnabled(self._inputs_ready())

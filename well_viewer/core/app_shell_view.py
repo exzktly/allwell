@@ -23,9 +23,16 @@ from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
 
 
-#: The left rail's width. Fixed, and the one place it is stated: the app
-#: header's mode bar spans exactly this so the two share a left column.
-RAIL_W = 340
+#: The left panel's width, shared by all three modes — Review's own rail,
+#: Datasets' sidebar, and Analyze's form panel (``analyze_tab.py``) all pin to
+#: this one value, so switching modes never visibly resizes the window. 438,
+#: not Review's narrower original width, because it's the value Analyze's own
+#: per-channel rows need to avoid clipping (widened there twice, 280→350→438,
+#: before landing on it) — Review's plate and Datasets' nav list have no
+#: trouble being wider, so the shared width is set by whichever mode actually
+#: needs the room. The app header's mode bar spans exactly this too, so it and
+#: the rail beneath it share a left column.
+RAIL_W = 438
 
 
 def _dataset_button(win, parent):
@@ -159,22 +166,27 @@ def position_rail_toggle(win) -> None:
     # default 100x30 and paint its chrome around an off-centre glyph.
     btn.adjustSize()
     size = btn.size()
-    # Vertically: level with the rail head, NOT centred on the splitter. The
-    # rail is full-bleed top to bottom, so a button on its edge always covers
-    # *something*; the head's row is the one band that is chrome rather than
-    # content. Centred on the splitter it sat squarely over the plate picker —
-    # the thing in this rail you click most — and drifted further onto it as the
-    # window grew; one row down it clipped the active nav item instead.
-    head = getattr(win, "_dataset_btn", None)
-    if head is not None and head.isVisible():
-        origin = head.mapTo(win, QPoint(0, 0)).y()
-        top = origin + (head.height() - size.height()) // 2
-    elif panel is not None:
-        # Analyze and Datasets have no dataset head; sit just inside the top of
-        # whichever panel is showing.
-        top = panel.mapTo(win, QPoint(0, 0)).y() + theme.Spacing.sm
+    # Vertically centred on whichever panel is showing — the toggle straddles
+    # the panel's own right edge (see below), not any one row inside it, so a
+    # user scanning down that edge finds it in the same predictable spot
+    # regardless of mode or what the panel currently contains.
+    if panel is not None:
+        origin = panel.mapTo(win, QPoint(0, 0)).y()
+        top = origin + max((panel.height() - size.height()) // 2, 0)
+        # Review's sidebar carries an 8x12 well-picker plate near the top of
+        # its content. True centre lands on it for common window heights,
+        # turning a click-and-drag well selection into an accidental sidebar
+        # collapse (reported: dragging across the plate's middle columns hit
+        # the toggle instead). Nudge below the plate rather than covering it
+        # whenever centring would otherwise land on it.
+        plate = getattr(win, "_sidebar_plate", None)
+        if plate is not None and plate.isVisible():
+            plate_top = plate.mapTo(win, QPoint(0, 0)).y()
+            plate_bottom = plate_top + plate.height()
+            if top < plate_bottom and top + size.height() > plate_top:
+                top = plate_bottom + theme.Spacing.sm
     else:
-        top = pane.geometry().top() + theme.Spacing.sm
+        top = pane.geometry().top() + max((pane.height() - size.height()) // 2, 0)
     # Straddle the rail's right boundary.
     btn.move(max(edge - size.width() // 2, 0), top)
     btn.raise_()

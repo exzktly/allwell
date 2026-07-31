@@ -721,16 +721,18 @@ flush, with no inset — the topbar's left content margin is zero and the widget
 after the bar carry their own leading pad, so the bar and the panel below it are
 one column rather than a chip row floating over one.
 
-Its **width follows whichever panel is under it**. All three modes put a panel
-down the left edge and they are three different widths: Review's rail is fixed,
-the Datasets rail is its own, and Analyze's form is wider still and draggable in
-its splitter. `AllWellApp._sync_mode_bar_width` matches the bar to the current
-one, re-running on every mode switch and on any resize of the three panels it
-watches. Pinned to any single width the bar stopped short of the column's edge
-in the other two modes, and the page tabs beside it started at a boundary that
-matched nothing on screen. It floors at the bar's own natural width, so a panel
-narrower than the three segments elides their labels rather than shrinking the
-bar, and falls back to that width when every panel is hidden.
+All three modes put a panel down the left edge, and all three pin to the same
+`RAIL_W` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
+there too, not merely a minimum inside a resizable splitter) — so switching
+modes never visibly resizes the window. `AllWellApp._sync_mode_bar_width`
+still matches the bar to whichever panel is current, re-running on every mode
+switch and on any resize of the three panels it watches, as a defensive floor
+rather than reconciling genuinely different widths: it floors at the bar's own
+natural width, so a panel narrower than the three segments elides their labels
+rather than shrinking the bar, and falls back to that width when every panel
+is hidden. `RAIL_W` itself is set by whichever mode's content actually needs
+the room, not by Review's — see `analyze_tab.py::_build_ui` for why it's 438,
+not narrower.
 
 **The page tab bars are in this band too**, to the right of the mode bar and
 sharing its bottom edge. They used to sit inside each tab's own body, one row
@@ -784,15 +786,19 @@ edge is **mapped** into window coordinates rather than read off `geometry()` —
 the button is an overlay on the window while the panels sit at different depths,
 Analyze's and Datasets' inside their own pane's splitter rather than the shell's.
 
-In Review it is placed **level with the rail head**, not centred on the splitter.
-The rail is full-bleed from top to bottom, so a button on its edge always covers
-something; the head's row is the one band there that is chrome rather than
-content. Centred on the splitter it sat squarely over the plate picker — the
-thing in this rail you click most — and drifted further onto it as the window
-grew; one row lower it clipped the active nav item instead. The rail head
-carries an `xl` right inset so its caret clears the button rather than sitting
-under it. Analyze and Datasets have no such head, so there the toggle sits just
-inside the top of their panel.
+It is **vertically centred on whichever panel is showing**, in all three modes
+— a user scanning down the panel's right edge for it finds it at the same
+predictable spot regardless of mode or what that panel currently contains,
+rather than pinned near the top the way an earlier "level with the rail head"
+placement read as stuck. Review's sidebar carries an 8×12 well-picker plate
+near the top of its content, and true centring lands on it at common window
+heights — turning a click-and-drag well selection into an accidental sidebar
+collapse. `position_rail_toggle` detects that specific overlap against
+`win._sidebar_plate`'s own bounds and nudges the toggle just below the plate
+instead of covering it; Analyze and Datasets have no such widget to dodge, so
+there it's a plain panel-height centre. The rail head still carries an `xl`
+right inset so its caret has room regardless of exactly where the toggle
+lands.
 
 A mode switch re-parks it twice: once immediately, and once through a
 `QTimer.singleShot(0, …)`. The first call runs while the pane being shown still
@@ -1579,12 +1585,20 @@ test_not_installed_is_single_tab`.)
   `MouseButtonPress` delivery (e.g. a click that lands while Image Table
   "Generate" is recompositing the focused pane) would mutate the widget tree
   mid-dispatch and crash — running it on the next event-loop turn lets the click
-  finish first. Split auto-exits on a Review/Analyze switch (connected to
+  finish first. Split auto-exits on a mode switch (connected to
   `app.modeChanged`), on rail navigation (`split_nav_intercept` in
   `_on_section_nav_changed`), and at the **start of a dataset load**
   (`load_controller.load_directory`) — the load restores view-state + redraws
   against the single-notebook layout, so leaving split first avoids driving
   detached pages (the reported open-dataset crash).
+
+  It is also a **Review-only feature**: both panes it splits are Review tabs,
+  but the top-bar toggle it lives in is shared across all three modes (Review,
+  Analyze, Datasets mount into the same `WellViewerApp` central-pane stack —
+  see §6b). The same `modeChanged` handler that exits an active split also
+  hides the toggle button (and its right-pane dropdown, if open) outside
+  Review and shows it again on returning — previously it just sat in the
+  Analyze/Datasets top bar with nothing for it to act on.
 
 ### 5.11 The Spatial feature
 

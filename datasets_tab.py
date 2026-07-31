@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.rail_nav import RailNav
+from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.centre_view import NamedPageStack
 from datasets.concatenate.controller import ConcatenateController
 from datasets.import_loose.controller import ImportLooseController
@@ -197,7 +198,7 @@ class DatasetsTab(QWidget):
         # previously did). Only the header label gets its own inset.
         panel = QWidget(self)
         panel.setObjectName("Sidebar")
-        panel.setFixedWidth(260)
+        panel.setFixedWidth(RAIL_W)
         col = QVBoxLayout(panel)
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(0)
@@ -223,7 +224,7 @@ class DatasetsTab(QWidget):
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
         scroll.setWidget(panel)
-        scroll.setFixedWidth(260)
+        scroll.setFixedWidth(RAIL_W)
         self._left_sidebar = scroll  # shell left-rail toggle hides/shows this
         return scroll
 

@@ -669,6 +669,8 @@ tabs and is what every plot / aggregate / export consumes.
   Click into a pane to focus it — the focused pane drives the sidebar and the
   well picker, and both panes refresh on a selection or channel change. It
   needs a second tab to show something; a tab can't be split against itself.
+  A Review-only control — it's hidden while Analyze or Datasets is active,
+  and switching to either exits an active split automatically.
 
 #### One band across the top
 

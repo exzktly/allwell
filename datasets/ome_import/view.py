@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from util.plate_grid import serpentine_well_labels
+from widgets._support import set_variant
 from widgets.path_field import PathField
 from widgets.plate_order_editor import PlateOrderEditor
 from datasets.ome_import.ome_import_compute import (
@@ -336,6 +337,7 @@ class OmeImportPage(QWidget):
         )
 
     def _on_source_changed(self) -> None:
+        set_variant(self._run_btn, "primary")
         # Auto-fill the destination the first time (unless the user set one).
         if self._src_field.path() and not self._dest_user_set:
             self._dest_field.set_path(str(default_dest(self._src_field.path())))
@@ -416,10 +418,15 @@ class OmeImportPage(QWidget):
         self._queue_btn.setEnabled(not running and self._can_convert())
         if running:
             self._open_btn.setVisible(False)
+            set_variant(self._run_btn, "primary")
 
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root
         self._open_btn.setVisible(True)
+        # Promoted to the primary action on success, demoting Convert — see
+        # ConcatenatePage.show_open_in_review for the reasoning.
+        set_variant(self._open_btn, "primary")
+        set_variant(self._run_btn, "secondary")
 
     def refresh_readout(self) -> None:
         """Recompute the split readout and the frame-order visibility / Run gate."""

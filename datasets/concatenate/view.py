@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.concatenate.concatenate_compute import (
@@ -199,7 +200,7 @@ class ConcatenatePage(QWidget):
         outer.addWidget(self._cross_hint)
 
         for field in (self._ds1_field, self._ds2_field, self._dest_field):
-            field.changed.connect(self._revalidate_cross)
+            field.changed.connect(self._on_field_changed)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
         hdr = QWidget(self)
@@ -310,10 +311,19 @@ class ConcatenatePage(QWidget):
         self._run_btn.setText("Concatenating…" if running else "▶  Concatenate")
         if running:
             self._open_btn.setVisible(False)
+            set_variant(self._run_btn, "primary")
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
         self._open_btn.setVisible(True)
+        # Promoted to the primary action on success, demoting Concatenate --
+        # the natural next step once a run finishes is opening the result,
+        # not running the same merge again, but the plain "secondary"
+        # Open button used to sit visually subordinate to a Concatenate
+        # button that no longer has anything useful left to do until the
+        # inputs change.
+        set_variant(self._open_btn, "primary")
+        set_variant(self._run_btn, "secondary")
 
     # ── internals ────────────────────────────────────────────────────────────
     def _inputs_ready(self) -> bool:
@@ -329,6 +339,17 @@ class ConcatenatePage(QWidget):
         if dest and (dest == d1 or dest == d2):
             return "Destination must be a different folder from both datasets."
         return ""
+
+    def _on_field_changed(self) -> None:
+        # A dataset picked again is the point a fresh run becomes the
+        # relevant next action once more — hand the primary emphasis back
+        # from a still-visible post-success Open button (show_open_in_review).
+        # Deliberately not inside _revalidate_cross() itself: revalidate_fields()
+        # (called from _on_finished, right after show_open_in_review already
+        # promoted Open/demoted Concatenate) calls _revalidate_cross() too,
+        # and doing the reset there would immediately undo that promotion.
+        set_variant(self._run_btn, "primary")
+        self._revalidate_cross()
 
     def _revalidate_cross(self) -> None:
         message = self._cross_message()

@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
+from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.dashboard import ImportLooseDashboard
@@ -260,6 +261,7 @@ class ImportLoosePage(QWidget):
         self._run_btn.setText("Converting…" if running else "▶  Convert")
         if running:
             self._open_btn.setVisible(False)
+            set_variant(self._run_btn, "primary")
         # Locked alongside the run (ImportLooseController._launch captures
         # source_path() once at launch and never re-reads it afterward, but
         # the field itself must not drift out from under the user mid-run
@@ -273,6 +275,11 @@ class ImportLoosePage(QWidget):
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root
         self._open_btn.setVisible(bool(dest_root))
+        if dest_root:
+            # Promoted to the primary action on success, demoting Convert —
+            # see ConcatenatePage.show_open_in_review for the reasoning.
+            set_variant(self._open_btn, "primary")
+            set_variant(self._run_btn, "secondary")
 
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """Re-run the destination field's validator against current disk
@@ -353,6 +360,7 @@ class ImportLoosePage(QWidget):
         self.dashboard.setVisible(True)
 
     def _on_source_changed(self) -> None:
+        set_variant(self._run_btn, "primary")
         self.refresh_readout()
         self._update_status_preview()
 

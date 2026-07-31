@@ -109,6 +109,44 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_war
     ctrl.shutdown()
 
 
+def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path):
+    """Regression guard (UX audit P2-2): success must promote Open to
+    primary and demote Merge to secondary; picking a dataset again
+    afterward (the point a fresh run becomes the relevant action again)
+    must flip it back. Also guards the ordering trap the fix is prone to:
+    revalidate_fields() (called from _on_finished, right after
+    show_open_in_review already promoted/demoted) must not itself reset the
+    run button back to primary before the caller ever sees the promotion."""
+    from datasets.merge_plates.controller import MergePlatesController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"])
+    build_dataset(ds2, wells=["B02"], timepoints=["0h"])
+
+    ctrl = MergePlatesController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    assert page._run_btn.property("variant") == "primary"
+    assert page._open_btn.property("variant") == "secondary"
+
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert ctrl._last_result[0] is True
+    assert page._open_btn.property("variant") == "primary"
+    assert page._run_btn.property("variant") == "secondary"
+
+    page._ds1_field.set_path(str(ds1))
+    page._ds1_field.changed.emit()
+    assert page._run_btn.property("variant") == "primary"
+    ctrl.shutdown()
+
+
 def test_collision_without_remap_fails_gracefully(qapp, tmp_path):
     from datasets.merge_plates.controller import MergePlatesController
 

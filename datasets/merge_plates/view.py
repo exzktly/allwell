@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from util.well_token import canonical_well_label
+from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.merge_plates.dashboard import MergePlatesDashboard
@@ -295,6 +296,7 @@ class MergePlatesPage(QWidget):
         self._run_btn.setText("Merging…" if running else "▶  Merge")
         if running:
             self._open_btn.setVisible(False)
+            set_variant(self._run_btn, "primary")
         # Locked for the run's duration — MergePlatesController._on_wells_planned
         # re-resolves dataset1_path()/dataset2_path() live to colour the
         # dashboard by origin, so a mid-run change would misattribute the
@@ -308,6 +310,10 @@ class MergePlatesPage(QWidget):
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
         self._open_btn.setVisible(True)
+        # Promoted to the primary action on success, demoting Merge — see
+        # ConcatenatePage.show_open_in_review for the reasoning.
+        set_variant(self._open_btn, "primary")
+        set_variant(self._run_btn, "secondary")
 
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """*ok*: after a successful run, the destination's validator message
@@ -351,6 +357,10 @@ class MergePlatesPage(QWidget):
         )
 
     def _on_input_changed(self, *_args) -> None:
+        # A dataset/remap picked again is the point a fresh run becomes the
+        # relevant next action once more — hand the primary emphasis back
+        # from a still-visible post-success Open button (show_open_in_review).
+        set_variant(self._run_btn, "primary")
         self._refresh_run_enabled()
         self._update_status_preview()
 

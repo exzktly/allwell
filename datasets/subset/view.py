@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from util.timepoint import sort_key as tp_sort_key
+from widgets._support import set_variant
 from widgets.flow_layout import FlowLayout
 from widgets.path_field import PathField, folder_picker
 from widgets.well_plate_selector import WellPlateSelector
@@ -316,10 +317,15 @@ class SubsetPage(QWidget):
         self._dest_field.setEnabled(not running)
         if running:
             self._open_btn.setVisible(False)
+            set_variant(self._run_btn, "primary")
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
         self._open_btn.setVisible(True)
+        # Promoted to the primary action on success, demoting Subset — see
+        # ConcatenatePage.show_open_in_review for the reasoning.
+        set_variant(self._open_btn, "primary")
+        set_variant(self._run_btn, "secondary")
 
     def revalidate_fields(self) -> None:
         self._src_field.revalidate()
@@ -344,6 +350,7 @@ class SubsetPage(QWidget):
 
     def _on_source_changed(self) -> None:
         self._open_btn.setVisible(False)
+        set_variant(self._run_btn, "primary")
         self._reload_source_metadata()
         self._refresh_run_enabled()
         self._update_status_preview()

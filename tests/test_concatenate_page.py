@@ -113,3 +113,43 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_content_war
     # correctly disabled against the same now-occupied destination.
     assert not page._dest_field.is_valid()
     ctrl.shutdown()
+
+
+def test_post_run_open_button_is_promoted_and_run_button_demoted(qapp, tmp_path):
+    """Regression guard (UX audit P2-2): the "Open merged dataset in Review"
+    button appeared on success styled the same secondary way it always was,
+    right next to a still-primary-styled Concatenate button that has nothing
+    useful left to do until the inputs change -- the visual emphasis stayed
+    on the wrong control. Success must promote Open to primary and demote
+    Concatenate to secondary; picking a new dataset afterward (the point a
+    fresh run becomes the relevant action again) must flip it back."""
+    from datasets.concatenate.controller import ConcatenateController
+
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"])
+    build_dataset(ds2, wells=["A01"], timepoints=["48h"])
+
+    ctrl = ConcatenateController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    assert page._run_btn.property("variant") == "primary"
+    assert page._open_btn.property("variant") == "secondary"
+
+    page._ds1_field.set_path(str(ds1))
+    page._ds2_field.set_path(str(ds2))
+    page._dest_field.set_path(str(dest))
+    page._revalidate_cross()
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+
+    assert ctrl._last_result[0] is True
+    assert page._open_btn.property("variant") == "primary"
+    assert page._run_btn.property("variant") == "secondary"
+
+    # Picking dataset 1 again (any interactive input change) hands the
+    # primary emphasis back to the run button.
+    page._ds1_field.set_path(str(ds1))
+    page._ds1_field.changed.emit()
+    assert page._run_btn.property("variant") == "primary"
+    ctrl.shutdown()

@@ -624,20 +624,18 @@ QPushButton[variant="toggle_muted"], QToolButton[variant="toggle_muted"] {{
     color: {c.text_muted};
 }}
 
-/* Nested sub-tab bars (Plotting / Image Browser / Sample Definitions / Scatter).
-   Three call sites carried comments claiming this name "picks up the existing
+/* Nested sub-tab bars (Plotting / Image Browser / Sample Definitions). The call
+   sites carried comments claiming this name "picks up the existing
    rectangular-tab QSS"; no such rule existed, so all of them fell through to the
    generic QTabBar::tab rule and were indistinguishable from the top level. */
 QTabBar#SampleDefinitionsSubTabs::tab,
-QTabBar#PlottingSubTabs::tab,
-QTabBar#ScatterSubTabs::tab {{
+QTabBar#PlottingSubTabs::tab {{
     padding: {s.xs}px {s.md}px;
     min-width: 72px;
     color: {c.text_secondary};
 }}
 QTabBar#SampleDefinitionsSubTabs::tab:selected,
-QTabBar#PlottingSubTabs::tab:selected,
-QTabBar#ScatterSubTabs::tab:selected {{
+QTabBar#PlottingSubTabs::tab:selected {{
     color: {c.text_primary};
     border-bottom: 2px solid {c.accent};
 }}

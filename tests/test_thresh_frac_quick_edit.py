@@ -204,7 +204,7 @@ def test_refresh_noop_without_stepper():
 
 def test_ctxbar_stepper_exists(loaded_app):
     assert hasattr(loaded_app, "_plotting_thresh_frac_stepper")
-    assert hasattr(loaded_app, "_plotting_thresh_frac_lbl")
+    assert hasattr(loaded_app, "_plotting_thresh_frac_grp")
     # Default before any edit.
     assert loaded_app._plotting_thresh_frac_stepper.value() == 50.0
 
@@ -229,22 +229,47 @@ def test_stepper_follows_channel_switch(loaded_app):
     assert loaded_app._plotting_thresh_frac_stepper.value() == 123.0
 
 
-def test_stepper_disabled_on_scatter_subtab(loaded_app):
-    # S2: on the Scatter sub-tabs the global Channel/Property/Threshold controls
-    # stay visible but DIMMED (disabled) — with an inline note pointing at the
-    # per-axis selectors — instead of vanishing (a row that disappeared read as
-    # a glitch). They re-enable on the other plot sub-tabs.
+def test_scope_controls_swap_for_the_view_toggle_on_scatter(loaded_app):
+    """The Scatter sub-tab has per-axis channel and property selectors, so the
+    band's global Channel / Property / Threshold groups do not drive its plot.
+
+    They used to stay in the row greyed out, beside a note reading "Scatter uses
+    per-axis channels below" — three dead controls plus an apology for them.
+    The groups are now removed from the band while Scatter is current and the
+    scatter View toggle takes their place, so the row only ever carries controls
+    that do something. ``isHidden`` reflects the explicit visibility flag
+    without needing the offscreen window to be shown.
+    """
     assert loaded_app._notebook.setCurrentByName("Plotting")
-    stepper = loaded_app._plotting_thresh_frac_stepper
-    lbl = loaded_app._plotting_thresh_frac_lbl
+    scope = [loaded_app._plotting_channel_grp,
+             loaded_app._plotting_metric_grp,
+             loaded_app._plotting_thresh_frac_grp]
+    view = loaded_app._plotting_scatter_grp
 
     assert loaded_app._plotting_notebook.setCurrentByName("Scatter Plot")
-    assert not stepper.isHidden() and not lbl.isHidden()
-    assert not stepper.isEnabled() and not lbl.isEnabled()
-    # The explanatory note is shown on scatter (isHidden reflects the explicit
-    # visibility flag without needing the offscreen window to be shown).
-    assert not loaded_app._plotting_scatter_note.isHidden()
+    assert all(g.isHidden() for g in scope), (
+        "a global scope control is still in the band on the Scatter sub-tab"
+    )
+    assert not view.isHidden(), "the scatter View toggle did not take their place"
 
     assert loaded_app._plotting_notebook.setCurrentByName("Bar Plots")
-    assert stepper.isEnabled() and lbl.isEnabled()
-    assert loaded_app._plotting_scatter_note.isHidden()
+    assert not any(g.isHidden() for g in scope)
+    assert view.isHidden()
+
+
+def test_view_toggle_drives_the_scatter_mode(loaded_app):
+    """The toggle is in the shared band, in core; the Scatter page is a feature.
+    They are wired through ``ctx.runtime.scatter.set_mode`` so the core never
+    imports the feature — check the round trip actually lands."""
+    assert loaded_app._notebook.setCurrentByName("Plotting")
+    assert loaded_app._plotting_notebook.setCurrentByName("Scatter Plot")
+    toggle = loaded_app._plotting_scatter_view
+    pages = loaded_app._scatter_pages
+
+    toggle.setCurrentIndex(1)
+    assert loaded_app._ctx.state.scatter.mode == "aggregate"
+    assert pages.currentName() == "aggregate"
+
+    toggle.setCurrentIndex(0)
+    assert loaded_app._ctx.state.scatter.mode == "cells"
+    assert pages.currentName() == "cells"

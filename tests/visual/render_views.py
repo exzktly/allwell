@@ -96,15 +96,6 @@ def grab(widget: QWidget, slug: str, desc: str) -> None:
     print(f"  saved {slug}.png ({size:,} B) — {desc}")
 
 
-def find_tabwidget(root: QWidget, marker: str) -> QTabWidget | None:
-    """First visible QTabWidget under *root* whose tab labels include *marker*."""
-    for tw in root.findChildren(QTabWidget):
-        labels = [tw.tabText(i) for i in range(tw.count())]
-        if marker in labels:
-            return tw
-    return None
-
-
 # ── app construction ───────────────────────────────────────────────────────
 def make_app(load: bool):
     from allwell import AllWellApp
@@ -173,7 +164,7 @@ def capture_review(app) -> None:
     print("  pages:", pages)
 
     # 1) Plotting + its 5 inner sub-tabs (a custom NamedPageStack, not a
-    #    QTabWidget) plus the Scatter Plot inner QTabWidget sub-modes.
+    #    QTabWidget) plus the Scatter Plot sub-modes.
     if goto(app, rev, "Plotting"):
         pnb = getattr(rev, "_plotting_notebook", None)
         subs = list(pnb.pageNames()) if pnb is not None else []
@@ -183,13 +174,7 @@ def capture_review(app) -> None:
             settle(app, 350)
             grab(w, f"10-plotting-{_slug(sub)}", f"Plotting → {sub}")
             if sub == "Scatter Plot":
-                inner = find_tabwidget(rev, "Per-cell points")
-                if inner is not None:
-                    for j in range(inner.count()):
-                        inner.setCurrentIndex(j)
-                        settle(app, 300)
-                        m = inner.tabText(j)
-                        grab(w, f"11-scatter-{_slug(m)}", f"Scatter Plot → {m}")
+                _capture_scatter_modes(app, w, rev)
 
     # 2) Statistics.
     if goto(app, rev, "Statistics"):
@@ -257,6 +242,25 @@ def _current_page(rev) -> QWidget:
     nb = rev._notebook
     name = nb.currentName()
     return rev._tab_frames.get(name) if hasattr(rev, "_tab_frames") else rev
+
+
+def _capture_scatter_modes(app, w, rev) -> None:
+    """Grab the Scatter Plot page once per mode.
+
+    Its two modes are the ``View`` toggle in the shared control band driving a
+    ``NamedPageStack``, not an inner ``QTabWidget``, so the tab-widget search
+    finds nothing here. Degrades to one plain grab if the toggle is absent.
+    """
+    toggle = getattr(rev, "_plotting_scatter_view", None)
+    if toggle is None:
+        grab(w, "11-scatter", "Scatter Plot")
+        return
+    for i in range(toggle.count()):
+        toggle.setCurrentIndex(i)
+        rev._drain_pending_centre_builders()
+        settle(app, 300)
+        label = toggle.segmentText(i)
+        grab(w, f"11-scatter-{_slug(label)}", f"Scatter Plot → {label}")
 
 
 def _capture_multivariate_modes(app, w, rev) -> None:

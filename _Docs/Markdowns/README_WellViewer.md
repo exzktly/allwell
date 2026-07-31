@@ -678,8 +678,8 @@ row, holding four actions:
   axis label / tick / title sizes, grid on/off + alpha + linestyle, legend,
   line / marker widths, axis limits + log-scale, layout engine, and an
   export-profile picker. Axis **limits**, **log-scale** and the **line / marker
-  styling** are scoped to the one plot — the Scatter tab's Per-cell points and
-  Per-well aggregate are separate plots here, so sizing markers for five
+  styling** are scoped to the one plot — the Scatter tab's Cells and
+  Wells views are separate plots here, so sizing markers for five
   aggregate points won't blow up a fifty-thousand-cell cloud. **Typography,
   grid, legend and ticks stay shared** across tabs, so one setting still gives
   a whole figure set a consistent look. On the Bar Plots tab (a Value /
@@ -810,10 +810,15 @@ count) — plus a CDF.
 
 ### Scatter Plot
 
-**What it shows.** Two sub-views on a sub-tab bar — **Per-cell points** (one
-point per cell, X vs Y feature) and **Per-well aggregate** (one point per
-well/timepoint). Per-cell points can be coloured **by well** or, via **Color by
+**What it shows.** Two views, chosen with the **View** toggle at the left of the
+controls row — **Cells** (one point per cell, X vs Y feature) and **Wells** (one
+point per well/timepoint). Cells can be coloured **by well** or, via **Color by
 time**, by timepoint.
+
+The Channel, Property and Threshold controls that the other plot tabs share
+disappear from the controls row here, and the View toggle takes their place.
+That is because this tab picks its channels per axis, from the X-axis and
+Y-axis dropdowns below — the shared controls have nothing to act on.
 
 - **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis

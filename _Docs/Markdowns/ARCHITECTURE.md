@@ -581,6 +581,44 @@ the page stack is purely name-keyed.
 the stack and put back in its original slot — the reparenting primitive behind
 **Split View** (§5.10).
 
+#### The Plotting control band
+
+Below the plot-type tab bar, Plotting's controls are a single
+`widgets.control_band.ControlBand` — the shared band described in §7. Scope
+controls go in its left zone through `add_scope`, which bundles each label with
+its control as one flow item; actions sit flush right. `add_scope` returns the
+group widget, and `centre_view` keeps those on `app._plotting_channel_grp`,
+`_plotting_metric_grp`, `_plotting_thresh_frac_grp` and `_plotting_scatter_grp`
+so the sub-tab handler can swap which ones are in the row.
+
+That swap is what the band buys on the **Scatter Plot** sub-tab. Scatter has
+per-axis channel and property selectors of its own, so the global
+Channel / Property / Threshold controls do not drive its plot; they are removed
+from the band while Scatter is current, and a `Cells | Wells` **View** toggle
+takes their place. The band therefore only ever carries controls that do
+something.
+
+The View toggle lives in the band, which is core, while the Scatter page is a
+feature. They are wired through `ctx.runtime.scatter.set_mode` and the widget
+registry, never an import: the band calls `set_mode`, and `build_scatter_tab`
+mirrors the toggle back through `ctx.widgets.get_or_none("_plotting_scatter_view")`
+so a mode set from elsewhere — restoring a saved view calls `set_mode`
+directly — cannot leave the toggle showing the other mode. `ctx.state.scatter.mode`
+stays the record of which mode is live.
+
+Scatter's own page is a bare `NamedPageStack` with `cells` and `aggregate` pages
+and no tab bar of its own; the band's toggle is its only selector.
+
+The band carries the object name `ControlBand`, which is in
+`ui_helpers._DATA_GATED_OBJECT_NAMES`, so a tab picks up "grey the controls
+until a dataset is loaded" by adopting the band rather than by remembering a
+name. `tests/test_control_band_adoption.py` is an AST ratchet over the modules
+that have adopted it: one band per module, no hand-rolled `FlowLayout` control
+row beside it, no plot-card header built only to be hidden. It is a static scan
+on purpose — a test that builds a tab needs the `viewer_app` fixture, which
+`conftest.py` auto-marks `slow`, and `scripts/test.sh` runs `-m "not slow"`, so
+such a test would never run in CI.
+
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 
 Each module exposes a single `build_<name>_tab(ctx, parent)` function —
@@ -594,8 +632,9 @@ The function:
 1. Creates a `make_plot_with_right_dock(parent)` host (returns
    `(plot_area, layout, right_dock)`) — the right-side dock is reserved for
    the Properties / Export Style sidebar.
-2. Adds the per-tab controls row (channel ctxbar, metric combo, timepoint
-   combo, an **Export** dropdown, **Properties**).
+2. Adds the per-tab controls row (channel, metric combo, timepoint combo, an
+   **Export** dropdown, **Properties**). Plotting's row is the shared
+   `ControlBand` (§5.2).
 3. Mounts a `PlotCard` from `widgets/plot_card.py` (matplotlib figure +
    custom toolbar inside a styled panel).
 4. Stashes the figure / canvas on `app` so controllers can reach them
@@ -2181,6 +2220,8 @@ Notable members worth knowing about by name:
 
 | Widget | What it is |
 |--------|-----------|
+| `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. Its object name is `ControlBand`, which is data-gated (§5.2). |
+| `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | The 8×12 plate selector used by the sidebar and the sample-definitions editor. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus a `setWellMarker` glyph layer — both used by the run dashboard's live plate map. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | An 8×12 plate whose model is an *ordered list* of wells — the acquisition path — not an unordered selection set. Lit wells carry their 1-based visit number and a subtle alpha-blended arrow traces the order across the plate; clicking an off-path well appends it, clicking an on-path one removes it and the rest renumber (`orderChanged`). A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |

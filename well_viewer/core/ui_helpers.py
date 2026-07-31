@@ -216,9 +216,10 @@ def wrap_with_empty_state(
 #: Object names of per-tab control-bar containers that act on the loaded
 #: dataset. They are greyed out until a dataset is present (see
 #: ``refresh_plot_empty_states``) so the empty state isn't a wall of live-looking
-#: controls that do nothing. ``TabCtrl`` is the shared marker every tab's control
-#: row already uses; ``PlottingActionRow`` is the plotting ctxbar's channel row.
-_DATA_GATED_OBJECT_NAMES = ("TabCtrl", "PlottingActionRow")
+#: controls that do nothing. ``TabCtrl`` is the marker a tab's own control row
+#: uses; ``ControlBand`` is the shared band (``widgets/control_band.py``), so a
+#: tab picks the gating up by adopting it rather than by remembering a name.
+_DATA_GATED_OBJECT_NAMES = ("TabCtrl", "ControlBand")
 
 
 def refresh_plot_empty_states(win: Any) -> None:

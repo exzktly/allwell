@@ -1,25 +1,31 @@
 """Unified Scatter Plot tab — merges the per-cell and per-well aggregate views.
 
-Two sub-tabs:
+Two modes:
 
-- ``Per-cell points`` — one matplotlib point per gated cell (intensity X
-  vs intensity Y at a single timepoint).
-- ``Per-well aggregate`` — one point per replicate or well (aggregated
-  statistic on each axis, multi-timepoint).
+- ``cells`` — one matplotlib point per gated cell (intensity X vs intensity Y
+  at a single timepoint).
+- ``aggregate`` — one point per replicate or well (aggregated statistic on each
+  axis, multi-timepoint).
 
 Each page is built by the original ``build_scatter_cells_tab`` /
 ``build_scatter_agg_tab`` so the two rendering pipelines, controllers,
 and per-mode controls stay separate. Only the active page is visible, so
 controls that don't apply to the other mode aren't shown.
+
+The mode is chosen from the ``View`` toggle in the shared control band, not
+from a tab bar inside this page: a tab strip here was a third row of tabs under
+the pane's tab row and the plot-type row, and what it selects is the scope of
+what gets plotted, which is what the band's left zone is for. The page
+therefore holds a bare page stack and nothing else. ``ctx.runtime.scatter``
+carries the ``set_mode`` callback the band drives, and ``ctx.state.scatter.mode``
+stays the record of which mode is live.
 """
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QTabWidget, QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from well_viewer.core.centre_view import NamedPageStack
 from well_viewer.features.scatter.agg_tab_view import build_scatter_agg_tab
 from well_viewer.features.scatter.cells_tab_view import build_scatter_cells_tab
 from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
@@ -41,60 +47,54 @@ def build_scatter_tab(ctx, parent: QWidget) -> None:
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(0)
 
-    tab_widget = QTabWidget(parent)
-    tab_widget.setObjectName("ScatterSubTabs")
-    tab_widget.setUsesScrollButtons(False)
-    tab_widget.setElideMode(Qt.ElideNone)
-    tab_widget.tabBar().setUsesScrollButtons(False)
-    tab_widget.tabBar().setElideMode(Qt.ElideNone)
-    tab_widget.tabBar().setExpanding(False)
-    layout.addWidget(tab_widget, 1)
+    pages = NamedPageStack(parent)
+    layout.addWidget(pages, 1)
 
     cells_page = QWidget()
     QVBoxLayout(cells_page).setContentsMargins(0, 0, 0, 0)
     build_scatter_cells_tab(ctx, cells_page)
-    tab_widget.addTab(cells_page, "Per-cell points")
+    pages.addPage(_MODE_CELLS, cells_page)
 
     agg_page = QWidget()
     QVBoxLayout(agg_page).setContentsMargins(0, 0, 0, 0)
     build_scatter_agg_tab(ctx, agg_page)
-    tab_widget.addTab(agg_page, "Per-well aggregate")
+    pages.addPage(_MODE_AGG, agg_page)
 
-    # A8 burn-down: the sub-tab QTabWidget handle goes through the WidgetRegistry
-    # (``ctx.widgets``), which stamps ``app._scatter_tab_widget``. The active-mode
+    # A8 burn-down: the page-stack handle goes through the WidgetRegistry
+    # (``ctx.widgets``), which stamps ``app._scatter_pages``. The active mode
     # is typed state (``ctx.state.scatter.mode``); the set-mode callback stays.
-    ctx.widgets.register("_scatter_tab_widget", tab_widget)
+    ctx.widgets.register("_scatter_pages", pages)
 
     def _set_mode(mode: str) -> None:
-        if mode == _MODE_AGG:
-            if tab_widget.currentIndex() != 1:
-                tab_widget.setCurrentIndex(1)
-            ctx.state.scatter.mode = _MODE_AGG
+        mode = _MODE_AGG if mode == _MODE_AGG else _MODE_CELLS
+        pages.setCurrentByName(mode)
+        ctx.state.scatter.mode = mode
+        # Mirror the band's View toggle. The mode is also set from outside the
+        # toggle — restoring a saved view calls this directly — and a toggle
+        # left showing the other mode is worse than no toggle. Reached through
+        # the widget registry so the feature still does not import the shell.
+        toggle = ctx.widgets.get_or_none("_plotting_scatter_view")
+        if toggle is not None:
+            blocked = toggle.blockSignals(True)
             try:
-                update_scatter_menus(ctx)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            try:
-                redraw_scatter_agg_orchestrate(ctx)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        else:
-            if tab_widget.currentIndex() != 0:
-                tab_widget.setCurrentIndex(0)
-            ctx.state.scatter.mode = _MODE_CELLS
-            try:
-                update_scatter_menus(ctx)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-            try:
-                redraw_scatter_orchestrate(ctx)
-            except Exception:
-                swallowed()  # was: pass (silent except)
-    ctx.runtime.scatter.set_mode = _set_mode
+                toggle.setCurrentByData(mode)
+            finally:
+                toggle.blockSignals(blocked)
+        try:
+            update_scatter_menus(ctx)
+        except Exception:
+            swallowed()  # was: pass (silent except)
+        redraw = (redraw_scatter_agg_orchestrate if mode == _MODE_AGG
+                  else redraw_scatter_orchestrate)
+        try:
+            redraw(ctx)
+        except Exception:
+            swallowed()  # was: pass (silent except)
 
-    tab_widget.currentChanged.connect(
-        lambda idx: _set_mode(_MODE_AGG if idx == 1 else _MODE_CELLS)
-    )
+    ctx.runtime.scatter.set_mode = _set_mode
+    # Adopt whichever mode a restored session left in state, so the page and the
+    # band's toggle agree from the first paint.
+    pages.setCurrentByName(ctx.state.scatter.mode or _MODE_CELLS)
 
 
 def scatter_active_mode(ctx) -> str:

@@ -92,6 +92,27 @@ def test_dashboard_well_stage_updates_color_and_overall_bar(qapp):
     assert d._bar.value() == 2
 
 
+def test_terminal_well_states_carry_a_marker_not_just_colour(qapp):
+    """Regression guard (UX audit P2-12): "merged" and "warned" painted
+    colour only -- accessibility-unreadable to anyone who can't distinguish
+    success-green from accent-lilac, and the one state (warned) that means
+    "look at this, something's off" had no glyph at all once the transient
+    "⚙" cleared."""
+    from datasets.concatenate.dashboard import ConcatDashboard
+    from widgets.well_plate_selector import _parse_well_id
+
+    d = ConcatDashboard()
+    d.set_wells(["A01", "A02", "A03"])
+    d.set_well_stage("A01", "merging")
+    assert d._plate._grid._markers.get(_parse_well_id("A01")) == "⚙"
+    d.set_well_stage("A01", "merged")
+    assert d._plate._grid._markers.get(_parse_well_id("A01")) == "✓"
+    d.set_well_stage("A02", "warned")
+    assert d._plate._grid._markers.get(_parse_well_id("A02")) == "!"
+    d.set_well_stage("A03", "pending")
+    assert d._plate._grid._markers.get(_parse_well_id("A03")) is None
+
+
 def test_dashboard_no_per_well_failed_state(qapp):
     """There is no reachable per-well failure -- an unknown stage is ignored,
     not painted red (a well-loop exception aborts the whole run instead)."""

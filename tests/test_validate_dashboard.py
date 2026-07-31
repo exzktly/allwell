@@ -47,6 +47,23 @@ def test_reset_clears_state(qapp):
     assert d._bar.value() == 0
 
 
+def test_complete_wells_carry_a_marker_not_just_colour(qapp):
+    """Regression guard (UX audit P2-12): "complete" painted colour only --
+    accessibility-unreadable to anyone who can't distinguish success-green
+    from the other three states' colours, unlike partial/missing which
+    already carry "!"."""
+    from widgets.well_plate_selector import _parse_well_id
+
+    d = ValidateDashboard()
+    d.set_wells(["A01", "B02", "C03"])
+    d.set_well_state("A01", "complete")
+    assert d._plate._grid._markers.get(_parse_well_id("A01")) == "✓"
+    d.set_well_state("B02", "partial", missing_count=1)
+    assert d._plate._grid._markers.get(_parse_well_id("B02")) == "!"
+    d.set_well_state("C03", "no_output")
+    assert d._plate._grid._markers.get(_parse_well_id("C03")) is None
+
+
 def test_unknown_well_and_state_are_ignored(qapp):
     d = ValidateDashboard()
     d.set_wells(["A01"])

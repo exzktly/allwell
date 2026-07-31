@@ -154,7 +154,11 @@ class SubsetController(QObject):
             return
         self._well_stage[w] = stage
         self.page._plate.setWellColor(w, well_color(stage))
-        self.page._plate.setWellMarker(w, "⚙" if stage == "copying" else None)
+        # Terminal states carry a marker too, not just colour (accessibility
+        # — colour alone is unreadable to anyone who can't distinguish
+        # success-green from accent-lilac).
+        marker = {"copying": "⚙", "done": "✓", "empty": "!"}.get(stage)
+        self.page._plate.setWellMarker(w, marker)
 
     def _well_tooltip(self, well_id: str) -> str:
         w = canon_well(well_id)

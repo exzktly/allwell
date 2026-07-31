@@ -65,7 +65,11 @@ class ImportLooseDashboard(PlateProgress):
             return
         self._well_stage[w] = stage
         self._plate.setWellColor(w, self._well_color(w))
-        self._plate.setWellMarker(w, "⚙" if stage == "writing" else None)
+        # Terminal states carry a marker too, not just colour (accessibility
+        # — colour alone is unreadable to anyone who can't distinguish
+        # success-green from text-muted grey).
+        marker = {"writing": "⚙", "done": "✓"}.get(stage)
+        self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_stage.values() if s == "done"))
         self._refresh_rail()
 

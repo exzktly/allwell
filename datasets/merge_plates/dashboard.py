@@ -83,6 +83,11 @@ class MergePlatesDashboard(PlateProgress):
             return "⚙"
         if self._well_origin.get(w) == "ds2":
             return "2"
+        # A dataset-1 well's own terminal "merged" state -- ds2's origin
+        # marker above already doubles as its own "not just colour" signal,
+        # so this only fires for the wells that would otherwise have none.
+        if self._well_stage.get(w) == "merged":
+            return "✓"
         return None
 
     def set_done(self, summary: str, *, tooltip: str | None = None) -> None:

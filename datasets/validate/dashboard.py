@@ -65,7 +65,11 @@ class ValidateDashboard(PlateProgress):
         self._well_state[w] = state
         self._well_missing_count[w] = missing_count
         self._plate.setWellColor(w, self._well_color(w))
-        self._plate.setWellMarker(w, "!" if state in ("partial", "missing") else None)
+        # Terminal states carry a marker too, not just colour (accessibility
+        # — colour alone is unreadable to anyone who can't distinguish
+        # success-green from danger-red).
+        marker = "!" if state in ("partial", "missing") else "✓" if state == "complete" else None
+        self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_state.values() if s == "complete"))
         self._refresh_rail()
 

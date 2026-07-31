@@ -87,10 +87,18 @@ class ConcatDashboard(PlateProgress):
             return
         self._well_stage[w] = stage
         self._plate.setWellColor(w, self._well_color(w))
-        self._plate.setWellMarker(w, "⚙" if stage == "merging" else None)
+        self._plate.setWellMarker(w, self._well_marker(w))
         self.set_overall(sum(1 for s in self._well_stage.values()
                               if s in ("merged", "warned")))
         self._refresh_rail()
+
+    def _well_marker(self, w: str) -> str | None:
+        # Terminal states carry a marker too, not just colour (accessibility
+        # — colour alone is unreadable to anyone who can't distinguish
+        # success-green from accent-lilac).
+        return {
+            "merging": "⚙", "merged": "✓", "warned": "!",
+        }.get(self._well_stage.get(w))
 
     def set_phase(self, phase: str) -> None:
         if phase == self._phase:

@@ -339,6 +339,10 @@ def test_run_progress_overlays_onto_the_picker_plate(qapp, tmp_path):
         key = _parse_well_id(well)
         assert grid._colors.get(key) is not None
         assert grid._colors[key].name() == well_color("done").lower()
+        # Regression guard (UX audit P2-12): "done" painted colour only --
+        # accessibility-unreadable to anyone who can't distinguish
+        # success-green from the other states' colours.
+        assert grid._markers.get(key) == "✓"
     ctrl.shutdown()
 
 

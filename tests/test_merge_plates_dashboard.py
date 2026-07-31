@@ -64,6 +64,21 @@ def test_dataset2_wells_carry_a_marker_independent_of_colour(qapp):
     assert d._well_marker("C03") == "2"
 
 
+def test_ds1_merged_wells_carry_a_check_mark(qapp):
+    """Regression guard (UX audit P2-12): a dataset-1 "merged" well had no
+    marker at all -- accent2's own "2" marker already covers ds2's wells
+    (P1-9), but a plain ds1 well relied on colour alone to say "done"."""
+    d = MergePlatesDashboard()
+    d.set_wells(["A01"], ["C03"])
+    assert d._well_marker("A01") is None
+    d.set_well_stage("A01", "merged")
+    assert d._well_marker("A01") == "✓"
+    # ds2's origin marker still wins over the terminal check mark -- it's
+    # the more load-bearing signal (which dataset a well came from).
+    d.set_well_stage("C03", "merged")
+    assert d._well_marker("C03") == "2"
+
+
 def test_reset_clears_state(qapp):
     d = MergePlatesDashboard()
     d.set_wells(["A01"], ["C03"])

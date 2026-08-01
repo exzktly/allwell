@@ -418,14 +418,60 @@ def _cell_mfi(ctx, label, chan: str, well: str, tp: str, fov: str,
     return (getattr(label, "_mfi_by_nid", None) or {}).get(nid)
 
 
+# Rendered cells carry their source image's shape, not the image — the same
+# contract CropTool reads, so both resolve it through one helper.
+from well_viewer.data.crop_tool import label_source_shape as _label_source_shape  # noqa: E402
+
+
+# The one cell whose pixels the hover readout is currently holding:
+# ``((well, chan, tp, fov, row), array)``. One frame, replaced as the cursor
+# moves to the next cell — enough that dragging across a single cell decodes at
+# most once, without the grid holding every cell's frame open.
+_HOVER_ARRAY: tuple = ((), None)
+
+
+def _hover_array(ctx, well: str, chan: str, tp: str, fov: str, r: int):
+    """The full-resolution array behind one cell, fetched on demand.
+
+    Normally a decode-cache hit; a miss re-reads that one frame. Returns None if
+    it can't be loaded (the readout then shows nothing, as it did when the array
+    was missing before).
+    """
+    global _HOVER_ARRAY
+    key = (well, chan, tp, fov, r)
+    cached_key, cached_arr = _HOVER_ARRAY
+    if cached_key == key and cached_arr is not None:
+        return cached_arr
+    cache = ctx.state.image_table.image_cache
+    if not isinstance(cache, dict):
+        return None
+    arr = None
+    with swallow("image table: hover readout load"):
+        use_tophat = _row_display_opts(ctx, r, chan)[0]
+        ratio = _find_ratio_for_channel(ctx, chan)
+        if ratio is not None:
+            arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
+        else:
+            arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+    _HOVER_ARRAY = (key, arr)
+    return arr
+
+
 def _install_cell_events(
-    ctx, label, crop_tool, well: str, chan: str, tp: str, fov: str,
+    ctx, label, crop_tool, well: str, chan: str, tp: str, fov: str, r: int = 0,
 ) -> None:
     """Wire press/move/release on a cell's image label.
 
     Replaces ``CropTool.install_events`` so the same label can both serve
     as the crop-tool's drag target and report the intensity of the pixel
     under the cursor on every move.
+
+    The pixel readout re-fetches the cell's array on demand rather than the
+    label holding one: a grid pinning every cell's full-resolution frame is
+    memory that grows with the grid and that the decode cache's budget cannot
+    bound (see ``image_table_generate``). The fetch is normally a decode-cache
+    hit, and the result is held for the cell currently under the cursor
+    (:func:`_hover_array`) so moving within one cell never decodes twice.
     """
     from PySide6.QtCore import QObject, QEvent
     from PySide6.QtCore import Qt as _Qt
@@ -435,6 +481,15 @@ def _install_cell_events(
     if crop_tool is not None:
         label.setCursor(_Qt.CrossCursor)
 
+    def _cell_array(_lbl):
+        # A label that carries its own array (Segmentation's single review image)
+        # is read directly; a grid cell carries only its shape, so its pixels are
+        # fetched on demand.
+        own = getattr(_lbl, "_raw_arr", None)
+        if own is not None:
+            return own
+        return _hover_array(ctx, well, chan, tp, fov, r)
+
     def _show_tip(_lbl, global_pt, text: str) -> None:
         if not text or global_pt is None:
             QToolTip.hideText()
@@ -443,22 +498,20 @@ def _install_cell_events(
 
     def _label_to_image_xy(_lbl, lx: int, ly: int):
         """Map label-local coords to source-image (x, y). Returns None when
-        cursor is outside the rendered pixmap area."""
-        try:
-            import numpy as _np
-        except Exception:
-            return None
+        cursor is outside the rendered pixmap area.
+
+        Needs the source image's *shape* only, which the label carries — the
+        pixels themselves are fetched on demand by the readout."""
         pm = _lbl.pixmap()
-        arr = getattr(_lbl, "_raw_arr", None)
-        if arr is None or pm is None:
+        shape = _label_source_shape(_lbl)
+        if shape is None or pm is None:
             return None
         if hasattr(pm, "isNull") and pm.isNull():
             return None
         pw, ph = pm.width(), pm.height()
         if pw <= 0 or ph <= 0:
             return None
-        a = _np.asarray(arr)
-        full_h, full_w = a.shape[:2]
+        full_h, full_w = shape
         crop = getattr(_lbl, "_crop", None)
         if crop is not None:
             y0, x0, y1, x1 = crop
@@ -484,11 +537,11 @@ def _install_cell_events(
         """Pixel readout for label-local ``(lx, ly)``; '' when the cursor is off
         the rendered image or the label carries no array. Includes the combo
         identity as a prefix, so it's a superset of the static cell tooltip."""
-        arr = getattr(_lbl, "_raw_arr", None)
-        if arr is None:
-            return ""
         xy = _label_to_image_xy(_lbl, lx, ly)
         if xy is None:
+            return ""
+        arr = _cell_array(_lbl)
+        if arr is None:
             return ""
         x, y = xy
         intensity = _format_pixel_intensity(arr, y, x)
@@ -902,9 +955,15 @@ def image_table_generate(ctx) -> None:
                 )
                 failed += 1
                 pix, arr, ok, note = None, None, False, "(render failed)"
-            # Overlay cells recompute their blend from the live channel set, so
-            # don't cache a single array under them (export re-blends too).
-            rendered[(r, c)] = None if is_overlay else arr
+            # The render model records WHICH cells drew, never their pixels.
+            # Holding each cell's full-resolution frame here (and on the label
+            # below) pinned the whole grid's pixels for as long as the table was
+            # on screen — memory that scales with the grid and that the decode
+            # cache's budget cannot bound, because the pins live outside it. The
+            # consumers that used to read an array from here (export, the
+            # composite column) already lazy-load on a None, and that load is a
+            # decode-cache hit.
+            rendered[(r, c)] = None
 
             cell_widget = QWidget()
             cl = QVBoxLayout(cell_widget)
@@ -915,13 +974,18 @@ def image_table_generate(ctx) -> None:
             img_label.setToolTip(_cell_title(ctx, cell, overlay_chans))
             img_label.setAlignment(Qt.AlignCenter)
             if ok:
-                # CropTool needs the FULL source array + the active crop on the
-                # label so label-pixel → image-pixel coord conversion works even
-                # when the label already shows a crop.
-                img_label._raw_arr = arr  # type: ignore[attr-defined]
+                # CropTool + the pixel readout need the FULL source image's
+                # SHAPE and the active crop, so label-pixel → image-pixel coord
+                # conversion works even when the label already shows a crop.
+                # Only the shape: holding the array here would pin every cell's
+                # frame for the life of the grid (see the render-model note above).
+                shape = getattr(arr, "shape", None)
+                img_label._raw_shape = (  # type: ignore[attr-defined]
+                    (int(shape[0]), int(shape[1])) if shape and len(shape) >= 2 else None)
                 img_label._crop = crop_tool.crop if crop_tool else None  # type: ignore[attr-defined]
                 _install_cell_events(ctx, img_label, crop_tool,
-                                     cell["well"], cell["chan"], cell["tp"], cell["fov"])
+                                     cell["well"], cell["chan"], cell["tp"],
+                                     cell["fov"], r)
                 # Right-click a rendered cell → one-off per-cell override popover
                 # (writes the cell combos the renderer reads, then re-renders).
                 img_label.setContextMenuPolicy(Qt.CustomContextMenu)

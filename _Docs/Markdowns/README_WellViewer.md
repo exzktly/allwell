@@ -1342,6 +1342,13 @@ channel for every well).
   unavailable (an external drive spinning down, a folder still being written)
   comes back the next time you press **Generate** — nothing is written off for
   the session, so there is no need to reload the dataset.
+- **Large grids** — the images a Generate decodes are held in one bounded cache
+  sized to your machine's RAM, and nothing else keeps them: the grid on screen
+  holds thumbnails, not full-resolution frames. A grid whose images exceed that
+  budget therefore re-reads some of them on the next pass, so a plate-wide walk
+  of large frames takes longer to Generate — but it stays within memory instead
+  of failing to load images part-way through. If a big grid is slow, narrow the
+  well or timepoint selection, or crop the view.
 - **Well labels** — where a well would show its `A01` position (axis / group labels,
   cell tooltips, exported labels and titles), its custom label is shown instead when
   one is set under Sample Definitions → Well Labels.

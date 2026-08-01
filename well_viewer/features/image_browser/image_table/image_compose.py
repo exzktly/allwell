@@ -806,8 +806,9 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
     Single source of truth for "what pixels does this cell display": applies the
     shared crop, resolves the row's LUT window / colormap / display toggles, and
     delegates to :func:`_compose_image_table_rgb`. Callers pass the already-loaded
-    ``arr`` (the live path reuses ``last_render``; the export path lazy-loads it)
-    so this helper stays free of the ratio-load / controller coupling. Returns
+    ``arr`` (the live path passes the frame it just loaded; the export path and the
+    composite column lazy-load theirs, which is a decode-cache hit) so this helper
+    stays free of the ratio-load / controller coupling. Returns
     ``None`` when ``arr`` is ``None`` or can't be composed.
 
     Mirrors the per-cell block in ``export._build_export_figure`` — extracted so
@@ -901,9 +902,10 @@ def composite_column_rgb(ctx, cache, cells, crop_tool, c: int, rendered):
     """Build the additive composite RGB for grid column *c*.
 
     Gathers each grid row's displayed RGB (via :func:`cell_display_rgb`) for
-    column *c* and merges them with :func:`composite_additive_rgb`. Reuses the
-    per-generate ``rendered`` arrays when present, else lazy-loads (mirroring the
-    export path). Returns a uint8 (H, W, 3) array, or ``None``.
+    column *c* and merges them with :func:`composite_additive_rgb`. Uses a
+    ``rendered`` array when the caller supplies one, else lazy-loads through the
+    decode cache (mirroring the export path; the live render model stores no
+    arrays). Returns a uint8 (H, W, 3) array, or ``None``.
     """
     rendered = rendered or {}
     rgbs = []

@@ -11,11 +11,14 @@ microscopy images in QLabels can reuse the same UI + interaction:
   callback fires (typically a redraw).
 - A status label shows the current crop size; a Reset button clears it.
 
-Each thumbnail QLabel that should be drag-croppable must carry a
-``_raw_arr`` attribute (the source image) and optionally a ``_crop``
+Each thumbnail QLabel that should be drag-croppable must describe its
+source image's size — either ``_raw_shape`` (an ``(h, w)`` tuple) or
+``_raw_arr`` (the source array itself) — and optionally a ``_crop``
 attribute reflecting any pre-applied crop (so coordinate conversion
 maps label-local pixels back to full-image pixels even when the label
-already shows a sub-region).
+already shows a sub-region). Prefer ``_raw_shape``: a grid of labels
+each holding its own full-resolution array pins the whole grid's pixels
+for as long as it is on screen, which is memory no image cache can bound.
 """
 
 from __future__ import annotations
@@ -36,6 +39,27 @@ except Exception:  # pragma: no cover
 from well_viewer.core.ui_helpers import btn_secondary
 
 CropRect = tuple[int, int, int, int]  # (y0, x0, y1, x1) in source pixels
+
+
+def label_source_shape(label: QLabel) -> tuple[int, int] | None:
+    """``(height, width)`` of the full source image behind *label*, or None.
+
+    Prefers the label's ``_raw_shape`` tuple and falls back to measuring
+    ``_raw_arr`` for labels that still carry the array itself.
+    """
+    shape = getattr(label, "_raw_shape", None)
+    if shape:
+        try:
+            return int(shape[0]), int(shape[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+    arr = getattr(label, "_raw_arr", None)
+    if arr is None or not _NP_AVAILABLE:
+        return None
+    dims = _np.asarray(arr).shape[:2]
+    if len(dims) < 2:
+        return None
+    return int(dims[0]), int(dims[1])
 
 
 class CropTool:
@@ -170,17 +194,17 @@ class CropTool:
     ) -> tuple[int, int] | None:
         """Translate label-local pixels to source-image (y, x) pixels.
 
-        Reads ``label._raw_arr`` (full source) and ``label._crop`` (any
-        pre-applied crop the label is currently showing).
+        Reads the label's source-image shape (:func:`label_source_shape`) and
+        ``label._crop`` (any pre-applied crop the label is currently showing).
         """
         if not _NP_AVAILABLE:
             return None
         pm = label.pixmap()
-        arr = getattr(label, "_raw_arr", None)
-        if pm is None or arr is None or pm.width() <= 0 or pm.height() <= 0:
+        shape = label_source_shape(label)
+        if pm is None or shape is None or pm.width() <= 0 or pm.height() <= 0:
             return None
         crop = getattr(label, "_crop", None)
-        full_h, full_w = _np.asarray(arr).shape[:2]
+        full_h, full_w = shape
         if crop is not None:
             y0, x0, y1, x1 = crop
             view_h = max(1, int(y1) - int(y0))
@@ -259,9 +283,9 @@ class CropTool:
             return True
         side = max(2, max(y1 - y0, x1 - x0))
         if _NP_AVAILABLE:
-            arr = getattr(label, "_raw_arr", None)
-            if arr is not None:
-                full_h, full_w = _np.asarray(arr).shape[:2]
+            shape = label_source_shape(label)
+            if shape is not None:
+                full_h, full_w = shape
                 side = min(side, full_h - y0, full_w - x0)
         if side < 2:
             return True

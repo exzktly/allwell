@@ -26,8 +26,9 @@ class ImageTableState:
     ``active_wells`` / ``active_channels`` are the sidebar / dropdown
     multi-selections. ``zoom`` is the only global display option; top-hat /
     boundaries / binary are per-row (on the LUT/Display boxes). ``last_render``
-    / ``image_cache`` are the hot-path caches rebuilt by ``image_table_generate``
-    (not persisted).
+    / ``image_cache`` are the hot-path bookkeeping rebuilt by
+    ``image_table_generate`` (not persisted); neither holds decoded pixels —
+    those live only in the bounded cache in ``data/image_discovery``.
     """
 
     # selections
@@ -135,6 +136,11 @@ class ImageTableState:
     fixed_vals: dict = field(default_factory=dict)
 
     # per-generate caches (rebuilt each render; never persisted)
+    # {(row, col): None} — which cells the last Generate drew, NOT their pixels.
+    # Holding each cell's frame here pinned the whole grid's pixels for as long as
+    # the table was on screen, outside any cache budget; the consumers that read
+    # it (export, the composite column) lazy-load a missing array instead, which
+    # is a decode-cache hit.
     last_render: dict = field(default_factory=dict)
     image_cache: dict = field(default_factory=dict)
     # Pooled Auto-LUT window per base channel, {chan_lower: (lo, hi)}, computed each

@@ -147,18 +147,35 @@ def read_member_bytes(zip_path: Path, member: str) -> bytes | None:
 # Table Generate, a crop/zoom/LUT tweak) nearly free on the decode axis, and it
 # collapses the Image Table's prefetch double-decode into one (the warm pass
 # fills the cache, the render pass hits it).
-DEFAULT_MAX_DECODE_ENTRIES = 512
-DEFAULT_MAX_DECODE_BYTES = 1 << 32   # 4 GiB
-# Sized for the Image Table's actual documented use cases (a full 96-well
-# plate walk, a facet per timepoint/FOV) rather than an arbitrary round
-# number: the old 96-entry/1 GiB budget was smaller than a single plate's
-# worth of distinct images, so any such grid evicted entries the prefetch
-# had just warmed before the render pass could reuse them — reintroducing,
-# via cache thrash, exactly the double-decode this cache exists to collapse
-# into one (see the module docstring above and _prefetch_cell_arrays in
-# image_table/controller.py). Still bounded, not unlimited — a dataset
-# large enough to blow even this budget still degrades via LRU eviction
-# instead of growing without limit.
+DEFAULT_MAX_DECODE_ENTRIES = 2048
+
+
+def _default_max_decode_bytes() -> int:
+    """Byte budget for decoded pixels: ~15% of RAM, within [512 MiB, 2 GiB].
+
+    This cache is the **only** owner of decoded frames — the Image Table's
+    render model and its cell widgets keep shapes, not arrays — so this budget
+    is the app's ceiling for decoded pixels rather than a hint. That makes it a
+    number that has to survive the machine it runs on: microscopy frames are
+    commonly 2048×2048, which is 16 MB once widened to float32, so a 96-well
+    plate walk is ~1.5 GB of pixels and a multi-timepoint grid is several times
+    that. A fixed 4 GiB budget on a 16 GB laptop (that is also holding Qt, the
+    dataframes, and possibly a segmentation stack) drives the machine into swap
+    and then into failed allocations, which surface as images that decode for
+    some cells and not others. Scaling to installed RAM keeps a large grid slow
+    (LRU eviction, so frames re-decode) instead of unstable.
+
+    Entries are capped too, so a dataset of very small frames can't grow the
+    bookkeeping without bound.
+    """
+    try:
+        total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
+    except (ValueError, OSError, AttributeError):  # pragma: no cover - platform
+        return 1 << 30
+    return int(max(512 * (1 << 20), min(2 * (1 << 30), total * 0.15)))
+
+
+DEFAULT_MAX_DECODE_BYTES = _default_max_decode_bytes()
 
 
 class _DecodedArrayCache:

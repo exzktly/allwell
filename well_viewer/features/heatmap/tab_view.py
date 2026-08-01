@@ -13,7 +13,6 @@ from well_viewer.core.plot_card_actions import (
 )
 
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QInputDialog, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
@@ -89,18 +88,16 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     metric_cb.currentIndexChanged.connect(lambda _i: _redraw(ctx))
     band.add_scope("Aggregation", metric_cb)
 
-    # The timepoint scrubber. It is deliberately a fixed width rather than a
-    # stretching one: a slider with stretch takes every pixel the scope zone
-    # has, so the controls beside it wrap to a second row at any pane width.
-    from widgets.styled_slider import StyledSlider as _StyledSlider
-    tp_slider = reg.register("_heatmap_tp_slider", _StyledSlider(Qt.Horizontal))
-    tp_slider.setMinimum(0)
-    tp_slider.setMaximum(0)
-    tp_slider.setFixedWidth(160)
-    tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
-    tp_label = reg.register("_heatmap_tp_label", QLabel("—"))
-    tp_label.setMinimumWidth(64)
-    band.add_scope("Timepoint", tp_slider, tp_label)
+    # The timepoint picker — a LabeledComboBox like every other Timepoint
+    # control in Review, painting its own "Timepoint: 4.0h" prefix. Was a
+    # StyledSlider; unified to a combo so scrubbing to an exact timepoint
+    # doesn't depend on pixel-precise dragging and the control matches its
+    # siblings (Stats, Distribution, …) instead of being the one holdout.
+    from widgets.labeled_combo import LabeledComboBox
+    tp_cb = reg.register("_heatmap_tp_cb", LabeledComboBox("Timepoint"))
+    tp_cb.addItem("—")
+    tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed(ctx))
+    band.add_scope("", tp_cb)
 
     status_lbl = reg.register("_heatmap_status_lbl", QLabel(""))
     status_lbl.setObjectName("Muted")
@@ -268,13 +265,12 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 # ── helpers attached or referenced from runtime_app ─────────────────────────
 
 def refresh_heatmap_timepoints(ctx) -> None:
-    # A8-teardown T3: modern infrastructure — slider/label via ``ctx.widgets``,
+    # A8-teardown T3: modern infrastructure — the combo via ``ctx.widgets``,
     # the timepoint-value cache via ``ctx.runtime.heatmap``, timepoints/focus via
     # the ctx leaves. The onward ``_redraw`` is the one render handoff residual
     # (the heatmap render tree still takes ``app`` — a later one-feature pass).
-    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
-    label = ctx.widgets.get_or_none("_heatmap_tp_label")
-    if slider is None:
+    cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
+    if cb is None:
         return
     try:
         from well_viewer.features.scatter.controller import get_all_timepoints
@@ -282,39 +278,34 @@ def refresh_heatmap_timepoints(ctx) -> None:
     except Exception:
         tps = []
     ctx.state.heatmap.tp_values = tps
-    # Seed the slider from the shared focus timepoint (N5) when one is set and
-    # present, so opening Heat Map after picking a timepoint on Distribution
-    # lands on the same point; else default to the first timepoint.
+    # Seed from the shared focus timepoint (N5) when one is set and present,
+    # so opening Heat Map after picking a timepoint on Distribution lands on
+    # the same point; else default to the first timepoint.
     from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
     focus_idx = nearest_index(tps, current_focus_tp(ctx)) if tps else None
     start_idx = focus_idx if focus_idx is not None else 0
-    blocked = slider.blockSignals(True)
+    blocked = cb.blockSignals(True)
     try:
-        slider.setMinimum(0)
-        slider.setMaximum(max(0, len(tps) - 1))
-        slider.setValue(start_idx)
-    finally:
-        slider.blockSignals(blocked)
-    if label is not None:
+        cb.clear()
         if tps:
-            label.setText(f"t = {tps[start_idx]:g} h")
+            cb.addItems([f"{v:g} h" for v in tps])
+            cb.setCurrentIndex(start_idx)
         else:
-            label.setText("—")
+            cb.addItem("—")
+    finally:
+        cb.blockSignals(blocked)
     _redraw(ctx)
 
 
 def _on_tp_changed(ctx) -> None:
     tps: list[float] = list(ctx.state.heatmap.tp_values or [])
-    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
-    label = ctx.widgets.get_or_none("_heatmap_tp_label")
-    if not tps or slider is None:
+    cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
+    if not tps or cb is None:
         return
-    idx = max(0, min(slider.value(), len(tps) - 1))
-    if label is not None:
-        label.setText(f"t = {tps[idx]:g} h")
+    idx = max(0, min(cb.currentIndex(), len(tps) - 1))
     # Publish the shared focus timepoint (N5). In Split View, emit so the other
     # pane (Distribution) redraws live; otherwise update the value silently and
-    # redraw only this tab — keeps slider scrubbing as cheap as before (no
+    # redraw only this tab — keeps switching timepoints as cheap as before (no
     # offscreen fan-out). Other tabs pick the value up on next show.
     from well_viewer.core.timepoint_sync import set_focus_tp
     if ctx.runtime.split.active:

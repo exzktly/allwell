@@ -20,6 +20,7 @@ from typing import Any
 from well_viewer.persistence import _doc
 from well_viewer.core.channel_state_controller import set_active_channel
 from well_viewer.core.safe import swallowed
+from well_viewer.core.ui_helpers import multiselect_button_text
 
 _logger = logging.getLogger("well_viewer")
 
@@ -638,13 +639,11 @@ def _apply_bar(ctx, state: dict) -> None:
             ctx.state.bar.tp_selections = merged or saved
         except Exception:
             swallowed()  # was: pass (silent except)
-        # Sync the hidden back-compat combo + the "(X selected)" label so every
-        # downstream reader (export, status text, the popup itself) reflects
-        # the restored selection. Without this the popup defaults checkboxes
-        # from a stale ``tp_selections`` snapshot taken before the restore.
-        # Inlined (rather than importing the bar controller helpers) so this
-        # module doesn't add a new deferred ``from well_viewer.features ...``
-        # import — the cycle-budget guard in test_deferred_imports caps those.
+        # Sync the hidden back-compat combo + the picker button's "Timepoints: …
+        # selected" readout so every downstream reader (export, status text, the
+        # popup itself) reflects the restored selection. Without this the popup
+        # defaults checkboxes from a stale ``tp_selections`` snapshot taken
+        # before the restore.
         try:
             sels = ctx.state.bar.tp_selections or {}
             hidden = ctx.widgets.get_or_none("_bar_tp_cb")
@@ -653,14 +652,9 @@ def _apply_bar(ctx, state: dict) -> None:
                     if sels[tp_str]:
                         hidden.setCurrentText(tp_str)
                         break
-            lbl = ctx.widgets.get_or_none("_bar_tp_label")
-            if lbl is not None:
-                total = len(sels)
-                count = sum(1 for v in sels.values() if v)
-                if total and count == total:
-                    lbl.setText(f"(All {count} selected)")
-                else:
-                    lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
+            btn = ctx.widgets.get_or_none("_bar_tp_button")
+            if btn is not None:
+                btn.setText(multiselect_button_text("Timepoints", sels))
         except Exception:
             _logger.debug("view_state: bar tp post-restore sync failed", exc_info=True)
     _bar = ctx.state.feature_slice("bar")

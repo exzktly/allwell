@@ -12,6 +12,7 @@ import re
 from well_viewer.domain.batch_models import ReplicateSet
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
+from well_viewer.core.ui_helpers import multiselect_button_text
 from well_viewer.data.data_loading import extract_well_token as _extract_well_token
 
 _logger = logging.getLogger(__name__)
@@ -547,17 +548,11 @@ def toggle_bar_pool_replicates(ctx) -> None:
 
 
 def update_bar_tp_selection_display(ctx) -> None:
-    """Refresh the bar tab's "(X selected)" label below the picker."""
-    sels = ctx.state.bar.tp_selections
-    lbl = getattr(ctx.runtime.barplot, "tp_label", None)
-    if lbl is None:
+    """Refresh the "Timepoints: …" readout painted on the picker button itself."""
+    btn = getattr(ctx.runtime.barplot, "tp_button", None)
+    if btn is None:
         return
-    total = len(sels)
-    count = sum(1 for v in sels.values() if v)
-    if total and count == total:
-        lbl.setText(f"(All {count} selected)")
-    else:
-        lbl.setText(f"({count}/{total} selected)" if total else "(0 selected)")
+    btn.setText(multiselect_button_text("Timepoints", ctx.state.bar.tp_selections))
 
 
 def sync_hidden_bar_tp_combo(ctx) -> None:

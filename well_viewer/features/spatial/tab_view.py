@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
 
 from widgets.control_band import ControlBand
 from widgets.icons import make_icon
+from widgets.labeled_combo import LabeledComboBox
 
 from well_viewer.core.plot_card_actions import (
     copy_active_card_as_svg, save_active_card_figure, save_card_to_gallery,
@@ -179,7 +180,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     reg.register("_sp_metric_cb", metric_cb)
     band.add_scope("Metric", metric_cb)
 
-    tp_cb = QComboBox()
+    tp_cb = LabeledComboBox("Timepoint")
     tp_cb.addItem("First available", None)
     tp_cb.setToolTip(
         "Spatial analysis is per frame — pick which timepoint to analyse. "
@@ -188,7 +189,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     tp_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_timepoint(ctx, tp_cb.currentData()))
     reg.register("_sp_tp_cb", tp_cb)
-    band.add_scope("Timepoint", tp_cb)
+    band.add_scope("", tp_cb)
 
     # Labelled, not a bare tick. A "✓" button says nothing about what it does;
     # this one forces a fresh compute, and the glyph now says so too.

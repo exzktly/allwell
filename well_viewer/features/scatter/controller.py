@@ -13,6 +13,7 @@ import logging
 _logger = logging.getLogger(__name__)
 
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
+from well_viewer.core.ui_helpers import multiselect_button_text
 from well_viewer.core.channel_state_controller import populate_metric_combo, get_fluor_gate, ratio_label_for
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.ratio_models import is_ratio_key
@@ -836,18 +837,14 @@ def scatter_axis_metric_key(ctx, axis: str, *, agg: bool = False) -> str:
 
 
 def update_scatter_tp_selection_display(ctx) -> None:
-    """Update the per-cell scatter label showing selected timepoints.
+    """Update the per-cell scatter picker button's "Timepoints: …" readout.
 
-    Mirrors _update_tp_selection_display so the two pickers behave
-    identically (label format included).
+    Mirrors update_tp_selection_display so the two pickers behave identically.
     """
-    tp_selections = ctx.runtime.scatter.tp_selections or {}
-    count = sum(1 for v in tp_selections.values() if v)
-    total = len(tp_selections)
-    label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
-    tp_label = ctx.widgets.get_or_none("_scatter_tp_label")
-    if tp_label is not None:
-        tp_label.setText(label_text)
+    tp_button = ctx.widgets.get_or_none("_scatter_tp_button")
+    if tp_button is not None:
+        tp_button.setText(multiselect_button_text(
+            "Timepoints", ctx.runtime.scatter.tp_selections or {}))
 
 
 
@@ -865,11 +862,8 @@ def refresh_scatter_metric_for_axis(ctx, axis: str) -> None:
 
 
 def update_tp_selection_display(ctx) -> None:
-    """Update the aggregate scatter label showing selected timepoints."""
-    agg_tp_selections = ctx.runtime.scatter.agg_tp_selections or {}
-    count = sum(1 for v in agg_tp_selections.values() if v)
-    total = len(agg_tp_selections)
-    label_text = f"(All {count} selected)" if count == total else f"({count}/{total} selected)"
-    tp_label = ctx.widgets.get_or_none("_scatter_agg_tp_label")
-    if tp_label is not None:
-        tp_label.setText(label_text)
+    """Update the aggregate scatter picker button's "Timepoints: …" readout."""
+    tp_button = ctx.widgets.get_or_none("_scatter_agg_tp_button")
+    if tp_button is not None:
+        tp_button.setText(multiselect_button_text(
+            "Timepoints", ctx.runtime.scatter.agg_tp_selections or {}))

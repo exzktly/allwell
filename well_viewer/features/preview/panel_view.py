@@ -22,6 +22,7 @@ from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
 from widgets.stepper import Stepper
+from widgets.labeled_combo import LabeledComboBox
 from functools import partial
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
@@ -96,12 +97,12 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("FOV", fov_menu)
 
-    tp_menu = reg.register("_review_image_tp_menu", QComboBox())
+    tp_menu = reg.register("_review_image_tp_menu", LabeledComboBox("Timepoint"))
     tp_menu.addItems(["—"])
     tp_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    ctrl.add_scope("Timepoint", tp_menu)
+    ctrl.add_scope("", tp_menu)
     rt.tp_var = tp_menu
     rt.tp_cb = tp_menu  # alias for review_image_controller
 

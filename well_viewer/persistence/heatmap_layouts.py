@@ -21,7 +21,7 @@ def _collect_settings(app) -> dict:
         if isinstance(v, (int, float)) and math.isfinite(float(v)):
             return float(v)
         return None
-    slider = getattr(app, "_heatmap_tp_slider", None)
+    tp_cb = getattr(app, "_heatmap_tp_cb", None)
     hm = app._app_state.feature_slice("heatmap")
     return {
         # cmap / vmin / vmax are the typed HeatmapState display stamps (D-persist;
@@ -32,9 +32,9 @@ def _collect_settings(app) -> dict:
         "vmax": _f(hm.vmax) if hm is not None else None,
         "repset_avg": bool(hm.repset_avg if hm is not None else False),
         "log_scale": bool(hm.log_scale if hm is not None else False),
-        # Timepoint-slider position so the scrubbed timepoint restores between
-        # sessions (clamped to the live slider range on restore).
-        "tp_index": int(slider.value()) if slider is not None else 0,
+        # Selected timepoint's combo index, so it restores between sessions
+        # (clamped to the live item count on restore).
+        "tp_index": int(tp_cb.currentIndex()) if tp_cb is not None else 0,
     }
 
 
@@ -162,25 +162,22 @@ def apply_persisted_settings(ctx) -> None:
         finally:
             log_cb.blockSignals(blocked)
 
-    # Timepoint slider position. The slider's range is populated by
+    # Selected timepoint. The combo's items are populated by
     # ``refresh_heatmap_timepoints`` (called just before this on tab build), so
-    # clamp to the live maximum; the caller's ``_redraw`` then renders the
+    # clamp to the live item count; the caller's ``_redraw`` then renders the
     # restored timepoint. Signals are blocked so we don't re-enter the redraw
-    # path here.
+    # path here — ``setCurrentIndex`` alone repaints the combo's own
+    # "Timepoint: …" text, it isn't a separate label to update in step.
     tp_idx = settings.get("tp_index")
     if isinstance(tp_idx, int):
-        slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
-        if slider is not None:
-            clamped = max(0, min(tp_idx, slider.maximum()))
-            blocked = slider.blockSignals(True)
+        tp_cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
+        if tp_cb is not None and tp_cb.count():
+            clamped = max(0, min(tp_idx, tp_cb.count() - 1))
+            blocked = tp_cb.blockSignals(True)
             try:
-                slider.setValue(clamped)
+                tp_cb.setCurrentIndex(clamped)
             finally:
-                slider.blockSignals(blocked)
-            tps = list((hm.tp_values if hm is not None else None) or [])
-            label = ctx.widgets.get_or_none("_heatmap_tp_label")
-            if label is not None and tps and clamped < len(tps):
-                label.setText(f"t = {tps[clamped]:g} h")
+                tp_cb.blockSignals(blocked)
 
     # Successfully applied — keep the dict around in case the tab rebuilds.
     # (No need to clear it; a subsequent save_to_data_dir overwrites the file

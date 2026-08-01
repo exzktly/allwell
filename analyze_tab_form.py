@@ -194,6 +194,10 @@ class AnalyzeTabFormMixin:
         lbl.setWhatsThis(info)
         return lbl
 
+    #: Row label column width, narrow enough to leave room for a field at
+    #: RAIL_W; word-wrap below lets an overflowing label wrap instead of clip.
+    _ROW_LABEL_W = 108
+
     def _row(self, parent: QWidget, label: str) -> QWidget:
         """Append a two-column label+widget row to *parent*; return the right cell."""
         row = QWidget(parent)
@@ -203,15 +207,16 @@ class AnalyzeTabFormMixin:
 
         lbl = QLabel(label, row)
         lbl.setObjectName("Muted")
-        lbl.setFixedWidth(150)
-        rl.addWidget(lbl)
+        lbl.setFixedWidth(self._ROW_LABEL_W)
+        lbl.setWordWrap(True)
+        rl.addWidget(lbl, 0, Qt.AlignTop)
 
         right = QWidget(row)
         right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         rr = QHBoxLayout(right)
         rr.setContentsMargins(0, 0, 0, 0)
         rr.setSpacing(4)
-        rl.addWidget(right)
+        rl.addWidget(right, 0, Qt.AlignTop)
 
         parent.layout().addWidget(row)
         return right
@@ -263,9 +268,10 @@ class AnalyzeTabFormMixin:
 
         schema_str_row = self._row(sec, "Schema string")
         self._schema_str_edit = QLineEdit(DEFAULT_SCHEMA, schema_str_row)
-        # Expand to fill the row — a fixed 170 px clipped the full schema string
-        # (e.g. "experiment:channel:well:fov:timepoint" → "nnel:well:fov:…").
-        self._schema_str_edit.setMinimumWidth(220)
+        # Expand to fill the row. The string never fits unscrolled at any width
+        # this sidebar offers — a scrollable single-line edit (cursor pinned to
+        # the start below), so the minimum just keeps a legible chunk on screen.
+        self._schema_str_edit.setMinimumWidth(165)
         self._schema_str_edit.setCursorPosition(0)  # show the start, not the tail
         schema_str_row.layout().addWidget(self._schema_str_edit, 1)
         self._schema_str_edit.editingFinished.connect(self._sync_dropdowns_from_string)
@@ -296,7 +302,12 @@ class AnalyzeTabFormMixin:
             if not _cellpose_ok and _value.startswith("cellpose"):
                 continue
             self._seg_method_cb.addItem(_label, userData=_value)
-        self._seg_method_cb.setFixedWidth(230)
+        # Narrower than the longest item ("Label-free (Cellpose, brightfield)")
+        # — Qt elides the closed box's text; the tooltip carries the full label.
+        self._seg_method_cb.setFixedWidth(165)
+        self._seg_method_cb.currentIndexChanged.connect(
+            lambda _i: self._seg_method_cb.setToolTip(self._seg_method_cb.currentText()))
+        self._seg_method_cb.setToolTip(self._seg_method_cb.currentText())
         seg_row.layout().addWidget(self._seg_method_cb)
         seg_row.layout().addStretch(1)
         self._seg_method_cb.currentIndexChanged.connect(lambda _: self._refresh_segmentation_hints())
@@ -732,28 +743,28 @@ class AnalyzeTabFormMixin:
     def _build_compute_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Compute Options", collapsible=True, collapsed=True)
 
+        # Hint below its row, not inline — matches the Mesh tile/sigma note below.
+        def _hint(text: str) -> None:
+            lbl = QLabel(text, sec)
+            lbl.setObjectName("Muted")
+            lbl.setWordWrap(True)
+            sec.layout().addWidget(lbl)
+
         tf_row = self._row(sec, "TF threads (0=auto)")
         self._tf_threads_edit = self._entry(tf_row, "0", width=40)
-        tf_hint = QLabel("(0 → auto-select 4)", tf_row)
-        tf_hint.setObjectName("Muted")
-        tf_row.layout().addWidget(tf_hint)
         tf_row.layout().addStretch(1)
+        _hint("(0 → auto-select 4)")
 
         w_row = self._row(sec, "Workers (0=auto)")
         self._workers_edit = self._entry(w_row, "0", width=40)
-        w_hint = QLabel("(process count override)", w_row)
-        w_hint.setObjectName("Muted")
-        w_row.layout().addWidget(w_hint)
         w_row.layout().addStretch(1)
+        _hint("(process count override)")
 
         # StarDist prediction tiling — caps per-worker peak RAM on large frames
         # (an untiled ~4K predict can use several GB/worker, so parallel workers
         # exhaust memory). The value is the MAX pixels per tile SIDE (not the
-        # number of tiles): StarDist splits the frame into as many tiles as
-        # needed so no block exceeds it. 0 = off (default).
-        # Label kept short so it fits the 150 px label column — a longer string
-        # clips mid-word and leaves a stray "=" hanging at the edge. The px/side
-        # meaning is spelled out in the info-icon tooltip below.
+        # number of tiles), 0 = off (default). Label kept short so it fits the
+        # row label column; the px/side meaning is in the info-icon tooltip.
         tile_row = self._row(sec, "Max tile size (0=off)")
         # Same width as the TF threads / Workers entries above it — these three
         # small integer fields read as one uniform column.
@@ -1283,7 +1294,9 @@ class AnalyzeTabFormMixin:
         self._auto_threshold_method_cb.addItem("Otsu (whole dataset)", "otsu")
         self._auto_threshold_method_cb.addItem("Positive / negative controls",
                                                "controls")
-        self._auto_threshold_method_cb.setFixedWidth(220)
+        # Narrower than "Positive / negative controls" — Qt elides the closed
+        # box's text; the tooltip below spells out both options regardless.
+        self._auto_threshold_method_cb.setFixedWidth(165)
         self._auto_threshold_method_cb.setToolTip(
             "Otsu: split each channel's per-cell signal from image background, "
             "pooled across the dataset — no controls needed, but it cannot tell "

@@ -1,7 +1,7 @@
 """A8 burn-down — heatmap widget handles moved into the WidgetRegistry.
 
-The Heat Map tab builder stashed its ~17 Qt widgets (combos, edits, checkboxes,
-slider, PlotCard, figure/axes/canvas) on the app god-object. They now go through
+The Heat Map tab builder stashed its ~16 Qt widgets (combos, edits, checkboxes,
+PlotCard, figure/axes/canvas) on the app god-object. They now go through
 `ctx.widgets.register`, which also stamps `app._<name>` so the heatmap
 controller's legacy `app._heatmap_*` readers keep resolving. This test proves
 the tab builds and every migrated handle is present on the app afterwards.
@@ -21,7 +21,7 @@ _HANDLES = (
     "_heatmap_export_dock", "_chan_cb_heatmap", "_heatmap_metric_cb",
     "_heatmap_cmap_cb", "_heatmap_scale_cb", "_heatmap_vmin_edit",
     "_heatmap_vmax_edit", "_heatmap_repset_avg_cb", "_heatmap_log_scale_cb",
-    "_heatmap_status_lbl", "_heatmap_tp_slider", "_heatmap_tp_label",
+    "_heatmap_status_lbl", "_heatmap_tp_cb",
     "_heatmap_card", "_heatmap_fig", "_heatmap_ax", "_heatmap_cax",
     "_heatmap_canvas",
 )

@@ -22,6 +22,7 @@ from well_viewer.core.ui_helpers import (
     make_plot_with_right_dock, make_properties_button, plotting_band_slot)
 from well_viewer.features.export.service import export_distribution_data
 from well_viewer.data.data_loading import get_all_timepoints
+from widgets.labeled_combo import LabeledComboBox
 
 
 _MODE_OPTIONS = ["Histogram", "Histogram + KDE", "KDE only", "CDF", "Violin (per group)"]
@@ -59,10 +60,10 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     )
     chan_cb.hide()
 
-    tp_cb = reg.register("_distribution_tp_cb", QComboBox(ctrl))
+    tp_cb = reg.register("_distribution_tp_cb", LabeledComboBox("Timepoint", ctrl))
     tp_cb.setMinimumContentsLength(8)
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
-    ctrl.add_scope("Timepoint", tp_cb)
+    ctrl.add_scope("", tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget
 
     mode_cb = reg.register("_distribution_mode_cb", QComboBox(ctrl))

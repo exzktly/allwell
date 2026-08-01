@@ -28,17 +28,19 @@ def qapp():
 def test_analyze_form_fits_narrow_sidebar(qapp):
     """Regression: long-label checkboxes (a QCheckBox reports its full text as
     its minimum width) used to pin the form ~822 px wide, so the scroll area
-    could never shrink to its 438 px viewport — every word-wrap hint was laid
-    out wide and then clipped instead of wrapping. The offending checkboxes are
-    now WrapCheckBox, so the form's minimum width fits the sidebar."""
+    could never shrink to its RAIL_W-px viewport — every word-wrap hint was
+    laid out wide and then clipped instead of wrapping. The offending
+    checkboxes are now WrapCheckBox, so the form's minimum width fits the
+    sidebar."""
     from PySide6.QtWidgets import QScrollArea
     from analyze_tab import AnalyzeTab
+    from well_viewer.core.app_shell_view import RAIL_W
     from widgets.wrap_checkbox import WrapCheckBox
 
     tab = AnalyzeTab()
     form = next(sa.widget() for sa in tab.findChildren(QScrollArea))
-    # The form must be able to shrink to (≤) the scroll area's 438 px minimum.
-    assert form.minimumSizeHint().width() <= 440, form.minimumSizeHint().width()
+    # The form must be able to shrink to (≤) the scroll area's RAIL_W viewport.
+    assert form.minimumSizeHint().width() <= RAIL_W + 2, form.minimumSizeHint().width()
     # the long-label checkboxes wrap rather than pinning the panel wide
     for cb in (tab._qc_remove_debris_cb,
                tab._dry_run_cleanup_cb):

@@ -16,6 +16,7 @@ refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 
 from widgets.control_band import ControlBand
+from widgets.labeled_combo import LabeledComboBox
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
@@ -45,12 +46,14 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_review_tp_cb", QComboBox())
-    tp_cb.setFixedWidth(140)
+    tp_cb = reg.register("_review_tp_cb", LabeledComboBox("Timepoint"))
+    # Wider than the plain-combo 140px it replaced — room for the painted
+    # "Timepoint: " prefix plus a typical value before Qt starts eliding.
+    tp_cb.setFixedWidth(170)
     tp_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    ctrl.add_scope("Timepoint", tp_cb)
+    ctrl.add_scope("", tp_cb)
 
     refresh_btn = QPushButton("Refresh", ctrl)
     refresh_btn.setProperty("variant", "secondary")

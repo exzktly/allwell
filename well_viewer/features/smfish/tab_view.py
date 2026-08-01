@@ -72,6 +72,7 @@ _NO_SMFISH_MESSAGE = (
 
 
 from widgets.control_band import ControlBand
+from widgets.labeled_combo import LabeledComboBox
 
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
@@ -147,11 +148,11 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("FOV", fov_cb)
 
-    tp_cb = reg.register("_smfish_tp_cb", QComboBox())
+    tp_cb = reg.register("_smfish_tp_cb", LabeledComboBox("Timepoint"))
     tp_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    ctrl.add_scope("Timepoint", tp_cb)
+    ctrl.add_scope("", tp_cb)
 
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
     threshold_edit.setFixedWidth(90)

@@ -24,7 +24,10 @@ def save_to_pipeline_info(ctx) -> None:
     state = ctx.state
     if not state.dataset.data_dir:
         return
-    from well_viewer.core.channel_state_controller import get_all_fluor_gates
+    from well_viewer.core.channel_state_controller import (
+        get_all_fluor_gates,
+        seg_channel_token_of,
+    )
     from well_viewer.domain.gating_state import (
         build_gating_block,
         save_gating_to_pipeline_info,
@@ -45,6 +48,10 @@ def save_to_pipeline_info(ctx) -> None:
         scatter_gate_choices_gating=_sorted_or_none(cg.gating_choices),
         scatter_gate_choices_thresh=_sorted_or_none(cg.thresh_choices),
         use_scatter_thresh=cg.use_scatter_thresh,
+        # The nuclear channel's ThreshFracOn default differs from the readout
+        # default, so the block builder needs to know which channel it is to
+        # diff each value against the right one.
+        seg_channel_token=seg_channel_token_of(ctx),
     )
     save_gating_to_pipeline_info(state.dataset.data_dir, block)
 

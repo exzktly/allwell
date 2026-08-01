@@ -41,12 +41,14 @@ from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
     ratio_label_for,
     refresh_thresh_frac_quick_edit,
+    seg_channel_token_of,
 )
 from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.core.safe import swallowed
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.data.data_loading import get_rows
+from well_viewer.domain.gating_state import default_thresh_frac_on
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.features.grouping.cell_gating.gating_compute import (
@@ -387,10 +389,16 @@ def cell_gating_get_fluor_gate(ctx, channel: str) -> float:
 
 
 def cell_gating_get_thresh_frac_on(ctx, channel: str) -> float:
-    """ThreshFracOn cutoff for *channel* from the typed slice (default 50.0)."""
+    """ThreshFracOn cutoff for *channel* from the typed slice.
+
+    A channel with no stored cutoff falls back to its default — 50.0 for a
+    readout channel, 0.0 for the nuclear/segmentation channel (see
+    ``well_viewer.domain.gating_state.default_thresh_frac_on``)."""
     key = _cell_gating_resolve_key(ctx, channel)
     val = ctx.state.cell_gating.thresh_frac_on.get(key)
-    return 50.0 if val is None else float(val)
+    if val is None:
+        return default_thresh_frac_on(channel, seg_channel_token_of(ctx))
+    return float(val)
 
 
 def cell_gating_on_gating_change(ctx) -> None:
@@ -1087,6 +1095,7 @@ def _cell_gating_build_channel_controls(ctx) -> None:
         inner_layout.addWidget(lbl)
         return
 
+    seg_tok = seg_channel_token_of(ctx)
     for channel, row_label in row_specs:
         ch_row = QWidget(ctx.runtime.cell_gating.inner)
         rl = QHBoxLayout(ch_row)
@@ -1113,7 +1122,12 @@ def _cell_gating_build_channel_controls(ctx) -> None:
 
         rl.addWidget(QLabel("ThreshFracOn:", ch_row))
         if channel not in ctx.runtime.cell_gating.thresh_frac_edits:
-            thresh_edit = QLineEdit(str(gate_state.thresh_frac_on.setdefault(channel, 50.0)), ch_row)
+            # Seed the slice with this channel's default — 50.0 for a readout
+            # channel, 0.0 for the nuclear/segmentation one, which has no
+            # meaningful ON/OFF brightness cut.
+            seeded = gate_state.thresh_frac_on.setdefault(
+                channel, default_thresh_frac_on(channel, seg_tok))
+            thresh_edit = QLineEdit(str(seeded), ch_row)
             thresh_edit.setFixedWidth(90)
             thresh_edit.editingFinished.connect(
                 lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c)

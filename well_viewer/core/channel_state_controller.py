@@ -937,21 +937,36 @@ def get_all_fluor_gates(ctx) -> Dict[str, float]:
 
 
 
+def seg_channel_token_of(ctx) -> str:
+    """The dataset's nuclear/segmentation channel token, or ``""``.
+
+    Read defensively: the threshold leaves are reached from unit tests that
+    stand ``ctx.state`` up as a minimal namespace carrying only the slices that
+    leaf needs, and an absent token simply means "no channel is the nuclear
+    one". The token itself is seeded from ``pipeline_info.json``'s
+    ``nuclear_token`` by :func:`recalculate_threshold`.
+    """
+    channel_state = getattr(ctx.state, "channel", None)
+    return str(getattr(channel_state, "seg_channel_token", "") or "")
+
+
 def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     """Get ThreshFracOn threshold. Uses active channel if not specified.
 
     A8 teardown: pure typed state, so it takes ``ctx``. Post-R6 the per-channel
     ThreshFracOn cutoffs live on the ``CellGatingState`` slice; a channel with no
-    configured cutoff falls back to the global ``channel.threshold`` — the same
-    value the pre-R6 "tab-not-built" guard returned (``channel.threshold`` has no
-    writers, so it is the constant 50.0 the cell-gating accessor also defaults
-    to; the fallback is kept explicit in case that ever changes)."""
+    configured cutoff falls back to its default — 50.0 for a readout channel,
+    0.0 for the nuclear/segmentation channel, per
+    :func:`well_viewer.domain.gating_state.default_thresh_frac_on`."""
     if channel is None:
         channel = ctx.state.channel.active_channel
+    from well_viewer.domain.gating_state import default_thresh_frac_on
     from well_viewer.features.grouping.cell_gating.controller import _cell_gating_resolve_key
     key = _cell_gating_resolve_key(ctx, channel)
     tf = ctx.state.cell_gating.thresh_frac_on
-    return tf[key] if key in tf else ctx.state.channel.threshold
+    if key in tf:
+        return tf[key]
+    return default_thresh_frac_on(channel, seg_channel_token_of(ctx))
 
 
 def ensure_cell_gating_tab_built(ctx) -> bool:

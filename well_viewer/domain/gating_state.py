@@ -47,8 +47,34 @@ def pipeline_info_available(out_dir: Path) -> bool:
 
 DEFAULT_FLUOR_GATE = 0.0
 DEFAULT_THRESH_FRAC_ON = 50.0
+DEFAULT_THRESH_FRAC_ON_NUCLEAR = 0.0
 
 _EPS = 1e-9
+
+
+def default_thresh_frac_on(channel: str, seg_channel_token: str = "") -> float:
+    """The ON/OFF intensity cutoff *channel* starts at when nothing is saved.
+
+    A readout channel starts at :data:`DEFAULT_THRESH_FRAC_ON`: "how bright must
+    a cell be before it counts as ON" is a question about a fluorescence
+    measurement, and a non-zero starting cut is the useful answer.
+
+    The nuclear channel — the segmentation channel recorded as ``nuclear_token``
+    in ``pipeline_info.json``, the one nuclei are *found* with — starts at
+    :data:`DEFAULT_THRESH_FRAC_ON_NUCLEAR` (0.0, i.e. no cut). An ON/OFF
+    brightness cut carries no meaning there: every segmented cell is by
+    construction a detection in that channel, so the readout default only served
+    to hide most nuclei from the Image Table's threshold / binary view.
+
+    A value the user has actually set is unaffected — this is consulted only
+    when a channel has no stored cutoff. Matching is case-insensitive on the
+    normalised channel token; ratio keys (``ratio:<name>``) never match.
+    """
+    seg = str(seg_channel_token or "").strip().lower()
+    chan = str(channel or "").strip().lower()
+    if seg and chan == seg:
+        return DEFAULT_THRESH_FRAC_ON_NUCLEAR
+    return DEFAULT_THRESH_FRAC_ON
 
 
 def _resolve_pipeline_info_path(out_dir: Path) -> Path:
@@ -77,6 +103,7 @@ def build_gating_block(
     scatter_gate_choices_gating: list | None = None,
     scatter_gate_choices_thresh: list | None = None,
     use_scatter_thresh: bool = False,
+    seg_channel_token: str = "",
 ) -> dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
@@ -88,6 +115,13 @@ def build_gating_block(
     only when the inclusion mode is on *and* gates exist — unlike the scalar
     thresholds there is no "default" value to diff against, so the on-mode flag
     is the gate that keeps default state out of the sidecar.
+
+    ``seg_channel_token`` is the dataset's nuclear/segmentation channel, whose
+    ThreshFracOn default differs (see :func:`default_thresh_frac_on`). It has to
+    be known here or the diff-against-default would strip the wrong values:
+    a nuclear cutoff the user deliberately raised to the readout default would
+    be dropped, and the zero it starts at would be written out as if it were a
+    deliberate choice.
     """
     block: dict[str, Any] = {}
     fg_out: dict[str, float] = {}
@@ -99,7 +133,7 @@ def build_gating_block(
 
     tfo_out: dict[str, float] = {}
     for ch, val in (thresh_frac_on or {}).items():
-        if not _is_default(val, DEFAULT_THRESH_FRAC_ON):
+        if not _is_default(val, default_thresh_frac_on(ch, seg_channel_token)):
             tfo_out[str(ch)] = float(val)
     if tfo_out:
         block["thresh_frac_on"] = tfo_out

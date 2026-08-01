@@ -12,7 +12,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from well_viewer.core.channel_state_controller import get_all_fluor_gates
+from well_viewer.core.channel_state_controller import (
+    get_all_fluor_gates,
+    seg_channel_token_of,
+)
 from well_viewer.core.lazy import lazy_names
 from well_viewer.persistence import view_state
 
@@ -93,6 +96,7 @@ def _capture_gating_block(ctx) -> dict:
         scatter_gate_choices_gating=_sorted_or_none(cg.gating_choices),
         scatter_gate_choices_thresh=_sorted_or_none(cg.thresh_choices),
         use_scatter_thresh=cg.use_scatter_thresh,
+        seg_channel_token=seg_channel_token_of(ctx),
     )
 
 

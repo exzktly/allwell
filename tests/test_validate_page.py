@@ -258,7 +258,7 @@ def test_check_reports_missing_fov_and_offers_completion(qapp, tmp_path):
 
     seen = []
 
-    def _open(path, pipeline_info=None, *, incremental=False):
+    def _open(path, pipeline_info=None, *, incremental=False, force_wells=None):
         seen.append(path)
 
     ctrl = ValidateController(on_open_in_analyze=_open)
@@ -382,11 +382,14 @@ def test_failed_check_clears_the_previous_runs_findings(qapp, tmp_path):
     _run_worker_to_completion(ctrl)
 
     assert "Failed" in page.dashboard._headline.text()
-    # clear_findings() shows the empty-state hint inside the list (P1-2),
-    # not literally zero items -- the stale findings from the unrelated
-    # dataset are still gone, which is what this test actually guards.
+    # The stale findings from the unrelated dataset are gone, which is what
+    # this test guards -- and what replaces them is the reason the check
+    # failed. It used to be the "Pick a dataset folder and press Check."
+    # placeholder, which reads as "nothing happened" directly under a red
+    # Failed headline; see
+    # test_failed_check_shows_why_and_withdraws_the_completion_offer.
     assert page._findings_list.count() == 1
-    assert "Pick a dataset folder" in page._findings_list.item(0).text()
+    assert "Check failed" in page._findings_list.item(0).text()
     ctrl.shutdown()
 
 
@@ -545,3 +548,54 @@ def test_live_well_paint_matches_the_finished_report(qapp, tmp_path):
 
     assert page.dashboard._well_state["A01"] == "partial"
     assert page.dashboard._well_missing_count["A01"] == 1
+
+
+def test_failed_check_shows_why_and_withdraws_the_completion_offer(qapp, tmp_path):
+    """Regression guard for the pair of symptoms a failed re-check produced.
+
+    The findings list reset to its "Pick a dataset folder and press Check."
+    placeholder -- which says nothing happened -- while the "Complete this run
+    in Analyze" button left over from the earlier successful check stayed
+    visible and live. Clicking it then handed Analyze a dataset root whose
+    sidecar had just proved unreadable, so no settings could travel with it and
+    the user landed on an Analyze tab that looked untouched. The failure now
+    replaces the findings, and the offer goes with the report it belonged to."""
+    import csv
+    import zipfile
+
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h", "24h"])
+    # Crash-truncate A01 so the first check offers completion.
+    with zipfile.ZipFile(tmp_path / "out" / "A01_out.zip") as zf:
+        keep = [m for m in zf.namelist() if "_0h" in m]
+    with zipfile.ZipFile(tmp_path / "out" / "A01_out.zip", "w") as zf:
+        for m in keep:
+            zf.writestr(m, b"x")
+    csv_path = tmp_path / "out" / "measurements_A01.csv"
+    rows = [r for r in csv.DictReader(csv_path.open()) if r["timepoint"] == "0h"]
+    with csv_path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+
+    ctrl = ValidateController(on_open_in_analyze=lambda *a, **k: None)
+    page = ctrl.page
+    page.set_dataset_path(str(tmp_path))
+    page._check_btn.click()
+    _run_worker_to_completion(ctrl)
+    assert page._complete_btn.isVisibleTo(page)
+    assert page._findings_list.count() >= 1
+
+    # Now make the sidecar unreadable and re-check on the same page.
+    (tmp_path / "out" / "pipeline_info.json").write_text("{ not json")
+    page._check_btn.click()
+    _run_worker_to_completion(ctrl)
+
+    shown = [page._findings_list.item(i).text()
+             for i in range(page._findings_list.count())]
+    assert any("Check failed" in text for text in shown), shown
+    assert not any("Pick a dataset folder" in text for text in shown), shown
+    assert not page._complete_btn.isVisibleTo(page)
+    assert not page._repair_btn.isEnabled()
+    ctrl.shutdown()

@@ -513,6 +513,13 @@ A cell counts only when it is manually kept **and** it passes QC.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
+- **Force these wells.** Comma-separated wells to reprocess in full, whatever
+  else the run decides. This is the only thing that recovers a well whose
+  `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
+  processed images count as already-done work, so an incremental run reports
+  that well "up to date" and skips it forever. Forcing it re-segments the well
+  and overwrites its outputs; every other well is unaffected. Validate &
+  Repair's completion handoff fills this in for you with exactly those wells.
 - **Incremental — process only missing FOVs.** Finishes a partial or crashed
   run instead of skipping past it. Normally a well whose `<WELL>_out.zip` and
   CSV both exist is skipped whole, however few of its `(FOV, timepoint)` pairs
@@ -1863,6 +1870,15 @@ plain re-run would skip the very wells that need finishing.
    current segmentation. The findings list holds a placeholder ("Pick a
    dataset folder and press Check.") until then, and clears back to it if a
    re-check fails, rather than leaving an earlier check's results on screen.
+   Where the run left records of its own — the per-well completeness block in
+   `pipeline_info.json` and any tracebacks under `out/errors/` — the findings
+   use them rather than guessing. A well with images and no measurements CSV
+   is reported three different ways depending on what the run recorded: as
+   normal ("processed every field and segmented zero cells in all of them —
+   nothing to recover"), as a real failure (naming the FOV-groups that failed
+   and the traceback files to read), or as unknown when the run died before
+   writing a record. Only the last two are worth re-running, and only those
+   are put on the force list when you complete the run.
    Tick **Show raw log** for the line-by-line record: one line per well as
    it's read, and a final line stating what the check concluded.
 2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't
@@ -1876,14 +1892,25 @@ plain re-run would skip the very wells that need finishing.
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,
    channel roles, QC options, CSV prefix — everything the original run used),
-   and **Incremental — process only missing FOVs** is ticked for you. Press
-   Run and only the missing `(FOV, timepoint)` pairs are processed, merged
-   into the existing per-well CSVs and `<WELL>_out.zip` archives; wells that
-   are already complete are left untouched. Without that tick a plain re-run
-   would skip every well that already has any output at all — which is most
-   of the wells you need finished. If the dataset's settings can't be read,
-   the handoff still happens and the log says so; check the schema, channel
-   tokens and CSV prefix by hand before running in that case.
+   and **Incremental — process only missing FOVs** is ticked for you. You land
+   with Compute Options already unfolded so you can see that tick, and a line
+   across the top of the run panel naming the dataset and confirming what was
+   set up, including any wells listed under **Force these wells** — those are
+   wells whose images exist but whose measurements CSV is gone, which an
+   incremental run would skip forever, so they are re-segmented in full. Press
+   Run and only the missing `(FOV, timepoint)` pairs are
+   processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
+   archives; wells that are already complete are left untouched. Without that
+   tick a plain re-run would skip every well that already has any output at
+   all — which is most of the wells you need finished. If the dataset's
+   settings can't be read, the handoff still happens but that same line says
+   the settings were **not** loaded — check the schema, channel tokens and CSV
+   prefix by hand before running in that case.
+
+If a check fails, the findings list says why instead of going back to its
+"Pick a dataset folder" prompt, and the **Complete this run in Analyze**
+button disappears — the offer belonged to the report that failed, and taking
+it would hand Analyze a dataset whose settings had just proved unreadable.
 
 ### Subset / Split Dataset
 

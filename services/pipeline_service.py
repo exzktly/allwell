@@ -181,6 +181,13 @@ def build_pipeline_args(
     # this to the uploaded sidecar (the remote output dir starts empty).
     if opts.get("incremental"):
         args += ["--incremental_prior_dir", str(output_dir)]
+    # Per-well force. Emitted independently of --force/--incremental: it is the
+    # only way to regenerate a well whose measurements CSV is gone but whose
+    # <well>_out.zip survives, because that archive's own members make the well
+    # look complete to an incremental run's done-set.
+    force_wells = [str(w).strip() for w in (opts.get("force_wells") or []) if str(w).strip()]
+    if force_wells:
+        args += ["--force_wells", *force_wells]
     # Input/output well compression is always on (no longer a flag) — the
     # pipeline always produces per-well .zip files.
     smfish = opts.get("smfish_tokens", [])

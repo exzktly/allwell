@@ -177,6 +177,12 @@ from pipeline.io import (  # noqa: F401
     scratch_base_for,
     write_csvs_per_well,
 )
+from pipeline.well_skip import (
+    _canonical_force_wells,
+    incremental_for_well as _incremental_for_well,
+    output_exists_for_well,
+    output_exists_for_well_folder,
+)
 from pipeline.run_report import (
     clear_run_report,
     finalize_run_report,
@@ -3451,54 +3457,6 @@ def process_well_folder_task(
 # Skip-detection helpers
 # ---------------------------------------------------------------------------
 
-def output_exists_for_well(output_dir: Path, well_label: str, csv_prefix: str) -> bool:
-    """
-    Return True if processable output already exists for *well_label*.
-
-    Both outputs must be present and non-empty to count as complete:
-      • <output_dir>/<well>_out.zip       – compressed QC images
-      • <output_dir>/<csv_prefix>_<well>.csv – per-well measurements
-
-    This prevents re-processing wells that completed in a prior run. Note that a
-    well whose CSV + out.zip exist counts as complete here even if some of its
-    FOV-groups failed (the outputs cover only the successful FOV-groups), so a
-    plain re-run SKIPS such partial wells. To reprocess the missing FOV-groups,
-    re-run with --incremental (they are absent from the CSV done-set and so are
-    re-processed) or --force (redo the whole well).
-    """
-    safe_well = _safe_well(well_label)
-    out_zip  = output_dir / f"{well_label}_out.zip"
-    csv_path = output_dir / f"{csv_prefix}_{safe_well}.csv"
-    zip_ok = out_zip.exists()  and out_zip.stat().st_size  > 0
-    csv_ok = csv_path.exists() and csv_path.stat().st_size > 0
-    return zip_ok and csv_ok
-
-
-def output_exists_for_well_folder(
-    output_dir: Path,
-    well_label: str,
-    csv_prefix: str,
-    compressed_output: bool = False,
-) -> bool:
-    """
-    Return True if folder-mode output already exists for *well_label*.
-
-    Both outputs must be present and non-empty to count as complete:
-      • <output_dir>/<well>/                   – output image folder (must contain ≥1 file), OR
-        <output_dir>/<well>_out.zip            – output image archive when *compressed_output* is True
-      • <output_dir>/<csv_prefix>_<well>.csv   – per-well measurements
-    """
-    safe_well  = _safe_well(well_label)
-    out_folder = output_dir / well_label
-    out_zip    = output_dir / f"{well_label}_out.zip"
-    csv_path   = output_dir / f"{csv_prefix}_{safe_well}.csv"
-    folder_ok  = out_folder.is_dir() and any(out_folder.iterdir())
-    zip_ok     = out_zip.exists() and out_zip.stat().st_size > 0
-    csv_ok     = csv_path.exists() and csv_path.stat().st_size > 0
-    out_ok     = zip_ok if compressed_output else folder_ok
-    return out_ok and csv_ok
-
-
 def _unique_tokens_preserve_order(tokens: list[str]) -> list[str]:
     """Stable de-dupe for channel tokens, ignoring case and surrounding whitespace."""
     seen: set[str] = set()
@@ -3532,6 +3490,7 @@ def _run_well_worker_pool(
     stale_sweep,
     output_exists,
     submit_task,
+    force_wells=None,
 ) -> None:
     """Shared per-well ``ProcessPoolExecutor`` driver for the zip / folder modes
     (audit A10 — both hand-rolled the identical skip / dispatch / collect / log
@@ -3547,8 +3506,11 @@ def _run_well_worker_pool(
     # new-well / merge-new-FOVs / up-to-date per well.
     n_skipped = 0
     to_process: list[tuple[str, Path]] = []
+    forced = _canonical_force_wells(force_wells)
     for well_label, path in items:
-        if not force and not incremental and output_exists(well_label):
+        if (not force and not incremental
+                and _canonical_well_label(well_label) not in forced
+                and output_exists(well_label)):
             log.info(
                 "SKIP well %s — output already exists. Use --force to reprocess.",
                 well_label,
@@ -3671,6 +3633,7 @@ def process_well_zips(
     workers: int,
     csv_prefix: str,
     force: bool = False,
+    force_wells: set[str] | None = None,
     incremental: bool = False,
     incremental_prior_dir: Path | None = None,
     force_cpu: bool = False,
@@ -3693,17 +3656,20 @@ def process_well_zips(
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
 
+    forced = _canonical_force_wells(force_wells)
+
     def _submit(executor, well_label, zip_path):
         return executor.submit(
             process_well_zip_task,
             well_label, zip_path, output_dir, shared_kwargs_template,
             nuclear_token, fluor_tokens, csv_prefix, schema, sep,
-            incremental, incremental_prior_dir,
+            _incremental_for_well(incremental, well_label, forced),
+            incremental_prior_dir,
         )
 
     return _run_well_worker_pool(
         items=well_zips, output_dir=output_dir, workers=workers,
-        force=force, incremental=incremental, force_cpu=force_cpu,
+        force=force, force_wells=forced, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Zip",
         # Zip staging (extract + images) lives under the scratch base.
@@ -3723,6 +3689,7 @@ def process_well_folders(
     workers: int,
     csv_prefix: str,
     force: bool = False,
+    force_wells: set[str] | None = None,
     incremental: bool = False,
     incremental_prior_dir: Path | None = None,
     force_cpu: bool = False,
@@ -3743,18 +3710,21 @@ def process_well_folders(
     """
     if schema is None:
         schema = parse_schema(DEFAULT_SCHEMA)
+    forced = _canonical_force_wells(force_wells)
 
     def _submit(executor, well_label, folder_path):
         return executor.submit(
             process_well_folder_task,
             well_label, folder_path, output_dir, shared_kwargs_template,
             nuclear_token, fluor_tokens, csv_prefix,
-            schema, sep, incremental, incremental_prior_dir,
+            schema, sep,
+            _incremental_for_well(incremental, well_label, forced),
+            incremental_prior_dir,
         )
 
     return _run_well_worker_pool(
         items=well_folders, output_dir=output_dir, workers=workers,
-        force=force, incremental=incremental, force_cpu=force_cpu,
+        force=force, force_wells=forced, incremental=incremental, force_cpu=force_cpu,
         threads_per_worker=threads_per_worker,
         shared_kwargs_template=shared_kwargs_template, mode_label="Folder",
         # Folder-mode staging (_tmp_images_*) lives under the scratch base, same
@@ -4260,6 +4230,20 @@ def build_parser() -> argparse.ArgumentParser:
                        "are left as-is. Ignored when --force is given."
                    ))
 
+    p.add_argument("--force_wells", nargs="*", default=None, metavar="WELL",
+                   help=(
+                       "Reprocess these wells in full, whatever else the run "
+                       "decides — the per-well counterpart to --force. Given "
+                       "with --incremental, the named wells ignore the "
+                       "already-done set and re-segment from scratch, which is "
+                       "the only way to regenerate a well whose measurements "
+                       "CSV is missing while its <well>_out.zip survives: the "
+                       "archive's own members make that well look complete to "
+                       "an incremental run, so it would otherwise be skipped "
+                       "forever. Well labels are matched canonically, so C8 "
+                       "and C08 name the same well."
+                   ))
+
     p.add_argument("--incremental_prior_dir", default=None,
                    help=(
                        "Directory holding the prior per-well CSVs used to build "
@@ -4622,6 +4606,7 @@ def main() -> None:
             workers=workers,
             csv_prefix=args.csv_prefix,
             force=args.force,
+            force_wells=args.force_wells,
             incremental=args.incremental,
             incremental_prior_dir=(
                 Path(args.incremental_prior_dir)
@@ -4644,6 +4629,7 @@ def main() -> None:
             workers=workers,
             csv_prefix=args.csv_prefix,
             force=args.force,
+            force_wells=args.force_wells,
             incremental=args.incremental,
             incremental_prior_dir=(
                 Path(args.incremental_prior_dir)

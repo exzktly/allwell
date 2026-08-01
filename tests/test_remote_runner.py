@@ -1993,6 +1993,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/cellpose.py",
         "pipeline/flatfield.py",
         "pipeline/incremental_keys.py",
+        "pipeline/well_skip.py",
         "pipeline/io.py",
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).

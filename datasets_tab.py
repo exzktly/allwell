@@ -235,7 +235,7 @@ class DatasetsTab(QWidget):
 
     def _open_in_analyze(
         self, dataset_root: str, pipeline_info: dict | None = None,
-        *, incremental: bool = False,
+        *, incremental: bool = False, force_wells: list[str] | None = None,
     ) -> None:
         """Hand a folder to the Analyze pane.
 
@@ -248,7 +248,8 @@ class DatasetsTab(QWidget):
         """
         if self._on_open_in_analyze is not None and dataset_root:
             self._on_open_in_analyze(
-                Path(dataset_root), pipeline_info or {}, incremental=incremental)
+                Path(dataset_root), pipeline_info or {}, incremental=incremental,
+                force_wells=list(force_wells or []))
 
     def shutdown(self) -> None:
         """Stop any running feature workers (called on app close)."""

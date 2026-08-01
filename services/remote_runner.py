@@ -308,6 +308,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/cellpose.py",
     "pipeline/flatfield.py",
     "pipeline/incremental_keys.py",
+    "pipeline/well_skip.py",
     "pipeline/io.py",
     # Packed OME-TIFF de-interleave. Runs client-side before remote sync (the
     # remote receives ordinary loose TIFs), but listed so the manifest stays a

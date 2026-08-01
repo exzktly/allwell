@@ -509,3 +509,179 @@ def test_well_health_classifies_the_four_dataset_health_states():
         well="A01", missing=(), csv_state="missing", has_in_container=False,
         has_out_zip=False)
     assert vc.well_health(nothing) == "no_output"
+
+
+def _count_reads(monkeypatch):
+    """Count container opens and CSV parses a scan actually performs.
+
+    Patching ``zipfile.ZipFile`` on the stdlib module covers every reader at
+    once (validate_compute, dataset_paths and incremental_keys all reach the
+    same module object), which is the point — the count is of real reads, not
+    of calls to one wrapper.
+    """
+    counts = {"zip": 0, "csv": 0}
+    real_zip, real_csv = zipfile.ZipFile, vc._read_csv_rows
+
+    class _CountingZip(real_zip):
+        def __init__(self, *args, **kwargs):
+            counts["zip"] += 1
+            super().__init__(*args, **kwargs)
+
+    def _counting_csv(path):
+        counts["csv"] += 1
+        return real_csv(path)
+
+    monkeypatch.setattr(zipfile, "ZipFile", _CountingZip)
+    monkeypatch.setattr(vc, "_read_csv_rows", _counting_csv)
+    return counts
+
+
+def test_scan_reads_each_container_once_and_each_csv_once(tmp_path, monkeypatch):
+    """Performance ratchet, and the reason the scan looked serial.
+
+    A well's input archive was opened six times per scan — twice by
+    ``_well_intent`` (members, then keys), again by ``_row_content_findings``,
+    and twice more by the sidecar-availability check re-walking the whole input
+    folder once per field, serially, after the per-well pass had already read
+    everything. Its CSV was parsed twice, which on a real plate was the single
+    largest cost in the scan. Two container opens (in + out) and one CSV parse
+    per well is the whole job; anything above that is a re-read."""
+    wells = ["A01", "B02", "C03"]
+    build_dataset(tmp_path, wells=wells, timepoints=["0h", "24h"],
+                  fovs=("F001", "F002"))
+
+    counts = _count_reads(monkeypatch)
+    report = vc.build_report(tmp_path)
+
+    assert len(report.wells) == len(wells)
+    # in/<WELL>.zip and out/<WELL>_out.zip, once each.
+    assert counts["zip"] == 2 * len(wells)
+    assert counts["csv"] == len(wells)
+
+
+def test_sidecar_availability_is_identical_with_and_without_the_reused_members(
+    tmp_path,
+):
+    """The availability check reuses member names the per-well scan already
+    read. That passthrough is only safe if it answers exactly what re-opening
+    every archive would have answered — Apply repairs *writes* this list into
+    pipeline_info.json, so a narrower answer would silently drop real
+    timepoints from the sidecar."""
+    build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h", "24h", "48h"],
+                  fovs=("F001", "F002"))
+    # Real input folders carry more than well zips: a loose TIF and a
+    # non-well-named archive are both outside the per-well scan's map, so they
+    # exercise the fall-back-to-reading branch alongside the reused ones.
+    (tmp_path / "in" / "exp_GFP_Z09_F003_96h.tif").write_bytes(b"img")
+    with zipfile.ZipFile(tmp_path / "in" / "leftovers.zip", "w") as zf:
+        zf.writestr("exp_GFP_Y08_F004_72h.tif", b"img")
+
+    paths = vc.resolve_dataset(tmp_path, label="dataset")
+    info = vc._read_sidecar(paths)
+    schema = vc.load_schema(info)
+    cands, _prefixes, _findings = vc._classify_csvs(paths)
+    _reports, _wf, members = vc._scan_wells(
+        paths, schema_fields=list(schema.fields), sep=schema.sep,
+        fov_field_present=schema.has_fov, csv_candidates=cands)
+    assert members, "the per-well scan must expose the members it read"
+
+    cold = vc._check_sidecar_availability(
+        paths, info, schema_fields=list(schema.fields), sep=schema.sep)
+    reused = vc._check_sidecar_availability(
+        paths, info, schema_fields=list(schema.fields), sep=schema.sep,
+        known_members=members)
+    assert reused == cold
+    # And the extras really did land in the answer, so this isn't passing
+    # because both sides missed them equally.
+    assert "96h" in cold[1] or "96h" in cold[0]
+    assert "72h" in cold[1] or "72h" in cold[0]
+
+
+def _run_report(root, wells: dict) -> None:
+    """Write the sidecar block ``pipeline.run_report.finalize_run_report``
+    merges in at the end of a real run."""
+    info_path = root / "out" / "pipeline_info.json"
+    info = json.loads(info_path.read_text())
+    info["run_report"] = {
+        "wells": wells,
+        "incomplete_wells": sorted(
+            w for w, r in wells.items()
+            if int(r.get("groups_total", 0)) > int(r.get("groups_covered", 0))),
+    }
+    info_path.write_text(json.dumps(info))
+
+
+def test_a_well_the_run_recorded_as_zero_cells_is_not_a_defect(tmp_path):
+    """The distinction the run's own record exists to make. A well that
+    processed every FOV-group and segmented zero cells in all of them has no
+    CSV — legitimately. Reprocessing it produces the same empty result, so it
+    must not be flagged as a gap and must not be swept into a forced
+    reprocess."""
+    build_dataset(tmp_path, wells=["A01", "C08"], timepoints=["0h", "24h"])
+    (tmp_path / "out" / "measurements_C08.csv").unlink()
+    _run_report(tmp_path, {"C08": {"well": "C08", "groups_total": 2,
+                                   "groups_covered": 0, "failed": []}})
+
+    report = vc.build_report(tmp_path)
+    c08 = next(w for w in report.wells if w.well == "C08")
+    assert c08.zero_cell_recorded
+    finding = next(f for f in report.findings if f.well == "C08")
+    assert finding.code == "no_csv_zero_cells"
+    assert finding.severity == "info"          # not a defect
+    assert "segmented zero cells" in finding.message
+    # And so it is left off the force list: re-segmenting proves nothing.
+    assert vc.wells_needing_force(report) == ()
+
+
+def test_a_well_whose_run_recorded_failures_is_a_real_gap(tmp_path):
+    """The other side of the same distinction — identical on disk, opposite
+    verdict, and the run said which."""
+    build_dataset(tmp_path, wells=["A01", "C08"], timepoints=["0h", "24h"])
+    (tmp_path / "out" / "measurements_C08.csv").unlink()
+    _run_report(tmp_path, {"C08": {"well": "C08", "groups_total": 2,
+                                   "groups_covered": 0,
+                                   "failed": ["exp_GFP_C08_F001_0h.tif"]}})
+
+    report = vc.build_report(tmp_path)
+    c08 = next(w for w in report.wells if w.well == "C08")
+    assert not c08.zero_cell_recorded
+    finding = next(f for f in report.findings if f.well == "C08")
+    assert finding.code == "no_csv_failed"
+    assert finding.severity == "error"
+    assert "exp_GFP_C08_F001_0h.tif" in finding.message
+    assert vc.wells_needing_force(report) == ("C08",)
+
+
+def test_error_tracebacks_on_disk_are_read_and_named(tmp_path):
+    """`out/errors/<well>_<fov>_pid<N>.txt` is where the pipeline persists a
+    failure's full traceback, and it usually names the cause outright — a scan
+    that re-derives everything from the data files and never mentions those
+    records makes the user hunt for something the software already has."""
+    build_dataset(tmp_path, wells=["A01", "C08"], timepoints=["0h", "24h"])
+    err_dir = tmp_path / "out" / "errors"
+    err_dir.mkdir()
+    (err_dir / "C08_F001_pid1234.txt").write_text("Traceback...\nMemoryError\n")
+
+    report = vc.build_report(tmp_path)
+    finding = next(f for f in report.findings
+                   if f.well == "C08" and f.code == "recorded_failures")
+    assert finding.severity == "error"
+    assert "C08_F001_pid1234.txt" in finding.message
+    # A01 has no traceback and must not be implicated.
+    assert not any(f.well == "A01" and f.code == "recorded_failures"
+                   for f in report.findings)
+
+
+def test_no_record_at_all_stays_a_warning_rather_than_assumed_benign(tmp_path):
+    """A run that died before writing its completeness block leaves no record.
+    That is unknown, not fine — assuming benign is how a lost CSV goes
+    unnoticed — so it stays a warning and stays on the force list."""
+    build_dataset(tmp_path, wells=["C08"], timepoints=["0h"])
+    (tmp_path / "out" / "measurements_C08.csv").unlink()
+
+    report = vc.build_report(tmp_path)
+    finding = next(f for f in report.findings if f.well == "C08")
+    assert finding.code == "no_csv"
+    assert finding.severity == "warning"
+    assert "no completeness record" in finding.message
+    assert vc.wells_needing_force(report) == ("C08",)

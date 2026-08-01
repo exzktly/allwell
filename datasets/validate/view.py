@@ -35,7 +35,7 @@ import theme
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
-from datasets.validate.validate_compute import DatasetReport
+from datasets.validate.validate_compute import DatasetReport, wells_needing_force
 
 
 def _hrule(parent: QWidget) -> QFrame:
@@ -239,6 +239,40 @@ class ValidatePage(QWidget):
     def clear_findings(self) -> None:
         self._show_empty_findings_hint()
 
+    def show_failure(self, message: str) -> None:
+        """Replace the findings with why the check failed, and withdraw the
+        offer to complete a run.
+
+        A failed check used to reset the list to its "Pick a dataset folder and
+        press Check." placeholder — which says nothing happened, directly under
+        a red "Failed" headline and *next to a still-visible* "Complete this
+        run in Analyze" button left over from an earlier successful check. That
+        button then handed Analyze a dataset root whose sidecar had just proved
+        unreadable, so the settings could not travel with it and the user
+        landed on an Analyze tab that looked untouched. The failure is now what
+        the list says, and the completion offer goes with the report it
+        belonged to.
+        """
+        self._dataset_root = ""
+        self._findings_list.clear()
+        item = QListWidgetItem(f"✗ Check failed — {message}")
+        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        self._findings_list.addItem(item)
+        self._repair_btn.setEnabled(False)
+        self._complete_btn.setVisible(False)
+
+    def show_note(self, message: str) -> None:
+        """Add a line to the findings list without disturbing what's there.
+
+        For something the user must see that isn't a scan finding — the
+        completion handoff reporting that a dataset's settings could not be
+        read. Writing that to the raw log alone hid it: the log is behind a
+        checkbox that is off by default.
+        """
+        item = QListWidgetItem(message)
+        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        self._findings_list.addItem(item)
+
     def _show_empty_findings_hint(self) -> None:
         # Lives inside the (otherwise large, blank) findings list itself,
         # not as a separate caption below it — an empty container that big
@@ -289,7 +323,14 @@ class ValidatePage(QWidget):
             self._repair_btn.setToolTip("These findings can't be repaired automatically.")
         else:
             self._repair_btn.setToolTip("")
-        needs_completion = any(w.missing for w in report.wells)
+        # Missing (fov, timepoint) pairs are not the only thing a completion
+        # run fixes. A well with images and no measurements CSV has no missing
+        # pairs at all — its own output archive covers them — yet it is the one
+        # kind of well an incremental run can never repair on its own, so the
+        # offer has to be on screen for a dataset whose only fault is that.
+        needs_completion = (
+            any(w.missing for w in report.wells) or bool(wells_needing_force(report))
+        )
         self._complete_btn.setVisible(needs_completion)
         self._check_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())

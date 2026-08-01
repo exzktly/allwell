@@ -517,6 +517,12 @@ A cell counts only when it is manually kept **and** it passes QC.
 ### 8. Run / Suspend / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
+- The **plate map** above the log colours each well by the stage it has reached.
+  A well being computed right now is drawn as a dial rather than a flat circle:
+  the lighter part of it is the fields already measured, the darker part what is
+  left, filling clockwise. So you can see at a glance whether a slow well is
+  nearly through or has barely started, without hunting for it in the progress
+  bars underneath.
 - **Suspend** winds the run down cleanly. It finishes the fields already being
   computed, then lets every well that got any work done write its results, and
   remembers what you were running. Use it when the run is fine but you need the

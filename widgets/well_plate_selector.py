@@ -127,6 +127,9 @@ class _PlateGrid(QWidget):
         # Decoration overrides.
         self._enabled: set[tuple[int, int]] | None = None   # None ⇒ all enabled
         self._colors: dict[tuple[int, int], QColor] = {}
+        # Per-well degree of completion, 0..1. Empty for every plate that does
+        # not opt in (see ``set_well_fraction``).
+        self._fractions: dict[tuple[int, int], float] = {}
         # Interaction config.
         self._mode = "select"                  # "select" | "passive"
         self._drag_select = True
@@ -262,6 +265,7 @@ class _PlateGrid(QWidget):
         if new is not None:
             self._selected = {k: v for k, v in self._selected.items() if k in new}
             self._colors = {k: v for k, v in self._colors.items() if k in new}
+            self._fractions = {k: v for k, v in self._fractions.items() if k in new}
             if self._hover_cell is not None and self._hover_cell not in new:
                 self._hover_cell = None
         self._recolor()
@@ -288,6 +292,22 @@ class _PlateGrid(QWidget):
     def set_well_colors(self, mapping) -> None:
         for w, col in (mapping or {}).items():
             self.set_well_color(w, col, _defer=True)
+        self.update()
+
+    def set_well_fraction(self, well_id, fraction) -> None:
+        """Degree of completion for one well, or ``None`` to drop the wedge.
+
+        Opt-in and off by default: every other user of this plate — Review's
+        rail, the heat-map drag source, the replicate pickers — never sets a
+        fraction and paints exactly as before.
+        """
+        key = _parse_well_id(well_id)
+        if key is None:
+            return
+        if fraction is None:
+            self._fractions.pop(key, None)
+        else:
+            self._fractions[key] = max(0.0, min(1.0, float(fraction)))
         self.update()
 
     def set_well_color(self, well_id, color, *, _defer: bool = False) -> None:
@@ -377,6 +397,11 @@ class _PlateGrid(QWidget):
         else:
             self._markers.pop(parsed, None)
         self.update()
+
+    def clear_well_fractions(self) -> None:
+        if self._fractions:
+            self._fractions.clear()
+            self.update()
 
     def clear_well_markers(self) -> None:
         if self._markers:
@@ -760,6 +785,41 @@ class _PlateGrid(QWidget):
         return super().event(ev)
 
     # ── painting ─────────────────────────────────────────────────────────
+    def _paint_fraction(self, p: QPainter, wr: QRectF, base: QColor,
+                        fraction: float, hovered: bool) -> None:
+        """Paint the well *as* a two-tone pie of its own state colour.
+
+        A solid well says which stage it reached; it cannot say how far through
+        that stage it is, so a well on its first FOV-group and one on its last
+        look identical for however long the well takes — which on a timelapse
+        plate is most of the run. Here the whole well is the dial: the light
+        tone is what is done, the dark tone what is left, both of them the
+        state's own colour, so the well still reads as that state at a glance
+        and resolves into a proportion when looked at.
+
+        Full-diameter deliberately. An inset ring inside the well body left
+        about fifteen pixels to work with at the dashboard's real size, and a
+        one-twelfth wedge in fifteen pixels is a few pixels of nothing. Taking
+        the whole area gives the boundary the well's full width to travel.
+
+        Clockwise from twelve o'clock, which is how a dial is read. Qt measures
+        counter-clockwise sixteenths of a degree from three o'clock, hence the
+        90° offset and the negative span.
+        """
+        base = QColor(base)
+        p.setPen(Qt.NoPen)
+        p.setBrush(base.darker(210))
+        p.drawEllipse(wr)
+        span = max(0.0, min(1.0, fraction))
+        if span > 0.0:
+            p.setBrush(base.lighter(130))
+            p.drawPie(wr, 90 * 16, -int(round(span * 360.0 * 16)))
+        # Same rim as every other well, so a dial still reads as a well.
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(theme.Colors.text_primary) if hovered
+                      else base.darker(170), max(1.0, wr.width() * 0.04)))
+        p.drawEllipse(wr)
+
     def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool) -> None:
         c = theme.Colors
         base = QColor(base)
@@ -934,8 +994,17 @@ class _PlateGrid(QWidget):
                 #     muted tint (group colour if set, else the app's
                 #     accent) so the well always reads as a faint hue
                 #     rather than a dark recess.
+                # A well showing progress is drawn AS the dial — the pie is the
+                # well body, not something laid over one. Falls through to the
+                # marker glyph below like any other well.
+                frac = self._fractions.get(key)
                 lit = in_selection or (self._colored_wells_lit and group_color is not None)
-                if lit:
+                if frac is not None:
+                    self._paint_fraction(
+                        p, wr,
+                        group_color if group_color is not None else QColor(c.accent),
+                        frac, hovered)
+                elif lit:
                     base = group_color if group_color is not None else QColor(
                         traces[self._selected[key] % len(traces)]
                     )
@@ -943,6 +1012,7 @@ class _PlateGrid(QWidget):
                 else:
                     tint = group_color if group_color is not None else QColor(c.accent)
                     self._paint_depressed(p, wr, hovered, tint=tint)
+
                 glyph = self._markers.get(key)
                 if glyph:
                     f = QFont(self.font())
@@ -1058,6 +1128,13 @@ class WellPlateSelector(QWidget):
 
     def setWellColor(self, well_id, color) -> None:
         self._grid.set_well_color(well_id, color)
+
+    def setWellFraction(self, well_id, fraction) -> None:
+        """Degree of completion for one well (0..1), or ``None`` for no dial."""
+        self._grid.set_well_fraction(well_id, fraction)
+
+    def clearWellFractions(self) -> None:
+        self._grid.clear_well_fractions()
 
     def clearWellColors(self) -> None:
         self._grid.clear_well_colors()

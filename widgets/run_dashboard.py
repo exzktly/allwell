@@ -73,6 +73,7 @@ class RunDashboard(PlateProgress):
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
+        self._plate.clearWellFractions()
         self._plate.setEnabledWells(None)
         self._build_rail(); self._build_legend()
         self._headline.setText("Preparing…")
@@ -98,6 +99,7 @@ class RunDashboard(PlateProgress):
             self._done.setdefault(stage, set()).add(w)
             self._active.discard(w)
         self._plate.setWellColor(w, self._well_color(w))
+        self._plate.setWellFraction(w, self._well_fraction(w))
         self._plate.setWellMarker(
             w, "✕" if w in self._errored
             else ("⚙" if w in self._active else None))
@@ -111,7 +113,32 @@ class RunDashboard(PlateProgress):
         if not w:
             return
         self._fov[w] = (int(done), int(total))
+        self._plate.setWellFraction(w, self._well_fraction(w))
         self._refresh_fov()
+
+    def _well_fraction(self, well: str) -> float | None:
+        """How far through this well is, as a wedge fraction for the plate.
+
+        The hue already says which stage the well reached; it cannot say how
+        far through that stage it is, so a well on its first FOV-group and one
+        on its last looked identical for however long the well took — which on
+        a timelapse plate is most of the run. The wedge fills with the
+        FOV-group progress the pipeline already reports (``well_fov``), so the
+        data costs nothing new.
+
+        A well that has finished reads full whether or not any FOV events
+        arrived for it, and one that has not started reads empty. ``None``
+        drops the wedge entirely, which is what an errored well gets: a partial
+        ring beside the ✕ would suggest it is still going.
+        """
+        if well in self._errored:
+            return None
+        if any(well in done for done in self._done.values()):
+            return 1.0
+        done, total = self._fov.get(well, (0, 0))
+        if total <= 0:
+            return None if well not in self._active else 0.0
+        return max(0.0, min(1.0, done / total))
 
     def _clear_fov_rows(self) -> None:
         while self._fov_lay.count():

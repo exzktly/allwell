@@ -119,6 +119,7 @@ def rep_add(ctx) -> None:
     the same (rubber-band rectangle select, row/column headers, multi-select)."""
     from well_viewer.core.selection_controller import sel_add
     from well_viewer.domain.viewer_state import parse_rc
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     from widgets.well_plate_selector import WellPlateSelector
     sel_state = ctx.state.selection
     well_paths = ctx.state.dataset.well_paths
@@ -135,15 +136,18 @@ def rep_add(ctx) -> None:
     enabled = sorted(well_paths.keys(), key=lambda l: parse_rc(l))
     plate = WellPlateSelector()
     try:
-        plate.setActionsVisible(False)
         plate.setEnabledWells(enabled)
-        plate.setSelectionMode("select")
         plate.setRowColumnSelectable(True)
         plate.setSingleSelectionMode(False)
         plate.setDragMode("rect")   # rubber-band rectangle, not freeform paint
+        # The app-wide plate geometry (widgets/plate_geometry.py): same caps,
+        # same cell scale and same centring as every other plate map in the app.
+        # The "rail" role hides the built-in action row — this dialog has its own
+        # Create / Cancel buttons and no use for All / Invert / Clear.
+        apply_plate_geometry(plate, role="rail")
     except Exception:
         swallowed()
-    v.addWidget(plate, 1)
+    v.addWidget(plate, 1, PLATE_ALIGNMENT)
 
     btn_row = QHBoxLayout()
     v.addLayout(btn_row)

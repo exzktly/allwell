@@ -68,22 +68,19 @@ def build_replicate_panel(ctx, parent: QWidget) -> None:
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     from widgets.well_plate_selector import WellPlateSelector
     plate = WellPlateSelector(parent)
-    plate.setActionsVisible(False)
-    plate.setSelectionMode("select")
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
-    from well_viewer.core.ui_helpers import (
-        apply_sidebar_plate_geometry, well_plate_tooltip_provider,
-    )
+    from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
-    # scales to the rail width, keeps aspect, no fixed min-height floor. The
+    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
+    # cell scale and same centring as every other plate map in the app. The
     # trailing addStretch below pins the plate to the top of the column.
-    apply_sidebar_plate_geometry(plate)
-    layout.addWidget(plate, 0)
+    apply_plate_geometry(plate, role="rail")
+    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
     layout.addStretch(1)
     ctx.widgets.register("_rep_map_plate", plate)
 

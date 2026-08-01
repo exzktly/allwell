@@ -237,21 +237,27 @@ def test_dashboard_has_no_plate_map_of_its_own(qapp):
 
 
 def test_picker_plate_renders_at_the_same_cell_size_as_a_dashboard_plate(qapp):
-    """Regression guard (UX audit P2-5): the picker plate shared the
-    dashboard plate's 210px height cap, but unlike the dashboard's plate
-    (setActionsVisible(False)) it keeps its own All/Invert/Clear action row
-    visible inside that same budget — eating room the grid itself would
-    otherwise get, so the same cap produced a visibly smaller grid here than
-    on every other plate map in the pane. The two must render their wells at
-    the same pixel cell size, not just share a maximumHeight number that
-    means different things once one plate's chrome eats into it."""
+    """Regression guard (UX audit P2-5): the picker plate keeps its own
+    All/Invert/Clear action row, which the dashboard's status plate hides. If
+    both plates simply shared one maximum height, that row would eat room the
+    grid would otherwise get and the same cap would produce a visibly smaller
+    grid here than on every other plate map in the pane.
+    ``widgets.plate_geometry.apply_plate_geometry`` is what keeps them equal: it
+    measures the action row and adds its height on top of the shared cap for the
+    ``"picker"`` role, so the *grid* budget is the same either way.
+
+    Neither plate is resized by hand here — the point is that the geometry
+    helper's own caps are what make the two agree, so the test lets each plate
+    take the size its real page gives it. (It used to resize the picker to a
+    hardcoded 330x258, the empirically-matched pair those caps replaced; that
+    assertion could only ever confirm the numbers the test itself supplied.)"""
     from datasets.concatenate.dashboard import ConcatDashboard
     from datasets.subset.controller import SubsetController
 
     ctrl = SubsetController(on_open_in_review=lambda _p: None)
     page = ctrl.page
-    page._plate.resize(330, 258)
-    page._plate.show()
+    page.resize(1300, 980)  # generous, so the picker reaches its own caps
+    page.show()
     qapp.processEvents()
     qapp.processEvents()
     _lab, picker_cell, _ox, _oy = page._plate._grid._metrics()
@@ -267,6 +273,40 @@ def test_picker_plate_renders_at_the_same_cell_size_as_a_dashboard_plate(qapp):
         f"picker cell {picker_cell}px vs dashboard cell {dashboard_cell}px "
         "-- the two plate maps no longer render at the same scale"
     )
+    ctrl.shutdown()
+
+
+def test_every_plate_map_is_horizontally_centred(qapp):
+    """The picker and a dashboard status plate must both sit centred in their
+    own container. They used to be added with ``Qt.AlignLeft`` — on a page much
+    wider than the plate's own width cap that pinned each one to the left edge
+    of a different-width column, so two controls that are the same size read as
+    misaligned with each other."""
+    from datasets.concatenate.dashboard import ConcatDashboard
+    from datasets.subset.controller import SubsetController
+
+    def _gaps(plate):
+        container = plate.parentWidget()
+        left = plate.geometry().x()
+        right = container.width() - (plate.geometry().x() + plate.width())
+        return left, right
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page.resize(1300, 980)
+    page.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    left, right = _gaps(page._plate)
+    assert abs(left - right) <= 1, f"subset picker not centred: {left} vs {right}"
+
+    dashboard = ConcatDashboard()
+    dashboard.resize(1300, 600)
+    dashboard.show()
+    qapp.processEvents()
+    qapp.processEvents()
+    left, right = _gaps(dashboard._plate)
+    assert abs(left - right) <= 1, f"dashboard status plate not centred: {left} vs {right}"
     ctrl.shutdown()
 
 

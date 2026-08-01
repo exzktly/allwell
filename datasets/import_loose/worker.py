@@ -25,6 +25,10 @@ class ImportLooseWorker(QThread):
     logLine = Signal(str)
     wellsPlanned = Signal(list)   # the wells this conversion will actually touch
     wellStage = Signal(str, str)  # (well, "writing"|"done")
+    # (well, done, total) — sub-progress *within* one well, so its plate cell
+    # can render as a filling dial instead of a flat "writing" until the whole
+    # well lands. See datasets._common.containers.WellFraction.
+    wellFraction = Signal(str, int, int)
     succeeded = Signal(str, str)  # (destination root — "" for in-place, summary)
     failed = Signal(str)
 
@@ -85,6 +89,7 @@ class ImportLooseWorker(QThread):
                     filename_sep=self._filename_sep,
                     move_source_tifs=self._move_source_tifs,
                     log=self.logLine.emit, progress=self.wellStage.emit,
+                    sub_progress=self.wellFraction.emit,
                     proc_hook=self._track_proc,
                 )
                 dest = ""
@@ -95,6 +100,7 @@ class ImportLooseWorker(QThread):
                     filename_sep=self._filename_sep,
                     log=self.logLine.emit, is_cancelled=self.isInterruptionRequested,
                     progress=self.wellStage.emit,
+                    sub_progress=self.wellFraction.emit,
                 )
                 dest = self._dest_root
         except ValueError as exc:

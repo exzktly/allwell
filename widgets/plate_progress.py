@@ -21,10 +21,11 @@ import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea, QSizePolicy,
+    QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea,
     QToolButton, QVBoxLayout, QWidget,
 )
 
+from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 
 
@@ -121,31 +122,21 @@ class PlateProgress(QWidget):
             center.setContentsMargins(0, 0, 0, 0); center.setSpacing(6)
 
             self._plate = WellPlateSelector(self._center_host)
-            self._plate.setSelectionMode("passive")
             self._plate.setDragSelectEnabled(False)
             self._plate.setRowColumnSelectable(False)
-            self._plate.setActionsVisible(False)
             # Paint coloured wells in the raised/lit style (not the dim recessed
             # tint) so run states read clearly on the status map.
             self._plate.setColoredWellsLit(True)
             self._plate.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            self._plate.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-            self._plate.setMaximumHeight(210)
-            # WellPlateSelector paints a panel background + border across its
-            # *entire* allocated box (well_plate_selector.py's #WellPlateSelector
-            # QSS rule), independent of how much of that box the grid itself
-            # actually draws into — _metrics() sizes the grid to
-            # min(avail_w/12, avail_h/8), so once maxHeight above caps the grid's
-            # cell size, any extra width the layout hands this widget (the
-            # centre column is wide, shared with a fixed-width rail/legend) does
-            # NOT grow the grid — it only stretches the panel's own background
-            # into a big, mostly-empty grey card with a small grid centred
-            # inside it. Cap the width too so the card hugs its content, matching
-            # the height-bound cell size's own natural width (12 cols at the
-            # same cell size the 210px height already produces).
-            self._plate.setMaximumWidth(330)
+            # The app-wide plate geometry (widgets/plate_geometry.py): the
+            # "status" role hides the built-in action row and makes the plate
+            # read-only, and the caps give it the same cell scale as every other
+            # plate map in the app. Centred, like all of them — the centre column
+            # is as wide as the page allows, so a plate pinned to one edge of it
+            # reads as misaligned against the picker above.
+            apply_plate_geometry(self._plate, role="status")
             self._plate.setWellTooltipProvider(self._well_tooltip)
-            center.addWidget(self._plate, 0, Qt.AlignLeft)
+            center.addWidget(self._plate, 0, PLATE_ALIGNMENT)
 
             # Per-well sub-progress rails (RunDashboard: FOV·timepoint progress;
             # unused by ConcatDashboard, which has no per-well sub-phases) —
@@ -220,6 +211,50 @@ class PlateProgress(QWidget):
 
     def overall_maximum(self) -> int:
         return self._bar.maximum()
+
+    # ── per-well progress dials ─────────────────────────────────────────────
+    # A well's colour says which stage it reached; it cannot say how far through
+    # that stage it is, so a well on its first FOV-group and one on its last look
+    # identical for however long the well takes. These three promote
+    # ``WellPlateSelector``'s own fraction API onto the dashboard so every tool
+    # can draw that progress as a dial on the well itself, and so no subclass has
+    # to reach through ``self._plate`` — which does not exist at all when the
+    # dashboard is built with ``show_plate=False`` (SubsetDashboard paints run
+    # progress onto its page's own picker instead). All three no-op in that case
+    # rather than raising, so a controller can report progress uniformly without
+    # first asking which kind of dashboard it is talking to.
+
+    def set_well_fraction(self, well_id: str, fraction: float | None) -> None:
+        """Fill *well_id*'s dial to *fraction* (0.0–1.0), or drop it with ``None``."""
+        plate = getattr(self, "_plate", None)
+        if plate is None:
+            return
+        well = canon_well(well_id)
+        if not well:
+            return
+        if fraction is None:
+            plate.setWellFraction(well, None)
+            return
+        plate.setWellFraction(well, max(0.0, min(1.0, float(fraction))))
+
+    def set_well_progress(self, well_id: str, done: int, total: int) -> None:
+        """Fill *well_id*'s dial to ``done / total``.
+
+        A *total* of zero or less clears the dial instead of dividing by it: a
+        caller that has not yet counted the work is reporting "unknown", and an
+        unknown amount of progress must not render as a definite zero-filled
+        dial — that is the same well as one that has genuinely done nothing.
+        """
+        if int(total) <= 0:
+            self.set_well_fraction(well_id, None)
+            return
+        self.set_well_fraction(well_id, max(0, int(done)) / int(total))
+
+    def clear_well_fractions(self) -> None:
+        """Drop every dial, leaving the wells' own state colours untouched."""
+        plate = getattr(self, "_plate", None)
+        if plate is not None:
+            plate.clearWellFractions()
 
     # ── internals shared by subclasses ──────────────────────────────────────
     @staticmethod

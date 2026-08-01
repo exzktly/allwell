@@ -53,3 +53,26 @@ def test_import_loose_end_to_end_then_readable_by_analyze_input_resolution(tmp_p
         f"exp_GFP_{w}_{fov}_{tp}.tif"
         for w in ("A01", "B02", "C03") for fov in ("F001", "F002") for tp in ("0h", "24h", "48h")
     )
+
+
+def test_convert_reports_a_rising_sub_progress_sweep_per_well(tmp_path):
+    """``sub_progress`` is the per-well dial behind ``progress``'s
+    writing/done stages: a well fills as its files go into the archive,
+    rather than jumping straight from empty to done. Every planned well must
+    reach full — a well that finished but reported nothing would leave its
+    dial looking stalled."""
+    src = tmp_path / "loose"
+    dest = tmp_path / "dataset"
+    _write_loose(src, ["A01", "B02"], timepoints=("0h", "24h", "48h"), fovs=("F001", "F002"))
+
+    fractions: dict[str, list[tuple[int, int]]] = {}
+    convert_to_new_destination(
+        src, dest, filename_schema=SCHEMA, filename_sep=SEP,
+        sub_progress=lambda well, done, total: fractions.setdefault(well, []).append((done, total)),
+    )
+
+    assert set(fractions) == {"A01", "B02"}
+    for well, seq in fractions.items():
+        values = [done for done, _total in seq]
+        assert values == sorted(values), f"{well} dial went backwards: {values}"
+        assert seq[-1][0] == seq[-1][1], f"{well} dial never reached full: {seq[-1]}"

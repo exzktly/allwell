@@ -54,18 +54,16 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
 
     # Plate map first — nothing should appear above the well picker.
     plate = WellPlateSelector(parent)
-    plate.setActionsVisible(False)
-    plate.setSelectionMode("select")
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
-    # scales to the rail width, keeps aspect, no fixed min-height floor.
-    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
-    apply_sidebar_plate_geometry(plate)
-    layout.addWidget(plate)
+    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
+    # cell scale and same centring as every other plate map in the app.
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+    apply_plate_geometry(plate, role="rail")
+    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
     ctx.widgets.register("_stats_map_plate", plate)
 
     layout.addWidget(build_hline_separator(parent))

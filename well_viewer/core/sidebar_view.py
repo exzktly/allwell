@@ -38,6 +38,7 @@ def build_sidebar(win, parent: QWidget) -> None:
       - Group-mode hint label
     """
     from well_viewer.domain.plate_layout import PLATE_ROWS as _PLATE_ROWS, PLATE_COLS as _PLATE_COLS
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
     from widgets.well_plate_selector import WellPlateSelector
 
     # Ensure parent has a vertical layout
@@ -53,14 +54,14 @@ def build_sidebar(win, parent: QWidget) -> None:
     # widget's setEnabledWells / setWellColors / setSelectionMode API; clicks /
     # drags / headers come back through the signal connections below.
     plate = WellPlateSelector(parent)
-    plate.setActionsVisible(False)        # the rail keeps its own All / None below
     plate.setEnabledWells([])             # nothing selectable until a dataset loads
-    # Shared sidebar-plate sizing (the single home for it) — scales to the rail
-    # width, keeps aspect, no fixed min-height floor. A trailing addStretch below
-    # keeps the plate anchored to the top of the sidebar across tabs.
-    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
-    apply_sidebar_plate_geometry(plate)
-    layout.addWidget(plate)
+    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
+    # cell scale and same centring as every other plate map in the app. The
+    # "rail" role hides the built-in All / Invert / Clear row, since the rail
+    # keeps its own All / None below. A trailing addStretch below keeps the
+    # plate anchored to the top of the sidebar across tabs.
+    apply_plate_geometry(plate, role="rail")
+    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
     win._sidebar_plate = win._ctx.widgets.register("_sidebar_plate", plate)
     win._sidebar_map_outer = plate
 

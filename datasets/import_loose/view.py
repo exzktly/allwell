@@ -91,7 +91,7 @@ class ImportLoosePage(QWidget):
                                  theme.Spacing.lg, theme.Spacing.lg)
         outer.setSpacing(theme.Spacing.md)
 
-        heading = QLabel("Import Loose Folder", self)
+        heading = QLabel("Zip Loose Folder", self)
         heading.setObjectName("Heading")
         outer.addWidget(heading)
         outer.addWidget(_hrule(self))

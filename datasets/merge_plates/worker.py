@@ -18,6 +18,10 @@ class MergePlatesWorker(QThread):
     logLine = Signal(str)
     wellsPlanned = Signal(list)
     wellStage = Signal(str, str)   # (dest well, "merging"|"merged")
+    # (dest well, done, total) — sub-progress *within* one well, so its plate
+    # cell can render as a filling dial instead of a flat "merging" until the
+    # whole well lands. See datasets._common.containers.WellFraction.
+    wellFraction = Signal(str, int, int)
     succeeded = Signal(str, str)   # (destination root, summary line)
     failed = Signal(str)
 
@@ -47,6 +51,7 @@ class MergePlatesWorker(QThread):
             summary = execute_plan(
                 plan, self.logLine.emit, self.isInterruptionRequested,
                 progress=self.wellStage.emit,
+                sub_progress=self.wellFraction.emit,
             )
         except MergePlatesError as exc:
             self.failed.emit(str(exc))

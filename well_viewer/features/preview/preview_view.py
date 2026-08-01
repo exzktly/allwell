@@ -26,16 +26,14 @@ def build_preview_picker(win, parent: QWidget) -> None:
     layout.setSpacing(0)
 
     plate = WellPlateSelector(parent)
-    plate.setActionsVisible(False)
-    plate.setSelectionMode("select")
     plate.setSingleSelectionMode(True)
     plate.setRowColumnSelectable(False)
     plate.setEnabledWells([])
-    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
-    # scales to the rail width, keeps aspect, no fixed min-height floor.
-    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
-    apply_sidebar_plate_geometry(plate)
-    layout.addWidget(plate)
+    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
+    # cell scale and same centring as every other plate map in the app.
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+    apply_plate_geometry(plate, role="rail")
+    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
     win._sidebar_preview_plate = win._ctx.widgets.register("_sidebar_preview_plate", plate)
 
     def _on_plate_changed(ids) -> None:

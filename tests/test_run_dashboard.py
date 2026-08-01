@@ -288,3 +288,57 @@ def test_the_counts_behind_a_dial_are_in_its_tooltip(qapp):
     # still going, exactly as a part-filled dial would.
     d.set_well_stage("A01", "error")
     assert d._well_tooltip("A01") == "A01: failed"
+
+
+def test_a_transfer_is_painted_in_the_colour_it_is_heading_toward(qtbot):
+    """A well waiting on the server is blue; once its download starts it should
+    fill GREEN, not blue.
+
+    The dial fills from a light tint of its colour to the full one, so painting
+    a download in the "on server" blue it is leaving made the well fill
+    blue-into-blue — light meaning "not yet", on a plate where light is exactly
+    how an unstarted dial looks. It also left no moment at which the well
+    simply *was* blue: dark blue, then pale blue, then green. The colour change
+    should be the arrival.
+    """
+    import theme
+    from widgets.run_dashboard import RunDashboard
+
+    dash = RunDashboard()
+    qtbot.addWidget(dash)
+    dash.reset(remote=True, total=4)
+
+    dash.set_well_stage("A01", "process")
+    assert dash._well_color("A01") == theme.Colors.accent, "computed, awaiting fetch"
+
+    # Download in flight — the well is becoming local, so it reads as local.
+    dash.set_well_transfer("A01", "down", 0.4)
+    assert dash._well_color("A01") == theme.Colors.success
+    assert dash._well_fraction("A01") == pytest.approx(0.4)
+
+    # And it stays that colour once the fetch lands.
+    dash.set_well_stage("A01", "download")
+    assert dash._well_color("A01") == theme.Colors.success
+
+
+def test_an_upload_in_flight_reads_as_heading_to_the_remote(qtbot):
+    """Same rule the other way: a well being uploaded is becoming "over there",
+    so it takes the colour of a well that has landed there rather than the
+    grouped-and-queued grey it is leaving."""
+    import theme
+    from widgets.run_dashboard import RunDashboard
+
+    dash = RunDashboard()
+    qtbot.addWidget(dash)
+    dash.reset(remote=True, total=4)
+
+    dash.set_well_stage("B02", "group")
+    assert dash._well_color("B02") == theme.Colors.text_muted
+
+    dash.set_well_transfer("B02", "up", 0.5)
+    assert dash._well_color("B02") == theme.Colors.accent2
+
+    # A well that is already computing is not "heading to the remote" any more,
+    # so a stale upload marker must not repaint it away from amber.
+    dash.set_well_stage("B02", "active")
+    assert dash._well_color("B02") == theme.Colors.warn

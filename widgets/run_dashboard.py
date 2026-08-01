@@ -259,6 +259,22 @@ class RunDashboard(PlateProgress):
         if w in self._errored:
             return theme.Colors.danger
         if self._remote:
+            # A transfer in flight is painted in the colour of the state it is
+            # travelling TOWARD, not the one the well is leaving. The dial fills
+            # from a light tint of its colour to the full one, so painting a
+            # download in the "on server" blue it is leaving made the well fill
+            # blue-into-blue — light meaning "not yet", against a plate where
+            # light is how an unstarted dial looks. It also left no moment at
+            # which the well simply *was* blue: it went dark blue, then pale
+            # blue, then green. Now it holds blue while it waits on the server
+            # and fills green as it lands, so the colour change is the arrival.
+            xfer = self._xfer.get(w)
+            if xfer is not None and not self._has("download", w):
+                direction, _frac = xfer
+                if direction == _XFER_DOWN:
+                    return theme.Colors.success           # filling toward local
+                if direction == _XFER_UP and w not in self._active:
+                    return theme.Colors.accent2           # filling toward the remote
             if self._has("download", w):
                 return theme.Colors.success               # fetched locally — done
             if self._has("process", w) or self._has("threshold", w):

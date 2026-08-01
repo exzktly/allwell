@@ -3148,6 +3148,18 @@ staged archives and the host's measured bandwidth actually support. Which side
 is faster is a question it does not answer, and a better-guessed answer would
 have been the same failure in a smarter disguise.
 
+**A transfer is painted in the colour it is heading toward.** The dial fills
+from a light tint of its colour to the full one, so a download painted in the
+"on server" blue the well is *leaving* filled blue-into-blue — light meaning
+"not yet", on a plate where light is exactly how an unstarted dial looks — and
+left no moment at which the well simply *was* blue (dark blue, then pale blue,
+then green). `RunDashboard._well_color` now returns the destination state's
+colour while a transfer is in flight: `success` for a download, `accent2` for an
+upload, so a well holds blue while it waits on the server and fills green as it
+lands. The colour change *is* the arrival. A well that has moved on (already
+computing, already fetched) keeps its own colour, so a stale transfer marker
+cannot repaint it backwards.
+
 **Rail denominators are per stage.** A remote run's stages do not count the
 same population: every well on the plate is grouped locally, while only the
 subset the incremental split sends is uploaded, processed and thresholded, and

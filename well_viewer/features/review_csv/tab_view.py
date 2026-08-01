@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QHeaderView, QLabel, QPushButton, QTableWidget,
+    QHeaderView, QLabel, QPushButton, QTableWidget,
     QVBoxLayout, QWidget,
 )
 from well_viewer.core.lazy import lazy as _lazy
@@ -39,12 +39,13 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     well_lbl.setObjectName("Muted")
     ctrl.add_scope("Well", well_lbl)
 
-    fov_cb = reg.register("_review_fov_cb", QComboBox())
-    fov_cb.setFixedWidth(120)
+    fov_cb = reg.register("_review_fov_cb", LabeledComboBox("FOV"))
+    # No setFixedWidth — LabeledComboBox already sizes to exactly the painted
+    # "FOV: …" text.
     fov_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )
-    ctrl.add_scope("FOV", fov_cb)
+    ctrl.add_scope("", fov_cb)
 
     tp_cb = reg.register("_review_tp_cb", LabeledComboBox("Timepoint"))
     # No setFixedWidth — LabeledComboBox already sizes to exactly the painted

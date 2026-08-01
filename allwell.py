@@ -247,7 +247,7 @@ class AllWellApp(QMainWindow):
         self._mode_seg.addSegment("Datasets", icon="boxes", data="datasets")
         self._mode_seg.currentChanged.connect(self._on_titlebar_mode_seg)
         # Width tracks the left panel of whichever mode is showing, so the bar
-        # and the panel under it are one column — see ``_sync_mode_bar_width``.
+        # and the panel under it are one column — see ``_sync_mode_bar``.
         # The rail's width is only the starting value, for the first paint
         # before any panel has been laid out.
         from well_viewer.core.app_shell_view import RAIL_W as _RAIL_W
@@ -380,7 +380,7 @@ class AllWellApp(QMainWindow):
             analyze_controller=self._analyze,
         )
         self._review.mountDatasetsPane(self._datasets)
-        self._install_mode_bar_width_sync()
+        self._install_mode_bar_sync()
 
         # Status bar v2: status / kbd hints / Log tray IconButton.
         from widgets.kbd_hint import KbdHint as _KbdHint
@@ -978,24 +978,32 @@ class AllWellApp(QMainWindow):
         pane = getattr(self, f"_{mode}", None)
         return getattr(pane, "_left_sidebar", None)
 
-    def _sync_mode_bar_width(self) -> None:
-        """Match the mode bar's width to the left panel below it.
+    def _sync_mode_bar(self) -> None:
+        """Keep the mode bar in step with the left panel below it.
 
-        The bar and that panel form the window's left column. All three
-        modes' panels now pin to the same `RAIL_W`
-        (`well_viewer.core.app_shell_view`), so this is a defensive floor
-        rather than reconciling genuinely different widths — it still runs on
-        every mode switch and panel resize in case that ever changes, or a
-        panel is momentarily narrower than the bar's own natural width.
+        The bar and that panel are one column, so they collapse together. When
+        the rail is collapsed the bar goes with it and the page tabs run to the
+        window's left edge; leaving it behind stranded a rail-width band of
+        chrome above an empty column — the rail was gone but its header was
+        still there, squeezed down to a width its three labels do not fit.
+        Bringing the rail back brings the bar back with it, which is also the
+        only route back to Analyze and Datasets while collapsed.
 
-        Floored at the bar's natural width so a panel narrower than the three
-        segments elides their labels rather than the bar shrinking to fit, and
-        falls back to that width when the panel is hidden — a collapsed rail
-        should not leave the tabs stranded across a gap.
+        Width matches the panel. All three modes' panels now pin to the same
+        `RAIL_W` (`well_viewer.core.app_shell_view`), so this is a defensive
+        floor rather than reconciling genuinely different widths — it still runs
+        on every mode switch and panel resize in case that ever changes, or a
+        panel is momentarily narrower than the bar's own natural width. Floored
+        at the bar's natural width so a panel narrower than the three segments
+        elides their labels rather than the bar shrinking to fit.
         """
         bar = getattr(self, "_mode_seg", None)
         if bar is None:
             return
+        collapsed = bool(getattr(getattr(self, "_review", None),
+                                 "_sidebar_collapsed", False))
+        if bar.isVisibleTo(bar.parentWidget() or self) == collapsed:
+            bar.setVisible(not collapsed)
         panel = self._mode_left_panel()
         natural = bar.sizeHint().width()
         width = max(panel.width(), natural) if (
@@ -1003,7 +1011,7 @@ class AllWellApp(QMainWindow):
         if bar.width() != width:
             bar.setFixedWidth(width)
 
-    def _install_mode_bar_width_sync(self) -> None:
+    def _install_mode_bar_sync(self) -> None:
         """Re-sync the bar whenever a mode's left panel is resized or toggled."""
         from PySide6.QtCore import QEvent, QObject
 
@@ -1012,18 +1020,18 @@ class AllWellApp(QMainWindow):
         class _WidthSync(QObject):
             def eventFilter(self, _obj, event) -> bool:  # Qt naming
                 if event.type() in (QEvent.Resize, QEvent.Show, QEvent.Hide):
-                    app._sync_mode_bar_width()
+                    app._sync_mode_bar()
                 return False
 
         watcher = _WidthSync(self)
-        self._mode_bar_width_sync = watcher   # keep a reference alive
+        self._mode_bar_sync = watcher   # keep a reference alive
         panels = [getattr(self._review, "_sidebar_root", None)]
         panels += [getattr(getattr(self, name, None), "_left_sidebar", None)
                    for name in ("_analyze", "_datasets")]
         for panel in panels:
             if panel is not None:
                 panel.installEventFilter(watcher)
-        self._sync_mode_bar_width()
+        self._sync_mode_bar()
 
     # ── Phase 10 / 11 handlers ───────────────────────────────────────────
     def _on_titlebar_mode_seg(self, idx: int) -> None:
@@ -1039,7 +1047,7 @@ class AllWellApp(QMainWindow):
         if stack is not None and 0 <= idx < stack.count() and stack.currentIndex() != idx:
             stack.setCurrentIndex(idx)
         # The new mode's left panel is a different width from the old one's.
-        self._sync_mode_bar_width()
+        self._sync_mode_bar()
 
     def _on_review_mode_changed(self, mode: str) -> None:
         """Mirror WellViewerApp's mode change into the titlebar seg + status."""
@@ -1052,7 +1060,7 @@ class AllWellApp(QMainWindow):
                 seg.setCurrentIndex(idx)
             finally:
                 seg.blockSignals(blocked)
-        self._sync_mode_bar_width()
+        self._sync_mode_bar()
         # Status dot now reflects dataset state (set by _update_dataset_chip),
         # not the Review/Analyze mode toggle — that's already shown by the
         # SegmentedControl itself.

@@ -736,13 +736,23 @@ one column rather than a chip row floating over one.
 All three modes put a panel down the left edge, and all three pin to the same
 `RAIL_W` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
 there too, not merely a minimum inside a resizable splitter) — so switching
-modes never visibly resizes the window. `AllWellApp._sync_mode_bar_width`
+modes never visibly resizes the window. `AllWellApp._sync_mode_bar`
 still matches the bar to whichever panel is current, re-running on every mode
 switch and on any resize of the three panels it watches, as a defensive floor
 rather than reconciling genuinely different widths: it floors at the bar's own
 natural width, so a panel narrower than the three segments elides their labels
-rather than shrinking the bar, and falls back to that width when every panel
-is hidden. An earlier pass set `RAIL_W` to whichever mode's content needed the
+rather than shrinking the bar.
+
+Because the bar and the panel are one column, they collapse together. The same
+method hides the bar whenever the rail is collapsed (`Ctrl+B`, or the button
+floating on the rail's edge), and the page tab strip then runs to the window's
+left edge. It is driven off the panels' own show/hide events, so it follows
+both routes into `tab_controller.apply_sidebar_visibility` without either of
+them having to know the bar exists. Left behind, the bar was a rail-width band
+of chrome hanging above an empty column, squeezed to a natural width its three
+labels do not fit inside. Re-expanding the rail brings it back — which is also
+the only way back to Analyze and Datasets while collapsed, since the bar is the
+app's sole mode switch. An earlier pass set `RAIL_W` to whichever mode's content needed the
 most room (Analyze's, at 438) and let the other two panes — neither of which
 needs anywhere near that width — inherit it unchanged; the result read as an
 oversized sidebar with no content to justify it in Review and Datasets.

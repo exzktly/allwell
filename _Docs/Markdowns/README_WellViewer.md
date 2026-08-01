@@ -616,7 +616,10 @@ the viewer always tracks the schema + channel tokens the dataset was built with
   at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
   beside the mode selector. `Ctrl+B` collapses the rail, as does the small
   button floating on the rail's right edge — it stays put when the rail hides,
-  so it is also how you bring the rail back.
+  so it is also how you bring the rail back. The mode selector is the top of
+  that same column and collapses with it, so while the rail is hidden the
+  sub-tabs run to the window's left edge; bring the rail back to switch between
+  Review, Analyze, and Datasets.
 - **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
   well selection they drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on

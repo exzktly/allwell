@@ -513,6 +513,13 @@ A cell counts only when it is manually kept **and** it passes QC.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
+- **Force these wells.** Comma-separated wells to reprocess in full, whatever
+  else the run decides. This is the only thing that recovers a well whose
+  `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
+  processed images count as already-done work, so an incremental run reports
+  that well "up to date" and skips it forever. Forcing it re-segments the well
+  and overwrites its outputs; every other well is unaffected. Validate &
+  Repair's completion handoff fills this in for you with exactly those wells.
 - **Incremental — process only missing FOVs.** Finishes a partial or crashed
   run instead of skipping past it. Normally a well whose `<WELL>_out.zip` and
   CSV both exist is skipped whole, however few of its `(FOV, timepoint)` pairs
@@ -1879,7 +1886,10 @@ plain re-run would skip the very wells that need finishing.
    and **Incremental — process only missing FOVs** is ticked for you. You land
    with Compute Options already unfolded so you can see that tick, and a line
    across the top of the run panel naming the dataset and confirming what was
-   set up. Press Run and only the missing `(FOV, timepoint)` pairs are
+   set up, including any wells listed under **Force these wells** — those are
+   wells whose images exist but whose measurements CSV is gone, which an
+   incremental run would skip forever, so they are re-segmented in full. Press
+   Run and only the missing `(FOV, timepoint)` pairs are
    processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
    archives; wells that are already complete are left untouched. Without that
    tick a plain re-run would skip every well that already has any output at

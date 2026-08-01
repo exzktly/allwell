@@ -35,7 +35,7 @@ import theme
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
-from datasets.validate.validate_compute import DatasetReport
+from datasets.validate.validate_compute import DatasetReport, wells_needing_force
 
 
 def _hrule(parent: QWidget) -> QFrame:
@@ -323,7 +323,14 @@ class ValidatePage(QWidget):
             self._repair_btn.setToolTip("These findings can't be repaired automatically.")
         else:
             self._repair_btn.setToolTip("")
-        needs_completion = any(w.missing for w in report.wells)
+        # Missing (fov, timepoint) pairs are not the only thing a completion
+        # run fixes. A well with images and no measurements CSV has no missing
+        # pairs at all — its own output archive covers them — yet it is the one
+        # kind of well an incremental run can never repair on its own, so the
+        # offer has to be on screen for a dataset whose only fault is that.
+        needs_completion = (
+            any(w.missing for w in report.wells) or bool(wells_needing_force(report))
+        )
         self._complete_btn.setVisible(needs_completion)
         self._check_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())

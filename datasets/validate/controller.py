@@ -18,6 +18,7 @@ from datasets.validate.validate_compute import (
     WellReport,
     read_dataset_settings,
     well_health,
+    wells_needing_force,
 )
 from datasets.validate.view import ValidatePage
 from datasets.validate.worker import ValidateWorker
@@ -41,6 +42,10 @@ class ValidateController(QObject):
         self._on_add_to_queue = on_add_to_queue
         self._worker: ValidateWorker | None = None
         self._last_result: tuple[bool, str, str] = (False, "", "")
+        # Wells the last report found with images but no measurements CSV —
+        # the ones an incremental run skips forever. Carried to the completion
+        # handoff as its per-well force list.
+        self._force_wells: tuple[str, ...] = ()
 
         self.page = ValidatePage()
         self.page.checkRequested.connect(self._on_check)
@@ -156,6 +161,7 @@ class ValidateController(QObject):
         # exactly one line ("Scanning dataset…") and nothing else, so the raw
         # log never recorded that the scan had even finished, let alone what
         # it concluded.
+        self._force_wells = wells_needing_force(report)
         self.page.append_log(f"✓ {summary}")
         self.page.dashboard.set_done(summary)
         self.page.show_report(report)
@@ -172,6 +178,7 @@ class ValidateController(QObject):
         # from the earlier successful check and pointed at a dataset whose
         # sidecar had just failed to read.
         self.page.show_failure(message)
+        self._force_wells = ()
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
@@ -215,7 +222,8 @@ class ValidateController(QObject):
             )
             self.page.append_log(warning)
             self.page.show_note(warning)
-        self._on_open_in_analyze(dataset_root, info, incremental=True)
+        self._on_open_in_analyze(
+            dataset_root, info, incremental=True, force_wells=list(self._force_wells))
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def shutdown(self) -> None:

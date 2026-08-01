@@ -131,6 +131,22 @@ def well_health(report: WellReport) -> str:
     return "no_output"
 
 
+def wells_needing_force(report: "DatasetReport") -> tuple[str, ...]:
+    """Wells an incremental run would skip forever, so it must be told to force.
+
+    A well with processed images and no measurements CSV has no *missing*
+    ``(fov, timepoint)`` pairs — its output archive's members already cover
+    everything its input holds — so ``incremental_done_fov_keys`` calls it done
+    and the run skips it. That is exactly the well whose CSV needs
+    regenerating, and only a per-well force
+    (``process_microscopy --force_wells``) will do it.
+
+    Wells that are merely *partial* are deliberately not here: an incremental
+    run does fix those, at a fraction of the cost of re-segmenting them whole.
+    """
+    return tuple(w.well for w in report.wells if well_health(w) == "missing")
+
+
 @dataclass(frozen=True)
 class ScanProgress:
     """Optional callbacks that follow a :func:`build_report` scan while it runs.
@@ -544,11 +560,21 @@ def _scan_one_well(
                 ),
             ))
     if csv_state == "missing" and (container is not None or out_zip is not None or out_folder is not None):
+        # An incremental run cannot fix this well, and saying only "no CSV
+        # found" sent users to press Run for nothing. incremental_done_fov_keys
+        # unions the CSV's rows with the output archive's members, so this
+        # well's own processed images are counted as already done: the run
+        # reports it "up to date (no new FOVs)" and skips it, leaving the
+        # missing CSV missing forever. Naming the remedy is the whole point of
+        # the finding.
         findings.append(Finding(
             severity="warning", code="no_csv", well=well,
             message=(
                 f"Well {well}: images exist but no measurements CSV was found "
-                "(it may have segmented zero cells at every timepoint)."
+                "(it may have segmented zero cells at every timepoint). An "
+                "incremental run counts this well's own output images as "
+                "already done and reports it up to date, so only a forced "
+                "reprocess of this well regenerates the CSV."
             ),
         ))
     elif csv_state == "unreadable":

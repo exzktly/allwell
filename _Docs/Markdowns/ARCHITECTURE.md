@@ -3070,7 +3070,20 @@ run, not a new execution path. What travels through that seam is what makes the
 handoff able to finish anything: the dataset's own recorded
 `out/pipeline_info.json` (read best-effort by
 `validate_compute.read_dataset_settings`, which returns `(info, problem)` and
-never raises) plus `incremental=True`. Both matter, and each was missing on its
+never raises), `incremental=True`, and the per-well force list
+`validate_compute.wells_needing_force(report)` — every well the report found
+with images and no measurements CSV, which is precisely the set an incremental
+run would skip forever. Wells that are merely *partial* are deliberately left
+off it: incremental does fix those, at a fraction of the cost of re-segmenting
+them whole. `ValidatePage.show_report`'s `needs_completion` keys off that list
+as well as off missing `(fov, timepoint)` pairs, because a no-CSV well has no
+missing pairs at all — its own archive covers them — and a dataset whose only
+fault is that kind of well is exactly the case where the button is the only
+remedy on offer. The `no_csv` finding says so in words: an incremental run
+counts the well's own output images as already done and reports it up to date,
+so only a forced reprocess regenerates the CSV.
+
+The sidecar and the incremental flag both matter, and each was missing on its
 own account. Without the sidecar the Analyze form keeps whatever was already in
 it, so the schema, separator, channel roles, QC options and — the one that
 silently breaks the done-set lookup — the `csv_prefix` all have to be re-entered

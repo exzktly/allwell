@@ -25,10 +25,11 @@ from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
 def _handoff_recorder() -> tuple[dict, object]:
     calls: dict = {}
 
-    def _open(path, pipeline_info=None, *, incremental=False):
+    def _open(path, pipeline_info=None, *, incremental=False, force_wells=None):
         calls["path"] = path
         calls["info"] = pipeline_info
         calls["incremental"] = incremental
+        calls["force_wells"] = list(force_wells or [])
 
     return calls, _open
 
@@ -261,3 +262,112 @@ def test_unreadable_settings_warning_reaches_the_findings_list(qtbot, tmp_path):
     shown = [ctrl.page._findings_list.item(i).text()
              for i in range(ctrl.page._findings_list.count())]
     assert any("NOT pre-filled" in text for text in shown)
+
+
+# ── the well an incremental run can never fix ────────────────────────────────
+
+def _well_with_images_but_no_csv(root):
+    """Build a dataset where C08 has processed images and no measurements CSV.
+
+    The reported case: Validate paints it red "no measurements recorded" while
+    the pipeline's own incremental diff calls the same well up to date, because
+    incremental_done_fov_keys unions the CSV's rows with the OUT-ZIP's members
+    -- so C08's own processed images are counted as already done and the run
+    skips the very well whose CSV is missing.
+    """
+    build_dataset(root, wells=["B02", "C08"], timepoints=["0h", "24h"],
+                  fovs=("F001", "F002"))
+    (root / "out" / "measurements_C08.csv").unlink()
+
+
+def test_a_well_with_images_and_no_csv_is_what_incremental_skips_forever(tmp_path):
+    """Pins the disagreement itself: no missing (fov, timepoint) pairs, so the
+    incremental run has nothing to do, yet the CSV is absent."""
+    from datasets.validate import validate_compute as vc
+    from pipeline.incremental_keys import incremental_done_fov_keys
+    from well_viewer.data.image_identity import load_schema
+
+    _well_with_images_but_no_csv(tmp_path)
+    report = vc.build_report(tmp_path)
+    c08 = next(w for w in report.wells if w.well == "C08")
+    assert c08.csv_state == "missing"
+    assert c08.missing == ()                      # nothing for incremental to do
+    assert vc.well_health(c08) == "missing"
+
+    info = vc._read_sidecar(vc.resolve_dataset(tmp_path, label="d"))
+    schema = load_schema(info)
+    done, from_csv = incremental_done_fov_keys(
+        tmp_path / "out", "C08", csv_prefix="measurements", safe_well="C08",
+        schema=list(schema.fields), sep=schema.sep)
+    assert done and not from_csv                  # recovered from the out-zip
+    assert vc.wells_needing_force(report) == ("C08",)
+    # B02 is fine and must not be dragged into a needless re-segmentation.
+    assert "B02" not in vc.wells_needing_force(report)
+
+    no_csv = [f for f in report.findings if f.code == "no_csv" and f.well == "C08"]
+    assert len(no_csv) == 1
+    assert "forced reprocess" in no_csv[0].message
+
+
+def test_completion_is_offered_when_no_csv_wells_are_the_only_fault(qtbot, tmp_path):
+    """`needs_completion` used to key off missing (fov, timepoint) pairs alone,
+    so a dataset whose only fault was a no-CSV well never offered the button --
+    the one case where the user most needs it, since nothing else recovers
+    that well."""
+    from datasets.validate.controller import ValidateController
+
+    _well_with_images_but_no_csv(tmp_path)
+    ctrl = ValidateController()
+    qtbot.addWidget(ctrl.page)
+    ctrl.page.show_report(__import__(
+        "datasets.validate.validate_compute", fromlist=["build_report"]
+    ).build_report(tmp_path))
+    assert ctrl.page._complete_btn.isVisibleTo(ctrl.page)
+
+
+def test_handoff_forces_exactly_the_wells_incremental_would_skip(qtbot, tmp_path):
+    """End of the chain: those wells reach the pipeline command line as
+    --force_wells, which is the only thing that regenerates their CSVs."""
+    from allwell import AllWellApp
+    from analyze_tab import AnalyzeTab
+    from datasets.validate import validate_compute as vc
+    from services.pipeline_service import build_pipeline_args
+
+    _well_with_images_but_no_csv(tmp_path)
+    info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
+    forced = list(vc.wells_needing_force(vc.build_report(tmp_path)))
+
+    analyze = AnalyzeTab()
+    qtbot.addWidget(analyze)
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, info, incremental=True, force_wells=forced)
+
+    assert analyze._force_wells_edit.text() == "C08"
+    assert "C08" in analyze._dashboard._status.text()
+    opts = analyze._collect_run_options()
+    assert opts["force_wells"] == ["C08"]
+    args = build_pipeline_args(
+        Path("process_microscopy.py"), tmp_path / "in", tmp_path / "out", opts)
+    assert args[args.index("--force_wells") + 1] == "C08"
+    # Incremental stays on for everything else — the partial wells it does fix
+    # must not be re-segmented from scratch.
+    assert "--incremental" in args
+
+
+def test_force_wells_only_overrides_the_named_wells(tmp_path):
+    """The pipeline-side decision, on its own: a forced well runs as if
+    --incremental were off; every other well is untouched by the list."""
+    import process_microscopy as pm
+
+    forced = pm._canonical_force_wells(["c8", "F08"])
+    assert sorted(forced) == ["C08", "F08"]        # C8 and C08 are one well
+    assert pm._incremental_for_well(True, "C08", forced) is False
+    assert pm._incremental_for_well(True, "C8", forced) is False
+    assert pm._incremental_for_well(True, "B02", forced) is True
+    assert pm._incremental_for_well(True, "B02", frozenset()) is True
+
+    args = pm.build_parser().parse_args(
+        ["--input_dir", "in", "--output_dir", "out", "--force_wells", "c8"])
+    assert args.force_wells == ["c8"]
+    assert pm.build_parser().parse_args(
+        ["--input_dir", "in", "--output_dir", "out"]).force_wells is None

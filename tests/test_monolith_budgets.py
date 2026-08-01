@@ -69,7 +69,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # process_well_folders drivers onto one shared _run_well_worker_pool (+ a shared
 # _sweep_stale_scratch_dirs); the mode-specific skip/sweep/submit become
 # callables. Genuine dedup — ratcheted the budget down to the new 4707.
-PROCESS_MICROSCOPY_BUDGET = 4707
+# 4707 -> 4692: the per-well skip/force decisions (output_exists_for_well and
+# its folder twin, plus the per-well force normaliser and incremental_for_well)
+# moved into the stdlib-only pipeline/well_skip.py. Genuine extraction — ratchet
+# down to the new size.
+PROCESS_MICROSCOPY_BUDGET = 4692
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis
@@ -108,8 +112,10 @@ ANALYZE_TAB_BUDGET = 970
 # an extraction, as the pipeline_info restore (_open_pipeline_info /
 # _pinfo_flat / _apply_pipeline_info → analyze_tab_pinfo.AnalyzePipelineInfoMixin)
 # and the form chrome (_section / _row / _entry / _info_icon / reveal_section →
-# analyze_tab_chrome.AnalyzeFormChromeMixin) both did.
-ANALYZE_TAB_FORM_BUDGET = 1215
+# analyze_tab_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
+# parsers (_safe_qc_float / _safe_seg_float / _INT_FIELDS /
+# _numeric_option_errors → analyze_tab_fields.py) all did.
+ANALYZE_TAB_FORM_BUDGET = 1170
 
 
 def _line_count(rel: str) -> int:

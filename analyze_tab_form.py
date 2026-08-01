@@ -25,6 +25,12 @@ from PySide6.QtWidgets import (
 
 
 from analyze_tab_chrome import AnalyzeFormChromeMixin
+from analyze_tab_fields import (  # noqa: F401 — re-exported for analyze_tab
+    _INT_FIELDS,
+    _numeric_option_errors,
+    _safe_qc_float,
+    _safe_seg_float,
+)
 from analyze_tab_pinfo import AnalyzePipelineInfoMixin
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
@@ -48,76 +54,6 @@ _SCHEMA_LABELS = ("Experiment", "Channel", "Well", "FOV", "Timepoint", "— igno
 # the picker rather than raising.
 _LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
 _FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
-
-
-# ── Entry-boundary parsing + numeric validation ─────────────────────────────
-#
-# These read the form's text fields, so they live beside the widgets rather than
-# in the tab that hosts them. ``analyze_tab`` re-exports
-# ``_numeric_option_errors`` so its old import path still resolves.
-
-def _safe_qc_float(text: str) -> float:
-    """Parse a QC bound from a text field; 0.0 (= no bound) on empty/invalid."""
-    try:
-        return float(str(text).strip() or "0")
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _safe_seg_float(text: str, default: float) -> float:
-    """Parse a segmentation-parameter field; *default* on empty/invalid."""
-    try:
-        return float(str(text).strip() or default)
-    except (TypeError, ValueError):
-        return default
-
-
-_INT_FIELDS = {
-    "tophat_radius_nir": "Nuclear tophat radius",
-    "tophat_radius_fluor": "Fluor tophat radius",
-    "fft_small_nir": "Nuclear FFT small-object px",
-    "fft_small_fluor": "Fluor FFT small-object px",
-    "tf_threads": "TF threads",
-    "workers": "Workers",
-    "remote_batch_size": "Remote batch size",
-}
-
-
-def _numeric_option_errors(opts: dict) -> list[str]:
-    """Return human-readable errors for out-of-range / unparseable numeric run
-    options. Empty/blank means "use the pipeline default" and is allowed."""
-    errors: list[str] = []
-    for key, label in _INT_FIELDS.items():
-        raw = str(opts.get(key, "") or "").strip()
-        if not raw:
-            continue
-        try:
-            if int(raw) < 0:
-                errors.append(f"{label} must be a whole number ≥ 0 (got {raw!r}).")
-        except ValueError:
-            errors.append(f"{label} must be a whole number (got {raw!r}).")
-    for key, label, allow_zero in (("mesh_ratio", "Mesh tile ratio", False),
-                                   ("mesh_sigma", "Mesh sigma", True)):
-        raw = str(opts.get(key, "") or "").strip()
-        if not raw:
-            continue
-        try:
-            val = float(raw)
-        except ValueError:
-            errors.append(f"{label} must be a number (got {raw!r}).")
-            continue
-        if allow_zero and val < 0:
-            errors.append(f"{label} must be ≥ 0.")
-        elif not allow_zero and val <= 0:
-            errors.append(f"{label} must be > 0.")   # 0 → downstream div-by-zero
-    mn = opts.get("qc_min_area") or 0.0
-    mx = opts.get("qc_max_area") or 0.0
-    if mn and mx and mn > mx:
-        errors.append("QC minimum area must be ≤ maximum area.")
-    sol = opts.get("qc_min_solidity") or 0.0
-    if not (0.0 <= sol <= 1.0):
-        errors.append("QC minimum solidity must be between 0 and 1.")
-    return errors
 
 
 class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
@@ -699,6 +635,22 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
             "all process in full; wells that are already complete are left "
             "untouched.")
         sec.layout().addWidget(self._incremental_cb)
+        # Per-well force, as a visible field rather than hidden run state: it
+        # re-segments the named wells from scratch, which is expensive and
+        # overwrites their outputs, so it must never be something the user
+        # cannot see or clear. Validate & Repair's completion handoff fills it
+        # with the wells an incremental run would otherwise skip forever.
+        fw_row = self._row(sec, "Force these wells")
+        self._force_wells_edit = QLineEdit(fw_row)
+        self._force_wells_edit.setPlaceholderText("(none)")
+        self._force_wells_edit.setToolTip(
+            "Comma-separated wells to reprocess in full, whatever else the run "
+            "decides. A well whose <WELL>_out.zip exists but whose measurements "
+            "CSV is missing looks complete to an incremental run — its archive "
+            "members are counted as already done — so only forcing it "
+            "regenerates the CSV. Re-segments those wells and overwrites their "
+            "outputs; everything else is unaffected.")
+        fw_row.layout().addWidget(self._force_wells_edit, 1)
 
     def _build_scratch_section(self, parent: QWidget) -> None:
         """Scratch-disk picker — the very last option before the Run controls.
@@ -1183,6 +1135,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
             # background model), but it never clears a True the form set: with
             # nothing appended it returns before touching the key.
             incremental=self._incremental_cb.isChecked(),
+            force_wells=[w.strip() for w in
+                         self._force_wells_edit.text().replace(";", ",").split(",")
+                         if w.strip()],
             cpu_only=self._cpu_only_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),
             workers=self._workers_edit.text(),

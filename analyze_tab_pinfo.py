@@ -192,6 +192,9 @@ class AnalyzePipelineInfoMixin:
         chk("_cpu_only_cb", d.get("cpu_only"))
         chk("_force_cb", d.get("force"))
         chk("_incremental_cb", d.get("incremental"))
+        forced = d.get("force_wells")
+        if forced is not None and hasattr(self, "_force_wells_edit"):
+            self._force_wells_edit.setText(", ".join(str(w) for w in forced))
 
         # Scratch disk — a recorded value pins the field; absent, it stays blank
         # so the pipeline default (~/.allwell/scratch) applies.

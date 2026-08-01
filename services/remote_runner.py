@@ -513,16 +513,7 @@ def stage_local_zips(
                 filename_sep=filename_sep,
                 log_fn=log_fn,
             )
-            if zero_match:
-                sample = ", ".join(zero_match[:5])
-                more = (f" (and {len(zero_match) - 5} more)"
-                        if len(zero_match) > 5 else "")
-                raise RuntimeError(
-                    f"Channel filter matched zero images in {len(zero_match)} "
-                    f"well(s): {sample}{more}. Likely a typo in the channel "
-                    f"name(s) on the Analyze tab — check your nuclear and fluor "
-                    f"channel tokens against the filenames inside the well zips."
-                )
+            _raise_on_zero_channel_match(zero_match)
             _to_move = sum(
                 (len(p_.keep) if p_.keep is not None else p_.n_members)
                 for p_ in plans
@@ -1002,25 +993,30 @@ def _stage_mixed_mode(
                 pass
 
     if fluor_tokens is not None:
-        # v5.2.18 invariant: the channel filter must NOT mutate the
-        # user's input dir. Copy ALL zips (existing + new) into a
-        # temp staging dir and filter there. The originals in
-        # input_dir stay pristine.
+        # v5.2.18 invariant: the channel filter must NOT mutate the user's input
+        # dir, so the filtered archives are built in a staging dir. Same
+        # plan-then-materialise as plain ZIP mode: decide which members survive
+        # from each archive's member list, then write only those. Copying every
+        # archive in full and rewriting it afterwards — which this used to do —
+        # pulls the whole plate off the input volume to discard most of it,
+        # which is worst exactly where MIXED mode is most likely: a resumed run
+        # against a slow network share.
         staging = _new_scratch_dir("allwell-stage-")
         try:
-            staged: list[Path] = []
-            for z in all_zips:
-                dest = staging / z.name
-                _copy_into_staging(z, dest, log_fn=log_fn)
-                staged.append(dest)
-            zin = _filter_channels_in_staging(
-                staging, tuple(staged), LocalInputMode.MIXED,
+            plans, _unused, zero_match = _plan_staging(
+                all_zips,
                 keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
                 log_fn=log_fn,
             )
-            zin.cleanup = lambda d=staging: shutil.rmtree(d, ignore_errors=True)
-            zin.on_pipeline_success = _on_success
-            return zin
+            _raise_on_zero_channel_match(zero_match)
+            staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
+            return ZippedInput(
+                zip_dir=staging,
+                mode=LocalInputMode.MIXED,
+                well_zips=staged_zips,
+                cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+                on_pipeline_success=_on_success,
+            )
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
             raise
@@ -1054,15 +1050,34 @@ class _StagePlan:
     note: str = ""
 
 
+def _raise_on_zero_channel_match(zero_match: list[str]) -> None:
+    """Fail naming every well whose channel filter matched nothing.
+
+    A filter that matches zero images is nearly always a mistyped channel name,
+    and learning that one well at a time is useless — so the plan pass collects
+    every offender and this raises once, before any bytes have moved.
+    """
+    if not zero_match:
+        return
+    sample = ", ".join(zero_match[:5])
+    more = f" (and {len(zero_match) - 5} more)" if len(zero_match) > 5 else ""
+    raise RuntimeError(
+        f"Channel filter matched zero images in {len(zero_match)} well(s): "
+        f"{sample}{more}. Likely a typo in the channel name(s) on the Analyze "
+        f"tab — check your nuclear and fluor channel tokens against the "
+        f"filenames inside the well zips."
+    )
+
+
 def _plan_staging(
     well_zips: tuple[Path, ...],
     *,
     keep_tokens: set[str] | None,
-    incremental: bool,
-    prior_output_dir: Path | None,
-    csv_prefix: str,
-    filename_schema: str,
-    filename_sep: str,
+    incremental: bool = False,
+    prior_output_dir: Path | None = None,
+    csv_prefix: str = "measurements",
+    filename_schema: str = "",
+    filename_sep: str = "_",
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[list[_StagePlan], list[str], list[str]]:
     """Decide, per well, which members need staging — reading no member bytes.

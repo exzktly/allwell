@@ -2267,6 +2267,14 @@ to the wanted members pulls the entire dataset across the network before a singl
 byte reaches the remote, which is exactly backwards when the data lives on a NAS
 — the normal case. The channel-filter typo guard runs in the plan pass, so a
 mistyped channel name names every offending well before any bytes move.
+**MIXED mode** — some wells zipped, others still folders, the signature of a
+run that died mid-compression — stages through the same two passes; it is the
+mode most likely to arise on a slow share, so a full copy there was the worst
+place to keep one. Its leftover folders are still zipped into the *input* dir
+(persisted deliberately, so the next run sees plain ZIP mode and re-zips
+nothing), and with no channel filter it uploads from the input dir with no
+staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
+path, which filters zips it has just written itself.
 
 **Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
 where per-well working files go: the extracted input TIFs, every intermediate

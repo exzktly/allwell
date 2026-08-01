@@ -351,6 +351,76 @@ def test_a_typo_d_channel_filter_names_every_offending_well(tmp_path, monkeypatc
     assert "C02" in str(exc.value) and "C03" in str(exc.value)
 
 
+def test_mixed_mode_stages_the_same_way_as_zip_mode(tmp_path, monkeypatch):
+    """MIXED (some wells zipped, others still folders — a resumed run) filters
+    into staging just like plain ZIP mode, writing only the members it keeps.
+
+    It used to copy every archive in full and rewrite them afterwards, which is
+    worst exactly where MIXED arises: a run resumed against a slow share.
+    """
+    import zipfile
+
+    import services.remote_runner as rr
+
+    src = tmp_path / "in"
+    src.mkdir()
+    # C02 already zipped; C03 is still a folder of TIFs -> MIXED.
+    _make_well_zip(src / "C02.zip", "C02", fovs=("f0",), tps=("t0",),
+                   channels=("RFP", "GFP", "DAPI"))
+    folder = src / "C03"
+    folder.mkdir()
+    for chan in ("RFP", "GFP", "DAPI"):
+        (folder / f"Exp_{chan}_C03_f0_t0.tif").write_bytes(b"x" * 4096)
+
+    assert rr._detect_local_input_mode(src) is rr.LocalInputMode.MIXED
+
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
+    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+
+    lines: list[str] = []
+    out = rr.stage_local_zips(
+        src, filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_", fluor_tokens=["GFP"], nuclear_token="RFP",
+        log_fn=lines.append,
+    )
+
+    assert out.mode is rr.LocalInputMode.MIXED
+    assert {p.stem for p in out.well_zips} == {"C02", "C03"}
+    for zp in out.well_zips:
+        with zipfile.ZipFile(zp) as z:
+            names = z.namelist()
+        # DAPI was not requested and must never have been written.
+        assert not any("DAPI" in n for n in names), names
+        assert len(names) == 2, names
+    # The staged archives are the filtered ones, not full copies.
+    assert (staging / "C02.zip").stat().st_size < (src / "C02.zip").stat().st_size
+    assert "staged (" in "".join(lines)
+
+
+def test_mixed_mode_with_no_filter_uploads_from_the_input_dir(tmp_path, monkeypatch):
+    """Nothing to transform means nothing to stage — the zips are uploaded
+    where they lie, and the newly-zipped well persists for the next run."""
+    import services.remote_runner as rr
+
+    src = tmp_path / "in"
+    src.mkdir()
+    _make_well_zip(src / "C02.zip", "C02", fovs=("f0",), tps=("t0",))
+    folder = src / "C03"
+    folder.mkdir()
+    for chan in ("RFP", "GFP"):
+        (folder / f"Exp_{chan}_C03_f0_t0.tif").write_bytes(b"x" * 4096)
+
+    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+    out = rr.stage_local_zips(
+        src, filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_", log_fn=lambda m: None,
+    )
+    assert out.zip_dir == src, "no filter, so no staging copy"
+    assert (src / "C03.zip").exists(), "the newly-zipped well persists in the input dir"
+
+
 # ── The viewer says so at load ──────────────────────────────────────────────
 
 

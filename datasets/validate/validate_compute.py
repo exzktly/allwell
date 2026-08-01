@@ -248,6 +248,23 @@ def _read_sidecar(paths) -> dict:
     return info
 
 
+def read_dataset_settings(root: Path | str) -> tuple[dict, str]:
+    """The dataset's own recorded ``pipeline_info``, for pre-filling a run.
+
+    Returns ``(info, problem)``. *problem* is a short user-facing sentence when
+    the sidecar can't be read at all, with *info* empty in that case. Never
+    raises: the caller's actual job — handing this dataset to Analyze so a
+    partial run can be finished — still goes ahead without the settings; it
+    just has to say out loud that it did, since a run reconfigured by hand
+    against the wrong ``csv_prefix`` or schema reads its already-done set from
+    files that don't exist.
+    """
+    try:
+        return _read_sidecar(resolve_dataset(root, label="dataset")), ""
+    except (ValidateError, DatasetPathsError) as exc:
+        return {}, str(exc)
+
+
 def _classify_csvs(paths) -> tuple[dict[str, list[Path]], set[str], list[Finding]]:
     """Glob ``out/*.csv`` directly (never through ``out_csvs()``, which
     plainly overwrites on a duplicate well key) and split it into

@@ -513,6 +513,16 @@ A cell counts only when it is manually kept **and** it passes QC.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
+- **Incremental — process only missing FOVs.** Finishes a partial or crashed
+  run instead of skipping past it. Normally a well whose `<WELL>_out.zip` and
+  CSV both exist is skipped whole, however few of its `(FOV, timepoint)` pairs
+  actually made it in — so pressing Run again after a crash does nothing for
+  the wells that need it. With this ticked, each well's already-recorded pairs
+  are read from the output folder and only the missing ones are processed,
+  then merged into the existing CSV and archive. Wells with no output at all
+  process in full; complete wells are left untouched. Datasets → *Validate &
+  Repair* → **Complete this run in Analyze** ticks this for you. Force re-run
+  overrides it.
 
 ### 8. Run / Suspend / Stop / Log
 
@@ -1863,8 +1873,17 @@ plain re-run would skip the very wells that need finishing.
    hover it — the tooltip explains when a finding genuinely can't be
    auto-repaired.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
-   Analyze** opens the dataset there so you can re-run and pick up the
-   missing pieces.
+   Analyze** opens the dataset there set up to finish it: the Analyze form is
+   filled in from the dataset's own recorded settings (schema, separator,
+   channel roles, QC options, CSV prefix — everything the original run used),
+   and **Incremental — process only missing FOVs** is ticked for you. Press
+   Run and only the missing `(FOV, timepoint)` pairs are processed, merged
+   into the existing per-well CSVs and `<WELL>_out.zip` archives; wells that
+   are already complete are left untouched. Without that tick a plain re-run
+   would skip every well that already has any output at all — which is most
+   of the wells you need finished. If the dataset's settings can't be read,
+   the handoff still happens and the log says so; check the schema, channel
+   tokens and CSV prefix by hand before running in that case.
 
 ### Subset / Split Dataset
 

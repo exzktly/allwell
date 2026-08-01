@@ -13,7 +13,12 @@ from PySide6.QtCore import QObject, Signal
 
 from util.aw_safe import swallowed
 from datasets._common.dataset_paths import preview_wells
-from datasets.validate.validate_compute import DatasetReport, WellReport, well_health
+from datasets.validate.validate_compute import (
+    DatasetReport,
+    WellReport,
+    read_dataset_settings,
+    well_health,
+)
 from datasets.validate.view import ValidatePage
 from datasets.validate.worker import ValidateWorker
 
@@ -27,7 +32,7 @@ class ValidateController(QObject):
     def __init__(
         self,
         *,
-        on_open_in_analyze: Callable[[str], None] | None = None,
+        on_open_in_analyze: Callable[..., None] | None = None,
         on_add_to_queue: Callable[[str, dict], None] | None = None,
         parent: QObject | None = None,
     ) -> None:
@@ -174,8 +179,34 @@ class ValidateController(QObject):
             swallowed()
 
     def _on_complete_run(self, dataset_root: str) -> None:
-        if self._on_open_in_analyze is not None and dataset_root:
-            self._on_open_in_analyze(dataset_root)
+        """Hand the dataset to Analyze configured to finish what it started.
+
+        Handing over only the folder path was not enough to complete a run, in
+        two independent ways. The form kept whatever settings happened to be in
+        it, so the schema, separator, channel roles, QC options and — the one
+        that silently breaks the done-set lookup — the ``csv_prefix`` all had to
+        be re-entered by hand and matched exactly. And a plain re-run *skips*
+        any well whose ``<well>_out.zip`` and CSV both exist, however few of its
+        FOV-groups actually landed, which is exactly the state this page exists
+        to report: pressing Run again did nothing for the very wells it named.
+
+        So the dataset's own recorded sidecar goes with it, and the run is asked
+        for FOV-level incremental mode.
+        """
+        if self._on_open_in_analyze is None or not dataset_root:
+            return
+        info, problem = read_dataset_settings(dataset_root)
+        if problem:
+            # Never a silent handoff: Analyze still opens on the folder, but the
+            # form keeps whatever was already in it, and a run configured by
+            # hand against the wrong csv_prefix or schema reads its done-set
+            # from files that don't exist and reprocesses everything. Say so.
+            self.page.append_log(
+                f"⚠ {problem} Analyze opened on the folder, but its settings "
+                "were NOT pre-filled — check the schema, channel tokens and CSV "
+                "prefix against the original run before pressing Run."
+            )
+        self._on_open_in_analyze(dataset_root, info, incremental=True)
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def shutdown(self) -> None:

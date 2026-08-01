@@ -257,7 +257,11 @@ def test_check_reports_missing_fov_and_offers_completion(qapp, tmp_path):
         w.writerows(rows)
 
     seen = []
-    ctrl = ValidateController(on_open_in_analyze=seen.append)
+
+    def _open(path, pipeline_info=None, *, incremental=False):
+        seen.append(path)
+
+    ctrl = ValidateController(on_open_in_analyze=_open)
     page = ctrl.page
     page._dataset_field.set_path(str(tmp_path))
     page._on_dataset_changed()

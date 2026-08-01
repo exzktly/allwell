@@ -103,11 +103,12 @@ ANALYZE_TAB_BUDGET = 970
 
 # analyze_tab_form.py carried no budget while analyze_tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
-# ratchets down like the rest instead of becoming the new dumping ground. This is
-# the opening value, set at the end of the PR that introduced the budget — not a
-# ratchet that was raised. From here it only moves down; the next section added
-# to this form should come with an extraction.
-ANALYZE_TAB_FORM_BUDGET = 1492
+# ratchets down like the rest instead of becoming the new dumping ground. From
+# there it only moves down; the next section added to this form should come with
+# an extraction, as the pipeline_info restore (_open_pipeline_info /
+# _pinfo_flat / _apply_pipeline_info → analyze_tab_pinfo.AnalyzePipelineInfoMixin)
+# did.
+ANALYZE_TAB_FORM_BUDGET = 1323
 
 
 def _line_count(rel: str) -> int:

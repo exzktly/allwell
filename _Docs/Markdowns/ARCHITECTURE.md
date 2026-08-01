@@ -113,6 +113,7 @@ allwell/
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
+├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
@@ -1896,6 +1897,30 @@ keeps only the run/log/dashboard orchestration. Both files carry a line budget
 (`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
 behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
 
+Restoring a prior run's settings is a fourth mixin,
+`analyze_tab_pinfo.AnalyzePipelineInfoMixin` (`_open_pipeline_info` →
+`_pinfo_flat` → `_apply_pipeline_info`), inherited by `AnalyzeTabFormMixin` so
+those names stay reachable on the form where every caller expects them. Three
+paths arrive there: the "Load previous run" action, the OME converter's
+channel-role handoff, and Validate & Repair's "Complete this run in Analyze".
+`_pinfo_flat` prefers the sidecar's `execution_options` (the full `vars(args)`
+snapshot the pipeline records) and falls back to the top-level/`qc_options` keys
+for older sidecars; `None`-valued keys are dropped so a sparse sidecar can't
+clobber widget defaults with blanks.
+
+The **Incremental — process only missing FOVs** checkbox in Output & Compute
+carries `--incremental` into the run: each well's already-recorded
+`(fov, timepoint)` pairs are read from the output folder and only the missing
+ones are processed, then merged into the existing per-well CSV and
+`<WELL>_out.zip`. Without it a well whose out-zip and CSV both exist is skipped
+whole however few of its FOV-groups landed, which is why a crashed run cannot be
+completed by pressing Run again — the checkbox is the run mode Validate &
+Repair's completion handoff ticks on the way in, and the pipeline ignores it
+when `--force` is also set. `select_incremental_scope` may still switch a run to
+a full `--force` reprocess during input resolution (loose images landing under a
+cross-well flat-field/background model), but it never clears a `True` the form
+set: with nothing appended it returns before touching the key.
+
 Rendering the run's progress is a third mixin, `analyze_progress.AnalyzeProgressMixin`:
 `_apply_progress_event` turns each `ProgressTracker` event into dashboard state
 (headline, overall bar, per-well plate colour, per-well FOV and transfer dials),
@@ -2690,6 +2715,17 @@ to `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive
 pre-filled. The channel names are written into the output filenames regardless
 of the roles.
 
+That callback takes a `pipeline_info`-shaped settings dict and an `incremental`
+flag, and both of its callers use them: the converter passes the channel roles
+it assigned, Validate & Repair passes the dataset's whole recorded sidecar with
+`incremental=True`. It applies the settings **first** and writes the input field
+**afterwards** — a full sidecar's `execution_options` carries the `input_dir`
+recorded on whatever machine ran the pipeline, and letting that win would point
+Analyze at a path that need not exist locally, whereas the folder the caller
+names is the one the user just picked. It ends by calling `_refresh_output`, so
+the resolved output folder (and with it the incremental run's prior directory)
+is on screen before the user presses Run.
+
 The readout and the Convert/"+ Queue" buttons sit above the acquisition plate
 rather than below it — every other Datasets tool puts its primary action above
 a height-capped plate map, and here the uncapped `PlateOrderEditor` used to
@@ -2974,8 +3010,26 @@ for a schema that doesn't have `field_name` — silently wiping a real, correct
 
 The page's **Complete this run** button hands the dataset off to Analyze
 through the existing `on_open_in_analyze` seam — the same one `Convert
-OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
-incremental) Analyze run, not a new execution path.
+OME-TIFF` uses — so finishing a partial run is an ordinary incremental Analyze
+run, not a new execution path. What travels through that seam is what makes the
+handoff able to finish anything: the dataset's own recorded
+`out/pipeline_info.json` (read best-effort by
+`validate_compute.read_dataset_settings`, which returns `(info, problem)` and
+never raises) plus `incremental=True`. Both matter, and each was missing on its
+own account. Without the sidecar the Analyze form keeps whatever was already in
+it, so the schema, separator, channel roles, QC options and — the one that
+silently breaks the done-set lookup — the `csv_prefix` all have to be re-entered
+by hand and matched exactly; `incremental_done_fov_keys` reconstructs
+`f"{csv_prefix}_{safe_well}.csv"`, so a mismatched prefix reads the done-set
+from a file that doesn't exist and reprocesses the whole plate. Without
+`incremental` the run is a plain re-run, which *skips* any well whose
+`<well>_out.zip` and CSV both exist however few of its FOV-groups actually
+landed — precisely the state this page exists to report, so pressing Run did
+nothing for the very wells the findings list had just named. When the sidecar
+can't be read at all, the handoff still happens (refusing would strand the user)
+and `_on_complete_run` writes a warning to the page's own log saying the form
+was *not* pre-filled, rather than opening Analyze in a silently unconfigured
+state.
 
 `ValidatePage.set_running` locks the dataset `PathField` (`setLocked`,
 disabling only Browse — see `PathField` in §7) for the run's

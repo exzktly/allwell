@@ -103,7 +103,10 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV
 # Ratcheted to 970: run-progress rendering (the ETA cluster and
 # _apply_progress_event) moved to analyze_progress.AnalyzeProgressMixin. It is a
 # self-contained job with one entry point, and the tab only hosts it.
-ANALYZE_TAB_BUDGET = 970
+# Ratcheted to 964: the grouping-phase events (zipper_start / stage_total)
+# moved to analyze_progress._apply_grouping_event, beside the rest of the
+# progress rendering the tab only hosts.
+ANALYZE_TAB_BUDGET = 964
 
 # analyze_tab_form.py carried no budget while analyze_tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it

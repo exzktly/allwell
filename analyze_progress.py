@@ -110,6 +110,28 @@ class AnalyzeProgressMixin:
         self._eta_total = 0
         self._eta_deadline = None
 
+    def _apply_grouping_event(self, kind: str, payload: object) -> None:
+        """Render the grouping phase's own events onto the dashboard.
+
+        ``zipper_start`` opens the Group stage with the well count it is about
+        to cover; ``stage_total`` gives one rail row a denominator of its own,
+        for a stage whose population differs from the run's (see
+        :meth:`widgets.run_dashboard.RunDashboard.set_stage_total`) — on a
+        remote run Group and Download span the whole plate while the stages
+        between them only ever see the wells the upload split sent.
+        """
+        if kind == "zipper_start":
+            n = payload or 96
+            self._zipper_done = 0
+            self._dashboard.set_total(n)
+            self._dashboard.set_overall_range(n)
+            self._dashboard.set_overall(0)
+            self._dashboard.set_active_stage("group")
+            self._dashboard.set_headline(f"Grouping 0 / {n} wells")
+        elif kind == "stage_total":
+            stage, total = payload  # type: ignore[misc]
+            self._dashboard.set_stage_total(str(stage), int(total))
+
     def _apply_progress_event(self, kind: str, payload: object) -> None:
         """Render a progress event from :class:`ProgressTracker` to the UI."""
         if kind == "well_total":

@@ -3133,6 +3133,20 @@ recomputed rather than merged so they cannot disagree with the `wells` map they
 summarise. Both sit beside `refresh_pipeline_info_available_from_outputs`, which
 already read-modify-writes the same file for the same reason.
 
+**Rail denominators are per stage.** A remote run's stages do not count the
+same population: every well on the plate is grouped locally, while only the
+subset the incremental split sends is uploaded, processed and thresholded, and
+Download ends up covering the whole plate again (a well that was already current
+locally is, by the end, fetched locally). `RunDashboard` carried one shared
+`_total`, so whichever population announced last became every row's divisor —
+which is how the rail came to read `Group 40/6` and `Download 34/6`, numerators
+counting the plate against a denominator counting the run, with Download ahead
+of an Upload that had not started. `set_stage_total(stage, total)` overrides one
+row's divisor; `services.pipeline_runner` announces the grouped population for
+`group` and `download` (a `stage_total` event, rendered by
+`analyze_progress._apply_grouping_event`) and leaves the stages between them on
+the run's own well count.
+
 **rsync has to be told to narrate.** Everything the Upload rail and the plate's
 per-well transfer state are built from is parsed out of rsync's own stdout:
 `_looks_like_rsync_filename` turns each per-file line into `[remote] ↑ <well>.zip`

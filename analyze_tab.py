@@ -830,14 +830,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                             self._apply_progress_event(ev_kind, ev_payload)
                     if not is_transient_progress(payload):
                         self._log_line(payload, classify_log_line(payload))
-                elif kind == "zipper_start":
-                    n = payload or 96
-                    self._zipper_done = 0
-                    self._dashboard.set_total(n)
-                    self._dashboard.set_overall_range(n)
-                    self._dashboard.set_overall(0)
-                    self._dashboard.set_active_stage("group")
-                    self._dashboard.set_headline(f"Grouping 0 / {n} wells")
+                elif kind in ("zipper_start", "stage_total"):
+                    self._apply_grouping_event(kind, payload)
                 elif kind == "zipper_well":
                     n_total = self._dashboard.overall_maximum() or 96
                     self._zipper_done = getattr(self, "_zipper_done", 0) + 1

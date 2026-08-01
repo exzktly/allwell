@@ -15,14 +15,30 @@ import process_microscopy as pm
 
 
 class _FakeFuture:
+    """Enough of ``concurrent.futures.Future`` for the pool driver.
+
+    ``cancel`` / ``cancelled`` are part of that surface: a suspend cancels the
+    wells not yet started, and the driver skips any future that comes back
+    cancelled rather than calling ``result()`` on it (which would raise
+    ``CancelledError`` and be reported as a worker failure).
+    """
+
     def __init__(self, result=None, exc=None):
         self._result = result
         self._exc = exc
+        self._cancelled = False
 
     def result(self):
         if self._exc is not None:
             raise self._exc
         return self._result
+
+    def cancel(self) -> bool:
+        self._cancelled = True
+        return True
+
+    def cancelled(self) -> bool:
+        return self._cancelled
 
 
 class _FakeExecutor:

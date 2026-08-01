@@ -350,7 +350,47 @@ each case the software knew and did not say. When you add a path that can produc
 less than it was asked for, make the shortfall visible in the artifact itself
 (a marker, a count, a named placeholder), not only in a log line.
 
-## 7.1 Debugging entry points
+## 7.1 When a fix doesn't take
+
+A fix that ships, passes its tests, and changes nothing the user can see is a
+different failure from a wrong diagnosis, and it has its own habits behind it.
+The staging rewrite took three attempts — the first fixed a neighbouring case,
+the second added a fast path that could never be reached, and only the third
+found the cause — and the same four mistakes produced all three.
+
+1. **Run the code path; do not read it.** Every one of those attempts came from
+   reading a function and reasoning about what it would decide. Not one ran the
+   decision against a realistic input and printed the answer. A ten-line script
+   that builds a fixture, calls the planner, and prints what it chose would have
+   ended it at the first attempt. Reading tells you what the code can do; only
+   running tells you what it does.
+2. **Read your own instrumentation.** The counter that named the bug — a log
+   line reporting how many members of each archive survived the filter — was
+   added by the *first* attempt and went unread through the second. When a
+   change adds a count, a ratio, or a per-item tick, that output is evidence:
+   look at it on a realistic input before claiming the change works.
+3. **Verify which branch the app takes, not which branch exists.** A fast path
+   guarded by `if fluor_tokens is None` is worthless if the caller always passes
+   a list — and the caller here is a GUI that hardcodes it. Trace inward from
+   the real entry point (`analyze_run_spec._collect_run_spec` for an Analyze run)
+   rather than outward from the function under repair. Describing an unreachable
+   branch as the app's behaviour is worse than saying nothing.
+4. **Fixtures must carry the mess of real data.** Well over a hundred remote
+   tests passed at every step because every archive in them was built by the
+   test, holding nothing but well-formed TIFs. Real archives carry `.DS_Store`,
+   directory entries, AppleDouble sidecars, and files whose names parse to
+   nothing. A corpus of clean inputs validates the happy path and tells you
+   nothing else, and it will encode whatever assumption the bug is made of.
+
+The bug class underneath it: **a domain predicate applied outside its domain.**
+"Is this the requested channel?" was asked of every zip member, including the
+ones that are not images at all. Everything unclassifiable answers "no", so the
+whole set looks filtered. When a predicate partitions a collection, first decide
+which items it is entitled to judge. Expect siblings — the same misapplication
+sat in the zero-match guard and the incremental up-to-date check, so fixing one
+in isolation would have traded a slow run for a silently wrong one.
+
+## 7.2 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

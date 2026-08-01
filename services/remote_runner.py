@@ -665,30 +665,37 @@ def stage_local_zips(
         p for p in input_dir.iterdir()
         if p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
     )
-    newly_zipped: list[Path] = []
-    try:
-        for folder in folders_after_zipper:
-            target = input_dir / f"{folder.name}.zip"
-            if target.exists() and target in pre_existing_zips:
-                # User-data zip from a prior run; leave it alone.
-                continue
-            n = _zip_well_folder(folder, target)
-            if n > 0:
-                newly_zipped.append(target)
-                if log_fn:
-                    log_fn(
-                        f"[stage] zipped {folder.name} → {target.name} "
-                        f"({n} TIF{'s' if n != 1 else ''}).\n"
-                    )
-    except Exception:
-        # On a zip-up failure clean up partial zip artifacts (sources
-        # stay intact for a retry).
-        for p in newly_zipped:
-            try:
-                p.unlink()
-            except OSError:
-                pass
-        raise
+    # Each folder is deleted the moment its own zip is published, rather than
+    # at the end of the run. ``_zip_well_folder`` goes through ``atomic_zip``,
+    # which renames a verified archive into place or leaves nothing at all, so
+    # by the time a folder is removed its contents are already in a complete
+    # archive beside it. Deferring the deletion left the input dir holding both
+    # ``<well>/`` and ``<well>.zip`` for every well for the whole run — two full
+    # copies of the plate on the user's volume at peak, on exactly the runs
+    # where the input is largest.
+    #
+    # A folder with no TIFs in it is left alone (``n == 0``): there is no
+    # archive to replace it with, and it may hold non-image content. A folder
+    # whose well already had a user zip is skipped and likewise left.
+    for folder in folders_after_zipper:
+        target = input_dir / f"{folder.name}.zip"
+        if target.exists() and target in pre_existing_zips:
+            # User-data zip from a prior run; leave it and its folder alone.
+            continue
+        n = _zip_well_folder(folder, target)
+        if n <= 0:
+            continue
+        shutil.rmtree(folder, ignore_errors=True)
+        if log_fn:
+            log_fn(
+                f"[stage] zipped {folder.name} → {target.name} "
+                f"({n} TIF{'s' if n != 1 else ''}); folder removed.\n"
+            )
+    # No rollback of the zips written above. It used to unlink them all if a
+    # later well failed to zip — which, now that each folder is consumed as it
+    # goes, would delete the only remaining copy of every well that had already
+    # succeeded. A part-zipped plate is the correct resume state anyway: the
+    # next run reads the finished wells as ZIP mode and picks up the rest.
 
     well_zips = tuple(sorted(input_dir.glob("[A-H][0-9]*.zip")))
     if not well_zips:
@@ -954,26 +961,33 @@ def _stage_mixed_mode(
     # zips persist across a failure: the next run sees fewer leftover
     # folders and resumes faster.
     new_zip_paths: list[Path] = []
+    consumed: list[Path] = []
     for label in sorted(folder_wells):
         folder = folder_wells[label]
         target = input_dir / f"{label}.zip"
         n = _zip_well_folder(folder, target)
         new_zip_paths.append(target)
+        # Removed as soon as its own archive is published, not at the end of
+        # the run — same reasoning as the FOLDER/FLAT zip-up above. A folder
+        # that yielded no TIFs keeps whatever it does hold.
+        if n > 0:
+            shutil.rmtree(folder, ignore_errors=True)
+            consumed.append(folder)
         if log_fn:
             log_fn(
                 f"[stage] zipped {folder.name} → {target.name} "
                 f"({n} TIF{'s' if n != 1 else ''}) — persisted to "
-                f"input dir.\n"
+                f"input dir{'; folder removed' if n > 0 else ''}.\n"
             )
 
     all_zips = tuple(sorted(existing_zip_paths + new_zip_paths))
 
-    # Snapshot the leftover folders we just zipped; ``on_pipeline_success``
-    # removes them so the next run is plain ZIP mode rather than MIXED.
-    # Pre-v5.x.x policy was "leave folders for manual user verification";
-    # the user explicitly opted into automatic deletion on clean
-    # completion via the user-facing zipper-output question.
-    consumed_folders = tuple(folder_wells[label] for label in sorted(folder_wells))
+    # The folders are already gone — each was removed as its archive landed —
+    # so the input dir is plain ZIP mode from here on rather than MIXED. This
+    # hook stays as the backstop for anything the loop above declined to
+    # consume (a folder that yielded no TIFs keeps its contents, so it is
+    # deliberately not in ``consumed`` and not removed here either).
+    consumed_folders = tuple(consumed)
 
     def _on_success() -> None:
         for folder in consumed_folders:
@@ -1106,10 +1120,19 @@ def _plan_staging(
                        f"WARN empty zip; skipping\n")
             continue
 
-        keep = list(members)
+        # Only the images are the run's business. A zip written on macOS carries
+        # `.DS_Store`; one written by some other tool carries directory entries
+        # or metadata sidecars. None of those is a channel, so the channel filter
+        # has no opinion on them — and letting it drop them made every archive on
+        # the plate look changed (276 of 279 members "kept"), which forced a full
+        # rewrite of the whole dataset to remove a few hundred bytes per well.
+        # The remote pipeline ignores them anyway: `find_image_groups_in_zip`
+        # skips dotfiles and anything without an image extension.
+        images = [m for m in members if _is_image_member(m)]
+        keep = list(images)
         if keep_tokens:
             keep = [m for m in keep if _member_matches(m, keep_tokens)]
-            if not keep:
+            if images and not keep:
                 zero_match.append(wz.stem)
                 if log_fn:
                     log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
@@ -1130,17 +1153,21 @@ def _plan_staging(
                     if fov_tp_from_name(m, schema=filename_schema,
                                         sep=filename_sep) not in done
                 ]
-                if not keep:
+                if images and not keep:
                     up_to_date.append(well)
                     if log_fn:
                         log_fn(f"[remote] ✓ {well}: up to date (local) — "
                                f"not uploaded\n")
                     continue
 
-        take_all = len(keep) == len(members)
+        # "Changed" is decided on the images alone, so a stray `.DS_Store` can
+        # never be the reason an archive is rebuilt. When nothing is dropped the
+        # archive is used exactly as it is, junk members and all; when something
+        # is, the rewrite carries only the images the remote will actually read.
+        take_all = len(keep) == len(images)
         plans.append(_StagePlan(
             src=wz, keep=None if take_all else tuple(keep),
-            n_members=len(members),
+            n_members=len(images),
         ))
     return plans, up_to_date, zero_match
 
@@ -1369,6 +1396,25 @@ def _filter_channels_in_staging(
             f"dropped {dropped}.\n"
         )
     return ZippedInput(zip_dir=zip_dir, mode=mode, well_zips=well_zips, cleanup=None)
+
+
+_IMAGE_MEMBER_EXTS = (".tif", ".tiff")
+
+
+def _is_image_member(member: str) -> bool:
+    """Whether a zip member is one of the images the run is here to process.
+
+    Everything else in an archive — `.DS_Store`, directory entries, metadata
+    sidecars — is not a channel, so the channel filter must have no opinion on
+    it. Deciding "did this archive change?" on the images alone is what keeps a
+    single stray file from forcing a rewrite of the whole plate. Mirrors what
+    ``process_microscopy.find_image_groups_in_zip`` already skips on the remote
+    side: a leading dot, or a suffix that is not an image.
+    """
+    base = Path(member).name
+    if not base or base.startswith("."):
+        return False
+    return base.lower().endswith(_IMAGE_MEMBER_EXTS)
 
 
 def _member_matches(member: str, keep_tokens: set[str]) -> bool:

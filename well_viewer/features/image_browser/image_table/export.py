@@ -25,6 +25,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     cell_chrome_kwargs,
     cell_display_rgb,
     draw_cell_chrome,
+    mark_uncorrected,
     overlay_cell_rgb,
     reset_scan_misses,
     resolve_chrome_plan,
@@ -423,6 +424,9 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
                 ck = cell_chrome_kwargs(ctx, r, c, cell, chrome_plan, overlay_chans)
                 if ck:
                     rgb = draw_cell_chrome(rgb, **ck)
+                # A figure that dropped the uncorrected mark would leave the app
+                # carrying exactly the ambiguity the live grid no longer has.
+                rgb = mark_uncorrected(ctx, cell, rgb)
 
             if rgb is not None:
                 if cell_max_px:

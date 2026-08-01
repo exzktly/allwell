@@ -1406,7 +1406,19 @@ channel for every well).
   mutually exclusive with **Wrap cols** — dragging any root or channel onto Rows /
   Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
   you want a plate view: Wrap only labels the first band, whereas Plate labels every
-  row and column correctly.
+  row and column correctly. Because both axes are the plate, Plate mode shows **one
+  channel** — the first in the builder. The LUT panel offers a row for that channel
+  only and names the others as not shown, so you are never editing a brightness
+  nothing on screen reads.
+- **Cells marked `raw`** have no corrected image for that field, so the table is
+  showing you the uncorrected frame instead. It still carries the camera offset and
+  the background that correction removes, which puts it on a different brightness
+  scale from its neighbours: one LUT window cannot suit both, and a window set for
+  the corrected cells usually leaves the marked ones washed out and unresponsive to
+  further LUT changes. They are also left out of **Auto**'s pooled brightness window,
+  so they cannot darken the rest of the grid. The status line after **Generate**
+  counts them; the badge says which. If a whole block of the plate is marked, the
+  correction never ran for those wells — check the run's `errors/` folder.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
   in one click) · **Crop view ▾** (drag a region on any image — the button reads

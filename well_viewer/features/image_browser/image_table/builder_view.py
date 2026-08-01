@@ -1038,6 +1038,31 @@ def _has_display_range(cs) -> bool:
             and not _is_nuc_seg(cs.channel))
 
 
+def _axis_channels(spec) -> list:
+    """The channel specs on whichever axis carries them (``TableSpec.channel_axis``)."""
+    ax = spec.channel_axis() if hasattr(spec, "channel_axis") else None
+    if ax == "rows":
+        return list(spec.rows.channels)
+    if ax == "cols":
+        return list(spec.cols.channels)
+    return []
+
+
+def _plate_shown_token(spec) -> str | None:
+    """In plate mode, the one channel token the grid actually displays.
+
+    Plate mode overrides both axes with the plate's rows and columns
+    (``state.spec_to_state_fields``), so there is nowhere left for a channel axis
+    to tile: it pins ``fixed_vals["channel"]`` to the FIRST channel in the shelf
+    and every cell shows that one. ``None`` outside plate mode, where all of them
+    are on the grid.
+    """
+    if not getattr(spec, "plate", False):
+        return None
+    channels = _axis_channels(spec)
+    return channels[0].axis_token() if channels else None
+
+
 def _table_channels(spec) -> dict:
     """Distinct LUT-adjustable channels in the table, in row-then-column order,
     mapped to every ChannelSpec that shares that channel — so a channel shown once
@@ -1048,16 +1073,45 @@ def _table_channels(spec) -> dict:
     repaint nothing. A channel shown as both its fluorescence and its ≥Thresh binary
     therefore appears exactly once (its fluorescence instance drives the LUT); a
     channel shown only as binary/mask, or the ``NUC+SEG`` overlay, gets no LUT row.
+
+    In plate mode only one channel reaches the grid (:func:`_plate_shown_token`),
+    so only that one gets a row — a row for a channel with no cells would edit a
+    value nothing reads.
     """
+    shown = _plate_shown_token(spec)
     seen: dict = {}
     for axis in ("rows", "cols"):
         for cs in getattr(spec, axis).channels:
             if not _has_display_range(cs):
                 continue
+            if shown is not None and cs.axis_token() != shown:
+                continue
             key = str(cs.channel or "").strip().upper()
             if key:
                 seen.setdefault(key, []).append(cs)
     return seen
+
+
+def _plate_hidden_channels(spec) -> list[str]:
+    """Axis tokens dropped in the shelf that plate mode does not display.
+
+    Only :func:`_plate_shown_token` reaches the grid; the rest have a display
+    range and would be perfectly adjustable on any other layout, so their absence
+    is about the layout rather than about them. Editing one used to repaint zero
+    of the grid's cells with nothing said — the all-or-nothing sibling of the
+    partial repaint the inert list below covers.
+    """
+    shown = _plate_shown_token(spec)
+    if shown is None:
+        return []
+    out: list[str] = []
+    for cs in _axis_channels(spec):
+        if not _has_display_range(cs):
+            continue  # already named as having no display range at all
+        tok = cs.axis_token()
+        if tok and tok != shown and tok not in out:
+            out.append(tok)
+    return out
 
 
 def _lut_inert_channels(spec) -> list[str]:
@@ -1090,7 +1144,8 @@ def _build_lut_box(ctx, spec) -> None:
     lay = body.layout()
     chans = _table_channels(spec)
     inert = _lut_inert_channels(spec)
-    if not chans and not inert:
+    hidden = _plate_hidden_channels(spec)
+    if not chans and not inert and not hidden:
         lay.addWidget(_text("channels dragged into the table appear here", "ITBHint"))
         return
     for token, specs in chans.items():
@@ -1098,6 +1153,10 @@ def _build_lut_box(ctx, spec) -> None:
     if inert:
         lay.addWidget(_text(
             "no display range (unchanged by any LUT edit): " + ", ".join(inert),
+            "ITBHint"))
+    if hidden:
+        lay.addWidget(_text(
+            "not shown in plate mode (one channel per plate): " + ", ".join(hidden),
             "ITBHint"))
 
 

@@ -1261,3 +1261,69 @@ def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None):
         label_color=getattr(st, "label_color", "white"),
         label_bg=bool(getattr(st, "label_bg", True)),
     )
+
+
+#: Burned into any cell served the raw frame in place of the corrected one.
+#: Short because it shares the cell with the scale bar and the identity label.
+UNCORRECTED_MARK = "raw"
+
+#: Spelled out in the cell's tooltip, where there is room for the reason.
+UNCORRECTED_TOOLTIP = "shown uncorrected — no corrected image for this field"
+
+
+def is_raw_fallback(ctx, cell) -> bool:
+    """Whether *cell* was served the raw frame after asking for the corrected one.
+
+    Reads the current render pass's :func:`_raw_fallbacks` set, whose keys
+    ``_load_array`` writes as ``(well, base_channel_lower, str(tp), str(fov))``.
+    The set is populated by whichever pass loaded the cell first — the pooled
+    Auto-LUT pass runs before the render loop — so this answers correctly for
+    both.
+    """
+    well = (cell.get("well") or "") if hasattr(cell, "get") else ""
+    chan = (cell.get("chan") or "") if hasattr(cell, "get") else ""
+    if not well or not chan:
+        return False
+    key = (well, _binary_base(chan).strip().lower(),
+           str(cell.get("tp") or ""), str(cell.get("fov") or ""))
+    return key in _raw_fallbacks(ctx)
+
+
+def _mark_corner(st) -> str:
+    """A cell corner the scale bar and the identity label have not claimed."""
+    taken = {getattr(st, "label_img_corner", "tl"),
+             getattr(st, "scale_bar_img_corner", "br")}
+    for corner in ("tr", "bl", "tl", "br"):
+        if corner not in taken:
+            return corner
+    return "tr"
+
+
+def mark_uncorrected(ctx, cell, rgb):
+    """Burn :data:`UNCORRECTED_MARK` into *rgb* when *cell* fell back to raw.
+
+    A cell whose corrected (top-hat) image is missing still draws — it draws the
+    raw frame, which carries the camera offset and the background the correction
+    would have removed. That is a different intensity domain from its corrected
+    neighbours, so one LUT window cannot suit both: a window tuned on the
+    corrected population pushes the raw cells past its ceiling, where they
+    saturate and stop responding to any further LUT edit. The grid then looks
+    like a table that ignores its own brightness control on part of itself.
+
+    The count already reaches the Generate status line, but a count does not say
+    *which* cells and does not survive the next status message. This puts the
+    fact on the cell, through the same ``draw_cell_chrome`` the scale bar and the
+    identity label use, so the live thumbnail and the exported figure carry it
+    identically. Returns *rgb* untouched for a cell that got what it asked for.
+    """
+    if rgb is None or not is_raw_fallback(ctx, cell):
+        return rgb
+    st = ctx.state.image_table
+    return draw_cell_chrome(
+        rgb,
+        label_text=UNCORRECTED_MARK,
+        label_corner=_mark_corner(st),
+        label_font_px=int(getattr(st, "label_font_px", 12)),
+        label_color=getattr(st, "label_color", "white"),
+        label_bg=True,
+    )

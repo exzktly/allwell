@@ -1857,6 +1857,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/run_report.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",
+        "pipeline/suspend.py",
         "pipeline/threshold_optimize.py",
         "_Docs/requirements-remote.txt",
     )

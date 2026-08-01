@@ -112,6 +112,7 @@ def __getattr__(name: str):  # PEP 562: only fires for names not in globals()
 # is injected by ``_worker_init`` via ``set_model``). Re-exported so the
 # segmentation dispatch resolves them under this module too.
 import pipeline.stardist as _stardist
+import pipeline.suspend as _suspend
 from pipeline.stardist import (
     _segment_stardist_nuclei,
     _segment_stardist_seeded_watershed_cell,
@@ -2622,6 +2623,8 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     """
     import sys as _sys
 
+    from pipeline.suspend import install_handlers as _install_suspend
+    _install_suspend()          # a group signal reaches every worker
     os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
     # Determine effective device policy before any TF import.
@@ -2759,26 +2762,18 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
 _MAX_CONSECUTIVE_IO_FAILURES = 3
 
 
-# ── Per-FOV checkpoint helpers (v5.2.0) ─────────────────────────────────────
+# ── Per-FOV checkpoint helpers ──────────────────────────────────────────────
 #
-# When a worker is killed mid-well, the next invocation should pick up where
-# the previous one left off rather than redoing every FOV in the well. The
-# scheme:
-#
-#   * After each FOV finishes (records computed, QC TIFs written), the worker
-#     writes <tmp_images>/.fov_<stem>.records.json (atomic) then touches
-#     <tmp_images>/.fov_<stem>.done. The records JSON is the cached output of
-#     :func:`process_image_group` for that FOV.
-#   * On startup, the worker scans <tmp_images> for valid checkpoint pairs and
-#     skips those FOVs in the per-group loop, loading their records from disk.
-#     Partially-written records (no .done marker) are reprocessed; orphan
-#     __aw_tmp_* scratch files are deleted.
-#   * On successful end-of-well (zip + CSV both written), the whole tmp_images
-#     dir is removed in the usual finally-block — checkpoints are inherently
-#     transient and never survive a successful well.
-#
-# Recovery cost for a killed-mid-well run drops from "redo every FOV in the
-# well" to "redo only the in-flight FOV at kill time."
+# A worker killed mid-well should pick up where it left off rather than redoing
+# every FOV. After each FOV finishes (records computed, QC TIFs written) the
+# worker writes <tmp_images>/.fov_<stem>.records.json atomically, then touches
+# <tmp_images>/.fov_<stem>.done — the marker last, so a half-written records
+# file never reads as done. On startup the worker scans <tmp_images> for valid
+# pairs and loads those FOVs from disk instead of reprocessing them; records
+# with no marker are redone and orphan __aw_tmp_* files deleted. A successful
+# end-of-well removes the whole dir in the usual finally-block: checkpoints are
+# transient and never survive a well that finished. Recovery cost for a killed
+# run drops from "redo every FOV in the well" to "redo the in-flight FOV".
 
 # Schema version stored in each records.json. Bumped if the records dict
 # layout changes — older checkpoints with a different version are discarded
@@ -2990,12 +2985,10 @@ def _process_groups_in_worker(
             return cached
         return _run_group(nuclear_path, fluor_paths)
 
-    # Storage that has run out does not recover mid-well. Without this, a full
-    # scratch volume is discovered once per FOV-group: every remaining group
+    # Storage that has run out does not recover mid-well. Without this a full
+    # scratch volume is rediscovered once per FOV-group — every remaining group
     # fails the same way, each writing a traceback, and the run spends hours
-    # producing complete-looking output for wells it has already gutted. Stop
-    # the well after a few consecutive I/O failures and say why — the groups not
-    # attempted are reported as missing, which is what they are.
+    # producing complete-looking output for wells it has already gutted.
     _consecutive_io_failures = 0
     aborted_reason = ""
 
@@ -3013,6 +3006,8 @@ def _process_groups_in_worker(
 
     if fov_threads == 1 or len(groups) == 1:
         for nuclear_path, fluor_paths in groups:
+            if _suspend.is_suspended():
+                break            # not attempted is not the same as failed
             if aborted_reason:
                 failed.append(nuclear_path.name)
                 continue
@@ -3034,7 +3029,7 @@ def _process_groups_in_worker(
         with ThreadPoolExecutor(max_workers=fov_threads) as tex:
             future_map = {
                 tex.submit(_process_or_resume, nuc, fluors): nuc
-                for nuc, fluors in groups
+                for nuc, fluors in groups if not _suspend.is_suspended()
             }
             for fut in _as_completed(future_map):
                 nuclear_path = future_map[fut]
@@ -3580,27 +3575,20 @@ def _run_well_worker_pool(
                  len(to_process))
     log.info("%s mode: %d well(s) to process, %d worker(s).", mode_label, len(to_process), workers)
 
-    # Running count of per-cell records across all wells — NOT the records
-    # themselves. Each well already writes its own per-well CSV inside its worker,
-    # so the parent never needs the records; it only reports a total in the
-    # summary line below. Accumulating the full list here (the old behaviour) held
-    # every cell dict of the entire plate in the long-lived parent process just to
-    # call len() on it — tens of millions of ~KB dicts on a large plate, i.e. the
-    # tens-of-GB "the run eats all my RAM" leak. A single integer fixes it, and
-    # each well's returned records are freed as soon as the loop reassigns them.
+    # A running COUNT of per-cell records, not the records. Each well writes its
+    # own CSV inside its worker, so the parent needs only the total for the
+    # summary line below; accumulating the full list held every cell dict of the
+    # plate in the long-lived parent just to call len() on it — tens of millions
+    # of ~KB dicts, the tens-of-GB "the run eats all my RAM" leak.
     total_nuclei = 0
     # Two DISTINCT failure classes, kept apart so the summary isn't misleading:
-    #   * wells_failed_entirely — the worker raised, so the well produced NO
-    #     output at all (no CSV, no out.zip); it is absent from the plate map.
-    #   * partial_wells{well -> failed FOV-group names} — the well finished and
-    #     wrote a CSV + out.zip from its successful FOV-groups (so it shows as
-    #     complete / green on the plate map), but some FOV-groups failed and are
-    #     missing from that output.
-    # Previously both were flattened into one list and per-FOV failure *names*
-    # were counted as "wells failed", so a run with e.g. 12 failed FOV-groups
-    # across a couple of otherwise-complete wells reported "12 well(s)/pair(s)
-    # failed" while those wells looked done — exactly the confusing mismatch this
-    # separation fixes.
+    # wells_failed_entirely — the worker raised, so the well wrote nothing and is
+    # absent from the plate map. partial_wells{well -> failed FOV-group names} —
+    # the well wrote a CSV + out.zip from its successful groups, so it reads as
+    # complete on the plate map while missing the groups listed. Flattened into
+    # one list they reported per-FOV failure names as "wells failed", which is
+    # how a run with 12 bad groups across two otherwise-complete wells claimed
+    # "12 well(s)/pair(s) failed" while those wells looked done.
     wells_failed_entirely: list[str] = []
     partial_wells: dict[str, list[str]] = {}
 
@@ -3617,8 +3605,12 @@ def _run_well_worker_pool(
             submit_task(executor, well_label, path): well_label
             for well_label, path in to_process
         }
+        pending = set(future_to_well)
         for future in as_completed(future_to_well):
+            pending.discard(future)
             well_label = future_to_well[future]
+            if future.cancelled():
+                continue                    # never started; suspend took it
             try:
                 records, failed = future.result()
                 total_nuclei += len(records)
@@ -3627,6 +3619,12 @@ def _run_well_worker_pool(
             except Exception as exc:
                 _report_worker_failure(well_label, output_dir, exc)
                 wells_failed_entirely.append(well_label)
+            if _suspend.is_suspended():
+                # Wells not yet started are dropped rather than each spinning up
+                # a worker only to find the flag set. They are simply absent from
+                # the output, which is what the completeness record already means.
+                for f in pending:
+                    f.cancel()
 
     n_partial_fovs = sum(len(v) for v in partial_wells.values())
     # Wells the exit code must flag: those with no output PLUS those with partial
@@ -4315,6 +4313,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser    = build_parser()
     args      = parser.parse_args()
+    _suspend.install_handlers(log=log)   # SIGTERM/SIGINT → wind down, don't die
     input_dir = args.input_dir.resolve()
     output_dir = args.output_dir.resolve()
 

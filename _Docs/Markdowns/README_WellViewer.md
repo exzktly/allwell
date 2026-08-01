@@ -514,11 +514,26 @@ A cell counts only when it is manually kept **and** it passes QC.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
 
-### 8. Run / Stop / Log
+### 8. Run / Suspend / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
-- **Stop** signals the entire pipeline process group (sub-workers
-  included).
+- **Suspend** winds the run down cleanly. It finishes the fields already being
+  computed, then lets every well that got any work done write its results, and
+  remembers what you were running. Use it when the run is fine but you need the
+  machine back — it takes a little longer to stop than **Stop** does, because it
+  is waiting for those fields to land. You can close All-Well afterwards; next
+  time you open the Analyze pane a strip at the top offers to carry on, naming
+  the folder and how far it got. **Resume** continues it, computing only the
+  field/timepoint groups still missing. **Discard** forgets the offer and
+  deletes nothing — the results already written stay exactly as they are, and
+  you can still finish the plate later by re-running that input with
+  **incremental** ticked.
+- **Stop** signals the entire pipeline process group (sub-workers included) and
+  discards whatever is in flight. Press it a second time during a Suspend if you
+  do not want to wait for the in-flight fields.
+- Either way the wells already finished keep their results, so nothing you have
+  waited for is thrown away — Suspend just also keeps the fields in progress and
+  saves you re-entering the form.
 - On success the app switches to Review and loads the output folder.
 
 ### What the pipeline writes

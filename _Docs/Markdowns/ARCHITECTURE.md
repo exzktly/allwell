@@ -2338,6 +2338,45 @@ nothing), and with no channel filter it uploads from the input dir with no
 staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
 path, which filters zips it has just written itself.
 
+**Suspending a run.** Stop is a kill — SIGTERM to the process group, SIGKILL
+five seconds later — and whatever each worker was mid-way through is lost.
+Suspend (`PipelineRunner.suspend`) sends the same SIGTERM with the escalation
+suppressed (`subprocess_kill.signal_subprocess(..., escalate=False)`, since a
+well finishing its FOV-group can easily outlast five seconds), and the pipeline
+*catches* it: `pipeline/suspend.py` installs a handler in the orchestrator and in
+every pool worker, the per-group loops stop taking on new FOV-groups, wells not
+yet started are cancelled, and each well that did any work returns through the
+normal end-of-well path so its CSV and `<well>_out.zip` are written. A second
+signal is a hard stop — the handler restores the previous disposition before
+returning, so a suspend that hangs is still escapable.
+
+Nothing records "where the run was". The output directory already is that:
+`--incremental` reads the per-well CSVs and out-zips back as the done-set of
+`(fov, timepoint)` groups, so a resumed run recomputes only what is missing, and
+a suspended output is indistinguishable from one left by a run that ended early
+for any other reason. A group the run never attempted is deliberately **not**
+added to the well's `failed` list — it is missing, which the completeness record
+already reports as the gap between the input's group count and the CSV's, and
+calling it failed would put it in the PARTIAL warning as though the data were
+broken rather than unfinished.
+
+What the app *does* lose across a restart is intent — which folders and which of
+the several dozen form fields produced that half-finished output — so
+`services/suspend_record.py` persists exactly the `RunSpec` that was running,
+plus enough to describe it. The same `to_json` the job queue already uses; no
+second serialisation to keep in step with the form. It lives at
+`~/.allwell/suspended_runs.json` rather than in the output folder because at
+startup the app does not yet know which output folder to look in, and it holds a
+list keyed by output directory so several plates can be suspended at once.
+`analyze_suspend.AnalyzeSuspendMixin` is the seam: the Suspend button, the banner
+above the Analyze form offering the most recent record, and the resume itself,
+which forces `incremental=True` into the spec before restarting. That flag is not
+a preference here — without it the pipeline skips any well whose CSV exists and
+reprocesses nothing, so a half-done plate would come back still half-done with
+the run reporting success. The record is cleared on resume, on discard, and when
+a run completes normally; a *stopped* run keeps its record, because a hard Stop
+also leaves every finished well's CSV on disk.
+
 **Grouping consumes each well folder as it goes.** The FOLDER / FLAT staging
 path (and the MIXED leftover zip-up) turns every `<well>/` into `<well>.zip`, and
 removes that folder the moment its own archive is published rather than at the

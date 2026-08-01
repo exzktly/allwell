@@ -67,8 +67,32 @@ def test_stop_before_launch_prevents_orphan():
 def test_stop_signals_a_launched_proc(monkeypatch):
     r = PipelineRunner()
     signalled = []
-    monkeypatch.setattr(r, "_signal_subprocess", lambda p: signalled.append(p))
+    monkeypatch.setattr(r, "_signal_subprocess",
+                        lambda p, **kw: signalled.append((p, kw)))
     fake = _FakeProc()
     r._spawn_tracked(lambda: fake)  # launch wins
     r.stop()
-    assert fake in signalled, "stop() must signal the subprocess it can see"
+    assert (fake, {"escalate": True}) in signalled, (
+        "stop() must signal the subprocess it can see, escalating to SIGKILL")
+
+
+def test_suspend_signals_without_the_sigkill_escalation(monkeypatch):
+    """A cooperative wind-down must outlive the five-second escalation.
+
+    Suspend sends the same SIGTERM as Stop; the pipeline catches it and finishes
+    the FOV-group it is on, which can easily take longer than five seconds. The
+    SIGKILL that follows a Stop would destroy exactly the work suspend exists to
+    preserve, so it is suppressed — the user's own second click is the fallback.
+    """
+    r = PipelineRunner()
+    signalled = []
+    monkeypatch.setattr(r, "_signal_subprocess",
+                        lambda p, **kw: signalled.append((p, kw)))
+    fake = _FakeProc()
+    r._spawn_tracked(lambda: fake)
+    r.suspend()
+    assert (fake, {"escalate": False}) in signalled
+    assert r.was_suspended is True
+    assert r.was_stopped is True          # suspend is a stop, of a gentler kind
+    assert r._cleanup_remote == "none", (
+        "a suspended run's remote output is what a resume reads")

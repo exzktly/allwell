@@ -276,6 +276,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/run_report.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
+    # Cooperative wind-down: the remote pipeline catches SIGTERM and finishes
+    # the FOV-groups in flight instead of dying, so a suspended remote run
+    # leaves the same resumable output a local one does.
+    "pipeline/suspend.py",
     "pipeline/threshold_optimize.py",
     # v5.2.1: headless-only requirements (no PySide6/pyobjc/pyinstaller
     # — the remote doesn't run the GUI). See _Docs/requirements.txt for

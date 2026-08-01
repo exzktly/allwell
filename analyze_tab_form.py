@@ -229,14 +229,14 @@ class AnalyzeTabFormMixin:
         return e
 
     def _build_form(self, parent: QWidget) -> None:
+        parent.layout().addWidget(self._build_resume_banner(parent))
         self._build_open_pinfo_row(parent)
         self._build_schema_section(parent)
         self._build_channel_tokens_section(parent)
         self._build_folders_section(parent)
         self._refresh_schema_preview()
-        # Quality Control leads the optional sections (above Shape Metrics) and
-        # stays open — the correction stages it configures are the common tuning
-        # knobs, not an advanced afterthought.
+        # Quality Control leads the optional sections and stays open: its
+        # correction stages are common tuning knobs, not an afterthought.
         self._build_qc_section(parent)
         self._build_auto_threshold_section(parent)
         self._build_shape_features_section(parent)
@@ -1097,13 +1097,12 @@ class AnalyzeTabFormMixin:
         bs_row = self._row(self._remote_params_widget, "Batch size (0=off)")
         self._remote_batch_size_edit = self._entry(bs_row, "0", width=40)
         bs_hint = QLabel("(bounds peak disk to ~N wells of input)", bs_row)
-        bs_hint.setObjectName("Muted")
-        bs_hint.setWordWrap(True)
+        bs_hint.setObjectName("Muted"); bs_hint.setWordWrap(True)
         bs_row.layout().addWidget(bs_hint, 1)
 
-        # Auto-delete checkbox, ON by default: a remote that accumulates every
-        # run fills up, and a full volume is how a run silently loses FOV-groups.
-        # Only deletes after a verified-successful run, never failed work.
+        # ON by default: a remote that accumulates every run fills up, and a full
+        # volume is how a run silently loses FOV-groups. Only deletes after a
+        # verified-successful run, never failed work.
         self._cleanup_remote_cb = QCheckBox(
             "Auto-delete remote files when done", self._remote_params_widget)
         self._cleanup_remote_cb.setChecked(True)
@@ -1113,26 +1112,25 @@ class AnalyzeTabFormMixin:
             "machine does not fill up. Unchecked = leave it untouched.")
         rp.addWidget(self._cleanup_remote_cb)
 
-        # Dry-run cleanup (v5.2.23): log what auto-delete WOULD remove without
-        # actually removing anything. Only enabled when auto-delete is checked.
+        # Log what auto-delete WOULD remove without removing it. Only enabled
+        # when auto-delete is checked.
         self._dry_run_cleanup_cb = WrapCheckBox(
             "Dry-run cleanup (show what would be deleted, don't delete)",
             self._remote_params_widget,
         )
         self._dry_run_cleanup_cb.setToolTip(
-            "v5.2.23: with auto-delete enabled, log path + file count + "
-            "total bytes for each remote directory that WOULD be removed "
-            "at end-of-run, without actually removing anything. Useful "
-            "for confirming what auto-delete will do on a shared remote "
-            "before committing to it."
+            "With auto-delete enabled, log path + file count + total bytes for "
+            "each remote directory that WOULD be removed at end-of-run, without "
+            "removing anything. Useful for confirming what auto-delete will do "
+            "on a shared remote before committing to it."
         )
         rp.addWidget(self._dry_run_cleanup_cb)
 
         parent.layout().addWidget(self._remote_params_widget)
 
-        # Show the remote-only group only when a remote is selected.
+        # Show the remote-only group only when a remote is selected; dry-run
+        # only makes sense when auto-delete is on.
         self._remote_cb.currentIndexChanged.connect(self._refresh_remote_controls)
-        # Dry-run only makes sense when auto-delete is on.
         self._cleanup_remote_cb.toggled.connect(self._refresh_remote_controls)
         self._refresh_remote_controls()
 
@@ -1145,6 +1143,8 @@ class AnalyzeTabFormMixin:
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.clicked.connect(self._run)
         bl.addWidget(self._run_btn)
+
+        bl.addWidget(self._build_suspend_button(btn_widget))
 
         self._stop_btn = QPushButton("■  Stop", btn_widget)
         self._stop_btn.setProperty("variant", "danger")

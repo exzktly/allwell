@@ -41,6 +41,7 @@ import theme
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
 from analyze_input import AnalyzeInputMixin
+from analyze_progress import AnalyzeProgressMixin
 from analyze_run_spec import AnalyzeRunMixin
 from analyze_suspend import AnalyzeSuspendMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
@@ -100,8 +101,8 @@ def _has_well_content(folder: Path) -> bool:
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
-                 AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
+                 AnalyzeSuspendMixin, AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     # Positive-latch completion signal for a job queue: emitted exactly once
@@ -150,6 +151,11 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
         self._run_error: str | None = None
         self._well_total = 0
         self._well_done  = 0
+        # Wells that announced completion more than once (batched remote runs
+        # can re-visit a well whose input zip outlived its batch). Counted and
+        # surfaced rather than folded into _well_done, which would let the
+        # headline read 100% with wells still outstanding.
+        self._well_repeats = 0
         self._zipper_done = 0
         self._on_pipeline_complete = on_pipeline_complete
         self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
@@ -712,6 +718,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
         self._running = True
         self._well_total = 0
         self._well_done  = 0
+        self._well_repeats = 0
         self._progress_tracker.reset()
         self._dashboard.reset(remote=remote is not None)
         if getattr(self, "_last_run_card", None) is not None:
@@ -809,120 +816,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
     def _clear_log(self) -> None:
         self._log.clear()
 
-    def _update_eta(self, done: int, total: int) -> None:
-        # Remember the latest progress snapshot so the tick timer can
-        # re-render the ETA against live ``_time.monotonic()`` between
-        # well_done events.
-        self._eta_done = int(done)
-        self._eta_total = int(total)
-        # Lock in a deadline at this event using the cumulative per-well
-        # wall-clock rate. The tick timer between events just renders
-        # ``deadline - now`` — never recomputing from elapsed, which would
-        # make the displayed remaining grow while waiting for the next
-        # well to complete.
-        started = getattr(self, "_pipeline_started_at", None)
-        if (
-            started is not None
-            and self._eta_done > 0
-            and self._eta_total > 0
-            and self._eta_done < self._eta_total
-        ):
-            elapsed = _time.monotonic() - started
-            if elapsed > 0.0:
-                per_well_rate = elapsed / self._eta_done
-                remaining_wells = self._eta_total - self._eta_done
-                self._eta_deadline = _time.monotonic() + remaining_wells * per_well_rate
-        self._render_eta()
-        # Start the 1-Hz tick timer the first time we get usable progress
-        # so the label counts down even when no new well_done arrives.
-        timer = getattr(self, "_eta_timer", None)
-        if timer is None:
-            timer = QTimer(self)
-            timer.setInterval(1000)
-            timer.timeout.connect(self._render_eta)
-            self._eta_timer = timer
-        if done > 0 and total > 0 and done < total and not timer.isActive():
-            timer.start()
-
-    def _render_eta(self) -> None:
-        started = getattr(self, "_pipeline_started_at", None)
-        done = int(getattr(self, "_eta_done", 0))
-        total = int(getattr(self, "_eta_total", 0))
-        if started is None:
-            self._dashboard.set_eta("")
-            return
-        if total > 0 and done >= total:
-            # All wells finished. The pipeline still has post-well work
-            # (write pipeline_info.json, run the auto-threshold pass)
-            # before the "finished" event fires; surface that state
-            # explicitly so the user doesn't see a stale ETA / blank
-            # while the progress bar sits at 100%.
-            self._dashboard.set_eta("Finalizing…")
-            return
-        deadline = getattr(self, "_eta_deadline", None)
-
-        def _fmt(secs: float) -> str:
-            secs = int(round(max(0.0, secs)))
-            if secs >= 3600:
-                return f"{secs // 3600}h{(secs % 3600) // 60:02d}m"
-            if secs >= 60:
-                return f"{secs // 60}m{secs % 60:02d}s"
-            return f"{secs}s"
-
-        if deadline is None:
-            # Pipeline is running but no well has completed yet — show a
-            # placeholder so the user sees the timer is alive.
-            self._dashboard.set_eta("ETA")
-            return
-        remaining = deadline - _time.monotonic()
-        self._dashboard.set_eta(f"ETA {_fmt(remaining)}")
-
-    def _stop_eta_timer(self) -> None:
-        timer = getattr(self, "_eta_timer", None)
-        if timer is not None and timer.isActive():
-            timer.stop()
-        self._eta_done = 0
-        self._eta_total = 0
-        self._eta_deadline = None
-
-    def _apply_progress_event(self, kind: str, payload: object) -> None:
-        """Render a progress event from :class:`ProgressTracker` to the UI."""
-        if kind == "well_total":
-            total = int(payload)  # type: ignore[arg-type]
-            self._well_total = total
-            self._dashboard.set_total(total)
-            self._dashboard.set_overall_range(total)
-            self._dashboard.set_overall(0)
-            self._dashboard.set_headline(f"Processing 0 / {total} wells")
-        elif kind == "well_done":
-            done, total = payload  # type: ignore[misc]
-            self._well_done = int(done)
-            self._dashboard.set_overall(self._well_done)
-            pct = int(self._well_done / max(1, total) * 100)
-            self._update_eta(self._well_done, total)
-            self._dashboard.set_headline(
-                f"Processing {self._well_done} / {total} wells  ({pct}%)")
-            # The auto-threshold pass runs *after* the last well — show
-            # an explicit finalizing state so the user doesn't see the
-            # progress bar pinned at 100% with nothing happening.
-            if total > 0 and self._well_done >= total:
-                self._dashboard.set_status("Finalizing…")
-        elif kind == "stage":
-            self._dashboard.set_active_stage(str(payload))
-        elif kind == "well_stage":
-            well, stage = payload  # type: ignore[misc]
-            self._dashboard.set_well_stage(str(well), str(stage))
-        elif kind == "well_fov":
-            well, done, total = payload  # type: ignore[misc]
-            self._dashboard.set_well_fov(str(well), int(done), int(total))
-        elif kind == "well_xfer":
-            well, direction, frac = payload  # type: ignore[misc]
-            self._dashboard.set_well_transfer(str(well), str(direction), float(frac))
-        elif kind == "status":
-            # Descriptive finalize-phase status (auto-threshold / remote drain
-            # / cleanup) so the post-well work doesn't read as a hang.
-            self._dashboard.set_status(str(payload))
-
     def _poll_log(self) -> None:
         try:
             while True:
@@ -983,9 +876,28 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
                     self._dashboard.set_status(f"Transferring… {int(pct * 100)}%")
                 elif kind == "done":
                     self._run_ok = True
-                    self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
                     n = self._well_done or getattr(self, "_zipper_done", 0)
-                    self._dashboard.set_headline(f"Complete — {n} well(s) processed")
+                    missing = max(0, self._well_total - self._well_done)
+                    if missing:
+                        # Fewer wells finished than the run announced. Leave the
+                        # bar short and name the shortfall: a full bar over a
+                        # partial plate is the one thing this display must never
+                        # show, because nothing else in the window says so.
+                        self._dashboard.set_overall(self._well_done)
+                        self._dashboard.set_headline(
+                            f"Complete — {self._well_done} of {self._well_total} "
+                            f"well(s) processed; {missing} never reported completion")
+                        self._log_line(
+                            f"[warn] Run finished with {missing} of "
+                            f"{self._well_total} well(s) never reporting "
+                            f"completion. Check the log above for FAILED / "
+                            f"PARTIAL lines and the output dir's errors/ "
+                            f"folder.\n",
+                            "WARNING",
+                        )
+                    else:
+                        self._dashboard.set_overall(self._dashboard.overall_maximum() or 100)
+                        self._dashboard.set_headline(f"Complete — {n} well(s) processed")
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
                     self._log_line(payload, "DONE")

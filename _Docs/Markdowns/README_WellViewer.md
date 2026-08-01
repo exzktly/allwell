@@ -536,6 +536,18 @@ A cell counts only when it is manually kept **and** it passes QC.
   (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
   its turn has its own colour, distinct from one being computed — see the
   **Wells** legend beside the plate.
+- The **headline and progress bar** count wells, and count each well once. A
+  well already finished by an earlier run is counted too — it is part of the
+  plate you asked for, so a run that only has ten wells left to compute still
+  reads against the whole plate rather than against the ten. If the same well
+  reports finishing twice (which a batched remote run can do when a batch's
+  input files outlive it), the log says so and the count does not move: the bar
+  reaching the end always means every well is accounted for.
+- When a run ends with wells unaccounted for, the headline says which — "Complete
+  — 28 of 40 well(s) processed; 12 never reported completion" — and the bar is
+  left short of full, with a warning in the log pointing at the `errors/` folder
+  in the output directory. A finished-looking bar over a part-finished plate is
+  the one thing the run view will not show you.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the
@@ -1402,7 +1414,8 @@ channel for every well).
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
   with a **channel** dropdown choosing which channel it applies to (the same
-  ThreshFracOn shared with Cell Gating and the plot tabs) · **Export ▾** (to file ·
+  ThreshFracOn shared with Cell Gating and the plot tabs; it follows the picked
+  channel, and reads 0 for the nuclear channel until you set one) · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
@@ -1565,7 +1578,13 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
 - **Inclusion** — per-channel **FluorGating** thresholds, or tick **Use
   scatter-plot gates** and pick a filtering gate to let the [Scatter
   Plot](#scatter-plot)'s rectangular gates define inclusion instead.
-- **Fraction-on** — per-channel **ThreshFracOn** cutoffs, with
+- **Fraction-on** — per-channel **ThreshFracOn** cutoffs. A readout channel
+  starts at 50; the nuclear (segmentation) channel starts at 0, because an
+  ON/OFF brightness cut has no meaning for the channel nuclei are *found* with —
+  every segmented cell is by construction a detection in it, so a non-zero cut
+  there only hides nuclei from the Image Table's "≥ threshold" view. Whichever
+  channel it is, a value you set yourself always wins over the starting one.
+  The panel also offers
   **Auto-threshold all channels** (an Otsu pass over per-cell + matched-
   background pixels) to derive sensible defaults, and **Optimize ThreshFracOn**
   — pick two wells, a timepoint, and a Min / Max / # Points range, and the

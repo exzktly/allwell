@@ -3363,6 +3363,14 @@ class _BatchedRemoteProcess:
     def _run_batches(self) -> None:
         try:
             all_zips = list(self._zipped.well_zips)
+            # The whole staged plate — the denominator the GUI's progress
+            # headline is measured against. Wells dropped below because their
+            # output is already complete locally stay in this count: they are
+            # part of what the user asked for, and a denominator that shrinks
+            # to the subset actually uploaded lets the headline read "N / N
+            # wells (100%)" over a plate that still has wells with no output.
+            staged_total = len(all_zips)
+            skipped: list[Path] = []
 
             # v5.4.7: local-completion filter. The remote pipeline's
             # own skip check (``output_exists_for_well``) looks at the
@@ -3407,7 +3415,6 @@ class _BatchedRemoteProcess:
             # local-CSV "already complete" skip would wrongly drop these touched
             # wells (they DO have a local CSV), so bypass it for incremental.
             if not force and not self._zipped.incremental:
-                skipped: list[Path] = []
                 kept: list[Path] = []
                 for p in all_zips:
                     well = p.stem.upper()
@@ -3431,6 +3438,29 @@ class _BatchedRemoteProcess:
                         )
                     all_zips = kept
 
+            # Inject a synthetic "Zip mode: <total> wells" banner BEFORE
+            # batch 1's stdout. The GUI's ``ProgressTracker`` locks on the
+            # first such banner via ``if not self.well_total:``; without this,
+            # each batch's own banner reports just THAT batch's count (e.g.
+            # 50) and the run's progress is measured against one batch. We
+            # always say "Zip mode" because the remote pipeline sees zips on
+            # disk regardless of the local input mode the user started from.
+            # The "— batched" suffix is informational only; the regex
+            # ``\s+well`` matches both "well" and "wells" so the parenthetical
+            # doesn't disturb the match.
+            #
+            # The count is the whole staged plate, including the wells skipped
+            # above. Each of those then gets its own terminal marker in the
+            # same stream, so it is counted and painted on the plate map
+            # instead of sitting pending for the length of the run while the
+            # headline counts only the wells that were uploaded.
+            self._line_q.put(f"Zip mode: {staged_total} wells — batched\n")
+            for p in skipped:
+                self._line_q.put(
+                    f"SKIP well {p.stem.upper()} — output already exists "
+                    f"locally; not uploaded. Use --force to reprocess.\n"
+                )
+
             if not all_zips:
                 self._log(
                     "[remote] batched mode: every well already complete "
@@ -3452,20 +3482,6 @@ class _BatchedRemoteProcess:
                 f"{n_batches} batch(es) of up to {self._batch_size} "
                 f"(peak remote disk ≈ {self._batch_size} well-input)\n"
             )
-
-            # Inject a synthetic "Zip mode: <total> wells" banner
-            # BEFORE batch 1's stdout. The GUI's ``ProgressTracker``
-            # locks on the first such banner via
-            # ``if not self.well_total:``; without this, each batch's
-            # own banner reports just THAT batch's count (e.g. 50)
-            # and well_done climbs past 100% as later batches add up
-            # against the wrong denominator. We always say "Zip mode"
-            # because the remote pipeline sees zips on disk regardless
-            # of the local input mode the user started from. The "—
-            # batched" suffix is informational only; the regex
-            # ``\s+well`` matches both "well" and "wells" so the
-            # parenthetical doesn't disturb the match.
-            self._line_q.put(f"Zip mode: {len(all_zips)} wells — batched\n")
 
             for batch_idx, batch_zips in enumerate(batches):
                 if self._stop.is_set():

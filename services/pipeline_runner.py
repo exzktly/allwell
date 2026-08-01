@@ -169,15 +169,19 @@ class ProgressTracker:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self.well_repeats = 0
         self._finalize_emitted = False
         self._fetch_parts: dict[str, set] = {}   # well -> {"zip","csv"} seen
+        self._done_wells: set[str] = set()       # wells already counted done
 
     def reset(self) -> None:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self.well_repeats = 0
         self._finalize_emitted = False
         self._fetch_parts = {}
+        self._done_wells = set()
 
     def _mark_fetch_part(self, well: str, part: str) -> bool:
         """Record that *part* ("zip"/"csv") of *well*'s output has landed.
@@ -187,6 +191,40 @@ class ProgressTracker:
         was_complete = {"zip", "csv"} <= seen
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
+
+    def _count_well_done(self, well: str) -> list[tuple[str, object]]:
+        """Record that *well* reached a terminal state, counting it once.
+
+        Progress is the number of DISTINCT wells that finished, not the number
+        of completion markers seen. The two diverge in batched remote mode: the
+        pipeline is launched once per batch against a shared remote input
+        directory, so a well whose input zip is still there when the next batch
+        starts is announced terminal a second time (re-processed, or skipped
+        with "output already exists"). Counting markers made the headline reach
+        "N / N wells (100%)" with wells still outstanding, and then climb past
+        100% — the run reported itself complete while it was not.
+
+        A repeat is reported rather than absorbed: it means a well was handled
+        twice, which is either wasted compute or a stale input left behind, and
+        the log is the only place that can say so.
+
+        The announced total is a floor, never a ceiling. If more distinct wells
+        finish than the banner promised, the total is raised to what was
+        actually observed so the fraction stays truthful.
+        """
+        token = well.upper()
+        if token in self._done_wells:
+            self.well_repeats += 1
+            return [("well_repeat", token)]
+        self._done_wells.add(token)
+        self.well_done = len(self._done_wells)
+        events: list[tuple[str, object]] = []
+        if self.well_done > self.well_total:
+            self.well_total = self.well_done
+            events.append(("well_total", self.well_total))
+        events.append(("well_done", (self.well_done, self.well_total)))
+        events.append(("well_stage", (well, "process")))
+        return events
 
     def parse(self, line: str) -> list[tuple[str, object]]:
         """Return queue events for a single stdout line.
@@ -299,28 +337,19 @@ class ProgressTracker:
             # removed" as the only completion log; keep matching it
             # too as a fallback for users running mismatched
             # client/server versions.
-            md = _RE_WELL_DONE_ID.search(line)
+            #
+            # The three terminal markers — finished, incremental up-to-date,
+            # and already-complete-so-skipped — all mean the same thing to the
+            # progress count, and all name their well, so they share one
+            # identity-aware counter. An up-to-date well never emits "— done.";
+            # a skipped one never runs at all; both are complete.
+            md = (
+                _RE_WELL_DONE_ID.search(line)
+                or _RE_WELL_UPTODATE.search(line)
+                or _RE_WELL_SKIP.search(line)
+            )
             if md:
-                self.well_done += 1
-                events.append(("well_done", (self.well_done, self.well_total)))
-                events.append(("well_stage", (md.group(1), "process")))
-            else:
-                # Incremental up-to-date well: counts toward completion and
-                # advances to the processed stage (the auto-threshold pass then
-                # turns it green locally; the remote ✓ marker does so remotely).
-                mu = _RE_WELL_UPTODATE.search(line)
-                if mu:
-                    self.well_done += 1
-                    events.append(("well_done", (self.well_done, self.well_total)))
-                    events.append(("well_stage", (mu.group(1), "process")))
-                # Already-complete well skipped on a re-run: it's done, so count
-                # it and advance it to the processed stage (the auto-threshold
-                # pass over its existing _out.zip then turns it green).
-                ms = _RE_WELL_SKIP.search(line)
-                if ms:
-                    self.well_done += 1
-                    events.append(("well_done", (self.well_done, self.well_total)))
-                    events.append(("well_stage", (ms.group(1), "process")))
+                events.extend(self._count_well_done(md.group(1)))
         return events
 
 

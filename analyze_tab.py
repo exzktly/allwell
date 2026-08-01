@@ -211,12 +211,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
         splitter.setSizes([RAIL_W, 600])
 
     # ------------------------------------------------------------------
-    # Layout helpers
-    # ------------------------------------------------------------------
-
-
-
-    # ------------------------------------------------------------------
     # Form orchestration
     # ------------------------------------------------------------------
 
@@ -921,6 +915,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
         elif kind == "well_fov":
             well, done, total = payload  # type: ignore[misc]
             self._dashboard.set_well_fov(str(well), int(done), int(total))
+        elif kind == "well_xfer":
+            well, direction, frac = payload  # type: ignore[misc]
+            self._dashboard.set_well_transfer(str(well), str(direction), float(frac))
         elif kind == "status":
             # Descriptive finalize-phase status (auto-threshold / remote drain
             # / cleanup) so the post-well work doesn't read as a hang.

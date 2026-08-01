@@ -17,7 +17,11 @@ def _patch_stream(monkeypatch, results):
     seq = iter(results)
     calls = {"n": 0}
 
-    def _fake(cmd, *, log_fn=None, progress_fn=None, stop_event=None):
+    # ``well_sizes`` carries the per-well upload denominators through to the
+    # streaming reader; the retry loop only forwards it, so this fake accepts
+    # and ignores it.
+    def _fake(cmd, *, log_fn=None, progress_fn=None, stop_event=None,
+              well_sizes=None):
         calls["n"] += 1
         return next(seq)
 

@@ -109,18 +109,24 @@ def test_uploaded_and_computing_are_different_colours(qapp):
     assert d._well_color("A01") != d._well_color("A02")
 
 
-def test_uploaded_wears_no_dial_because_nothing_is_measured_yet(qapp):
-    """The dial is FOV-group progress, which upload has none of.
+def test_uploaded_wears_an_empty_dial(qapp):
+    """Rewritten: per-well upload used to be treated as a single event — the
+    archive landed or it did not — so an uploaded well carried no dial at all
+    and a plate mid-run was a solid block of wells saying nothing.
 
-    Per-well upload is a single event — the archive landed or it did not — so
-    there is no fraction to draw. Plate-wide transfer progress is the bar.
+    Upload does have a fraction (rsync's own byte stream, attributed per
+    archive), and once it is finished the well is *waiting to compute*, which
+    is an empty dial rather than a plain disc.
     """
     from widgets.run_dashboard import RunDashboard
 
     d = RunDashboard()
     d.reset(remote=True, total=1)
+    d.set_well_transfer("A01", "up", 0.6)
+    assert d._plate._grid._fractions[(0, 0)] == pytest.approx(0.6)
     d.set_well_stage("A01", "upload")
-    assert d._plate._grid._fractions == {}
+    d.set_well_transfer("A01", "up", 1.0)
+    assert d._plate._grid._fractions[(0, 0)] == 0.0
 
 
 def test_the_legend_names_uploaded_on_remote_runs_only(qapp):
@@ -192,6 +198,21 @@ def test_tracker_emits_per_well_fov_progress():
                               if k == "well_fov"]
 
 
+def test_tracker_emits_per_well_transfer_progress():
+    """Upload and download report a fraction per well, not just plate-wide."""
+    from services.remote_runner import _well_xfer_line
+
+    t = ProgressTracker()
+    assert t.parse(_well_xfer_line("C02", "down", 0.418)) == [
+        ("well_xfer", ("C02", "down", 0.418))]
+    assert t.parse(_well_xfer_line("d4", "up", 0.5)) == [
+        ("well_xfer", ("D4", "up", 0.5))]
+    # A sample that cannot be read is dropped, not guessed at — the only thing
+    # it drives is a gauge position.
+    from services.remote_runner import WELL_XFER_PREFIX
+    assert t.parse(f"{WELL_XFER_PREFIX}sideways C02 0.5") == []
+
+
 def test_tracker_cached_upload_marks_well_uploaded():
     # A full cache hit logs "↑ <well>.zip already on remote" (no live transfer
     # lines) — it must still advance the Upload rail.
@@ -212,48 +233,58 @@ def test_tracker_emits_finalize_status():
         "[remote] removed run dir abc123.")
 
 
-def _fov_rails(d):
-    """{well: (value, maximum)} from the per-well FOV progress rails beneath
-    the plate (replaces the old single _fov_lbl text line)."""
-    from PySide6.QtWidgets import QLabel, QProgressBar
-    out = {}
-    for i in range(d._fov_lay.count()):
-        row = d._fov_lay.itemAt(i).widget()
-        if row is None:
-            continue
-        lbl = row.findChild(QLabel)
-        bar = row.findChild(QProgressBar)
-        out[lbl.text().split(" ")[0]] = (bar.value(), bar.maximum())
-    return out
-
-
 def test_dashboard_fov_sub_progress(qapp):
+    """Rewritten: FOV progress used to be drawn as a stack of labelled
+    ``QProgressBar`` rows beneath the plate, one per computing well. The dial
+    on the well itself carries the same information in the place the eye is
+    already looking, so the rail is gone and this asserts the dial instead.
+    """
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard(); d.reset(remote=True, total=2)
     d.set_well_stage("A01", "active"); d.set_well_stage("B02", "active")
     d.set_well_fov("A01", 0, 12); d.set_well_fov("B02", 0, 8)
     d.set_well_fov("A01", 7, 12)
-    # each computing well gets its own labelled rail (value/maximum), under the plate
-    rails = _fov_rails(d)
-    assert rails.get("A01") == (7, 12) and rails.get("B02") == (0, 8)
-    # a well that finishes processing drops out of the FOV rails
+    fractions = d._plate._grid._fractions
+    assert fractions[(0, 0)] == pytest.approx(7 / 12)
+    assert fractions[(1, 1)] == 0.0
+    # a well that finishes processing reads full, not stuck at its last count
     d.set_well_stage("A01", "process")
-    rails = _fov_rails(d)
-    assert "A01" not in rails and "B02" in rails
+    assert d._plate._grid._fractions[(0, 0)] == 1.0
 
 
-def test_dashboard_fov_rails_are_height_capped_and_scrollable(qapp):
-    """Many concurrent wells must NOT grow the dashboard and crush the log:
-    the FOV rails live in a height-capped scroll area that's hidden when idle."""
+def test_no_per_well_progress_bars_beneath_the_plate(qapp):
+    """The rail is gone, and nothing may quietly rebuild it.
+
+    It was a height-capped scroll area holding a ``QProgressBar`` per active
+    well. Many concurrent wells could not grow the dashboard and crush the
+    log, which was the whole reason for the cap — a constraint that stops
+    existing once the information lives on the plate.
+    """
+    from PySide6.QtWidgets import QProgressBar
+
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard(); d.reset(remote=False, total=8)
-    # idle → the rail area reserves no space
-    assert d._fov_scroll.isHidden()
-    assert d._fov_scroll.maximumHeight() <= 120  # bounded, not unbounded
-    # fill more rails than fit in the cap
     for i, w in enumerate(["A01", "B02", "C03", "D04", "E05", "F06", "G07", "H08"]):
         d.set_well_stage(w, "active"); d.set_well_fov(w, i, 12)
-    assert d._fov_lay.count() == 8
-    assert not d._fov_scroll.isHidden()                       # shown while active
-    # content taller than the cap → it scrolls instead of expanding the dashboard
-    assert d._fov_host.sizeHint().height() > d._fov_scroll.maximumHeight()
+    # The only bars left are the overall-completion bar and the stage rail's.
+    bars = d.findChildren(QProgressBar)
+    assert len(bars) == 1 + len(d._rail), [b.format() for b in bars]
+    # And every well still says how far along it is, on the plate.
+    assert len(d._plate._grid._fractions) == 8
+
+
+def test_the_counts_behind_a_dial_are_in_its_tooltip(qapp):
+    """A proportion cannot be counted off a circle, and the per-well progress
+    bars that used to carry the numbers are gone — so the hover text does."""
+    from widgets.run_dashboard import RunDashboard
+    d = RunDashboard(); d.reset(remote=True, total=2)
+    d.set_well_stage("A01", "active"); d.set_well_fov("A01", 7, 12)
+    assert "FOV 7/12" in d._well_tooltip("A01")
+    d.set_well_transfer("B02", "down", 0.42)
+    assert "downloading 42%" in d._well_tooltip("B02")
+    d.set_well_transfer("C03", "up", 0.10)
+    assert "uploading 10%" in d._well_tooltip("C03")
+    # A failed well says only that: a percentage beside it would suggest it is
+    # still going, exactly as a part-filled dial would.
+    d.set_well_stage("A01", "error")
+    assert d._well_tooltip("A01") == "A01: failed"

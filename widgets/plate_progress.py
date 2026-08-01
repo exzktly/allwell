@@ -4,8 +4,8 @@ Holds what :class:`~widgets.run_dashboard.RunDashboard` (Analyze) and
 :class:`~datasets.concatenate.dashboard.ConcatDashboard` (Concatenate) have in
 common: a header (title/status/eta/collapse toggle), a headline label, one
 overall completion bar, and a 3-column body — a subclass-owned left "rail"
-slot, the 8x12 well plate map (+ optional per-well sub-progress rails beneath
-it), and a legend. Extracted so the two dashboards' layout/plate/legend wiring
+slot, the 8x12 well plate map (each well drawn as a progress dial while it
+is being worked on), and a legend. Extracted so the two dashboards' layout/plate/legend wiring
 can't drift apart from each other the way it had before this module existed.
 
 A subclass sets its own instance state, then calls ``super().__init__(title)``;
@@ -21,8 +21,7 @@ import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QScrollArea,
-    QToolButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QProgressBar, QToolButton, QVBoxLayout, QWidget,
 )
 
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
@@ -93,7 +92,7 @@ class PlateProgress(QWidget):
         self._bar.setTextVisible(False)
         root.addWidget(self._bar)
 
-        # body: rail | plate (+ per-well sub-progress rails) | legend
+        # body: rail | plate | legend
         self._body = QWidget(self)
         body = QHBoxLayout(self._body)
         body.setContentsMargins(0, 4, 0, 0); body.setSpacing(14)
@@ -138,24 +137,6 @@ class PlateProgress(QWidget):
             self._plate.setWellTooltipProvider(self._well_tooltip)
             center.addWidget(self._plate, 0, PLATE_ALIGNMENT)
 
-            # Per-well sub-progress rails (RunDashboard: FOV·timepoint progress;
-            # unused by ConcatDashboard, which has no per-well sub-phases) —
-            # height-capped + scrollable so many concurrent wells never grow the
-            # dashboard and crush the log below.
-            self._fov_host = QWidget()
-            self._fov_lay = QVBoxLayout(self._fov_host)
-            self._fov_lay.setContentsMargins(0, 0, 0, 0); self._fov_lay.setSpacing(3)
-            self._fov_scroll = QScrollArea(self._center_host)
-            self._fov_scroll.setWidget(self._fov_host)
-            self._fov_scroll.setWidgetResizable(True)
-            self._fov_scroll.setFrameShape(QFrame.NoFrame)
-            self._fov_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self._fov_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            self._fov_scroll.setMaximumHeight(96)
-            self._fov_scroll.setStyleSheet("QScrollArea { background: transparent; }")
-            self._fov_host.setStyleSheet("background: transparent;")
-            self._fov_scroll.setVisible(False)
-            center.addWidget(self._fov_scroll)
             center.addStretch(1)
             body.addWidget(self._center_host, 1)
 

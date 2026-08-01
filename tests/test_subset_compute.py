@@ -218,6 +218,30 @@ def test_execute_plan_copies_many_wells_in_parallel(tmp_path):
             assert len(list(csv.DictReader(f))) == 2
 
 
+def test_execute_plan_sub_progress_is_one_rising_sweep_per_well(tmp_path):
+    """``sub_progress`` is the per-well dial behind ``progress``'s stage
+    events. Copying one well is four container passes (read then write, for
+    the raw input and again for the QC archive); they are fused into a single
+    sweep, so each well's fractions must rise monotonically and end at full
+    rather than filling from empty once per pass."""
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    _build(src, wells=["A01", "B02"], timepoints=["0h", "24h"], fovs=("F001",))
+
+    plan = sc.build_subset_plan(src, dest, sc.SubsetFilter())
+    fractions: dict[str, list[tuple[int, int]]] = {}
+    subset_apply.execute_plan(
+        plan,
+        sub_progress=lambda well, done, total: fractions.setdefault(well, []).append((done, total)),
+    )
+
+    assert set(fractions) == {"A01", "B02"}
+    for well, seq in fractions.items():
+        values = [done for done, _total in seq]
+        assert values == sorted(values), f"{well} dial went backwards: {values}"
+        assert seq[-1][0] == seq[-1][1], f"{well} dial never reached full: {seq[-1]}"
+
+
 def test_execute_plan_respects_explicit_worker_count(tmp_path):
     src = tmp_path / "src"
     dest = tmp_path / "dest"

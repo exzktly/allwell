@@ -792,10 +792,18 @@ class _PlateGrid(QWidget):
         A solid well says which stage it reached; it cannot say how far through
         that stage it is, so a well on its first FOV-group and one on its last
         look identical for however long the well takes — which on a timelapse
-        plate is most of the run. Here the whole well is the dial: the light
-        tone is what is done, the dark tone what is left, both of them the
+        plate is most of the run. Here the whole well is the dial: the dark
+        tone is what is done, the light tone what is left, both of them the
         state's own colour, so the well still reads as that state at a glance
         and resolves into a proportion when looked at.
+
+        That way round because a well fills from the state's own bright colour
+        toward a settled, spent one as the work is finished, which matches how
+        the rest of the dashboard reads: the bright end of a hue is the part
+        still in play. It also puts an untouched dial at its most visible
+        against the plate's dark surface, so a well that has started and
+        produced nothing yet still announces itself instead of sinking into
+        the background.
 
         Full-diameter deliberately. An inset ring inside the well body left
         about fifteen pixels to work with at the dashboard's real size, and a
@@ -808,16 +816,23 @@ class _PlateGrid(QWidget):
         """
         base = QColor(base)
         p.setPen(Qt.NoPen)
-        p.setBrush(base.darker(210))
+        p.setBrush(base.lighter(130))
         p.drawEllipse(wr)
         span = max(0.0, min(1.0, fraction))
         if span > 0.0:
-            p.setBrush(base.lighter(130))
+            p.setBrush(base.darker(210))
             p.drawPie(wr, 90 * 16, -int(round(span * 360.0 * 16)))
-        # Same rim as every other well, so a dial still reads as a well.
+        # Same rim as every other well, so a dial still reads as a well. The
+        # rim has to sit between the two tones: darker than the light body so
+        # it draws an edge on a dial that has barely started, and lighter than
+        # the completed wedge so a full dial still has a visible boundary
+        # against the plate's near-black surface. The state's own undarkened
+        # colour is exactly that middle value — rendering the alternatives at
+        # the dashboard's real cell size, anything at or below the wedge's
+        # ``darker(210)`` left a finished well with no discernible edge at all.
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(theme.Colors.text_primary) if hovered
-                      else base.darker(170), max(1.0, wr.width() * 0.04)))
+                      else QColor(base), max(1.0, wr.width() * 0.05)))
         p.drawEllipse(wr)
 
     def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool) -> None:

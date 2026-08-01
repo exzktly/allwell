@@ -50,7 +50,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
      [Subset / Split Dataset](#subset--split-dataset) ·
-     [Import Loose Folder](#import-loose-folder) ·
+     [Zip Loose Folder](#zip-loose-folder) ·
      [Merge Plates](#merge-plates) ·
      [Job Queue](#job-queue)
 7. [Filename schema](#filename-schema)
@@ -82,7 +82,7 @@ to add features, how to debug, and build / environment troubleshooting), see
   **Validate & Repair Dataset** checks whether an Analyze run actually
   finished and fixes metadata drift without re-running the pipeline; and
   **Subset / Split Dataset** copies a filtered slice of wells/timepoints/FOVs
-  into a new folder, leaving the source untouched; **Import Loose
+  into a new folder, leaving the source untouched; **Zip Loose
   Folder** groups a folder of loose TIFs into per-well zips with a live
   preview before converting; and **Merge Plates** joins two different plates
   along the well axis into one dataset.
@@ -518,16 +518,24 @@ A cell counts only when it is manually kept **and** it passes QC.
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
-  A well being computed right now is drawn as a dial rather than a flat circle:
-  the lighter part of it is the fields already measured, the darker part what is
-  left, filling clockwise. So you can see at a glance whether a slow well is
-  nearly through or has barely started, without hunting for it in the progress
-  bars underneath. There is no longer a cog on the well — the dial and its
-  colour say it is working. Only wells being computed have a dial: uploading and
-  downloading a well are single steps with no fraction to show, so those wells
-  stay plain discs and the transfer bar covers the plate as a whole. On a remote
-  run an uploaded well waiting its turn has its own colour, distinct from one
-  being computed — see the **Wells** legend beside the plate.
+  A well that has started is drawn as a dial rather than a flat circle: the
+  darker part of it is the work already done, the lighter part what is left,
+  filling clockwise from twelve o'clock. So you can see at a glance whether a
+  slow well is nearly through or has barely started. There is no longer a cog on
+  the well — the dial and its colour say it is working.
+- The dial follows whichever step the well is actually in. While the well is
+  being computed it fills with the fields measured; while its input archive is
+  being uploaded, or its results downloaded, it fills with the bytes moved. A
+  well that has entered a step but finished none of it — one sitting on the
+  remote waiting its turn, for instance — shows an empty dial, so the part of
+  the plate that is merely waiting is visibly distinct from the part that has
+  not been reached at all. Wells still to be started have no dial, and neither
+  does a failed well: a part-filled ring beside the ✕ would suggest it was
+  still going.
+- Hover a well for its exact numbers — the stage it is in plus its field count
+  (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
+  its turn has its own colour, distinct from one being computed — see the
+  **Wells** legend beside the plate.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the
@@ -692,6 +700,13 @@ a well to toggle it; drag across wells to multi-toggle; click a row letter
 or column number to toggle the whole row / column; **Select all** /
 **Select none** clear or fill in one click. The selection survives across
 tabs and is what every plot / aggregate / export consumes.
+
+Every plate map in the app — this one, the pickers on the Statistics, Image
+Browser, Preview and Sample Definitions panels, the Datasets tools' own well
+pickers, and the status map on a running job's dashboard — is the same control
+at the same size, centred in whatever panel holds it. A plate looks the same
+wherever you meet it, so a well you can find on one is in the same place on
+the next.
 
 #### Plot Groups and Split View
 
@@ -1843,7 +1858,7 @@ inclusion overrides carry over for cells that survive the filter (dropped for
 ones that don't) and gating thresholds / sample definitions carry over from
 the source, same as Concatenate. The source dataset is never modified.
 
-### Import Loose Folder
+### Zip Loose Folder
 
 Use this to group a folder of loose, ungrouped TIFs (no `in/<WELL>.zip`
 structure yet) into the layout Analyze reads directly.

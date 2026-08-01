@@ -12,6 +12,10 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
     zipper_done   None       Grouping phase finished.
     remote_xfer   float      Remote rsync progress as a fraction in [0, 1].
                              Only emitted during remote-execution runs.
+    well_xfer     tuple      (well, "up"|"down", fraction) — one well's own
+                             upload or download progress, for its dial on the
+                             plate map. Parsed out of the log stream by
+                             ProgressTracker; never written to the log.
     done          str        Pipeline finished successfully.
     error         str        Pipeline failed; payload is a message.
     finished      None       Final event, always emitted in a finally.
@@ -33,6 +37,7 @@ from services.remote_runner import (
     OutputFilter,
     RemoteRunner,
     TRANSIENT_PREFIX,
+    WELL_XFER_PREFIX,
     stage_local_zips,
 )
 from services.subprocess_kill import signal_subprocess
@@ -129,6 +134,30 @@ def is_transient_progress(line: str) -> bool:
     return line.lstrip().startswith(TRANSIENT_PREFIX)
 
 
+# ``[remote] ⋯ xfer down C02 0.4180`` — see ``remote_runner.WELL_XFER_PREFIX``.
+_RE_WELL_XFER = re.compile(r"^(up|down)\s+([A-Ha-h]\d{1,2})\s+([0-9.]+)\s*$")
+
+
+def parse_well_transfer(line: str) -> tuple[str, str, float] | None:
+    """``(well, direction, fraction)`` for a per-well transfer-progress line.
+
+    ``None`` for anything else, including a malformed line carrying the marker
+    — a transfer sample that cannot be read is dropped rather than guessed at,
+    since the only thing it drives is a gauge position.
+    """
+    stripped = line.lstrip()
+    if not stripped.startswith(WELL_XFER_PREFIX):
+        return None
+    m = _RE_WELL_XFER.match(stripped[len(WELL_XFER_PREFIX):].strip())
+    if not m:
+        return None
+    try:
+        fraction = float(m.group(3))
+    except ValueError:
+        return None
+    return m.group(2).upper(), m.group(1), max(0.0, min(1.0, fraction))
+
+
 class ProgressTracker:
     """Pure log-line parser that tracks well-count progress.
 
@@ -175,6 +204,15 @@ class ProgressTracker:
         # when the pipeline echoes the same banner via stdout.
         if "Zip mode:" in line or "Zip mode complete" in line:
             self.zip_mode_warning_logged = True
+        if line.lstrip().startswith(WELL_XFER_PREFIX):
+            # Per-well upload/download progress: a gauge position for one
+            # well's dial, and nothing else. Claimed before the generic
+            # transient branch because it carries the same marker plus more —
+            # and claimed even when it doesn't parse, so a malformed sample is
+            # dropped rather than falling through to the status line, where it
+            # would show the user "xfer down C02 0.4180" as prose.
+            xfer = parse_well_transfer(line)
+            return [("well_xfer", xfer)] if xfer is not None else []
         if is_transient_progress(line):
             # Live state: straight to the status line, nothing else to parse.
             return [("status", line.strip()[len(TRANSIENT_PREFIX):].strip())]

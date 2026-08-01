@@ -25,6 +25,7 @@ pytest.importorskip("PySide6")
 
 from services.pipeline_runner import (
     TRANSIENT_PREFIX,
+    WELL_XFER_PREFIX,
     ProgressTracker,
     is_transient_progress,
 )
@@ -59,6 +60,24 @@ def test_a_transient_line_yields_nothing_else():
     assert [k for k, _ in events] == ["status"]
 
 
+def test_per_well_transfer_progress_is_transient_too():
+    """It is the same flood by another name: a sample per second per well.
+
+    The marker is built on ``TRANSIENT_PREFIX`` precisely so this rule covers
+    it without a second place to remember — a per-well transfer emits more
+    lines than the plate-wide stream it sits beside.
+    """
+    assert is_transient_progress(f"{WELL_XFER_PREFIX}down C02 0.4180")
+
+
+def test_per_well_transfer_progress_does_not_reach_the_status_line():
+    """It is a gauge position, not a sentence: showing "xfer down C02 0.4180"
+    as status text would be worse than showing nothing."""
+    tracker = ProgressTracker()
+    events = tracker.parse(f"{WELL_XFER_PREFIX}down C02 0.4180")
+    assert [k for k, _ in events] == ["well_xfer"]
+
+
 def test_the_upload_rail_still_reads_the_per_file_names():
     """The regression this guards: marking rsync's stream transient must not
     take the per-well name lines with it — those are what fill the rail."""
@@ -76,6 +95,17 @@ def test_the_gui_skips_transient_lines(qapp):
     src = inspect.getsource(AnalyzeTab._poll_log)
     assert "is_transient_progress(payload)" in src
     assert "if not is_transient_progress(payload):" in src
+
+
+def test_the_gui_routes_per_well_transfer_progress_to_the_plate():
+    """The other half of the wiring: the event has to reach a dial."""
+    import inspect
+
+    from analyze_tab import AnalyzeTab
+
+    src = inspect.getsource(AnalyzeTab._apply_progress_event)
+    assert "well_xfer" in src
+    assert "set_well_transfer" in src
 
 
 def test_the_heartbeat_emits_both_cadences():

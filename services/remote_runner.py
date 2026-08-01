@@ -98,9 +98,28 @@ from util.retry_io import retry_io, volume_hint
 # already imports this module and the reverse would be a cycle.
 TRANSIENT_PREFIX = "[remote] ⋯ "
 
+# Per-well transfer progress, as ``<prefix><direction> <well> <fraction>`` —
+# e.g. ``[remote] ⋯ xfer down C02 0.4180``. ``pipeline_runner.ProgressTracker``
+# turns these into ``("well_xfer", (well, direction, fraction))`` events that
+# fill the well's dial on the run dashboard's plate map.
+#
+# Deliberately built on ``TRANSIENT_PREFIX`` rather than beside it: a per-well
+# transfer emits a sample every second or so, which is the same flood the
+# transient marker exists to keep out of the log, and extending the existing
+# prefix means the "never write this to the log" rule already covers it. The
+# tracker recognises the longer marker first, so these never reach the status
+# line as raw text either.
+WELL_XFER_PREFIX = TRANSIENT_PREFIX + "xfer "
+
 # How often a transfer writes a durable "still going" line to the log, as
 # opposed to the live status updates it emits every ``interval`` seconds.
 _BREADCRUMB_INTERVAL_S = 60.0
+
+# How often a per-well transfer emits its dial fraction. Much faster than the
+# status-line cadence — a dial that only moves every eight seconds reads as
+# stuck — and cheap, since the emission is one formatted string that never
+# touches the log.
+_WELL_XFER_INTERVAL_S = 1.0
 from util.zip_write import atomic_zip
 
 
@@ -2201,6 +2220,7 @@ class DatasetCache:
         # ``upload_subset`` via ``_stream_rsync_with_retry`` (audit A11).
         sent_bytes, elapsed, rc, attempts_run = _stream_rsync_with_retry(
             cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+            well_sizes=_well_zip_sizes(zipped.well_zips),
         )
 
         # v5.2.14: pre-v5.2.14 ``ensure_uploaded`` returned even when
@@ -2315,6 +2335,7 @@ class DatasetCache:
         # Shared streaming retry loop (audit A11).
         sent_bytes, elapsed, rc, _attempts = _stream_rsync_with_retry(
             cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+            well_sizes=_well_zip_sizes(well_zips),
         )
         if rc == 0 and log_fn:
             _log_wells_uploaded(well_zips, log_fn)
@@ -2514,17 +2535,114 @@ def _iter_rsync_lines(stdout) -> Iterable[str]:
         buf = parts[-1]
 
 
+def _well_xfer_line(well: str, direction: str, fraction: float) -> str:
+    """Format one per-well transfer-progress line (see ``WELL_XFER_PREFIX``).
+
+    ``direction`` is ``"up"`` or ``"down"``; ``fraction`` is clamped to 0..1.
+    """
+    frac = max(0.0, min(1.0, float(fraction)))
+    return f"{WELL_XFER_PREFIX}{direction} {well} {frac:.4f}\n"
+
+
+def _well_zip_sizes(well_zips) -> dict[str, int]:
+    """``{archive basename: bytes}`` for the well zips about to be uploaded.
+
+    The denominator for per-well upload progress. An archive that has gone
+    missing between staging and upload is simply left out — the transfer will
+    fail on its own and say so; guessing a size here would put a dial on a
+    well that is not moving.
+    """
+    sizes: dict[str, int] = {}
+    for p in well_zips or ():
+        path = Path(p)
+        try:
+            sizes[path.name] = path.stat().st_size
+        except OSError:
+            continue
+    return sizes
+
+
+class _UploadWellProgress:
+    """Turn one rsync's ``--info=name1,progress2`` stream into per-well upload
+    fractions.
+
+    ``progress2`` reports bytes transferred for the *whole* invocation, not per
+    file, so a percentage on its own says nothing about any individual well.
+    ``name1`` fills the gap: rsync prints a file's name as it starts sending
+    it, so the cumulative byte count at that moment is that well's zero point,
+    and everything after it until the next name belongs to that well. With the
+    local zip's own size as the denominator that gives a genuine per-well
+    fraction rather than a plate-wide one smeared across every well.
+
+    Files rsync skips — a cache hit, an incremental re-send — emit no name line
+    and contribute no bytes, so they never open a window at all. That is the
+    right answer: nothing about them is in flight.
+    """
+
+    def __init__(self, sizes: dict[str, int], emit: Callable[[str], None]) -> None:
+        # {basename: size_in_bytes} for the archives this rsync was asked for.
+        self._sizes = sizes
+        self._emit = emit
+        self._well: str | None = None
+        self._size = 0
+        self._base_bytes = 0
+        self._cumulative = 0
+        self._last_sent = -1.0
+
+    def note_bytes(self, cumulative: int) -> None:
+        """Record rsync's running total, and emit the open well's share of it."""
+        self._cumulative = cumulative
+        if self._well is None or self._size <= 0:
+            return
+        frac = (cumulative - self._base_bytes) / self._size
+        # Rounded before the compare so a byte-level dribble doesn't emit a
+        # line per progress update; the dial cannot show finer than this.
+        frac = round(max(0.0, min(1.0, frac)), 3)
+        if frac != self._last_sent:
+            self._last_sent = frac
+            self._emit(_well_xfer_line(self._well, "up", frac))
+
+    def note_file(self, name: str) -> None:
+        """A new file just started transferring: close the previous well's
+        window at full and open this one at zero."""
+        self.finish()
+        base = name.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        size = self._sizes.get(base)
+        if size is None:
+            return
+        well = _canonical_well_from_path(Path(base).stem)
+        if well is None:
+            return
+        self._well, self._size = well, int(size)
+        self._base_bytes = self._cumulative
+        self._last_sent = 0.0
+        self._emit(_well_xfer_line(well, "up", 0.0))
+
+    def finish(self) -> None:
+        """Close the open well's window at full — it is on the remote now."""
+        if self._well is not None:
+            self._emit(_well_xfer_line(self._well, "up", 1.0))
+            self._well = None
+            self._size = 0
+            self._last_sent = -1.0
+
+
 def _run_rsync_streaming(
     cmd: list[str],
     *,
     log_fn: Callable[[str], None] | None,
     progress_fn: Callable[[float], None] | None,
     stop_event: threading.Event | None,
+    well_sizes: dict[str, int] | None = None,
 ) -> tuple[int, int]:
     """Run rsync, stream its stdout, return ``(bytes_sent, returncode)``.
 
     Honors the stop_event by terminating the rsync subprocess. Parses the
     ``--info=stats2`` summary line at the end for the byte count.
+
+    ``well_sizes`` maps ``{archive basename: bytes}`` for the well zips this
+    invocation is uploading. When supplied (and ``log_fn`` is set) the stream
+    also yields per-well upload fractions — see :class:`_UploadWellProgress`.
 
     v5.1.1: return value gained the exit code so the caller can drive a
     bounded retry on transient network failures (rsync codes 10/12/30/35).
@@ -2565,6 +2683,10 @@ def _run_rsync_streaming(
     # final 100% line.
     last_progress_log = 0.0
     PROGRESS_LOG_MIN_INTERVAL = 1.0
+    wells = (
+        _UploadWellProgress(well_sizes, log_fn)
+        if (well_sizes and log_fn is not None) else None
+    )
 
     try:
         assert proc.stdout is not None
@@ -2581,6 +2703,11 @@ def _run_rsync_streaming(
                 try:
                     pct = float(m.group(2)) / 100.0
                     progress_fn(pct)
+                except ValueError:
+                    pass
+            if is_progress and wells is not None:
+                try:
+                    wells.note_bytes(int(m.group(1).replace(",", "")))
                 except ValueError:
                     pass
             m_bytes = bytes_actual_re.match(line)
@@ -2605,7 +2732,11 @@ def _run_rsync_streaming(
                         last_progress_log = now
                 elif _looks_like_rsync_filename(line):
                     file_count += 1
+                    if wells is not None:
+                        wells.note_file(line)
                     log_fn(f"[remote] ↑ ({file_count}) {line}\n")
+        if wells is not None:
+            wells.finish()
         proc.wait()
     finally:
         if proc.poll() is None:
@@ -2677,6 +2808,7 @@ def _stream_rsync_with_retry(
     log_fn: Callable[[str], None] | None = None,
     progress_fn=None,
     stop_event: threading.Event | None = None,
+    well_sizes: dict[str, int] | None = None,
 ) -> tuple[int, float, int, int]:
     """Run a *streaming* rsync (:func:`_run_rsync_streaming`) with bounded retry
     on transient network failures, resuming via ``--partial`` each attempt.
@@ -2706,6 +2838,7 @@ def _stream_rsync_with_retry(
             time.sleep(delay)
         attempt_bytes, rc = _run_rsync_streaming(
             cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
+            well_sizes=well_sizes,
         )
         sent_bytes += attempt_bytes  # each resumed attempt sends incremental bytes
         attempts_run += 1
@@ -3728,15 +3861,67 @@ class Fetcher:
                     + "; continuing\n"
                 )
 
+    def _remote_file_size(self, remote_path: str) -> int | None:
+        """Byte size of a file on the remote, or ``None`` if it can't be read.
+
+        The denominator for per-well download progress: the heartbeat below
+        already counts the bytes that have landed, and this is what they are a
+        fraction *of*. One small ssh per well, alongside the ones the Fetcher
+        already makes for the CSV listing and the per-well cleanup — cheap
+        beside the multi-megabyte transfer it is measuring.
+
+        The script is piped to ``bash -s`` rather than passed as an argument so
+        a ``~`` in the staging path still expands on the remote (the same
+        lesson ``_rsync_glob`` and ``_delete_well_files_on_remote`` carry), and
+        it tries GNU ``stat``, BSD ``stat`` and ``ls`` in turn so it works on a
+        Linux cluster or a macOS host without having to know which it is.
+
+        Returns ``None`` on any failure — a missing size means the caller
+        reports bytes-so-far and no fraction, never an invented one.
+        """
+        script = (
+            f"stat -c %s -- {remote_path} 2>/dev/null || "
+            f"stat -f %z -- {remote_path} 2>/dev/null || "
+            f"ls -ln -- {remote_path} 2>/dev/null | awk '{{print $5}}'\n"
+        )
+        try:
+            result = subprocess.run(
+                self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+                input=script.encode("utf-8"),
+                capture_output=True,
+                timeout=30,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        out = (
+            result.stdout.decode("utf-8", errors="replace")
+            if result.stdout else ""
+        )
+        for token in out.split():
+            if token.isdigit():
+                size = int(token)
+                return size if size > 0 else None
+        return None
+
     @contextlib.contextmanager
     def _transfer_heartbeat(self, label: str, dest_path: Path,
                             interval: float = 8.0,
-                            breadcrumb_interval: float = _BREADCRUMB_INTERVAL_S):
+                            breadcrumb_interval: float = _BREADCRUMB_INTERVAL_S,
+                            total_bytes: int | None = None):
         """Emit a periodic "still transferring…" line showing bytes-so-far while a
         per-well rsync runs, so a long download is visibly *moving* rather than
         looking hung. The per-well fetch rsync is silent (capture_output), so
         without this the user has no way to tell a slow transfer from a stuck one.
-        Bytes-so-far = the growing rsync temp/partial file(s) in the dest dir."""
+        Bytes-so-far = the growing rsync temp/partial file(s) in the dest dir.
+
+        When ``total_bytes`` is known (the remote size of the file being
+        pulled, from :meth:`_remote_file_size`) the same count also drives the
+        well's dial on the dashboard, emitted on its own much faster cadence so
+        the dial moves smoothly while the log and the status line keep their
+        slower ones. Without a total the status line still reports bytes-so-far
+        and no fraction is claimed — an unknown denominator must not become a
+        made-up percentage.
+        """
         stop = threading.Event()
         t0 = time.monotonic()
 
@@ -3759,21 +3944,46 @@ class Fetcher:
             return total
 
         def _beat() -> None:
-            # Two cadences, because they answer two different questions.
-            # The fast one is live state — it goes to the status line and never
-            # to the log, so a long transfer no longer writes a line every few
-            # seconds and pushes real events out of the log's 10 000-block cap.
-            # The slow one is a durable breadcrumb: a status line cannot answer
+            # Three cadences, because they answer three different questions.
+            # The dial tick is the fastest: it is a position on a gauge, so it
+            # has to move often enough to look alive, and it costs one string.
+            # The status line is live state — it never reaches the log, so a
+            # long transfer no longer writes a line every few seconds and
+            # pushes real events out of the log's 10 000-block cap. The
+            # breadcrumb is the durable record: a status line cannot answer
             # "was it stuck at 3am?" the next morning, and one line a minute is
             # a record rather than a flood.
             last_breadcrumb = t0
-            while not stop.wait(interval):
+            last_frac = -1.0
+            # The loop runs at the dial's cadence, or at the caller's if that
+            # is finer — a caller asking for a fast status line must not be
+            # slowed to the dial's tick. The status line then fires every Nth
+            # tick, counted rather than clock-compared, so its cadence cannot
+            # drift or skip on a tick that returns a hair early.
+            tick = min(_WELL_XFER_INTERVAL_S, interval)
+            ticks_per_status = max(1, int(round(interval / tick)))
+            ticks = 0
+            if total_bytes:
+                self._log(_well_xfer_line(label, "down", 0.0))
+            while not stop.wait(tick):
                 now = time.monotonic()
+                seen = _bytes_so_far()
+                ticks += 1
+                if total_bytes:
+                    frac = round(min(1.0, seen / total_bytes), 3)
+                    if frac != last_frac:
+                        last_frac = frac
+                        self._log(_well_xfer_line(label, "down", frac))
+                if ticks % ticks_per_status:
+                    continue
                 elapsed = _fmt_secs(now - t0)
-                mb = _bytes_so_far() / (1024 * 1024)
+                mb = seen / (1024 * 1024)
+                of_total = (
+                    f" / {total_bytes / (1024 * 1024):.1f}" if total_bytes else ""
+                )
                 self._log(
                     f"{TRANSIENT_PREFIX}Downloading {label} — "
-                    f"{mb:.1f} MB, {elapsed}\n"
+                    f"{mb:.1f}{of_total} MB, {elapsed}\n"
                 )
                 if now - last_breadcrumb >= breadcrumb_interval:
                     last_breadcrumb = now
@@ -3789,6 +3999,12 @@ class Fetcher:
         finally:
             stop.set()
             th.join(timeout=1.0)
+            # Close the dial's window whatever happened. A well whose fetch
+            # failed still has to stop showing a part-filled download; the
+            # stage rules take over from here, and the well is only marked
+            # downloaded once its CSVs have landed too.
+            if total_bytes:
+                self._log(_well_xfer_line(label, "down", 1.0))
 
     def _fetch_one(self, well: str) -> None:
         """Pull a single well's output. The remote pipeline produces
@@ -3815,11 +4031,18 @@ class Fetcher:
 
         self._log(f"[remote] ↓ {prefix}{well}: starting download from {self.host.ssh_alias}\n")
 
+        # Ask the remote how big the zip is before pulling it. That number is
+        # the denominator for this well's download dial; without it the
+        # heartbeat can only say how many bytes have arrived, which cannot be
+        # turned into a proportion.
+        expected_bytes = self._remote_file_size(
+            f"{self.run.remote_output_dir}/{well}_out.zip")
+
         # Output zip — exists iff the pipeline finished this well. Pull it
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
         t0 = time.monotonic()
-        with self._transfer_heartbeat(well, tmp_zip):
+        with self._transfer_heartbeat(well, tmp_zip, total_bytes=expected_bytes):
             ok = self._rsync(
                 # ``--timeout`` is rsync's own I/O-idle timeout: if the link
                 # stalls (or rsync hangs after the data is across, waiting on a

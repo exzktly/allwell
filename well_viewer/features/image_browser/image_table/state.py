@@ -26,8 +26,9 @@ class ImageTableState:
     ``active_wells`` / ``active_channels`` are the sidebar / dropdown
     multi-selections. ``zoom`` is the only global display option; top-hat /
     boundaries / binary are per-row (on the LUT/Display boxes). ``last_render``
-    / ``image_cache`` are the hot-path caches rebuilt by ``image_table_generate``
-    (not persisted).
+    / ``image_cache`` are the hot-path bookkeeping rebuilt by
+    ``image_table_generate`` (not persisted); neither holds decoded pixels —
+    those live only in the bounded cache in ``data/image_discovery``.
     """
 
     # selections
@@ -135,6 +136,11 @@ class ImageTableState:
     fixed_vals: dict = field(default_factory=dict)
 
     # per-generate caches (rebuilt each render; never persisted)
+    # {(row, col): None} — which cells the last Generate drew, NOT their pixels.
+    # Holding each cell's frame here pinned the whole grid's pixels for as long as
+    # the table was on screen, outside any cache budget; the consumers that read
+    # it (export, the composite column) lazy-load a missing array instead, which
+    # is a decode-cache hit.
     last_render: dict = field(default_factory=dict)
     image_cache: dict = field(default_factory=dict)
     # Pooled Auto-LUT window per base channel, {chan_lower: (lo, hi)}, computed each
@@ -147,6 +153,13 @@ class ImageTableState:
     # so a second Generate on an unchanged grid skips re-submitting work to the
     # thread pool instead of just cheaply re-hitting _load_array's own caches.
     prefetched_cells: set = field(default_factory=set)
+    # (well, chan_lower, variant) scans that came up empty during the CURRENT
+    # render pass, cleared at the top of each Generate / export run. It stops one
+    # pass from re-scanning the same missing well/channel once per cell without
+    # writing the miss into ``image_cache``, which outlives the pass — an empty
+    # scan there would pin "no images here" for the session, so a drive that
+    # stalled for a moment would leave a permanently half-empty grid.
+    scan_misses: set = field(default_factory=set)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
@@ -154,6 +167,7 @@ class ImageTableState:
         self.image_cache.clear()
         self.auto_lut_by_channel.clear()
         self.prefetched_cells.clear()
+        self.scan_misses.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

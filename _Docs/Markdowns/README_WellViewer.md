@@ -1841,16 +1841,20 @@ plain re-run would skip the very wells that need finishing.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel
    appears showing a "Ready — N well(s)" preview of the plate, before you've
-   pressed anything. Press **Check** and that same plate fills in with each
-   well's actual state (green with a checkmark = complete, yellow with a "!"
-   = missing some `(FOV, timepoint)` work, red with a "!" = no measurements
-   recorded, grey = no output yet), and a findings list below it names
+   pressed anything. Press **Check** and that same plate stays on screen and
+   fills in well by well as each one is read, so a scan over a full plate
+   shows its progress rather than sitting still until it's done. Each well
+   takes its actual state (green with a checkmark = complete, yellow with a
+   "!" = missing some `(FOV, timepoint)` work, red with a "!" = no
+   measurements recorded, grey = not read yet), and a findings list below names
    anything wrong — exactly which timepoints a well is missing, a sidecar
    that's out of sync with what's on disk, a CSV that looks like a well's
    data but isn't, or cell-inclusion overrides that no longer match the
    current segmentation. The findings list holds a placeholder ("Pick a
    dataset folder and press Check.") until then, and clears back to it if a
    re-check fails, rather than leaving an earlier check's results on screen.
+   Tick **Show raw log** for the line-by-line record: one line per well as
+   it's read, and a final line stating what the check concluded.
 2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't
    match what's on disk, or stale cell overrides), **Apply repairs** fixes
    just that metadata. It never touches measurement CSVs or images — gating

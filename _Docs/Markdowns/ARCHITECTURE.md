@@ -2918,12 +2918,32 @@ findings with nothing explaining why a well that's actually done reads as
 almost entirely missing.
 
 The per-well diff itself (`_scan_one_well`) runs on a `ThreadPoolExecutor`
-(`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads
-with no destination file and no live per-well dashboard, so there's no lock
-to take: `ThreadPoolExecutor.map()` (not `as_completed`) hands results back
-in the same order they were submitted regardless of which well's thread
-finishes first, so the report's well/finding ordering is identical to the
-old sequential loop's no matter the worker count.
+(`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads with
+no destination file, so there's no lock to take: the only shared state is the
+caller's own progress callback, and that does nothing but hand its result off.
+`ThreadPoolExecutor.map()` (not `as_completed`) hands results back in the same
+order they were submitted regardless of which well's thread finishes first, so
+the report's well/finding ordering is identical to the old sequential loop's no
+matter the worker count.
+
+`build_report` also takes an optional `ScanProgress` — two plain callables, so
+the module stays Qt-free — that reports the scan as it happens rather than only
+when it lands. `on_wells` fires once with the full set of wells the scan will
+cover, before any of them is read; `on_well_done` fires per well as that well's
+diff finishes. The threading contract is the reason it's a documented dataclass
+rather than a bare callback argument: `on_wells` runs on the calling thread,
+`on_well_done` on whichever pool thread scanned that well, in completion order
+(never the report's own order). `ValidateWorker` satisfies that by making both
+callbacks bare Qt signal emissions (`wellsDiscovered`, `wellScanned`), which
+are delivered as queued calls on the GUI thread. Without this channel a scan
+exposed nothing at all between "started" and "finished" — and since the scan
+opens every well's input archive and reads every measurements CSV, that gap is
+the whole duration of a plate-sized run, during which the page had nothing to
+show. `well_health(WellReport)` classifies a well into the four states the
+plate map paints (`complete` / `partial` / `missing` / `no_output`) and is the
+single classifier behind both the live per-well paint and the finished
+report's, so a well cannot change colour depending on which of the two got
+there first.
 
 Beyond the per-well diff, `build_report` also checks: the sidecar's
 `available_timepoints`/`available_fovs` against what
@@ -2962,7 +2982,20 @@ disabling only Browse — see `PathField` in §7) for the run's
 duration, the same as Subset's source/destination fields — `_on_succeeded`
 records the finished report's `report.root` (the path the worker actually
 scanned) rather than re-reading the page's live field, but the field itself
-must still not drift out from under the user mid-scan. `ValidateController._run`'s
+must still not drift out from under the user mid-scan. `ValidateController._run`
+re-seeds the dashboard from `preview_wells` immediately after resetting it, on
+the GUI thread and before the worker starts — `PlateProgress.reset()` clears the
+plate's enabled wells, so a run that began by resetting blanked the very plate
+map `_update_status_preview` had just painted and left it empty for the scan's
+whole duration; the worker's `wellsDiscovered` then replaces the seed with the
+wells the scan actually covers, and `wellScanned` paints each one as it lands.
+`_on_succeeded` still repaints every well from the finished report afterwards:
+the report is the authority, and a plate disagreeing with the findings list
+below it would be exactly the silent substitution this feature exists to catch.
+The controller also logs the run's summary for every run, not only a repair —
+a plain Check wrote one line ("Scanning dataset…") and never recorded that it
+had finished or what it concluded, because the completion line was gated on a
+`RepairResult` a Check never produces. `ValidateController._run`'s
 "no dataset path" early return also emits `jobFinished(False, …)` directly
 (mirroring `MergePlatesController._launch`'s remap-failure branch) instead of
 silently returning: a queued job whose persisted `spec["dataset"]` is empty or
@@ -2994,10 +3027,15 @@ shows, zero findings, full stop. The findings list shows a centred,
 non-selectable placeholder ("Pick a dataset folder and press Check.") while
 empty instead of rendering as a large blank box with no explanation, and
 `_on_failed` clears it back to that placeholder on a failed re-check so a
-stale success's findings can't linger under a fresh red "Failed" headline —
-reachable in production via `QueueBridge.show_job`, which populates the page
-through `set_dataset_path()` and so never runs the field's own interactive
-`changed` handler. **Apply repairs** carries a tooltip explaining why it's
+stale success's findings can't linger under a fresh red "Failed" headline.
+`ValidatePage.set_dataset_path` runs `_on_dataset_changed` itself after
+setting the field: `PathField.set_path` deliberately emits `changed` only for
+an interactive Browse pick, so a page populated through the setter —
+`QueueBridge.show_job` is its only caller — otherwise never ran the handler
+that enables "▶ Check", clears the previous job's findings, and paints the
+plate. Selecting a queued Validate job filled in a valid dataset folder and
+left the page inert: a disabled Check button that did nothing at all when
+pressed, above a blank plate. **Apply repairs** carries a tooltip explaining why it's
 greyed out when `report.findings` is non-empty but `report.repairable` is
 false — previously a disabled button with findings still listed above it had
 no way to say whether that meant "nothing to repair" or "can't repair this".

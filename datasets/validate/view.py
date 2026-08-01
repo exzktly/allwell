@@ -219,7 +219,16 @@ class ValidatePage(QWidget):
         return self._dataset_field.path()
 
     def set_dataset_path(self, path: str) -> None:
+        # PathField.set_path() deliberately doesn't emit `changed` (only an
+        # interactive Browse pick does), so a page populated this way —
+        # QueueBridge.show_job is the only caller — never ran the handler that
+        # enables "▶ Check" and paints the plate map. Selecting a queued
+        # Validate job therefore filled in a perfectly valid dataset folder
+        # and left the page inert: a disabled Check button that did nothing at
+        # all when pressed, above a blank plate. Run the same handler an
+        # interactive pick runs.
         self._dataset_field.set_path(path)
+        self._on_dataset_changed()
 
     def append_log(self, text: str) -> None:
         self._status.appendPlainText(text)

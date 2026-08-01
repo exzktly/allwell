@@ -817,38 +817,46 @@ class _PlateGrid(QWidget):
         """
         base = QColor(base)
         p.setPen(Qt.NoPen)
-        p.setBrush(base.lighter(165))
+        p.setBrush(QBrush(self._sphere_gradient(wr, base.lighter(165))))
         p.drawEllipse(wr)
         span = max(0.0, min(1.0, fraction))
         if span > 0.0:
-            p.setBrush(base)
+            p.setBrush(QBrush(self._sphere_gradient(wr, base)))
             p.drawPie(wr, 90 * 16, -int(round(span * 360.0 * 16)))
-        # Same rim as every other well, so a dial still reads as a well. It has
-        # to be darker than both tones now that the done wedge is the base
-        # colour itself: a rim at ``base`` would vanish into a finished wedge
-        # and leave a full dial with no edge against the plate's near-black
-        # surface. One step down from the base reads as an edge over the light
-        # remainder and over the done wedge alike.
+        # Exactly the rim and specular highlight a plain well gets, at the same
+        # widths, so a dial is the same object as every other well and not a
+        # flat disc that appeared where a sphere used to be. A well that starts
+        # progressing should gain a boundary inside itself, not change what
+        # kind of thing it is.
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(QColor(theme.Colors.text_primary) if hovered
-                      else base.darker(150), max(1.0, wr.width() * 0.05)))
+                      else base.darker(170), max(1.0, wr.width() * 0.04)))
         p.drawEllipse(wr)
+        self._paint_specular(p, wr)
 
-    def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool) -> None:
-        c = theme.Colors
-        base = QColor(base)
+    @staticmethod
+    def _sphere_gradient(wr: QRectF, tone: QColor) -> QRadialGradient:
+        """The shading that makes a well read as a sphere, in *tone*.
+
+        Shared by the plain well and by each half of a progress dial, so a well
+        that starts progressing keeps its form and only gains a boundary inside
+        itself. Two separate flat-fill and gradient-fill paths had the dial
+        rendering as a flat disc beside spherical neighbours, which read as a
+        different kind of object rather than the same well further along.
+        """
         grad = QRadialGradient(
             wr.center().x() - wr.width() * 0.15,
             wr.center().y() - wr.height() * 0.20,
             wr.width() * 0.75,
         )
-        grad.setColorAt(0.0, base.lighter(150))
-        grad.setColorAt(0.55, base)
-        grad.setColorAt(1.0, base.darker(135))
-        p.setBrush(QBrush(grad))
-        p.setPen(QPen(QColor(c.text_primary) if hovered else base.darker(170),
-                      max(1.0, wr.width() * 0.04)))
-        p.drawEllipse(wr)
+        grad.setColorAt(0.0, tone.lighter(150))
+        grad.setColorAt(0.55, tone)
+        grad.setColorAt(1.0, tone.darker(135))
+        return grad
+
+    @staticmethod
+    def _paint_specular(p: QPainter, wr: QRectF) -> None:
+        """The highlight arc across the well's upper face."""
         hl = QRectF(wr).adjusted(
             wr.width() * 0.16, wr.height() * 0.10,
             -wr.width() * 0.16, -wr.height() * 0.46,
@@ -856,6 +864,15 @@ class _PlateGrid(QWidget):
         p.setBrush(Qt.NoBrush)
         p.setPen(QPen(with_alpha(theme.Colors.ink_light, 0.30), max(1.0, wr.width() * 0.06)))
         p.drawArc(hl, 20 * 16, 140 * 16)
+
+    def _paint_lit(self, p: QPainter, wr: QRectF, base: QColor, hovered: bool) -> None:
+        c = theme.Colors
+        base = QColor(base)
+        p.setBrush(QBrush(self._sphere_gradient(wr, base)))
+        p.setPen(QPen(QColor(c.text_primary) if hovered else base.darker(170),
+                      max(1.0, wr.width() * 0.04)))
+        p.drawEllipse(wr)
+        self._paint_specular(p, wr)
 
     @staticmethod
     def _mix_with_rail(tint: QColor, t: float = 0.30) -> QColor:

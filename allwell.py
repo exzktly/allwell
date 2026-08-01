@@ -1384,26 +1384,45 @@ class AllWellApp(QMainWindow):
         self._update_dataset_chip(dataset_path)
 
     def _open_dataset_in_analyze(
-        self, dataset_path: Path, channel_tokens: dict | None = None,
+        self, dataset_path: Path, pipeline_info: dict | None = None,
+        *, incremental: bool = False,
     ) -> None:
         """Point the Analyze pane at a dataset folder and switch to it.
 
-        Used by the Datasets OME-TIFF converter: the folder it produced is an
-        Analyze *input* (a raw ``in/`` dataset), so it opens in Analyze — where
-        the user configures channels and runs the pipeline — not in Review. When
-        the converter assigned channel roles, *channel_tokens* is a minimal
-        ``pipeline_info``-shaped dict (nuclear/fluor/phase) applied to the Analyze
-        form so those fields arrive pre-filled.
+        Two callers, both handing Analyze a folder that is an Analyze *input*:
+
+        * the Datasets OME-TIFF converter, whose output is a raw ``in/``
+          dataset. When it assigned channel roles it passes a minimal
+          ``pipeline_info``-shaped dict (nuclear/fluor/phase) so those fields
+          arrive pre-filled.
+        * Validate & Repair's **Complete this run in Analyze**, which passes the
+          dataset's own recorded ``out/pipeline_info.json`` — so the run that
+          finishes a partial one is configured exactly as the run that started
+          it — together with ``incremental=True``, the run mode that processes
+          the missing FOV-groups instead of skipping every well that already
+          has output.
+
+        The input field is written **after** the settings are applied, not
+        before: a full sidecar's ``execution_options`` carries the ``input_dir``
+        recorded on whatever machine ran the pipeline, and letting that win
+        would point Analyze at a path that need not exist here. The folder the
+        caller names is the one the user just picked, so it is authoritative.
         """
         if self._analyze is None:
             return
         self._nb.setCurrentIndex(1)
+        if pipeline_info and hasattr(self._analyze, "_apply_pipeline_info"):
+            self._analyze._apply_pipeline_info(pipeline_info)
         edit = getattr(self._analyze, "_input_edit", None)
         if edit is not None:
             edit.setEnabled(True)
             edit.setText(str(dataset_path))
-        if channel_tokens and hasattr(self._analyze, "_apply_pipeline_info"):
-            self._analyze._apply_pipeline_info(channel_tokens)
+        incremental_cb = getattr(self._analyze, "_incremental_cb", None)
+        if incremental_cb is not None and incremental:
+            incremental_cb.setChecked(True)
+        refresh = getattr(self._analyze, "_refresh_output", None)
+        if callable(refresh):
+            refresh()
 
     def _nudge_review(self) -> None:
         if self._review is None:

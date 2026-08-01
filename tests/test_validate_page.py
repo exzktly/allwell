@@ -257,7 +257,11 @@ def test_check_reports_missing_fov_and_offers_completion(qapp, tmp_path):
         w.writerows(rows)
 
     seen = []
-    ctrl = ValidateController(on_open_in_analyze=seen.append)
+
+    def _open(path, pipeline_info=None, *, incremental=False):
+        seen.append(path)
+
+    ctrl = ValidateController(on_open_in_analyze=_open)
     page = ctrl.page
     page._dataset_field.set_path(str(tmp_path))
     page._on_dataset_changed()
@@ -450,3 +454,94 @@ def test_findings_and_log_panels_have_their_own_distinct_headers(qapp):
     log_header_text = [c.text() for c in page._log_hdr.findChildren(QLabel)]
     assert any("Raw log" in t for t in log_header_text)
     ctrl.shutdown()
+
+
+def test_show_job_populates_the_page_instead_of_leaving_it_inert(qapp, tmp_path):
+    """Regression guard: `QueueBridge.show_job` is the only caller of
+    `set_dataset_path`, and `PathField.set_path` deliberately doesn't emit
+    `changed` (only an interactive Browse pick does). Selecting a queued
+    Validate job therefore filled in a perfectly valid dataset folder and left
+    the page inert -- "▶ Check" stayed disabled, so pressing it did nothing at
+    all, above a plate map that was never painted."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h"])
+    ctrl = ValidateController()
+    page = ctrl.page
+
+    ctrl.show_job({"dataset": str(tmp_path)})
+
+    assert page._check_btn.isEnabled()
+    assert page._queue_btn.isEnabled()
+    # isVisibleTo, not isVisible: the page itself is never shown in an
+    # offscreen test, which would make every child read as hidden.
+    assert page.dashboard.isVisibleTo(page)
+    assert page.dashboard._wells == ["A01", "B02"]
+    assert "2 well(s)" in page.dashboard._headline.text()
+
+
+def test_plate_map_stays_painted_while_the_scan_runs(qapp, tmp_path):
+    """Regression guard: `_run` reset the dashboard, which clears the plate's
+    enabled wells, and nothing repainted it until the whole scan landed. On a
+    real plate that is the entire duration of the run -- every well's input
+    archive opened, every measurements CSV read -- so pressing Check blanked
+    the very plate map the ready-state preview had just painted and left it
+    empty with no updates of any kind."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01", "B02", "C03"], timepoints=["0h"])
+    ctrl = ValidateController()
+    page = ctrl.page
+    page.set_dataset_path(str(tmp_path))
+
+    # _run seeds the plate synchronously, before the worker thread is started,
+    # so this reads the state the user sees for the scan's whole duration --
+    # no event pumping, and therefore nothing the worker has done yet.
+    ctrl._run(apply_repair=False)
+    assert page.dashboard._wells == ["A01", "B02", "C03"]
+    assert page.dashboard._headline.text() == "Scanning…"
+
+    _run_worker_to_completion(ctrl)
+    assert page.dashboard._wells == ["A01", "B02", "C03"]
+    assert set(page.dashboard._well_state.values()) == {"complete"}
+
+
+def test_check_streams_per_well_progress_and_logs_its_result(qapp, tmp_path):
+    """A plain Check used to write exactly one log line ("Scanning dataset…")
+    and never record that the scan had finished, let alone what it found --
+    the completion line was gated on a repair result, which a Check never has.
+    Per-well lines land alongside it as each well is scanned."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01", "B02"], timepoints=["0h"])
+    ctrl = ValidateController()
+    page = ctrl.page
+    page.set_dataset_path(str(tmp_path))
+
+    page._check_btn.click()
+    _run_worker_to_completion(ctrl)
+
+    log = page._status.toPlainText()
+    assert "Scanning dataset…" in log
+    assert "A01: complete" in log
+    assert "B02: complete" in log
+    assert "✓ Clean — no issues found." in log
+
+
+def test_live_well_paint_matches_the_finished_report(qapp, tmp_path):
+    """The live per-well callback and the final report render through the same
+    `well_health` classifier, so a partially-complete well is painted the same
+    colour whichever of the two got there first."""
+    from datasets.validate.controller import ValidateController
+    from datasets.validate.validate_compute import WellReport
+
+    ctrl = ValidateController()
+    page = ctrl.page
+    page.dashboard.set_wells(["A01"])
+
+    ctrl._on_well_scanned(WellReport(
+        well="A01", missing=(("F001", "24h"),), csv_state="ok",
+        has_in_container=True, has_out_zip=True))
+
+    assert page.dashboard._well_state["A01"] == "partial"
+    assert page.dashboard._well_missing_count["A01"] == 1

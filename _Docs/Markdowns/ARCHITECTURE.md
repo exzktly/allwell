@@ -113,6 +113,7 @@ allwell/
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
+├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
@@ -1896,6 +1897,30 @@ keeps only the run/log/dashboard orchestration. Both files carry a line budget
 (`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
 behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
 
+Restoring a prior run's settings is a fourth mixin,
+`analyze_tab_pinfo.AnalyzePipelineInfoMixin` (`_open_pipeline_info` →
+`_pinfo_flat` → `_apply_pipeline_info`), inherited by `AnalyzeTabFormMixin` so
+those names stay reachable on the form where every caller expects them. Three
+paths arrive there: the "Load previous run" action, the OME converter's
+channel-role handoff, and Validate & Repair's "Complete this run in Analyze".
+`_pinfo_flat` prefers the sidecar's `execution_options` (the full `vars(args)`
+snapshot the pipeline records) and falls back to the top-level/`qc_options` keys
+for older sidecars; `None`-valued keys are dropped so a sparse sidecar can't
+clobber widget defaults with blanks.
+
+The **Incremental — process only missing FOVs** checkbox in Output & Compute
+carries `--incremental` into the run: each well's already-recorded
+`(fov, timepoint)` pairs are read from the output folder and only the missing
+ones are processed, then merged into the existing per-well CSV and
+`<WELL>_out.zip`. Without it a well whose out-zip and CSV both exist is skipped
+whole however few of its FOV-groups landed, which is why a crashed run cannot be
+completed by pressing Run again — the checkbox is the run mode Validate &
+Repair's completion handoff ticks on the way in, and the pipeline ignores it
+when `--force` is also set. `select_incremental_scope` may still switch a run to
+a full `--force` reprocess during input resolution (loose images landing under a
+cross-well flat-field/background model), but it never clears a `True` the form
+set: with nothing appended it returns before touching the key.
+
 Rendering the run's progress is a third mixin, `analyze_progress.AnalyzeProgressMixin`:
 `_apply_progress_event` turns each `ProgressTracker` event into dashboard state
 (headline, overall bar, per-well plate colour, per-well FOV and transfer dials),
@@ -2690,6 +2715,17 @@ to `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive
 pre-filled. The channel names are written into the output filenames regardless
 of the roles.
 
+That callback takes a `pipeline_info`-shaped settings dict and an `incremental`
+flag, and both of its callers use them: the converter passes the channel roles
+it assigned, Validate & Repair passes the dataset's whole recorded sidecar with
+`incremental=True`. It applies the settings **first** and writes the input field
+**afterwards** — a full sidecar's `execution_options` carries the `input_dir`
+recorded on whatever machine ran the pipeline, and letting that win would point
+Analyze at a path that need not exist locally, whereas the folder the caller
+names is the one the user just picked. It ends by calling `_refresh_output`, so
+the resolved output folder (and with it the incremental run's prior directory)
+is on screen before the user presses Run.
+
 The readout and the Convert/"+ Queue" buttons sit above the acquisition plate
 rather than below it — every other Datasets tool puts its primary action above
 a height-capped plate map, and here the uncapped `PlateOrderEditor` used to
@@ -2918,12 +2954,32 @@ findings with nothing explaining why a well that's actually done reads as
 almost entirely missing.
 
 The per-well diff itself (`_scan_one_well`) runs on a `ThreadPoolExecutor`
-(`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads
-with no destination file and no live per-well dashboard, so there's no lock
-to take: `ThreadPoolExecutor.map()` (not `as_completed`) hands results back
-in the same order they were submitted regardless of which well's thread
-finishes first, so the report's well/finding ordering is identical to the
-old sequential loop's no matter the worker count.
+(`pick_workers`) — unlike Concatenate/Subset/Merge Plates it's pure reads with
+no destination file, so there's no lock to take: the only shared state is the
+caller's own progress callback, and that does nothing but hand its result off.
+`ThreadPoolExecutor.map()` (not `as_completed`) hands results back in the same
+order they were submitted regardless of which well's thread finishes first, so
+the report's well/finding ordering is identical to the old sequential loop's no
+matter the worker count.
+
+`build_report` also takes an optional `ScanProgress` — two plain callables, so
+the module stays Qt-free — that reports the scan as it happens rather than only
+when it lands. `on_wells` fires once with the full set of wells the scan will
+cover, before any of them is read; `on_well_done` fires per well as that well's
+diff finishes. The threading contract is the reason it's a documented dataclass
+rather than a bare callback argument: `on_wells` runs on the calling thread,
+`on_well_done` on whichever pool thread scanned that well, in completion order
+(never the report's own order). `ValidateWorker` satisfies that by making both
+callbacks bare Qt signal emissions (`wellsDiscovered`, `wellScanned`), which
+are delivered as queued calls on the GUI thread. Without this channel a scan
+exposed nothing at all between "started" and "finished" — and since the scan
+opens every well's input archive and reads every measurements CSV, that gap is
+the whole duration of a plate-sized run, during which the page had nothing to
+show. `well_health(WellReport)` classifies a well into the four states the
+plate map paints (`complete` / `partial` / `missing` / `no_output`) and is the
+single classifier behind both the live per-well paint and the finished
+report's, so a well cannot change colour depending on which of the two got
+there first.
 
 Beyond the per-well diff, `build_report` also checks: the sidecar's
 `available_timepoints`/`available_fovs` against what
@@ -2954,15 +3010,46 @@ for a schema that doesn't have `field_name` — silently wiping a real, correct
 
 The page's **Complete this run** button hands the dataset off to Analyze
 through the existing `on_open_in_analyze` seam — the same one `Convert
-OME-TIFF` uses — so finishing a partial run is an ordinary (optionally
-incremental) Analyze run, not a new execution path.
+OME-TIFF` uses — so finishing a partial run is an ordinary incremental Analyze
+run, not a new execution path. What travels through that seam is what makes the
+handoff able to finish anything: the dataset's own recorded
+`out/pipeline_info.json` (read best-effort by
+`validate_compute.read_dataset_settings`, which returns `(info, problem)` and
+never raises) plus `incremental=True`. Both matter, and each was missing on its
+own account. Without the sidecar the Analyze form keeps whatever was already in
+it, so the schema, separator, channel roles, QC options and — the one that
+silently breaks the done-set lookup — the `csv_prefix` all have to be re-entered
+by hand and matched exactly; `incremental_done_fov_keys` reconstructs
+`f"{csv_prefix}_{safe_well}.csv"`, so a mismatched prefix reads the done-set
+from a file that doesn't exist and reprocesses the whole plate. Without
+`incremental` the run is a plain re-run, which *skips* any well whose
+`<well>_out.zip` and CSV both exist however few of its FOV-groups actually
+landed — precisely the state this page exists to report, so pressing Run did
+nothing for the very wells the findings list had just named. When the sidecar
+can't be read at all, the handoff still happens (refusing would strand the user)
+and `_on_complete_run` writes a warning to the page's own log saying the form
+was *not* pre-filled, rather than opening Analyze in a silently unconfigured
+state.
 
 `ValidatePage.set_running` locks the dataset `PathField` (`setLocked`,
 disabling only Browse — see `PathField` in §7) for the run's
 duration, the same as Subset's source/destination fields — `_on_succeeded`
 records the finished report's `report.root` (the path the worker actually
 scanned) rather than re-reading the page's live field, but the field itself
-must still not drift out from under the user mid-scan. `ValidateController._run`'s
+must still not drift out from under the user mid-scan. `ValidateController._run`
+re-seeds the dashboard from `preview_wells` immediately after resetting it, on
+the GUI thread and before the worker starts — `PlateProgress.reset()` clears the
+plate's enabled wells, so a run that began by resetting blanked the very plate
+map `_update_status_preview` had just painted and left it empty for the scan's
+whole duration; the worker's `wellsDiscovered` then replaces the seed with the
+wells the scan actually covers, and `wellScanned` paints each one as it lands.
+`_on_succeeded` still repaints every well from the finished report afterwards:
+the report is the authority, and a plate disagreeing with the findings list
+below it would be exactly the silent substitution this feature exists to catch.
+The controller also logs the run's summary for every run, not only a repair —
+a plain Check wrote one line ("Scanning dataset…") and never recorded that it
+had finished or what it concluded, because the completion line was gated on a
+`RepairResult` a Check never produces. `ValidateController._run`'s
 "no dataset path" early return also emits `jobFinished(False, …)` directly
 (mirroring `MergePlatesController._launch`'s remap-failure branch) instead of
 silently returning: a queued job whose persisted `spec["dataset"]` is empty or
@@ -2994,10 +3081,15 @@ shows, zero findings, full stop. The findings list shows a centred,
 non-selectable placeholder ("Pick a dataset folder and press Check.") while
 empty instead of rendering as a large blank box with no explanation, and
 `_on_failed` clears it back to that placeholder on a failed re-check so a
-stale success's findings can't linger under a fresh red "Failed" headline —
-reachable in production via `QueueBridge.show_job`, which populates the page
-through `set_dataset_path()` and so never runs the field's own interactive
-`changed` handler. **Apply repairs** carries a tooltip explaining why it's
+stale success's findings can't linger under a fresh red "Failed" headline.
+`ValidatePage.set_dataset_path` runs `_on_dataset_changed` itself after
+setting the field: `PathField.set_path` deliberately emits `changed` only for
+an interactive Browse pick, so a page populated through the setter —
+`QueueBridge.show_job` is its only caller — otherwise never ran the handler
+that enables "▶ Check", clears the previous job's findings, and paints the
+plate. Selecting a queued Validate job filled in a valid dataset folder and
+left the page inert: a disabled Check button that did nothing at all when
+pressed, above a blank plate. **Apply repairs** carries a tooltip explaining why it's
 greyed out when `report.findings` is non-empty but `report.repairable` is
 false — previously a disabled button with findings still listed above it had
 no way to say whether that meant "nothing to repair" or "can't repair this".

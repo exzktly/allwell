@@ -35,6 +35,7 @@ import json
 import math
 import re
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -87,6 +88,62 @@ class WellReport:
     @property
     def complete(self) -> bool:
         return not self.missing
+
+
+def well_health(report: WellReport) -> str:
+    """Classify a :class:`WellReport` into one of the four dataset-health
+    states the plate map paints.
+
+    Lives here rather than in the controller because both the live per-well
+    progress callback and the final report render the same four states, and a
+    well that flipped colour between the two would be the exact kind of silent
+    disagreement this feature exists to surface:
+
+    ``complete``
+        every ``(fov, timepoint)`` pair in the input is accounted for and a
+        readable measurements CSV exists.
+    ``partial``
+        some of the input's pairs are missing from the output.
+    ``missing``
+        nothing is missing from the input diff, but images exist with no
+        usable measurements CSV behind them.
+    ``no_output``
+        the well has no output evidence at all.
+    """
+    if report.missing:
+        return "partial"
+    if report.csv_state == "ok":
+        return "complete"
+    if report.has_in_container or report.has_out_zip or report.has_out_folder:
+        return "missing"
+    return "no_output"
+
+
+@dataclass(frozen=True)
+class ScanProgress:
+    """Optional callbacks that follow a :func:`build_report` scan while it runs.
+
+    A scan over a full plate opens every well's input archive and reads every
+    measurements CSV, which takes long enough that a UI with no progress
+    channel sits visibly still for the whole run. Both callbacks are plain
+    Python callables so this module stays Qt-free.
+
+    ``on_wells`` fires once, before any well is scanned, with the complete set
+    of wells the scan will cover — that is the scan's real scope, which a
+    caller can only otherwise guess at.
+
+    ``on_well_done`` fires once per well as that well's diff finishes.
+
+    **Threading.** ``on_wells`` is called on the calling thread;
+    ``on_well_done`` is called on whichever pool thread scanned that well, in
+    completion order (which is *not* the report's own well order). A caller
+    that touches UI state from it must marshal the call onto its own thread —
+    ``ValidateWorker`` does this by making both callbacks bare Qt signal
+    emissions, which are queued to the GUI thread.
+    """
+
+    on_wells: Callable[[tuple[str, ...]], None] | None = None
+    on_well_done: Callable[[WellReport], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -189,6 +246,23 @@ def _read_sidecar(paths) -> dict:
     if not isinstance(info, dict):
         raise ValidateError("pipeline_info.json is not a JSON object.")
     return info
+
+
+def read_dataset_settings(root: Path | str) -> tuple[dict, str]:
+    """The dataset's own recorded ``pipeline_info``, for pre-filling a run.
+
+    Returns ``(info, problem)``. *problem* is a short user-facing sentence when
+    the sidecar can't be read at all, with *info* empty in that case. Never
+    raises: the caller's actual job — handing this dataset to Analyze so a
+    partial run can be finished — still goes ahead without the settings; it
+    just has to say out loud that it did, since a run reconfigured by hand
+    against the wrong ``csv_prefix`` or schema reads its already-done set from
+    files that don't exist.
+    """
+    try:
+        return _read_sidecar(resolve_dataset(root, label="dataset")), ""
+    except (ValidateError, DatasetPathsError) as exc:
+        return {}, str(exc)
 
 
 def _classify_csvs(paths) -> tuple[dict[str, list[Path]], set[str], list[Finding]]:
@@ -451,26 +525,36 @@ def _scan_one_well(
 def _scan_wells(
     paths, *, schema_fields, sep: str, fov_field_present: bool,
     csv_candidates: dict[str, list[Path]], workers: int = 0,
+    progress: ScanProgress | None = None,
 ) -> tuple[list[WellReport], list[Finding]]:
     in_map = in_containers(paths)
     zip_map = out_zips(paths)
     folder_map = out_folders(paths)
     all_wells = sorted(set(in_map) | set(csv_candidates) | set(zip_map) | set(folder_map))
 
-    # Read-only per well (no cancellation, no live per-well dashboard here —
-    # unlike the other Datasets tools' write-heavy execute_plan()s), so
-    # .map() is enough: it runs wells in parallel but hands results back in
-    # the same order they were submitted, keeping the report's well/finding
-    # ordering identical to the old sequential loop's.
+    if progress is not None and progress.on_wells is not None:
+        progress.on_wells(tuple(all_wells))
+
+    def _scan(well: str) -> tuple[WellReport, list[Finding]]:
+        result = _scan_one_well(
+            well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
+            csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
+            fov_field_present=fov_field_present,
+        )
+        if progress is not None and progress.on_well_done is not None:
+            progress.on_well_done(result[0])
+        return result
+
+    # Read-only per well (no cancellation, no destination file), so there is
+    # still no lock to take: the only shared state is the caller's own
+    # progress callback, which is documented as being called from these
+    # threads and does nothing but hand the result off. .map() (not
+    # as_completed) hands results back in the same order they were submitted
+    # regardless of which well's thread finishes first, so the report's
+    # well/finding ordering is identical to the old sequential loop's even
+    # though on_well_done fires in completion order.
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
-        results = list(ex.map(
-            lambda well: _scan_one_well(
-                well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
-                csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
-                fov_field_present=fov_field_present,
-            ),
-            all_wells,
-        ))
+        results = list(ex.map(_scan, all_wells))
 
     well_reports = [report for report, _findings in results]
     findings: list[Finding] = [f for _report, well_findings in results for f in well_findings]
@@ -563,7 +647,9 @@ def _check_stale_overrides(paths, zip_map: dict[str, Path]) -> tuple[int, list[F
     return stale_count, findings
 
 
-def build_report(root: Path | str, *, workers: int = 0) -> DatasetReport:
+def build_report(
+    root: Path | str, *, workers: int = 0, progress: ScanProgress | None = None,
+) -> DatasetReport:
     """Scan a dataset folder and report what Analyze did and did not finish.
 
     Read-only. Raises :class:`ValidateError` only when the folder isn't a
@@ -572,7 +658,10 @@ def build_report(root: Path | str, *, workers: int = 0) -> DatasetReport:
     point is to describe a broken dataset rather than refuse to look at it.
 
     The per-well diff runs in parallel — *workers* threads (0 = auto, see
-    :func:`datasets._common.concurrency.pick_workers`).
+    :func:`datasets._common.concurrency.pick_workers`). Pass a
+    :class:`ScanProgress` to follow the scan as it runs rather than only
+    seeing its finished report; a full plate takes long enough that a caller
+    with no progress channel has nothing to show for the duration.
     """
     try:
         paths = resolve_dataset(root, label="dataset")
@@ -589,7 +678,7 @@ def build_report(root: Path | str, *, workers: int = 0) -> DatasetReport:
     well_reports, well_findings = _scan_wells(
         paths, schema_fields=schema_fields, sep=sep,
         fov_field_present=fov_field_present, csv_candidates=csv_candidates,
-        workers=workers,
+        workers=workers, progress=progress,
     )
     stale_tps, missing_tps, stale_fovs, missing_fovs, availability_findings = (
         _check_sidecar_availability(paths, info, schema_fields=schema_fields, sep=sep)

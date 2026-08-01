@@ -513,6 +513,16 @@ A cell counts only when it is manually kept **and** it passes QC.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist.
+- **Incremental — process only missing FOVs.** Finishes a partial or crashed
+  run instead of skipping past it. Normally a well whose `<WELL>_out.zip` and
+  CSV both exist is skipped whole, however few of its `(FOV, timepoint)` pairs
+  actually made it in — so pressing Run again after a crash does nothing for
+  the wells that need it. With this ticked, each well's already-recorded pairs
+  are read from the output folder and only the missing ones are processed,
+  then merged into the existing CSV and archive. Wells with no output at all
+  process in full; complete wells are left untouched. Datasets → *Validate &
+  Repair* → **Complete this run in Analyze** ticks this for you. Force re-run
+  overrides it.
 
 ### 8. Run / Suspend / Stop / Log
 
@@ -1841,16 +1851,20 @@ plain re-run would skip the very wells that need finishing.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel
    appears showing a "Ready — N well(s)" preview of the plate, before you've
-   pressed anything. Press **Check** and that same plate fills in with each
-   well's actual state (green with a checkmark = complete, yellow with a "!"
-   = missing some `(FOV, timepoint)` work, red with a "!" = no measurements
-   recorded, grey = no output yet), and a findings list below it names
+   pressed anything. Press **Check** and that same plate stays on screen and
+   fills in well by well as each one is read, so a scan over a full plate
+   shows its progress rather than sitting still until it's done. Each well
+   takes its actual state (green with a checkmark = complete, yellow with a
+   "!" = missing some `(FOV, timepoint)` work, red with a "!" = no
+   measurements recorded, grey = not read yet), and a findings list below names
    anything wrong — exactly which timepoints a well is missing, a sidecar
    that's out of sync with what's on disk, a CSV that looks like a well's
    data but isn't, or cell-inclusion overrides that no longer match the
    current segmentation. The findings list holds a placeholder ("Pick a
    dataset folder and press Check.") until then, and clears back to it if a
    re-check fails, rather than leaving an earlier check's results on screen.
+   Tick **Show raw log** for the line-by-line record: one line per well as
+   it's read, and a final line stating what the check concluded.
 2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't
    match what's on disk, or stale cell overrides), **Apply repairs** fixes
    just that metadata. It never touches measurement CSVs or images — gating
@@ -1859,8 +1873,17 @@ plain re-run would skip the very wells that need finishing.
    hover it — the tooltip explains when a finding genuinely can't be
    auto-repaired.
 3. If a well is genuinely missing FOV/timepoint work, **Complete this run in
-   Analyze** opens the dataset there so you can re-run and pick up the
-   missing pieces.
+   Analyze** opens the dataset there set up to finish it: the Analyze form is
+   filled in from the dataset's own recorded settings (schema, separator,
+   channel roles, QC options, CSV prefix — everything the original run used),
+   and **Incremental — process only missing FOVs** is ticked for you. Press
+   Run and only the missing `(FOV, timepoint)` pairs are processed, merged
+   into the existing per-well CSVs and `<WELL>_out.zip` archives; wells that
+   are already complete are left untouched. Without that tick a plain re-run
+   would skip every well that already has any output at all — which is most
+   of the wells you need finished. If the dataset's settings can't be read,
+   the handoff still happens and the log says so; check the schema, channel
+   tokens and CSV prefix by hand before running in that case.
 
 ### Subset / Split Dataset
 

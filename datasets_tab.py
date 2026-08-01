@@ -132,7 +132,7 @@ class DatasetsTab(QWidget):
         parent: QWidget | None = None,
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
-        on_open_in_analyze: Callable[[Path, dict], None] | None = None,
+        on_open_in_analyze: Callable[..., None] | None = None,
         analyze_controller: object | None = None,
         queue_state_dir: Path | None = None,
     ) -> None:
@@ -233,9 +233,22 @@ class DatasetsTab(QWidget):
         if self._on_open_in_review is not None and dest_root:
             self._on_open_in_review(Path(dest_root))
 
-    def _open_in_analyze(self, dataset_root: str, channel_tokens: dict | None = None) -> None:
+    def _open_in_analyze(
+        self, dataset_root: str, pipeline_info: dict | None = None,
+        *, incremental: bool = False,
+    ) -> None:
+        """Hand a folder to the Analyze pane.
+
+        *pipeline_info* is a ``pipeline_info``-shaped settings dict to pre-fill
+        the form with — the OME-TIFF converter passes the channel roles it
+        assigned, Validate & Repair passes the dataset's whole recorded
+        sidecar. *incremental* asks Analyze for the run mode that fills in a
+        partial run's missing FOV-groups rather than skipping wells that
+        already have output.
+        """
         if self._on_open_in_analyze is not None and dataset_root:
-            self._on_open_in_analyze(Path(dataset_root), channel_tokens or {})
+            self._on_open_in_analyze(
+                Path(dataset_root), pipeline_info or {}, incremental=incremental)
 
     def shutdown(self) -> None:
         """Stop any running feature workers (called on app close)."""

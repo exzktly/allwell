@@ -443,3 +443,69 @@ def test_schema_drift_reports_a_diagnostic_instead_of_a_wall_of_false_missing(tm
     assert len(mismatch_findings) == 1
     assert "pipeline_info.json" in mismatch_findings[0].message
     assert "schema_fields" in mismatch_findings[0].message
+
+
+def test_scan_reports_progress_per_well_while_it_runs(tmp_path):
+    """Regression guard: a scan used to expose nothing at all between "started"
+    and "finished", so the page it drives had nothing to show for a run that
+    opens every well's archive and reads every measurements CSV -- the whole
+    duration of a plate-sized scan read as "pressing Check did nothing"."""
+    build_dataset(tmp_path, wells=["A01", "B02", "C03"], timepoints=["0h", "24h"])
+
+    scopes: list[tuple[str, ...]] = []
+    scanned: list[vc.WellReport] = []
+    report = vc.build_report(tmp_path, progress=vc.ScanProgress(
+        on_wells=scopes.append, on_well_done=scanned.append))
+
+    # The scope callback fires exactly once, with every well the scan covers,
+    # before any well has been read -- that is what lets a caller paint the
+    # run's real scope up front rather than guessing at it.
+    assert scopes == [("A01", "B02", "C03")]
+    # One per well, in whatever order the pool finished them (the report's own
+    # ordering stays submission order regardless -- asserted below).
+    assert sorted(w.well for w in scanned) == ["A01", "B02", "C03"]
+    assert [w.well for w in report.wells] == ["A01", "B02", "C03"]
+    # Every live-reported well matches its counterpart in the finished report,
+    # so a plate painted from the callbacks can never disagree with the
+    # findings list built from the report.
+    by_well = {w.well: w for w in scanned}
+    for finished in report.wells:
+        assert by_well[finished.well] == finished
+
+
+def test_scan_progress_is_optional(tmp_path):
+    """The Qt-free callers (the CLI-shaped ones, and every existing test) pass
+    no progress at all, and a scan with neither callback set behaves
+    identically."""
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+
+    assert vc.build_report(tmp_path) == vc.build_report(
+        tmp_path, progress=vc.ScanProgress())
+
+
+def test_well_health_classifies_the_four_dataset_health_states():
+    """`well_health` is the single classifier behind both the live per-well
+    paint and the final report's -- the controller used to inline it in one
+    place only, so a live-painted well and a report-painted one could drift."""
+    complete = vc.WellReport(
+        well="A01", missing=(), csv_state="ok", has_in_container=True,
+        has_out_zip=True)
+    assert vc.well_health(complete) == "complete"
+
+    partial = vc.WellReport(
+        well="A01", missing=(("F001", "24h"),), csv_state="ok",
+        has_in_container=True, has_out_zip=True)
+    assert vc.well_health(partial) == "partial"
+
+    # Images on disk but nothing readable behind them: "missing", not
+    # "no_output" -- a well that produced images and no measurements is a
+    # different state from one that produced nothing at all.
+    no_csv = vc.WellReport(
+        well="A01", missing=(), csv_state="missing", has_in_container=True,
+        has_out_zip=True)
+    assert vc.well_health(no_csv) == "missing"
+
+    nothing = vc.WellReport(
+        well="A01", missing=(), csv_state="missing", has_in_container=False,
+        has_out_zip=False)
+    assert vc.well_health(nothing) == "no_output"

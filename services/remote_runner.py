@@ -2242,17 +2242,8 @@ class DatasetCache:
 
         mb = sent_bytes / (1024**2)
         cache_hit = mb < 1
-        # On a full cache hit rsync moves nothing and emits no per-file
-        # "↑ <well>.zip" name lines, so the dashboard's Upload rail never
-        # advanced (the user just saw it stuck at 0/N when the inputs were
-        # already on the remote). Verification above confirmed every expected
-        # zip is present — emit a per-well marker so the Upload step reads
-        # complete. The dashboard de-dupes via sets, so this is harmless on a
-        # fresh upload that also streamed live ↑ lines.
-        if log_fn and cache_hit:
-            for wz in zipped.well_zips:
-                log_fn(f"[remote] ↑ {wz.stem}.zip already on remote\n")
         if log_fn:
+            _log_wells_uploaded(zipped.well_zips, log_fn)
             log_fn(
                 f"[remote] upload: {mb:.1f} MB in {_fmt_secs(elapsed)}"
                 f"{' (cache hit)' if cache_hit else ''}\n"
@@ -2304,6 +2295,8 @@ class DatasetCache:
         sent_bytes, elapsed, rc, _attempts = _stream_rsync_with_retry(
             cmd, log_fn=log_fn, progress_fn=progress_fn, stop_event=stop_event,
         )
+        if rc == 0 and log_fn:
+            _log_wells_uploaded(well_zips, log_fn)
         return sent_bytes, elapsed, rc
 
     def gc(
@@ -2627,6 +2620,32 @@ _RSYNC_RETRY_CODES = {10, 11, 12, 30, 35}
 # across the three retries is 14 s, an upper bound the user can sit
 # through without thinking the run is hung.
 _RSYNC_RETRY_DELAYS = (2.0, 4.0, 8.0)
+
+
+def _log_wells_uploaded(well_zips, log_fn: Callable[[str], None]) -> None:
+    """Say which wells are now on the remote, once their transfer succeeded.
+
+    The dashboard's Upload rail counts wells off ``[remote] ↑ …<well>.zip``
+    lines, and those come from rsync's own per-file output — which is a poor
+    thing to depend on, because rsync stays silent in three ordinary cases:
+
+    * **a cache hit**, where it moves nothing because the inputs are already
+      there;
+    * **an incremental re-send**, where it skips the files that match;
+    * **an rsync without ``--info=name1``** — macOS still ships 2.6.9, which
+      does not have the flag at all (see ``_rsync_supports_info_flag``).
+
+    In every one of those the transfer succeeded and the rail sat at 0/N, which
+    reads as a stalled upload. Batched mode hit it hardest: ``upload_subset``
+    had no compensator of any kind, so a batched run's rail never moved off
+    zero on any of the three.
+
+    Emitted from the success path instead, where the caller knows exactly which
+    archives it asked for and that rsync returned 0. The dashboard de-dupes
+    into sets, so this is harmless alongside live per-file lines.
+    """
+    for wz in well_zips:
+        log_fn(f"[remote] ↑ {Path(wz).stem}.zip on remote\n")
 
 
 def _stream_rsync_with_retry(

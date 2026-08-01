@@ -88,6 +88,48 @@ def test_an_active_well_with_no_counts_yet_reads_empty(qapp):
     assert _fractions(d._plate)[(1, 3)] == 0.0
 
 
+def test_uploading_a_well_does_not_fill_its_dial(qapp):
+    """The bug rendering the dashboard caught, and unit tests did not.
+
+    On a remote run every well reaches ``upload`` long before it computes. An
+    earlier version treated any completed stage as done, so the whole plate
+    showed full dials from the moment the zips landed — the feature did nothing
+    precisely where the wait is longest. The tests all passed because they
+    drove ``active``/``process`` directly and never sent an ``upload``.
+    """
+    d = RunDashboard()
+    d.reset(remote=True)
+    d.set_well_stage("D07", "upload")
+    assert (3, 6) not in _fractions(d._plate), "uploaded is not started"
+    d.set_well_stage("D07", "active")
+    d.set_well_fov("D07", 3, 12)
+    assert _fractions(d._plate)[(3, 6)] == pytest.approx(0.25)
+
+
+def test_a_well_that_finished_short_still_reads_full(qapp):
+    """Groups can fail, so the last count is not always total/total.
+
+    Leaving the dial at 3/12 would read as still-running forever. The shortfall
+    is reported as a partial well by the run's completeness record, which is
+    where it belongs.
+    """
+    d = RunDashboard()
+    d.reset()
+    d.set_well_stage("B04", "active")
+    d.set_well_fov("B04", 3, 12)
+    d.set_well_stage("B04", "process")
+    assert _fractions(d._plate)[(1, 3)] == 1.0
+
+
+def test_a_downloaded_well_reads_full(qapp):
+    """Remote's terminal stage fills the dial like local's ``process`` does."""
+    d = RunDashboard()
+    d.reset(remote=True)
+    d.set_well_stage("D07", "upload")
+    d.set_well_stage("D07", "download")
+    assert _fractions(d._plate)[(3, 6)] == 1.0
+
+
 def test_an_errored_well_has_no_dial(qapp):
     """A part-filled ring beside the ✕ would suggest it is still going."""
     d = RunDashboard()

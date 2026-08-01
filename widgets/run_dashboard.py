@@ -43,6 +43,11 @@ _RAIL_LOCAL = [("group", "Group"), ("process", "Process"), ("threshold", "Thresh
 _RAIL_REMOTE = [("group", "Group"), ("upload", "Upload"), ("process", "Process"),
                 ("threshold", "Threshold"), ("download", "Download")]
 
+# Reaching one of these means the well's FOV-groups are all measured, so its
+# dial is full. ``group`` and ``upload`` deliberately are not here: a remote
+# well reaches both before any of its images have been looked at.
+_COMPUTED_STAGES = ("process", "threshold", "download")
+
 
 class RunDashboard(PlateProgress):
     """At-a-glance per-well run view. Driven entirely by the host."""
@@ -126,19 +131,32 @@ class RunDashboard(PlateProgress):
         FOV-group progress the pipeline already reports (``well_fov``), so the
         data costs nothing new.
 
-        A well that has finished reads full whether or not any FOV events
-        arrived for it, and one that has not started reads empty. ``None``
-        drops the wedge entirely, which is what an errored well gets: a partial
-        ring beside the ✕ would suggest it is still going.
+        Only the stages at or past the compute step can fill the dial. An
+        earlier version treated *any* completed stage as done, which on a
+        remote run is wrong for every well on the plate: each one reaches
+        ``upload`` long before it computes, so every well showed a full dial
+        from the moment its zip landed and the feature did nothing precisely
+        where the wait is longest. Rendering the dashboard is what caught it —
+        the unit tests drove ``active``/``process`` directly and never sent an
+        ``upload``, so they all passed.
+
+        ``None`` means no dial at all: the well is pending (or only uploaded),
+        or it errored — a partial ring beside the ✕ would suggest it is still
+        going. A well that has computed reads full whether or not any FOV
+        events arrived for it.
         """
         if well in self._errored:
             return None
-        if any(well in done for done in self._done.values()):
+        if any(well in self._done.get(stage, ()) for stage in _COMPUTED_STAGES):
+            # Full regardless of the last FOV count. A well that finished with
+            # some groups failed stops at, say, 3/12, and leaving the dial
+            # there would read as still-running forever — the shortfall is
+            # reported as a partial well elsewhere, which is where it belongs.
             return 1.0
         done, total = self._fov.get(well, (0, 0))
-        if total <= 0:
-            return None if well not in self._active else 0.0
-        return max(0.0, min(1.0, done / total))
+        if total > 0:
+            return max(0.0, min(1.0, done / total))
+        return 0.0 if well in self._active else None
 
     def _clear_fov_rows(self) -> None:
         while self._fov_lay.count():

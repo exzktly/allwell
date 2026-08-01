@@ -58,6 +58,12 @@ class DatasetState:
     # excluded at the df_included_mask chokepoint via the Crop_Pass column.
     crop_region: tuple[int, int, int, int] | None = None
 
+    # well token -> domain.fov_integrity.FovIntegrity, filled by ``get_rows`` as
+    # each well's frame is built. A well whose FOV labels don't identify its
+    # fields cannot produce per-field statistics, and the fact has to be
+    # reported rather than silently absorbed — see ``domain/fov_integrity.py``.
+    fov_integrity: dict = field(default_factory=dict)
+
     # ── status ───────────────────────────────────────────────────────────────
 
     @property
@@ -82,6 +88,7 @@ class DatasetState:
         self.persistence_doc = None
         self.well_paths.clear()
         self.cache.clear()
+        self.fov_integrity.clear()
         # Well labels are per-dataset (persisted in the new dataset's
         # pipeline_info sample_definitions block). The loader merges them in
         # additively and early-returns when the new dataset has no block, so

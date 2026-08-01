@@ -186,6 +186,36 @@ def _reset_sample_definitions_state(ctx) -> None:
             notes_edit.blockSignals(blocked)
 
 
+def _report_unusable_fov_labels(ctx) -> None:
+    """Announce wells whose FOV labels don't identify their fields of view.
+
+    Every per-field number the app produces — the bar and line error bars, the
+    events-per-field panel, the Statistics tab's ``n`` — groups on the CSV's
+    ``fov`` column. When a well's filenames didn't match the schema that column
+    arrives as a single repeated placeholder, and the pooled result is
+    indistinguishable from a genuine single-field well. The aggregation now
+    reports those statistics as undefined instead of guessing, but silence about
+    *why* is what let the original problem look like a plotting glitch, so this
+    says it once, by name, in the status line, a toast, and the log.
+
+    Rows are loaded lazily, so this reads the verdicts recorded by ``get_rows``
+    for the wells whose frames the load pass already built.
+    """
+    verdicts = getattr(ctx.state.dataset, "fov_integrity", None) or {}
+    bad = sorted(w for w, v in verdicts.items() if not getattr(v, "trusted", True))
+    if not bad:
+        return
+    shown = ", ".join(bad[:6]) + ("…" if len(bad) > 6 else "")
+    msg = (f"{len(bad)} well(s) have unusable FOV labels ({shown}) — per-field "
+           "statistics are undefined for them")
+    logging.getLogger("well_viewer").warning(
+        "%s. Reasons: %s", msg,
+        "; ".join(f"{w}: {verdicts[w].reason}" for w in bad[:6]),
+    )
+    ctx.notify.set_status(msg + ".")
+    ctx.notify.toast(msg, kind="warn", msec=9000)
+
+
 def load_directory(ctx, d: Path, label=None) -> None:
     app = ctx.window  # transitional bridge (A3)
     _opening_set_phase(ctx, "Scanning folder…")
@@ -451,6 +481,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     from well_viewer.core.app_shell_view import refresh_dataset_button
     refresh_dataset_button(app)
     app._set_status(f"Loaded {n} well(s) — {display}")
+    _report_unusable_fov_labels(ctx)
     recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from

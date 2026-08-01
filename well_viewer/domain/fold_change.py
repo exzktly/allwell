@@ -1751,7 +1751,14 @@ def scale_bar_value(
         return float("nan"), 0.0
     effective_op_ctrl = op_ctrl if op_ctrl is not None else op
     effective_op_t0 = op_t0 if op_t0 is not None else op
-    val, sp = float(mean), float(spread) if (spread is not None and math.isfinite(spread)) else 0.0
+    # An undefined input spread stays undefined through the normalization: it is
+    # not zero, and folding it to zero would hand the scaled bar an error bar
+    # that looks measured. The value is still scaled normally (it does not
+    # depend on its own spread). A *denominator* spread of None keeps meaning
+    # "treated as exact" — that is the documented contract for control / t0.
+    spread_undefined = spread is not None and not math.isfinite(spread)
+    val = float(mean)
+    sp = 0.0 if (spread is None or spread_undefined) else float(spread)
     if order == "t0_first":
         val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
         if not math.isfinite(val):
@@ -1764,7 +1771,7 @@ def scale_bar_value(
         val, sp = _apply_axis(val, sp, t0_mean, t0_spread, effective_op_t0)
     if not math.isfinite(val):
         return float("nan"), 0.0
-    return val, sp
+    return val, (float("nan") if spread_undefined else sp)
 
 
 def first_tp_value(pts) -> float | None:

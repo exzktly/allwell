@@ -658,6 +658,28 @@ def _parse_timepoint_hours(tp: str) -> float:
     return float("nan") if hours is None else hours
 
 
+_SHORT_FILENAME_WARNED: set = set()
+
+
+def _warn_short_filename(stem: str, n_parts: int, n_slots: int, sep: str) -> None:
+    """Warn once per filename shape that the schema's FOV slot went unfilled.
+
+    Deduped on the shape (token count), not the filename, so a plate of 600
+    files produces one line per naming convention rather than 600.
+    """
+    key = (n_parts, n_slots, sep)
+    if key in _SHORT_FILENAME_WARNED:
+        return
+    _SHORT_FILENAME_WARNED.add(key)
+    log.warning(
+        "Filename %r splits into %d %r-separated token(s) but the schema has %d "
+        "field(s) — the 'fov' slot is empty, so every row of these wells will be "
+        "written with no field-of-view label and their fields will pool into one "
+        "downstream. Check --filename_schema / --sep against the actual filenames.",
+        stem, n_parts, sep, n_slots,
+    )
+
+
 def parse_filename(
     path: Path | str,
     schema: list[str] | None = None,
@@ -702,6 +724,20 @@ def parse_filename(
         "timepoint":       "",
         "timepoint_hours": float("nan"),
     }
+
+    # A filename with fewer tokens than the schema has slots leaves the trailing
+    # fields empty. That is legitimate for ``timepoint`` (handled below: a
+    # single-timepoint dataset often carries no timepoint token) but never for
+    # ``fov``: an empty FOV token is written to every row of the well, the
+    # viewer maps it onto field "1", and the well's fields silently pool into
+    # one — which makes its per-field statistics wrong rather than missing. Say
+    # so once per (schema, token-count) shape so a mis-specified schema is
+    # visible in the run log instead of surfacing later as a plot with no error
+    # bars. Not fatal: the rest of the row is still good data.
+    if len(parts) < len(schema) and "fov" in schema:
+        fov_slot = schema.index("fov")
+        if fov_slot >= len(parts):
+            _warn_short_filename(stem, len(parts), len(schema), sep)
 
     for i, field in enumerate(schema):
         if field == "ignore":

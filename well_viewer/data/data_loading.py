@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 
 from well_viewer.data.cache_projectors import iter_cache_projectors
+from well_viewer.domain.fov_integrity import check_fov_labels
 from well_viewer.domain.ratio_models import RatioMetric, is_ratio_key
 from well_viewer.domain.tp_match import tp_close_mask
 
@@ -266,6 +267,19 @@ def get_rows(ctx, label: str) -> pd.DataFrame:
         # registered projectors — no features/ import in the data layer.
         for _project in iter_cache_projectors():
             _project(ctx, label)
+        # Check the FOV labels once, while the frame is being built. Every
+        # per-field number in the app groups on this column, and a well whose
+        # filenames didn't match the schema arrives with every row labelled
+        # field "1" — which is indistinguishable, after loading, from a well
+        # that genuinely has one field.
+        verdict = check_fov_labels(cache[label])
+        ctx.state.dataset.fov_integrity[label] = verdict
+        if not verdict.trusted:
+            _logger.warning(
+                "Well %s: %s. Per-field statistics (error bars, events per "
+                "field, the Statistics tab's n) are undefined for this well "
+                "until the CSV carries usable FOV labels.", label, verdict.reason,
+            )
     return cache[label]
 
 
@@ -508,6 +522,15 @@ def aggregate_with_threshold_df(
         on_full = pd.to_numeric(df[on_col], errors="coerce").fillna(0).to_numpy() > 0.5
         on_arr = on_full[final]
 
+    # Per-field statistics are only meaningful if the FOV labels actually
+    # identify the fields. A well whose filenames didn't match the schema
+    # arrives with every row labelled field "1" (parse_filename writes "" for a
+    # slot it can't fill; load_well_csv maps "" and "-1" onto "1"), which is
+    # indistinguishable *after* loading from a well that genuinely has one
+    # field. Checking it here — against the source images and nucleus ids the
+    # rows already carry — is what stops the pooled total from being reported as
+    # a per-field mean.
+    fov_trusted = True
     if per_fov_spread:
         if "fov" in df.columns:
             fov_series = (df["fov"].fillna("1").astype(str).str.strip()
@@ -515,11 +538,20 @@ def aggregate_with_threshold_df(
         else:
             fov_series = pd.Series(["1"] * n, index=df.index)
         fov_arr = fov_series.to_numpy()[final]
+        verdict = check_fov_labels(df)
+        fov_trusted = verdict.trusted
+        if not fov_trusted:
+            _logger.warning(
+                "FOV labels are unusable for this well (%s) — per-field "
+                "statistics are reported as undefined rather than pooled.",
+                verdict.reason,
+            )
     else:
         fov_arr = None
 
     return _aggregate_arrays(tp_arr, val_arr, fov_arr, threshold, use_sem,
-                             per_fov_spread, on_arr=on_arr)
+                             per_fov_spread, on_arr=on_arr,
+                             fov_trusted=fov_trusted)
 
 
 def _aggregate_arrays(
@@ -530,6 +562,7 @@ def _aggregate_arrays(
     use_sem: bool,
     per_fov_spread: bool,
     on_arr: np.ndarray | None = None,
+    fov_trusted: bool = True,
 ) -> list[AggPoint]:
     """Per-timepoint mean / fraction of the "on" population.
 
@@ -538,6 +571,20 @@ def _aggregate_arrays(
     scatter-gate "thresholding" mode passes gate membership here so fraction-on
     (and the mean of the on-population) reflect the gate rather than the
     per-channel ThreshFracOn cutoff.
+
+    **Every spread this returns is NaN when it is undefined, never 0.0.** A
+    spread of zero is a measurement — it says the replicates agreed exactly —
+    and one replicate is not that. Reporting the two identically is what let a
+    well with a single field (or with unusable field labels, see
+    ``fov_trusted``) draw exactly like a well whose error bars had been turned
+    off, and made the exported ``err_*`` column read ``0.000000`` for a quantity
+    that was never computed. Consumers already skip a non-positive spread, so
+    NaN drops the error bar the same way while staying visibly undefined.
+
+    ``fov_trusted=False`` (the caller found the FOV labels don't identify the
+    fields) additionally makes the per-field *event count* undefined rather than
+    the pooled total, which is otherwise six fields' events plotted as if it
+    were one field's mean.
     """
     result: list[AggPoint] = []
     for t in np.unique(tp_arr):
@@ -549,12 +596,15 @@ def _aggregate_arrays(
         n_above = int(above.size)
         mean = float(above.sum() / n_above) if n_above else float("nan")
 
-        spread = 0.0
-        frac_spread = 0.0
-        n_above_per_fov_mean = 0.0
-        n_above_per_fov_spread = 0.0
+        nan = float("nan")
+        spread = nan
+        frac_spread = nan
+        n_above_per_fov_mean = nan
+        n_above_per_fov_spread = nan
 
-        if per_fov_spread:
+        if per_fov_spread and not fov_trusted:
+            pass  # labels don't identify fields — every per-field value stays NaN
+        elif per_fov_spread:
             f = fov_arr[idx]
             sub = pd.DataFrame({"fov": f, "v": v, "above": above_mask})
             grp = sub.groupby("fov", sort=False)

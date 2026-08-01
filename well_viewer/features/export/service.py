@@ -167,15 +167,24 @@ def bar_metric_row(
     indicates per-FOV spread is in use, which switches *n_above* to a float
     and exposes the per-FOV error column.
     """
+    # An undefined spread is written as an EMPTY cell, never as 0.000000 — the
+    # zero reads as "the replicates agreed exactly" when in fact there was only
+    # one replicate (or none, when the FOV labels were unusable) and nothing was
+    # computed. Anything downstream that averages these columns would otherwise
+    # take a fabricated zero as data.
+    def _num(v) -> str:
+        return f"{float(v):.6f}" if (v is not None and math.isfinite(float(v))) else ""
+
     return {
         "timepoint_h": tp_str,
-        f"mean_{ch}_{metric}": f"{mean:.6f}" if has and not math.isnan(mean) else "",
-        f"err_{band_lbl}_{ch}_{metric}": f"{spread:.6f}" if has else "",
-        "fraction_above": f"{frac:.6f}" if has and not math.isnan(frac) else "",
-        f"err_frac_{band_lbl}": f"{frac_spread:.6f}" if has and not math.isnan(frac) else "",
+        f"mean_{ch}_{metric}": _num(mean) if has else "",
+        f"err_{band_lbl}_{ch}_{metric}": _num(spread) if has else "",
+        "fraction_above": _num(frac) if has else "",
+        f"err_frac_{band_lbl}": _num(frac_spread) if has and not math.isnan(frac) else "",
         "n_above_threshold": (
-            f"{n_above:.6f}" if n_above_spread > 0
-            else f"{int(n_above)}" if has else ""
+            "" if not has or not math.isfinite(float(n_above))
+            else f"{n_above:.6f}" if math.isfinite(float(n_above_spread)) and n_above_spread > 0
+            else f"{int(n_above)}"
         ),
         f"err_n_above_{band_lbl}": f"{n_above_spread:.6f}" if n_above_spread > 0 else "",
         "threshold": f"{threshold:.4f}",

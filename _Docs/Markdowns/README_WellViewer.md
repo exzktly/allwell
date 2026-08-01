@@ -860,6 +860,22 @@ count) — plus a CDF.
 - **Optimal use** — turn on FOV spread when you have several fields per well
   and want the error band to reflect field-to-field variability; normalize vs
   **t0** to collapse every curve to a shared start of 1.0 for shape comparison.
+- **When a spread can't be computed** — a bar or band with only one replicate
+  has no spread to show. That is *not* zero, and the app no longer draws it as
+  though it were: the bar carries a small **`n/a`** marker, and the exported CSV
+  leaves the `err_…` cell **empty** instead of writing `0.000000`. A bar with no
+  marker and no whisker (with error bars switched on) means the spread really is
+  too small to see.
+- **"Unusable FOV labels" at load** — a warning naming specific wells means those
+  wells' rows carry no usable field-of-view label, so all their fields pooled
+  into one and nothing per field can be computed for them: no error bars, and
+  the **N events** panel shows no bar rather than a total pretending to be a
+  per-field mean. Their mean and fraction-on are unaffected — those don't depend
+  on the field labels. The cause is upstream, in the analysis run: the image
+  filenames didn't split into as many parts as the **filename schema** has
+  fields, so the pipeline had no field token to record (it now warns about this
+  during the run too). Re-run those wells with a schema matching their
+  filenames to restore per-field statistics.
 
 ### Scatter Plot
 

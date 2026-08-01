@@ -3133,6 +3133,51 @@ recomputed rather than merged so they cannot disagree with the `wells` map they
 summarise. Both sit beside `refresh_pipeline_info_available_from_outputs`, which
 already read-modify-writes the same file for the same reason.
 
+**The run estimate reports bytes, not a verdict.** `RunEstimate` used to end in
+"remote wins" / "LOCAL would be faster", computed from a hardcoded
+`max(60s, 5s per well)` local-compute figure and a flat assumed 4× remote
+speedup. Neither measured anything: on a real plate it guessed 60s against a run
+that took eight hours, and the verdict recommended running locally — printed
+beside a genuinely measured transfer size, which is precisely what made a
+constant read as a measurement. It could not have been right in principle
+either, because the comparison assumes local compute pays no I/O and a
+NAS-resident dataset pays network reads for every image whether or not a remote
+is involved, plus scratch on top. The verdict is gone rather than tuned: the
+type now carries only `bytes_to_transfer` and `transfer_s`, both of which the
+staged archives and the host's measured bandwidth actually support. Which side
+is faster is a question it does not answer, and a better-guessed answer would
+have been the same failure in a smarter disguise.
+
+**Rail denominators are per stage.** A remote run's stages do not count the
+same population: every well on the plate is grouped locally, while only the
+subset the incremental split sends is uploaded, processed and thresholded, and
+Download ends up covering the whole plate again (a well that was already current
+locally is, by the end, fetched locally). `RunDashboard` carried one shared
+`_total`, so whichever population announced last became every row's divisor —
+which is how the rail came to read `Group 40/6` and `Download 34/6`, numerators
+counting the plate against a denominator counting the run, with Download ahead
+of an Upload that had not started. `set_stage_total(stage, total)` overrides one
+row's divisor; `services.pipeline_runner` announces the grouped population for
+`group` and `download` (a `stage_total` event, rendered by
+`analyze_progress._apply_grouping_event`) and leaves the stages between them on
+the run's own well count.
+
+**rsync has to be told to narrate.** Everything the Upload rail and the plate's
+per-well transfer state are built from is parsed out of rsync's own stdout:
+`_looks_like_rsync_filename` turns each per-file line into `[remote] ↑ <well>.zip`
+(which drives the rail and the "uploaded" colour), and the percentage stream
+drives the transfer bar and `note_bytes`' per-well pie slices.
+`--info=name1,stats2,progress2` needs rsync ≥ 3.1.0, and macOS ships 2.6.9 — the
+machine most runs are launched from — so on the common case the gate fell
+through to no progress flags at all. rsync then ran silently for the whole
+transfer and every consumer went dark with it: `Upload 0/N` and an unchanged
+plate from the first second to the last, indistinguishable from a hang, for as
+long as the upload took. `_rsync_progress_flags()` is the single decision, used
+by both upload sites: `--info=…` where it exists, `-v --progress` (both older
+than 3.0) where it does not. The existing parsers already accept both shapes.
+On legacy rsync the percentage is per file rather than whole-transfer, so the
+bar sweeps once per archive; the per-well attribution is unaffected.
+
 **The fetch skips what this run did not produce.** A well the remote skipped —
 up to date, or never uploaded by the split — emits no `Well X — done.` marker,
 so it is absent from `expected_wells` and this run produced nothing new for it.

@@ -64,6 +64,14 @@ class RunDashboard(PlateProgress):
     def __init__(self, parent: QWidget | None = None) -> None:
         self._remote = False
         self._total = 0
+        # Per-stage overrides for the rail's denominator. A remote run's stages
+        # do not all count the same population: Group sees every well on the
+        # plate, while Upload/Process/Threshold only ever see the subset the
+        # incremental split decided to send. One shared total made every row
+        # divide by whichever population happened to set it last, which is how
+        # the rail came to read "Group 40/6" and "Download 34/6" — numerators
+        # counting the plate against a denominator counting the run.
+        self._stage_totals: dict[str, int] = {}
         self._done: dict[str, set] = {}          # stage -> set of wells completed
         self._active: set = set()                # wells currently processing
         self._errored: set = set()
@@ -81,6 +89,7 @@ class RunDashboard(PlateProgress):
     def reset(self, *, remote: bool = False, total: int = 0) -> None:
         self._remote = remote
         self._total = total
+        self._stage_totals = {}
         self._done = {}
         self._active = set()
         self._errored = set()
@@ -99,6 +108,20 @@ class RunDashboard(PlateProgress):
     def set_total(self, total: int) -> None:
         self._total = int(total)
         self._refresh_rail()
+
+    def set_stage_total(self, stage: str, total: int) -> None:
+        """Give one rail row its own denominator, overriding :attr:`_total`.
+
+        For the stages whose population differs from the run's: on a remote run
+        Group counts every well the plate holds, while the stages after the
+        upload split only ever see the wells actually sent.
+        """
+        if stage in _STAGE_KEYS:
+            self._stage_totals[stage] = int(total)
+            self._refresh_rail()
+
+    def _stage_total(self, stage: str) -> int:
+        return self._stage_totals.get(stage, self._total)
 
     def set_well_stage(self, well_id: str, stage: str) -> None:
         """Record that *well_id* reached *stage* (the main driver). Each stage is
@@ -305,10 +328,11 @@ class RunDashboard(PlateProgress):
                 continue
             dot, nm, bar, cnt = widgets
             done = self._count(key)
-            bar.setRange(0, max(1, self._total)); bar.setValue(done)
-            cnt.setText(f"{done}/{self._total}")
+            stage_total = self._stage_total(key)
+            bar.setRange(0, max(1, stage_total)); bar.setValue(done)
+            cnt.setText(f"{done}/{stage_total}")
             active = key == self._active_stage
-            complete = self._total and done >= self._total
+            complete = stage_total and done >= stage_total
             color = (theme.Colors.success if complete else
                      (theme.Colors.warn if active else
                       (theme.Colors.accent if done else theme.Colors.text_muted)))

@@ -772,10 +772,24 @@ class PipelineRunner:
             # zipper subprocess), so it never emitted the per-well group events
             # the dashboard's Group stage listens for — Group sat at 0 on remote
             # runs. Surface them now that staging is complete.
-            self._enqueue(("zipper_start", len(zipped.well_zips)))
-            for wz in zipped.well_zips:
-                self._enqueue(("zipper_well", wz.stem))
+            # Group's population is the whole plate, not the upload's subset:
+            # every well was grouped locally, including the ones the
+            # incremental split then decided not to send. Announcing only the
+            # survivors narrowed the rail's shared denominator while the set of
+            # grouped wells kept all of them, which is how the rail came to read
+            # "Group 40/6".
+            grouped = [wz.stem for wz in zipped.well_zips]
+            grouped += [w for w in zipped.up_to_date_wells if w not in grouped]
+            self._enqueue(("zipper_start", len(grouped)))
+            for stem in grouped:
+                self._enqueue(("zipper_well", stem))
             self._enqueue(("zipper_done", None))
+            # Group and Download both end up covering the whole plate — a well
+            # that was already current locally is, by the end, fetched locally.
+            # The stages between them only ever see what was uploaded, which is
+            # what the run's own total counts.
+            for _stage in ("group", "download"):
+                self._enqueue(("stage_total", (_stage, len(grouped))))
 
             est = self._remote_runner.estimate(zipped)
             self._enqueue(("line", f"[remote] {est.format()}\n"))

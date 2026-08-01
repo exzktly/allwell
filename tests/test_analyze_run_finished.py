@@ -148,3 +148,49 @@ def test_runfinished_slot_exception_does_not_abort_drain(tab):
     assert len(exceptions) == 1
     assert isinstance(exceptions[0][1], RuntimeError)
     assert tab._running is False
+
+
+def test_rail_denominators_are_per_stage_not_one_shared_total(qtbot):
+    """Regression guard for a rail that read "Group 40/6" and "Download 34/6".
+
+    A remote run's stages do not count the same population. Every well on the
+    plate is grouped locally; only the subset the incremental split decides to
+    send is uploaded, processed and thresholded. One shared denominator meant
+    the numerators counted the plate while the divisor counted the run — and
+    Download, which includes the wells that were already current locally, came
+    out ahead of an Upload that hadn't started."""
+    from widgets.run_dashboard import RunDashboard
+
+    plate = [f"{r}{c:02d}" for r in "ABCDE" for c in range(1, 9)]   # 40 wells
+    uploaded, already_local = plate[:6], plate[6:]                  # 6 + 34
+
+    dash = RunDashboard()
+    qtbot.addWidget(dash)
+    dash.reset(remote=True, total=len(uploaded))
+    for well in plate:
+        dash.set_well_stage(well, "group")
+    for well in already_local:
+        dash.set_well_stage(well, "download")
+
+    def counts():
+        return {k: dash._rail[k][3].text() for k in
+                ("group", "upload", "process", "threshold", "download")}
+
+    assert counts()["group"] == "40/6"        # the reported state
+    assert counts()["download"] == "34/6"
+
+    for stage in ("group", "download"):
+        dash.set_stage_total(stage, len(plate))
+
+    assert counts() == {
+        "group": "40/40", "upload": "0/6", "process": "0/6",
+        "threshold": "0/6", "download": "34/40",
+    }
+    # An unknown stage name is ignored rather than inventing a rail row.
+    dash.set_stage_total("nonsense", 99)
+    assert counts()["group"] == "40/40"
+    # reset() drops the overrides with everything else.
+    dash.reset(remote=True, total=7)
+    for well in plate[:3]:
+        dash.set_well_stage(well, "group")
+    assert counts()["group"] == "3/7"

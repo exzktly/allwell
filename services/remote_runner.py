@@ -387,28 +387,34 @@ class LocalInputMode(str, Enum):
 
 @dataclass
 class RunEstimate:
-    """Bandwidth-aware break-even estimate. Returned by
-    :meth:`RemoteRunner.estimate` before each run so the user can see
-    whether going remote is actually worth it on this network."""
+    """What this run has to move, and how long that should take.
+
+    **Deliberately not a local-vs-remote verdict.** It used to end with
+    "remote wins" / "LOCAL would be faster", derived from a *hardcoded*
+    ``max(60s, 5s per well)`` local-compute figure with a flat 4x speedup
+    assumed for the remote. Neither number measured anything: on a real plate
+    that guessed 60s against a run that took eight hours, roughly a
+    thousand-fold error, and the banner used it to recommend running locally —
+    printed beside a genuinely measured transfer size, which is exactly what
+    made it look like a measurement.
+
+    It could not have been right in principle either. The comparison assumes
+    local compute pays no I/O, and a dataset that lives on a NAS pays network
+    reads for every image whether or not a remote is involved, plus its scratch
+    on top. Modelling that is a real piece of work; asserting a winner without
+    it is a guess wearing a measurement's clothes.
+
+    So this reports only what it actually knows — bytes, and the transfer time
+    those bytes imply at the measured bandwidth. Which side is faster is a
+    question this type does not answer.
+    """
 
     bytes_to_transfer: int
     transfer_s: float
-    remote_compute_s: float
-    local_compute_s: float
-
-    @property
-    def will_win(self) -> bool:
-        return self.local_compute_s > self.transfer_s + self.remote_compute_s
 
     def format(self) -> str:
         gb = self.bytes_to_transfer / (1024**3)
-        return (
-            f"transfer {gb:.2f} GB ({_fmt_secs(self.transfer_s)}) + "
-            f"remote compute {_fmt_secs(self.remote_compute_s)} = "
-            f"{_fmt_secs(self.transfer_s + self.remote_compute_s)}  "
-            f"vs local {_fmt_secs(self.local_compute_s)} — "
-            f"{'remote wins' if self.will_win else 'LOCAL would be faster'}"
-        )
+        return f"transfer {gb:.2f} GB ({_fmt_secs(self.transfer_s)}) to the remote"
 
 
 def _fmt_secs(s: float) -> str:
@@ -4645,28 +4651,19 @@ class RemoteRunner:
         zipped: ZippedInput,
         *,
         is_cache_hit: bool = False,
-        local_compute_s: float | None = None,
-        remote_compute_speedup: float = 4.0,
     ) -> RunEstimate:
-        """Rough break-even estimate. The compute-time numbers come from a
-        tiny local cache of past runs — first run has no history, so we
-        assume a 4× CPU speedup as a placeholder.
+        """How much this run has to upload, and how long that should take.
+
+        Both are measurable here: the staged archives' sizes, and the host's
+        measured bandwidth. Nothing about compute time is — see
+        :class:`RunEstimate` for why the local-vs-remote verdict this used to
+        end with was removed rather than improved.
         """
         total_bytes = sum(p.stat().st_size for p in zipped.well_zips)
         bw_mbps = max(self.host.measured_bandwidth_mbps, 1.0)
         bps = bw_mbps * 1_000_000 / 8
         transfer_s = (total_bytes / bps) if not is_cache_hit else 0.0
-        # Default local-compute fallback: very rough — ~5s per well zip
-        # on a laptop. The Phase-3 timings.json refinement lands later.
-        if local_compute_s is None:
-            local_compute_s = max(60.0, len(zipped.well_zips) * 5.0)
-        remote_compute_s = local_compute_s / max(remote_compute_speedup, 1.0)
-        return RunEstimate(
-            bytes_to_transfer=total_bytes,
-            transfer_s=transfer_s,
-            remote_compute_s=remote_compute_s,
-            local_compute_s=local_compute_s,
-        )
+        return RunEstimate(bytes_to_transfer=total_bytes, transfer_s=transfer_s)
 
     # ── Spawn ───────────────────────────────────────────────────────────
 

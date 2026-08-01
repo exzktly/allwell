@@ -1173,15 +1173,31 @@ def test_remote_argv_appends_extra_args(host):
 # ── RemoteRunner.estimate ───────────────────────────────────────────────────
 
 
-def test_estimate_remote_wins(host, tmp_path):
-    # 50 MB / 100 Mbps → 4s transfer; assume 4× speedup.
+def test_estimate_reports_transfer_and_nothing_it_cannot_measure(host, tmp_path):
+    """The estimate used to end in "remote wins" / "LOCAL would be faster",
+    derived from a hardcoded max(60s, 5s-per-well) local-compute figure and a
+    flat assumed 4x remote speedup. On a real plate that guessed 60s against a
+    run that took eight hours — a thousand-fold error — and the verdict told
+    the user to run locally, printed beside a genuinely measured transfer size,
+    which is what made a constant look like a measurement. It could not have
+    been right in principle either: it assumes local compute pays no I/O, and a
+    NAS-resident dataset pays network reads for every image either way. Bytes
+    and transfer time are measurable; which side is faster is not, so it is no
+    longer claimed."""
     z = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
     z.write_bytes(b"\0" * 50 * 1024 * 1024)
     zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(z,))
     runner = RemoteRunner(host)
-    est = runner.estimate(zipped, local_compute_s=600.0)
-    assert est.will_win
+    est = runner.estimate(zipped)
+
     assert est.transfer_s > 0
+    assert est.bytes_to_transfer == 50 * 1024 * 1024
+    text = est.format()
+    assert "50.00 GB" not in text and "0.05 GB" in text
+    for claim in ("wins", "faster", "vs local", "compute"):
+        assert claim not in text, f"estimate still asserts {claim!r}: {text}"
+    assert not hasattr(est, "will_win")
+    assert not hasattr(est, "local_compute_s")
 
 
 def test_estimate_cache_hit_zeroes_transfer(host, tmp_path):
@@ -1191,16 +1207,6 @@ def test_estimate_cache_hit_zeroes_transfer(host, tmp_path):
     runner = RemoteRunner(host)
     est = runner.estimate(zipped, is_cache_hit=True)
     assert est.transfer_s == 0.0
-
-
-def test_estimate_warns_when_local_would_win(host, tmp_path):
-    # Tiny local compute + a lot of bytes → remote loses.
-    big = _make_well_zip(tmp_path, "A01.zip", ["x.tif"])
-    big.write_bytes(b"\0" * 500 * 1024 * 1024)  # 500 MB
-    zipped = ZippedInput(zip_dir=tmp_path, mode=LocalInputMode.ZIP, well_zips=(big,))
-    runner = RemoteRunner(host)
-    est = runner.estimate(zipped, local_compute_s=10.0)
-    assert not est.will_win
 
 
 # ── DatasetCache.ensure_uploaded: error path ────────────────────────────────

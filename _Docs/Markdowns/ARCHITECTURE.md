@@ -3133,6 +3133,21 @@ recomputed rather than merged so they cannot disagree with the `wells` map they
 summarise. Both sit beside `refresh_pipeline_info_available_from_outputs`, which
 already read-modify-writes the same file for the same reason.
 
+**The run estimate reports bytes, not a verdict.** `RunEstimate` used to end in
+"remote wins" / "LOCAL would be faster", computed from a hardcoded
+`max(60s, 5s per well)` local-compute figure and a flat assumed 4× remote
+speedup. Neither measured anything: on a real plate it guessed 60s against a run
+that took eight hours, and the verdict recommended running locally — printed
+beside a genuinely measured transfer size, which is precisely what made a
+constant read as a measurement. It could not have been right in principle
+either, because the comparison assumes local compute pays no I/O and a
+NAS-resident dataset pays network reads for every image whether or not a remote
+is involved, plus scratch on top. The verdict is gone rather than tuned: the
+type now carries only `bytes_to_transfer` and `transfer_s`, both of which the
+staged archives and the host's measured bandwidth actually support. Which side
+is faster is a question it does not answer, and a better-guessed answer would
+have been the same failure in a smarter disguise.
+
 **Rail denominators are per stage.** A remote run's stages do not count the
 same population: every well on the plate is grouped locally, while only the
 subset the incremental split sends is uploaded, processed and thresholded, and

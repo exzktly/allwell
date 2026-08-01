@@ -3133,6 +3133,22 @@ recomputed rather than merged so they cannot disagree with the `wells` map they
 summarise. Both sit beside `refresh_pipeline_info_available_from_outputs`, which
 already read-modify-writes the same file for the same reason.
 
+**rsync has to be told to narrate.** Everything the Upload rail and the plate's
+per-well transfer state are built from is parsed out of rsync's own stdout:
+`_looks_like_rsync_filename` turns each per-file line into `[remote] ↑ <well>.zip`
+(which drives the rail and the "uploaded" colour), and the percentage stream
+drives the transfer bar and `note_bytes`' per-well pie slices.
+`--info=name1,stats2,progress2` needs rsync ≥ 3.1.0, and macOS ships 2.6.9 — the
+machine most runs are launched from — so on the common case the gate fell
+through to no progress flags at all. rsync then ran silently for the whole
+transfer and every consumer went dark with it: `Upload 0/N` and an unchanged
+plate from the first second to the last, indistinguishable from a hang, for as
+long as the upload took. `_rsync_progress_flags()` is the single decision, used
+by both upload sites: `--info=…` where it exists, `-v --progress` (both older
+than 3.0) where it does not. The existing parsers already accept both shapes.
+On legacy rsync the percentage is per file rather than whole-transfer, so the
+bar sweeps once per archive; the per-well attribution is unaffected.
+
 **The fetch skips what this run did not produce.** A well the remote skipped —
 up to date, or never uploaded by the split — emits no `Well X — done.` marker,
 so it is absent from `expected_wells` and this run produced nothing new for it.

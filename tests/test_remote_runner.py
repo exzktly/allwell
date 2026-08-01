@@ -3397,3 +3397,46 @@ def test_close_remote_job_warns_on_ssh_failure():
         r.close_remote_job(log_fn=logs.append)   # must not raise
     assert any("WARN" in m and "scancel" in m for m in logs), \
         f"expected a scancel-failure warning; got {logs}"
+
+
+def test_old_rsync_still_gets_progress_flags():
+    """macOS ships rsync 2.6.9, which has no ``--info=`` at all — and that is
+    the machine most runs are launched from. The gate around ``--info`` fell
+    through to NOTHING, so rsync ran silently for the whole transfer and every
+    consumer downstream went dark with it: no per-file lines means no
+    ``[remote] ↑ <well>.zip``, so the Upload rail sat at 0/N and no well took
+    the "uploaded" colour; no progress stream means no transfer bar and no
+    per-well pie slices. A multi-hour upload was indistinguishable from a hang.
+    ``-v`` and ``--progress`` both predate 3.0 and produce shapes the existing
+    parsers already accept."""
+    from unittest import mock
+
+    from services import remote_runner as rr
+
+    with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: True):
+        assert rr._rsync_progress_flags() == ["--info=name1,stats2,progress2"]
+    with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: False):
+        assert rr._rsync_progress_flags() == ["-v", "--progress"]
+    # Never empty: an rsync that narrates nothing is the bug.
+    for supported in (True, False):
+        with mock.patch.object(rr, "_rsync_supports_info_flag", lambda: supported):
+            assert rr._rsync_progress_flags()
+
+
+def test_legacy_rsync_output_shapes_still_parse():
+    """What rsync 2.6.9 actually prints under ``-v --progress``: a bare
+    filename per transferred file, and a per-file percentage line."""
+    import re
+
+    from services.remote_runner import _looks_like_rsync_filename
+
+    assert _looks_like_rsync_filename("C08.zip")
+    assert not _looks_like_rsync_filename("sending incremental file list")
+
+    # The same regex _stream_rsync_with_retry uses for the percentage stream.
+    progress_re = re.compile(r"(\d[\d,]*)\s+(\d+)%\s+(\S+)\s+\S+(?:\s+\(.*\))?")
+    m = progress_re.search(
+        "     32,768  100%   31.25MB/s    0:00:00 (xfer#1, to-check=5/6)")
+    assert m is not None
+    assert m.group(2) == "100"
+    assert int(m.group(1).replace(",", "")) == 32768

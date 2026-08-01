@@ -2089,6 +2089,29 @@ def _rsync_supports_info_flag() -> bool:
     return _rsync_version() >= (3, 1)
 
 
+def _rsync_progress_flags() -> list[str]:
+    """Flags that make rsync narrate a transfer, for whatever rsync is here.
+
+    ``--info=name1,stats2,progress2`` needs rsync ≥ 3.1.0. macOS ships 2.6.9 and
+    that is the machine most runs are launched from, so on the common case the
+    gate around ``--info`` fell through to **nothing at all** — rsync ran
+    silently for the entire transfer. Everything downstream is driven off its
+    output: ``_looks_like_rsync_filename`` turns per-file lines into
+    ``[remote] ↑ <well>.zip`` (the Upload rail and the per-well "uploaded"
+    colour), and the progress stream drives the transfer bar and the per-well
+    pie slices. With no flags none of it fires, so a multi-hour upload showed
+    ``Upload 0/N`` and an unchanged plate from the first second to the last,
+    which is indistinguishable from a hang.
+
+    ``-v`` and ``--progress`` both predate 3.0 and are what the old rsync
+    understands: ``-v`` names each file as it goes, ``--progress`` emits the
+    percentage stream. The parsers already accept both shapes.
+    """
+    if _rsync_supports_info_flag():
+        return ["--info=name1,stats2,progress2"]
+    return ["-v", "--progress"]
+
+
 def _rsync_supports_append_verify() -> bool:
     """Whether the local rsync accepts ``--append-verify``.
 
@@ -2238,8 +2261,7 @@ class DatasetCache:
         # transferred file. ``_run_rsync_streaming`` forwards those
         # lines as ``[remote] ↑ <filename>`` so the user can see
         # which well is in flight.
-        if _rsync_supports_info_flag():
-            cmd.append("--info=name1,stats2,progress2")
+        cmd += _rsync_progress_flags()
         if log_fn:
             # Log the full flag list so the user can see every gating
             # flag (--append-verify, --info=name1,...) in the log;
@@ -2363,8 +2385,7 @@ class DatasetCache:
         ]
         if _rsync_supports_append_verify():
             cmd.append("--append-verify")
-        if _rsync_supports_info_flag():
-            cmd.append("--info=name1,stats2,progress2")
+        cmd += _rsync_progress_flags()
         if log_fn:
             log_fn(
                 f"[remote] $ {' '.join(shlex.quote(c) for c in cmd)} … → {dest} "

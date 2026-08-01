@@ -117,17 +117,7 @@ class Stepper(QFrame):
         # Match the combos beside us. The two step buttons split the row
         # between them; without the explicit split each still asks for a full
         # text row and the frame is forced taller than it was just pinned to.
-        row_h = control_row_height()
-        self.setFixedHeight(row_h)
-        # The frame's own 1px border top and bottom is the only thing outside
-        # the two children, so pin them to what is left. Without pinning the
-        # edit as well, its vertical text padding keeps the layout's minimum
-        # above the height the frame was just given and the frame renders
-        # taller than it was asked to be.
-        inner = max(1, row_h - 2)
-        self._edit.setFixedHeight(inner)
-        for b in (self._up, self._down):
-            b.setFixedHeight(inner // 2)
+        self._apply_row_height()
 
         self._edit.installEventFilter(self)
         self.setStyleSheet(self._build_qss())
@@ -258,6 +248,35 @@ class Stepper(QFrame):
                     self.stepBy(-1)
                     return True
         return super().eventFilter(obj, event)
+
+    def _apply_row_height(self) -> None:
+        """Pin this stepper to the height of the combos beside it.
+
+        The frame's own 1px border top and bottom is the only thing outside the
+        two children, so they get what is left. Without pinning the edit as
+        well, its vertical text padding keeps the layout's minimum above the
+        height the frame was just given and the frame renders taller than asked.
+        """
+        row_h = control_row_height()
+        self.setFixedHeight(row_h)
+        inner = max(1, row_h - 2)
+        self._edit.setFixedHeight(inner)
+        for b in (self._up, self._down):
+            b.setFixedHeight(inner // 2)
+
+    def changeEvent(self, event) -> None:  # Qt naming
+        """Re-measure when the stylesheet or font moves under us.
+
+        Measuring once in ``__init__`` is not enough: the reference height
+        depends on the application stylesheet, and a stepper built before that
+        stylesheet is applied — which is every stepper built during startup —
+        would freeze an unstyled number and then sit a pixel or two off the
+        combos for the rest of the session. This is the same staleness
+        ``mode_bar.tab_bar_height`` refuses to cache for.
+        """
+        if event.type() in (QEvent.StyleChange, QEvent.FontChange):
+            self._apply_row_height()
+        super().changeEvent(event)
 
     def _build_qss(self) -> str:
         c, t, r = theme.Colors, theme.Typography, theme.Radii

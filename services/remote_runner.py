@@ -66,6 +66,11 @@ from services.remote_config import (
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
 from util.fov import sort_key as fov_sort_key
 from util.timepoint import sort_key as tp_sort_key
+from pipeline.run_report import (
+    merge_fetched_run_report,
+    read_run_report_block,
+)
+from pipeline.well_skip import _canonical_force_wells
 from pipeline.incremental_keys import (
     fov_tp_from_name,
     read_done_fov_keys,
@@ -477,6 +482,7 @@ def stage_local_zips(
     incremental: bool = False,
     prior_output_dir: Path | None = None,
     csv_prefix: str = "measurements",
+    force_wells: Iterable[str] | None = None,
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -541,8 +547,16 @@ def stage_local_zips(
             csv_prefix=csv_prefix,
             filename_schema=filename_schema,
             filename_sep=filename_sep,
+            force_wells=_canonical_force_wells(force_wells),
             log_fn=log_fn,
         )
+        if log_fn is not None:
+            # Planning emits a line only for a well it drops or rewrites, so a
+            # plate whose remaining wells all stage unchanged went silent right
+            # after the two or three wells it did report — reading as a stall
+            # with most of the plate still to go. Say what the pass concluded.
+            log_fn(f"[remote] planned {len(plans)} well archive(s) to upload, "
+                   f"{len(up_to_date_list)} already up to date.\n")
         _raise_on_zero_channel_match(zero_match)
         # Opened only if something actually has to be rewritten; when the
         # filter drops nothing from any archive there is no local copy at all.
@@ -1129,6 +1143,7 @@ def _plan_staging(
     csv_prefix: str = "measurements",
     filename_schema: str = "",
     filename_sep: str = "_",
+    force_wells: frozenset[str] = frozenset(),
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[list[_StagePlan], list[str], list[str]]:
     """Decide, per well, which members need staging — reading no member bytes.
@@ -1185,6 +1200,19 @@ def _plan_staging(
                 continue
 
         well = _canonical_well_from_path(wz.stem)
+        if well is not None and well in force_wells:
+            # Asked for in full, so the incremental diff below is skipped
+            # outright. Without this the split drops the well before a single
+            # byte is uploaded and the remote never sees it — so
+            # ``--force_wells`` on the remote command line has nothing to act
+            # on, and the well that most needs reprocessing is the one
+            # guaranteed not to be. Logged, because "up to date — not uploaded"
+            # for the well the user just forced is exactly the confusion this
+            # avoids.
+            if log_fn:
+                log_fn(f"[remote] ↻ {well}: forced — uploading in full\n")
+            plans.append(_StagePlan(src=wz, keep=None, n_members=len(images)))
+            continue
         if incremental and prior_output_dir is not None and well is not None:
             # CSV is the primary done-set; fall back to the well's local output
             # zip so a missing / lost CSV doesn't re-upload already-done FOVs.
@@ -1479,7 +1507,17 @@ def _filter_new_fovs_in_staging(
     filename_sep: str,
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[tuple[Path, ...], tuple[str, ...]]:
-    """Client-side incremental split: rewrite each staged well zip to keep only
+    """**Superseded and unused in production** — see :func:`_plan_staging`.
+
+    The live remote path plans from each archive's central directory and never
+    copies an archive it does not have to rewrite; this earlier shape copied
+    every archive into scratch first, which dragged a whole NAS-resident plate
+    across the network before a byte went to the remote. Only
+    ``tests/test_remote_incremental.py`` still calls it. Anything changed about
+    the incremental split has to change ``_plan_staging`` to reach a real run —
+    fixing this one alone looks right and does nothing.
+
+    Client-side incremental split: rewrite each staged well zip to keep only
     members whose ``(fov, timepoint)`` is NOT already in the well's local CSV,
     and drop wells whose every input FOV is already done.
 
@@ -4023,6 +4061,34 @@ class Fetcher:
             if total_bytes:
                 self._log(_well_xfer_line(label, "down", 1.0))
 
+    def _already_local(self, well: str) -> str | None:
+        """Why this well needs no transfer at all, or ``None`` to fetch it.
+
+        A well the remote **skipped** — up to date, or never uploaded by the
+        incremental split — emits no ``Well X — done.`` marker, so it is not in
+        ``expected_wells`` and this run produced nothing new for it. If its
+        local artefacts are already complete there is nothing on the remote
+        that this fetch could improve, and pulling it anyway costs a full
+        per-well transfer: an ssh size probe, then two ``rsync --timeout=120``
+        invocations, each retry-wrapped. That is the shape behind a fetch that
+        sits on one well for minutes while the file it is pulling is already on
+        disk, correct, and untouched by this run.
+
+        Deliberately narrow. A well this run *did* process is always re-fetched,
+        however complete the local copy looks, because a local artefact from an
+        earlier run is exactly what the new output is meant to replace.
+        """
+        run = self.run
+        if well in run.expected_wells:
+            return None                       # this run produced new output
+        if run.output_filter is OutputFilter.FULL:
+            local_zip = run.local_output_dir / f"{well}_out.zip"
+            if not (local_zip.exists() and _zip_is_complete(local_zip)):
+                return None
+        if not list(run.local_output_dir.glob(f"*_{well}.csv")):
+            return None
+        return "already complete locally and untouched by this run"
+
     def _fetch_one(self, well: str) -> None:
         """Pull a single well's output. The remote pipeline produces
         ``{output_dir}/{well}_out.zip`` and a sibling
@@ -4038,6 +4104,11 @@ class Fetcher:
         """
         if self._stop.is_set():
             return
+        skip_reason = self._already_local(well)
+        if skip_reason is not None:
+            self._log(f"[remote] ⤼ {well}: {skip_reason} — not re-fetched\n")
+            self.run.fetched_wells.add(well)
+            return
         tmp_zip = _scratch_dir() / f"allwell-{self.run.run_id}-{well}_out.zip"
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
@@ -4046,7 +4117,16 @@ class Fetcher:
         position = len(self.run.fetched_wells) + 1
         prefix = f"({position}/{total}) " if total else ""
 
-        self._log(f"[remote] ↓ {prefix}{well}: starting download from {self.host.ssh_alias}\n")
+        # Say *why* this well is being pulled. A fetch that sits on one well
+        # for minutes is only diagnosable if the log distinguishes "this run
+        # produced new output for it" from "the end-of-run sweep found it
+        # missing locally" — the second, on a well whose files are already on
+        # disk, is work that should not be happening at all.
+        why = ("this run produced new output" if well in self.run.expected_wells
+               else "end-of-run sweep: not complete locally")
+        self._log(
+            f"[remote] ↓ {prefix}{well}: starting download from "
+            f"{self.host.ssh_alias} ({why})\n")
 
         # Ask the remote how big the zip is before pulling it. That number is
         # the denominator for this well's download dial; without it the
@@ -4843,12 +4923,34 @@ class RemoteRunner:
         # Pull pipeline_info.json + any top-level CSVs we may have missed
         # (well CSVs are pulled by the Fetcher, but a top-level summary
         # written at end-of-run wouldn't be).
+        # The fetched sidecar OVERWRITES the local one, and a remote output dir
+        # starts empty — so its run_report block describes only the wells this
+        # run processed (on an incremental run, only the uploaded split). Left
+        # alone, that replaces a whole plate's completeness records with a
+        # handful, and every skipped well loses the record that said whether its
+        # empty output was a measurement or a gap. Capture before, merge after.
+        info_path = run.local_output_dir / "pipeline_info.json"
+        prior_run_report = read_run_report_block(info_path)
         for top in ("pipeline_info.json",):
             self._rsync_optional(
                 f"{self.host.ssh_alias}:{run.remote_output_dir}/{top}",
                 run.local_output_dir / top,
                 log_fn=log,
             )
+        if merge_fetched_run_report(info_path, prior_run_report):
+            log("[remote] merged this run's completeness records into the "
+                "existing pipeline_info run_report.\n")
+
+        # Per-failure tracebacks. The pipeline writes them remotely and nothing
+        # pulled them back, so on a remote run they stayed on the remote host —
+        # and Validate & Repair, which reads out/errors/ to say WHY a well is
+        # empty, found an empty directory every time. They are small text files
+        # and they are usually the fastest answer to "why did this well fail".
+        self._rsync_optional(
+            f"{self.host.ssh_alias}:{run.remote_output_dir}/errors/",
+            run.local_output_dir / "errors",
+            log_fn=log,
+        )
 
         # The fetched pipeline_info.json reflects only the (partial) input the
         # remote saw — for an incremental run that's just the uploaded new-FOV

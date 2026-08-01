@@ -74,3 +74,14 @@ def background_well_key(token) -> str:
     reads; a non-well identifier falls back to a plain lowercase match."""
     c = canonical_well_label(token)
     return c.lower() if c else str(token or "").strip().lower()
+
+
+def safe_well(label: str) -> str:
+    """Sanitise a well label for use as a filename component.
+
+    Lives here rather than in ``pipeline.io`` so a caller that only needs to
+    name a well's file — the remote client's staging planner, the per-well skip
+    decisions — does not have to import a module that pulls numpy / tifffile /
+    skimage at module scope. ``pipeline.io`` re-exports it as ``_safe_well``.
+    """
+    return label.replace("/", "_").replace("\\", "_")

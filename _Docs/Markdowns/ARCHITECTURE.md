@@ -3083,6 +3083,76 @@ remedy on offer. The `no_csv` finding says so in words: an incremental run
 counts the well's own output images as already done and reports it up to date,
 so only a forced reprocess regenerates the CSV.
 
+**The forced reprocess itself.** `process_microscopy --force_wells W1 W2 …` is
+the per-well counterpart to `--force`: a named well runs as if `--incremental`
+were off — no done-set filter, a fresh CSV, a rewritten archive — while every
+other well still runs incrementally and is not re-segmented. The three per-well
+decisions (does output already exist, is this well forced, does it therefore run
+incrementally) live in the stdlib-only `pipeline/well_skip.py`, which is in the
+remote upload manifest. Labels match through `canonical_well_label`, since `C8`
+and `C08` name the same well and the two sides of that comparison are a GUI
+field and a zip stem. The Analyze form carries it as a visible **Force these
+wells** field rather than hidden run state: it re-segments and overwrites, so it
+must be something the user can see and clear.
+
+**A remote run needs telling twice.** The flag on the remote command line is not
+enough on its own, because the client decides what to upload before the remote
+sees anything. `remote_runner._plan_staging` computes its own done-set — the
+local CSV's rows unioned with the local `<WELL>_out.zip`'s members — and drops a
+well whose input it considers covered, logging `✓ <well>: up to date (local) —
+not uploaded`. For the well this whole path exists to recover (images present,
+CSV missing) that check fires, the archive is never uploaded, and the flag
+downstream has nothing to act on. `_plan_staging` therefore takes the same force
+list, canonicalised through `pipeline.well_skip._canonical_force_wells`, and
+stages a forced well in full before the incremental diff is consulted at all;
+`services.pipeline_runner` passes it from `opts["force_wells"]`, the same key
+`build_pipeline_args` reads. Planning also logs what it concluded (`planned N
+well archive(s) to upload, M already up to date`) — it emits a line only for a
+well it drops or rewrites, so a plate whose remaining wells all stage unchanged
+went silent right after the two or three it did report, which reads as a stall
+with most of the plate still to go.
+
+**What the end-of-run sweep brings back.** Two things beyond the per-well
+outputs, both because a remote run's records are useless if they stay on the
+remote. `out/errors/` — the per-failure tracebacks — is pulled, so Validate's
+`_scan_error_files` has something to read; without it that whole half of the
+"read the run's own records first" rule was local-run-only, and a remote user
+got the hedged verdict every time. And the fetched `pipeline_info.json`
+**overwrites** the local one, while a remote output dir starts empty — so the
+`run_report` block it carries describes only the wells that run processed (on an
+incremental run, only the uploaded split). Left alone that replaces a whole
+plate's completeness records with a handful, and every skipped well loses the
+record saying whether its empty output was a measurement or a gap — which is
+precisely what Validate reads to avoid forcing a well that legitimately
+segments zero cells, so the loss shows up as a well being re-segmented to the
+same empty result on every run. `run_report.read_run_report_block` captures the
+block before the rsync and `merge_fetched_run_report` folds it back after:
+fetched records win per well, prior records survive for wells the fetched block
+does not mention, and the derived fields (`incomplete_wells`, the totals) are
+recomputed rather than merged so they cannot disagree with the `wells` map they
+summarise. Both sit beside `refresh_pipeline_info_available_from_outputs`, which
+already read-modify-writes the same file for the same reason.
+
+**The fetch skips what this run did not produce.** A well the remote skipped —
+up to date, or never uploaded by the split — emits no `Well X — done.` marker,
+so it is absent from `expected_wells` and this run produced nothing new for it.
+`Fetcher._already_local` short-circuits such a well when its local artefacts are
+already complete (a readable `<WELL>_out.zip` under the FULL filter, plus a
+`*_<WELL>.csv`): there is nothing on the remote a transfer could improve, and
+pulling it anyway costs an ssh size probe and two retry-wrapped
+`rsync --timeout=120` invocations — the shape behind a fetch that sits on one
+well for minutes while the file it is pulling is already on disk and untouched.
+The skip is deliberately narrow: a well this run *did* process is always
+re-fetched however complete the local copy looks, because that local artefact is
+exactly what the new output replaces. Each fetch also logs why it is happening
+(`this run produced new output` vs `end-of-run sweep: not complete locally`),
+since a slow fetch is only diagnosable if those two are distinguishable.
+
+`_filter_new_fovs_in_staging` is an **older, production-dead** split kept only by
+`tests/test_remote_incremental.py`. A change to the incremental split has to land
+in `_plan_staging` to reach a real run; fixing that one alone looks right and
+does nothing.
+
 The sidecar and the incremental flag both matter, and each was missing on its
 own account. Without the sidecar the Analyze form keeps whatever was already in
 it, so the schema, separator, channel roles, QC options and — the one that

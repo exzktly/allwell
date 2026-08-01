@@ -755,6 +755,7 @@ class PipelineRunner:
                 incremental=bool(opts.get("incremental", False)),
                 prior_output_dir=output_dir,
                 csv_prefix=opts.get("csv_prefix", "measurements"),
+                force_wells=opts.get("force_wells"),
             )
             # Incremental: wells whose local output already covers every input
             # FOV were dropped from the upload. Surface a synthetic per-well

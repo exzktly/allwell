@@ -390,7 +390,71 @@ which items it is entitled to judge. Expect siblings — the same misapplication
 sat in the zero-match guard and the incremental up-to-date check, so fixing one
 in isolation would have traded a slow run for a silently wrong one.
 
-## 7.2 Debugging entry points
+## 7.2 The report usually contains the answer
+
+A bug report from someone who has watched the software do the thing is primary
+evidence. It outranks anything you infer by reading code, and it is the cheapest
+evidence you will ever get — reading costs tokens the user pays for; asking costs
+one turn.
+
+The Image Table LUT bug took four rounds and three wrong diagnoses. The first
+message said: *"showing 10 columns and four rows, changing the lut only updated
+the first 24."* In a 10-wide grid, 24 is not a whole number of rows or columns,
+which excludes every per-row, per-column and per-channel mechanism outright and
+leaves a row-major prefix — the answer. That arithmetic took ten seconds and was
+done on the fourth round.
+
+1. **Do arithmetic on the reported numbers before opening a file.** A count, a
+   grid shape, a ratio, a duration: factor it, divide it by the dimensions you
+   were given, ask what it is a multiple of. Most reported numbers are structural
+   and rule out whole families of cause for free. A mechanism that cannot produce
+   the reported number is refuted before you read a line of it.
+2. **Treat the reporter's word choice as load-bearing.** "Redraw" is not "draw";
+   "updated" is not "rendered"; "sometimes" is not "always". When your diagnosis
+   requires reading their word as a looser synonym, your diagnosis is probably
+   wrong. Say which word you are relying on, so they can correct it early rather
+   than after you have shipped.
+3. **Ask about the artifact, not about the code.** They can see the screen; you
+   cannot. Which axis holds what, what is actually inside the cells that misbehave,
+   whether the affected region is contiguous or scattered, what the status line
+   says — four questions like that closed this bug in one turn after three rounds
+   of investigation had not. Ask them *first*, in parallel with the work that does
+   not depend on the answers, not after the cheap explanations are exhausted.
+4. **Never argue with an observation.** When the user says the cells were there,
+   they were there. Re-deriving from code why they might not have been is not
+   evidence, and making someone re-assert what they already told you is the most
+   expensive thing you can do with their turn.
+5. **Reproduce the reported number before changing anything.** The fix that
+   finally worked began with a script that built the described grid and printed
+   which cells changed: `24 / 40`, in the bottom-right block, matching the report
+   exactly. Until your harness reproduces their number, you are fixing a bug you
+   have not found.
+
+**Subagents are billed to the user, and they start from zero.** A subagent
+re-reads a codebase the parent already has in context, so dispatching one for
+work in files you have already opened is pure waste with someone else's money.
+Default to inline. Reach for an agent when the work genuinely spans files you have
+not read, or when two independent lines of investigation can run at once — not as
+a reflex, and not to feel thorough.
+
+Two ways that went wrong here, both worth naming:
+
+- **Never state a subagent's uncommitted working tree as fact.** I told the user
+  two helpers "already exist" in the codebase; they had been written minutes
+  earlier by an agent and were not on HEAD. Check `git show HEAD:<file>` before
+  reporting that something is already there.
+- **Overcorrection costs as much as the original mistake.** After being burned by
+  CI failures I instructed agents to run every test file matching a grep, which
+  pulled in slow-lane full-app files at minutes apiece. CI is the gate here (§2);
+  a broad local sweep buys a signal that was already coming for free.
+
+**The habit underneath all of this:** when a user reports a symptom, the first
+move is to restate their observation as constraints — this number, this shape,
+this word — and check each candidate mechanism against those constraints before
+investigating any of them. Investigation that has not been narrowed by the report
+is just reading, and reading is what produced all three wrong answers.
+
+## 7.3 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

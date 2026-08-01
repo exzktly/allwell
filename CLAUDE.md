@@ -317,7 +317,40 @@ a way to lose unrelated prose from the same file.
 ARCHITECTURE.md still must not say *when* something landed, either — no
 `(vX.Y.Z)` markers, no "new in". Same test.
 
-## 7. Debugging entry points
+## 7. Diagnosing a wrong number
+
+A plot that draws the wrong value — or quietly draws nothing — is almost never a
+plotting bug. Work the chain from the data outward, in this order, before
+proposing a cause:
+
+1. **Read the run's own failure records first.** The pipeline persists a full
+   traceback per failed FOV-group to `<output_dir>/errors/<well>_<fov>_pid<N>.txt`
+   and shouts PARTIAL warnings in the run log. When wells or fields are missing
+   from the results, that directory usually names the reason outright — exception
+   type, well, field, timepoint. Check it before reading any application code.
+2. **Verify which input the code actually reads.** For the in/out layout the
+   pipeline segments from `in/<well>.zip`, never the sibling `in/<well>/` folder
+   (`process_microscopy._process_one_well_zip` → `find_image_groups_in_zip`).
+   Reasoning about files the run never opened wastes a whole cycle.
+3. **Separate "not computed" from "computed as zero".** Most silent-wrong-number
+   bugs here are that conflation: a spread with one replicate, a mask that could
+   not be resolved, a scan that came up empty. Zero is a measurement; undefined
+   is not. If the code stores `0.0` for something it never computed, that is the
+   bug, whatever else is also true.
+4. **Say what is established and what is inferred.** A mechanism found by reading
+   code is a hypothesis until the data confirms it. State which is which in every
+   reply — a plausible cause presented as a conclusion sends the user off to
+   re-run a plate for nothing.
+
+**The design rule these keep pointing at: degraded output must never be
+indistinguishable from good output.** A partial run that writes a complete-looking
+CSV, a cell that renders a different image than the one requested, a bar with no
+whisker because nothing was computable — each was a silent substitution, and in
+each case the software knew and did not say. When you add a path that can produce
+less than it was asked for, make the shortfall visible in the artifact itself
+(a marker, a count, a named placeholder), not only in a log line.
+
+## 7.1 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

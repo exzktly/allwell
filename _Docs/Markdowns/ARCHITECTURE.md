@@ -2163,6 +2163,31 @@ parent process supervises the per-well worker pool:
   well's records free as the loop advances, so the parent holds at most one
   well's worth transiently (per-well CSV writing stays worker-side).
   `tests/test_well_worker_pool.py` pins the count.
+- **Completeness is not part of the output contract — and that is the gap that
+  bites.** A well whose FOV-groups partly failed still writes its per-well CSV and
+  `<well>_out.zip` from the groups that succeeded (`_process_groups_in_worker`
+  returns `(records, failed_names)` and the caller writes the records regardless).
+  On disk, and to every consumer downstream, that output is indistinguishable
+  from a well that processed cleanly: nothing in `pipeline_info.json` records how
+  many FOV-groups a well was *expected* to yield versus how many it did, so the
+  viewer cannot tell a 6-field well from the same well with 3 fields lost to
+  write errors. The consequence is not a missing plot but a plausible one — the
+  per-field statistics silently describe whatever fields survived, and the first
+  visible symptom is an absent error bar several layers away from the cause. The
+  durable evidence is `<output_dir>/errors/` and the run log's PARTIAL warnings;
+  when wells or fields are missing from a dataset, read those before anything
+  else.
+- **Scratch exhaustion is the common cause of a partial run.** The scratch base
+  defaults to `~/.allwell/scratch` (§6.5) — the *home* volume — while the dataset
+  usually lives on an external or network disk, so a run with terabytes free
+  beside its inputs can still fill the volume it actually writes to. Each
+  FOV-group stages ~6 intermediate images there, so a 6-field × 23-timepoint well
+  is several GB and a plate of them is far more. `pipeline.io._safe_imwrite`
+  retries with backoff and triages disk-full versus transient, but once space is
+  genuinely gone every remaining group fails the same way: the run continues,
+  logging a failure per group, and produces a full complement of complete-looking
+  per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the Analyze tab's *Scratch
+  disk* field) at the same volume as the data when the home volume is tight.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
   `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
   mirroring `_dump_well_failure_trace`), and `classify_log_line` treats
@@ -4648,6 +4673,15 @@ walk of large frames takes longer to Generate; it no longer grows resident memor
 with the grid, which is what previously turned a big grid into failed allocations
 and cells that would not load. If a grid is slow, narrow the well / timepoint
 selection or crop the view.
+
+**A well has fewer fields of view than were imaged.** — Its FOV-groups failed
+during processing; the well still wrote a complete-looking CSV from the ones that
+succeeded. `ls <output_dir>/errors/` names every failed (well, field, timepoint)
+with its exception type, and `cat` on one gives the traceback. The most common
+cause is the scratch volume filling mid-run (§6.2) — the message reports the free
+space at the moment of failure. Recover with `--incremental`, which reprocesses
+only the (fov, timepoint) groups missing from each CSV and merges them in; the
+rows already present are correct, so nothing needs deleting.
 
 **A well's error bars are missing and its bars carry `n/a`.** — Nothing was
 computable for that spread. Either the well has one replicate (one field with

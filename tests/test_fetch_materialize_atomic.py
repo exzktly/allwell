@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import logging
-import tempfile
 import types
 import zipfile
 from pathlib import Path
@@ -59,10 +58,17 @@ def test_materialize_csv_only_is_noop_true(tmp_path):
 
 # ── E14 ─────────────────────────────────────────────────────────────────
 def test_bad_scratch_override_warns_and_falls_back(tmp_path, monkeypatch, caplog):
+    """An unusable override degrades to the default, loudly.
+
+    The default is ``~/.allwell/scratch`` — the same one ``pipeline.io`` uses.
+    The OS temp dir is only the last resort below that, for an unwritable home.
+    """
     a_file = tmp_path / "afile"; a_file.write_text("x")
     bad = a_file / "sub"                    # parent is a file → mkdir fails
+    home = tmp_path / "home"; home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad))
     with caplog.at_level(logging.WARNING, logger="services.remote_runner"):
         p = rr._scratch_dir()
-    assert p == Path(tempfile.gettempdir())
+    assert p == home / ".allwell" / "scratch"
     assert any("unusable" in r.getMessage() for r in caplog.records)

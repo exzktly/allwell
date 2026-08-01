@@ -283,13 +283,18 @@ def test_staging_writes_only_the_members_that_will_be_uploaded(tmp_path, monkeyp
     assert len(c02) == 4, c02
     assert all("_f2_" in m for m in c02), c02
     assert staged["C02"].stat().st_size < (src / "C02.zip").stat().st_size
-    # C03: nothing done, so the whole archive is taken.
+    # C03: nothing done, so the whole archive is taken — and because nothing
+    # about it changes, it is never copied: the upload list names the source.
     assert len(c03) == 12
+    assert staged["C03"] == src / "C03.zip"
+    assert sorted(p.name for p in staging.iterdir()) == ["C02.zip"]
 
     text = "".join(lines)
     assert "scanning input" in text, "the first slow step must announce itself"
     assert "planning 2 well archive(s)" in text
-    assert "staged (1/2)" in text and "staged (2/2)" in text
+    # One rewrite (C02), one pass-through (C03).
+    assert "staged (1/2)" in text and "staged (2/2)" not in text
+    assert "1 archive(s) need no rewrite" in text, text
     assert "4/12 member(s)" in text, f"per-well kept/total tick missing: {text}"
 
 

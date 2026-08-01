@@ -46,20 +46,46 @@ def test_spatial_properties_panel_opens_and_toggles(loaded_app_shape):
     assert sb.isHidden()
 
 
+def _flow_host(widget):
+    """The nearest ancestor of *widget* whose layout is a ``FlowLayout``.
+
+    A scope control is not a direct child of the flow: ``ControlBand.add_scope``
+    bundles a labelled control with its caption into a ``flow_group`` container
+    (a ``QHBoxLayout``, so the label can never wrap away from its control) and
+    adds that container to the flow. Walking up rather than reading
+    ``parentWidget()`` keeps this assertion about the property that matters —
+    the control sits inside a zone that wraps — instead of about how many
+    containers currently sit between the two.
+    """
+    from widgets.flow_layout import FlowLayout
+    node = widget.parentWidget()
+    while node is not None:
+        if isinstance(node.layout(), FlowLayout):
+            return node
+        node = node.parentWidget()
+    return None
+
+
 @pytest.mark.slow
 def test_control_rows_use_reflowing_flow_layout(loaded_app_shape):
-    """The Spatial control rows are backed by a FlowLayout, so they wrap onto
+    """The Spatial controls live in a FlowLayout-backed zone, so they wrap onto
     extra lines when the pane narrows — e.g. when the Properties dock opens or in
     Split View — instead of crushing / overlapping the dense combos. (The
     wrapping geometry itself is covered by tests/test_flow_layout.py; here we
-    assert the rows are wired to it, which the offscreen harness can verify
+    assert the controls are wired to it, which the offscreen harness can verify
     without shown widgets.)
+
+    Both the always-present controls (Level) and the parameter groups shown only
+    for the relevant level (Colonies) go through the same zone: the scope side of
+    the tab's shared ``ControlBand``.
     """
-    from widgets.flow_layout import FlowLayout
     app = loaded_app_shape
     _open_spatial(app)
     reg = app._ctx.widgets
-    row1 = reg.get_or_none("_sp_level_seg").parentWidget()  # controls row 1
-    row2 = reg.get_or_none("_sp_method_cb").parentWidget()  # controls row 2
-    assert isinstance(row1.layout(), FlowLayout)
-    assert isinstance(row2.layout(), FlowLayout)
+    level_host = _flow_host(reg.get_or_none("_sp_level_seg"))
+    method_host = _flow_host(reg.get_or_none("_sp_method_cb"))
+    assert level_host is not None, "Level control is not inside a flowing zone"
+    assert method_host is not None, "Colonies control is not inside a flowing zone"
+    # One band, one scope zone — not a control row per group.
+    assert level_host is method_host
+    assert level_host.objectName() == "ControlBandScope"

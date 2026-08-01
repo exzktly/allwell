@@ -607,10 +607,15 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 ```
 **Getting around the window.**
 
-- **Title bar** — the `[Review | Analyze]` segmented control switches modes;
-  the icons to its right are Refresh (re-read the folder), presentation
-  toggle (flip every plot Screen ↔ Publication), Open, and the **`i`** Help
-  drawer.
+- **Title bar** — the app name and the version.
+- **Top band** — one row carrying everything that steers the window. On the
+  left, the `[Review | Analyze | Datasets]` selector switches modes; beside it
+  are the current page's sub-tabs; and at the far right the dataset actions —
+  Refresh (re-read the folder), presentation toggle (flip every plot
+  Screen ↔ Publication), reset saved state, reveal the dataset folder, reset the
+  view, and the **`i`** Help drawer. Those six act on the loaded dataset or on
+  the plots drawn from it, so they appear in Review only; `Ctrl+/` opens the
+  Help drawer from any mode.
 - **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
   grouped into **Analysis**, **Images**, and **Data**, under the dataset control
   at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,

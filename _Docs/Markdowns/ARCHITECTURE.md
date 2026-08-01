@@ -58,8 +58,11 @@ central pane stack. The central stack has three pages:
 | Page 1 | **Analyze** | `AnalyzeTab(QWidget)` | `analyze_tab.py` |
 | Page 2 | **Datasets** | `DatasetsTab(QWidget)` | `datasets_tab.py` |
 
-The title bar's `SegmentedControl` (`Review` / `Analyze` / `Datasets`) drives the
-stack; segment index maps straight to stack index. The stack lives inside
+The mode bar (`Review` / `Analyze` / `Datasets`) drives the stack; segment index
+maps straight to stack index. It is built by `AllWellApp` but lives on the
+Review pane's mode band, along with the dataset action cluster — see
+[The rail head](#the-rail-head) — leaving the title bar itself carrying the logo
+and the version pill. The stack lives inside
 `WellViewerApp` (`_central_pane_stack`) so Review's left rail stays put; Analyze
 and Datasets are mounted onto it by `WellViewerApp.mountAnalyzePane` /
 `mountDatasetsPane` (both go through `_mount_secondary_pane`, which places a pane
@@ -397,7 +400,9 @@ allwell.main()
     ├── app.setStyleSheet(theme.qss())                        ← global QSS
     ├── AllWellApp().__init__
     │       ├── _build_ui()
-    │       │    ├── title bar (mode seg, Open, Help, …)
+    │       │    ├── title bar (logo + version pill; the mode seg and the
+    │       │    │            Review action cluster are re-parented into the
+    │       │    │            Review pane's mode band below)
     │       │    └── central stack:
     │       │         ├── page 0  ←  WellViewerApp() (Review)
     │       │         │       ├── _build_ui()
@@ -752,7 +757,23 @@ them having to know the bar exists. Left behind, the bar was a rail-width band
 of chrome hanging above an empty column, squeezed to a natural width its three
 labels do not fit inside. Re-expanding the rail brings it back — which is also
 the only way back to Analyze and Datasets while collapsed, since the bar is the
-app's sole mode switch. An earlier pass set `RAIL_W` to whichever mode's content needed the
+app's sole mode switch.
+
+The band's right end carries the dataset action cluster — reload, presentation
+mode, full reset of saved state, reveal the dataset folder, reset the view, and
+the help drawer. They are built in `AllWellApp` alongside their handlers and
+then moved into the band by `_mount_review_actions`, which appends them after
+the page-tabs host; that host holds the band's only stretch, so the cluster is
+pushed hard right whatever the tab strip is showing, and the band's pinned
+height rises to whatever the buttons need rather than clipping them. Every one
+of the six acts on the loaded dataset or on the plots drawn from it, so
+`_sync_review_actions` shows the cluster in Review alone and hides it in Analyze
+and Datasets, where each would be a control with nothing behind it (`Ctrl+/`
+still opens the help drawer from any mode). Both mode-change handlers call it,
+so the cluster follows the seg and the pane stack alike. It sits on the band
+rather than in the window header a row above because that put a second strip of
+chrome across the top of the window carrying controls for a mode the user might
+not be in. An earlier pass set `RAIL_W` to whichever mode's content needed the
 most room (Analyze's, at 438) and let the other two panes — neither of which
 needs anywhere near that width — inherit it unchanged; the result read as an
 oversized sidebar with no content to justify it in Review and Datasets.
@@ -1396,9 +1417,9 @@ each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.
 
-**Resetting saved state.** The header's `rotate-ccw` button resets only the
+**Resetting saved state.** The mode band's `rotate-ccw` button resets only the
 *view* (`view_state.reset` — selected wells, fold-change scopes, per-tab combos).
-A second header button (`trash-2`, top-right next to the Presentation/plot
+A second button in the same cluster (`trash-2`, next to the Presentation/plot
 screen↔publication toggle) does a **full** reset: `_doc.delete(app)` deletes the
 whole `persistence.json` (every section above) and clears the in-memory cache,
 then `AllWellApp._on_reset_saves_clicked` reloads the dataset fresh. It's the

@@ -1870,6 +1870,15 @@ plain re-run would skip the very wells that need finishing.
    current segmentation. The findings list holds a placeholder ("Pick a
    dataset folder and press Check.") until then, and clears back to it if a
    re-check fails, rather than leaving an earlier check's results on screen.
+   Where the run left records of its own — the per-well completeness block in
+   `pipeline_info.json` and any tracebacks under `out/errors/` — the findings
+   use them rather than guessing. A well with images and no measurements CSV
+   is reported three different ways depending on what the run recorded: as
+   normal ("processed every field and segmented zero cells in all of them —
+   nothing to recover"), as a real failure (naming the FOV-groups that failed
+   and the traceback files to read), or as unknown when the run died before
+   writing a record. Only the last two are worth re-running, and only those
+   are put on the force list when you complete the run.
    Tick **Show raw log** for the line-by-line record: one line per well as
    it's read, and a final line stating what the check concluded.
 2. If any findings are metadata-only (the sidecar's timepoint/FOV lists don't

@@ -47,7 +47,7 @@ import re
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from datasets._common.concurrency import pick_workers
@@ -58,6 +58,7 @@ from pipeline.incremental_keys import (
 )
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.aw_safe import swallow
+from util.well_token import canonical_well_label
 from well_viewer.data.image_identity import load_schema
 from well_viewer.domain.tp_match import tp_close
 from datasets._common.dataset_paths import (
@@ -74,6 +75,7 @@ _TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
 _TIMEPOINT_HOURS_COLUMN = "timepoint_hours"
 _FILENAME_COLUMN = "filename"
 _OVERRIDES_FILENAME = "cell_overrides.json"
+_ERRORS_DIRNAME = "errors"
 
 
 class ValidateError(Exception):
@@ -96,6 +98,10 @@ class WellReport:
     has_in_container: bool
     has_out_zip: bool
     has_out_folder: bool = False
+    #: The run recorded this well as having segmented zero cells everywhere —
+    #: its empty output is a measurement, not a gap, so it must not be swept
+    #: into a forced reprocess that would produce the same empty result.
+    zero_cell_recorded: bool = False
 
     @property
     def complete(self) -> bool:
@@ -144,7 +150,10 @@ def wells_needing_force(report: "DatasetReport") -> tuple[str, ...]:
     Wells that are merely *partial* are deliberately not here: an incremental
     run does fix those, at a fraction of the cost of re-segmenting them whole.
     """
-    return tuple(w.well for w in report.wells if well_health(w) == "missing")
+    return tuple(
+        w.well for w in report.wells
+        if well_health(w) == "missing" and not w.zero_cell_recorded
+    )
 
 
 @dataclass(frozen=True)
@@ -258,6 +267,99 @@ def _member_names(container: Path) -> set[str] | None:
     except (OSError, zipfile.BadZipFile):
         return None
     return names if names else None
+
+
+@dataclass(frozen=True)
+class WellEvidence:
+    """What the run itself recorded about a well, beyond what its files show.
+
+    CLAUDE.md's first debugging rule for a wrong number here is to read the
+    run's own failure records before reading any application code, and this is
+    that evidence: ``pipeline_info.json``'s ``run_report`` block (written by
+    ``pipeline.run_report.finalize_run_report`` at the end of a run) and the
+    per-failure tracebacks under ``out/errors/``.
+
+    It is what separates the two datasets that look identical on disk — a well
+    that legitimately segmented zero cells at every timepoint, and a well whose
+    measurements CSV was lost. Both have images and no CSV. Only one of them is
+    a defect, and only one of them is worth re-segmenting.
+    """
+
+    groups_total: int | None = None
+    groups_covered: int | None = None
+    recorded_failures: tuple[str, ...] = ()
+    error_files: tuple[str, ...] = ()
+
+    @property
+    def recorded(self) -> bool:
+        """True when the run finished and wrote a record for this well."""
+        return self.groups_total is not None
+
+    @property
+    def segmented_zero_cells(self) -> bool:
+        """The run completed this well and it produced no rows anywhere.
+
+        ``groups_covered`` is read back from the finished CSV, so zero coverage
+        across a well the run *did* attempt in full, with nothing failed and no
+        traceback on disk, is a measurement — this well had no cells — not a
+        gap. Re-segmenting it would produce the same empty result.
+        """
+        return (
+            self.recorded
+            and (self.groups_total or 0) > 0
+            and self.groups_covered == 0
+            and not self.recorded_failures
+            and not self.error_files
+        )
+
+
+def _read_run_report(info: dict) -> dict[str, WellEvidence]:
+    """The sidecar's ``run_report`` block, keyed by canonical well."""
+    block = info.get("run_report")
+    if not isinstance(block, dict):
+        return {}
+    wells = block.get("wells")
+    if not isinstance(wells, dict):
+        return {}
+    out: dict[str, WellEvidence] = {}
+    for raw_well, rec in wells.items():
+        if not isinstance(rec, dict):
+            continue
+        well = canonical_well_label(str(raw_well)) or str(raw_well)
+        failed = rec.get("failed")
+        out[well] = WellEvidence(
+            groups_total=_as_int(rec.get("groups_total")),
+            groups_covered=_as_int(rec.get("groups_covered")),
+            recorded_failures=tuple(
+                str(f) for f in (failed if isinstance(failed, list) else [])),
+        )
+    return out
+
+
+def _as_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _scan_error_files(paths) -> dict[str, tuple[str, ...]]:
+    """Per-well traceback files the run left under ``out/errors/``.
+
+    Named ``<well>_<fov>_pid<N>.txt`` (or ``<well>_pid<N>.txt`` when a whole
+    well failed), so the well is the leading token up to the first separator
+    that yields a well label.
+    """
+    err_dir = paths.out_dir / _ERRORS_DIRNAME
+    found: dict[str, list[str]] = {}
+    if not err_dir.is_dir():
+        return {}
+    with swallow(f"scan {err_dir}"):
+        for path in sorted(err_dir.glob("*.txt")):
+            well = canonical_well_label(path.stem.split("_")[0])
+            if well:
+                found.setdefault(well, []).append(path.name)
+    return {well: tuple(names) for well, names in found.items()}
 
 
 def _read_sidecar(paths) -> dict:
@@ -450,9 +552,74 @@ def _row_content_findings(
     return findings
 
 
+def _no_csv_finding(well: str, evidence: WellEvidence) -> Finding:
+    """Why this well has images and no measurements CSV, and what fixes it.
+
+    The three answers are genuinely different and used to be one hedged
+    sentence ("it may have segmented zero cells at every timepoint"), which
+    told a user neither what happened nor what to do:
+
+    * the run recorded the well, covered none of its FOV-groups, failed
+      nothing and left no traceback — it segmented zero cells, which is a
+      measurement. Reprocessing produces the same empty result, so this is
+      ``info`` and the well is left off the force list.
+    * the run recorded failures, or left tracebacks under ``out/errors/`` —
+      a real gap, with the run's own records naming it. ``error``.
+    * no record at all (the run died before writing one, or predates the
+      block) — unknown, so it is reported as a gap rather than assumed
+      benign, since assuming benign is how a missing CSV goes unnoticed.
+
+    The last two both need a *forced* reprocess: an incremental run counts this
+    well's own output images as already done and reports it up to date, so it
+    would skip the well forever.
+    """
+    forced_remedy = (
+        "An incremental run counts this well's own output images as already "
+        "done and reports it up to date, so only a forced reprocess of this "
+        "well regenerates the CSV."
+    )
+    if evidence.segmented_zero_cells:
+        return Finding(
+            severity="info", code="no_csv_zero_cells", well=well,
+            message=(
+                f"Well {well}: no measurements CSV, and the run's own record "
+                f"says why — it processed all {evidence.groups_total} "
+                "FOV-group(s) and segmented zero cells in every one. Nothing "
+                "to recover; reprocessing would produce the same empty result."
+            ),
+        )
+    if evidence.recorded_failures or evidence.error_files:
+        detail = []
+        if evidence.recorded_failures:
+            detail.append(
+                f"{len(evidence.recorded_failures)} FOV-group(s) recorded as "
+                f"failed (e.g. {', '.join(evidence.recorded_failures[:3])})")
+        if evidence.error_files:
+            detail.append(
+                f"{len(evidence.error_files)} traceback(s) under out/errors/ "
+                f"(e.g. {', '.join(evidence.error_files[:3])})")
+        return Finding(
+            severity="error", code="no_csv_failed", well=well,
+            message=(
+                f"Well {well}: images exist but no measurements CSV, and the "
+                f"run recorded why — {'; '.join(detail)}. Read those before "
+                f"re-running. {forced_remedy}"
+            ),
+        )
+    return Finding(
+        severity="warning", code="no_csv", well=well,
+        message=(
+            f"Well {well}: images exist but no measurements CSV was found, and "
+            "the run left no completeness record for it — so whether it "
+            "segmented zero cells or lost its CSV cannot be told from disk. "
+            f"{forced_remedy}"
+        ),
+    )
+
+
 def _scan_one_well(
     well: str, *, in_map, zip_map, folder_map, csv_candidates, schema_fields, sep: str,
-    fov_field_present: bool,
+    fov_field_present: bool, evidence_map: dict[str, WellEvidence] | None = None,
 ) -> tuple[WellReport, list[Finding], set[str] | None]:
     """Read-only per-well diff: intent (from the input container) vs. done
     (from the CSV/out-zip/out-folder). Pulled out of :func:`_scan_wells` so
@@ -466,6 +633,7 @@ def _scan_one_well(
     caller's own sidecar-availability check can reuse them too.
     """
     findings: list[Finding] = []
+    evidence = (evidence_map or {}).get(well, WellEvidence())
     container = in_map.get(well)
     members = _member_names(container) if container is not None else None
     csvs = csv_candidates.get(well, [])
@@ -509,6 +677,7 @@ def _scan_one_well(
         well=well, missing=tuple(sorted(missing)), csv_state=csv_state,
         has_in_container=container is not None, has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
+        zero_cell_recorded=evidence.segmented_zero_cells,
     )
 
     # A well with real recorded output (done) should have every one of its
@@ -560,27 +729,32 @@ def _scan_one_well(
                 ),
             ))
     if csv_state == "missing" and (container is not None or out_zip is not None or out_folder is not None):
-        # An incremental run cannot fix this well, and saying only "no CSV
-        # found" sent users to press Run for nothing. incremental_done_fov_keys
-        # unions the CSV's rows with the output archive's members, so this
-        # well's own processed images are counted as already done: the run
-        # reports it "up to date (no new FOVs)" and skips it, leaving the
-        # missing CSV missing forever. Naming the remedy is the whole point of
-        # the finding.
-        findings.append(Finding(
-            severity="warning", code="no_csv", well=well,
-            message=(
-                f"Well {well}: images exist but no measurements CSV was found "
-                "(it may have segmented zero cells at every timepoint). An "
-                "incremental run counts this well's own output images as "
-                "already done and reports it up to date, so only a forced "
-                "reprocess of this well regenerates the CSV."
-            ),
-        ))
+        findings.append(_no_csv_finding(well, evidence))
     elif csv_state == "unreadable":
         findings.append(Finding(
             severity="error", code="unreadable_csv", well=well,
             message=f"Well {well}: its measurements CSV could not be parsed.",
+        ))
+
+    if csv_state != "missing" and (evidence.recorded_failures or evidence.error_files):
+        # The run wrote down what went wrong; a scan that re-derives everything
+        # from the files and never mentions those records makes the user hunt
+        # for a cause the software already has on disk. A well can hold a
+        # perfectly readable CSV and still have lost FOV-groups to failures.
+        bits = []
+        if evidence.recorded_failures:
+            bits.append(f"{len(evidence.recorded_failures)} FOV-group(s) failed")
+        if evidence.error_files:
+            bits.append(
+                f"{len(evidence.error_files)} traceback(s) in out/errors/ "
+                f"(e.g. {evidence.error_files[0]})")
+        findings.append(Finding(
+            severity="error", code="recorded_failures", well=well,
+            message=(
+                f"Well {well}: the run recorded failures for this well — "
+                f"{'; '.join(bits)}. Read them before re-running; they usually "
+                "name the cause outright."
+            ),
         ))
 
     if csv_state == "ok" and container is not None:
@@ -593,6 +767,7 @@ def _scan_wells(
     paths, *, schema_fields, sep: str, fov_field_present: bool,
     csv_candidates: dict[str, list[Path]], workers: int = 0,
     progress: ScanProgress | None = None,
+    evidence_map: dict[str, WellEvidence] | None = None,
 ) -> tuple[list[WellReport], list[Finding], dict[Path, set[str]]]:
     """Diff every well, returning ``(reports, findings, members_by_container)``.
 
@@ -612,7 +787,7 @@ def _scan_wells(
         result = _scan_one_well(
             well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
             csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
-            fov_field_present=fov_field_present,
+            fov_field_present=fov_field_present, evidence_map=evidence_map,
         )
         if progress is not None and progress.on_well_done is not None:
             progress.on_well_done(result[0])
@@ -765,10 +940,17 @@ def build_report(
     fov_field_present = schema.has_fov
 
     csv_candidates, prefixes, csv_findings = _classify_csvs(paths)
+    # The run's own records, read before anything is inferred from the files
+    # themselves — they are the only thing that can say whether an empty well
+    # is empty because it had no cells or because its CSV went missing.
+    evidence_map = _read_run_report(info)
+    for well, names in _scan_error_files(paths).items():
+        prior = evidence_map.get(well, WellEvidence())
+        evidence_map[well] = replace(prior, error_files=names)
     well_reports, well_findings, members_by_container = _scan_wells(
         paths, schema_fields=schema_fields, sep=sep,
         fov_field_present=fov_field_present, csv_candidates=csv_candidates,
-        workers=workers, progress=progress,
+        workers=workers, progress=progress, evidence_map=evidence_map,
     )
     stale_tps, missing_tps, stale_fovs, missing_fovs, availability_findings = (
         _check_sidecar_availability(

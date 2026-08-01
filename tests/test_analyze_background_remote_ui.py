@@ -64,19 +64,23 @@ def test_remote_params_grouped_and_gated_on_selection(qapp):
     assert tab._remote_cb.currentData() is None
     assert grp.isHidden()
 
-    # Selecting a remote reveals the group; dry-run stays gated on auto-delete.
+    # Selecting a remote reveals the group. Auto-delete is ON by default, so
+    # dry-run — which is gated on it — is available immediately.
     tab._remote_cb.addItem("fakehost", userData="fakehost")
     tab._remote_cb.setCurrentText("fakehost")
     assert not grp.isHidden()
-    assert not tab._dry_run_cleanup_cb.isEnabled()
-    tab._cleanup_remote_cb.setChecked(True)
+    assert tab._cleanup_remote_cb.isChecked(), "auto-delete defaults to on"
     assert tab._dry_run_cleanup_cb.isEnabled()
 
-    # Back to Local: hidden again and the toggles reset so a stale value can't
-    # be submitted for the next remote run.
+    # Unchecking it gates dry-run off again.
+    tab._cleanup_remote_cb.setChecked(False)
+    assert not tab._dry_run_cleanup_cb.isEnabled()
+
+    # Back to Local: hidden again, and the toggles return to their DEFAULTS so
+    # the next remote run starts from the same state a fresh tab would.
     tab._remote_cb.setCurrentText("Local")
     assert grp.isHidden()
-    assert not tab._cleanup_remote_cb.isChecked()
+    assert tab._cleanup_remote_cb.isChecked()
     assert not tab._dry_run_cleanup_cb.isChecked()
 
 

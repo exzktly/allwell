@@ -1676,6 +1676,7 @@ def test_required_files_list_is_what_we_promised():
         # Packed OME-TIFF de-interleave; client-side, listed for manifest
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",
+        "pipeline/run_report.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",
         "pipeline/threshold_optimize.py",

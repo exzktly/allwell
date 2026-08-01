@@ -167,6 +167,7 @@ from pipeline.io import (  # noqa: F401
     _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
+    preflight_scratch_for_run,
     merge_images_into_zip,
     merge_records_into_csv,
     remove_directory,
@@ -174,6 +175,11 @@ from pipeline.io import (  # noqa: F401
     save_overlay,
     scratch_base_for,
     write_csvs_per_well,
+)
+from pipeline.run_report import (
+    clear_run_report,
+    finalize_run_report,
+    record_well_completeness,
 )
 
 
@@ -658,6 +664,28 @@ def _parse_timepoint_hours(tp: str) -> float:
     return float("nan") if hours is None else hours
 
 
+_SHORT_FILENAME_WARNED: set = set()
+
+
+def _warn_short_filename(stem: str, n_parts: int, n_slots: int, sep: str) -> None:
+    """Warn once per filename shape that the schema's FOV slot went unfilled.
+
+    Deduped on the shape (token count), not the filename, so a plate of 600
+    files produces one line per naming convention rather than 600.
+    """
+    key = (n_parts, n_slots, sep)
+    if key in _SHORT_FILENAME_WARNED:
+        return
+    _SHORT_FILENAME_WARNED.add(key)
+    log.warning(
+        "Filename %r splits into %d %r-separated token(s) but the schema has %d "
+        "field(s) — the 'fov' slot is empty, so every row of these wells will be "
+        "written with no field-of-view label and their fields will pool into one "
+        "downstream. Check --filename_schema / --sep against the actual filenames.",
+        stem, n_parts, sep, n_slots,
+    )
+
+
 def parse_filename(
     path: Path | str,
     schema: list[str] | None = None,
@@ -702,6 +730,20 @@ def parse_filename(
         "timepoint":       "",
         "timepoint_hours": float("nan"),
     }
+
+    # A filename with fewer tokens than the schema has slots leaves the trailing
+    # fields empty. That is legitimate for ``timepoint`` (handled below: a
+    # single-timepoint dataset often carries no timepoint token) but never for
+    # ``fov``: an empty FOV token is written to every row of the well, the
+    # viewer maps it onto field "1", and the well's fields silently pool into
+    # one — which makes its per-field statistics wrong rather than missing. Say
+    # so once per (schema, token-count) shape so a mis-specified schema is
+    # visible in the run log instead of surfacing later as a plot with no error
+    # bars. Not fatal: the rest of the row is still good data.
+    if len(parts) < len(schema) and "fov" in schema:
+        fov_slot = schema.index("fov")
+        if fov_slot >= len(parts):
+            _warn_short_filename(stem, len(parts), len(schema), sep)
 
     for i, field in enumerate(schema):
         if field == "ignore":
@@ -2712,6 +2754,11 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
 # Well-level task functions (run inside worker processes)
 # ---------------------------------------------------------------------------
 
+# Consecutive OSErrors that mean the storage is gone rather than flaky.
+# _safe_imwrite already retried each write five times, so three groups = 15 tries.
+_MAX_CONSECUTIVE_IO_FAILURES = 3
+
+
 # ── Per-FOV checkpoint helpers (v5.2.0) ─────────────────────────────────────
 #
 # When a worker is killed mid-well, the next invocation should pick up where
@@ -2943,15 +2990,47 @@ def _process_groups_in_worker(
             return cached
         return _run_group(nuclear_path, fluor_paths)
 
+    # Storage that has run out does not recover mid-well. Without this, a full
+    # scratch volume is discovered once per FOV-group: every remaining group
+    # fails the same way, each writing a traceback, and the run spends hours
+    # producing complete-looking output for wells it has already gutted. Stop
+    # the well after a few consecutive I/O failures and say why — the groups not
+    # attempted are reported as missing, which is what they are.
+    _consecutive_io_failures = 0
+    aborted_reason = ""
+
+    def _note_failure(exc: BaseException) -> bool:
+        """Count a failure; True when the well should stop attempting groups."""
+        nonlocal _consecutive_io_failures, aborted_reason
+        _consecutive_io_failures = (
+            _consecutive_io_failures + 1 if isinstance(exc, OSError) else 0)
+        if _consecutive_io_failures < _MAX_CONSECUTIVE_IO_FAILURES:
+            return False
+        aborted_reason = (
+            f"{_consecutive_io_failures} consecutive I/O failures — the storage "
+            f"this well writes to is not usable")
+        return True
+
     if fov_threads == 1 or len(groups) == 1:
         for nuclear_path, fluor_paths in groups:
+            if aborted_reason:
+                failed.append(nuclear_path.name)
+                continue
             try:
                 all_records.extend(_process_or_resume(nuclear_path, fluor_paths))
+                _consecutive_io_failures = 0
             except Exception as exc:
                 _record_fov_failure(nuclear_path, exc)
+                if _note_failure(exc):
+                    log.error(
+                        "Well %s — ABORTING after %s. The remaining FOV-group(s) "
+                        "are not attempted; re-run with --incremental once the "
+                        "storage problem is fixed.", well_label, aborted_reason,
+                    )
             _fov_done += 1
             log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
     else:
+        _abort_logged = False
         with ThreadPoolExecutor(max_workers=fov_threads) as tex:
             future_map = {
                 tex.submit(_process_or_resume, nuc, fluors): nuc
@@ -2961,8 +3040,17 @@ def _process_groups_in_worker(
                 nuclear_path = future_map[fut]
                 try:
                     all_records.extend(fut.result())
+                    _consecutive_io_failures = 0
                 except Exception as exc:
                     _record_fov_failure(nuclear_path, exc)
+                    if _note_failure(exc) and not _abort_logged:
+                        _abort_logged = True
+                        log.error(
+                            "Well %s — storage failure: %s. The in-flight "
+                            "FOV-group(s) will finish or fail on their own; "
+                            "re-run with --incremental once it is fixed.",
+                            well_label, aborted_reason,
+                        )
                 _fov_done += 1
                 log.info("Well %s — FOV %d/%d done", well_label, _fov_done, _fov_total)
 
@@ -3067,8 +3155,14 @@ def process_well_zip_task(
             )
             if not groups:
                 log.warning("Well %s: no image groups found in %s.", well_label, zip_path.name)
+                record_well_completeness(output_dir, well_label, 0, None, [])
                 return [], []
 
+            # How many FOV-groups this well's INPUT holds — captured before the
+            # incremental filter narrows ``groups`` to the ones still missing,
+            # because the completeness record compares the well's output against
+            # its input, not against whatever this particular run attempted.
+            groups_in_input = len(groups)
             safe_well = _safe_well(well_label)
             csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
             out_zip   = output_dir / f"{well_label}_out.zip"
@@ -3121,6 +3215,8 @@ def process_well_zip_task(
                              well_label, csv_path.name, added)
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
+                record_well_completeness(
+                    output_dir, well_label, groups_in_input, csv_path, failed)
                 n_compressed = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_compressed, out_zip.name)
@@ -3130,6 +3226,8 @@ def process_well_zip_task(
                     log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
+                record_well_completeness(
+                    output_dir, well_label, groups_in_input, csv_path, failed)
 
                 n_compressed = compress_images_to_zip(tmp_images, out_zip)
                 log.info("Well %s: %d image(s) -> %s", well_label, n_compressed, out_zip.name)
@@ -3232,8 +3330,12 @@ def process_well_folder_task(
             )
             if not groups:
                 log.warning("Well %s: no image groups found in %s.", well_label, well_folder)
+                record_well_completeness(output_dir, well_label, 0, None, [])
                 return [], []
 
+            # See the zip-mode task: the well's full input group count, captured
+            # before the incremental filter narrows ``groups``.
+            groups_in_input = len(groups)
             safe_well = _safe_well(well_label)
             csv_path  = output_dir / f"{csv_prefix}_{safe_well}.csv"
             out_zip   = output_dir / f"{well_label}_out.zip"
@@ -3274,6 +3376,8 @@ def process_well_folder_task(
                              well_label, csv_path.name, added)
                 else:
                     log.warning("Well %s: no records produced; CSV not updated.", well_label)
+                record_well_completeness(
+                    output_dir, well_label, groups_in_input, csv_path, failed)
                 n_out = merge_images_into_zip(out_zip, tmp_images)
                 log.info("Well %s: merged %d new image(s) -> %s",
                          well_label, n_out, out_zip.name)
@@ -3286,6 +3390,8 @@ def process_well_folder_task(
                     log.info("Well %-12s -> %s  (%d rows)", well_label, csv_path.name, len(records))
                 else:
                     log.warning("Well %s: no records produced; CSV not written.", well_label)
+                record_well_completeness(
+                    output_dir, well_label, groups_in_input, csv_path, failed)
 
                 # Atomically rename staging dir to final output folder.
                 if final_out.exists():
@@ -4476,6 +4582,32 @@ def main() -> None:
     well_zips    = find_well_zips(input_dir)
     well_folders = find_well_folders(input_dir) if not well_zips else []
 
+    # ── Scratch preflight ───────────────────────────────────────────────────
+    # Checked here, once both the well list and the channel count are known and
+    # before a single image is read. The scratch volume is usually NOT the one
+    # holding the dataset (§ pipeline.io.scratch_base_for), so "there is plenty
+    # of room" beside the inputs says nothing about the volume the run actually
+    # writes its transient working set to.
+    preflight_scratch_for_run(
+        scratch_base_for(output_dir), input_dir,
+        n_wells=len(well_zips) + len(well_folders),
+        n_channels=1 + len(fluor_tokens_for_quant),
+        workers=workers,
+        image_exts=_GROUP_IMAGE_EXTS,
+        count_groups=lambda: (
+            len(_collect_available_fovs(
+                input_dir, filename_schema=":".join(schema), filename_sep=sep)) or 1
+        ) * (
+            len(_collect_available_timepoints(
+                input_dir, filename_schema=":".join(schema), filename_sep=sep)) or 1
+        ),
+        log=log,
+    )
+
+    # Any completeness records from a previous run in this output dir would be
+    # merged into this run's report; start clean.
+    clear_run_report(output_dir)
+
     # Per-well failures are surfaced here so main() can signal them via the
     # process exit code (audit E5) rather than always exiting 0.
     failed_wells: list[str] = []
@@ -4538,6 +4670,14 @@ def main() -> None:
             input_dir,
         )
         _sys.exit(1)
+
+    # Fold each well's coverage into pipeline_info.json. Without this record a
+    # partly-failed well is indistinguishable from a whole one — see
+    # pipeline/run_report.py.
+    finalize_run_report(
+        output_dir, output_dir / PIPELINE_INFO_FILENAME,
+        atomic_writer=_safe_atomic_text_write, log=log,
+    )
 
     # Auto-threshold: every well is processed and the output zips, per-well CSVs
     # and sidecar are on disk, so write the default ThreshFracOn cut per channel

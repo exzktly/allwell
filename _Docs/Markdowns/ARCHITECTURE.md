@@ -58,8 +58,11 @@ central pane stack. The central stack has three pages:
 | Page 1 | **Analyze** | `AnalyzeTab(QWidget)` | `analyze_tab.py` |
 | Page 2 | **Datasets** | `DatasetsTab(QWidget)` | `datasets_tab.py` |
 
-The title bar's `SegmentedControl` (`Review` / `Analyze` / `Datasets`) drives the
-stack; segment index maps straight to stack index. The stack lives inside
+The mode bar (`Review` / `Analyze` / `Datasets`) drives the stack; segment index
+maps straight to stack index. It is built by `AllWellApp` but lives on the
+Review pane's mode band, along with the dataset action cluster — see
+[The rail head](#the-rail-head) — leaving the title bar itself carrying the logo
+and the version pill. The stack lives inside
 `WellViewerApp` (`_central_pane_stack`) so Review's left rail stays put; Analyze
 and Datasets are mounted onto it by `WellViewerApp.mountAnalyzePane` /
 `mountDatasetsPane` (both go through `_mount_secondary_pane`, which places a pane
@@ -397,7 +400,9 @@ allwell.main()
     ├── app.setStyleSheet(theme.qss())                        ← global QSS
     ├── AllWellApp().__init__
     │       ├── _build_ui()
-    │       │    ├── title bar (mode seg, Open, Help, …)
+    │       │    ├── title bar (logo + version pill; the mode seg and the
+    │       │    │            Review action cluster are re-parented into the
+    │       │    │            Review pane's mode band below)
     │       │    └── central stack:
     │       │         ├── page 0  ←  WellViewerApp() (Review)
     │       │         │       ├── _build_ui()
@@ -736,13 +741,39 @@ one column rather than a chip row floating over one.
 All three modes put a panel down the left edge, and all three pin to the same
 `RAIL_W` — Review's rail, the Datasets sidebar, and Analyze's form panel (fixed
 there too, not merely a minimum inside a resizable splitter) — so switching
-modes never visibly resizes the window. `AllWellApp._sync_mode_bar_width`
+modes never visibly resizes the window. `AllWellApp._sync_mode_bar`
 still matches the bar to whichever panel is current, re-running on every mode
 switch and on any resize of the three panels it watches, as a defensive floor
 rather than reconciling genuinely different widths: it floors at the bar's own
 natural width, so a panel narrower than the three segments elides their labels
-rather than shrinking the bar, and falls back to that width when every panel
-is hidden. An earlier pass set `RAIL_W` to whichever mode's content needed the
+rather than shrinking the bar.
+
+Because the bar and the panel are one column, they collapse together. The same
+method hides the bar whenever the rail is collapsed (`Ctrl+B`, or the button
+floating on the rail's edge), and the page tab strip then runs to the window's
+left edge. It is driven off the panels' own show/hide events, so it follows
+both routes into `tab_controller.apply_sidebar_visibility` without either of
+them having to know the bar exists. Left behind, the bar was a rail-width band
+of chrome hanging above an empty column, squeezed to a natural width its three
+labels do not fit inside. Re-expanding the rail brings it back — which is also
+the only way back to Analyze and Datasets while collapsed, since the bar is the
+app's sole mode switch.
+
+The band's right end carries the dataset action cluster — reload, presentation
+mode, full reset of saved state, reveal the dataset folder, reset the view, and
+the help drawer. They are built in `AllWellApp` alongside their handlers and
+then moved into the band by `_mount_review_actions`, which appends them after
+the page-tabs host; that host holds the band's only stretch, so the cluster is
+pushed hard right whatever the tab strip is showing, and the band's pinned
+height rises to whatever the buttons need rather than clipping them. Every one
+of the six acts on the loaded dataset or on the plots drawn from it, so
+`_sync_review_actions` shows the cluster in Review alone and hides it in Analyze
+and Datasets, where each would be a control with nothing behind it (`Ctrl+/`
+still opens the help drawer from any mode). Both mode-change handlers call it,
+so the cluster follows the seg and the pane stack alike. It sits on the band
+rather than in the window header a row above because that put a second strip of
+chrome across the top of the window carrying controls for a mode the user might
+not be in. An earlier pass set `RAIL_W` to whichever mode's content needed the
 most room (Analyze's, at 438) and let the other two panes — neither of which
 needs anywhere near that width — inherit it unchanged; the result read as an
 oversized sidebar with no content to justify it in Review and Datasets.
@@ -1270,6 +1301,8 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `features/scatter/{controller,callbacks}.py` | Scatter Plot (cells + aggregate). The per-axis fluor-gate (`fluor_gate_x` / `fluor_gate_y`) comes from the Cell Gating tab's per-channel floors, looked up by the axis's channel — which the scatter holds as the upper-cased dropdown label, so `_cell_gating_resolve_key` matches case-insensitively (a case-sensitive lookup returned the 0.0 "gate off" default and the tab's gate silently did nothing here). It is bypassed when an axis column ends with `_smfish_count` — the gate is a fluorescence-intensity floor and would strip every integer-count cell on a count axis. The mixed-axis case (one count, one intensity) still gates the intensity axis. The interactive rectangular gates live in `scatter/gating.py` (a documented naming exception): each box is stamped at draw time with its axis metric columns (`x_col`/`y_col`) and a `name` (auto-assigned `Gate N`, shown on the plot, editable in the Properties sidebar's gate list via `rename_gate`, which captions each row with those two columns via `data/metric_labels.gate_axes_label` so a gate list spanning several metric pairs is readable), so beyond the on-plot "% inside" labels its `compute_gate_inclusion` (matplotlib-free, reuses `_in_gate` + `resolve_value_series`) lets the Cell Gating tab turn the selected gate(s) into the `Gate_Pass` inclusion layer. The gating (inclusion) and thresholding (fraction-on) layers each have their OWN *Gates* multi-select checkbox menu, so they can be configured independently (`cell_gating_selected_scatter_gates(ctx, mode)`); each selection is a set of names on the typed slice, `ctx.state.cell_gating.gating_choices` / `.thresh_choices` (`None` ⇒ all gates, auto-including ones drawn later). Each box's stamped `x_col`/`y_col` also drive on-axes rendering: `gating.draw_gates` / `gate_edge_at` only show and hit-test a gate when `ctx.runtime.scatter.axes_cols` (the columns currently on the axes, recorded by `paint_gates`) match it — a gate drawn on a different X/Y pair is hidden, since its box coords are meaningless there. Drawing / editing / clearing a gate fans out through `gating._notify_gates_changed` to the callback the Cell Gating tab registers on `ctx.runtime.scatter.gates_changed_cb` (`cell_gating_sync_scatter_gates`), which refreshes the pickers and recomputes inclusion immediately (signature-guarded); the per-cell scatter opts out of `Gate_Pass` by default, so its cloud never shrinks under its own gates. That opt-out is the tab's **Apply gates** toggle (`ScatterState.apply_gates_to_points`, in the `Display ▾` popover with the other view options): on, the plot shows only the gated population. It filters on the gate *geometry*, not on the `Gate_Pass` column — `redraw_scatter` passes `collect_scatter_data(gates=gates_for_axes(ctx, col_x, col_y))` and `_collect_well` ANDs in `compute_gate_inclusion`. That is deliberate and load-bearing: `Gate_Pass` is written by the Cell Gating worker, asynchronously and against *its own* gate selection, so it can describe a different set of boxes than the ones on screen — a gate drawn or resized since the last pass, a selection that omits it, or gates belonging to another metric pair whose boxes this plot hides. Each of those produced the same symptom: survivors in one corner, an empty box in another. Computing membership here makes "the points you see are the points inside the boxes you see" true by construction. `gates_for_axes` applies the same column-pair rule `_gate_on_current_axes` uses for drawing, minus unstamped gates (`compute_gate_inclusion` skips those, so including them would contribute an all-false mask and blank the plot — a box drawn but not filtering beats an empty cloud). `collect.scatter_points_gated` gates the whole thing on the toggle plus one more condition: no gate being drawn or edge-dragged. That matters because a gate release fans out to a recompute and a redraw, so a live filter would erase every point outside the box the instant it was drawn, leaving nothing to judge or resize the gate against. The toggle is otherwise self-contained — it does not consult `use_scatter_gates`, and filtering here changes nothing about what any other view counts. `collect.gate_filter_title_suffix` tags the axes title with `· gate-filtered` while it bites, since the toggle itself does not travel into a copied or saved figure. A second, independent Cell Gating toggle applies the same selected gate as a **fraction-on threshold** instead of (or as well as) inclusion: the worker writes a per-cell `Gate_On` column and `aggregate_with_threshold_df(on_col="Gate_On")` (selected via `stats_compute._thresh_on_col`) makes gate membership the "on" population for fraction-on, replacing the `value > ThreshFracOn` cutoff. The per-cell tab's **Color by time** toggle (`_scatter_color_by_tp`) colours each point by its timepoint instead of by well identity (one `Line2D` per well-timepoint in a shared viridis scale from `collect.timepoint_color_map`, which the aggregate scatter reuses); it overrides density shading, and with >1 well selected it forces the "Separate axes" stacked layout (`_render_scatter_faceted`) so each well's time-coloured cloud gets its own panel. |
 | `features/heatmap/{controller,models}.py` | Heat Map: layout + redraw. A canvas click selects the cell's wells; Shift adds and Ctrl toggles. `_event_modifiers` resolves those from the Qt `QMouseEvent` behind `event.guiEvent` — PySide6 hands back a `KeyboardModifier` flag object that `int()` rejects, so the bits are read through `.value` — and falls back to matplotlib's own `event.key` when no GUI event is attached. `features/heatmap/sidebar_view.py` holds the layout editor; its **Auto-populate from selection** plans cells through the pure `_autopopulate_cells`, which reads whichever store the plate's current mode expresses the selection in — `selection.selections` in replicate mode and `selection.selected_wells` in plain mode (one cell per well, in plate order). Reading only the latter laid out whatever stale individual wells were left in it whenever replicate groups were defined, since replicate mode leaves that store empty. In replicate mode the shape of the plan then follows `heatmap.repset_avg`, which is what decides whether a cell means a set or a well: on, one cell per *visible* set holding all of its loaded wells; off, one cell per member well in plate order. A cell holding several wells renders as `A01+3` (members in the tooltip) with its well token in `_CELL_TOKEN_ROLE`, so the summary never reaches the model, and a drag moves the cell's whole well list rather than the single token the drag carried. **Cell numbers.** `_format_cell_value` picks a format from the metric and the magnitude — counts whole, fractions to two places, intensities scaled to their size — unless the Properties panel's **Value format** (`heatmap_value_format`, a printf-style string) overrides it; a format the value cannot satisfy falls back to the automatic choice rather than blanking the cell. The drawn cell and the hover readout share it, so the number under the cursor matches the one on the grid. Because the format changes annotation *text* rather than style, the Properties row triggers a real redraw instead of the auto-wired restyle. **Log scale** routes the values through a `LogNorm` (raw data reaches `imshow`, so the cell numbers stay in raw units) and masks non-positive entries; when the data carries no usable positive range it says so on the status line instead of quietly rendering linear, which was indistinguishable from the toggle doing nothing. |
 | `features/distribution/controller.py` | Distribution tab: histogram / KDE / violin. Log-X/Log-Y is a **single per-figure axis pref** (`x_log` / `y_log`) that the on-plot checkboxes and the Properties-sidebar toggles both drive — they previously wrote two independent stores and the export pass clobbered the button. Log-Y histograms pass `log=log_y` straight into `ax.hist` rather than computing a density from 0 and log-scaling afterwards (which corrupted the bar heights). |
+| `domain/fov_integrity.py` | **Are a well's FOV labels real?** Every per-field number in the app — the bar / line error bars, the events-per-field panel, the Statistics tab's `n` — groups on the CSV's `fov` column, and that column is only as good as the filename parsing that produced it: `process_microscopy.parse_filename` fills a schema slot it can't find with `""`, and `data/image_identity.normalize_fov` maps `""` and `"-1"` onto `"1"` (the single-field convention). A well whose filenames don't match the schema therefore arrives with every row labelled field 1, and *after loading* that is indistinguishable from a well that genuinely has one field — so the fields pool, the spread across fields becomes undefined, and the "mean events per field" silently becomes the pooled total. `check_fov_labels(df)` decides it from evidence the rows already carry, with no image reads: `filename` records the nuclear image each cell came from (one per field per timepoint), so **more distinct images than field labels within a timepoint** proves the labels don't separate the images; and `nucleus_id` is assigned per label image, so a **repeated id inside one (field, timepoint)** proves several images were pooled. The image-count signal is the one that survives an incremental re-run, because `pipeline/io.merge_records_into_csv` dedups on `(well, fov, timepoint, nucleus_id)` and drops the colliding rows outright. Either signal is conclusive alone and neither can fire for a genuine single-field well, so a dataset the checker doesn't understand behaves exactly as before. `data/data_loading.get_rows` runs it once as each well's frame is built and records the verdict on `state.dataset.fov_integrity`; `core/load_controller._report_unusable_fov_labels` names the affected wells in the status line, a toast, and the log, because silence about *why* is what made the original report look like a plotting glitch. `aggregate_with_threshold_df` consults it before computing anything per field: an untrusted well's per-field spread **and its per-field event count** come back `NaN` rather than a pooled total wearing a per-field label. |
+| **Undefined spread is `NaN`, never `0.0`** | A spread of zero is a measurement — it says the replicates agreed exactly — and one replicate is not that. `data_loading._aggregate_arrays` returns `NaN` for every spread it did not compute (a single field, a single above-threshold cell, untrusted FOV labels), and that undefinedness is preserved end to end: `domain/fold_change.scale_bar_value` scales the value but keeps an undefined input spread undefined instead of folding it to zero; `features/export/service.bar_metric_row` writes an **empty cell**, so `err_SEM_*` never reads `0.000000` for a quantity that was never computed; and `features/barplot/controller._mark_undefined_spread` puts a hollow cap and an `n/a` on the bar when error bars are on. The marker is the point — consumers already skip a non-positive spread, so before it, a bar with nothing computable drew *identically* to a bar whose error bars had been switched off. |
 | `features/stats/controller.py` | Statistics tab: groupwise tests, KS CDF. The replicate unit is the **one rule** `domain/stats_compute.replicate_unit` — shared with the bar/line error bars so the test's `n` and the plotted spread never disagree. In **FOV mode** every FOV **across all of a group's wells** is an independent replicate (`n` = total FOVs, pooled across wells); otherwise each well is one replicate. Pooling FOVs across wells is pseudo-replication (smaller p-values than a well-level test) — an explicitly chosen mode. |
 | `features/image_browser/image_table/controller.py` | Image Table grid: render-model assembly + Generate/export orchestration. The "turn cache + state into pixels" work is split into sibling modules it re-exports (so call sites and external importers are unchanged) and which `test_monolith_budgets.py` ratchets: `image_compose.py` (LUT palette + per-channel cmap/LUT resolution, array loading, mask/threshold rendering, the RGB cell composer `cell_display_rgb`, the boundary overlay, and the channel-overlay blender `overlay_cell_rgb`), `grid_layout.py` (axis/cell layout math + the per-dimension well/channel/FOV/timepoint option lists), `build_layout.py` (flat + nested grid assembly + `image_table_apply_spec`), and `facet_view.py` (faceted render placement — axis labels + group spacing). **One facet plan, two surfaces.** `facet_view.plan_facets` computes the placement and the label text from the builder's nesting; `facet_view.render_facet_chrome` turns that plan into the live grid's `QLabel` axis strips, and `renderer.py` replays the *same* plan onto the export figure's `GridSpec`. So Export to File, Copy PNG, Copy SVG and Save to Saved Plots all carry the row/column axis labels, the rotated group strips, the corner label and the inter-group gaps the user sees on screen — the per-cell titles (`show_titles`) are an Export-settings opt-in on top, off by default because the axis labels already identify every cell. `renderer.py` is Qt-free: it duck-types the plan through its argument rather than importing `facet_view`, so the geometry is unit-testable without building a widget, and it restates the label palette in dark-on-light because the figure is saved transparent and lands on a white page where the app's dark chrome colours are unreadable. The export gridspec **pins its own margins and solves `wspace`/`hspace` for an absolute inch pad** (matplotlib spreads one uniform separator between adjacent slots, sized as `wspace × usable/n` before the ratios apply). It deliberately does not use `tight_layout` or `constrained_layout`: both redistribute space to fit each axes' content, which flattens exactly the group gaps the layout exists to express. **Brightness parity.** The Saved Plots snapshot pre-shrinks each cell to a pixel budget with an *area-average* pooler (`export._area_pool_rgb`) — the same averaging Qt's smooth transform applies to the live thumbnail — so the saved image reads at the grid's brightness; peak-preserving pooling dilates sparse fluorescence and makes the snapshot brighter than its source. Symmetrically, the live thumbnail passes an explicit `(0.0, 255.0)` window to `make_overlay_thumb`, because `cell_display_rgb` has already applied the channel's LUT and colormap and re-fitting a finished image to its own min/max distorts any colormap whose ends are not black and white. **The decode cache owns the pixels, and nothing else holds them.** A rendered grid keeps no frames: `ctx.runtime.image_table.cells` and `state.image_table.last_render` record *which* cells drew, never their arrays, and a cell's `QLabel` carries `_raw_shape` (an `(h, w)` tuple, the contract `crop_tool.label_source_shape` reads) instead of the frame itself. The pixel readout fetches its cell's array on demand (`controller._hover_array`, which holds the one cell under the cursor so a drag across it decodes once); the export figure and the composite column already lazy-load on a missing array, and that load is a decode-cache hit. This is what makes `_DECODE_CACHE`'s byte budget an actual ceiling rather than a suggestion: when the render model and the widgets each pinned every frame, the budget bounded nothing — emptying the whole cache released no memory — and resident pixels grew as (cells × frame size), which at the 2048×2048 frames microscopy produces is ~16 MB a cell and over a gigabyte for a plate walk. The budget is sized from installed RAM (`image_discovery._default_max_decode_bytes`, ~15% clamped to [512 MiB, 2 GiB]) precisely because it is now the ceiling: a grid larger than the budget re-decodes through LRU eviction, which is slow, instead of exhausting memory, which fails allocations and surfaces as frames that decode for some cells and not others. **Decode caching is two-tier and shared across every export path.** `ctx.state.image_table.image_cache` holds the per-`(well, chan_lower, variant)` ref-dicts (which files exist for a well+channel); `data/image_discovery.py`'s module-global `_DECODE_CACHE` holds the actual decoded pixel arrays, keyed by `(resolved_path, greyscale, mtime_ns)`. `export._build_export_figure` writes into the *same* `image_cache` object `image_table_generate` uses (never a throwaway copy), and calls the identical threaded `controller._prefetch_cell_arrays` warm-up Generate uses before rendering — so a Save to Saved Plots or Export to File run benefits from a prior Generate's decode work and vice versa, and a save without a prior Generate still decodes in parallel rather than one cell at a time on the GUI thread. `_prefetch_cell_arrays` dedupes across calls via `state.image_table.prefetched_cells`, a persistent `set` of `(well, chan_lower, variant, tp, fov)` tuples already submitted to the thread pool — a *per-cell* key, unlike `image_cache`'s per-well+channel ref-dicts, because a grid faceted by timepoint or FOV needs every distinct cell warmed, not just one representative per well+channel. Because `export.py` needs one function out of `controller.py` (which already imports `export` at module scope as its re-export point), that one edge is a function-scoped import inside `_build_export_figure` — the standard cycle-break pattern the codebase uses elsewhere in this feature (§ `test_deferred_imports.py`'s budget). **Save to Saved Plots quality is a tunable preset**, not a fixed constant: `GALLERY_QUALITY_PRESETS` (`export.py`) maps `draft`/`standard`/`high` to a `(cell_max_px, gallery_max_px)` pair — the per-cell pre-shrink budget and the assembled grid's longest-side cap — so a single user choice (the Export dropdown's quick-pick submenu, or the "Export settings…" dialog) scales both together; scaling only one independently would either cap quality at the other's bound or waste compute. Export to File / Copy PNG / Copy SVG always render full resolution — only the gallery-save path reads this setting. **A Generate pass degrades cell by cell.** `image_table_generate` clears the grid before it draws anything, so an exception escaping mid-pass leaves a wiped or half-drawn table and no account of why. Every pre-pass — the parallel prefetch, the pooled Auto-LUT window, the chrome plan, the facet plan — is wrapped and degrades to a usable default (per-cell auto-fit, no scale bar, a plain unfaceted grid), and each cell's render is wrapped on its own, so one unreadable frame costs that one cell instead of abandoning every cell after it. A cell that produces no pixmap carries a *reason*: `(no image)` when nothing decoded, `(no mask)` when it asks for a mask / ≥threshold view the segmentation output can't supply, `(render failed)` when the render raised (logged with the cell's well / channel / timepoint / FOV). The status line counts the holes — a table that quietly draws fewer cells than it was asked for reads as a finished table. **A binary render never falls back to the intensity image.** `cell_display_rgb` returns `None` when a mask / ≥threshold cell can't resolve its segmentation mask, rather than composing the fluorescence it would otherwise show: that fallback made a threshold view come out half switched, with the cells whose mask resolved turning into silhouettes while the rest kept showing their picture, indistinguishable from cells with no signal above threshold. `_load_mask_array` resolves through the *same* `_match_image_ref` tiers as the image lookup (exact → normalized → numeric-close, plus the ambiguous-FOV refusal), so the mask and the image agree cell for cell instead of the mask resolving a subset of what the image does. **An empty scan is remembered for one pass, not for the session.** `image_cache` outlives every Generate (it is dropped on dataset load), so an empty `find_well_images_and_masks` result written into it pins "this well/channel has no images" until the dataset is reloaded — and empty is not always permanent: a drive that stalls, a directory a running pipeline is still writing, a transient `OSError` inside the walk all produce it, and the affected cells then read `(no image)` forever while their neighbours render. `_load_well_channel` caches only non-empty results (including the `__mask__` sentinel dict) and records the empty ones in `state.image_table.scan_misses`, cleared at the top of each Generate / export run — so one pass still scans a genuinely absent well/channel only once, and the next pass gives it another chance. `_prefetch_cell_arrays` marks only the keys that actually decoded, for the same reason. **Headless plain-data render model.** `ctx.runtime.image_table.cells` is a `rows × cols` grid of plain `{"well","chan","tp","fov"}` string dicts — the render contract, no Qt widgets. The renderer (`image_table_generate`), the layout math, the per-cell override popover (`grid_ops.py`), and `persistence/view_state.py` all read/write those strings directly; off-axis held values live on `state.fixed_vals` (read by `grid_layout._fixed_off_axis`) and grid size on `state.rows`/`state.cols`, so there are no held-value combos or grid-size spinners. A **grouped/tiled** well layout (`group_size`, 0 = off) bands each channel across multiple rows; it persists through `persistence/view_state.py` (`group_size` / `group_row_span`). **Builder shelf.** The **sole** authoring surface is `builder_view.py` — a root + nested-channels drag-and-drop tree: each axis gets a root (Well/Timepoint/FOV) with channels nested under it, each channel carrying its own render options (raw/corrected · mask · ≥thr · boundary · colormap/LUT) via a ⚙ menu; a derived **Fixed** panel auto-lists the off-axis roots with value pickers; a **Separate ↔ Overlay** switch (`state.composite`) collapses a root's channel axis to a single entry and additively blends every selected channel into each cell — "blend this root's channels into one cell" (the layout emits the `image_compose.OVERLAY_CHAN` sentinel as the sole channel value via `grid_layout._axis_dim_values`; `image_compose.overlay_cell_rgb` blends it in both the live grid and export, and the flag round-trips through `view_state`); wells come from the sidebar plate. The shelf edits a Qt-free `TableSpec` (`state.py`) and calls `build_layout.image_table_apply_spec`, which flattens it onto the existing `row_dims`/`col_dims`/`active_*`/`composite`/`group_size` state (+ a per-channel `channel_opts` block) and drives the layout + a debounced `image_table_generate`. Per-channel display is **position-independent**: the four `image_compose._row_*` helpers resolve options from `channel_opts` keyed by the cell's channel, and the live generate path is unified onto `cell_display_rgb` so the live grid, the channel-overlay blend, and export always agree. A ⚙ "≥threshold" reuses main's `"<CHAN> (binary)"` token. Per-cell tweaks come from right-clicking a rendered cell (`grid_ops.image_table_cell_override_menu`, which writes the cell dict). **Plate (96-well) layout.** A **Plate A–H × 1–12** toggle in the shelf header lays each selected well's image out in true plate positions with correct axis labels, using two *virtual* layout dims — `well_row` (A–H) and `well_col` (1–12), enumerated from the plate selection in `grid_layout` (`_well_row_options` / `_well_col_options`). They never get their own render-model cell key: `grid_layout.compose_plate_well` resolves each `(row, col)` back to the real `well` token (blank when that position is absent), and `facet_view._cv` derives them back from the composed well so the A–H / 1–12 headers label every band — unlike the `group_size`/Wrap trick, whose facet headers only reflect the first band. It rides the existing single-dim `_build_nested_layout` path (`row_dims=["well_row"]`, `col_dims=["well_col"]`); the channel is held fixed (`TableSpec.plate` flag round-trips through `spec_to_state_fields` / `spec_from_state`), and it's mutually exclusive with Wrap *and* with channel Overlay (plate mode writes `composite=False`). |
 | `features/preview/controller.py` | Preview-panel helpers (well-picker sync for the image tabs). The image pixel-value hover tooltip lives in `review_image/controller.py` next to its only caller. |
@@ -1384,9 +1417,9 @@ each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.
 
-**Resetting saved state.** The header's `rotate-ccw` button resets only the
+**Resetting saved state.** The mode band's `rotate-ccw` button resets only the
 *view* (`view_state.reset` — selected wells, fold-change scopes, per-tab combos).
-A second header button (`trash-2`, top-right next to the Presentation/plot
+A second button in the same cluster (`trash-2`, next to the Presentation/plot
 screen↔publication toggle) does a **full** reset: `_doc.delete(app)` deletes the
 whole `persistence.json` (every section above) and clears the in-memory cache,
 then `AllWellApp._on_reset_saves_clicked` reloads the dataset fresh. It's the
@@ -2161,6 +2194,51 @@ parent process supervises the per-well worker pool:
   well's records free as the loop advances, so the parent holds at most one
   well's worth transiently (per-well CSV writing stays worker-side).
   `tests/test_well_worker_pool.py` pins the count.
+- **Completeness is part of the output contract.** A well whose FOV-groups partly
+  failed still writes its per-well CSV and `<well>_out.zip` from the groups that
+  succeeded, and on disk that output is shaped exactly like a clean well's — so
+  every well records how much of its input its output actually covers.
+  `pipeline/run_report.py` is that record: each worker drops one small JSON file
+  (`groups_total` from the well's input group count, `groups_covered` read back
+  from the finished CSV's distinct `(fov, timepoint)` pairs — ground truth from
+  the artifact, so it stays honest across incremental runs, resumed per-FOV
+  checkpoints, and groups a failing disk never let the run attempt). `main`
+  folds them into a `run_report` block inside `pipeline_info.json` and logs the
+  shortfall; `core/load_controller._report_incomplete_wells` names the affected
+  wells in the status line, a toast and the log at dataset load. One file per
+  well, written atomically and never appended to, so the worker pool cannot
+  interleave two wells into a corrupt record. Without this, per-field statistics
+  silently described whatever fields survived and the first visible symptom was
+  an absent error bar several layers from the cause. The per-FOV tracebacks in
+  `<output_dir>/errors/` remain the detailed evidence.
+- **A well stops attempting FOV-groups once its storage has failed repeatedly.**
+  `_MAX_CONSECUTIVE_IO_FAILURES` consecutive `OSError`s abort the well's
+  remaining groups (they are still reported as missing, which is what they are).
+  Storage that is out of room does not recover mid-well, and `_safe_imwrite` has
+  already retried each write five times with backoff before raising — so by the
+  third group in a row the volume has had fifteen chances. Non-`OSError`
+  failures do not trip it: a segmentation bug throwing on every frame is not a
+  storage problem, and aborting would hide how widespread it is.
+- **The scratch volume is checked before the run starts.** `main._preflight_scratch`
+  sizes the need from the dataset itself — one input image for the per-image
+  byte size, the run's own field/timepoint enumeration for FOV-groups per well,
+  `--workers` for how many wells stage at once — and compares it against free
+  space on the *resolved* scratch base (`pipeline.io.preflight_scratch_space`).
+  Below one well's worth it exits before reading an image, because a run that
+  starts there cannot finish; merely tight only warns, since the estimate is
+  deliberately rough and refusing to start on a heuristic would be worse than
+  the risk. The resolved base is logged on the `Scratch  :` line either way.
+- **Scratch exhaustion is the common cause of a partial run.** The scratch base
+  defaults to `~/.allwell/scratch` (§6.5) — the *home* volume — while the dataset
+  usually lives on an external or network disk, so a run with terabytes free
+  beside its inputs can still fill the volume it actually writes to. Each
+  FOV-group stages ~6 intermediate images there, so a 6-field × 23-timepoint well
+  is several GB and a plate of them is far more. `pipeline.io._safe_imwrite`
+  retries with backoff and triages disk-full versus transient, but once space is
+  genuinely gone every remaining group fails the same way: the run continues,
+  logging a failure per group, and produces a full complement of complete-looking
+  per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the Analyze tab's *Scratch
+  disk* field) at the same volume as the data when the home volume is tight.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
   `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
   mirroring `_dump_well_failure_trace`), and `classify_log_line` treats
@@ -2203,6 +2281,31 @@ itself uses — keeping them potentially reusable for a CLI driver.
 
 A run touches two classes of storage, and keeping them apart is what makes it
 survive an unreliable output volume.
+
+**Remote staging moves only what it uploads.** A remote run in zip mode with a
+channel filter or `--incremental` cannot use the user's archives directly — both
+paths rewrite the zip (dropping unused channels / already-done FOV-groups), and
+rewriting in place would corrupt the user's dataset. So it stages. The staging is
+**plan-then-materialise** (`remote_runner._plan_staging` / `_materialize_staging`):
+the plan pass reads each archive's *member list* only — that comes from the zip's
+central directory, a small read at the end of the file, so planning a whole plate
+costs a handful of seeks even across a network mount — and the materialise pass
+then writes only the members that will actually be uploaded, reading nothing
+else. A well with nothing new is never copied at all; a well that survives intact
+is copied wholesale rather than decompressed and recompressed. This ordering is
+the point: staging by copying each archive in full and *then* rewriting it down
+to the wanted members pulls the entire dataset across the network before a single
+byte reaches the remote, which is exactly backwards when the data lives on a NAS
+— the normal case. The channel-filter typo guard runs in the plan pass, so a
+mistyped channel name names every offending well before any bytes move.
+**MIXED mode** — some wells zipped, others still folders, the signature of a
+run that died mid-compression — stages through the same two passes; it is the
+mode most likely to arise on a slow share, so a full copy there was the worst
+place to keep one. Its leftover folders are still zipped into the *input* dir
+(persisted deliberately, so the next run sees plain ZIP mode and re-zips
+nothing), and with no channel filter it uploads from the input dir with no
+staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
+path, which filters zips it has just written itself.
 
 **Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
 where per-well working files go: the extracted input TIFs, every intermediate
@@ -4646,6 +4749,31 @@ walk of large frames takes longer to Generate; it no longer grows resident memor
 with the grid, which is what previously turned a big grid into failed allocations
 and cells that would not load. If a grid is slow, narrow the well / timepoint
 selection or crop the view.
+
+**A well has fewer fields of view than were imaged.** — Its FOV-groups failed
+during processing; the well still wrote a complete-looking CSV from the ones that
+succeeded. `ls <output_dir>/errors/` names every failed (well, field, timepoint)
+with its exception type, and `cat` on one gives the traceback. The most common
+cause is the scratch volume filling mid-run (§6.2) — the message reports the free
+space at the moment of failure. Recover with `--incremental`, which reprocesses
+only the (fov, timepoint) groups missing from each CSV and merges them in; the
+rows already present are correct, so nothing needs deleting.
+
+**A well's error bars are missing and its bars carry `n/a`.** — Nothing was
+computable for that spread. Either the well has one replicate (one field with
+FOV errors on; one above-threshold cell without), or its FOV labels don't
+identify its fields — check the status line and log at load, which name any well
+in the second state. `n/a` is deliberately distinct from a bar with no marker at
+all: the marker means "not computed", its absence with error bars on means the
+spread is genuinely tiny.
+
+**A whole well's per-field numbers are blank.** — Its `fov` column carries no
+usable labels, so the fields pooled into one. The cause is upstream: the image
+filenames don't split into as many tokens as `--filename_schema` has fields, so
+the pipeline wrote an empty FOV for every row (it now warns once per filename
+shape during the run). The well's mean and fraction are still valid — they don't
+depend on the field labels — but anything per field is undefined until the CSVs
+are rewritten with a schema that matches the filenames.
 
 **An Image Table cell reads `(no mask)`.** — That cell's ≥threshold or mask view
 has no segmentation mask for its (well, timepoint, FOV). The Image Table renders

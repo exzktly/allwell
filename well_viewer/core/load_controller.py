@@ -186,6 +186,77 @@ def _reset_sample_definitions_state(ctx) -> None:
             notes_edit.blockSignals(blocked)
 
 
+def _report_incomplete_wells(ctx) -> None:
+    """Announce wells whose results cover fewer FOV-groups than their input.
+
+    The pipeline records this per well in ``pipeline_info.json``'s
+    ``run_report`` block (``pipeline/run_report.py``). It exists because a well
+    whose FOV-groups partly failed still writes a CSV and an ``<well>_out.zip``
+    built from the groups that survived — output that is, on disk, identical in
+    shape to a well that processed cleanly. Every per-field number for such a
+    well then describes whatever fields happened to make it through, and the
+    first symptom a user sees is an error bar that isn't there.
+
+    So: say it at load, by name, before any plot is drawn from it.
+    """
+    report = (ctx.state.dataset.pipeline_info or {}).get("run_report") or {}
+    incomplete = [w for w in (report.get("incomplete_wells") or [])
+                  if w in ctx.state.dataset.well_paths]
+    if not incomplete:
+        return
+    wells = report.get("wells") or {}
+    missing = sum(
+        int(wells.get(w, {}).get("groups_total", 0))
+        - int(wells.get(w, {}).get("groups_covered", 0))
+        for w in incomplete
+    )
+    shown = ", ".join(incomplete[:6]) + ("…" if len(incomplete) > 6 else "")
+    msg = (f"{len(incomplete)} well(s) are incomplete ({shown}) — {missing} "
+           "FOV-group(s) missing from their results")
+    logging.getLogger("well_viewer").warning(
+        "%s. Per-field statistics for these wells describe only the fields that "
+        "were processed. Details: %s",
+        msg,
+        "; ".join(
+            f"{w}: {wells.get(w, {}).get('groups_covered', 0)}"
+            f"/{wells.get(w, {}).get('groups_total', 0)} FOV-groups"
+            for w in incomplete[:6]
+        ),
+    )
+    ctx.notify.set_status(msg + " — see the log.")
+    ctx.notify.toast(msg, kind="warn", msec=9000)
+
+
+def _report_unusable_fov_labels(ctx) -> None:
+    """Announce wells whose FOV labels don't identify their fields of view.
+
+    Every per-field number the app produces — the bar and line error bars, the
+    events-per-field panel, the Statistics tab's ``n`` — groups on the CSV's
+    ``fov`` column. When a well's filenames didn't match the schema that column
+    arrives as a single repeated placeholder, and the pooled result is
+    indistinguishable from a genuine single-field well. The aggregation now
+    reports those statistics as undefined instead of guessing, but silence about
+    *why* is what let the original problem look like a plotting glitch, so this
+    says it once, by name, in the status line, a toast, and the log.
+
+    Rows are loaded lazily, so this reads the verdicts recorded by ``get_rows``
+    for the wells whose frames the load pass already built.
+    """
+    verdicts = getattr(ctx.state.dataset, "fov_integrity", None) or {}
+    bad = sorted(w for w, v in verdicts.items() if not getattr(v, "trusted", True))
+    if not bad:
+        return
+    shown = ", ".join(bad[:6]) + ("…" if len(bad) > 6 else "")
+    msg = (f"{len(bad)} well(s) have unusable FOV labels ({shown}) — per-field "
+           "statistics are undefined for them")
+    logging.getLogger("well_viewer").warning(
+        "%s. Reasons: %s", msg,
+        "; ".join(f"{w}: {verdicts[w].reason}" for w in bad[:6]),
+    )
+    ctx.notify.set_status(msg + ".")
+    ctx.notify.toast(msg, kind="warn", msec=9000)
+
+
 def load_directory(ctx, d: Path, label=None) -> None:
     app = ctx.window  # transitional bridge (A3)
     _opening_set_phase(ctx, "Scanning folder…")
@@ -451,6 +522,8 @@ def load_directory(ctx, d: Path, label=None) -> None:
     from well_viewer.core.app_shell_view import refresh_dataset_button
     refresh_dataset_button(app)
     app._set_status(f"Loaded {n} well(s) — {display}")
+    _report_incomplete_wells(ctx)
+    _report_unusable_fov_labels(ctx)
     recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from
     # pipeline_info.json. Running the worker once here (rather than from

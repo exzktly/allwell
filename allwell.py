@@ -247,7 +247,7 @@ class AllWellApp(QMainWindow):
         self._mode_seg.addSegment("Datasets", icon="boxes", data="datasets")
         self._mode_seg.currentChanged.connect(self._on_titlebar_mode_seg)
         # Width tracks the left panel of whichever mode is showing, so the bar
-        # and the panel under it are one column — see ``_sync_mode_bar_width``.
+        # and the panel under it are one column — see ``_sync_mode_bar``.
         # The rail's width is only the starting value, for the first paint
         # before any panel has been laid out.
         from well_viewer.core.app_shell_view import RAIL_W as _RAIL_W
@@ -257,11 +257,23 @@ class AllWellApp(QMainWindow):
 
         hl.addStretch(1)
 
+        # Every action below acts on the loaded dataset or on the plots Review
+        # draws from it, so the cluster belongs to Review and to no other mode.
+        # It is built here, where those handlers live, and then dropped into the
+        # mode band's right end (``_mount_review_actions``) so the whole of the
+        # app's chrome sits on one row; ``_sync_review_actions`` takes it off
+        # screen in Analyze and Datasets, where every one of them would be a
+        # control with nothing to act on.
+        self._review_actions = QWidget()
+        ra = QHBoxLayout(self._review_actions)
+        ra.setContentsMargins(0, 0, 0, 0)
+        ra.setSpacing(theme_v2.Spacing.xs)
+
         # Phase 10 (B3): refresh action.
         self._refresh_btn = IconButton("refresh-cw")
         self._refresh_btn.setToolTip("Reload the active dataset")
         self._refresh_btn.clicked.connect(self._on_refresh_clicked)
-        hl.addWidget(self._refresh_btn)
+        ra.addWidget(self._refresh_btn)
 
         # Global "presentation mode" toggle: flips every PlotCard in the app
         # between Screen (dark live-preview) and Publication (canonical
@@ -276,7 +288,7 @@ class AllWellApp(QMainWindow):
         self._present_btn.setChecked(False)
         self._present_btn.setToolTip("Presentation mode: toggle all plots screen ↔ publication")
         self._present_btn.toggled.connect(self._on_present_toggled)
-        hl.addWidget(self._present_btn)
+        ra.addWidget(self._present_btn)
 
         # Reset ALL persisted state for the dataset (more aggressive than the
         # rotate-ccw "reset view"): deletes persistence.json and reloads, for
@@ -288,7 +300,7 @@ class AllWellApp(QMainWindow):
             "and reload. Your data files and sample labels are left intact."
         )
         self._reset_saves_btn.clicked.connect(self._on_reset_saves_clicked)
-        hl.addWidget(self._reset_saves_btn)
+        ra.addWidget(self._reset_saves_btn)
 
         self._open_btn = IconButton("home")
         self._open_btn.setToolTip(
@@ -296,7 +308,7 @@ class AllWellApp(QMainWindow):
             "(use ⌘O to load a different dataset)."
         )
         self._open_btn.clicked.connect(self._reveal_dataset_in_file_manager)
-        hl.addWidget(self._open_btn)
+        ra.addWidget(self._open_btn)
 
         # Reset selections / view state. Asks before clearing — the action
         # wipes wells, fold-change scopes, and per-tab combo state but
@@ -309,12 +321,12 @@ class AllWellApp(QMainWindow):
             "per-tab combos)"
         )
         self._reset_view_btn.clicked.connect(self._on_reset_view_clicked)
-        hl.addWidget(self._reset_view_btn)
+        ra.addWidget(self._reset_view_btn)
 
         self._help_btn = IconButton("info")
         self._help_btn.setToolTip("Open the help drawer")
         self._help_btn.clicked.connect(self._toggle_help_drawer)
-        hl.addWidget(self._help_btn)
+        ra.addWidget(self._help_btn)
         self._help_drawer = None  # built lazily on first open
         self._help_content = None
         self._help_manual_view = None  # None in trimmed builds without the manual
@@ -359,6 +371,7 @@ class AllWellApp(QMainWindow):
         review_topbar = getattr(self._review, "_top_bar", None)
         if review_topbar is not None and review_topbar.layout() is not None:
             review_topbar.layout().insertWidget(0, self._mode_seg)
+            self._mount_review_actions(review_topbar)
 
         self._analyze = AnalyzeTab(
             parent=None,
@@ -380,7 +393,7 @@ class AllWellApp(QMainWindow):
             analyze_controller=self._analyze,
         )
         self._review.mountDatasetsPane(self._datasets)
-        self._install_mode_bar_width_sync()
+        self._install_mode_bar_sync()
 
         # Status bar v2: status / kbd hints / Log tray IconButton.
         from widgets.kbd_hint import KbdHint as _KbdHint
@@ -978,24 +991,32 @@ class AllWellApp(QMainWindow):
         pane = getattr(self, f"_{mode}", None)
         return getattr(pane, "_left_sidebar", None)
 
-    def _sync_mode_bar_width(self) -> None:
-        """Match the mode bar's width to the left panel below it.
+    def _sync_mode_bar(self) -> None:
+        """Keep the mode bar in step with the left panel below it.
 
-        The bar and that panel form the window's left column. All three
-        modes' panels now pin to the same `RAIL_W`
-        (`well_viewer.core.app_shell_view`), so this is a defensive floor
-        rather than reconciling genuinely different widths — it still runs on
-        every mode switch and panel resize in case that ever changes, or a
-        panel is momentarily narrower than the bar's own natural width.
+        The bar and that panel are one column, so they collapse together. When
+        the rail is collapsed the bar goes with it and the page tabs run to the
+        window's left edge; leaving it behind stranded a rail-width band of
+        chrome above an empty column — the rail was gone but its header was
+        still there, squeezed down to a width its three labels do not fit.
+        Bringing the rail back brings the bar back with it, which is also the
+        only route back to Analyze and Datasets while collapsed.
 
-        Floored at the bar's natural width so a panel narrower than the three
-        segments elides their labels rather than the bar shrinking to fit, and
-        falls back to that width when the panel is hidden — a collapsed rail
-        should not leave the tabs stranded across a gap.
+        Width matches the panel. All three modes' panels now pin to the same
+        `RAIL_W` (`well_viewer.core.app_shell_view`), so this is a defensive
+        floor rather than reconciling genuinely different widths — it still runs
+        on every mode switch and panel resize in case that ever changes, or a
+        panel is momentarily narrower than the bar's own natural width. Floored
+        at the bar's natural width so a panel narrower than the three segments
+        elides their labels rather than the bar shrinking to fit.
         """
         bar = getattr(self, "_mode_seg", None)
         if bar is None:
             return
+        collapsed = bool(getattr(getattr(self, "_review", None),
+                                 "_sidebar_collapsed", False))
+        if bar.isVisibleTo(bar.parentWidget() or self) == collapsed:
+            bar.setVisible(not collapsed)
         panel = self._mode_left_panel()
         natural = bar.sizeHint().width()
         width = max(panel.width(), natural) if (
@@ -1003,7 +1024,50 @@ class AllWellApp(QMainWindow):
         if bar.width() != width:
             bar.setFixedWidth(width)
 
-    def _install_mode_bar_width_sync(self) -> None:
+    # ── the Review action cluster ────────────────────────────────────────
+    def _mount_review_actions(self, band) -> None:
+        """Drop the dataset actions into the mode band's right end.
+
+        They used to sit in the window header, a row above — so the top of the
+        window was two strips of chrome, and the actions were as prominent in
+        Analyze and Datasets (where none of them has anything to act on) as in
+        Review. The band already carries the mode selector and the page tabs and
+        already runs the full width of the window, so the cluster goes to its
+        right end and the header row below it disappears.
+
+        The page-tabs host holds the band's only stretch, so the cluster is
+        pushed hard right whatever the tab strip is showing.
+        """
+        layout = band.layout()
+        box = getattr(self, "_review_actions", None)
+        if layout is None or box is None:
+            return
+        layout.addWidget(box)
+        # The band is pinned to a tab bar's height — a row of text. The icon
+        # buttons are taller than that, so raise the pin rather than let the
+        # layout clip them; a clipped glyph reads as a broken icon.
+        needed = box.sizeHint().height()
+        if needed > band.minimumHeight():
+            band.setFixedHeight(needed)
+        self._sync_review_actions()
+
+    def _sync_review_actions(self) -> None:
+        """Show the action cluster in Review only.
+
+        Every one of them — reload, presentation mode, reset saved state,
+        reveal the folder, reset the view, help — acts on the loaded dataset or
+        on the plots drawn from it. In Analyze and Datasets they are controls
+        with nothing behind them, so the cluster goes off screen there. `Ctrl+/`
+        still opens the help drawer from any mode.
+        """
+        box = getattr(self, "_review_actions", None)
+        if box is None:
+            return
+        review = getattr(self, "_review", None)
+        mode = review.currentMode() if hasattr(review, "currentMode") else "review"
+        box.setVisible(mode == "review")
+
+    def _install_mode_bar_sync(self) -> None:
         """Re-sync the bar whenever a mode's left panel is resized or toggled."""
         from PySide6.QtCore import QEvent, QObject
 
@@ -1012,18 +1076,18 @@ class AllWellApp(QMainWindow):
         class _WidthSync(QObject):
             def eventFilter(self, _obj, event) -> bool:  # Qt naming
                 if event.type() in (QEvent.Resize, QEvent.Show, QEvent.Hide):
-                    app._sync_mode_bar_width()
+                    app._sync_mode_bar()
                 return False
 
         watcher = _WidthSync(self)
-        self._mode_bar_width_sync = watcher   # keep a reference alive
+        self._mode_bar_sync = watcher   # keep a reference alive
         panels = [getattr(self._review, "_sidebar_root", None)]
         panels += [getattr(getattr(self, name, None), "_left_sidebar", None)
                    for name in ("_analyze", "_datasets")]
         for panel in panels:
             if panel is not None:
                 panel.installEventFilter(watcher)
-        self._sync_mode_bar_width()
+        self._sync_mode_bar()
 
     # ── Phase 10 / 11 handlers ───────────────────────────────────────────
     def _on_titlebar_mode_seg(self, idx: int) -> None:
@@ -1038,8 +1102,10 @@ class AllWellApp(QMainWindow):
         stack = getattr(review, "_central_pane_stack", None)
         if stack is not None and 0 <= idx < stack.count() and stack.currentIndex() != idx:
             stack.setCurrentIndex(idx)
-        # The new mode's left panel is a different width from the old one's.
-        self._sync_mode_bar_width()
+        # The new mode's left panel is a different width from the old one's,
+        # and the action cluster belongs to Review alone.
+        self._sync_mode_bar()
+        self._sync_review_actions()
 
     def _on_review_mode_changed(self, mode: str) -> None:
         """Mirror WellViewerApp's mode change into the titlebar seg + status."""
@@ -1052,7 +1118,8 @@ class AllWellApp(QMainWindow):
                 seg.setCurrentIndex(idx)
             finally:
                 seg.blockSignals(blocked)
-        self._sync_mode_bar_width()
+        self._sync_mode_bar()
+        self._sync_review_actions()
         # Status dot now reflects dataset state (set by _update_dataset_chip),
         # not the Review/Analyze mode toggle — that's already shown by the
         # SegmentedControl itself.

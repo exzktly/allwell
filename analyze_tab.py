@@ -247,12 +247,15 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
     def _refresh_remote_controls(self) -> None:
         """Show the remote-only parameter group only when a remote is selected,
         and within it gate the dry-run-cleanup checkbox on auto-delete being
-        checked. Switching back to Local resets the toggles so a stale value
-        can't be submitted for the next remote run."""
+        checked. Switching back to Local restores the toggles to their defaults
+        so a stale value can't be submitted for the next remote run."""
         is_remote = self._remote_cb.currentData() is not None
         self._remote_params_widget.setVisible(is_remote)
         if not is_remote:
-            self._cleanup_remote_cb.setChecked(False)
+            # Back to its default rather than to off: auto-delete is on by
+            # default, so resetting to off here would quietly hand the next
+            # remote run the opposite setting from a fresh one.
+            self._cleanup_remote_cb.setChecked(True)
         dry_run_enabled = is_remote and self._cleanup_remote_cb.isChecked()
         self._dry_run_cleanup_cb.setEnabled(dry_run_enabled)
         if not dry_run_enabled:

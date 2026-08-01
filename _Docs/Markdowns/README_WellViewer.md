@@ -607,16 +607,24 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 ```
 **Getting around the window.**
 
-- **Title bar** — the `[Review | Analyze]` segmented control switches modes;
-  the icons to its right are Refresh (re-read the folder), presentation
-  toggle (flip every plot Screen ↔ Publication), Open, and the **`i`** Help
-  drawer.
+- **Title bar** — the app name and the version.
+- **Top band** — one row carrying everything that steers the window. On the
+  left, the `[Review | Analyze | Datasets]` selector switches modes; beside it
+  are the current page's sub-tabs; and at the far right the dataset actions —
+  Refresh (re-read the folder), presentation toggle (flip every plot
+  Screen ↔ Publication), reset saved state, reveal the dataset folder, reset the
+  view, and the **`i`** Help drawer. Those six act on the loaded dataset or on
+  the plots drawn from it, so they appear in Review only; `Ctrl+/` opens the
+  Help drawer from any mode.
 - **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
   grouped into **Analysis**, **Images**, and **Data**, under the dataset control
   at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
   beside the mode selector. `Ctrl+B` collapses the rail, as does the small
   button floating on the rail's right edge — it stays put when the rail hides,
-  so it is also how you bring the rail back.
+  so it is also how you bring the rail back. The mode selector is the top of
+  that same column and collapses with it, so while the rail is hidden the
+  sub-tabs run to the window's left edge; bring the rail back to switch between
+  Review, Analyze, and Datasets.
 - **Plate map + Plot Groups** — pinned to the bottom of the left rail; the
   well selection they drive is what every tab plots (see below).
 - **Controls band** — the row directly above the plot canvas: what is shown on
@@ -860,6 +868,42 @@ count) — plus a CDF.
 - **Optimal use** — turn on FOV spread when you have several fields per well
   and want the error band to reflect field-to-field variability; normalize vs
   **t0** to collapse every curve to a shared start of 1.0 for shape comparison.
+- **When a spread can't be computed** — a bar or band with only one replicate
+  has no spread to show. That is *not* zero, and the app no longer draws it as
+  though it were: the bar carries a small **`n/a`** marker, and the exported CSV
+  leaves the `err_…` cell **empty** instead of writing `0.000000`. A bar with no
+  marker and no whisker (with error bars switched on) means the spread really is
+  too small to see.
+- **Remote runs: what the log shows while it stages** — before anything uploads,
+  a remote run reads your input archives and builds the smaller set it is
+  actually going to send (only the channels you selected, and with **incremental**
+  only the fields not already processed). The log narrates it: `scanning input`,
+  `planning N well archive(s)`, then one `staged (i/N)` line per well showing how
+  many members it kept. A well with nothing new to process is skipped entirely.
+  If your data is on a network or external drive, this pass reads only the images
+  it will upload, so it is roughly as fast as the upload itself.
+- **"N well(s) are incomplete" at load** — those wells' results cover fewer
+  fields of view than their input holds: FOV-groups failed during the analysis
+  run, and the well still wrote a CSV and an `_out.zip` from the ones that
+  succeeded, so nothing about the files looks wrong. Every per-field number for
+  those wells describes only the fields that made it through. The run records
+  this itself now, and the analysis log names the failures; the per-FOV
+  tracebacks are in `<output folder>/errors/`. The usual cause is the scratch
+  disk filling mid-run — **scratch is not the folder your data is in**, it
+  defaults to your home drive, so a dataset on a roomy external disk can still
+  exhaust a full internal one. Free space (or point the Analyze tab's **Scratch
+  disk** field at the roomy volume) and re-run with **incremental**, which
+  reprocesses only the missing groups and merges them in.
+- **"Unusable FOV labels" at load** — a warning naming specific wells means those
+  wells' rows carry no usable field-of-view label, so all their fields pooled
+  into one and nothing per field can be computed for them: no error bars, and
+  the **N events** panel shows no bar rather than a total pretending to be a
+  per-field mean. Their mean and fraction-on are unaffected — those don't depend
+  on the field labels. The cause is upstream, in the analysis run: the image
+  filenames didn't split into as many parts as the **filename schema** has
+  fields, so the pipeline had no field token to record (it now warns about this
+  during the run too). Re-run those wells with a schema matching their
+  filenames to restore per-field statistics.
 
 ### Scatter Plot
 

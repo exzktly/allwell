@@ -111,6 +111,26 @@ def _annotate_cluster_headers(items: list[BarItem], xs: list[float], ax) -> None
                 color=_fg)
 
 
+def _mark_undefined_spread(ax, x: float, y: float, color: str) -> None:
+    """Mark a bar whose spread could not be computed, when error bars are on.
+
+    A hollow cap and an ``n/a`` above the bar, in the error-bar colour. The
+    point is only to make "not computed" visually distinct from "computed and
+    small" — a bar that silently loses its whisker is indistinguishable from one
+    whose error bars were turned off, and that ambiguity is how a well with
+    pooled (unusable) FOV labels passed for a well with tight replicates.
+    """
+    import math as _math
+
+    if y is None or not _math.isfinite(float(y)):
+        return
+    ax.plot([x], [y], marker="_", markersize=9, markeredgewidth=1.4,
+            color=color, alpha=0.7, linestyle="none", zorder=4)
+    ax.annotate("n/a", (x, y), textcoords="offset points", xytext=(0, 7),
+                ha="center", va="bottom", fontsize=7, color=color, alpha=0.85,
+                zorder=5, annotation_clip=False)
+
+
 def render_bar_items(
     *,
     ax_mean,
@@ -179,6 +199,13 @@ def render_bar_items(
                 ax_mean.errorbar(x, item.mean, yerr=item.spread * ci_scale,
                                  fmt="none", ecolor=err_bar_color, elinewidth=1.4,
                                  capsize=4, zorder=4)
+            elif draw_err and math.isnan(item.spread):
+                # The spread was never computed (one replicate, or FOV labels
+                # that don't identify the fields). Drawing nothing here is what
+                # made a bar with no computable error look exactly like a bar
+                # whose error bars were switched off — the reader has no way to
+                # tell "n=1" from "the replicates agreed".
+                _mark_undefined_spread(ax_mean, x, item.mean, err_bar_color)
         else:
             ax_mean.bar(x, 0, width=bar_w, color=placeholder_color,
                         linewidth=1, edgecolor=disabled_well_color,
@@ -191,6 +218,8 @@ def render_bar_items(
                 ax_frac.errorbar(x, item.frac, yerr=item.frac_spread * ci_scale,
                                  fmt="none", ecolor=err_bar_color,
                                  elinewidth=1.4, capsize=4, zorder=4)
+            elif draw_err and math.isnan(item.frac_spread):
+                _mark_undefined_spread(ax_frac, x, item.frac, err_bar_color)
         else:
             ax_frac.bar(x, 0, width=bar_w, color=placeholder_color,
                         linewidth=1, edgecolor=disabled_well_color,
@@ -204,6 +233,8 @@ def render_bar_items(
                     ax_n.errorbar(x, item.n_above, yerr=item.n_above_spread * ci_scale,
                                   fmt="none", ecolor=err_bar_color,
                                   elinewidth=1.4, capsize=4, zorder=4)
+                elif draw_err and math.isnan(item.n_above_spread):
+                    _mark_undefined_spread(ax_n, x, item.n_above, err_bar_color)
             else:
                 ax_n.bar(x, 0, width=bar_w, color=placeholder_color,
                          linewidth=1, edgecolor=disabled_well_color,

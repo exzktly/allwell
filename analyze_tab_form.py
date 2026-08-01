@@ -1101,16 +1101,16 @@ class AnalyzeTabFormMixin:
         bs_hint.setWordWrap(True)
         bs_row.layout().addWidget(bs_hint, 1)
 
-        # Auto-delete checkbox.
+        # Auto-delete checkbox, ON by default: a remote that accumulates every
+        # run fills up, and a full volume is how a run silently loses FOV-groups.
+        # Only deletes after a verified-successful run, never failed work.
         self._cleanup_remote_cb = QCheckBox(
-            "Auto-delete remote files when done", self._remote_params_widget,
-        )
+            "Auto-delete remote files when done", self._remote_params_widget)
+        self._cleanup_remote_cb.setChecked(True)
         self._cleanup_remote_cb.setToolTip(
-            "v5.2.11+: unchecked (default) = leave everything on the remote "
-            "untouched. Safe for shared machines. Checked = after a "
-            "verified-successful run, delete both the per-run output dir "
-            "AND the cached input on the remote."
-        )
+            "Checked (default) = after a verified-successful run, delete both the "
+            "per-run output dir AND the cached input on the remote, so a shared "
+            "machine does not fill up. Unchecked = leave it untouched.")
         rp.addWidget(self._cleanup_remote_cb)
 
         # Dry-run cleanup (v5.2.23): log what auto-delete WOULD remove without

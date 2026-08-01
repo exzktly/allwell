@@ -2377,6 +2377,20 @@ the run reporting success. The record is cleared on resume, on discard, and when
 a run completes normally; a *stopped* run keeps its record, because a hard Stop
 also leaves every finished well's CSV on disk.
 
+A run the **Datasets Job Queue** started suspends the same way, and the queue
+does the right thing for free: `suspend` goes through `stop`, so
+`AnalyzeRunMixin.was_cancelled` is true, so `JobQueueController._on_job_finished`
+marks the job cancelled and pauses the queue rather than starting the next one
+underneath a user who has just asked for their machine back. What did *not* come
+for free is restarting that job from the queue. A queued job's stored spec never
+carries `incremental` — it is not a form field — and re-running without it skips
+every well whose output zip exists: the wells that never began are recovered, but
+the ones that were *in flight* wrote a CSV and an out.zip from the FOV-groups
+they had finished, so they read as complete, are skipped, and never get their
+missing groups back. The plate returns looking done.
+`AnalyzeSuspendMixin.resume_aware_spec`, which `start_from_queue` routes through,
+forces incremental when a suspend record names the same input directory.
+
 **Grouping consumes each well folder as it goes.** The FOLDER / FLAT staging
 path (and the MIXED leftover zip-up) turns every `<well>/` into `<well>.zip`, and
 removes that folder the moment its own archive is published rather than at the

@@ -126,7 +126,7 @@ def save(run: SuspendedRun) -> bool:
     own suspension still suspends — the output directory is the real record, and
     the user can point Analyze at it by hand.
     """
-    keep = [r for r in load_all() if not _same_dir(r.output_dir, run.output_dir)]
+    keep = [r for r in load_all() if not same_dir(r.output_dir, run.output_dir)]
     return _write_all([run, *keep])
 
 
@@ -137,11 +137,11 @@ def clear(output_dir: str | os.PathLike[str]) -> bool:
     not keep offering to resume itself.
     """
     target = str(output_dir)
-    keep = [r for r in load_all() if not _same_dir(r.output_dir, target)]
+    keep = [r for r in load_all() if not same_dir(r.output_dir, target)]
     return _write_all(keep)
 
 
-def _same_dir(a: str, b: str) -> bool:
+def same_dir(a: str, b: str) -> bool:
     """Path equality that survives a trailing slash or a relative spelling."""
     try:
         return os.path.normcase(str(Path(a).resolve())) == os.path.normcase(

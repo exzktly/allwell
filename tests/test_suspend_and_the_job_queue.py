@@ -1,0 +1,146 @@
+"""Suspending a run the Datasets Job Queue started.
+
+Two things have to hold, and only one of them came for free.
+
+**The queue must pause, not march on.** ``suspend()`` goes through ``stop()``, so
+``was_cancelled()`` is true, so ``JobQueueController._on_job_finished`` marks the
+job cancelled and pauses the queue. That is the behaviour the queue's own
+decision table already specifies for a cancel, and it is the right one here: it
+stops the next job starting underneath a user who has just asked for their
+machine back, and it stops the resume banner offering to restart a plate while
+the queue runs something else.
+
+**Restarting that job from the queue must be incremental.** This did not come for
+free. ``incremental`` is not a form field — it is set by
+``input_resolution_service`` when loose images are appended, or by a resume — so
+a queued job's stored spec never carries it. Re-running such a spec skips every
+well whose output zip exists and processes the rest, which recovers the wells
+that never began but silently abandons the ones that were *in flight*: those
+wrote a CSV and an out.zip from the FOV-groups they had finished, so they read as
+complete and are skipped, and their missing groups are never recovered. The plate
+comes back looking done. ``resume_aware_spec`` closes that.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("PySide6")
+
+import services.suspend_record as sr
+from analyze_suspend import AnalyzeSuspendMixin
+from services.run_spec import RunSpec
+
+
+@pytest.fixture(autouse=True)
+def _fake_home(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    return tmp_path
+
+
+class _Host(AnalyzeSuspendMixin):
+    """Just the surface ``resume_aware_spec`` reads."""
+
+    def __init__(self):
+        self.logged: list[str] = []
+
+    def _log_line(self, text, level="INFO"):
+        self.logged.append(text)
+
+
+def _spec(raw: str, **opts) -> RunSpec:
+    return RunSpec(opts={"raw": raw, **opts}, remote_name=None)
+
+
+def _record(input_dir: str, output_dir: str = "/data/out"):
+    sr.save(sr.SuspendedRun(
+        spec={"opts": {"raw": input_dir}}, input_dir=input_dir,
+        output_dir=output_dir, suspended_at=1000.0, wells_done=4, wells_total=10,
+    ))
+
+
+def test_a_queued_job_with_no_suspended_run_is_untouched():
+    host = _Host()
+    spec = _spec("/data/in")
+    assert host.resume_aware_spec(spec) is spec
+    assert host.logged == []
+
+
+def test_a_queued_job_whose_input_was_suspended_becomes_incremental():
+    _record("/data/in")
+    host = _Host()
+    out = host.resume_aware_spec(_spec("/data/in"))
+    assert out.opts["incremental"] is True
+    assert out.opts["raw"] == "/data/in"
+    assert any("incrementally" in line for line in host.logged), (
+        "the user must be told why the run changed shape")
+
+
+def test_a_different_plate_is_not_dragged_into_incremental():
+    _record("/data/in")
+    host = _Host()
+    out = host.resume_aware_spec(_spec("/somewhere/else"))
+    assert "incremental" not in out.opts
+    assert host.logged == []
+
+
+def test_an_explicitly_incremental_spec_is_left_alone():
+    _record("/data/in")
+    host = _Host()
+    spec = _spec("/data/in", incremental=True)
+    assert host.resume_aware_spec(spec) is spec
+
+
+def test_the_rest_of_the_spec_survives_the_rewrite():
+    _record("/data/in")
+    host = _Host()
+    spec = RunSpec(
+        opts={"raw": "/data/in", "workers": 4},
+        remote_name="cluster", cleanup_remote="all", dry_run_cleanup=True,
+        output_filter="csv_only", selective_channels=False,
+    )
+    out = host.resume_aware_spec(spec)
+    assert out.remote_name == "cluster"
+    assert out.cleanup_remote == "all"
+    assert out.dry_run_cleanup is True
+    assert out.output_filter == "csv_only"
+    assert out.selective_channels is False
+    assert out.opts["workers"] == 4
+
+
+def test_an_unreadable_record_never_blocks_a_queued_run(monkeypatch):
+    """A queue job must start even if the resume bookkeeping is broken."""
+    def _boom():
+        raise OSError("record unreadable")
+
+    monkeypatch.setattr("analyze_suspend.load_all", _boom)
+    host = _Host()
+    spec = _spec("/data/in")
+    assert host.resume_aware_spec(spec) is spec
+
+
+def test_start_from_queue_routes_through_it(monkeypatch):
+    """The wiring, not just the helper: the queue's entry point must use it."""
+    import inspect
+
+    from analyze_run_spec import AnalyzeRunMixin
+
+    src = inspect.getsource(AnalyzeRunMixin.start_from_queue)
+    assert "resume_aware_spec" in src
+
+
+def test_a_suspend_reads_as_cancelled_so_the_queue_pauses():
+    """``was_cancelled`` is what ``_on_job_finished`` consults.
+
+    True here means the queue marks the job cancelled and pauses rather than
+    starting the next one underneath the user.
+    """
+    from services.pipeline_runner import PipelineRunner
+
+    runner = PipelineRunner()
+    assert runner.was_stopped is False
+    runner.suspend()
+    assert runner.was_stopped is True     # what AnalyzeRunMixin.was_cancelled reads
+    assert runner.was_suspended is True

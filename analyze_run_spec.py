@@ -83,7 +83,7 @@ class AnalyzeRunMixin:
         start_run() would from the live form. A remote that no longer
         resolves, or a missing pipeline script, reports failure through
         jobFinished rather than raising — there is no dialog to show it to."""
-        run_spec = RunSpec.from_json(spec)
+        run_spec = self.resume_aware_spec(RunSpec.from_json(spec))
         error = self.start_run(run_spec)
         if error is not None:
             self.jobFinished.emit(False, error, "")

@@ -35,7 +35,14 @@ from PySide6.QtWidgets import (
 )
 
 from services.run_spec import RunSpec, RunSpecError
-from services.suspend_record import SuspendedRun, clear, latest, save
+from services.suspend_record import (
+    SuspendedRun,
+    same_dir,
+    clear,
+    latest,
+    load_all,
+    save,
+)
 from well_viewer.core.safe import swallowed
 
 
@@ -184,6 +191,51 @@ class AnalyzeSuspendMixin:
             self.refresh_resume_banner()
         except Exception:
             swallowed()
+
+    def resume_aware_spec(self, spec: RunSpec) -> RunSpec:
+        """Force incremental when this spec's input has a suspended run behind it.
+
+        The Job Queue re-runs a job from its stored spec, and that spec has no
+        ``incremental`` in it — the flag is not a form field, it is set by
+        ``input_resolution_service`` or by a resume. So restarting a suspended
+        queue job from the queue's own Start button would skip every well whose
+        output zip exists and process the rest, which recovers the wells that
+        never began but silently abandons the ones that were *in flight* when
+        the run was suspended: those wrote a CSV and an out.zip from the
+        FOV-groups they had finished, so they read as complete and are skipped,
+        and their missing groups are never recovered. The plate comes back
+        looking done.
+
+        Matching is on the input directory, which is what the record stores and
+        what ``opts["raw"]`` carries, and is exactly the identity the queue
+        preserves when it re-runs a job.
+        """
+        try:
+            raw = str((spec.opts or {}).get("raw") or "").strip()
+            if not raw or spec.opts.get("incremental"):
+                return spec
+            if not any(same_dir(r.input_dir, raw) for r in load_all()):
+                return spec
+            opts = dict(spec.opts)
+            opts["incremental"] = True
+            self._log_line(
+                "[resume] This input has a suspended run behind it — processing "
+                "incrementally, so wells that were part-way through when it was "
+                "suspended recover their missing field/timepoint groups instead "
+                "of being skipped as complete.\n",
+                "INFO",
+            )
+            return RunSpec(
+                opts=opts,
+                remote_name=spec.remote_name,
+                cleanup_remote=spec.cleanup_remote,
+                dry_run_cleanup=spec.dry_run_cleanup,
+                output_filter=spec.output_filter,
+                selective_channels=spec.selective_channels,
+            )
+        except Exception:
+            swallowed()  # never block a run because the record was unreadable
+            return spec
 
     # ── resuming ─────────────────────────────────────────────────────────
     def _resume_suspended(self) -> None:

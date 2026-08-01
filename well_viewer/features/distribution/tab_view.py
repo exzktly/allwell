@@ -61,7 +61,6 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     chan_cb.hide()
 
     tp_cb = reg.register("_distribution_tp_cb", LabeledComboBox("Timepoint", ctrl))
-    tp_cb.setMinimumContentsLength(8)
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed_dist(ctx))
     ctrl.add_scope("", tp_cb)
     reg.register("_distribution_tp_var", tp_cb)   # legacy alias → same widget

@@ -47,9 +47,8 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("FOV", fov_cb)
 
     tp_cb = reg.register("_review_tp_cb", LabeledComboBox("Timepoint"))
-    # Wider than the plain-combo 140px it replaced — room for the painted
-    # "Timepoint: " prefix plus a typical value before Qt starts eliding.
-    tp_cb.setFixedWidth(170)
+    # No setFixedWidth — LabeledComboBox already sizes to exactly the painted
+    # "Timepoint: …" text.
     tp_cb.currentIndexChanged.connect(
         lambda _i: refresh_review_csv_rows(ctx)
     )

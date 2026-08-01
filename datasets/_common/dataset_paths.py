@@ -271,9 +271,20 @@ def shorten_headline(text: str, *full_paths: str) -> str:
 # write_pipeline_info time, so a rebuilt sidecar can't disagree with a fresh
 # run's. Deliberately not imported from process_microscopy itself: that would
 # drag the whole pipeline import graph into a Datasets compute module.
-def collect_input_image_stems(in_dir: Path) -> set[str]:
+def collect_input_image_stems(
+    in_dir: Path, *, known_zip_members: dict[Path, set[str]] | None = None,
+) -> set[str]:
     """Every image filename stem findable under *in_dir* — loose top-level
-    TIFs, one level of well subfolders, or well zips' TIF members."""
+    TIFs, one level of well subfolders, or well zips' TIF members.
+
+    *known_zip_members* maps a zip path to member names a caller has **already**
+    listed, so that zip is not opened again here. Validate reads every well's
+    input archive during its per-well scan and then needs this same answer for
+    its sidecar-drift check; without the passthrough it re-opened and re-listed
+    every archive in the folder, serially, after the scan had finished with them.
+    A path absent from the map (or mapped to nothing) is read normally, so the
+    result is identical either way.
+    """
     stems: set[str] = set()
     for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
         for p in in_dir.glob(pat):
@@ -285,13 +296,21 @@ def collect_input_image_stems(in_dir: Path) -> set[str]:
             for pat in ("*.tif", "*.tiff", "*.TIF", "*.TIFF"):
                 for p in entry.glob(pat):
                     stems.add(p.stem)
+
+    def _add_tif_stems(names) -> None:
+        for member in names:
+            name = Path(member).name
+            if name.lower().endswith((".tif", ".tiff")):
+                stems.add(Path(name).stem)
+
     for zip_path in in_dir.glob("*.zip"):
+        known = (known_zip_members or {}).get(zip_path)
+        if known:
+            _add_tif_stems(known)
+            continue
         with swallow(f"scan {zip_path} for image stems"):
             with zipfile.ZipFile(zip_path, "r") as zf:
-                for member in zf.namelist():
-                    name = Path(member).name
-                    if name.lower().endswith((".tif", ".tiff")):
-                        stems.add(Path(name).stem)
+                _add_tif_stems(zf.namelist())
     return stems
 
 
@@ -305,12 +324,31 @@ def collect_available_schema_values(
 ) -> list[str]:
     """Every distinct value of *field_name* found across ``in_dir``'s images,
     sorted by *sort_key*. Returns ``[]`` if *field_name* isn't in the schema."""
+    return schema_values_from_stems(
+        collect_input_image_stems(in_dir), schema_fields=schema_fields,
+        sep=sep, field_name=field_name, sort_key=sort_key)
+
+
+def schema_values_from_stems(
+    stems,
+    *,
+    schema_fields,
+    sep: str,
+    field_name: str,
+    sort_key: Callable,
+) -> list[str]:
+    """:func:`collect_available_schema_values` for stems already in hand.
+
+    A caller asking about two fields (Validate wants both ``timepoint`` and
+    ``fov``) would otherwise walk the whole input folder once per field, since
+    the walk is by far the expensive half and the token extraction is trivial.
+    """
     fields = [str(f).strip().lower() for f in schema_fields]
     if field_name not in fields:
         return []
     field_idx = fields.index(field_name)
     values: set[str] = set()
-    for stem in collect_input_image_stems(in_dir):
+    for stem in stems:
         parts = stem.split(sep)
         if 0 <= field_idx < len(parts):
             tok = str(parts[field_idx]).strip()

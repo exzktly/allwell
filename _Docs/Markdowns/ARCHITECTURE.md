@@ -2684,7 +2684,7 @@ deletable:
 
 | Module | What it holds |
 |---|---|
-| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. |
+| `datasets/_common/dataset_paths.py` | `DatasetPaths`, `resolve_dataset`, `read_info`, well enumeration (`in_containers`, `out_csvs`, `out_zips`, `out_folders`, `dataset_wells`), the destination-state predicates (each taking the caller's own in-progress marker filename as a parameter), and the input-side availability scan (`collect_available_schema_values`) that mirrors `process_microscopy._collect_available_timepoints`/`_fovs` without importing the pipeline. That scan is two halves: `collect_input_image_stems(in_dir, known_zip_members=…)` walks the input folder (loose TIFs, one level of well subfolders, well zips' TIF members), taking already-listed member names for any zip the caller has read itself rather than opening it again; `schema_values_from_stems` extracts one field's distinct values out of stems already in hand. `collect_available_schema_values` is the two composed, and remains the entry point for a caller asking about a single field from a cold start (Apply repairs). A caller asking about two fields, or one that has just read every archive for its own reasons (Validate does both), goes through the halves and walks once. `out_folders` is `out_zips`'s folder-mode twin (`out/<WELL>/`, written when `compressed_output=False`) — a dataset is written either zipped or folder-mode, never both, but a caller checking for "done" image evidence regardless of which mode produced it (Validate) should check both maps rather than assuming one. `dataset_wells` unions all four well-enumeration maps, including `out_folders`, matching its own docstring ("every 96-well position present in a dataset's `in` or `out`") — every current caller (Concatenate, Merge Plates, Subset) already refuses folder-mode input before calling it, so this only matters for a future caller that doesn't. `preview_wells(root)` is a best-effort, exception-safe `dataset_wells` a page calls on every keystroke while the user is still typing a path — it returns `[]` for anything that isn't (yet) a real dataset folder instead of raising `DatasetPathsError` the way `resolve_dataset` would, since "not a valid path yet" is the normal, expected state through most of a field edit, not an error to report. `shorten_headline(text, *full_paths)` replaces every occurrence of each of *full_paths* inside *text* with its own basename — a run's success summary is built by formatting a full destination (or source) path into a sentence, right for the log line but unreadable as a dashboard headline; the caller keeps the original *text* for the log and passes it again as the headline's own tooltip, so the full path is never actually lost, only the on-screen headline is shortened. It skips any path that is empty (Import Loose's in-place mode, whose `dest_root` is `""`) — `"".replace` would otherwise insert the basename between every character of *text*. |
 | `datasets/_common/containers.py` | `read_members` / `write_zip` (collision-safe, first-write-wins) / `clear_destination`, plus the `timepoint`/`timepoint_hours`/`filename` column-name and cell-overrides constants. Both container helpers take an optional `progress(done, total)` keyword, called once per member against a total they know up front (`infolist()` / `len(members)`) — the raw material for per-well sub-progress. `WellFraction` fuses those per-pass counts into one dial: copying a well is several passes (read the source container, write the destination one, and again for the QC `<WELL>_out.zip`), so the passes are declared up front as equal-weight *slices*, each pass reports into the slice `slice_progress()` hands it, and a pass with no work closes its slice with `skip()`. Feeding each pass's own `(done, total)` straight to a dashboard instead would fill the same well's dial from empty once per pass, which reads as the well restarting; leaving a no-work slice unclaimed would strand a finished well short of full. `finish()` closes out whatever remains once the well's non-container work (its CSV) is done. The scale is a fixed 100 steps, deduplicated to whole steps, so a well holding thousands of files emits a bounded number of updates rather than one queued signal and one plate repaint per file. |
 | `datasets/_common/member_names.py` | `rewrite_member_field` — the schema-safe, field-agnostic zip-member filename rewriter (extension check, field-count check, channel-scoped role suffix preserved) that Concatenate's timepoint shift and Merge plates' well remap both wrap with their own validity predicate. |
 | `datasets/_common/concurrency.py` | `pick_workers(workers, n_units)` — the shared worker-thread-count heuristic (0 = auto, capped at 8 and at the CPU count, mirroring `pipeline.ome_explode._pick_workers`) every tool below uses for its per-well `ThreadPoolExecutor`. |
@@ -2902,12 +2902,15 @@ plain re-run then treats a partially-done well as complete
 (`output_exists_for_well`), so the FOV-level gap is otherwise invisible.
 
 `validate_compute.py::build_report(root)` is a read-only Qt-free scan.
-*Intent* — what a well's raw input actually contains — is read via
-`pipeline.incremental_keys.read_done_fov_keys_from_zip`/`_from_folder` pointed
-at `in/<WELL>.zip`/`<WELL>/` instead of the output archive those functions
-were written for; nothing about them cares which side of the pipeline a
-container sits on, they only parse `(fov, timepoint)` positionally off member
-names. *Done* is read the same way `incremental_done_fov_keys` composes it
+*Intent* — what a well's raw input actually contains — is read through
+`pipeline.incremental_keys.fov_keys_from_member_names`, the name-parsing half of
+`read_done_fov_keys_from_zip`/`_from_folder`, applied to `in/<WELL>.zip`/
+`<WELL>/`'s members instead of the output archive those functions were written
+for; nothing about them cares which side of the pipeline a container sits on,
+they only parse `(fov, timepoint)` positionally off member names. Validate calls
+the name-based half because it has already listed the container (see "one read
+per artefact" below); the two path-based readers call it after listing, so all
+three agree by construction. *Done* is read the same way `incremental_done_fov_keys` composes it
 (CSV rows ∪ out-zip members ∪ output folder — `_well_done` unions all three,
 the last via `_common.dataset_paths.out_folders`, the `out_zips`-shaped
 well→path map for `compressed_output=False` datasets; a folder-mode well
@@ -2961,6 +2964,39 @@ caller's own progress callback, and that does nothing but hand its result off.
 order they were submitted regardless of which well's thread finishes first, so
 the report's well/finding ordering is identical to the old sequential loop's no
 matter the worker count.
+
+**What that pool does and does not buy.** The per-well work is pure-Python
+parsing — `csv.DictReader` building a dict per row, `zipfile`'s central-directory
+parse, `fov_tp_from_name` per member — and none of it releases the GIL, so on a
+warm local disk the threads interleave rather than overlap and a wider pool is
+measurably *slower* than one worker. The pool is kept because the picture
+inverts as soon as a container open costs a round trip, which is the normal case
+for a dataset on a network mount: with latency in front of each open, four
+workers beat one comfortably. It is deliberately not a `ProcessPoolExecutor`
+(`_scan_one_well` takes and returns plain data, so it would pickle, but the
+spawn cost inside a frozen app is real and the win is only on the half of the
+work that is already cheap). The way to make a local-disk scan faster is
+therefore to do less work, not to run it on more threads — which is why the
+read discipline below is a tested ratchet rather than a nicety.
+
+**One read per artefact.** `_scan_one_well` lists its input container **once**
+and parses each of the well's candidate CSVs **once**, then hands those results
+to the three consumers that need them: `_well_intent` derives the intent keys
+from the member names it is given (via `incremental_keys.fov_keys_from_member_names`,
+the name-parsing half that `read_done_fov_keys_from_zip`/`_from_folder` both
+delegate to, so skipping the second open cannot drift from what opening again
+would have said), `_well_done` reads the CSV rows out of the parsed map, and
+`_row_content_findings` takes both rather than re-reading either. `_scan_wells`
+returns the member names it collected, and `_check_sidecar_availability` walks
+the input folder once with them (`collect_input_image_stems(known_zip_members=…)`)
+and extracts both fields from that single set of stems
+(`schema_values_from_stems`). The budget is two container opens per well —
+`in/<WELL>.zip` and `out/<WELL>_out.zip` — and one CSV parse;
+`test_validate_compute.py::test_scan_reads_each_container_once_and_each_csv_once`
+fails on any re-read. An archive that is not in the per-well map (a loose TIF, a
+non-well-named zip) is still read normally by the availability walk, so its
+coverage is unchanged — the thing Apply repairs *writes back* into
+`pipeline_info.json` must not narrow because a scan got faster.
 
 `build_report` also takes an optional `ScanProgress` — two plain callables, so
 the module stays Qt-free — that reports the scan as it happens rather than only

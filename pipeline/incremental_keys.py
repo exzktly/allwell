@@ -74,6 +74,33 @@ def fov_tp_from_name(name: str, *, schema: str | list[str], sep: str) -> tuple[s
     return (fov, tp)
 
 
+def fov_keys_from_member_names(
+    names, *, schema: str | list[str], sep: str, skip_hidden: bool = False,
+) -> set[tuple[str, str]]:
+    """``(fov, timepoint)`` pairs for member/file names already in hand.
+
+    The name-parsing half of :func:`read_done_fov_keys_from_zip` and
+    :func:`read_done_fov_keys_from_folder`, split out so a caller that has
+    already listed a container's members does not have to open it a second time
+    just to get its keys. Both readers below delegate here, so the three call
+    sites cannot drift.
+
+    *skip_hidden* reproduces the folder reader's dotfile filter (``.DS_Store``
+    and friends, which a real input folder carries and which parse to nothing);
+    the zip reader passes ``False`` because it never had that filter, and
+    quietly changing what an incremental run considers done is not this
+    helper's job.
+    """
+    keys: set[tuple[str, str]] = set()
+    for name in names:
+        base = Path(name).name
+        if not base or (skip_hidden and base.startswith(".")):
+            continue
+        keys.add(fov_tp_from_name(base, schema=schema, sep=sep))
+    keys.discard(("", ""))
+    return keys
+
+
 def read_done_fov_keys_from_zip(
     out_zip: Path | str, *, schema: str | list[str], sep: str,
 ) -> set[tuple[str, str]]:
@@ -90,18 +117,13 @@ def read_done_fov_keys_from_zip(
     path = Path(out_zip)
     if not path.exists():
         return set()
-    keys: set[tuple[str, str]] = set()
     try:
         with zipfile.ZipFile(path, "r") as zf:
             names = zf.namelist()
     except (OSError, zipfile.BadZipFile):
         return set()
-    for name in names:
-        if name.endswith("/"):
-            continue
-        keys.add(fov_tp_from_name(name, schema=schema, sep=sep))
-    keys.discard(("", ""))
-    return keys
+    return fov_keys_from_member_names(
+        [n for n in names if not n.endswith("/")], schema=schema, sep=sep)
 
 
 def read_done_fov_keys_from_folder(
@@ -114,16 +136,12 @@ def read_done_fov_keys_from_folder(
     path = Path(folder)
     if not path.is_dir():
         return set()
-    keys: set[tuple[str, str]] = set()
     try:
-        for p in path.iterdir():
-            if not p.is_file() or p.name.startswith("."):
-                continue
-            keys.add(fov_tp_from_name(p.name, schema=schema, sep=sep))
+        names = [p.name for p in path.iterdir() if p.is_file()]
     except OSError:
         return set()
-    keys.discard(("", ""))
-    return keys
+    return fov_keys_from_member_names(
+        names, schema=schema, sep=sep, skip_hidden=True)
 
 
 def incremental_done_fov_keys(

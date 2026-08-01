@@ -10,13 +10,23 @@ a plain re-run then treats a partially-done well as complete
 to know exactly which ``(fov, timepoint)`` pairs are still outstanding.
 
 **Done-set discipline.** *Intent* — what a well's raw input actually contains
-— is read via the same two member-name readers the pipeline's own
-incremental diff uses (``pipeline.incremental_keys.read_done_fov_keys_from_zip``
-/ ``_from_folder``), which parse ``(fov, timepoint)`` positionally off a
+— is read via the same member-name parser the pipeline's own incremental diff
+uses (``pipeline.incremental_keys.fov_keys_from_member_names``, which
+``read_done_fov_keys_from_zip`` / ``_from_folder`` both delegate to after
+listing their container), which parses ``(fov, timepoint)`` positionally off a
 container's member names. Nothing distinguishes a raw-input container from a
-processed-output one to those two readers — they only care about filename
-structure — so pointing them at ``in/<WELL>.zip`` instead of
-``out/<WELL>_out.zip`` reads intent instead of done, with zero new code.
+processed-output one to that parser — it only cares about filename structure —
+so pointing it at ``in/<WELL>.zip``'s members instead of
+``out/<WELL>_out.zip``'s reads intent instead of done, with zero new code.
+
+**Read discipline.** Each artefact is read exactly once per scan:
+:func:`_scan_one_well` lists its input container once and parses each candidate
+CSV once, then passes both to every consumer. The per-well work is pure-Python
+parsing and therefore GIL-bound, so the thread pool below cannot overlap it on a
+warm local disk (it only pays off when a container open costs a round trip, as
+on a network mount) — doing less work is the only thing that makes a local scan
+faster, and ``test_scan_reads_each_container_once_and_each_csv_once`` holds the
+budget at two container opens and one CSV parse per well.
 *Done* is read the same way ``pipeline.incremental_keys.incremental_done_fov_keys``
 composes it (CSV rows ∪ out-zip members ∪ output folder), but **on the real
 paths already in hand** rather than by reconstructing
@@ -42,6 +52,7 @@ from pathlib import Path
 
 from datasets._common.concurrency import pick_workers
 from pipeline.incremental_keys import (
+    fov_keys_from_member_names,
     read_done_fov_keys_from_folder,
     read_done_fov_keys_from_zip,
 )
@@ -51,11 +62,12 @@ from well_viewer.data.image_identity import load_schema
 from well_viewer.domain.tp_match import tp_close
 from datasets._common.dataset_paths import (
     DatasetPathsError,
-    collect_available_schema_values,
+    collect_input_image_stems,
     in_containers,
     out_folders,
     out_zips,
     resolve_dataset,
+    schema_values_from_stems,
 )
 
 _TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
@@ -311,27 +323,34 @@ def _classify_csvs(paths) -> tuple[dict[str, list[Path]], set[str], list[Finding
     return candidates, prefixes, findings
 
 
-def _well_intent(container: Path | None, *, schema_fields, sep: str) -> tuple[set[tuple[str, str]], str | None]:
+def _well_intent(
+    container: Path | None, members: set[str] | None, *, schema_fields, sep: str,
+) -> tuple[set[tuple[str, str]], str | None]:
     """``(fov, timepoint)`` pairs the well's raw input actually contains, read
     via the same member-name parser the pipeline's own incremental diff
     uses, pointed at ``in/`` instead of ``out/``. Returns
     ``(intent, unreadable_message)`` — the message is set only when the
-    container itself can't be read at all."""
+    container itself can't be read at all.
+
+    *members* is the container's already-listed member names. Deriving the keys
+    from those, through the readers' own
+    ``incremental_keys.fov_keys_from_member_names``, is the same computation the
+    two ``read_done_fov_keys_from_*`` entry points perform after listing — this
+    just doesn't list the container a second time to get there. The folder form
+    keeps its dotfile filter (``skip_hidden``); the zip form never had one.
+    """
     if container is None:
         return set(), None
-    members = _member_names(container)
     if members is None:
         return set(), f"{container.name} could not be read as a zip/folder."
-    intent = (
-        read_done_fov_keys_from_folder(container, schema=schema_fields, sep=sep)
-        if container.is_dir()
-        else read_done_fov_keys_from_zip(container, schema=schema_fields, sep=sep)
-    )
+    intent = fov_keys_from_member_names(
+        members, schema=schema_fields, sep=sep, skip_hidden=container.is_dir())
     return intent, None
 
 
 def _well_done(
-    csvs: list[Path], out_zip: Path | None, out_folder: Path | None,
+    parsed_csvs: dict[Path, tuple[list[dict], list[str], str]],
+    out_zip: Path | None, out_folder: Path | None,
     *, schema_fields, sep: str,
 ) -> tuple[set[tuple[str, str]], str]:
     """``(fov, timepoint)`` pairs already recorded for a well, plus the
@@ -342,13 +361,18 @@ def _well_done(
     ``out_folder`` is ever non-None in practice, but checking both here
     (rather than the caller picking one) means this function alone decides
     what "done" means, matching ``pipeline.incremental_keys.
-    incremental_done_fov_keys``'s own three-way union."""
+    incremental_done_fov_keys``'s own three-way union.
+
+    *parsed_csvs* maps each of the well's candidate CSVs to its already-parsed
+    ``(rows, fieldnames, state)``. The scan parses each CSV exactly once and
+    shares the result with :func:`_row_content_findings`, which used to re-parse
+    every one of them — on a real plate that duplicate pass was the single
+    largest cost in the whole scan."""
     done: set[tuple[str, str]] = set()
     csv_state = "missing"
-    if csvs:
+    if parsed_csvs:
         states = []
-        for csv_path in csvs:
-            rows, fieldnames, state = _read_csv_rows(csv_path)
+        for rows, fieldnames, state in parsed_csvs.values():
             states.append(state)
             if state != "ok":
                 continue
@@ -363,13 +387,18 @@ def _well_done(
     return done, csv_state
 
 
-def _row_content_findings(well: str, container: Path, csvs: list[Path]) -> list[Finding]:
+def _row_content_findings(
+    well: str, container: Path, members: set[str] | None,
+    parsed_csvs: dict[Path, tuple[list[dict], list[str], str]],
+) -> list[Finding]:
     """timepoint/timepoint_hours agreement + filename-in-archive presence,
-    for a well whose CSV has already been confirmed to parse."""
+    for a well whose CSV has already been confirmed to parse.
+
+    Takes the container's members and the parsed CSV rows rather than reading
+    either again — both were read moments earlier by the same well's scan."""
     findings: list[Finding] = []
-    members = _member_names(container) or set()
-    for csv_path in csvs:
-        rows, _fieldnames, state = _read_csv_rows(csv_path)
+    members = members or set()
+    for rows, _fieldnames, state in parsed_csvs.values():
         if state != "ok":
             continue
         for row in rows:
@@ -408,24 +437,36 @@ def _row_content_findings(well: str, container: Path, csvs: list[Path]) -> list[
 def _scan_one_well(
     well: str, *, in_map, zip_map, folder_map, csv_candidates, schema_fields, sep: str,
     fov_field_present: bool,
-) -> tuple[WellReport, list[Finding]]:
+) -> tuple[WellReport, list[Finding], set[str] | None]:
     """Read-only per-well diff: intent (from the input container) vs. done
     (from the CSV/out-zip/out-folder). Pulled out of :func:`_scan_wells` so
     it can run on its own thread — nothing here touches another well's files
-    or any shared state, only this well's own container/CSV reads."""
+    or any shared state, only this well's own container/CSV reads.
+
+    Every read this well needs happens **here, once**: the input container is
+    listed once and each candidate CSV parsed once, and both results are then
+    handed to the three consumers below rather than each re-opening what it
+    wants. Returns the container's member names alongside the report so the
+    caller's own sidecar-availability check can reuse them too.
+    """
     findings: list[Finding] = []
     container = in_map.get(well)
-    intent, unreadable_message = _well_intent(container, schema_fields=schema_fields, sep=sep)
+    members = _member_names(container) if container is not None else None
+    csvs = csv_candidates.get(well, [])
+    parsed_csvs = {path: _read_csv_rows(path) for path in csvs}
+
+    intent, unreadable_message = _well_intent(
+        container, members, schema_fields=schema_fields, sep=sep)
     if unreadable_message is not None:
         findings.append(Finding(
             severity="error", code="unreadable_in_container", well=well,
             message=f"Well {well}: {unreadable_message}",
         ))
 
-    csvs = csv_candidates.get(well, [])
     out_zip = zip_map.get(well)
     out_folder = folder_map.get(well)
-    done, csv_state = _well_done(csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
+    done, csv_state = _well_done(
+        parsed_csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
 
     if container is None:
         missing: set[tuple[str, str]] = set()
@@ -517,16 +558,22 @@ def _scan_one_well(
         ))
 
     if csv_state == "ok" and container is not None:
-        findings.extend(_row_content_findings(well, container, csvs))
+        findings.extend(_row_content_findings(well, container, members, parsed_csvs))
 
-    return report, findings
+    return report, findings, members
 
 
 def _scan_wells(
     paths, *, schema_fields, sep: str, fov_field_present: bool,
     csv_candidates: dict[str, list[Path]], workers: int = 0,
     progress: ScanProgress | None = None,
-) -> tuple[list[WellReport], list[Finding]]:
+) -> tuple[list[WellReport], list[Finding], dict[Path, set[str]]]:
+    """Diff every well, returning ``(reports, findings, members_by_container)``.
+
+    The third value is each input container's member names as this pass read
+    them, so :func:`_check_sidecar_availability` can answer its own question
+    from names already in memory instead of re-listing the whole input folder.
+    """
     in_map = in_containers(paths)
     zip_map = out_zips(paths)
     folder_map = out_folders(paths)
@@ -535,7 +582,7 @@ def _scan_wells(
     if progress is not None and progress.on_wells is not None:
         progress.on_wells(tuple(all_wells))
 
-    def _scan(well: str) -> tuple[WellReport, list[Finding]]:
+    def _scan(well: str) -> tuple[WellReport, list[Finding], set[str] | None]:
         result = _scan_one_well(
             well, in_map=in_map, zip_map=zip_map, folder_map=folder_map,
             csv_candidates=csv_candidates, schema_fields=schema_fields, sep=sep,
@@ -556,8 +603,15 @@ def _scan_wells(
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
         results = list(ex.map(_scan, all_wells))
 
-    well_reports = [report for report, _findings in results]
-    findings: list[Finding] = [f for _report, well_findings in results for f in well_findings]
+    well_reports = [report for report, _findings, _members in results]
+    findings: list[Finding] = [
+        f for _report, well_findings, _members in results for f in well_findings
+    ]
+    members_by_container: dict[Path, set[str]] = {
+        in_map[well]: members
+        for well, (_report, _findings, members) in zip(all_wells, results)
+        if members and well in in_map
+    }
 
     if not fov_field_present:
         findings.insert(0, Finding(
@@ -568,7 +622,7 @@ def _scan_wells(
                 "FOV."
             ),
         ))
-    return well_reports, findings
+    return well_reports, findings, members_by_container
 
 
 def _fov_sort_key(value: str):
@@ -578,16 +632,26 @@ def _fov_sort_key(value: str):
 
 def _check_sidecar_availability(
     paths, info: dict, *, schema_fields, sep: str,
+    known_members: dict[Path, set[str]] | None = None,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[str, ...], list[Finding]]:
+    """Compare the sidecar's declared availability against what ``in/`` holds.
+
+    *known_members* is the member-name map the per-well scan just built. The
+    input folder is walked **once** here, reusing those names rather than
+    re-opening each archive, and both fields are then extracted from that one
+    set of stems — this used to be two full serial walks of the whole input
+    folder, on top of the per-well pass that had already read every archive.
+    """
     findings: list[Finding] = []
     declared_tps = [str(t).strip() for t in info.get("available_timepoints", []) or [] if str(t).strip()]
     declared_fovs = [str(f).strip() for f in info.get("available_fovs", []) or [] if str(f).strip()]
-    actual_tps = collect_available_schema_values(
-        paths.in_dir, schema_fields=schema_fields, sep=sep,
+    stems = collect_input_image_stems(paths.in_dir, known_zip_members=known_members)
+    actual_tps = schema_values_from_stems(
+        stems, schema_fields=schema_fields, sep=sep,
         field_name="timepoint", sort_key=tp_sort_key,
     )
-    actual_fovs = collect_available_schema_values(
-        paths.in_dir, schema_fields=schema_fields, sep=sep,
+    actual_fovs = schema_values_from_stems(
+        stems, schema_fields=schema_fields, sep=sep,
         field_name="fov", sort_key=_fov_sort_key,
     )
     stale_tps = tuple(sorted(set(declared_tps) - set(actual_tps)))
@@ -675,13 +739,15 @@ def build_report(
     fov_field_present = schema.has_fov
 
     csv_candidates, prefixes, csv_findings = _classify_csvs(paths)
-    well_reports, well_findings = _scan_wells(
+    well_reports, well_findings, members_by_container = _scan_wells(
         paths, schema_fields=schema_fields, sep=sep,
         fov_field_present=fov_field_present, csv_candidates=csv_candidates,
         workers=workers, progress=progress,
     )
     stale_tps, missing_tps, stale_fovs, missing_fovs, availability_findings = (
-        _check_sidecar_availability(paths, info, schema_fields=schema_fields, sep=sep)
+        _check_sidecar_availability(
+            paths, info, schema_fields=schema_fields, sep=sep,
+            known_members=members_by_container)
     )
     stale_override_count, override_findings = _check_stale_overrides(paths, out_zips(paths))
 

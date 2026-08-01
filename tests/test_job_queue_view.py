@@ -116,11 +116,14 @@ def test_up_down_hidden_on_terminal_rows_shown_on_pending(qapp):
                     if w.toolTip() in ("Move up", "Move down")])
 
     for state in (JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED,
-                  JobState.BLOCKED, JobState.INTERRUPTED):
+                  JobState.BLOCKED):
         row = _JobRow(_job(state=state))
         assert _tool_button_count(row) == 0, state
 
-    for state in (JobState.PENDING, JobState.RUNNING):
+    # Suspended and interrupted rows still have a future — the queue picks them
+    # up again — so where they sit in the order still matters.
+    for state in (JobState.PENDING, JobState.RUNNING,
+                  JobState.SUSPENDED, JobState.INTERRUPTED):
         row = _JobRow(_job(state=state))
         assert _tool_button_count(row) == 2, state
 

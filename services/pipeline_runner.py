@@ -314,6 +314,11 @@ class PipelineRunner:
         # launch so a cancel during grouping doesn't slip through and
         # start a fresh pipeline run.
         self._stop_requested: threading.Event = threading.Event()
+        # Set on Suspend, alongside ``_stop_requested``. The signal sent is the
+        # same one Stop sends; what differs is that the pipeline catches it and
+        # winds down, and that this runner then leaves the remote's files alone
+        # so a resume can pick them up. Read by ``was_suspended``.
+        self._suspend_requested: threading.Event = threading.Event()
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
@@ -441,7 +446,44 @@ class PipelineRunner:
             self._proc = spawn_fn()
             return self._proc
 
-    def stop(self) -> None:
+    def suspend(self) -> None:
+        """Ask the run to wind down at a FOV-group boundary and exit cleanly.
+
+        The signal is the one ``stop`` already sends — a SIGTERM to the process
+        group. The difference is entirely on the receiving end: since
+        ``pipeline.suspend`` installs a handler, the pipeline stops taking on new
+        FOV-groups, lets the ones in flight finish, and exits through the normal
+        end-of-well path so every well that got work done writes its CSV and its
+        ``<well>_out.zip``. Those artifacts are what a resumed run reads as its
+        done-set, so nothing else needs saving here.
+
+        Two things are deliberately suppressed for the rest of this run:
+
+        * **The SIGKILL escalation** that follows five seconds after the
+          SIGTERM. A well mid-FOV can easily need longer than that, and killing
+          it at second five would throw away exactly the work this is trying to
+          preserve. A suspend that hangs is still recoverable — Stop is right
+          there, and its second signal is a hard kill by design.
+        * **Remote cleanup.** Auto-delete is on by default, and it only fires
+          after a verified-successful run; a suspend is not that, but the guard
+          is made explicit here rather than left to depend on it. The partial
+          output on the remote is the thing a resume needs.
+        """
+        self._suspend_requested.set()
+        self._cleanup_remote = "none"
+        self.stop(escalate=False)
+
+    @property
+    def was_suspended(self) -> bool:
+        """Whether the most recent run was wound down via :meth:`suspend`.
+
+        Like ``was_stopped``, readable after the run's ``("finished", None)``
+        event so a caller can tell a suspend apart from a cancel apart from a
+        failure — all three of which otherwise look the same from outside.
+        """
+        return self._suspend_requested.is_set()
+
+    def stop(self, *, escalate: bool = True) -> None:
         # Flag the in-progress run as cancelled — used by the worker
         # thread to abort between phases (e.g. between grouping and
         # pipeline launch) so a Stop click during the zipper phase
@@ -459,7 +501,7 @@ class PipelineRunner:
         # subprocess. Signal each one's whole process group so any
         # multiprocessing workers it spawned get torn down too.
         for p in (zipper_proc, proc):
-            self._signal_subprocess(p)
+            self._signal_subprocess(p, escalate=escalate)
 
         # For remote runs, the local SIGTERM above tears down the ssh
         # client; ssh -tt propagates SIGHUP to the remote pipeline. The
@@ -474,7 +516,8 @@ class PipelineRunner:
                 swallowed()  # was: pass (silent except)
 
     @staticmethod
-    def _signal_subprocess(proc: subprocess.Popen | None) -> None:
+    def _signal_subprocess(proc: subprocess.Popen | None, *,
+                           escalate: bool = True) -> None:
         """Cross-platform pgid-aware SIGTERM with SIGKILL escalation.
 
         Thin wrapper around :func:`services.subprocess_kill.signal_subprocess`
@@ -483,7 +526,7 @@ class PipelineRunner:
         implementation. The wrapper stays here as a static method to
         keep the PipelineRunner public surface unchanged for callers.
         """
-        signal_subprocess(proc)
+        signal_subprocess(proc, escalate=escalate)
 
     def _run_pipeline_thread(
         self,
@@ -493,6 +536,7 @@ class PipelineRunner:
     ) -> None:
         # Each run starts with a fresh "not cancelled" state.
         self._stop_requested.clear()
+        self._suspend_requested.clear()
         # The Analyze "Scratch disk" field routes per-well working files via
         # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
         # pipeline subprocess (inherits os.environ) and the in-process remote

@@ -24,7 +24,8 @@ import threading
 from util.aw_safe import swallowed
 
 
-def signal_subprocess(proc: subprocess.Popen | None) -> None:
+def signal_subprocess(proc: subprocess.Popen | None, *,
+                      escalate: bool = True) -> None:
     """Terminate ``proc`` and its whole process group.
 
     Safe to call when ``proc`` is None or already exited — both no-op.
@@ -32,6 +33,13 @@ def signal_subprocess(proc: subprocess.Popen | None) -> None:
     subprocess ignores SIGTERM (rare in practice, but
     multiprocessing-spawned workers occasionally do this during
     shutdown).
+
+    ``escalate=False`` sends the SIGTERM and stops there. That is for a
+    *cooperative* stop, where the subprocess catches the signal and is expected
+    to take a while winding down — a well finishing the FOV-group it is on can
+    easily outlast five seconds, and the SIGKILL would destroy exactly the work
+    the caller is trying to keep. The caller owns the fallback: a second,
+    escalating call is still available if the process really is stuck.
 
     This is a **best-effort** kill and must never raise: it runs from the
     GUI's Stop handler, and an unhandled exception escaping a Qt slot
@@ -98,6 +106,8 @@ def signal_subprocess(proc: subprocess.Popen | None) -> None:
         except Exception:
             swallowed()
 
+    if not escalate:
+        return
     try:
         threading.Timer(5.0, _force_kill_if_alive).start()
     except Exception:

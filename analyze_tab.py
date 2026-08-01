@@ -41,6 +41,7 @@ from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.safe import swallowed
 from analyze_input import AnalyzeInputMixin
 from analyze_run_spec import AnalyzeRunMixin
+from analyze_suspend import AnalyzeSuspendMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
@@ -98,7 +99,8 @@ def _has_well_content(folder: Path) -> bool:
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
+                 AnalyzeTabFormMixin, QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     # Positive-latch completion signal for a job queue: emitted exactly once
@@ -687,17 +689,15 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
         if seg_errors:
             QMessageBox.critical(self, "Segmentation Error", "\n".join(seg_errors))
             return None
-        # Numeric fields (radius / FFT / mesh / threads / workers / batch / QC
-        # bounds) — block a bad value at the boundary instead of silently
-        # dropping the flag or dividing by zero downstream (audit X4/X6).
+        # Numeric fields — block a bad value at the boundary rather than
+        # silently dropping the flag or dividing by zero downstream.
         num_errors = _numeric_option_errors(self._collect_run_options())
         if num_errors:
             QMessageBox.critical(self, "Input Error", "\n".join(num_errors))
             return None
-        # Empty-well flat-field / background reads its reference images from a
-        # named background well — require it to be specified AND to exist in the
-        # input before starting, rather than letting the run no-op (empty model)
-        # or fail mid-pipeline.
+        # Empty-well flat-field / background reads its references from a named
+        # background well — require it to exist in the input before starting,
+        # rather than letting the run no-op or fail mid-pipeline.
         bw_err = self._background_well_validation_error()
         if bw_err:
             QMessageBox.critical(self, "Background Well Error", bw_err)
@@ -726,11 +726,13 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
         self._pipeline_started_at = _time.monotonic()
         self._run_btn.setEnabled(False)
         self._stop_btn.setEnabled(True)
+        self._suspend_btn.setEnabled(True)
+        self.refresh_resume_banner()      # hidden while a run is going
         self._dashboard.set_status("Running…")
 
     def _expected_well_count(self, opts: dict) -> int:
-        # Delegate to the service so the progress denominator uses the same
-        # layout detection as resolve_input_output (no GUI/service drift).
+        # Delegate so the denominator uses the same layout detection as
+        # resolve_input_output (no GUI/service drift).
         from services.input_resolution_service import count_expected_wells
         return count_expected_wells(
             opts["raw"],
@@ -1008,15 +1010,16 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeTabFormMixin, QWidge
                     self._running = False
                     self._run_btn.setEnabled(True)
                     self._stop_btn.setEnabled(False)
+                    self._suspend_btn.setEnabled(False)
+                    self._on_run_settled()
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
                     self._refresh_last_run_summary()  # C4: show the just-finished run
-                    # A directly-connected slot on either signal below may
-                    # start the next queued run re-entrantly (calling
-                    # _set_running_ui_state() from inside the emit), so
-                    # nothing after jobFinished's emit may touch run state —
-                    # it is truly the last statement of this branch.
+                    # A directly-connected slot on either signal below may start
+                    # the next queued run re-entrantly (calling
+                    # _set_running_ui_state() from inside the emit), so nothing
+                    # after jobFinished's emit may touch run state.
                     ok, message = self._run_ok, (self._run_error or "")
                     out_dir = str(self._last_output_dir) if ok and self._last_output_dir else ""
                     try:

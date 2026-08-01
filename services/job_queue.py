@@ -43,11 +43,24 @@ class JobState:
     CANCELLED = "cancelled"
     BLOCKED = "blocked"
     INTERRUPTED = "interrupted"
+    SUSPENDED = "suspended"
 
     # A predecessor in one of these states can never produce output its
     # successors were waiting on, so its successors cascade to BLOCKED.
     FAILURE_LIKE = frozenset({FAILED, CANCELLED})
-    TERMINAL = frozenset({SUCCEEDED, FAILED, CANCELLED, BLOCKED, INTERRUPTED})
+
+    # Jobs that stopped part-way with their work intact on disk, and can be
+    # picked up again. A suspended job was wound down deliberately; an
+    # interrupted one was running when the app went away. In both cases the
+    # output directory holds every well that finished, which is what the
+    # pipeline's ``--incremental`` reads as its done-set — so neither is a
+    # dead end, and ``next_runnable`` will select them again. Neither cascades
+    # to BLOCKED for the same reason: a successor waiting on one of these is
+    # waiting, not blocked.
+    RESUMABLE = frozenset({SUSPENDED, INTERRUPTED})
+
+    # Nothing more will happen to these without the user editing the queue.
+    TERMINAL = frozenset({SUCCEEDED, FAILED, CANCELLED, BLOCKED})
 
 
 # The three shapes a chained job's predecessor might have produced. Only
@@ -234,10 +247,14 @@ class JobQueue:
     # -- scheduling ---------------------------------------------------------
 
     def next_runnable(self) -> JobSpec | None:
-        """First pending job, in queue order, whose predecessor (if any) has
-        succeeded. ``None`` when nothing can run right now."""
+        """First job that can run now, in queue order.
+
+        Pending, or resumable — a suspended or interrupted job is picked up
+        where it left off rather than needing to be re-added by hand, which is
+        the whole point of persisting the queue across a session.
+        """
         for job in self._jobs:
-            if job.state != JobState.PENDING:
+            if job.state != JobState.PENDING and job.state not in JobState.RESUMABLE:
                 continue
             if job.chain_from is None:
                 return job
@@ -283,6 +300,17 @@ class JobQueue:
         job = self._by_id[job_id]
         job.state = JobState.RUNNING
         job.message = ""
+
+    def mark_suspended(self, job_id: str, message: str = "") -> None:
+        """The user wound this job down; it keeps its place and its progress.
+
+        Deliberately not routed through ``mark_finished``: a suspended job is
+        not an outcome, and treating it as a cancel would cascade its
+        successors to BLOCKED as though its output were never coming.
+        """
+        job = self._by_id[job_id]
+        job.state = JobState.SUSPENDED
+        job.message = message or "suspended — will resume where it left off"
 
     def mark_finished(
         self,
@@ -347,15 +375,17 @@ class JobQueue:
         notes: list[str] = []
         for j in self._jobs:
             if j.state == JobState.RUNNING:
+                # Not a failure and not a dead end. Whatever the run had
+                # finished is on disk, and INTERRUPTED is resumable, so
+                # starting the queue picks this job up again rather than
+                # requiring the user to re-add it. Its successors stay PENDING
+                # and wait for it — they are not cascaded to BLOCKED, because
+                # the output they are waiting on is still coming.
                 j.state = JobState.INTERRUPTED
-                j.message = "interrupted by an app restart"
-                notes.append(f"{j.id}: was running at last save, marked interrupted")
-                # An interrupted job never reached SUCCEEDED, so next_runnable()
-                # will never select a chained successor -- but without this the
-                # successor is left stuck at PENDING forever with no visible
-                # reason why, instead of the same BLOCKED-with-a-message state a
-                # FAILED/CANCELLED predecessor already produces via mark_finished.
-                self._cascade_block(j.id)
+                j.message = "interrupted by an app restart — resumable"
+                notes.append(
+                    f"{j.id}: was running at last save, marked interrupted "
+                    f"(start the queue to resume it)")
         if not self._chain_order_valid(self._jobs):
             fixed = self._topological_order(self._jobs)
             if fixed is not None:

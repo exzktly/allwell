@@ -633,10 +633,10 @@ def export_heatmap_data(ctx) -> None:
         _warn(ctx.window, "Export", "No heatmap data — draw the heatmap first.")
         return
     tp_values = list(ctx.state.heatmap.tp_values or [])
-    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    tp_cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
     tp = None
-    if slider is not None and tp_values:
-        idx = max(0, min(slider.value(), len(tp_values) - 1))
+    if tp_cb is not None and tp_values:
+        idx = max(0, min(tp_cb.currentIndex(), len(tp_values) - 1))
         tp = tp_values[idx]
     ch = ctx.state.channel.active_channel
     metric_cb = ctx.widgets.get_or_none("_heatmap_metric_cb")

@@ -4,13 +4,14 @@ Companion to ``test_thresh_frac_quick_edit.py::test_channel_and_property_combos_
 which covers Plotting's page-level Channel/Property combos — this covers every
 per-tab Timepoint control across Review, both the plain-combo kind
 (``widgets.labeled_combo.LabeledComboBox``, painting its own "Timepoint: …"
-prefix) and the checkbox-menu multi-select kind (Bar Plots / Scatter Cells /
-Scatter Agg, whose picker button now carries its own "Timepoints: … selected"
-readout via ``core.ui_helpers.multiselect_button_text`` instead of sitting
-beside a separate count label).
+prefix — Heat Map included, unified from a ``StyledSlider`` to a combo like
+every sibling tab) and the checkbox-menu multi-select kind (Bar Plots /
+Scatter Cells / Scatter Agg, whose picker button now carries its own
+"Timepoints: … selected" readout via ``core.ui_helpers.multiselect_button_text``
+instead of sitting beside a separate count label).
 
 Regression: before this, every one of these paired a plain ``QLabel``
-("Timepoint" / "Timepoints") with its combo or button through
+("Timepoint" / "Timepoints") with its combo, slider, or button through
 ``ControlBand.add_scope(label, widget)`` — two widgets per control, the
 pattern the Channel/Property fold already moved away from.
 """
@@ -74,6 +75,7 @@ def test_combo_based_timepoint_controls_use_labeled_combo(viewer_app, qtbot):
         ("well_viewer.features.smfish.tab_view", "build_smfish_tab", "_smfish_tp_cb"),
         ("well_viewer.features.review_csv.tab_view", "build_review_csv_tab", "_review_tp_cb"),
         ("well_viewer.features.preview.panel_view", "build_review_image_panel", "_review_image_tp_menu"),
+        ("well_viewer.features.heatmap.tab_view", "build_heatmap_tab", "_heatmap_tp_cb"),
     ]
     import importlib
     for module_name, fn_name, attr in checks:
@@ -82,6 +84,12 @@ def test_combo_based_timepoint_controls_use_labeled_combo(viewer_app, qtbot):
         parent = QWidget()
         qtbot.addWidget(parent)
         builder(app._ctx, parent)
+        if attr == "_heatmap_tp_cb":
+            # The builder ends with a queued matplotlib draw_idle; let it
+            # settle while the canvas is still alive (see
+            # test_heatmap_widget_registry_a8.py) or pytest-qt's post-test
+            # processEvents fires it against a deleted C++ object.
+            qtbot.wait(1)
         cb = app._ctx.widgets.get_or_none(attr)
         assert cb is not None, f"{attr} was not registered by {fn_name}"
         assert isinstance(cb, LabeledComboBox), f"{attr} is a {type(cb)}, not LabeledComboBox"
@@ -109,24 +117,3 @@ def test_multiselect_timepoint_buttons_have_no_sibling_label(viewer_app, qtbot):
         # The old count label is gone entirely, not just hidden.
         assert app._ctx.widgets.get_or_none(label_attr) is None
         _no_sibling_label(parent, {"Timepoints"})
-
-
-def test_heatmap_timepoint_readout_carries_its_own_prefix(viewer_app, qtbot):
-    """Heatmap keeps its live-value QLabel (a slider has no combo to paint a
-    prefix on) but the label's own text now carries "Timepoint: …" instead of
-    sitting beside a separate "Timepoint" caption."""
-    from well_viewer.features.heatmap.tab_view import build_heatmap_tab
-
-    app = viewer_app
-    parent = QWidget()
-    qtbot.addWidget(parent)
-    build_heatmap_tab(app._ctx, parent)
-    # The builder ends with a queued matplotlib draw_idle; let it settle while
-    # the canvas is still alive (see test_heatmap_widget_registry_a8.py) or
-    # pytest-qt's post-test processEvents fires it against a deleted C++
-    # object.
-    qtbot.wait(1)
-    label = app._ctx.widgets.get_or_none("_heatmap_tp_label")
-    assert label is not None
-    assert label.text() == "Timepoint: —"
-    _no_sibling_label(parent, {"Timepoint"})

@@ -107,19 +107,23 @@ def _selected_cmap(ctx) -> str:
 
 
 def _selected_tp(ctx) -> float | None:
-    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
+    cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
     tps: list[float] = list(ctx.state.heatmap.tp_values or [])
-    if slider is None or not tps:
+    if cb is None or not tps:
         return None
-    idx = max(0, min(slider.value(), len(tps) - 1))
+    idx = max(0, min(cb.currentIndex(), len(tps) - 1))
     return tps[idx]
 
 
-def sync_heatmap_slider_to_focus(ctx) -> None:
-    """Move the slider + label to the shared focus timepoint (N5) when one is set
-    and present in this tab's timepoints — so a timepoint chosen on another
+def sync_heatmap_timepoint_to_focus(ctx) -> None:
+    """Move the combo to the shared focus timepoint (N5) when one is set and
+    present in this tab's timepoints — so a timepoint chosen on another
     plotting tab (Distribution) is reflected here. Signals are blocked so this
-    silent sync never re-fires ``_on_tp_changed``. No-op when no focus is set."""
+    silent sync never re-fires ``_on_tp_changed``. No-op when no focus is set.
+
+    ``setCurrentIndex`` alone repaints the combo's own "Timepoint: …" text —
+    it's a LabeledComboBox reading its item text, not a separate label to
+    update in step."""
     focus = current_focus_tp(ctx)
     if focus is None:
         return
@@ -127,16 +131,13 @@ def sync_heatmap_slider_to_focus(ctx) -> None:
     i = nearest_index(tps, focus)
     if i is None:
         return
-    slider = ctx.widgets.get_or_none("_heatmap_tp_slider")
-    if slider is not None and slider.value() != i:
-        blocked = slider.blockSignals(True)
+    cb = ctx.widgets.get_or_none("_heatmap_tp_cb")
+    if cb is not None and cb.currentIndex() != i:
+        blocked = cb.blockSignals(True)
         try:
-            slider.setValue(i)
+            cb.setCurrentIndex(i)
         finally:
-            slider.blockSignals(blocked)
-    label = ctx.widgets.get_or_none("_heatmap_tp_label")
-    if label is not None:
-        label.setText(f"Timepoint: {tps[i]:g} h")
+            cb.blockSignals(blocked)
 
 
 def _repsets_loaded(ctx) -> list:
@@ -419,7 +420,7 @@ def redraw_heatmap(ctx) -> None:
         return
 
     layout = active_layout(ctx)
-    sync_heatmap_slider_to_focus(ctx)
+    sync_heatmap_timepoint_to_focus(ctx)
     tp = _selected_tp(ctx)
     if tp is None:
         # Try to derive from the data; if still none, leave the canvas blank.

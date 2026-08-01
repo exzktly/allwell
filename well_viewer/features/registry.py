@@ -574,7 +574,7 @@ def _channel_distribution(ctx) -> None:
 
 
 def _channel_heatmap(ctx) -> None:
-    if ctx.widgets.has("_heatmap_tp_slider"):
+    if ctx.widgets.has("_heatmap_tp_cb"):
         try:
             from well_viewer.features.heatmap.tab_view import (
                 refresh_heatmap_timepoints,

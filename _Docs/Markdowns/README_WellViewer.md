@@ -932,12 +932,13 @@ as a histogram, KDE, or violin.
 **What it shows.** A custom-layout heatmap of one metric across wells — you
 place cells in a grid that mirrors your plate or your experimental design.
 
-- **Needs** — a well selection and a channel; a timepoint (**t (h)**) chosen
-  with the slider.
+- **Needs** — a well selection and a channel; a **Timepoint** chosen from the
+  dropdown.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
     *Rep-set avg*).
-  - **t (h)** timepoint slider (its position persists across reopen).
+  - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`; its position
+    persists across reopen).
 
   Under **Display ▾**, since these set how the grid is coloured rather than what
   it shows:
@@ -982,8 +983,8 @@ place cells in a grid that mirrors your plate or your experimental design.
   Either way the grid grows (up to 32×32) if the selection needs more cells than
   it currently has.
 - **Optimal use** — build a layout once that matches your plate, pin the colour
-  **Scale** to *Fixed* vmin/vmax so frames are comparable, then scrub the
-  timepoint slider to watch the metric evolve.
+  **Scale** to *Fixed* vmin/vmax so frames are comparable, then step through
+  the **Timepoint** dropdown to watch the metric evolve.
 
 ### Statistics
 

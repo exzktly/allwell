@@ -80,6 +80,27 @@ from util.aw_safe import swallowed
 # pipeline-side wrapper; this module cannot import it (that would drag numpy /
 # tifffile into the remote client), which is why the loop lives in ``util``.
 from util.retry_io import retry_io, volume_hint
+
+# Lines this module marks as *live state* rather than events: a transfer's
+# bytes-so-far, rsync's own percentage stream. ``pipeline_runner`` routes them
+# to the dashboard's status line and never writes them to the log.
+#
+# A log records things that happened, and "still transferring" is a sample of a
+# continuous variable. One line per sample also evicted real history: the log
+# holds 10 000 blocks, and ``analyze_tab._log_line`` carries a block of
+# scroll-compensation whose own comment blames this stream for making that
+# trimming common.
+#
+# Marked at the source with a prefix rather than sniffed by shape downstream —
+# the per-file ``[remote] ↑ <well>.zip`` names look similar and are real events
+# (they drive the Upload rail), so guessing between them would be fragile. It
+# lives here, with the only code that emits it, because ``pipeline_runner``
+# already imports this module and the reverse would be a cycle.
+TRANSIENT_PREFIX = "[remote] ⋯ "
+
+# How often a transfer writes a durable "still going" line to the log, as
+# opposed to the live status updates it emits every ``interval`` seconds.
+_BREADCRUMB_INTERVAL_S = 60.0
 from util.zip_write import atomic_zip
 
 
@@ -2573,12 +2594,14 @@ def _run_rsync_streaming(
                 if line.startswith(("sent ", "Total ", "rsync:", "rsync error")):
                     log_fn(f"[remote] {line}\n")
                 elif is_progress:
-                    # Rate-limited so a fast link doesn't flood the GUI
-                    # with progress lines, but so the user does see
-                    # SOMETHING during a long upload of a single file.
+                    # rsync's own percentage stream is live state, not events:
+                    # marked transient so it drives the status line and the
+                    # transfer bar without writing to the log at all. Still
+                    # rate-limited, since the status line is repainted per
+                    # update and a fast link emits these continuously.
                     now = time.monotonic()
                     if now - last_progress_log >= PROGRESS_LOG_MIN_INTERVAL:
-                        log_fn(f"[remote] ↑ {line}\n")
+                        log_fn(f"{TRANSIENT_PREFIX}{line}\n")
                         last_progress_log = now
                 elif _looks_like_rsync_filename(line):
                     file_count += 1
@@ -3706,7 +3729,9 @@ class Fetcher:
                 )
 
     @contextlib.contextmanager
-    def _transfer_heartbeat(self, label: str, dest_path: Path, interval: float = 8.0):
+    def _transfer_heartbeat(self, label: str, dest_path: Path,
+                            interval: float = 8.0,
+                            breadcrumb_interval: float = _BREADCRUMB_INTERVAL_S):
         """Emit a periodic "still transferring…" line showing bytes-so-far while a
         per-well rsync runs, so a long download is visibly *moving* rather than
         looking hung. The per-well fetch rsync is silent (capture_output), so
@@ -3734,12 +3759,28 @@ class Fetcher:
             return total
 
         def _beat() -> None:
+            # Two cadences, because they answer two different questions.
+            # The fast one is live state — it goes to the status line and never
+            # to the log, so a long transfer no longer writes a line every few
+            # seconds and pushes real events out of the log's 10 000-block cap.
+            # The slow one is a durable breadcrumb: a status line cannot answer
+            # "was it stuck at 3am?" the next morning, and one line a minute is
+            # a record rather than a flood.
+            last_breadcrumb = t0
             while not stop.wait(interval):
+                now = time.monotonic()
+                elapsed = _fmt_secs(now - t0)
                 mb = _bytes_so_far() / (1024 * 1024)
                 self._log(
-                    f"[remote] ↓ {label}: still transferring… "
-                    f"({_fmt_secs(time.monotonic() - t0)}, {mb:.1f} MB so far)\n"
+                    f"{TRANSIENT_PREFIX}Downloading {label} — "
+                    f"{mb:.1f} MB, {elapsed}\n"
                 )
+                if now - last_breadcrumb >= breadcrumb_interval:
+                    last_breadcrumb = now
+                    self._log(
+                        f"[remote] ↓ {label}: still transferring… "
+                        f"({elapsed}, {mb:.1f} MB so far)\n"
+                    )
 
         th = threading.Thread(target=_beat, daemon=True)
         th.start()

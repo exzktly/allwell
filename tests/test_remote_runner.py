@@ -1378,9 +1378,15 @@ def test_transfer_heartbeat_reports_progress(host, tmp_path):
     dest = tmp_path / "allwell-x-A01_out.zip"
     # simulate rsync streaming into a hidden temp file in the dest dir
     (tmp_path / f".{dest.name}.abc123").write_bytes(b"\0" * (3 * 1024 * 1024))
-    with fetcher._transfer_heartbeat("A01", dest, interval=0.05):
+    with fetcher._transfer_heartbeat("A01", dest, interval=0.05,
+                                     breadcrumb_interval=0.1):
         _time.sleep(0.16)                       # allow a couple of beats
     joined = "".join(logs)
+    # Two cadences: a live sample every beat, marked transient so it reaches
+    # the status line and never the log, plus a rarer durable breadcrumb.
+    from services.remote_runner import TRANSIENT_PREFIX
+    assert TRANSIENT_PREFIX in joined
+    assert joined.count(TRANSIENT_PREFIX) > joined.count("still transferring")
     assert "still transferring" in joined
     assert "A01" in joined and "MB so far" in joined
     # no heartbeat lines leak after the context exits

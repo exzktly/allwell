@@ -32,6 +32,7 @@ from services.remote_config import RemoteHost
 from services.remote_runner import (
     OutputFilter,
     RemoteRunner,
+    TRANSIENT_PREFIX,
     stage_local_zips,
 )
 from services.subprocess_kill import signal_subprocess
@@ -123,6 +124,11 @@ _RE_TF_SCAN = re.compile(r"Auto-threshold: scanning (\d+) well")
 _RE_TF_PROG = re.compile(r"Auto-threshold: completed well (\d+)/(\d+)")
 
 
+def is_transient_progress(line: str) -> bool:
+    """Whether *line* is live state for the status bar, not a log entry."""
+    return line.lstrip().startswith(TRANSIENT_PREFIX)
+
+
 class ProgressTracker:
     """Pure log-line parser that tracks well-count progress.
 
@@ -169,6 +175,9 @@ class ProgressTracker:
         # when the pipeline echoes the same banner via stdout.
         if "Zip mode:" in line or "Zip mode complete" in line:
             self.zip_mode_warning_logged = True
+        if is_transient_progress(line):
+            # Live state: straight to the status line, nothing else to parse.
+            return [("status", line.strip()[len(TRANSIENT_PREFIX):].strip())]
         m = _RE_TF_WORKERS.search(line)
         if m:
             events.append(("workers", int(m.group(1))))

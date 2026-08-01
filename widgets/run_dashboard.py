@@ -105,9 +105,10 @@ class RunDashboard(PlateProgress):
             self._active.discard(w)
         self._plate.setWellColor(w, self._well_color(w))
         self._plate.setWellFraction(w, self._well_fraction(w))
-        self._plate.setWellMarker(
-            w, "✕" if w in self._errored
-            else ("⚙" if w in self._active else None))
+        # Only the error mark survives. A computing well used to carry a ⚙,
+        # which sat in the middle of what is now its dial — the fill and the
+        # colour already say it is working, and the glyph only hid them.
+        self._plate.setWellMarker(w, "✕" if w in self._errored else None)
         self._refresh_rail()
         self._refresh_fov()                  # active set changed
 

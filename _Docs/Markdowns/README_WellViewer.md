@@ -522,7 +522,13 @@ A cell counts only when it is manually kept **and** it passes QC.
   the lighter part of it is the fields already measured, the darker part what is
   left, filling clockwise. So you can see at a glance whether a slow well is
   nearly through or has barely started, without hunting for it in the progress
-  bars underneath.
+  bars underneath. There is no longer a cog on the well — the dial and its
+  colour say it is working.
+- During a remote transfer the **status line** beside the progress bar carries
+  the live figure (how much has come across, how long it has taken) and updates
+  in place. The log gets the events — each well starting, each one landing, the
+  final total — plus a "still transferring" note about once a minute, so a run
+  left overnight still leaves a readable trail without burying it.
 - **Suspend** winds the run down cleanly. It finishes the fields already being
   computed, then lets every well that got any work done write its results, and
   remembers what you were running. Use it when the run is fine but you need the

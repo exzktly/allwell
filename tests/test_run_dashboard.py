@@ -79,12 +79,15 @@ def test_dashboard_per_stage_counts_and_tooltip(qapp):
     assert "fetched" in d._well_tooltip("A01")
     assert "failed" in d._well_tooltip("A03")
     assert "pending" in d._well_tooltip("H12")
-    # active well carries a glyph marker; cleared once it advances
+    # A computing well is marked by its dial and its colour, not by a glyph:
+    # the ⚙ used to sit in the middle of exactly the area the dial now fills.
+    # Only an error still carries a marker.
     d2 = RunDashboard(); d2.reset(remote=False, total=1)
     d2.set_well_stage("A01", "active")
-    assert d2._plate._grid._markers                      # gear set
-    d2.set_well_stage("A01", "process")
-    assert not d2._plate._grid._markers                  # cleared on advance
+    assert not d2._plate._grid._markers                  # no gear any more
+    assert d2._plate._grid._fractions                    # a dial instead
+    d2.set_well_stage("A01", "error")
+    assert d2._plate._grid._markers                      # ✕ survives
 
 
 def test_remote_threshold_does_not_count_as_download(qapp):

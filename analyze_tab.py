@@ -33,6 +33,7 @@ from services.pipeline_runner import (
     PipelineRunner,
     ProgressTracker,
     classify_log_line,
+    is_transient_progress,
 )
 from services.pipeline_service import find_pipeline_script
 from services.remote_config import default_remote_index
@@ -731,8 +732,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
         self._dashboard.set_status("Running…")
 
     def _expected_well_count(self, opts: dict) -> int:
-        # Delegate so the denominator uses the same layout detection as
-        # resolve_input_output (no GUI/service drift).
+        # Same layout detection as resolve_input_output (no GUI/service drift).
         from services.input_resolution_service import count_expected_wells
         return count_expected_wells(
             opts["raw"],
@@ -938,7 +938,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
                             self._log_q.put((ev_kind, ev_payload))
                         else:
                             self._apply_progress_event(ev_kind, ev_payload)
-                    self._log_line(payload, classify_log_line(payload))
+                    if not is_transient_progress(payload):
+                        self._log_line(payload, classify_log_line(payload))
                 elif kind == "zipper_start":
                     n = payload or 96
                     self._zipper_done = 0
@@ -1016,10 +1017,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeRunMixin, AnalyzeSuspendMixin,
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
                     self._refresh_last_run_summary()  # C4: show the just-finished run
-                    # A directly-connected slot on either signal below may start
-                    # the next queued run re-entrantly (calling
-                    # _set_running_ui_state() from inside the emit), so nothing
-                    # after jobFinished's emit may touch run state.
+                                # A directly-connected slot on either signal below may
+                    # start the next queued run re-entrantly, so nothing after
+                    # jobFinished's emit may touch run state.
                     ok, message = self._run_ok, (self._run_error or "")
                     out_dir = str(self._last_output_dir) if ok and self._last_output_dir else ""
                     try:

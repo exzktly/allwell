@@ -37,37 +37,25 @@ def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
     return _tooltip
 
 def apply_sidebar_plate_geometry(plate) -> None:
-    """The single home for the sidebar well-plate's sizing.
+    """Review-side alias for the app-wide plate geometry in the ``"rail"`` role.
 
-    Every sidebar tab builds its own ``WellPlateSelector`` (they differ in
-    selection mode and signal wiring — see ``sidebar_view`` / ``preview_view`` /
-    ``picker_view`` / ``stats`` / ``replicate_panel``), but they must all size
-    identically. This geometry used to be copy-pasted into each builder, so a
-    change (e.g. dropping the old fixed 280px min-height that stretched the plate
-    inside the sidebar scroll area) had to be made five times or the tabs drifted
-    apart. Centralise it here so it changes in ONE place:
+    The sizing rule is not specific to Review's sidebar: the run dashboards and
+    the Datasets tools show the same plate control and must render it at the same
+    cell scale, so the rule lives in ``widgets/plate_geometry.py`` where the
+    ``widgets/`` and ``datasets/`` sides can reach it too (``widgets/`` must not
+    import ``well_viewer`` — ``test_architecture_contracts.py::
+    test_widgets_do_not_import_the_app``). This wrapper stays so Review-side
+    callers that already know this name keep working; new code should call
+    ``widgets.plate_geometry.apply_plate_geometry`` directly and pick its role.
 
-    - a ``Preferred`` size policy with ``heightForWidth`` so the plate scales to
-      the rail width and keeps its aspect;
-    - NO fixed min-height floor — the ``WellPlateSelector``'s own
-      ``minimumSizeHint`` is the (small) floor, and the sidebar scroll area
-      (``app_shell_view``) handles vertical overflow.
-
-    Because the plate paints from its own ``width()`` (not ``contentsRect``), its
-    on-screen size is set entirely by how wide its container lets it be. So a
-    matching rule holds for callers: the plate's container must add **no
-    horizontal inset** — every sidebar plate spans the full rail width, so the
-    picker is the SAME size on every tab. (A left/right gutter on one tab's plate
-    layout makes only that tab's plate render narrower, and — aspect-locked — it
-    shrinks in both dimensions; that was the Image Table "shrinking plate" bug.)
-
-    Non-sidebar plate consumers (run dashboard, saved-selections mini-plate)
-    deliberately do not call this — they size the plate for their own context.
+    One rule the helper cannot enforce for the caller: the plate's container must
+    add **no horizontal inset**, because the grid paints from the widget's own
+    ``width()``. A left/right gutter on one tab's plate layout makes only that
+    tab's plate render narrower, and — aspect-locked — it shrinks in both
+    dimensions. That was the Image Table "shrinking plate" bug.
     """
-    from PySide6.QtWidgets import QSizePolicy
-    sp = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-    sp.setHeightForWidth(True)
-    plate.setSizePolicy(sp)
+    from widgets.plate_geometry import apply_plate_geometry
+    apply_plate_geometry(plate, role="rail")
 
 
 def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):

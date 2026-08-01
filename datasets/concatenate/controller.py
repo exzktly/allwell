@@ -70,6 +70,7 @@ class ConcatenateController(QObject):
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
         worker.wellStage.connect(self.page.dashboard.set_well_stage)
+        worker.wellFraction.connect(self.page.dashboard.set_well_progress)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)

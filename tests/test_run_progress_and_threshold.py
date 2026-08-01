@@ -75,7 +75,12 @@ def test_grouped_well_is_pending_remote(qapp):
     d.set_well_stage("A01", "group")
     assert d._well_color("A01") == Colors.text_muted   # queued, not yet uploaded
     d.set_well_stage("A01", "upload")
-    assert d._well_color("A01") == Colors.warn          # uploading / active
+    # On the remote, waiting its turn — its own colour. This used to be ``warn``,
+    # shared with a well actually being computed, so a plate mid-run was one
+    # block of amber that said nothing about which wells were being worked on.
+    assert d._well_color("A01") == Colors.accent2
+    d.set_well_stage("A01", "active")
+    assert d._well_color("A01") == Colors.warn          # now actually computing
 
 
 # ── 3) Auto-threshold rounds to the nearest integer before saving ────────────

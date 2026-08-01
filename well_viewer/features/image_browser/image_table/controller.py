@@ -25,7 +25,10 @@ from PySide6.QtWidgets import (
 from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import set_combo_values
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.core.channel_state_controller import set_thresh_frac_on
+from well_viewer.core.channel_state_controller import (
+    refresh_thresh_frac_quick_edit,
+    set_thresh_frac_on,
+)
 
 
 # ── LUT colour palette ──────────────────────────────────────────────────────
@@ -70,9 +73,12 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     composite_additive_rgb,
     composite_column_rgb,
     draw_cell_chrome,
+    is_raw_fallback,
+    mark_uncorrected,
     overlay_cell_rgb,
     reset_scan_misses,
     resolve_chrome_plan,
+    UNCORRECTED_TOOLTIP,
 )
 # Faceted render placement (axis labels + group spacing) — same-feature sibling,
 # module-scope like the grid_layout import above so it isn't a deferred import.
@@ -214,6 +220,11 @@ def image_table_repopulate_dropdowns(ctx) -> None:
     thresh_cb = ctx.widgets.get_or_none("_image_table_thresh_chan_cb")
     if thresh_cb is not None:
         set_combo_values(thresh_cb, [c for c in chan_opts if " (binary)" not in c])
+        # ``set_combo_values`` blocks signals while it repopulates, so the
+        # stepper's own ``currentTextChanged`` sync never fires here — without
+        # this the box would keep showing its construction-time 50.0 while the
+        # picked channel's real ON threshold was something else entirely.
+        refresh_thresh_frac_quick_edit(ctx)
 
 
 # ── Per-cell render model build / rebuild ────────────────────────────────────
@@ -709,8 +720,14 @@ def _cell_title(ctx, cell, overlay_chans) -> str:
     An OVERLAY_CHAN cell names the merged channel set (e.g. "GFP+DAPI"); a normal
     cell names its single channel; anything without a well+timepoint is "(unset)".
     Delegates to the shared :func:`cell_identity_label` (also the burned-in label
-    source) so tooltip / burned label / export title all read identically."""
-    return cell_identity_label(ctx, cell, overlay_chans) or "(unset)"
+    source) so tooltip / burned label / export title all read identically.
+
+    A cell served the raw frame in place of the corrected one says so in full
+    words here; the burned-in mark has to stay short enough to sit in a corner."""
+    title = cell_identity_label(ctx, cell, overlay_chans) or "(unset)"
+    if is_raw_fallback(ctx, cell):
+        return f"{title}\n{UNCORRECTED_TOOLTIP}"
+    return title
 
 
 def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay_thumb,
@@ -777,6 +794,9 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
         rgb = cell_display_rgb(ctx, cache, cell, r, crop_tool, arr)
         if rgb is not None and chrome_kwargs:
             rgb = draw_cell_chrome(rgb, **chrome_kwargs)
+        # After the chrome, so the mark is not painted over by a scale bar or an
+        # identity label sharing the cell.
+        rgb = mark_uncorrected(ctx, cell, rgb)
         # Pin the window to the full 0..255 byte range (as the overlay branch
         # above does). ``cell_display_rgb`` has already applied the channel's LUT
         # and colormap, so letting make_overlay_thumb auto-fit its own min/max
@@ -832,6 +852,15 @@ def _compute_auto_luts(ctx, cells, cache, crop_tool) -> None:
                 swallowed()  # the render loop reports this cell
                 continue
             if arr is None or getattr(arr, "ndim", 2) >= 3:
+                continue
+            # A cell served the raw frame is not on the corrected population's
+            # scale — it still carries the camera offset and the background the
+            # top-hat would have removed. Pooling it in stretches the window by
+            # that offset and renders every genuinely corrected cell of the
+            # channel near-black. Pool the corrected population only; a raw cell
+            # falls through to its own auto-fit, which is the honest answer for a
+            # measurement that is not comparable to the rest of the grid.
+            if is_raw_fallback(ctx, cell):
                 continue
             a = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
             a = _np.asarray(a, dtype=_np.float32)
@@ -1028,6 +1057,13 @@ def image_table_generate(ctx) -> None:
     if unrendered:
         msg += f" {unrendered} could not be drawn"
         msg += f" ({failed} raised)." if failed else " — see the log."
+    # Cells served the raw frame because the corrected (top-hat) set doesn't
+    # cover them. They DO draw, so the count above says nothing about them — and
+    # a grid silently mixing corrected and raw frames is exactly the kind of
+    # degraded output that reads as a finished one.
+    n_raw = len(getattr(ctx.state.image_table, "raw_fallbacks", None) or ())
+    if n_raw:
+        msg += f" {n_raw} shown uncorrected (no corrected image)."
     ctx.notify.set_status(msg)
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log

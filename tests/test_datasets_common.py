@@ -117,6 +117,89 @@ def test_write_zip_drops_collisions_and_reports_them(tmp_path):
         assert zf.read("a.tif") == b"1"  # first write wins
 
 
+# ── per-member progress ──────────────────────────────────────────────────────
+def test_read_members_reports_one_progress_call_per_member(tmp_path):
+    """Both container layouts report the same ``(done, total)`` sequence, with
+    the total known from the first call — the whole point of reading it from
+    ``infolist()`` (or the folder walk) up front rather than counting as we go."""
+    zpath = tmp_path / "A01.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr("a.tif", b"one")
+        zf.writestr("b.tif", b"two")
+        zf.writestr("sub/", b"")  # directory entry — not a member
+    seen: list[tuple[int, int]] = []
+    ct.read_members(zpath, progress=lambda done, total: seen.append((done, total)))
+    assert seen == [(1, 2), (2, 2)]
+
+    folder = tmp_path / "A02"
+    (folder / "sub").mkdir(parents=True)
+    (folder / "a.tif").write_bytes(b"one")
+    (folder / "sub" / "b.tif").write_bytes(b"two")
+    seen.clear()
+    ct.read_members(folder, progress=lambda done, total: seen.append((done, total)))
+    assert seen == [(1, 2), (2, 2)]
+
+
+def test_write_zip_reports_progress_for_dropped_members_too(tmp_path):
+    """A collision is skipped as a *write* but still consumed as a step
+    through the caller's list, so the dial must not stall on it — otherwise a
+    well whose members all collided would never reach full."""
+    seen: list[tuple[int, int]] = []
+    ct.write_zip(
+        tmp_path / "out.zip",
+        [("a.tif", b"1"), ("a.tif", b"2"), ("b.tif", b"3")],
+        progress=lambda done, total: seen.append((done, total)),
+    )
+    assert seen == [(1, 3), (2, 3), (3, 3)]
+
+
+# ── WellFraction ─────────────────────────────────────────────────────────────
+def test_well_fraction_sweeps_zero_to_full_once_across_read_and_write():
+    """The reason this class exists: two passes over the same well must fill
+    one dial once, not fill it twice. With two equally weighted slices the
+    read half lands on 50% and the write half carries it to 100%."""
+    seen: list[tuple[str, int, int]] = []
+    frac = ct.WellFraction(lambda w, d, t: seen.append((w, d, t)), "A01", 2)
+
+    on_read = frac.slice_progress()
+    on_read(1, 4)
+    on_read(4, 4)
+    assert seen[-1] == ("A01", 50, 100)
+
+    on_write = frac.slice_progress()
+    on_write(2, 4)
+    on_write(4, 4)
+    assert seen[-1] == ("A01", 100, 100)
+
+    values = [done for _w, done, _t in seen]
+    assert values == sorted(values)  # monotonic — never restarts mid-well
+
+
+def test_well_fraction_skipped_and_unclaimed_slices_still_reach_full():
+    """A pass with nothing to do (no QC archive, a filter that kept nothing, a
+    byte-for-byte copy) owns its slice anyway, and ``finish`` closes out
+    whatever is left — a finished well must read as finished, never as stuck
+    part-way."""
+    seen: list[tuple[str, int, int]] = []
+    frac = ct.WellFraction(lambda w, d, t: seen.append((w, d, t)), "B02", 4)
+    frac.skip(2)
+    assert seen[-1] == ("B02", 50, 100)
+    frac.finish()
+    assert seen[-1] == ("B02", 100, 100)
+
+
+def test_well_fraction_deduplicates_to_whole_steps():
+    """A well holding thousands of files must not emit thousands of queued
+    signals and plate repaints — updates collapse onto the 100-step scale."""
+    seen: list[int] = []
+    frac = ct.WellFraction(lambda _w, done, _t: seen.append(done), "C03", 1)
+    on_read = frac.slice_progress()
+    for i in range(1, 5001):
+        on_read(i, 5000)
+    assert len(seen) <= 101
+    assert seen[-1] == 100
+
+
 def test_clear_destination_removes_in_and_out(tmp_path):
     dest_root = tmp_path / "dest"
     (dest_root / "in").mkdir(parents=True)

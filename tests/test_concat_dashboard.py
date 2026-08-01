@@ -59,7 +59,10 @@ def test_run_dashboard_still_exposes_every_test_facing_attribute(qapp):
     tests/test_run_dashboard.py pokes must still resolve on RunDashboard."""
     from widgets.run_dashboard import RunDashboard
     d = RunDashboard()
-    for attr in ("_plate", "_fov_lay", "_fov_scroll", "_fov_host", "_body",
+    # The ``_fov_*`` scroll area that once held a progress bar per computing
+    # well is deliberately absent from this list: the per-well rail is gone,
+    # its information having moved onto the plate's dials.
+    for attr in ("_plate", "_body",
                  "_toggle", "_rail", "_headline", "_bar"):
         assert hasattr(d, attr), f"RunDashboard lost attribute {attr!r}"
     assert callable(d._count)

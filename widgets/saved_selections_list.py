@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
 import theme
 from util.well_token import canonical_well_label
 from util.aw_safe import swallowed
+from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"
@@ -431,13 +432,16 @@ class _SelectionRow(QFrame):
             from widgets.well_plate_selector import WellPlateSelector
             plate = WellPlateSelector()
         try:
-            plate.setActionsVisible(False)
+            # The app-wide plate geometry (widgets/plate_geometry.py): same caps,
+            # same cell scale and same centring as every other plate map in the
+            # app. The "rail" role hides the built-in action row — the popover
+            # has its own OK / Cancel buttons below the plate.
+            apply_plate_geometry(plate, role="rail")
         except Exception:
             swallowed()
         enabled = list(self._enabled_wells) or list(_ALL_WELLS)
         plate.setEnabledWells(enabled)
         try:
-            plate.setSelectionMode("select")
             plate.setRowColumnSelectable(True)
             plate.setSingleSelectionMode(False)
             plate.setDragMode("rect")   # rubber-band rectangle, not freeform paint
@@ -456,7 +460,7 @@ class _SelectionRow(QFrame):
                               theme.Spacing.sm, theme.Spacing.sm)
         cv.setSpacing(theme.Spacing.sm)
         cv.addWidget(QLabel("Choose wells for this selection"))
-        cv.addWidget(plate, 1)
+        cv.addWidget(plate, 1, PLATE_ALIGNMENT)
         br = QHBoxLayout()
         br.addStretch(1)
         cancel = QPushButton("Cancel")

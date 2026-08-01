@@ -144,16 +144,28 @@ class ControlBand(QWidget):
         self._actions.setAlignment(Qt.AlignTop)
 
         # The scope host takes the slack, which is what pins the actions right.
+        #: Scope items pinned to the end of the row — see ``add_scope``.
+        self._trailing: list[QWidget] = []
         root.addWidget(self._scope_host, 1, Qt.AlignTop)
         root.addLayout(self._actions)
 
     # ── building ────────────────────────────────────────────────────────────
-    def add_scope(self, label: str, *widgets: QWidget) -> QWidget:
+    def add_scope(self, label: str, *widgets: QWidget,
+                  trailing: bool = False) -> QWidget:
         """Add a scope control, optionally with a label bound to it.
 
         The label and its control(s) are added as **one** flow item, so a wrap
         can never separate them. Pass an empty *label* for a self-describing
         control (a menu button that already reads "All 3 timepoints ▾").
+
+        ``trailing=True`` pins the item to the END of the scope zone whatever
+        order the tab builds its controls in. Threshold is the case it exists
+        for: it is the one scope control that narrows the data rather than
+        choosing which data to show, and every tab that has one wants it last —
+        but tabs add their controls in whatever order their builder runs, so
+        Threshold ended up mid-row with Timepoints after it. A flag keeps the
+        rule with the control instead of making each builder remember to call
+        it last.
         """
         if not widgets:
             raise ValueError("add_scope needs at least one widget")
@@ -168,8 +180,16 @@ class ControlBand(QWidget):
         else:
             item = flow_group(self._scope_host, *widgets)
             item.setObjectName("ControlBandGroup")
+        if trailing:
+            self._trailing.append(item)
         self._scope.addWidget(item)
+        self._restack_trailing()
         return item
+
+    def _restack_trailing(self) -> None:
+        """Re-append the pinned items so they stay last as others arrive."""
+        for item in self._trailing:
+            self._scope.move_to_end(item)
 
     def add_action(self, widget: QWidget) -> QWidget:
         """Add an action to the right zone, in call order, flush to the edge."""

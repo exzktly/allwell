@@ -50,7 +50,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
      [Subset / Split Dataset](#subset--split-dataset) ·
-     [Import Loose Folder](#import-loose-folder) ·
+     [Zip Loose Folder](#zip-loose-folder) ·
      [Merge Plates](#merge-plates) ·
      [Job Queue](#job-queue)
 7. [Filename schema](#filename-schema)
@@ -82,7 +82,7 @@ to add features, how to debug, and build / environment troubleshooting), see
   **Validate & Repair Dataset** checks whether an Analyze run actually
   finished and fixes metadata drift without re-running the pipeline; and
   **Subset / Split Dataset** copies a filtered slice of wells/timepoints/FOVs
-  into a new folder, leaving the source untouched; **Import Loose
+  into a new folder, leaving the source untouched; **Zip Loose
   Folder** groups a folder of loose TIFs into per-well zips with a live
   preview before converting; and **Merge Plates** joins two different plates
   along the well axis into one dataset.
@@ -517,6 +517,42 @@ A cell counts only when it is manually kept **and** it passes QC.
 ### 8. Run / Suspend / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
+- The **plate map** above the log colours each well by the stage it has reached.
+  A well that has started is drawn as a dial rather than a flat circle: the
+  darker part of it is the work already done, the lighter part what is left,
+  filling clockwise from twelve o'clock. So you can see at a glance whether a
+  slow well is nearly through or has barely started. There is no longer a cog on
+  the well — the dial and its colour say it is working.
+- The dial follows whichever step the well is actually in. While the well is
+  being computed it fills with the fields measured; while its input archive is
+  being uploaded, or its results downloaded, it fills with the bytes moved. A
+  well that has entered a step but finished none of it — one sitting on the
+  remote waiting its turn, for instance — shows an empty dial, so the part of
+  the plate that is merely waiting is visibly distinct from the part that has
+  not been reached at all. Wells still to be started have no dial, and neither
+  does a failed well: a part-filled ring beside the ✕ would suggest it was
+  still going.
+- Hover a well for its exact numbers — the stage it is in plus its field count
+  (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
+  its turn has its own colour, distinct from one being computed — see the
+  **Wells** legend beside the plate.
+- The **headline and progress bar** count wells, and count each well once. A
+  well already finished by an earlier run is counted too — it is part of the
+  plate you asked for, so a run that only has ten wells left to compute still
+  reads against the whole plate rather than against the ten. If the same well
+  reports finishing twice (which a batched remote run can do when a batch's
+  input files outlive it), the log says so and the count does not move: the bar
+  reaching the end always means every well is accounted for.
+- When a run ends with wells unaccounted for, the headline says which — "Complete
+  — 28 of 40 well(s) processed; 12 never reported completion" — and the bar is
+  left short of full, with a warning in the log pointing at the `errors/` folder
+  in the output directory. A finished-looking bar over a part-finished plate is
+  the one thing the run view will not show you.
+- During a remote transfer the **status line** beside the progress bar carries
+  the live figure (how much has come across, how long it has taken) and updates
+  in place. The log gets the events — each well starting, each one landing, the
+  final total — plus a "still transferring" note about once a minute, so a run
+  left overnight still leaves a readable trail without burying it.
 - **Suspend** winds the run down cleanly. It finishes the fields already being
   computed, then lets every well that got any work done write its results, and
   remembers what you were running. Use it when the run is fine but you need the
@@ -676,6 +712,13 @@ a well to toggle it; drag across wells to multi-toggle; click a row letter
 or column number to toggle the whole row / column; **Select all** /
 **Select none** clear or fill in one click. The selection survives across
 tabs and is what every plot / aggregate / export consumes.
+
+Every plate map in the app — this one, the pickers on the Statistics, Image
+Browser, Preview and Sample Definitions panels, the Datasets tools' own well
+pickers, and the status map on a running job's dashboard — is the same control
+at the same size, centred in whatever panel holds it. A plate looks the same
+wherever you meet it, so a well you can find on one is in the same place on
+the next.
 
 #### Plot Groups and Split View
 
@@ -1363,7 +1406,19 @@ channel for every well).
   mutually exclusive with **Wrap cols** — dragging any root or channel onto Rows /
   Columns switches Plate mode back off. Prefer this over well-on-columns + Wrap when
   you want a plate view: Wrap only labels the first band, whereas Plate labels every
-  row and column correctly.
+  row and column correctly. Because both axes are the plate, Plate mode shows **one
+  channel** — the first in the builder. The LUT panel offers a row for that channel
+  only and names the others as not shown, so you are never editing a brightness
+  nothing on screen reads.
+- **Cells marked `raw`** have no corrected image for that field, so the table is
+  showing you the uncorrected frame instead. It still carries the camera offset and
+  the background that correction removes, which puts it on a different brightness
+  scale from its neighbours: one LUT window cannot suit both, and a window set for
+  the corrected cells usually leaves the marked ones washed out and unresponsive to
+  further LUT changes. They are also left out of **Auto**'s pooled brightness window,
+  so they cannot darken the rest of the grid. The status line after **Generate**
+  counts them; the badge says which. If a whole block of the plate is marked, the
+  correction never ran for those wells — check the run's `errors/` folder.
 - **Action strip** — **Generate** · **Table ▾** (*Reset table layout*, back to
   defaults; *Clear rendered images*, which keeps the layout so Generate re-renders
   in one click) · **Crop view ▾** (drag a region on any image — the button reads
@@ -1371,7 +1426,8 @@ channel for every well).
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
   with a **channel** dropdown choosing which channel it applies to (the same
-  ThreshFracOn shared with Cell Gating and the plot tabs) · **Export ▾** (to file ·
+  ThreshFracOn shared with Cell Gating and the plot tabs; it follows the picked
+  channel, and reads 0 for the nuclear channel until you set one) · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
@@ -1534,7 +1590,13 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
 - **Inclusion** — per-channel **FluorGating** thresholds, or tick **Use
   scatter-plot gates** and pick a filtering gate to let the [Scatter
   Plot](#scatter-plot)'s rectangular gates define inclusion instead.
-- **Fraction-on** — per-channel **ThreshFracOn** cutoffs, with
+- **Fraction-on** — per-channel **ThreshFracOn** cutoffs. A readout channel
+  starts at 50; the nuclear (segmentation) channel starts at 0, because an
+  ON/OFF brightness cut has no meaning for the channel nuclei are *found* with —
+  every segmented cell is by construction a detection in it, so a non-zero cut
+  there only hides nuclei from the Image Table's "≥ threshold" view. Whichever
+  channel it is, a value you set yourself always wins over the starting one.
+  The panel also offers
   **Auto-threshold all channels** (an Otsu pass over per-cell + matched-
   background pixels) to derive sensible defaults, and **Optimize ThreshFracOn**
   — pick two wells, a timepoint, and a Min / Max / # Points range, and the
@@ -1827,7 +1889,7 @@ inclusion overrides carry over for cells that survive the filter (dropped for
 ones that don't) and gating thresholds / sample definitions carry over from
 the source, same as Concatenate. The source dataset is never modified.
 
-### Import Loose Folder
+### Zip Loose Folder
 
 Use this to group a folder of loose, ungrouped TIFs (no `in/<WELL>.zip`
 structure yet) into the layout Analyze reads directly.

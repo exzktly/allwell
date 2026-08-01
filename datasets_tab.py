@@ -118,7 +118,7 @@ _FEATURES: tuple[_Feature, ...] = (
     _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
     _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate),
     _Feature(name="Subset / Split", icon="boxes", build=_build_subset),
-    _Feature(name="Import Loose Folder", icon="download", build=_build_import_loose),
+    _Feature(name="Zip Loose Folder", icon="download", build=_build_import_loose),
     _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates),
     _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
 )

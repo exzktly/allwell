@@ -383,15 +383,21 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
     return bool(spec.get("log", False)) if spec is not None else False
 
 def reset_scan_misses(ctx) -> None:
-    """Start a render pass with a clean set of empty-scan results.
+    """Start a render pass with clean per-pass load bookkeeping.
 
-    Called at the top of every Generate / export run. Without the reset a
+    Called at the top of every Generate / export run. Two records are scoped to
+    a single pass and cleared here: the empty-scan set (without the reset a
     well/channel that came up empty once would stay written off for the rest of
-    the session; with it, the suppression lasts exactly one pass.
+    the session) and the raw-fallback set (which the status line counts, so it
+    has to describe the pass that just ran and no earlier one).
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
-    if st is not None and isinstance(getattr(st, "scan_misses", None), set):
-        st.scan_misses.clear()
+    if st is None:
+        return
+    for attr in ("scan_misses", "raw_fallbacks"):
+        rec = getattr(st, attr, None)
+        if isinstance(rec, set):
+            rec.clear()
 
 
 def _scan_misses(ctx) -> set:
@@ -406,6 +412,19 @@ def _scan_misses(ctx) -> set:
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     misses = getattr(st, "scan_misses", None)
     return misses if isinstance(misses, set) else set()
+
+
+def _raw_fallbacks(ctx) -> set:
+    """The current render pass's set of ``(well, channel, tp, fov)`` cells that
+    asked for the corrected (top-hat) image and were served the raw one instead.
+
+    Same lifetime and same stub tolerance as :func:`_scan_misses`. The Generate
+    status line reports its size, so a grid that quietly mixes corrected and raw
+    frames says so rather than looking like a uniformly corrected table.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "raw_fallbacks", None)
+    return rec if isinstance(rec, set) else set()
 
 
 def _load_well_channel(
@@ -576,19 +595,39 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
     When ``fov`` is empty (e.g. pipeline_info has no available_fovs and the
     dropdown is empty), match the first available FOV for the requested
     timepoint so single-FOV datasets still render.
+
+    The corrected (top-hat) variant falls back to raw **per cell**, not only
+    when the whole well/channel has no top-hat set. A pipeline commonly corrects
+    a subset of a well's frames — it was interrupted, it was re-run over fewer
+    timepoints, or the correction was only ever asked for on some fields — and
+    the resulting dict is non-empty but does not cover every ``(fov, tp)`` the
+    grid asks for. Resolving only against it left exactly those cells with no
+    image at all while their neighbours drew, even though the raw frame for the
+    same cell was already sitting in ``cache[(well, channel, "raw")]``. Each
+    fallback is recorded in :func:`_raw_fallbacks` so the pass can say how many
+    cells it served uncorrected.
     """
     # A "GFP (binary)" token loads the same pixels as "GFP" — the binary render is
     # applied downstream (cell_display_rgb); here we just resolve the base channel.
     chan_lower = _binary_base(chan_upper).strip().lower()
+    is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=use_tophat)
-    # When tophat is requested but not produced for this well/channel, drop
-    # back to raw rather than rendering "(no image)".
-    if (use_tophat and not fluor and chan_lower != NUC_SEG_TOKEN.lower()):
-        fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=False)
-    if not fluor:
-        return None
-
-    ref, kind = _match_image_ref(fluor, fov, tp)
+    ref, kind = _match_image_ref(fluor, fov, tp) if fluor else (None, "")
+    # An unresolved top-hat cell drops back to raw rather than rendering
+    # "(no image)". ``kind == "ambiguous_fov"`` is a deliberate refusal (an empty
+    # FOV spanning several fields), not a gap in the corrected set, so it is left
+    # to stand instead of being retried against a dict with the same ambiguity.
+    if ref is None and kind != "ambiguous_fov" and use_tophat and not is_overlay:
+        raw = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=False)
+        if raw:
+            ref, kind = _match_image_ref(raw, fov, tp)
+            if ref is not None:
+                _raw_fallbacks(ctx).add((well, chan_lower, str(tp), str(fov)))
+                logger.info(
+                    "image_table: no corrected image for well=%r channel=%r "
+                    "tp=%r fov=%r — showing the raw frame",
+                    well, chan_lower, tp, fov,
+                )
     if ref is None:
         return None
     if kind != "exact":
@@ -1221,4 +1260,70 @@ def cell_chrome_kwargs(ctx, r: int, c: int, cell, plan, overlay_chans=None):
         label_font_px=int(getattr(st, "label_font_px", 12)),
         label_color=getattr(st, "label_color", "white"),
         label_bg=bool(getattr(st, "label_bg", True)),
+    )
+
+
+#: Burned into any cell served the raw frame in place of the corrected one.
+#: Short because it shares the cell with the scale bar and the identity label.
+UNCORRECTED_MARK = "raw"
+
+#: Spelled out in the cell's tooltip, where there is room for the reason.
+UNCORRECTED_TOOLTIP = "shown uncorrected — no corrected image for this field"
+
+
+def is_raw_fallback(ctx, cell) -> bool:
+    """Whether *cell* was served the raw frame after asking for the corrected one.
+
+    Reads the current render pass's :func:`_raw_fallbacks` set, whose keys
+    ``_load_array`` writes as ``(well, base_channel_lower, str(tp), str(fov))``.
+    The set is populated by whichever pass loaded the cell first — the pooled
+    Auto-LUT pass runs before the render loop — so this answers correctly for
+    both.
+    """
+    well = (cell.get("well") or "") if hasattr(cell, "get") else ""
+    chan = (cell.get("chan") or "") if hasattr(cell, "get") else ""
+    if not well or not chan:
+        return False
+    key = (well, _binary_base(chan).strip().lower(),
+           str(cell.get("tp") or ""), str(cell.get("fov") or ""))
+    return key in _raw_fallbacks(ctx)
+
+
+def _mark_corner(st) -> str:
+    """A cell corner the scale bar and the identity label have not claimed."""
+    taken = {getattr(st, "label_img_corner", "tl"),
+             getattr(st, "scale_bar_img_corner", "br")}
+    for corner in ("tr", "bl", "tl", "br"):
+        if corner not in taken:
+            return corner
+    return "tr"
+
+
+def mark_uncorrected(ctx, cell, rgb):
+    """Burn :data:`UNCORRECTED_MARK` into *rgb* when *cell* fell back to raw.
+
+    A cell whose corrected (top-hat) image is missing still draws — it draws the
+    raw frame, which carries the camera offset and the background the correction
+    would have removed. That is a different intensity domain from its corrected
+    neighbours, so one LUT window cannot suit both: a window tuned on the
+    corrected population pushes the raw cells past its ceiling, where they
+    saturate and stop responding to any further LUT edit. The grid then looks
+    like a table that ignores its own brightness control on part of itself.
+
+    The count already reaches the Generate status line, but a count does not say
+    *which* cells and does not survive the next status message. This puts the
+    fact on the cell, through the same ``draw_cell_chrome`` the scale bar and the
+    identity label use, so the live thumbnail and the exported figure carry it
+    identically. Returns *rgb* untouched for a cell that got what it asked for.
+    """
+    if rgb is None or not is_raw_fallback(ctx, cell):
+        return rgb
+    st = ctx.state.image_table
+    return draw_cell_chrome(
+        rgb,
+        label_text=UNCORRECTED_MARK,
+        label_corner=_mark_corner(st),
+        label_font_px=int(getattr(st, "label_font_px", 12)),
+        label_color=getattr(st, "label_color", "white"),
+        label_bg=True,
     )

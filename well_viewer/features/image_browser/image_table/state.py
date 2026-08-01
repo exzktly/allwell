@@ -160,6 +160,12 @@ class ImageTableState:
     # scan there would pin "no images here" for the session, so a drive that
     # stalled for a moment would leave a permanently half-empty grid.
     scan_misses: set = field(default_factory=set)
+    # (well, chan_lower, tp, fov) cells that asked for the corrected (top-hat)
+    # image during the CURRENT render pass and were served the raw frame because
+    # the corrected set does not cover them. Same per-pass lifetime as
+    # ``scan_misses``; the Generate status line reports its size so a grid that
+    # mixes corrected and raw frames says so instead of reading as uniform.
+    raw_fallbacks: set = field(default_factory=set)
 
     def clear_caches(self) -> None:
         """Drop the per-generate render / image caches (call on dataset swap)."""
@@ -168,6 +174,7 @@ class ImageTableState:
         self.auto_lut_by_channel.clear()
         self.prefetched_cells.clear()
         self.scan_misses.clear()
+        self.raw_fallbacks.clear()
 
     def effective_row_dims(self) -> list:
         """Ordered row dimensions — ``row_dims`` if set, else ``[row_axis]``.

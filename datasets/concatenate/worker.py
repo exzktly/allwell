@@ -24,6 +24,10 @@ class ConcatenateWorker(QThread):
     logLine = Signal(str)          # one line for the status window
     wellsPlanned = Signal(list)    # the wells this merge will actually touch
     wellStage = Signal(str, str)   # (well, "merging"|"merged"|"warned")
+    # (well, done, total) — sub-progress *within* one well, so its plate cell
+    # can render as a filling dial instead of a flat "merging" until the whole
+    # well lands. See datasets._common.containers.WellFraction.
+    wellFraction = Signal(str, int, int)
     succeeded = Signal(str, str)   # (destination root, summary line)
     failed = Signal(str)           # user-facing error message
 
@@ -52,6 +56,7 @@ class ConcatenateWorker(QThread):
             summary = execute_plan(
                 plan, self.logLine.emit, self.isInterruptionRequested,
                 progress=self.wellStage.emit,
+                sub_progress=self.wellFraction.emit,
             )
         except ConcatError as exc:
             self.failed.emit(str(exc))

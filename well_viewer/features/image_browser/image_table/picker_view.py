@@ -34,18 +34,18 @@ def build_image_table_picker(ctx, parent: QWidget) -> None:
     layout.setSpacing(0)
 
     plate = WellPlateSelector(parent)
-    plate.setActionsVisible(False)          # the rail keeps its own All / Clear below
-    plate.setSelectionMode("select")
     plate.setDragSelectEnabled(True)
     plate.setRowColumnSelectable(True)
     plate.setEnabledWells([])               # nothing selectable until a dataset loads
     from well_viewer.core.ui_helpers import well_plate_tooltip_provider
     plate.setWellTooltipProvider(well_plate_tooltip_provider(ctx))
-    # Shared sidebar-plate sizing (see ui_helpers.apply_sidebar_plate_geometry):
-    # scales to the rail width, keeps aspect, no fixed min-height floor.
-    from well_viewer.core.ui_helpers import apply_sidebar_plate_geometry
-    apply_sidebar_plate_geometry(plate)
-    layout.addWidget(plate)
+    # The app-wide plate geometry (widgets/plate_geometry.py): same caps, same
+    # cell scale and same centring as every other plate map in the app. The
+    # "rail" role hides the built-in action row — the rail keeps its own
+    # Select All / Clear buttons below.
+    from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+    apply_plate_geometry(plate, role="rail")
+    layout.addWidget(plate, 0, PLATE_ALIGNMENT)
     ctx.runtime.image_table.sidebar_plate = plate
 
     def _on_plate_changed(ids) -> None:

@@ -1330,6 +1330,91 @@ def test_ensure_uploaded_verification_preserves_tilde_in_script(host, tmp_path, 
     assert "wc -l" in captured["script"]
 
 
+# ── Per-well upload progress ────────────────────────────────────────────────
+
+
+_FAKE_RSYNC = r"""#!/bin/sh
+printf 'sending incremental file list\n'
+printf 'A01.zip\n'
+printf '      1,048,576  10%%   10.00MB/s    0:00:09\r'
+printf '      5,242,880  50%%   10.00MB/s    0:00:05\r'
+printf '     10,485,760 100%%   10.00MB/s    0:00:00 (xfr#1, to-chk=1/2)\r\n'
+printf 'B02.zip\n'
+printf '     15,728,640  60%%   10.00MB/s    0:00:02\r'
+printf '     20,971,520 100%%   10.00MB/s    0:00:00 (xfr#2, to-chk=0/2)\r\n'
+printf 'sent 20,971,520 bytes  received 35 bytes  1,000,000.00 bytes/sec\n'
+"""
+
+
+def _run_fake_rsync(tmp_path, sizes):
+    """Drive the real streaming reader with a script that prints the same
+    ``--info=name1,stats2,progress2`` stream rsync does. Returns every line
+    the reader handed to ``log_fn``."""
+    import stat as _stat
+
+    from services.remote_runner import _run_rsync_streaming
+
+    fake = tmp_path / "fakersync.sh"
+    fake.write_text(_FAKE_RSYNC)
+    fake.chmod(fake.stat().st_mode | _stat.S_IEXEC)
+    lines: list[str] = []
+    _run_rsync_streaming([str(fake)], log_fn=lines.append, progress_fn=None,
+                         stop_event=None, well_sizes=sizes)
+    return lines
+
+
+def test_upload_progress_is_attributed_to_the_well_in_flight(tmp_path):
+    """``progress2`` counts bytes for the whole rsync, not per file, so a
+    percentage alone says nothing about any one well. ``name1`` marks where
+    each well's share of that running total begins, and the local zip's own
+    size is the denominator."""
+    from services.pipeline_runner import parse_well_transfer
+
+    sizes = {"A01.zip": 10_485_760, "B02.zip": 10_485_760}
+    samples = [parse_well_transfer(m) for m in _run_fake_rsync(tmp_path, sizes)]
+    samples = [s for s in samples if s is not None]
+    assert ("A01", "up", 0.0) in samples
+    assert ("A01", "up", 0.5) in samples
+    # B02's window rebases on the cumulative total at the moment it started —
+    # otherwise its first sample would read as already finished.
+    assert ("B02", "up", 0.0) in samples
+    assert ("B02", "up", 0.5) in samples
+    assert samples[-1] == ("B02", "up", 1.0)
+
+
+def test_upload_progress_never_reaches_the_log(tmp_path):
+    """A sample a second per well is the same flood the transient marker
+    exists to keep out of the log."""
+    from services.pipeline_runner import is_transient_progress
+
+    lines = _run_fake_rsync(tmp_path, {"A01.zip": 10_485_760,
+                                       "B02.zip": 10_485_760})
+    logged = [m for m in lines if not is_transient_progress(m)]
+    # What survives is the events: the per-file names and rsync's own summary.
+    assert any("↑ (1) A01.zip" in m for m in logged)
+    assert any("↑ (2) B02.zip" in m for m in logged)
+    assert not any("xfer" in m for m in logged)
+
+
+def test_a_plate_wide_rsync_without_sizes_emits_no_well_progress(tmp_path):
+    """The code sync uploads source files, not well archives — nothing there
+    is a well, so nothing may claim to be one."""
+    lines = _run_fake_rsync(tmp_path, None)
+    assert not any("xfer" in m for m in lines)
+
+
+def test_well_zip_sizes_skips_an_archive_that_vanished(tmp_path):
+    """A missing archive gets no entry rather than a guessed size: the
+    transfer will fail on its own and say so, and a dial on a well that is
+    not moving is worse than no dial."""
+    from services.remote_runner import _well_zip_sizes
+
+    real = tmp_path / "A01.zip"
+    real.write_bytes(b"\0" * 4096)
+    sizes = _well_zip_sizes([real, tmp_path / "B02.zip"])
+    assert sizes == {"A01.zip": 4096}
+
+
 # ── Fetcher: stdout observation ─────────────────────────────────────────────
 
 
@@ -1378,15 +1463,69 @@ def test_transfer_heartbeat_reports_progress(host, tmp_path):
     dest = tmp_path / "allwell-x-A01_out.zip"
     # simulate rsync streaming into a hidden temp file in the dest dir
     (tmp_path / f".{dest.name}.abc123").write_bytes(b"\0" * (3 * 1024 * 1024))
-    with fetcher._transfer_heartbeat("A01", dest, interval=0.05):
+    with fetcher._transfer_heartbeat("A01", dest, interval=0.05,
+                                     breadcrumb_interval=0.1):
         _time.sleep(0.16)                       # allow a couple of beats
     joined = "".join(logs)
+    # No remote size was supplied, so no fraction may be claimed — bytes-so-far
+    # is all this run knows, and an unknown denominator must not be invented.
+    assert "xfer" not in joined
+    # Two cadences: a live sample every beat, marked transient so it reaches
+    # the status line and never the log, plus a rarer durable breadcrumb.
+    from services.remote_runner import TRANSIENT_PREFIX
+    assert TRANSIENT_PREFIX in joined
+    assert joined.count(TRANSIENT_PREFIX) > joined.count("still transferring")
     assert "still transferring" in joined
     assert "A01" in joined and "MB so far" in joined
     # no heartbeat lines leak after the context exits
     n = joined.count("still transferring")
     _time.sleep(0.12)
     assert "".join(logs).count("still transferring") == n
+
+
+def test_transfer_heartbeat_fills_the_well_dial_when_the_size_is_known(host, tmp_path):
+    """Per-well download progress: bytes landed over the remote file's size.
+
+    The numerator was already here — the heartbeat sums the growing rsync
+    partial in the destination directory. The denominator is what turns it
+    into a proportion the plate can draw.
+    """
+    import time as _time
+
+    from services.pipeline_runner import parse_well_transfer
+
+    run = _make_run(tmp_path)
+    logs: list[str] = []
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL,
+                          log_fn=logs.append)
+    dest = tmp_path / "allwell-x-A01_out.zip"
+    (tmp_path / f".{dest.name}.abc123").write_bytes(b"\0" * 2_000_000)
+    with fetcher._transfer_heartbeat("A01", dest, interval=0.05,
+                                     breadcrumb_interval=10.0,
+                                     total_bytes=4_000_000):
+        _time.sleep(0.16)
+    samples = [parse_well_transfer(m) for m in logs]
+    samples = [s for s in samples if s is not None]
+    assert ("A01", "down", 0.0) in samples, "a dial opens at zero"
+    assert ("A01", "down", 0.5) in samples, "2 MB of 4 MB is half"
+    # The window always closes, so a failed fetch cannot leave a part-filled
+    # download on the plate for the rest of the run.
+    assert samples[-1] == ("A01", "down", 1.0)
+
+
+def test_a_missing_remote_file_yields_no_size(host, tmp_path):
+    """The honest failure: no denominator, so no fraction — never a guess."""
+    run = _make_run(tmp_path)
+    with patch.object(Fetcher, "_loop", lambda self: None):
+        fetcher = Fetcher(host, run, output_filter=OutputFilter.FULL)
+    real = tmp_path / "thing.bin"
+    real.write_bytes(b"\0" * 12345)
+    # ssh_argv -> [] runs the size script through a local bash, which is
+    # exactly the shell the remote would run it in.
+    with patch.object(type(host), "ssh_argv", lambda self, allocate_tty=False: []):
+        assert fetcher._remote_file_size(str(real)) == 12345
+        assert fetcher._remote_file_size(str(tmp_path / "nope.bin")) is None
 
 
 def test_zip_is_complete(tmp_path):
@@ -1421,6 +1560,7 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     try:
         with patch.object(Fetcher, "_rsync", return_value=False), \
              patch.object(Fetcher, "_rsync_glob", return_value=(1, 1)), \
+             patch.object(Fetcher, "_remote_file_size", lambda self, p: None), \
              patch.object(Fetcher, "_materialize", lambda self, w, z: True), \
              patch.object(Fetcher, "_delete_well_files_on_remote", lambda self, w: None):
             f._fetch_one(well)
@@ -1576,6 +1716,8 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
     monkeypatch.setattr(Fetcher, "_rsync", fake_rsync)
     monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: (1, 1))
     monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: True)
+    # The size query is a real ssh; there is no remote here.
+    monkeypatch.setattr(Fetcher, "_remote_file_size", lambda self, p: None)
 
     with patch.object(Fetcher, "_loop", lambda self: None):
         fetcher = Fetcher(
@@ -1615,6 +1757,7 @@ def test_fetcher_fetch_one_warns_when_zip_missing(host, tmp_path, monkeypatch):
 
     log_lines: list[str] = []
     monkeypatch.setattr(Fetcher, "_rsync", lambda self, argv: False)
+    monkeypatch.setattr(Fetcher, "_remote_file_size", lambda self, p: None)
 
     with patch.object(Fetcher, "_loop", lambda self: None):
         fetcher = Fetcher(

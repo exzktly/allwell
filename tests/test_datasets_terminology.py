@@ -66,7 +66,7 @@ def test_concatenate_heading_matches_the_rest_of_the_codebase_title_case(qapp):
     only the on-screen heading label and the sidebar entry name still said
     "Concatenate datasets" (sentence case), the one outlier among six
     title-cased page headings ("Validate & Repair Dataset", "Subset / Split
-    Dataset", "Import Loose Folder", "Merge Plates", "Convert OME-TIFF",
+    Dataset", "Zip Loose Folder", "Merge Plates", "Convert OME-TIFF",
     "Job Queue")."""
     from datasets.concatenate.view import ConcatenatePage
 

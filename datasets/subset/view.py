@@ -38,6 +38,7 @@ from util.timepoint import sort_key as tp_sort_key
 from widgets._support import set_variant
 from widgets.flow_layout import FlowLayout
 from widgets.path_field import PathField, folder_picker
+from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 from datasets.subset.dashboard import SubsetDashboard
 from datasets.subset.subset_compute import (
@@ -148,25 +149,14 @@ class SubsetPage(QWidget):
 
         outer.addWidget(QLabel("Wells", self))
         self._plate = WellPlateSelector(self)
-        # A matching width cap (330, same as PlateProgress's own plate map)
-        # so this picker and the dashboard's status plate at the bottom of
-        # this same page render at the same cell scale, rather than this one
-        # spreading across the full page width with dead space padding a
-        # tiny grid. The height cap is *not* the dashboard's own 210 — this
-        # picker keeps its All/Invert/Clear action row (the dashboard's
-        # plate hides it, setActionsVisible(False)), which eats ~48px of
-        # that budget from the grid itself. Matched empirically (offscreen
-        # geometry measurement, both plates' actual cell size in pixels) so
-        # the two plates read as the same control at the same scale rather
-        # than this one's wells rendering visibly smaller for no visible
-        # reason. Left-aligned since an unconstrained QVBoxLayout item would
-        # otherwise stretch to fill — and then immediately clip back down to
-        # maxWidth, floating it wherever Qt's default alignment happens to
-        # land it.
-        self._plate.setMaximumHeight(258)
-        self._plate.setMaximumWidth(330)
+        # The app-wide plate geometry (widgets/plate_geometry.py): the "picker"
+        # role keeps this plate's own All / Invert / Clear row — this page has no
+        # other well-selection buttons — and the helper adds the room that row
+        # needs on top of the shared height cap, so the grid itself still renders
+        # at exactly the cell scale every other plate map in the app uses.
+        apply_plate_geometry(self._plate, role="picker")
         self._plate.selectionChanged.connect(self._on_plate_selection_changed)
-        outer.addWidget(self._plate, 0, Qt.AlignLeft)
+        outer.addWidget(self._plate, 0, PLATE_ALIGNMENT)
 
         outer.addWidget(QLabel("Timepoints", self))
         # Matches Import Loose's own "Pick a folder to preview." -- an empty

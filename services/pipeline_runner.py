@@ -12,6 +12,10 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
     zipper_done   None       Grouping phase finished.
     remote_xfer   float      Remote rsync progress as a fraction in [0, 1].
                              Only emitted during remote-execution runs.
+    well_xfer     tuple      (well, "up"|"down", fraction) — one well's own
+                             upload or download progress, for its dial on the
+                             plate map. Parsed out of the log stream by
+                             ProgressTracker; never written to the log.
     done          str        Pipeline finished successfully.
     error         str        Pipeline failed; payload is a message.
     finished      None       Final event, always emitted in a finally.
@@ -32,6 +36,8 @@ from services.remote_config import RemoteHost
 from services.remote_runner import (
     OutputFilter,
     RemoteRunner,
+    TRANSIENT_PREFIX,
+    WELL_XFER_PREFIX,
     stage_local_zips,
 )
 from services.subprocess_kill import signal_subprocess
@@ -123,6 +129,35 @@ _RE_TF_SCAN = re.compile(r"Auto-threshold: scanning (\d+) well")
 _RE_TF_PROG = re.compile(r"Auto-threshold: completed well (\d+)/(\d+)")
 
 
+def is_transient_progress(line: str) -> bool:
+    """Whether *line* is live state for the status bar, not a log entry."""
+    return line.lstrip().startswith(TRANSIENT_PREFIX)
+
+
+# ``[remote] ⋯ xfer down C02 0.4180`` — see ``remote_runner.WELL_XFER_PREFIX``.
+_RE_WELL_XFER = re.compile(r"^(up|down)\s+([A-Ha-h]\d{1,2})\s+([0-9.]+)\s*$")
+
+
+def parse_well_transfer(line: str) -> tuple[str, str, float] | None:
+    """``(well, direction, fraction)`` for a per-well transfer-progress line.
+
+    ``None`` for anything else, including a malformed line carrying the marker
+    — a transfer sample that cannot be read is dropped rather than guessed at,
+    since the only thing it drives is a gauge position.
+    """
+    stripped = line.lstrip()
+    if not stripped.startswith(WELL_XFER_PREFIX):
+        return None
+    m = _RE_WELL_XFER.match(stripped[len(WELL_XFER_PREFIX):].strip())
+    if not m:
+        return None
+    try:
+        fraction = float(m.group(3))
+    except ValueError:
+        return None
+    return m.group(2).upper(), m.group(1), max(0.0, min(1.0, fraction))
+
+
 class ProgressTracker:
     """Pure log-line parser that tracks well-count progress.
 
@@ -134,15 +169,19 @@ class ProgressTracker:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self.well_repeats = 0
         self._finalize_emitted = False
         self._fetch_parts: dict[str, set] = {}   # well -> {"zip","csv"} seen
+        self._done_wells: set[str] = set()       # wells already counted done
 
     def reset(self) -> None:
         self.zip_mode_warning_logged = False
         self.well_total = 0
         self.well_done = 0
+        self.well_repeats = 0
         self._finalize_emitted = False
         self._fetch_parts = {}
+        self._done_wells = set()
 
     def _mark_fetch_part(self, well: str, part: str) -> bool:
         """Record that *part* ("zip"/"csv") of *well*'s output has landed.
@@ -152,6 +191,40 @@ class ProgressTracker:
         was_complete = {"zip", "csv"} <= seen
         seen.add(part)
         return not was_complete and {"zip", "csv"} <= seen
+
+    def _count_well_done(self, well: str) -> list[tuple[str, object]]:
+        """Record that *well* reached a terminal state, counting it once.
+
+        Progress is the number of DISTINCT wells that finished, not the number
+        of completion markers seen. The two diverge in batched remote mode: the
+        pipeline is launched once per batch against a shared remote input
+        directory, so a well whose input zip is still there when the next batch
+        starts is announced terminal a second time (re-processed, or skipped
+        with "output already exists"). Counting markers made the headline reach
+        "N / N wells (100%)" with wells still outstanding, and then climb past
+        100% — the run reported itself complete while it was not.
+
+        A repeat is reported rather than absorbed: it means a well was handled
+        twice, which is either wasted compute or a stale input left behind, and
+        the log is the only place that can say so.
+
+        The announced total is a floor, never a ceiling. If more distinct wells
+        finish than the banner promised, the total is raised to what was
+        actually observed so the fraction stays truthful.
+        """
+        token = well.upper()
+        if token in self._done_wells:
+            self.well_repeats += 1
+            return [("well_repeat", token)]
+        self._done_wells.add(token)
+        self.well_done = len(self._done_wells)
+        events: list[tuple[str, object]] = []
+        if self.well_done > self.well_total:
+            self.well_total = self.well_done
+            events.append(("well_total", self.well_total))
+        events.append(("well_done", (self.well_done, self.well_total)))
+        events.append(("well_stage", (well, "process")))
+        return events
 
     def parse(self, line: str) -> list[tuple[str, object]]:
         """Return queue events for a single stdout line.
@@ -169,6 +242,18 @@ class ProgressTracker:
         # when the pipeline echoes the same banner via stdout.
         if "Zip mode:" in line or "Zip mode complete" in line:
             self.zip_mode_warning_logged = True
+        if line.lstrip().startswith(WELL_XFER_PREFIX):
+            # Per-well upload/download progress: a gauge position for one
+            # well's dial, and nothing else. Claimed before the generic
+            # transient branch because it carries the same marker plus more —
+            # and claimed even when it doesn't parse, so a malformed sample is
+            # dropped rather than falling through to the status line, where it
+            # would show the user "xfer down C02 0.4180" as prose.
+            xfer = parse_well_transfer(line)
+            return [("well_xfer", xfer)] if xfer is not None else []
+        if is_transient_progress(line):
+            # Live state: straight to the status line, nothing else to parse.
+            return [("status", line.strip()[len(TRANSIENT_PREFIX):].strip())]
         m = _RE_TF_WORKERS.search(line)
         if m:
             events.append(("workers", int(m.group(1))))
@@ -252,28 +337,19 @@ class ProgressTracker:
             # removed" as the only completion log; keep matching it
             # too as a fallback for users running mismatched
             # client/server versions.
-            md = _RE_WELL_DONE_ID.search(line)
+            #
+            # The three terminal markers — finished, incremental up-to-date,
+            # and already-complete-so-skipped — all mean the same thing to the
+            # progress count, and all name their well, so they share one
+            # identity-aware counter. An up-to-date well never emits "— done.";
+            # a skipped one never runs at all; both are complete.
+            md = (
+                _RE_WELL_DONE_ID.search(line)
+                or _RE_WELL_UPTODATE.search(line)
+                or _RE_WELL_SKIP.search(line)
+            )
             if md:
-                self.well_done += 1
-                events.append(("well_done", (self.well_done, self.well_total)))
-                events.append(("well_stage", (md.group(1), "process")))
-            else:
-                # Incremental up-to-date well: counts toward completion and
-                # advances to the processed stage (the auto-threshold pass then
-                # turns it green locally; the remote ✓ marker does so remotely).
-                mu = _RE_WELL_UPTODATE.search(line)
-                if mu:
-                    self.well_done += 1
-                    events.append(("well_done", (self.well_done, self.well_total)))
-                    events.append(("well_stage", (mu.group(1), "process")))
-                # Already-complete well skipped on a re-run: it's done, so count
-                # it and advance it to the processed stage (the auto-threshold
-                # pass over its existing _out.zip then turns it green).
-                ms = _RE_WELL_SKIP.search(line)
-                if ms:
-                    self.well_done += 1
-                    events.append(("well_done", (self.well_done, self.well_total)))
-                    events.append(("well_stage", (ms.group(1), "process")))
+                events.extend(self._count_well_done(md.group(1)))
         return events
 
 

@@ -157,7 +157,7 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
     threshold_edit.setFixedWidth(90)
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
-    ctrl.add_scope("Threshold", threshold_edit)
+    ctrl.add_scope("Threshold", threshold_edit, trailing=True)
 
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
     lut_min_edit.setFixedWidth(70)

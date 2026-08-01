@@ -207,6 +207,32 @@ def test_incompatible_schema_refused(tmp_path):
         mpc.build_plate_merge_plan(ds1, ds2, dest)
 
 
+def test_execute_plan_reports_one_rising_sub_progress_sweep_per_well(tmp_path):
+    """``sub_progress`` is the per-well dial behind ``progress``'s stage
+    events. Each well's fractions must rise monotonically and end at full —
+    the four container passes a well takes are fused into one sweep, so a
+    dial that filled once per pass (or stopped short because a pass had
+    nothing to do) is the bug this reports against."""
+    ds1 = tmp_path / "ds1"
+    ds2 = tmp_path / "ds2"
+    dest = tmp_path / "dest"
+    build_dataset(ds1, wells=["A01", "A02"], timepoints=["0h", "24h"])
+    build_dataset(ds2, wells=["B01"], timepoints=["0h", "24h"])
+
+    plan = mpc.build_plate_merge_plan(ds1, ds2, dest, {"B01": "C03"})
+    fractions: dict[str, list[tuple[int, int]]] = {}
+    mp_apply.execute_plan(
+        plan,
+        sub_progress=lambda well, done, total: fractions.setdefault(well, []).append((done, total)),
+    )
+
+    assert set(fractions) == {"A01", "A02", "C03"}
+    for well, seq in fractions.items():
+        values = [done for done, _total in seq]
+        assert values == sorted(values), f"{well} dial went backwards: {values}"
+        assert seq[-1][0] == seq[-1][1], f"{well} dial never reached full: {seq[-1]}"
+
+
 def test_execute_plan_merges_many_wells_from_both_datasets_in_parallel(tmp_path):
     """Enough wells across both datasets to force >1 worker (default
     auto-sizing) -- every well from either side must land correctly with no

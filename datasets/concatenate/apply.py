@@ -37,6 +37,7 @@ from datasets._common.containers import (
     OVERRIDES_SCHEMA_VERSION as _OVERRIDES_SCHEMA_VERSION,
     TIMEPOINT_COLUMN as _TIMEPOINT_COLUMN,
     TIMEPOINT_HOURS_COLUMN as _TIMEPOINT_HOURS_COLUMN,
+    WellFraction,
     clear_destination,
     read_members,
     write_zip,
@@ -64,6 +65,27 @@ def _null_cancelled() -> bool:
 
 def _null_progress(_well: str, _stage: str) -> None:
     return None
+
+
+def _null_sub_progress(_well: str, _done: int, _total: int) -> None:
+    return None
+
+
+# Merging one well is six passes over files: for the raw input, read dataset
+# 2's archive, read dataset 1's, then write the merged one — and the same
+# three again for the QC ``<WELL>_out.zip``. :class:`WellFraction` fuses them
+# into a single 0 → 100% dial per well, so the well's dashboard cell fills
+# once rather than six times over.
+_INPUT_SLICES = 3
+_QC_SLICES = 3
+_SLICES_PER_WELL = _INPUT_SLICES + _QC_SLICES
+
+
+def _detached_fraction(well: str) -> WellFraction:
+    """A :class:`WellFraction` that reports nowhere — for a direct call to
+    :func:`merge_input` / :func:`merge_qc_zip` that has no dashboard behind
+    it (both are called with a real one by :func:`execute_plan`)."""
+    return WellFraction(_null_sub_progress, well, _SLICES_PER_WELL)
 
 
 # ── container IO ─────────────────────────────────────────────────────────────
@@ -95,6 +117,7 @@ def _copy_container_as_is(src: Path, dest_in_dir: Path) -> None:
 
 def merge_input(
     plan: MergePlan, well: str, c1: Path | None, c2: Path | None,
+    *, fraction: WellFraction | None = None,
 ) -> tuple[int, frozenset[str] | None, frozenset[str]]:
     """Merge a well's raw-input container into the destination ``in/``.
 
@@ -105,38 +128,59 @@ def merge_input(
     were silently skipped by :func:`write_zip` — nonzero here means real data
     never made it into the merged archive and must not be treated as success
     (see :func:`execute_plan` and :func:`_verify`).
+
+    *fraction* owns this well's dashboard dial; this pass claims its first
+    :data:`_INPUT_SLICES` slices — dataset 2's read, dataset 1's read, and the
+    merged write, in that order. Any of the three that has no work (the well
+    is on one side only, or the whole container is copied byte-for-byte) is
+    closed out with ``skip`` rather than left unclaimed, so a well that is in
+    fact finished doesn't leave its dial short.
     """
+    frac = fraction if fraction is not None else _detached_fraction(well)
     dest_zip = plan.dest.in_dir / f"{well}.zip"
     if c1 and not c2:
         _copy_container_as_is(c1, plan.dest.in_dir)
+        frac.skip(_INPUT_SLICES)
         return 0, None, frozenset()
     if c2 and not c1:
-        rewritten, unmatched = _rewrite_members(plan, read_members(c2))
-        written, dropped = write_zip(dest_zip, rewritten)
+        rewritten, unmatched = _rewrite_members(plan, read_members(c2, progress=frac.slice_progress()))
+        frac.skip()  # no dataset-1 archive on this well
+        written, dropped = write_zip(dest_zip, rewritten, progress=frac.slice_progress())
         return unmatched, written, dropped
     if c1 and c2:
-        rewritten, unmatched = _rewrite_members(plan, read_members(c2))
-        written, dropped = write_zip(dest_zip, read_members(c1) + rewritten)
+        rewritten, unmatched = _rewrite_members(plan, read_members(c2, progress=frac.slice_progress()))
+        members1 = read_members(c1, progress=frac.slice_progress())
+        written, dropped = write_zip(dest_zip, members1 + rewritten, progress=frac.slice_progress())
         return unmatched, written, dropped
+    frac.skip(_INPUT_SLICES)
     return 0, None, frozenset()
 
 
-def merge_qc_zip(plan: MergePlan, well: str, z1: Path | None, z2: Path | None) -> tuple[int, frozenset[str]]:
+def merge_qc_zip(
+    plan: MergePlan, well: str, z1: Path | None, z2: Path | None,
+    *, fraction: WellFraction | None = None,
+) -> tuple[int, frozenset[str]]:
     """Merge a well's ``<WELL>_out.zip`` QC archive into the destination
     ``out/``. Returns ``(unmatched_member_count, dropped_names)`` (see
-    :func:`merge_input`)."""
+    :func:`merge_input`, whose *fraction* contract this mirrors — this pass
+    claims the well's remaining :data:`_QC_SLICES` slices)."""
+    frac = fraction if fraction is not None else _detached_fraction(well)
     dest_zip = plan.dest.out_dir / f"{well}_out.zip"
     if z1 and not z2:
         shutil.copy2(z1, dest_zip)
+        frac.skip(_QC_SLICES)
         return 0, frozenset()
     if z2 and not z1:
-        rewritten, unmatched = _rewrite_members(plan, read_members(z2))
-        _written, dropped = write_zip(dest_zip, rewritten)
+        rewritten, unmatched = _rewrite_members(plan, read_members(z2, progress=frac.slice_progress()))
+        frac.skip()  # no dataset-1 QC archive on this well
+        _written, dropped = write_zip(dest_zip, rewritten, progress=frac.slice_progress())
         return unmatched, dropped
     if z1 and z2:
-        rewritten, unmatched = _rewrite_members(plan, read_members(z2))
-        _written, dropped = write_zip(dest_zip, read_members(z1) + rewritten)
+        rewritten, unmatched = _rewrite_members(plan, read_members(z2, progress=frac.slice_progress()))
+        members1 = read_members(z1, progress=frac.slice_progress())
+        _written, dropped = write_zip(dest_zip, members1 + rewritten, progress=frac.slice_progress())
         return unmatched, dropped
+    frac.skip(_QC_SLICES)
     return 0, frozenset()
 
 
@@ -437,6 +481,7 @@ def execute_plan(
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
     workers: int = 0,
+    sub_progress: Callable[[str, int, int], None] | None = None,
 ) -> str:
     """Carry out *plan*, writing the merged dataset. Returns a summary line.
 
@@ -448,7 +493,15 @@ def execute_plan(
     ``stage`` is ``"merging"`` before that well's containers/CSV are merged,
     then ``"merged"`` or ``"warned"`` (image data survived on one side with no
     matching measurements CSV) once it's done — for a live per-well status
-    display (defaults to a no-op).
+    display (defaults to a no-op). *sub_progress* receives ``(well, done,
+    total)`` repeatedly *within* one well, so that display can render the well
+    as a filling dial rather than a binary merging/merged state; the six
+    passes a well takes are fused into one 0-to-*total* sweep by
+    :class:`~datasets._common.containers.WellFraction` (see
+    :func:`merge_input`). It is called from the worker threads without the
+    callback lock: every call names its own well, so interleaving is
+    harmless, and locking once per member would serialise the parallel merge
+    it is reporting on.
 
     Wells are merged in parallel — *workers* threads (0 = auto, see
     :func:`datasets._common.concurrency.pick_workers`), each owning one
@@ -469,6 +522,7 @@ def execute_plan(
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
     report = progress or _null_progress
+    report_fraction = sub_progress or _null_sub_progress
 
     emit(
         f"Dataset 1 last timepoint {plan.ds1_last_hours:g}h, interval "
@@ -524,9 +578,13 @@ def execute_plan(
         with callback_lock:
             emit(f"  {well}…")
             report(well, "merging")
-        unmatched_in, in_names, dropped_in = merge_input(plan, well, in1.get(well), in2.get(well))
-        unmatched_qc, dropped_qc = merge_qc_zip(plan, well, zip1.get(well), zip2.get(well))
+        fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
+        unmatched_in, in_names, dropped_in = merge_input(
+            plan, well, in1.get(well), in2.get(well), fraction=fraction)
+        unmatched_qc, dropped_qc = merge_qc_zip(
+            plan, well, zip1.get(well), zip2.get(well), fraction=fraction)
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
+        fraction.finish()
         unmatched_total = unmatched_in + unmatched_qc + stats.unmatched_filenames
         well_dropped = dropped_in | dropped_qc
         # A well's images (in/ input or out/ QC zip) existing without a

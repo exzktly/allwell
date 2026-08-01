@@ -45,6 +45,7 @@ from pathlib import Path
 from util.well_token import canonical_well_label
 from util.zip_write import atomic_zip
 from datasets._common.concurrency import pick_workers
+from datasets._common.containers import WellFraction
 from datasets._common.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.import_loose_compute import group_files_by_well
 
@@ -59,6 +60,19 @@ def _null_cancelled() -> bool:
 
 def _null_progress(_well: str, _stage: str) -> None:
     return None
+
+
+def _null_sub_progress(_well: str, _done: int, _total: int) -> None:
+    return None
+
+
+# Unlike the copy tools, a well here is written in exactly one pass — its
+# loose files go straight into one archive — so its dial needs only a single
+# :class:`WellFraction` slice. The class is still used rather than raw file
+# counts so the two conversion modes report on the same scale as each other
+# and as the other Datasets tools, and so a well holding thousands of files
+# reports a bounded number of updates instead of one per file.
+_SLICES_PER_WELL = 1
 
 
 def _check_new_destination(dest_root: Path | str) -> None:
@@ -93,6 +107,7 @@ def convert_to_new_destination(
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    sub_progress: Callable[[str, int, int], None] | None = None,
 ) -> str:
     """Write ``<dest_root>/in/<WELL>.zip`` for every well matched under
     *search_dir*, leaving *search_dir* untouched. Returns a summary line.
@@ -103,10 +118,18 @@ def convert_to_new_destination(
     closure (e.g. ``ImportLooseWorker``'s ``done`` counter) can keep
     mutating a plain, un-locked variable across calls exactly as it does
     today, since only one well's callback runs at a time.
+
+    ``sub_progress`` reports ``(well, done, total)`` as that well's files go
+    into its archive, so a dashboard can draw the well as a filling dial
+    instead of a binary writing/done state. It is deliberately *outside* the
+    callback lock: every call names its own well, so interleaving is
+    harmless, and taking the lock once per file would serialise the parallel
+    conversion it is reporting on.
     """
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
     report = progress or _null_progress
+    report_fraction = sub_progress or _null_sub_progress
 
     _check_new_destination(dest_root)
 
@@ -131,10 +154,15 @@ def convert_to_new_destination(
         with callback_lock:
             report(well, "writing")
             emit(f"  {well}: {len(by_well[well])} file(s)")
+        paths = by_well[well]
+        fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
+        on_file = fraction.slice_progress()
         target = dest_in / f"{well}.zip"
         with atomic_zip(target) as zf:
-            for path in by_well[well]:
+            for done, path in enumerate(paths, start=1):
                 zf.write(path, arcname=path.name)
+                on_file(done, len(paths))
+        fraction.finish()
         with callback_lock:
             report(well, "done")
 
@@ -154,6 +182,7 @@ def _zip_well_folders(
     *,
     log_fn: Callable[[str], None] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    sub_progress: Callable[[str, int, int], None] | None = None,
 ) -> int:
     """Convert every ``<well>/`` subfolder of *folder* into ``<well>.zip``,
     removing the folder once packed. Returns the count zipped.
@@ -166,10 +195,16 @@ def _zip_well_folders(
     skipped rather than publishing a member-less archive. ``progress``, when
     given, fires ``(well, "done")`` once that well's zip lands on disk —
     the same "done" stage :func:`convert_to_new_destination` reports, so one
-    dashboard callback works for both conversion modes.
+    dashboard callback works for both conversion modes. ``sub_progress``
+    likewise fires ``(well, done, total)`` as that well's TIFs go into its
+    archive, matching the other mode's per-well dial. A well that an earlier
+    attempt already zipped has no files to walk, so it reports a full dial in
+    one call rather than none at all — "already finished" must read as
+    finished, not as never started.
     """
     emit = log_fn or _null_log
     report = progress or _null_progress
+    report_fraction = sub_progress or _null_sub_progress
     try:
         entries = list(folder.iterdir())
     except OSError:
@@ -192,6 +227,7 @@ def _zip_well_folders(
             # included (its loose TIFs hadn't all been moved/deleted yet
             # when the previous attempt crashed) doesn't sit stuck at
             # "writing" on the dashboard forever despite the run succeeding.
+            WellFraction(report_fraction, well, _SLICES_PER_WELL).finish()
             report(well, "done")
             continue
         tifs = sorted(
@@ -202,9 +238,13 @@ def _zip_well_folders(
             emit(f"  {well}: folder holds no TIFs — left as-is (no zip written)\n")
             continue
         target = folder / f"{well}.zip"
+        fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
+        on_file = fraction.slice_progress()
         with atomic_zip(target) as zf:
-            for t in tifs:
+            for done, t in enumerate(tifs, start=1):
                 zf.write(t, arcname=t.name)
+                on_file(done, len(tifs))
+        fraction.finish()
         shutil.rmtree(p, ignore_errors=True)
         zipped += 1
         emit(f"  {well}: folder → {well}.zip ({len(tifs)} file(s))\n")
@@ -220,6 +260,7 @@ def convert_in_place(
     move_source_tifs: bool = False,
     log: Callable[[str], None] | None = None,
     progress: Callable[[str, str], None] | None = None,
+    sub_progress: Callable[[str, int, int], None] | None = None,
     proc_hook=None,
 ) -> str:
     """Group loose TIFs directly under *search_dir* into ``<well>.zip``,
@@ -234,6 +275,13 @@ def convert_in_place(
     that single event is reported as "writing" (grouped, awaiting its zip);
     :func:`_zip_well_folders` then reports "done" once that well's zip
     actually lands on disk.
+
+    *sub_progress* is likewise the same ``(well, done, total)`` callback the
+    other mode takes, but it only covers the zipping half: ``run_zipper``
+    shells out to WellPlateZipper.py, which reports nothing until a whole
+    well has been grouped, so there is no per-file signal to forward from the
+    grouping half at all. A well therefore sits at an empty dial while it is
+    being grouped, then fills as it is zipped.
     """
     from services.input_resolution_service import run_zipper
 
@@ -249,5 +297,7 @@ def convert_in_place(
         filename_sep=filename_sep, proc_hook=proc_hook,
         move_source_tifs=move_source_tifs,
     )
-    zipped = _zip_well_folders(Path(search_dir), log_fn=emit, progress=report)
+    zipped = _zip_well_folders(
+        Path(search_dir), log_fn=emit, progress=report, sub_progress=sub_progress,
+    )
     return f"Grouped loose TIFs in {search_dir} into {zipped} per-well zip(s)."

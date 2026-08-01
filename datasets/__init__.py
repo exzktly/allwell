@@ -9,7 +9,7 @@ de-interleaves a packed OME-TIFF into a dataset folder; *Concatenate datasets*
 *Validate & Repair* (:mod:`datasets.validate`) reports and fixes a dataset's
 metadata after a partial or crashed Analyze run; *Subset / Split*
 (:mod:`datasets.subset`) copies a filtered slice of a dataset to a new folder;
-*Import loose folder* (:mod:`datasets.import_loose`) groups loose TIFs into
+*Zip loose folder* (:mod:`datasets.import_loose`) groups loose TIFs into
 per-well zips; *Merge plates* (:mod:`datasets.merge_plates`) joins two
 different plates along the well axis into one dataset.
 

@@ -542,6 +542,30 @@ def test_execute_plan_progress_reports_merging_then_merged_per_well(tmp_path):
     assert seen_terminal == {"A01", "A02"}
 
 
+def test_execute_plan_sub_progress_is_one_rising_sweep_per_well(tmp_path):
+    """``sub_progress`` is the per-well dial behind ``progress``'s stage
+    events. Merging one well is six container passes (dataset 2's read,
+    dataset 1's read and the merged write, twice over — raw input then QC
+    archive); they are fused into a single sweep, so each well's fractions
+    must rise monotonically and end at full rather than filling six times."""
+    _make_dataset(tmp_path / "d1", wells=["A01", "A02"], timepoints=["0", "24h"])
+    _make_dataset(tmp_path / "d2", wells=["A01", "A02"], timepoints=["0", "24h"])
+    dest = tmp_path / "dest"
+    plan = cc.build_merge_plan(tmp_path / "d1", tmp_path / "d2", dest)
+
+    fractions: dict[str, list[tuple[int, int]]] = {}
+    apply.execute_plan(
+        plan,
+        sub_progress=lambda well, done, total: fractions.setdefault(well, []).append((done, total)),
+    )
+
+    assert set(fractions) == {"A01", "A02"}
+    for well, seq in fractions.items():
+        values = [done for done, _total in seq]
+        assert values == sorted(values), f"{well} dial went backwards: {values}"
+        assert seq[-1][0] == seq[-1][1], f"{well} dial never reached full: {seq[-1]}"
+
+
 def test_execute_plan_progress_reports_warned_for_image_only_well(tmp_path):
     _make_dataset_with_image_only_well(
         tmp_path / "d1", normal_wells=["A01"], image_only_well="E05", timepoints=["0h", "24h"],

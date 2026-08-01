@@ -32,6 +32,34 @@ from PySide6.QtWidgets import (
 import theme
 
 
+def control_row_height() -> int:
+    """The height a themed combo box takes, measured rather than guessed.
+
+    A stepper sits in the same control row as the channel and property combos,
+    so it has to be the same height as them or the row reads as ragged. Left to
+    itself it is taller: its two stacked step buttons each want a full text
+    row, which came to 35px against the combos' 25px.
+
+    The number is derived from a throwaway combo rather than written down,
+    because it depends on the application stylesheet and the current font —
+    exactly the two things a literal would go stale against. This mirrors
+    ``widgets.mode_bar.tab_bar_height``, which measures a ``QTabBar`` for the
+    same reason, and is deliberately not cached for the same reason: a widget
+    built during startup would freeze a stylesheet that has not been applied.
+    """
+    from widgets.labeled_combo import LabeledComboBox
+
+    # A LabeledComboBox, not a bare QComboBox: the band's combos are that
+    # subclass and it is 3px shorter, so measuring the plain one silently
+    # reproduced the mismatch this function exists to remove.
+    probe = LabeledComboBox("Ag")
+    probe.addItem("Ag")              # ascender + descender: the tallest case
+    probe.ensurePolished()
+    height = probe.sizeHint().height()
+    probe.deleteLater()
+    return height
+
+
 class Stepper(QFrame):
     valueChanged = Signal(float)
 
@@ -85,6 +113,11 @@ class Stepper(QFrame):
 
         lay.addWidget(self._edit, 1)
         lay.addLayout(btn_col)
+
+        # Match the combos beside us. The two step buttons split the row
+        # between them; without the explicit split each still asks for a full
+        # text row and the frame is forced taller than it was just pinned to.
+        self._apply_row_height()
 
         self._edit.installEventFilter(self)
         self.setStyleSheet(self._build_qss())
@@ -215,6 +248,35 @@ class Stepper(QFrame):
                     self.stepBy(-1)
                     return True
         return super().eventFilter(obj, event)
+
+    def _apply_row_height(self) -> None:
+        """Pin this stepper to the height of the combos beside it.
+
+        The frame's own 1px border top and bottom is the only thing outside the
+        two children, so they get what is left. Without pinning the edit as
+        well, its vertical text padding keeps the layout's minimum above the
+        height the frame was just given and the frame renders taller than asked.
+        """
+        row_h = control_row_height()
+        self.setFixedHeight(row_h)
+        inner = max(1, row_h - 2)
+        self._edit.setFixedHeight(inner)
+        for b in (self._up, self._down):
+            b.setFixedHeight(inner // 2)
+
+    def changeEvent(self, event) -> None:  # Qt naming
+        """Re-measure when the stylesheet or font moves under us.
+
+        Measuring once in ``__init__`` is not enough: the reference height
+        depends on the application stylesheet, and a stepper built before that
+        stylesheet is applied — which is every stepper built during startup —
+        would freeze an unstyled number and then sit a pixel or two off the
+        combos for the rest of the session. This is the same staleness
+        ``mode_bar.tab_bar_height`` refuses to cache for.
+        """
+        if event.type() in (QEvent.StyleChange, QEvent.FontChange):
+            self._apply_row_height()
+        super().changeEvent(event)
 
     def _build_qss(self) -> str:
         c, t, r = theme.Colors, theme.Typography, theme.Radii

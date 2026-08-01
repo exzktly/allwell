@@ -26,6 +26,7 @@ from datasets._common.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
     OVERRIDES_SCHEMA_VERSION,
+    WellFraction,
     clear_destination,
     read_members,
     write_zip,
@@ -52,6 +53,16 @@ def _null_cancelled() -> bool:
 
 def _null_progress(_well: str, _stage: str) -> None:
     return None
+
+
+def _null_sub_progress(_well: str, _done: int, _total: int) -> None:
+    return None
+
+
+# One well's copy is four passes over files — read the raw-input container,
+# write the filtered one, then the same again for the QC ``<WELL>_out.zip`` —
+# fused by :class:`WellFraction` into a single 0 → 100% dial per well.
+_SLICES_PER_WELL = 4
 
 
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
@@ -129,6 +140,7 @@ def execute_plan(
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[str, str], None] | None = None,
     workers: int = 0,
+    sub_progress: Callable[[str, int, int], None] | None = None,
 ) -> str:
     """Carry out *plan*, writing the filtered dataset. Returns a summary line.
 
@@ -136,17 +148,29 @@ def execute_plan(
     and removes it only after the narrowed sidecar is written, mirroring
     Concatenate's restart-detection discipline.
 
+    *progress* receives ``(well, stage)`` as each well starts and finishes;
+    *sub_progress* receives ``(well, done, total)`` repeatedly *within* one
+    well, so a dashboard can render that well as a filling dial rather than a
+    binary copying/done state. The four passes a well takes (read then write,
+    for the raw input and again for the QC archive) are fused into one sweep
+    from 0 to *total* by :class:`~datasets._common.containers.WellFraction` —
+    without that, each pass would fill the same dial from empty on its own.
+
     Wells are copied in parallel — *workers* threads (0 = auto, see
     :func:`datasets._common.concurrency.pick_workers`), each owning one
     well's own destination files with nothing shared between wells. ``log``/
     ``progress`` calls before a well's work starts are serialised behind a
     lock; aggregating each well's result back into ``well_row_counts``/etc.
     happens on this function's own thread as each future completes, so that
-    bookkeeping needs no lock.
+    bookkeeping needs no lock. ``sub_progress`` is deliberately *not* under
+    that lock: every call already names the well it belongs to, so two wells'
+    fractions interleaving is harmless, and holding a lock once per member
+    would serialise the parallel copy it is reporting on.
     """
     emit = log or _null_log
     cancelled = is_cancelled or _null_cancelled
     report = progress or _null_progress
+    report_fraction = sub_progress or _null_sub_progress
 
     if plan.dest_is_restart:
         emit("Destination has leftover files from an earlier attempt — clearing.")
@@ -175,26 +199,42 @@ def execute_plan(
             emit(f"  {well}…")
             report(well, "copying")
 
+        fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
+
         container = in_map.get(well)
         kept_in_names: frozenset[str] = frozenset()
         if container is not None:
-            members = read_members(container)
+            members = read_members(container, progress=fraction.slice_progress())
             kept = [
                 (n, d) for n, d in members
                 if member_matches(n, schema=plan.schema, channels=plan.channels, filt=plan.filt)
             ]
             if kept:
-                kept_in_names, _dropped = write_zip(plan.dest.in_dir / f"{well}.zip", kept)
+                kept_in_names, _dropped = write_zip(
+                    plan.dest.in_dir / f"{well}.zip", kept,
+                    progress=fraction.slice_progress(),
+                )
+            else:
+                fraction.skip()
+        else:
+            fraction.skip(2)
 
         out_zip = zip_map.get(well)
         if out_zip is not None:
-            members = read_members(out_zip)
+            members = read_members(out_zip, progress=fraction.slice_progress())
             kept = [
                 (n, d) for n, d in members
                 if member_matches(n, schema=plan.schema, channels=plan.channels, filt=plan.filt)
             ]
             if kept:
-                write_zip(plan.dest.out_dir / f"{well}_out.zip", kept)
+                write_zip(
+                    plan.dest.out_dir / f"{well}_out.zip", kept,
+                    progress=fraction.slice_progress(),
+                )
+            else:
+                fraction.skip()
+        else:
+            fraction.skip(2)
 
         csv_path = csv_map.get(well)
         row_count = 0
@@ -218,6 +258,10 @@ def execute_plan(
                     # timepoint label like "24h" never matches its normalized
                     # "24" and _copy_filtered_overrides drops the override.
                     keys.add((normalize_fov(row.get("fov", "")), normalize_tp(row.get("timepoint", ""))))
+        # The CSV filter has no member-level sub-steps of its own, so the
+        # well's dial closes here rather than lingering at whatever the last
+        # container pass left it on.
+        fraction.finish()
         return well, row_count, kept_in_names, keys
 
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(plan.wells_kept))) as ex:

@@ -50,7 +50,7 @@ KIND_LABEL = {
     "ome_import": "Convert OME-TIFF",
     "validate": "Validate",
     "subset": "Subset",
-    "import_loose": "Import loose",
+    "import_loose": "Zip loose",
     "merge_plates": "Merge plates",
 }
 

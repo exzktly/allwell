@@ -13,6 +13,7 @@ merged back locally on fetch. Stdlib-only, so it runs without the imaging stack.
 """
 
 import csv
+import types
 import zipfile
 from pathlib import Path
 
@@ -237,3 +238,60 @@ def test_plan_staging_force_list_matches_wells_canonically(tmp_path):
         force_wells=_canonical_force_wells(["c8"]))
     assert up_to_date == []
     assert len(plans) == 1
+
+
+def test_fetch_skips_a_well_this_run_did_not_produce(tmp_path):
+    """A well the remote skipped (up to date, or never uploaded by the split)
+    emits no ``Well X — done.`` marker, so this run produced nothing new for
+    it. If its local artefacts are already complete there is nothing on the
+    remote a fetch could improve — and pulling it anyway costs an ssh size
+    probe plus two retry-wrapped ``rsync --timeout=120`` transfers, which is
+    the shape behind a fetch sitting on one well for minutes while the file it
+    is pulling is already on disk."""
+    from services.remote_runner import Fetcher, OutputFilter
+
+    out = tmp_path / "out"
+    out.mkdir()
+    with zipfile.ZipFile(out / "C08_out.zip", "w") as zf:
+        zf.writestr("exp_GFP_C08_F001_0h.tif", b"mask")
+    (out / "measurements_C08.csv").write_text("well\nC08\n")
+
+    run = types.SimpleNamespace(
+        expected_wells=set(),               # no "done" marker for C08
+        fetched_wells=set(),
+        local_output_dir=out,
+        output_filter=OutputFilter.FULL,
+    )
+    fetcher = object.__new__(Fetcher)
+    fetcher.run = run
+
+    assert Fetcher._already_local(fetcher, "C08") is not None
+
+    # A well this run *did* process is always re-fetched, however complete the
+    # local copy looks: the local artefact is what the new output replaces.
+    run.expected_wells.add("C08")
+    assert Fetcher._already_local(fetcher, "C08") is None
+
+
+def test_fetch_does_not_skip_an_incomplete_local_well(tmp_path):
+    """The skip is narrow on purpose — a missing CSV, or a zip that is not a
+    complete archive, still fetches."""
+    from services.remote_runner import Fetcher, OutputFilter
+
+    out = tmp_path / "out"
+    out.mkdir()
+    with zipfile.ZipFile(out / "C08_out.zip", "w") as zf:
+        zf.writestr("exp_GFP_C08_F001_0h.tif", b"mask")
+
+    run = types.SimpleNamespace(
+        expected_wells=set(), fetched_wells=set(),
+        local_output_dir=out, output_filter=OutputFilter.FULL)
+    fetcher = object.__new__(Fetcher)
+    fetcher.run = run
+    assert Fetcher._already_local(fetcher, "C08") is None      # no CSV
+
+    (out / "measurements_C08.csv").write_text("well\nC08\n")
+    assert Fetcher._already_local(fetcher, "C08") is not None
+
+    (out / "C08_out.zip").write_bytes(b"not a zip")            # truncated
+    assert Fetcher._already_local(fetcher, "C08") is None

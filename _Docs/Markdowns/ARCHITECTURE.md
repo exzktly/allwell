@@ -3112,6 +3112,21 @@ well it drops or rewrites, so a plate whose remaining wells all stage unchanged
 went silent right after the two or three it did report, which reads as a stall
 with most of the plate still to go.
 
+**The fetch skips what this run did not produce.** A well the remote skipped —
+up to date, or never uploaded by the split — emits no `Well X — done.` marker,
+so it is absent from `expected_wells` and this run produced nothing new for it.
+`Fetcher._already_local` short-circuits such a well when its local artefacts are
+already complete (a readable `<WELL>_out.zip` under the FULL filter, plus a
+`*_<WELL>.csv`): there is nothing on the remote a transfer could improve, and
+pulling it anyway costs an ssh size probe and two retry-wrapped
+`rsync --timeout=120` invocations — the shape behind a fetch that sits on one
+well for minutes while the file it is pulling is already on disk and untouched.
+The skip is deliberately narrow: a well this run *did* process is always
+re-fetched however complete the local copy looks, because that local artefact is
+exactly what the new output replaces. Each fetch also logs why it is happening
+(`this run produced new output` vs `end-of-run sweep: not complete locally`),
+since a slow fetch is only diagnosable if those two are distinguishable.
+
 `_filter_new_fovs_in_staging` is an **older, production-dead** split kept only by
 `tests/test_remote_incremental.py`. A change to the incremental split has to land
 in `_plan_staging` to reach a real run; fixing that one alone looks right and

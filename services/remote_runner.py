@@ -4057,6 +4057,34 @@ class Fetcher:
             if total_bytes:
                 self._log(_well_xfer_line(label, "down", 1.0))
 
+    def _already_local(self, well: str) -> str | None:
+        """Why this well needs no transfer at all, or ``None`` to fetch it.
+
+        A well the remote **skipped** — up to date, or never uploaded by the
+        incremental split — emits no ``Well X — done.`` marker, so it is not in
+        ``expected_wells`` and this run produced nothing new for it. If its
+        local artefacts are already complete there is nothing on the remote
+        that this fetch could improve, and pulling it anyway costs a full
+        per-well transfer: an ssh size probe, then two ``rsync --timeout=120``
+        invocations, each retry-wrapped. That is the shape behind a fetch that
+        sits on one well for minutes while the file it is pulling is already on
+        disk, correct, and untouched by this run.
+
+        Deliberately narrow. A well this run *did* process is always re-fetched,
+        however complete the local copy looks, because a local artefact from an
+        earlier run is exactly what the new output is meant to replace.
+        """
+        run = self.run
+        if well in run.expected_wells:
+            return None                       # this run produced new output
+        if run.output_filter is OutputFilter.FULL:
+            local_zip = run.local_output_dir / f"{well}_out.zip"
+            if not (local_zip.exists() and _zip_is_complete(local_zip)):
+                return None
+        if not list(run.local_output_dir.glob(f"*_{well}.csv")):
+            return None
+        return "already complete locally and untouched by this run"
+
     def _fetch_one(self, well: str) -> None:
         """Pull a single well's output. The remote pipeline produces
         ``{output_dir}/{well}_out.zip`` and a sibling
@@ -4072,6 +4100,11 @@ class Fetcher:
         """
         if self._stop.is_set():
             return
+        skip_reason = self._already_local(well)
+        if skip_reason is not None:
+            self._log(f"[remote] ⤼ {well}: {skip_reason} — not re-fetched\n")
+            self.run.fetched_wells.add(well)
+            return
         tmp_zip = _scratch_dir() / f"allwell-{self.run.run_id}-{well}_out.zip"
         zip_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/{well}_out.zip"
         csv_glob_src = f"{self.host.ssh_alias}:{self.run.remote_output_dir}/*_{well}.csv"
@@ -4080,7 +4113,16 @@ class Fetcher:
         position = len(self.run.fetched_wells) + 1
         prefix = f"({position}/{total}) " if total else ""
 
-        self._log(f"[remote] ↓ {prefix}{well}: starting download from {self.host.ssh_alias}\n")
+        # Say *why* this well is being pulled. A fetch that sits on one well
+        # for minutes is only diagnosable if the log distinguishes "this run
+        # produced new output for it" from "the end-of-run sweep found it
+        # missing locally" — the second, on a well whose files are already on
+        # disk, is work that should not be happening at all.
+        why = ("this run produced new output" if well in self.run.expected_wells
+               else "end-of-run sweep: not complete locally")
+        self._log(
+            f"[remote] ↓ {prefix}{well}: starting download from "
+            f"{self.host.ssh_alias} ({why})\n")
 
         # Ask the remote how big the zip is before pulling it. That number is
         # the denominator for this well's download dial; without it the

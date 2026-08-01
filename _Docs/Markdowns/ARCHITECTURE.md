@@ -2291,13 +2291,30 @@ the plan pass reads each archive's *member list* only — that comes from the zi
 central directory, a small read at the end of the file, so planning a whole plate
 costs a handful of seeks even across a network mount — and the materialise pass
 then writes only the members that will actually be uploaded, reading nothing
-else. A well with nothing new is never copied at all; a well that survives intact
-is copied wholesale rather than decompressed and recompressed. This ordering is
-the point: staging by copying each archive in full and *then* rewriting it down
-to the wanted members pulls the entire dataset across the network before a single
-byte reaches the remote, which is exactly backwards when the data lives on a NAS
-— the normal case. The channel-filter typo guard runs in the plan pass, so a
-mistyped channel name names every offending well before any bytes move.
+else. This ordering is the point: staging by copying each archive in full and
+*then* rewriting it down to the wanted members pulls the entire dataset across
+the network before a single byte reaches the remote, which is exactly backwards
+when the data lives on a NAS — the normal case. The channel-filter typo guard
+runs in the plan pass, so a mistyped channel name names every offending well
+before any bytes move.
+
+**Only an archive that actually changes is staged.** A plan that keeps every
+member is not written anywhere: its source path goes straight into the upload
+list and rsync reads it from the input dir. Copying it into scratch first would
+move the same bytes twice — once onto the local scratch volume, once to the
+remote — and only the second copy is the one anybody needs.
+`_open_staging_if_needed` therefore creates the staging directory only when some
+plan has a rewrite in it, and `stage_local_zips` returns `cleanup=None` and the
+input dir as its `zip_dir` when none does; `well_zips`, not `zip_dir`, is the
+authoritative list of what gets uploaded, and it can name files in both places.
+This is not an edge case: the Analyze tab always requests selective channels, so
+a run whose channel list happens to cover every image in the plate takes the
+filtered path with a filter that drops nothing — and used to copy the whole plate
+into the OS temp dir to get there. It also makes the upload cache work as
+designed, since `RemoteRunner.cache_key` hashes each archive's `(name, size,
+mtime)`: a freshly-written staging copy has a new mtime every run, so an
+unchanged plate keyed differently every time and re-uploaded; passing the source
+through keeps the key stable and the second run skips the transfer.
 **MIXED mode** — some wells zipped, others still folders, the signature of a
 run that died mid-compression — stages through the same two passes; it is the
 mode most likely to arise on a slow share, so a full copy there was the worst
@@ -2306,6 +2323,17 @@ place to keep one. Its leftover folders are still zipped into the *input* dir
 nothing), and with no channel filter it uploads from the input dir with no
 staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
 path, which filters zips it has just written itself.
+
+The remote client resolves its own scratch base — the staging rewrites, transit
+output zips, and incremental merge temps — through `remote_runner._scratch_dir`,
+in the same order and to the same default as the pipeline below:
+`$ALLWELL_SCRATCH_DIR` → `~/.allwell/scratch` → the OS temp dir (last resort,
+when home is unwritable). The two resolvers cannot share a constant, because the
+client must not import `pipeline.io` and drag numpy and tifffile into the remote
+path, so `tests/test_remote_runner.py` pins them to the same value instead. They
+used to disagree, the client defaulting to the OS temp dir: a remote run then
+staged gigabytes into `/var/folders/<hash>/T` on macOS, or a tmpfs — RAM — on
+Linux, at a path the user had never chosen and could not find.
 
 **Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
 where per-well working files go: the extracted input TIFs, every intermediate

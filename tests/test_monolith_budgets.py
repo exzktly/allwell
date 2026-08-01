@@ -107,8 +107,9 @@ ANALYZE_TAB_BUDGET = 970
 # there it only moves down; the next section added to this form should come with
 # an extraction, as the pipeline_info restore (_open_pipeline_info /
 # _pinfo_flat / _apply_pipeline_info → analyze_tab_pinfo.AnalyzePipelineInfoMixin)
-# did.
-ANALYZE_TAB_FORM_BUDGET = 1323
+# and the form chrome (_section / _row / _entry / _info_icon / reveal_section →
+# analyze_tab_chrome.AnalyzeFormChromeMixin) both did.
+ANALYZE_TAB_FORM_BUDGET = 1215
 
 
 def _line_count(rel: str) -> int:

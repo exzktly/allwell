@@ -142,9 +142,7 @@ def test_open_dataset_in_analyze_prefills_the_form_and_keeps_the_callers_path(
 
     analyze = AnalyzeTab()
     qtbot.addWidget(analyze)
-    shell = type("_Shell", (), {})()
-    shell._analyze = analyze
-    shell._nb = _NotebookStub()
+    shell = _shell_with(analyze)
 
     AllWellApp._open_dataset_in_analyze(shell, tmp_path, info, incremental=True)
 
@@ -183,3 +181,83 @@ def test_incremental_checkbox_reaches_the_pipeline_command_line(qtbot, tmp_path)
     # The prior dir is where the already-done (fov, timepoint) set is read
     # from; --incremental without it silently reprocesses the whole plate.
     assert args[args.index("--incremental_prior_dir") + 1] == str(tmp_path / "out")
+
+
+def _shell_with(analyze):
+    """A stand-in host carrying the real handoff methods off ``AllWellApp``."""
+    from allwell import AllWellApp
+
+    shell = type("_Shell", (), {})()
+    shell._analyze = analyze
+    shell._nb = _NotebookStub()
+    shell._announce_analyze_handoff = AllWellApp._announce_analyze_handoff.__get__(shell)
+    return shell
+
+
+def test_handoff_unfolds_the_section_holding_the_control_it_changed(qtbot, tmp_path):
+    """Regression guard: everything the handoff sets is either a field whose
+    new value looks like the old one at a glance, or -- for Incremental, the
+    setting that decides whether the run completes anything -- a checkbox
+    inside "Compute Options", which is collapsed by default. A correctly
+    configured completion run was therefore indistinguishable from landing on
+    an untouched Analyze tab."""
+    from allwell import AllWellApp
+    from analyze_tab import AnalyzeTab
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
+    analyze = AnalyzeTab()
+    qtbot.addWidget(analyze)
+    body, caret = analyze._collapsible_sections["Compute Options"]
+    assert not body.isVisibleTo(analyze), "section starts folded (the premise)"
+
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, info, incremental=True)
+
+    assert analyze._incremental_cb.isChecked()
+    assert body.isVisibleTo(analyze)
+    assert caret.text() == "▾"
+
+
+def test_handoff_states_what_it_configured(qtbot, tmp_path):
+    """And says it in words, naming the dataset -- including, when the sidecar
+    could not be read, that the settings did *not* travel. A user who can't
+    tell those apart presses Run on whatever was in the form before."""
+    from allwell import AllWellApp
+    from analyze_tab import AnalyzeTab
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    info = json.loads((tmp_path / "out" / "pipeline_info.json").read_text())
+    analyze = AnalyzeTab()
+    qtbot.addWidget(analyze)
+
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, info, incremental=True)
+    status = analyze._dashboard._status.text()
+    assert tmp_path.name in status
+    assert "pipeline_info.json" in status
+    assert "Incremental is on" in status
+
+    AllWellApp._open_dataset_in_analyze(
+        _shell_with(analyze), tmp_path, {}, incremental=True)
+    assert "NOT loaded" in analyze._dashboard._status.text()
+
+
+def test_unreadable_settings_warning_reaches_the_findings_list(qtbot, tmp_path):
+    """The warning used to go only to the raw log, which sits behind a
+    checkbox that is off by default -- a warning about a half-configured
+    handoff that nobody would read."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    (tmp_path / "out" / "pipeline_info.json").write_text("{ not json")
+    calls, on_open = _handoff_recorder()
+    ctrl = ValidateController(on_open_in_analyze=on_open)
+    qtbot.addWidget(ctrl.page)
+
+    ctrl._on_complete_run(str(tmp_path))
+
+    assert calls["info"] == {}
+    shown = [ctrl.page._findings_list.item(i).text()
+             for i in range(ctrl.page._findings_list.count())]
+    assert any("NOT pre-filled" in text for text in shown)

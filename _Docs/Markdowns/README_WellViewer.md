@@ -1876,14 +1876,22 @@ plain re-run would skip the very wells that need finishing.
    Analyze** opens the dataset there set up to finish it: the Analyze form is
    filled in from the dataset's own recorded settings (schema, separator,
    channel roles, QC options, CSV prefix — everything the original run used),
-   and **Incremental — process only missing FOVs** is ticked for you. Press
-   Run and only the missing `(FOV, timepoint)` pairs are processed, merged
-   into the existing per-well CSVs and `<WELL>_out.zip` archives; wells that
-   are already complete are left untouched. Without that tick a plain re-run
-   would skip every well that already has any output at all — which is most
-   of the wells you need finished. If the dataset's settings can't be read,
-   the handoff still happens and the log says so; check the schema, channel
-   tokens and CSV prefix by hand before running in that case.
+   and **Incremental — process only missing FOVs** is ticked for you. You land
+   with Compute Options already unfolded so you can see that tick, and a line
+   across the top of the run panel naming the dataset and confirming what was
+   set up. Press Run and only the missing `(FOV, timepoint)` pairs are
+   processed, merged into the existing per-well CSVs and `<WELL>_out.zip`
+   archives; wells that are already complete are left untouched. Without that
+   tick a plain re-run would skip every well that already has any output at
+   all — which is most of the wells you need finished. If the dataset's
+   settings can't be read, the handoff still happens but that same line says
+   the settings were **not** loaded — check the schema, channel tokens and CSV
+   prefix by hand before running in that case.
+
+If a check fails, the findings list says why instead of going back to its
+"Pick a dataset folder" prompt, and the **Complete this run in Analyze**
+button disappears — the offer belonged to the report that failed, and taking
+it would hand Analyze a dataset whose settings had just proved unreadable.
 
 ### Subset / Split Dataset
 

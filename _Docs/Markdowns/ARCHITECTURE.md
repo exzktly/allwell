@@ -114,6 +114,7 @@ allwell/
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
 ├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
+├── analyze_tab_chrome.py        ← Analyze mixin: form chrome (sections, rows, entries, ⓘ markers)
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
@@ -1897,7 +1898,14 @@ keeps only the run/log/dashboard orchestration. Both files carry a line budget
 (`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
 behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
 
-Restoring a prior run's settings is a fourth mixin,
+The form's own chrome — `_section` (a collapsible titled section), `_row`,
+`_entry`, `_info_icon`, and `reveal_section` — is `analyze_tab_chrome.AnalyzeFormChromeMixin`,
+inherited by `AnalyzeTabFormMixin`. `reveal_section(title)` unfolds a folded
+section on demand: the fold-by-default rule is right for a user filling the form
+in and wrong for a control something else just changed on their behalf, which
+otherwise leaves no visible trace at all (see `_open_dataset_in_analyze`).
+
+Restoring a prior run's settings is a fifth mixin,
 `analyze_tab_pinfo.AnalyzePipelineInfoMixin` (`_open_pipeline_info` →
 `_pinfo_flat` → `_apply_pipeline_info`), inherited by `AnalyzeTabFormMixin` so
 those names stay reachable on the form where every caller expects them. Three
@@ -2718,7 +2726,18 @@ of the roles.
 That callback takes a `pipeline_info`-shaped settings dict and an `incremental`
 flag, and both of its callers use them: the converter passes the channel roles
 it assigned, Validate & Repair passes the dataset's whole recorded sidecar with
-`incremental=True`. It applies the settings **first** and writes the input field
+`incremental=True`. **It has to be legible on arrival.** Everything it changes
+is either a field whose new value is indistinguishable from the old one at a
+glance, or — for *Incremental*, the setting that decides whether the run
+completes anything at all — a checkbox inside **Compute Options**, which is one
+of the sections that fold by default. A correct handoff therefore looked exactly
+like landing on an untouched Analyze tab, which is how a working feature gets
+reported as doing nothing. So it unfolds that section
+(`AnalyzeFormChromeMixin.reveal_section`) and `_announce_analyze_handoff` states
+on the run dashboard what was set up, naming the dataset — and, when the sidecar
+could not be read, saying in those words that the settings did **not** travel,
+since a user who can't tell the two apart presses Run on whatever the form
+happened to be holding. It applies the settings **first** and writes the input field
 **afterwards** — a full sidecar's `execution_options` carries the `input_dir`
 recorded on whatever machine ran the pipeline, and letting that win would point
 Analyze at a path that need not exist locally, whereas the folder the caller
@@ -3115,9 +3134,20 @@ timepoint), so a dataset with exactly that one warning used to show a green
 findings list explained; "Clean" now means what the findings list itself
 shows, zero findings, full stop. The findings list shows a centred,
 non-selectable placeholder ("Pick a dataset folder and press Check.") while
-empty instead of rendering as a large blank box with no explanation, and
-`_on_failed` clears it back to that placeholder on a failed re-check so a
-stale success's findings can't linger under a fresh red "Failed" headline.
+empty instead of rendering as a large blank box with no explanation. A failed
+check goes through `ValidatePage.show_failure`, which puts the reason *where the
+findings were* and hides **Complete this run in Analyze**. Both halves matter and
+neither was true before: resetting to the "Pick a dataset folder" placeholder
+says nothing happened, directly under a red "Failed" headline, and the
+completion button — set visible by the last `show_report` and touched by nothing
+else — stayed live next to it, still offering to complete a run against a
+dataset whose sidecar had just proved unreadable. Taking that offer then handed
+Analyze a root with no settings to send, so the user landed on an Analyze tab
+that looked untouched. A completion offer belongs to the report that produced
+it. `ValidatePage.show_note` appends a line to the findings list without
+disturbing it, for something the user must see that isn't a scan finding — the
+handoff reporting unreadable settings writes there as well as to the log, since
+the log sits behind a checkbox that is off by default.
 `ValidatePage.set_dataset_path` runs `_on_dataset_changed` itself after
 setting the field: `PathField.set_path` deliberately emits `changed` only for
 an interactive Browse pick, so a page populated through the setter —

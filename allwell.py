@@ -1407,6 +1407,14 @@ class AllWellApp(QMainWindow):
         recorded on whatever machine ran the pipeline, and letting that win
         would point Analyze at a path that need not exist here. The folder the
         caller names is the one the user just picked, so it is authoritative.
+
+        **The handoff has to be legible on arrival.** Everything it changes is
+        either a field whose new value is indistinguishable from the old one at
+        a glance, or — for *Incremental*, the setting that decides whether the
+        run completes anything at all — a checkbox inside a section that is
+        folded by default. A correct handoff therefore looked exactly like
+        landing on an untouched Analyze tab. So the section is unfolded and the
+        run dashboard states what was set up, naming the dataset.
         """
         if self._analyze is None:
             return
@@ -1420,9 +1428,38 @@ class AllWellApp(QMainWindow):
         incremental_cb = getattr(self._analyze, "_incremental_cb", None)
         if incremental_cb is not None and incremental:
             incremental_cb.setChecked(True)
+            reveal = getattr(self._analyze, "reveal_section", None)
+            if callable(reveal):
+                reveal("Compute Options")
         refresh = getattr(self._analyze, "_refresh_output", None)
         if callable(refresh):
             refresh()
+        self._announce_analyze_handoff(dataset_path, bool(pipeline_info), incremental)
+
+    def _announce_analyze_handoff(
+        self, dataset_path: Path, applied_settings: bool, incremental: bool,
+    ) -> None:
+        """State on the Analyze dashboard what the handoff just configured.
+
+        Says whether the settings actually came from the dataset — a handoff
+        whose sidecar could not be read still opens the folder, and a user who
+        can't tell that apart from a fully configured one will press Run on a
+        form holding whatever was in it before.
+        """
+        bits = [f"Opened {dataset_path.name}"]
+        bits.append(
+            "settings loaded from its pipeline_info.json" if applied_settings
+            else "settings NOT loaded — check the schema, channel tokens and "
+                 "CSV prefix before running"
+        )
+        if incremental:
+            bits.append("Incremental is on, so only missing FOVs are processed")
+        dashboard = getattr(self._analyze, "_dashboard", None)
+        if dashboard is not None:
+            try:
+                dashboard.set_status(" — ".join(bits) + ".")
+            except Exception:
+                swallowed()
 
     def _nudge_review(self) -> None:
         if self._review is None:

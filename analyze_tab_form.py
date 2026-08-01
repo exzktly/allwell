@@ -7,9 +7,10 @@ down to its run / validation / log-poll core. The schema vocabulary constants
 live here too (the form reads them) and are re-exported by ``analyze_tab``.
 
 Restoring a prior run's settings from its ``pipeline_info.json`` sidecar is its
-own cohesive job and lives in ``analyze_tab_pinfo.py``; this mixin inherits
-:class:`~analyze_tab_pinfo.AnalyzePipelineInfoMixin` so ``_apply_pipeline_info``
-and ``_pinfo_flat`` stay reachable on the form exactly where callers expect them.
+own cohesive job and lives in ``analyze_tab_pinfo.py``; the form's own chrome
+(``_section``/``_row``/``_entry``/``_info_icon``/``reveal_section``) lives in
+``analyze_tab_chrome.py``. This mixin inherits both, so every name stays
+reachable on the form exactly where callers expect it.
 """
 
 from __future__ import annotations
@@ -17,13 +18,13 @@ from __future__ import annotations
 import sys as _sys
 from pathlib import Path
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
 )
 
 
+from analyze_tab_chrome import AnalyzeFormChromeMixin
 from analyze_tab_pinfo import AnalyzePipelineInfoMixin
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
@@ -119,118 +120,9 @@ def _numeric_option_errors(opts: dict) -> list[str]:
     return errors
 
 
-class AnalyzeTabFormMixin(AnalyzePipelineInfoMixin):
+class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
-
-    def _section(self, parent: QWidget, title: str, info: str = "",
-                 *, collapsible: bool = False, collapsed: bool = False) -> QWidget:
-        """Add a labelled section to *parent* and return its body widget.
-
-        When *info* is given, a small ``ⓘ`` marker is placed next to the title
-        and the text is shown as its hover tooltip — keeping long explanatory
-        notes available on demand instead of cluttering the form inline.
-
-        When *collapsible*, the header carries a ▾/▸ caret and clicking it
-        shows/hides the body; *collapsed* sets the initial state. Used (C3) to
-        fold the optional/advanced sections (QC, Shape, Output, Compute,
-        Scratch) by default so the required fields lead the form.
-        """
-        container = QWidget(parent)
-        cl = QVBoxLayout(container)
-        cl.setContentsMargins(0, 4, 0, 4)
-        cl.setSpacing(2)
-
-        header = QWidget(container)
-        hl = QHBoxLayout(header)
-        hl.setContentsMargins(0, 0, 0, 0)
-        hl.setSpacing(4)
-        caret = None
-        if collapsible:
-            caret = QLabel("▸" if collapsed else "▾", header)
-            caret.setObjectName("SectionTitle")
-            caret.setContentsMargins(12, 6, 0, 2)
-            hl.addWidget(caret)
-        title_lbl = QLabel(title, header)
-        title_lbl.setObjectName("SectionTitle")
-        title_lbl.setContentsMargins(2 if collapsible else 12, 6, 0, 2)
-        hl.addWidget(title_lbl)
-        if info:
-            hl.addWidget(self._info_icon(header, info))
-        hl.addStretch(1)
-        cl.addWidget(header)
-
-        rule = QFrame(container)
-        rule.setFrameShape(QFrame.HLine)
-        rule.setObjectName("HRule")
-        cl.addWidget(rule)
-
-        body = QWidget(container)
-        bl = QVBoxLayout(body)
-        bl.setContentsMargins(12, 4, 12, 8)
-        bl.setSpacing(3)
-        cl.addWidget(body)
-
-        if collapsible:
-            body.setVisible(not collapsed)
-
-            def _toggle(_ev=None, _body=body, _caret=caret) -> None:
-                vis = not _body.isVisible()
-                _body.setVisible(vis)
-                _caret.setText("▾" if vis else "▸")
-
-            header.setCursor(Qt.PointingHandCursor)
-            header.mousePressEvent = _toggle  # type: ignore[assignment]
-
-        parent.layout().addWidget(container)
-        return body
-
-    def _info_icon(self, parent: QWidget, info: str) -> QLabel:
-        """A small ``ⓘ`` marker whose hover tooltip carries *info*.
-
-        Keeps long explanatory notes available on demand instead of cluttering
-        the form with inline paragraphs. A non-empty WhatsThis also surfaces the
-        note via the ?-cursor; Qt wraps long tooltips on its own.
-        """
-        lbl = QLabel("ⓘ", parent)
-        lbl.setObjectName("InfoHint")
-        lbl.setToolTip(info)
-        lbl.setWhatsThis(info)
-        return lbl
-
-    #: Row label column width, narrow enough to leave room for a field at
-    #: RAIL_W; word-wrap below lets an overflowing label wrap instead of clip.
-    _ROW_LABEL_W = 108
-
-    def _row(self, parent: QWidget, label: str) -> QWidget:
-        """Append a two-column label+widget row to *parent*; return the right cell."""
-        row = QWidget(parent)
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(0, 1, 0, 1)
-        rl.setSpacing(4)
-
-        lbl = QLabel(label, row)
-        lbl.setObjectName("Muted")
-        lbl.setFixedWidth(self._ROW_LABEL_W)
-        lbl.setWordWrap(True)
-        rl.addWidget(lbl, 0, Qt.AlignTop)
-
-        right = QWidget(row)
-        right.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        rr = QHBoxLayout(right)
-        rr.setContentsMargins(0, 0, 0, 0)
-        rr.setSpacing(4)
-        rl.addWidget(right, 0, Qt.AlignTop)
-
-        parent.layout().addWidget(row)
-        return right
-
-    def _entry(self, parent: QWidget, default: str = "", width: int = 80) -> QLineEdit:
-        """Create a QLineEdit, add it to *parent*'s layout, and return it."""
-        e = QLineEdit(default, parent)
-        e.setFixedWidth(width)
-        parent.layout().addWidget(e)
-        return e
 
     def _build_form(self, parent: QWidget) -> None:
         parent.layout().addWidget(self._build_resume_banner(parent))

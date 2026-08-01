@@ -166,8 +166,12 @@ class ValidateController(QObject):
         self.page.dashboard.set_failed(message)
         # A failed re-check would otherwise leave the previous run's findings
         # on screen under the new red "Failed" headline — nothing between two
-        # back-to-back runs on the same page clears them.
-        self.page.clear_findings()
+        # back-to-back runs on the same page clears them. show_failure (not
+        # clear_findings) puts the reason where the findings were and hides the
+        # stale "Complete this run in Analyze" offer, which otherwise survived
+        # from the earlier successful check and pointed at a dataset whose
+        # sidecar had just failed to read.
+        self.page.show_failure(message)
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
@@ -200,12 +204,17 @@ class ValidateController(QObject):
             # Never a silent handoff: Analyze still opens on the folder, but the
             # form keeps whatever was already in it, and a run configured by
             # hand against the wrong csv_prefix or schema reads its done-set
-            # from files that don't exist and reprocesses everything. Say so.
-            self.page.append_log(
+            # from files that don't exist and reprocesses everything. Say so —
+            # in the findings list as well as the log, because the log is behind
+            # a checkbox that is off by default, so a log-only warning about a
+            # half-configured handoff is a warning nobody reads.
+            warning = (
                 f"⚠ {problem} Analyze opened on the folder, but its settings "
                 "were NOT pre-filled — check the schema, channel tokens and CSV "
                 "prefix against the original run before pressing Run."
             )
+            self.page.append_log(warning)
+            self.page.show_note(warning)
         self._on_open_in_analyze(dataset_root, info, incremental=True)
 
     # ── lifecycle ────────────────────────────────────────────────────────────

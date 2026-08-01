@@ -239,6 +239,40 @@ class ValidatePage(QWidget):
     def clear_findings(self) -> None:
         self._show_empty_findings_hint()
 
+    def show_failure(self, message: str) -> None:
+        """Replace the findings with why the check failed, and withdraw the
+        offer to complete a run.
+
+        A failed check used to reset the list to its "Pick a dataset folder and
+        press Check." placeholder — which says nothing happened, directly under
+        a red "Failed" headline and *next to a still-visible* "Complete this
+        run in Analyze" button left over from an earlier successful check. That
+        button then handed Analyze a dataset root whose sidecar had just proved
+        unreadable, so the settings could not travel with it and the user
+        landed on an Analyze tab that looked untouched. The failure is now what
+        the list says, and the completion offer goes with the report it
+        belonged to.
+        """
+        self._dataset_root = ""
+        self._findings_list.clear()
+        item = QListWidgetItem(f"✗ Check failed — {message}")
+        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        self._findings_list.addItem(item)
+        self._repair_btn.setEnabled(False)
+        self._complete_btn.setVisible(False)
+
+    def show_note(self, message: str) -> None:
+        """Add a line to the findings list without disturbing what's there.
+
+        For something the user must see that isn't a scan finding — the
+        completion handoff reporting that a dataset's settings could not be
+        read. Writing that to the raw log alone hid it: the log is behind a
+        checkbox that is off by default.
+        """
+        item = QListWidgetItem(message)
+        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        self._findings_list.addItem(item)
+
     def _show_empty_findings_hint(self) -> None:
         # Lives inside the (otherwise large, blank) findings list itself,
         # not as a separate caption below it — an empty container that big

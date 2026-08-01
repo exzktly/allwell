@@ -2163,20 +2163,40 @@ parent process supervises the per-well worker pool:
   well's records free as the loop advances, so the parent holds at most one
   well's worth transiently (per-well CSV writing stays worker-side).
   `tests/test_well_worker_pool.py` pins the count.
-- **Completeness is not part of the output contract — and that is the gap that
-  bites.** A well whose FOV-groups partly failed still writes its per-well CSV and
-  `<well>_out.zip` from the groups that succeeded (`_process_groups_in_worker`
-  returns `(records, failed_names)` and the caller writes the records regardless).
-  On disk, and to every consumer downstream, that output is indistinguishable
-  from a well that processed cleanly: nothing in `pipeline_info.json` records how
-  many FOV-groups a well was *expected* to yield versus how many it did, so the
-  viewer cannot tell a 6-field well from the same well with 3 fields lost to
-  write errors. The consequence is not a missing plot but a plausible one — the
-  per-field statistics silently describe whatever fields survived, and the first
-  visible symptom is an absent error bar several layers away from the cause. The
-  durable evidence is `<output_dir>/errors/` and the run log's PARTIAL warnings;
-  when wells or fields are missing from a dataset, read those before anything
-  else.
+- **Completeness is part of the output contract.** A well whose FOV-groups partly
+  failed still writes its per-well CSV and `<well>_out.zip` from the groups that
+  succeeded, and on disk that output is shaped exactly like a clean well's — so
+  every well records how much of its input its output actually covers.
+  `pipeline/run_report.py` is that record: each worker drops one small JSON file
+  (`groups_total` from the well's input group count, `groups_covered` read back
+  from the finished CSV's distinct `(fov, timepoint)` pairs — ground truth from
+  the artifact, so it stays honest across incremental runs, resumed per-FOV
+  checkpoints, and groups a failing disk never let the run attempt). `main`
+  folds them into a `run_report` block inside `pipeline_info.json` and logs the
+  shortfall; `core/load_controller._report_incomplete_wells` names the affected
+  wells in the status line, a toast and the log at dataset load. One file per
+  well, written atomically and never appended to, so the worker pool cannot
+  interleave two wells into a corrupt record. Without this, per-field statistics
+  silently described whatever fields survived and the first visible symptom was
+  an absent error bar several layers from the cause. The per-FOV tracebacks in
+  `<output_dir>/errors/` remain the detailed evidence.
+- **A well stops attempting FOV-groups once its storage has failed repeatedly.**
+  `_MAX_CONSECUTIVE_IO_FAILURES` consecutive `OSError`s abort the well's
+  remaining groups (they are still reported as missing, which is what they are).
+  Storage that is out of room does not recover mid-well, and `_safe_imwrite` has
+  already retried each write five times with backoff before raising — so by the
+  third group in a row the volume has had fifteen chances. Non-`OSError`
+  failures do not trip it: a segmentation bug throwing on every frame is not a
+  storage problem, and aborting would hide how widespread it is.
+- **The scratch volume is checked before the run starts.** `main._preflight_scratch`
+  sizes the need from the dataset itself — one input image for the per-image
+  byte size, the run's own field/timepoint enumeration for FOV-groups per well,
+  `--workers` for how many wells stage at once — and compares it against free
+  space on the *resolved* scratch base (`pipeline.io.preflight_scratch_space`).
+  Below one well's worth it exits before reading an image, because a run that
+  starts there cannot finish; merely tight only warns, since the estimate is
+  deliberately rough and refusing to start on a heuristic would be worse than
+  the risk. The resolved base is logged on the `Scratch  :` line either way.
 - **Scratch exhaustion is the common cause of a partial run.** The scratch base
   defaults to `~/.allwell/scratch` (§6.5) — the *home* volume — while the dataset
   usually lives on an external or network disk, so a run with terabytes free

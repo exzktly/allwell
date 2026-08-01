@@ -157,6 +157,14 @@ _TRANSFER_ADVICE = (
 )
 
 
+def _staging_free_bytes(path: Path) -> int | None:
+    """Free bytes on the staging volume, or None when it can't be determined."""
+    try:
+        return shutil.disk_usage(path).free
+    except OSError:
+        return None
+
+
 def _copy_into_staging(
     src: Path, dest: Path, *, log_fn: Callable[[str], None] | None = None,
 ) -> None:
@@ -278,6 +286,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # remote receives ordinary loose TIFs), but listed so the manifest stays a
     # complete mirror of ``pipeline/`` per test_remote_manifest.
     "pipeline/ome_explode.py",
+    "pipeline/run_report.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
     "pipeline/threshold_optimize.py",
@@ -456,7 +465,14 @@ def stage_local_zips(
     sweep_stale_scratch(log_fn=log_fn)
 
     input_dir = input_dir.resolve()
+    # Scanning the input volume to classify the layout is itself slow enough to
+    # look like a hang on a spinning external disk, and it is the very first
+    # thing that happens after "[remote] target:". Say so before starting.
+    if log_fn is not None:
+        log_fn(f"[remote] scanning input: {input_dir}\n")
     mode = _detect_local_input_mode(input_dir)
+    if log_fn is not None:
+        log_fn(f"[remote] input layout: {mode.value}\n")
 
     if mode is LocalInputMode.ZIP:
         well_zips = tuple(sorted(input_dir.glob("[A-H][0-9]*.zip")))
@@ -477,10 +493,50 @@ def stage_local_zips(
         staging = _new_scratch_dir("allwell-stage-")
         try:
             staged: list[Path] = []
+            # Copying the whole plate into scratch is the longest silent stretch
+            # of a remote run — tens of GB off the user's input volume before a
+            # single byte is uploaded — and ``_copy_into_staging`` logs only when
+            # a copy has to be RETRIED, so a healthy run printed nothing at all
+            # between "[remote] target:" and the staged-count line. On a slow
+            # input volume that reads as a hang. Announce the work and tick per
+            # archive, so the log always says what it is doing and roughly how
+            # far along it is.
+            _total_bytes = 0
             for wz in well_zips:
+                try:
+                    _total_bytes += wz.stat().st_size
+                except OSError:
+                    pass
+            _n = len(well_zips)
+            if log_fn is not None:
+                log_fn(
+                    f"[remote] staging {_n} well archive(s) "
+                    f"({_total_bytes / float(1 << 30):.1f} GiB) → {staging}\n"
+                )
+                _free = _staging_free_bytes(staging)
+                if _free is not None and _free < _total_bytes:
+                    log_fn(
+                        f"[remote] WARN: staging needs "
+                        f"{_total_bytes / float(1 << 30):.1f} GiB but only "
+                        f"{_free / float(1 << 30):.1f} GiB is free on "
+                        f"{staging} — set ALLWELL_SCRATCH_DIR to a roomier "
+                        f"volume (it is not the input volume).\n"
+                    )
+            _done_bytes = 0
+            for idx, wz in enumerate(well_zips, 1):
                 dest = staging / wz.name
                 _copy_into_staging(wz, dest, log_fn=log_fn)
                 staged.append(dest)
+                try:
+                    _done_bytes += wz.stat().st_size
+                except OSError:
+                    pass
+                if log_fn is not None:
+                    log_fn(
+                        f"[remote] staged ({idx}/{_n}): {wz.stem} — "
+                        f"{_done_bytes / float(1 << 30):.1f}/"
+                        f"{_total_bytes / float(1 << 30):.1f} GiB\n"
+                    )
             staged_zips = tuple(staged)
             up_to_date: tuple[str, ...] = ()
             if fluor_tokens is not None:

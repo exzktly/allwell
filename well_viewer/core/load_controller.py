@@ -186,6 +186,47 @@ def _reset_sample_definitions_state(ctx) -> None:
             notes_edit.blockSignals(blocked)
 
 
+def _report_incomplete_wells(ctx) -> None:
+    """Announce wells whose results cover fewer FOV-groups than their input.
+
+    The pipeline records this per well in ``pipeline_info.json``'s
+    ``run_report`` block (``pipeline/run_report.py``). It exists because a well
+    whose FOV-groups partly failed still writes a CSV and an ``<well>_out.zip``
+    built from the groups that survived — output that is, on disk, identical in
+    shape to a well that processed cleanly. Every per-field number for such a
+    well then describes whatever fields happened to make it through, and the
+    first symptom a user sees is an error bar that isn't there.
+
+    So: say it at load, by name, before any plot is drawn from it.
+    """
+    report = (ctx.state.dataset.pipeline_info or {}).get("run_report") or {}
+    incomplete = [w for w in (report.get("incomplete_wells") or [])
+                  if w in ctx.state.dataset.well_paths]
+    if not incomplete:
+        return
+    wells = report.get("wells") or {}
+    missing = sum(
+        int(wells.get(w, {}).get("groups_total", 0))
+        - int(wells.get(w, {}).get("groups_covered", 0))
+        for w in incomplete
+    )
+    shown = ", ".join(incomplete[:6]) + ("…" if len(incomplete) > 6 else "")
+    msg = (f"{len(incomplete)} well(s) are incomplete ({shown}) — {missing} "
+           "FOV-group(s) missing from their results")
+    logging.getLogger("well_viewer").warning(
+        "%s. Per-field statistics for these wells describe only the fields that "
+        "were processed. Details: %s",
+        msg,
+        "; ".join(
+            f"{w}: {wells.get(w, {}).get('groups_covered', 0)}"
+            f"/{wells.get(w, {}).get('groups_total', 0)} FOV-groups"
+            for w in incomplete[:6]
+        ),
+    )
+    ctx.notify.set_status(msg + " — see the log.")
+    ctx.notify.toast(msg, kind="warn", msec=9000)
+
+
 def _report_unusable_fov_labels(ctx) -> None:
     """Announce wells whose FOV labels don't identify their fields of view.
 
@@ -481,6 +522,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
     from well_viewer.core.app_shell_view import refresh_dataset_button
     refresh_dataset_button(app)
     app._set_status(f"Loaded {n} well(s) — {display}")
+    _report_incomplete_wells(ctx)
     _report_unusable_fov_labels(ctx)
     recalculate_threshold(ctx)
     # Apply any non-default gating thresholds that were just hydrated from

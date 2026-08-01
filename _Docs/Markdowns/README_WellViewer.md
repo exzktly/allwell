@@ -866,6 +866,18 @@ count) — plus a CDF.
   leaves the `err_…` cell **empty** instead of writing `0.000000`. A bar with no
   marker and no whisker (with error bars switched on) means the spread really is
   too small to see.
+- **"N well(s) are incomplete" at load** — those wells' results cover fewer
+  fields of view than their input holds: FOV-groups failed during the analysis
+  run, and the well still wrote a CSV and an `_out.zip` from the ones that
+  succeeded, so nothing about the files looks wrong. Every per-field number for
+  those wells describes only the fields that made it through. The run records
+  this itself now, and the analysis log names the failures; the per-FOV
+  tracebacks are in `<output folder>/errors/`. The usual cause is the scratch
+  disk filling mid-run — **scratch is not the folder your data is in**, it
+  defaults to your home drive, so a dataset on a roomy external disk can still
+  exhaust a full internal one. Free space (or point the Analyze tab's **Scratch
+  disk** field at the roomy volume) and re-run with **incremental**, which
+  reprocesses only the missing groups and merges them in.
 - **"Unusable FOV labels" at load** — a warning naming specific wells means those
   wells' rows carry no usable field-of-view label, so all their fields pooled
   into one and nothing per field can be computed for them: no error bars, and

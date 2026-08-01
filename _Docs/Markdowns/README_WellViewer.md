@@ -866,6 +866,14 @@ count) — plus a CDF.
   leaves the `err_…` cell **empty** instead of writing `0.000000`. A bar with no
   marker and no whisker (with error bars switched on) means the spread really is
   too small to see.
+- **Remote runs: what the log shows while it stages** — before anything uploads,
+  a remote run reads your input archives and builds the smaller set it is
+  actually going to send (only the channels you selected, and with **incremental**
+  only the fields not already processed). The log narrates it: `scanning input`,
+  `planning N well archive(s)`, then one `staged (i/N)` line per well showing how
+  many members it kept. A well with nothing new to process is skipped entirely.
+  If your data is on a network or external drive, this pass reads only the images
+  it will upload, so it is roughly as fast as the upload itself.
 - **"N well(s) are incomplete" at load** — those wells' results cover fewer
   fields of view than their input holds: FOV-groups failed during the analysis
   run, and the well still wrote a CSV and an `_out.zip` from the ones that

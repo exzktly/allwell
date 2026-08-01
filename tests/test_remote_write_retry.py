@@ -29,7 +29,8 @@ from services.remote_runner import (
     _RSYNC_RETRY_CODES,
     Fetcher,
     OutputFilter,
-    _copy_into_staging,
+    _materialize_staging,
+    _StagePlan,
     refresh_pipeline_info_available_from_outputs,
 )
 
@@ -115,41 +116,73 @@ def test_volume_hint_only_speaks_when_it_recognises_the_errno():
 
 
 # ── upload staging: reading the plate off the user's input volume ───────────
+#
+# Only an archive the run has to REWRITE is read here — one whose channel filter
+# or incremental done-set drops some of its members. An archive that survives
+# intact is never copied at all; its source path goes straight to rsync, so
+# there is no client-side write to shield.
 
-def test_staging_copy_survives_a_transient_fault(monkeypatch, tmp_path):
+
+def _rewrite_plan(tmp_path) -> tuple[Path, _StagePlan]:
+    """A source archive of two members, planned down to one."""
+    src = tmp_path / "A01.zip"
+    with zipfile.ZipFile(src, "w") as zf:
+        zf.writestr("A01_GFP.tif", b"gfp-bytes")
+        zf.writestr("A01_mCherry.tif", b"mch-bytes")
+    return src, _StagePlan(src=src, keep=("A01_GFP.tif",), n_members=2)
+
+
+def test_staging_rewrite_survives_a_transient_fault(monkeypatch, tmp_path):
     import services.remote_runner as rr
 
-    src = tmp_path / "A01.zip"
-    src.write_bytes(b"zip-bytes")
-    dest = tmp_path / "staging" / "A01.zip"
-    dest.parent.mkdir()
+    src, plan = _rewrite_plan(tmp_path)
+    staging = tmp_path / "staging"
+    staging.mkdir()
 
-    flaky = _flaky(2, rr.shutil.copy2)
-    monkeypatch.setattr(rr.shutil, "copy2", flaky)
+    flaky = _flaky(2, rr.atomic_zip)
+    monkeypatch.setattr(rr, "atomic_zip", flaky)
 
-    _copy_into_staging(src, dest)
+    staged = _materialize_staging([plan], staging)
 
-    assert dest.read_bytes() == b"zip-bytes"
+    assert staged == (staging / "A01.zip",)
+    with zipfile.ZipFile(staged[0], "r") as zf:
+        assert zf.namelist() == ["A01_GFP.tif"]
     assert flaky.calls["n"] == 3
+    # The user's input is untouched by any of it.
+    with zipfile.ZipFile(src, "r") as zf:
+        assert len(zf.namelist()) == 2
 
 
-def test_staging_copy_reports_the_volume_when_the_budget_runs_out(
+def test_staging_rewrite_reports_the_volume_when_the_budget_runs_out(
     monkeypatch, tmp_path,
 ):
     import services.remote_runner as rr
 
-    src = tmp_path / "A01.zip"
-    src.write_bytes(b"zip-bytes")
-    dest = tmp_path / "A01-staged.zip"
+    _src, plan = _rewrite_plan(tmp_path)
+    staging = tmp_path / "staging"
+    staging.mkdir()
     monkeypatch.setattr(
-        rr.shutil, "copy2", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
+        rr, "atomic_zip", lambda *a, **k: (_ for _ in ()).throw(_ebadf()))
 
     with pytest.raises(OSError) as ei:
-        _copy_into_staging(src, dest)
+        _materialize_staging([plan], staging)
     assert "A01.zip" in str(ei.value)
     assert "network mount" in str(ei.value)
     # The partial must not be left for the uploader to ship.
-    assert not dest.exists()
+    assert not (staging / "A01.zip").exists()
+
+
+def test_an_intact_archive_is_never_copied(tmp_path):
+    """The pass-through case: no write, and the upload list names the source."""
+    src, _plan = _rewrite_plan(tmp_path)
+    plan = _StagePlan(src=src, keep=None, n_members=2)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+
+    staged = _materialize_staging([plan], staging)
+
+    assert staged == (src,)
+    assert list(staging.iterdir()) == []
 
 
 # ── the fetch side: writing results onto the user's output volume ───────────

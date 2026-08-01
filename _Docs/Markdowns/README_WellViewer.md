@@ -878,10 +878,15 @@ count) — plus a CDF.
   a remote run reads your input archives and builds the smaller set it is
   actually going to send (only the channels you selected, and with **incremental**
   only the fields not already processed). The log narrates it: `scanning input`,
-  `planning N well archive(s)`, then one `staged (i/N)` line per well showing how
-  many members it kept. A well with nothing new to process is skipped entirely.
-  If your data is on a network or external drive, this pass reads only the images
-  it will upload, so it is roughly as fast as the upload itself.
+  `planning N well archive(s)`, then one `staged (i/N)` line per well that had to
+  be rebuilt. A well with nothing new to process is skipped entirely, and a well
+  whose archive is already exactly what would be sent is uploaded from your input
+  folder untouched — nothing is copied to your local disk for it, and the log
+  says how many archives took that route. Only wells that genuinely lose
+  something (a channel you did not select, or fields **incremental** has already
+  done) are rebuilt, into `~/.allwell/scratch` unless the *Scratch disk* field
+  says otherwise. If your data is on a network or external drive, this pass reads
+  only the images it will upload, so it is roughly as fast as the upload itself.
 - **"N well(s) are incomplete" at load** — those wells' results cover fewer
   fields of view than their input holds: FOV-groups failed during the analysis
   run, and the well still wrote a CSV and an `_out.zip` from the ones that

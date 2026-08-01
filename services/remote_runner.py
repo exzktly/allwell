@@ -87,11 +87,26 @@ def _scratch_dir() -> Path:
     """Base directory for AllWell's local scratch — input staging, transit
     output zips, and incremental merge temps.
 
-    Honors ``$ALLWELL_SCRATCH_DIR`` so a user whose data lives on a NAS but
-    whose OS temp is a small system drive (Windows ``%TEMP%`` on ``C:``) can
-    redirect the potentially-GB-sized remote-staging copy onto a roomy volume.
-    Falls back to the OS temp dir; if the override can't be created we degrade
-    to the OS temp dir rather than fail the run.
+    Resolution order, matching ``pipeline.io.scratch_base_for`` exactly:
+
+    1. ``$ALLWELL_SCRATCH_DIR`` — the redirectable-scratch env the GUI sets from
+       its "Scratch disk" field, so a user whose data lives on a NAS but whose
+       OS temp is a small system drive (Windows ``%TEMP%`` on ``C:``) can put
+       the potentially-GB-sized staging rewrite on a roomy volume.
+    2. ``~/.allwell/scratch`` — the default.
+    3. The OS temp dir — last resort, when the home directory is unwritable.
+
+    The two resolvers agree deliberately. They used to differ: the pipeline
+    defaulted to ``~/.allwell/scratch`` while this one defaulted to the OS temp
+    dir, so a remote run wrote into a path the user had never heard of and could
+    not find — ``/var/folders/jj/…/T`` on macOS, and on Linux frequently a tmpfs,
+    i.e. RAM. One default, stated in one place, is one thing to reason about when
+    a volume fills.
+
+    This module cannot import ``pipeline.io`` to share the constant (that would
+    drag numpy and tifffile into the remote client, which
+    ``test_architecture_contracts`` forbids), so the path is repeated here and
+    ``test_remote_runner`` pins the two to the same value.
     """
     override = os.environ.get("ALLWELL_SCRATCH_DIR", "").strip()
     if override:
@@ -100,14 +115,19 @@ def _scratch_dir() -> Path:
             p.mkdir(parents=True, exist_ok=True)
             return p
         except OSError as exc:
-            # Don't silently ignore a user-set scratch dir — falling back to the
-            # OS temp can later fill a small system drive with GB of staging
+            # Don't silently ignore a user-set scratch dir — falling back
+            # elsewhere can later fill a small system drive with GB of staging
             # (audit E14). Surface it so the misconfiguration is visible.
             import logging as _logging
             _logging.getLogger(__name__).warning(
-                "ALLWELL_SCRATCH_DIR=%r is unusable (%s); falling back to the "
-                "OS temp dir", override, exc)
-    return Path(tempfile.gettempdir())
+                "ALLWELL_SCRATCH_DIR=%r is unusable (%s); falling back to "
+                "~/.allwell/scratch", override, exc)
+    try:
+        home = Path.home() / ".allwell" / "scratch"
+        home.mkdir(parents=True, exist_ok=True)
+        return home
+    except OSError:
+        return Path(tempfile.gettempdir())
 
 
 def _new_scratch_dir(prefix: str) -> Path:
@@ -163,39 +183,6 @@ def _staging_free_bytes(path: Path) -> int | None:
         return shutil.disk_usage(path).free
     except OSError:
         return None
-
-
-def _copy_into_staging(
-    src: Path, dest: Path, *, log_fn: Callable[[str], None] | None = None,
-) -> None:
-    """Copy one well archive into the upload staging dir, retrying transients.
-
-    Staging reads the entire plate off whatever volume the user's input folder
-    lives on — for a 96-well plate that is every input archive, back to back. On
-    a network mount that is more than enough to provoke a session drop, and the
-    unguarded ``shutil.copy2`` this replaces turned one such blip into a failed
-    run before a single byte had been uploaded (``OSError: [Errno 9] Bad file
-    descriptor``, raised out of ``stage_local_zips``).
-
-    The copy is idempotent — *dest* is a fresh path in All-Well's own scratch
-    dir and is overwritten wholesale — so a retry is safe; the partial is
-    removed between attempts so a failed run never leaves a truncated archive
-    behind for the uploader to find.
-    """
-    def _cleanup() -> None:
-        try:
-            if dest.exists():
-                dest.unlink()
-        except OSError:
-            pass
-
-    retry_io(
-        lambda: shutil.copy2(src, dest),
-        what=f"{src.name} into the upload staging dir",
-        cleanup=_cleanup,
-        advice=_TRANSFER_ADVICE,
-        log_fn=log_fn,
-    )
 
 
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
@@ -490,49 +477,52 @@ def stage_local_zips(
         # the user's original dataset on disk. The user's input dir
         # must be treated as read-only. The incremental split rewrites
         # zips too, so it likewise requires staging.
-        staging = _new_scratch_dir("allwell-stage-")
+        # Plan before moving anything. Reading each archive's member list is a
+        # small read of its central directory, so the whole plate can be planned
+        # for the cost of a few seeks even over a network mount — and then only
+        # the members that will actually be uploaded are ever read. An earlier
+        # shape copied every archive in full into scratch and *then* rewrote it
+        # down to the members it wanted, which on a NAS-resident dataset dragged
+        # the entire plate across the network before a single byte went to the
+        # remote.
+        if log_fn is not None:
+            log_fn(f"[remote] planning {len(well_zips)} well archive(s)…\n")
+        plans, up_to_date_list, zero_match = _plan_staging(
+            well_zips,
+            keep_tokens=(_required_tokens(nuclear_token, fluor_tokens)
+                         if fluor_tokens is not None else None),
+            incremental=incremental,
+            prior_output_dir=prior_output_dir,
+            csv_prefix=csv_prefix,
+            filename_schema=filename_schema,
+            filename_sep=filename_sep,
+            log_fn=log_fn,
+        )
+        _raise_on_zero_channel_match(zero_match)
+        # Opened only if something actually has to be rewritten; when the
+        # filter drops nothing from any archive there is no local copy at all.
+        staging = _open_staging_if_needed(plans, log_fn=log_fn)
         try:
-            # Plan before moving anything. Reading each archive's member list is
-            # a small read of its central directory, so the whole plate can be
-            # planned for the cost of a few seeks even over a network mount —
-            # and then only the members that will actually be uploaded are ever
-            # read. The previous shape copied every archive in full into scratch
-            # and *then* rewrote it down to the members it wanted, which on a
-            # NAS-resident dataset dragged the entire plate across the network
-            # before a single byte went to the remote.
-            if log_fn is not None:
-                log_fn(f"[remote] planning {len(well_zips)} well archive(s)…\n")
-            plans, up_to_date_list, zero_match = _plan_staging(
-                well_zips,
-                keep_tokens=(_required_tokens(nuclear_token, fluor_tokens)
-                             if fluor_tokens is not None else None),
-                incremental=incremental,
-                prior_output_dir=prior_output_dir,
-                csv_prefix=csv_prefix,
-                filename_schema=filename_schema,
-                filename_sep=filename_sep,
-                log_fn=log_fn,
-            )
-            _raise_on_zero_channel_match(zero_match)
-            _to_move = sum(
-                (len(p_.keep) if p_.keep is not None else p_.n_members)
-                for p_ in plans
-            )
-            if log_fn is not None:
-                log_fn(f"[remote] staging {len(plans)} well archive(s), "
+            if log_fn is not None and staging is not None:
+                _to_move = sum(len(p_.keep) for p_ in plans
+                               if p_.keep is not None)
+                n_rewrite = sum(1 for p_ in plans if p_.keep is not None)
+                log_fn(f"[remote] rewriting {n_rewrite} well archive(s), "
                        f"{_to_move} member(s) → {staging}\n")
             staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
             up_to_date = tuple(up_to_date_list)
             return ZippedInput(
-                zip_dir=staging,
+                zip_dir=staging or input_dir,
                 mode=mode,
                 well_zips=staged_zips,
-                cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+                cleanup=(None if staging is None else
+                         (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
                 incremental=incremental,
                 up_to_date_wells=up_to_date,
             )
         except Exception:
-            shutil.rmtree(staging, ignore_errors=True)
+            if staging is not None:
+                shutil.rmtree(staging, ignore_errors=True)
             raise
 
     if mode is LocalInputMode.MIXED:
@@ -1001,24 +991,26 @@ def _stage_mixed_mode(
         # pulls the whole plate off the input volume to discard most of it,
         # which is worst exactly where MIXED mode is most likely: a resumed run
         # against a slow network share.
-        staging = _new_scratch_dir("allwell-stage-")
+        plans, _unused, zero_match = _plan_staging(
+            all_zips,
+            keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
+            log_fn=log_fn,
+        )
+        _raise_on_zero_channel_match(zero_match)
+        staging = _open_staging_if_needed(plans, log_fn=log_fn)
         try:
-            plans, _unused, zero_match = _plan_staging(
-                all_zips,
-                keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
-                log_fn=log_fn,
-            )
-            _raise_on_zero_channel_match(zero_match)
             staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
             return ZippedInput(
-                zip_dir=staging,
+                zip_dir=staging or input_dir,
                 mode=LocalInputMode.MIXED,
                 well_zips=staged_zips,
-                cleanup=lambda d=staging: shutil.rmtree(d, ignore_errors=True),
+                cleanup=(None if staging is None else
+                         (lambda d=staging: shutil.rmtree(d, ignore_errors=True))),
                 on_pipeline_success=_on_success,
             )
         except Exception:
-            shutil.rmtree(staging, ignore_errors=True)
+            if staging is not None:
+                shutil.rmtree(staging, ignore_errors=True)
             raise
 
     # Non-filter path: zips live in input_dir, no cleanup needed.
@@ -1153,62 +1145,99 @@ def _plan_staging(
     return plans, up_to_date, zero_match
 
 
+def _open_staging_if_needed(
+    plans: list[_StagePlan], *, log_fn: Callable[[str], None] | None = None,
+) -> Path | None:
+    """A staging dir, but only if some archive actually has to be rewritten.
+
+    Staging exists for exactly one reason: an archive the run has to rewrite —
+    to drop unwanted channels, or the FOV-groups an incremental run has already
+    processed — must not be written back over the user's input. An archive that
+    survives its plan intact is not rewritten at all, so putting it in staging
+    would move the same bytes twice: once onto the local scratch volume, then
+    again to the remote. Those upload straight from where they already are.
+
+    That is the common case, not an edge one. The Analyze tab always asks for
+    selective channels, so a run whose channel list happens to cover every image
+    in the plate takes the filtered path with a filter that drops nothing — and
+    used to copy the whole plate into the OS temp dir to achieve it. Returning
+    ``None`` here is what makes that run upload directly from the source.
+    """
+    rewrites = sum(1 for p in plans if p.keep is not None)
+    if log_fn is not None and rewrites < len(plans):
+        log_fn(f"[remote] {len(plans) - rewrites} archive(s) need no rewrite — "
+               f"uploading those straight from the input, nothing copied "
+               f"locally\n")
+    if not rewrites:
+        return None
+    return _new_scratch_dir("allwell-stage-")
+
+
 def _materialize_staging(
     plans: list[_StagePlan],
-    staging: Path,
+    staging: Path | None,
     *,
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[Path, ...]:
-    """Write each plan into *staging*, moving only the bytes that will be sent.
+    """Turn the plans into the list of archives to upload.
 
-    A plan that keeps everything is copied wholesale (no point decompressing and
-    recompressing an archive that survives intact); a filtered plan is written
-    member by member straight from the source, so the members it drops are never
-    read at all. That is the difference that matters when the source is a network
-    volume: the previous code copied every archive in full and only then rewrote
-    it down to the members it wanted, so a run uploading a few hundred megabytes
-    still dragged the whole plate across the network first.
+    A plan that keeps every member is not written anywhere: its source path goes
+    into the returned list unchanged and rsync reads it from where it already
+    lives. Copying it into scratch first would move the same bytes twice — once
+    onto the local scratch volume, once to the remote — and the second copy is
+    the only one anybody needs. *staging* is ``None`` when no plan needs a
+    rewrite at all, which is the whole-plate case.
+
+    A filtered plan is written member by member straight from the source into
+    *staging*, so the members it drops are never read. That is what matters when
+    the source is a network volume: an earlier shape copied every archive in
+    full and only then rewrote it down to the members it wanted, so a run
+    uploading a few hundred megabytes still dragged the whole plate across the
+    network first.
     """
     staged: list[Path] = []
     n_total = len(plans)
     kept_members = 0
     total_members = 0
+    passed_through = 0
     for idx, plan in enumerate(plans, start=1):
-        dest = staging / plan.src.name
-        t0 = time.monotonic()
         total_members += plan.n_members
         if plan.keep is None:
-            _copy_into_staging(plan.src, dest, log_fn=log_fn)
+            # Nothing to rewrite — upload it from where it is.
             kept_members += plan.n_members
-            if log_fn:
-                mb = dest.stat().st_size / (1024 * 1024) if dest.exists() else 0.0
-                log_fn(f"[remote] staged ({idx}/{n_total}): {plan.src.stem} → "
-                       f"all {plan.n_members} member(s), {mb:.1f} MB "
-                       f"in {_fmt_secs(time.monotonic() - t0)}\n")
-        else:
-            def _write(_plan=plan, _dest=dest) -> None:
-                with atomic_zip(_dest) as dst:
-                    with zipfile.ZipFile(_plan.src, "r") as src:
-                        for member in _plan.keep or ():
-                            dst.writestr(src.getinfo(member), src.read(member))
+            passed_through += 1
+            staged.append(plan.src)
+            continue
+        if staging is None:                     # unreachable via the helper
+            raise RuntimeError(
+                f"{plan.src.name} needs rewriting but no staging dir was opened")
+        dest = staging / plan.src.name
+        t0 = time.monotonic()
 
-            retry_io(
-                _write,
-                what=f"{plan.src.name} into the upload staging dir",
-                cleanup=lambda d=dest: d.unlink(missing_ok=True),
-                advice=_TRANSFER_ADVICE,
-                log_fn=log_fn,
-            )
-            kept_members += len(plan.keep)
-            if log_fn:
-                mb = dest.stat().st_size / (1024 * 1024) if dest.exists() else 0.0
-                log_fn(f"[remote] staged ({idx}/{n_total}): {plan.src.stem} → "
-                       f"{len(plan.keep)}/{plan.n_members} member(s), "
-                       f"{mb:.1f} MB in {_fmt_secs(time.monotonic() - t0)}\n")
+        def _write(_plan=plan, _dest=dest) -> None:
+            with atomic_zip(_dest) as dst:
+                with zipfile.ZipFile(_plan.src, "r") as src:
+                    for member in _plan.keep or ():
+                        dst.writestr(src.getinfo(member), src.read(member))
+
+        retry_io(
+            _write,
+            what=f"{plan.src.name} into the upload staging dir",
+            cleanup=lambda d=dest: d.unlink(missing_ok=True),
+            advice=_TRANSFER_ADVICE,
+            log_fn=log_fn,
+        )
+        kept_members += len(plan.keep)
+        if log_fn:
+            mb = dest.stat().st_size / (1024 * 1024) if dest.exists() else 0.0
+            log_fn(f"[remote] staged ({idx}/{n_total}): {plan.src.stem} → "
+                   f"{len(plan.keep)}/{plan.n_members} member(s), "
+                   f"{mb:.1f} MB in {_fmt_secs(time.monotonic() - t0)}\n")
         staged.append(dest)
     if log_fn and total_members and kept_members < total_members:
         log_fn(f"[remote] staging: summary — {kept_members}/{total_members} "
-               f"member(s) across {n_total} well(s); the rest were never read.\n")
+               f"member(s) across {n_total} well(s); the rest were never read "
+               f"({passed_through} archive(s) uploaded from the input as-is).\n")
     return tuple(staged)
 
 

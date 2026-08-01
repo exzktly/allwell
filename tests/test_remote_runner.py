@@ -446,6 +446,98 @@ def test_stage_local_zips_with_fluor_filter_preserves_user_input(tmp_path):
     assert not zipped.zip_dir.exists()
 
 
+def test_client_scratch_default_matches_the_pipelines(monkeypatch, tmp_path):
+    """One scratch default across the app, not two.
+
+    ``pipeline.io.scratch_base_for`` and ``remote_runner._scratch_dir`` cannot
+    share a constant (the client must not import the imaging stack), so they are
+    pinned here instead. They used to disagree — the client fell back to the OS
+    temp dir, which on macOS is an opaque ``/var/folders/…/T`` path and on Linux
+    is often a tmpfs — and a remote run then staged gigabytes somewhere the user
+    had never chosen and could not find.
+    """
+    from pipeline.io import DEFAULT_SCRATCH_SUBDIR
+    from services.remote_runner import _scratch_dir
+
+    monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    assert _scratch_dir() == tmp_path / DEFAULT_SCRATCH_SUBDIR
+
+
+def test_client_scratch_honours_the_override(monkeypatch, tmp_path):
+    from services.remote_runner import _scratch_dir
+
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(tmp_path / "elsewhere"))
+    assert _scratch_dir() == tmp_path / "elsewhere"
+
+
+def test_a_filter_that_drops_nothing_stages_nothing(monkeypatch, tmp_path):
+    """The whole-plate case: no local copy, upload straight from the input.
+
+    The Analyze tab always asks for selective channels, so a run whose channel
+    list happens to cover every image in the plate reaches the filtered path
+    with a filter that drops nothing. That used to copy the entire plate into
+    the OS temp dir — gigabytes onto the local scratch volume, read off a NAS,
+    to produce archives byte-identical to the ones already on disk — before a
+    single byte went to the remote.
+    """
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(scratch))
+    src = tmp_path / "in"
+    src.mkdir()
+    a01 = _make_well_zip(src, "A01.zip", ["Exp_NIR_A01.tif", "Exp_GFP_A01.tif"])
+    b02 = _make_well_zip(src, "B02.zip", ["Exp_NIR_B02.tif", "Exp_GFP_B02.tif"])
+
+    zipped = stage_local_zips(
+        src,
+        filename_schema="experiment:channel:well",
+        filename_sep="_",
+        nuclear_token="NIR",
+        fluor_tokens=["GFP"],            # keeps every member of both archives
+    )
+
+    assert zipped.well_zips == (a01, b02)
+    assert zipped.zip_dir == src
+    assert zipped.cleanup is None
+    assert list(scratch.glob("allwell-stage-*")) == []
+
+
+def test_only_the_archives_that_change_are_staged(monkeypatch, tmp_path):
+    """A mixed plate: the well that loses a channel is rewritten, the other
+    is uploaded from the input untouched."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(scratch))
+    src = tmp_path / "in"
+    src.mkdir()
+    intact = _make_well_zip(src, "A01.zip", ["Exp_NIR_A01.tif", "Exp_GFP_A01.tif"])
+    _make_well_zip(
+        src, "B02.zip",
+        ["Exp_NIR_B02.tif", "Exp_GFP_B02.tif", "Exp_mCherry_B02.tif"],
+    )
+
+    zipped = stage_local_zips(
+        src,
+        filename_schema="experiment:channel:well",
+        filename_sep="_",
+        nuclear_token="NIR",
+        fluor_tokens=["GFP"],            # only B02 loses anything
+    )
+
+    by_name = {p.name: p for p in zipped.well_zips}
+    assert by_name["A01.zip"] == intact          # the source path itself
+    assert by_name["B02.zip"].parent == zipped.zip_dir != src
+    with zipfile.ZipFile(by_name["B02.zip"], "r") as zf:
+        assert not any("mCherry" in m for m in zf.namelist())
+    # The staging dir holds only the rewritten archive.
+    assert sorted(p.name for p in zipped.zip_dir.iterdir()) == ["B02.zip"]
+    assert zipped.cleanup is not None
+    zipped.cleanup()
+    # Cleaning up staging must not touch the input.
+    assert intact.exists()
+
+
 def test_stage_local_zips_typoed_channel_does_not_corrupt_user_input(tmp_path):
     """v5.2.18 worst-case scenario: user types nonsense channel
     names. The staging must (a) NOT modify the user's input, AND
@@ -1229,15 +1321,16 @@ def test_fetch_one_keeps_complete_zip_despite_rsync_error(host, tmp_path):
     """The stuck-final-fetch bug: rsync can exit non-zero (timeout / reset on
     close) *after* the zip is fully across. The well must still materialise —
     not get discarded and re-fetched forever — so the run can finish."""
-    import tempfile
     import zipfile
-    from pathlib import Path
     run = _make_run(tmp_path)
     logs: list[str] = []
     with patch.object(Fetcher, "_loop", lambda self: None):
         f = Fetcher(host, run, output_filter=OutputFilter.FULL, log_fn=logs.append)
     well = "A01"
-    tmp_zip = Path(tempfile.gettempdir()) / f"allwell-{run.run_id}-{well}_out.zip"
+    # Where the Fetcher looks for the transit zip — the client scratch base,
+    # not the OS temp dir (they are only the same when home is unwritable).
+    from services.remote_runner import _scratch_dir
+    tmp_zip = _scratch_dir() / f"allwell-{run.run_id}-{well}_out.zip"
     with zipfile.ZipFile(tmp_zip, "w") as z:            # a COMPLETE zip on disk
         z.writestr("A01_overlay.tif", b"data")
     try:
@@ -2844,12 +2937,28 @@ def test_scratch_dir_honors_env_override(tmp_path, monkeypatch):
 
 
 def test_scratch_dir_falls_back_when_override_unusable(tmp_path, monkeypatch):
-    import tempfile as _t
     from services import remote_runner as rr
-    # A path that can't be created (a file in the way) → fall back to OS temp.
+    # A path that can't be created (a file in the way) → fall back to the
+    # default, which is the same ~/.allwell/scratch the pipeline uses.
     bad = tmp_path / "afile"
     bad.write_text("x")
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(bad / "nope"))
+    assert rr._scratch_dir() == home / ".allwell" / "scratch"
+
+
+def test_scratch_dir_falls_back_to_os_temp_when_home_is_unwritable(
+    tmp_path, monkeypatch,
+):
+    """Last resort. An unwritable home must not fail the run outright."""
+    import tempfile as _t
+    from services import remote_runner as rr
+    blocked = tmp_path / "afile"
+    blocked.write_text("x")
+    monkeypatch.delenv("ALLWELL_SCRATCH_DIR", raising=False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: blocked))
     assert rr._scratch_dir() == Path(_t.gettempdir())
 
 

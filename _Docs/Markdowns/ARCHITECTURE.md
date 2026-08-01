@@ -3112,6 +3112,27 @@ well it drops or rewrites, so a plate whose remaining wells all stage unchanged
 went silent right after the two or three it did report, which reads as a stall
 with most of the plate still to go.
 
+**What the end-of-run sweep brings back.** Two things beyond the per-well
+outputs, both because a remote run's records are useless if they stay on the
+remote. `out/errors/` — the per-failure tracebacks — is pulled, so Validate's
+`_scan_error_files` has something to read; without it that whole half of the
+"read the run's own records first" rule was local-run-only, and a remote user
+got the hedged verdict every time. And the fetched `pipeline_info.json`
+**overwrites** the local one, while a remote output dir starts empty — so the
+`run_report` block it carries describes only the wells that run processed (on an
+incremental run, only the uploaded split). Left alone that replaces a whole
+plate's completeness records with a handful, and every skipped well loses the
+record saying whether its empty output was a measurement or a gap — which is
+precisely what Validate reads to avoid forcing a well that legitimately
+segments zero cells, so the loss shows up as a well being re-segmented to the
+same empty result on every run. `run_report.read_run_report_block` captures the
+block before the rsync and `merge_fetched_run_report` folds it back after:
+fetched records win per well, prior records survive for wells the fetched block
+does not mention, and the derived fields (`incomplete_wells`, the totals) are
+recomputed rather than merged so they cannot disagree with the `wells` map they
+summarise. Both sit beside `refresh_pipeline_info_available_from_outputs`, which
+already read-modify-writes the same file for the same reason.
+
 **The fetch skips what this run did not produce.** A well the remote skipped —
 up to date, or never uploaded by the split — emits no `Well X — done.` marker,
 so it is absent from `expected_wells` and this run produced nothing new for it.

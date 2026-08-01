@@ -295,3 +295,56 @@ def test_fetch_does_not_skip_an_incomplete_local_well(tmp_path):
 
     (out / "C08_out.zip").write_bytes(b"not a zip")            # truncated
     assert Fetcher._already_local(fetcher, "C08") is None
+
+
+def _sidecar(path, wells: dict) -> None:
+    path.write_text(json.dumps({
+        "schema": "experiment:channel:well:fov:timepoint",
+        "run_report": {"wells": wells, "incomplete_wells": []},
+    }))
+
+
+def test_fetched_run_report_does_not_erase_earlier_wells(tmp_path):
+    """A remote output dir starts empty, so the sidecar it writes describes
+    only the wells THAT run processed. Pulling it over the local one replaced a
+    whole plate's completeness records with a handful — and every skipped well
+    lost the record saying whether its empty output was a measurement or a gap,
+    which is exactly what Validate reads to avoid forcing a well that
+    legitimately segments zero cells."""
+    from pipeline.run_report import merge_fetched_run_report, read_run_report_block
+
+    info = tmp_path / "pipeline_info.json"
+    _sidecar(info, {
+        "A01": {"well": "A01", "groups_total": 4, "groups_covered": 4, "failed": []},
+        "C08": {"well": "C08", "groups_total": 4, "groups_covered": 0, "failed": []},
+    })
+    prior = read_run_report_block(info)
+    assert set(prior["wells"]) == {"A01", "C08"}
+
+    # The fetch overwrites it with this run's much smaller block.
+    _sidecar(info, {
+        "C08": {"well": "C08", "groups_total": 4, "groups_covered": 3, "failed": ["x.tif"]},
+    })
+    assert merge_fetched_run_report(info, prior) is True
+
+    merged = json.loads(info.read_text())["run_report"]
+    assert set(merged["wells"]) == {"A01", "C08"}          # A01 survived
+    assert merged["wells"]["C08"]["groups_covered"] == 3   # this run's wins
+    assert merged["wells"]["C08"]["failed"] == ["x.tif"]
+    # Derived fields are recomputed, never merged, so they cannot disagree
+    # with the wells map they summarise.
+    assert merged["incomplete_wells"] == ["C08"]
+    assert merged["groups_total"] == 8
+    assert merged["groups_covered"] == 7
+
+
+def test_merging_a_run_report_is_a_no_op_when_there_is_nothing_to_restore(tmp_path):
+    from pipeline.run_report import merge_fetched_run_report, read_run_report_block
+
+    info = tmp_path / "pipeline_info.json"
+    _sidecar(info, {"A01": {"well": "A01", "groups_total": 1, "groups_covered": 1}})
+    # No prior block (first run into this folder) — nothing to fold back.
+    assert merge_fetched_run_report(info, None) is False
+    # Prior block identical to the fetched one — no rewrite.
+    assert merge_fetched_run_report(info, read_run_report_block(info)) is False
+    assert read_run_report_block(tmp_path / "absent.json") is None

@@ -66,6 +66,10 @@ from services.remote_config import (
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
 from util.fov import sort_key as fov_sort_key
 from util.timepoint import sort_key as tp_sort_key
+from pipeline.run_report import (
+    merge_fetched_run_report,
+    read_run_report_block,
+)
 from pipeline.well_skip import _canonical_force_wells
 from pipeline.incremental_keys import (
     fov_tp_from_name,
@@ -4919,12 +4923,34 @@ class RemoteRunner:
         # Pull pipeline_info.json + any top-level CSVs we may have missed
         # (well CSVs are pulled by the Fetcher, but a top-level summary
         # written at end-of-run wouldn't be).
+        # The fetched sidecar OVERWRITES the local one, and a remote output dir
+        # starts empty — so its run_report block describes only the wells this
+        # run processed (on an incremental run, only the uploaded split). Left
+        # alone, that replaces a whole plate's completeness records with a
+        # handful, and every skipped well loses the record that said whether its
+        # empty output was a measurement or a gap. Capture before, merge after.
+        info_path = run.local_output_dir / "pipeline_info.json"
+        prior_run_report = read_run_report_block(info_path)
         for top in ("pipeline_info.json",):
             self._rsync_optional(
                 f"{self.host.ssh_alias}:{run.remote_output_dir}/{top}",
                 run.local_output_dir / top,
                 log_fn=log,
             )
+        if merge_fetched_run_report(info_path, prior_run_report):
+            log("[remote] merged this run's completeness records into the "
+                "existing pipeline_info run_report.\n")
+
+        # Per-failure tracebacks. The pipeline writes them remotely and nothing
+        # pulled them back, so on a remote run they stayed on the remote host —
+        # and Validate & Repair, which reads out/errors/ to say WHY a well is
+        # empty, found an empty directory every time. They are small text files
+        # and they are usually the fastest answer to "why did this well fail".
+        self._rsync_optional(
+            f"{self.host.ssh_alias}:{run.remote_output_dir}/errors/",
+            run.local_output_dir / "errors",
+            log_fn=log,
+        )
 
         # The fetched pipeline_info.json reflects only the (partial) input the
         # remote saw — for an incremental run that's just the uploaded new-FOV

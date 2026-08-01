@@ -209,3 +209,67 @@ def finalize_run_report(output_dir, info_path, *, atomic_writer, log) -> None:
         clear_run_report(output_dir)
     except Exception as exc:
         log.warning("Could not record run completeness: %s", exc)
+
+
+# ── Remote fetch: the sidecar is overwritten, the record must not be ────────
+
+def read_run_report_block(info_path) -> dict | None:
+    """The ``run_report`` block currently in *info_path*, or ``None``."""
+    path = Path(info_path)
+    if not path.exists():
+        return None
+    try:
+        info = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    block = info.get("run_report") if isinstance(info, dict) else None
+    return block if isinstance(block, dict) else None
+
+
+def merge_fetched_run_report(info_path, prior_block: dict | None) -> bool:
+    """Fold *prior_block* back into the sidecar a remote fetch just overwrote.
+
+    A remote run's output dir starts empty, so the sidecar it writes describes
+    only the wells that run processed — on an incremental run, only the ones the
+    upload split sent. Pulling that file over the local one therefore replaces a
+    whole plate's completeness records with a handful, and every well the run
+    skipped silently loses the record that said whether its empty output was a
+    measurement or a gap. This restores them.
+
+    Fetched records win per well (they are this run's, and newer); prior records
+    survive for every well the fetched block does not mention. The derived
+    fields are recomputed rather than merged, so they cannot disagree with the
+    ``wells`` map they summarise. Returns True iff the file was rewritten.
+    """
+    if not prior_block:
+        return False
+    path = Path(info_path)
+    try:
+        info = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return False
+    if not isinstance(info, dict):
+        return False
+    fetched = info.get("run_report")
+    fetched_wells = fetched.get("wells") if isinstance(fetched, dict) else None
+    prior_wells = prior_block.get("wells")
+    if not isinstance(prior_wells, dict):
+        return False
+    merged = dict(prior_wells)
+    if isinstance(fetched_wells, dict):
+        merged.update(fetched_wells)
+    if merged == fetched_wells:
+        return False
+    info["run_report"] = {
+        "wells": merged,
+        "incomplete_wells": sorted(
+            w for w, r in merged.items()
+            if int((r or {}).get("groups_total", 0)) > int((r or {}).get("groups_covered", 0))),
+        "groups_total": sum(int((r or {}).get("groups_total", 0)) for r in merged.values()),
+        "groups_covered": sum(int((r or {}).get("groups_covered", 0)) for r in merged.values()),
+    }
+    try:
+        path.write_text(json.dumps(info, indent=2))
+    except OSError:
+        return False
+    return True

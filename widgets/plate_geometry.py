@@ -68,6 +68,9 @@ PLATE_MAX_HEIGHT = 210
 #: against one edge.
 PLATE_ALIGNMENT = Qt.AlignHCenter
 
+#: Qt's QWIDGETSIZE_MAX — "no ceiling", used to exempt the rail picker.
+_UNCAPPED = 16_777_215
+
 _ROLES = ("rail", "picker", "status")
 
 #: ``objectName`` of the grid child inside a ``WellPlateSelector``. Everything
@@ -132,5 +135,17 @@ def apply_plate_geometry(plate, *, role: str = "rail") -> None:
     policy.setHeightForWidth(True)
     plate.setSizePolicy(policy)
 
+    if role == "rail":
+        # Review's left-rail well picker is EXEMPT from the caps. It is the
+        # app's primary interaction surface, not a status readout, and it has
+        # its own sizing story: it scales to whatever width the rail gives it
+        # and keeps its aspect, with no ceiling. Capping it to the dashboards'
+        # budget shrank its cells from 23.7px to 20.8px — unifying the two by
+        # making the one people actually click on smaller, which is the wrong
+        # direction. The size policy above is shared because that part IS the
+        # same rule; only the ceiling differs.
+        plate.setMaximumWidth(_UNCAPPED)
+        plate.setMaximumHeight(_UNCAPPED)
+        return
     plate.setMaximumWidth(PLATE_MAX_WIDTH)
     plate.setMaximumHeight(PLATE_MAX_HEIGHT + _action_row_allowance(plate))

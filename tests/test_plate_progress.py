@@ -125,3 +125,34 @@ def test_show_plate_true_still_has_two_dividers_and_a_stretchy_centre(qapp):
     center_right = d._center_host.x() + d._center_host.width()
     legend_left = d._legend_host.x()
     assert legend_left - center_right < 60
+
+
+def test_the_rail_picker_is_exempt_from_the_size_caps(qapp):
+    """Review's left-rail well picker keeps its own size.
+
+    Unifying every plate to one geometry initially capped the rail picker at the
+    dashboards' budget too, which shrank its cells from 23.7px to 20.8px — it
+    unified the two by making the one people actually click on smaller. The rail
+    is the app's primary interaction surface, not a status readout: it scales to
+    whatever width the rail gives it, with no ceiling. It still shares the size
+    *policy*, because that part genuinely is the same rule; only the cap differs.
+    """
+    from widgets.plate_geometry import (
+        PLATE_MAX_HEIGHT,
+        PLATE_MAX_WIDTH,
+        apply_plate_geometry,
+    )
+    from widgets.well_plate_selector import WellPlateSelector
+
+    rail = WellPlateSelector()
+    apply_plate_geometry(rail, role="rail")
+    assert rail.maximumWidth() > PLATE_MAX_WIDTH
+    assert rail.maximumHeight() > PLATE_MAX_HEIGHT
+
+    status = WellPlateSelector()
+    apply_plate_geometry(status, role="status")
+    assert status.maximumWidth() == PLATE_MAX_WIDTH
+    assert status.maximumHeight() == PLATE_MAX_HEIGHT
+
+    assert rail.sizePolicy().hasHeightForWidth()
+    assert status.sizePolicy().hasHeightForWidth()

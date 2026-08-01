@@ -93,6 +93,25 @@ class AnalyzeRunMixin:
         a queue bridge, which isn't a widget event."""
         self._runner.stop()
 
+    def suspend(self) -> None:
+        """QueueableController hook: wind down rather than cancel.
+
+        Optional on the protocol — the queue probes for it and falls back to
+        ``stop`` for the Datasets tools, which have no equivalent boundary to
+        stop at. ``AnalyzeSuspendMixin._suspend`` is the button's path and also
+        writes the resume record; this is the queue's, where the record is not
+        needed because the queue is itself the record.
+        """
+        self._runner.suspend()
+
+    def was_suspended(self) -> bool:
+        """Whether the most recent run was wound down rather than cancelled.
+
+        The queue reads this to tell a suspend apart from a Stop when the user
+        clicked Suspend on the Analyze page rather than in the queue.
+        """
+        return self._runner.was_suspended
+
     def is_busy(self) -> bool:
         """QueueableController hook: whether a pipeline run is already in
         flight — checked by QueueBridge.show_job before it repopulates the

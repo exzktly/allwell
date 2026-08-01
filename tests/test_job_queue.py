@@ -157,13 +157,16 @@ def test_load_leaves_pending_job_alone():
     assert q.get("a").state == JobState.PENDING
 
 
-def test_load_cascades_block_to_successors_of_an_interrupted_job():
-    """Regression guard: _repair_after_load used to mark a crashed RUNNING
-    job INTERRUPTED without calling _cascade_block, unlike mark_finished's
-    own FAILED/CANCELLED path. INTERRUPTED never equals SUCCEEDED, so
-    next_runnable() would never select the chained successor either way —
-    but without the cascade the successor was left stuck at PENDING forever
-    with no visible reason, instead of BLOCKED with a message naming why."""
+def test_an_interrupted_job_is_resumable_and_does_not_block_its_successors():
+    """A job that was running when the app went away is not a failure.
+
+    Whatever it had finished is on disk, and the pipeline's ``--incremental``
+    reads that as its done-set, so the job is picked up where it left off the
+    next time the queue is started — which is the point of persisting the queue
+    across a session at all. Its successors therefore stay PENDING and wait for
+    it, rather than cascading to BLOCKED as though the output they need were
+    never coming.
+    """
     data = {"jobs": [
         _job("a", state=JobState.RUNNING).to_json(),
         _job("b", chain_from="a", chain_target="opts.raw", chain_kind="out_dir").to_json(),
@@ -171,10 +174,39 @@ def test_load_cascades_block_to_successors_of_an_interrupted_job():
     ]}
     q = JobQueue.from_json(data)
     assert q.get("a").state == JobState.INTERRUPTED
-    assert q.get("b").state == JobState.BLOCKED
-    assert q.get("c").state == JobState.BLOCKED
-    assert "predecessor a" in q.get("b").message
-    assert q.next_runnable() is None
+    assert q.get("b").state == JobState.PENDING
+    assert q.get("c").state == JobState.PENDING
+    assert "resumable" in q.get("a").message
+    # Starting the queue resumes the interrupted job, not its successor.
+    assert q.next_runnable().id == "a"
+
+
+def test_a_suspended_job_keeps_its_place_and_is_picked_up_again():
+    q = JobQueue.from_json({"jobs": [
+        _job("a", state=JobState.RUNNING).to_json(),
+        _job("b").to_json(),
+    ]})
+    q.mark_suspended("a")
+    assert q.get("a").state == JobState.SUSPENDED
+    assert q.next_runnable().id == "a", "suspended jobs resume before later ones run"
+
+
+def test_suspending_does_not_block_a_chained_successor():
+    """A suspend is not an outcome, so nothing downstream is written off."""
+    q = JobQueue.from_json({"jobs": [
+        _job("a", state=JobState.RUNNING).to_json(),
+        _job("b", chain_from="a", chain_target="opts.raw", chain_kind="out_dir").to_json(),
+    ]})
+    q.mark_suspended("a")
+    assert q.get("b").state == JobState.PENDING
+
+
+def test_a_suspended_job_survives_a_save_load_round_trip():
+    q = JobQueue.from_json({"jobs": [_job("a", state=JobState.RUNNING).to_json()]})
+    q.mark_suspended("a")
+    back = JobQueue.from_json(q.to_json())
+    assert back.get("a").state == JobState.SUSPENDED
+    assert back.next_runnable().id == "a"
 
 
 def test_load_repairs_persisted_order_that_violates_chain_link():

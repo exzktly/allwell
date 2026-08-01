@@ -2377,8 +2377,25 @@ the run reporting success. The record is cleared on resume, on discard, and when
 a run completes normally; a *stopped* run keeps its record, because a hard Stop
 also leaves every finished well's CSV on disk.
 
-A run the **Datasets Job Queue** started suspends the same way, and the queue
-does the right thing for free: `suspend` goes through `stop`, so
+The **Datasets Job Queue** can suspend too, and carries the result across a
+session. Its Pause button winds the running job down (`suspend_current`, which
+probes the runner for a `suspend` hook and falls back to a plain cancel for the
+Datasets tools, none of which has an equivalent boundary to stop at); a separate
+`Stop job` button is the destructive answer. A wound-down job goes to
+`JobState.SUSPENDED` — deliberately not through `mark_finished`, since a suspend
+is not an outcome and treating it as a cancel would cascade its successors to
+BLOCKED as though its output were never coming.
+
+`SUSPENDED` and `INTERRUPTED` form `JobState.RESUMABLE`: work that stopped
+part-way with its results intact on disk. `next_runnable` selects them alongside
+`PENDING`, so starting the queue picks such a job up rather than requiring it to
+be re-added by hand, and neither is in `TERMINAL` any more — a job with a future
+is still worth reordering. `_repair_after_load` turns a `RUNNING` job (the app
+went away mid-run) into `INTERRUPTED` and no longer cascade-blocks its
+successors: they stay `PENDING` and wait for output that is still coming.
+
+A run the queue started also suspends from the Analyze page, and the queue does
+the right thing for free there: `suspend` goes through `stop`, so
 `AnalyzeRunMixin.was_cancelled` is true, so `JobQueueController._on_job_finished`
 marks the job cancelled and pauses the queue rather than starting the next one
 underneath a user who has just asked for their machine back. What did *not* come

@@ -535,6 +535,13 @@ A cell counts only when it is manually kept **and** it passes QC.
   waited for is thrown away — Suspend just also keeps the fields in progress and
   saves you re-entering the form.
 - On success the app switches to Review and loads the output folder.
+- The **Job Queue** (Datasets pane) works the same way. **Pause queue** winds
+  the running job down and keeps what it finished; the job stays in the list
+  marked *suspended*, and **Start queue** picks it up again — including after
+  you quit and reopen All-Well. **Stop job**, beside it, cancels outright. If
+  All-Well is closed or crashes while a job is running, that job comes back
+  marked *interrupted* and is resumed the same way; jobs chained after it wait
+  rather than being written off.
 
 ### What the pipeline writes
 

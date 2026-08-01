@@ -62,6 +62,7 @@ _STATE_DOT = {
     JobState.CANCELLED: "warn",
     JobState.BLOCKED: "warn",
     JobState.INTERRUPTED: "warn",
+    JobState.SUSPENDED: "warn",
 }
 
 
@@ -184,6 +185,7 @@ class JobQueuePage(QWidget):
     """The Job Queue feature body."""
 
     startToggled = Signal()
+    stopRequested = Signal()
     addAnalyzeRequested = Signal()
     removeRequested = Signal(str)
     moveUpRequested = Signal(str)
@@ -224,7 +226,9 @@ class JobQueuePage(QWidget):
             "unattended. Strictly serial — one job runs at a time, in order. "
             "A queued run proceeds without the interactive confirmations its "
             "own page would show, since there's no one there to ask. "
-            "Stopping the running job pauses the queue; resuming is explicit.",
+            "Pause winds the running job down and keeps what it has finished, "
+            "so starting the queue again — even in a new session — carries on "
+            "from there. Stop job discards whatever is in flight.",
             self,
         )
         blurb.setObjectName("Muted")
@@ -243,6 +247,18 @@ class JobQueuePage(QWidget):
         self._start_btn.setProperty("variant", "primary")
         self._start_btn.clicked.connect(self.startToggled)
         hl.addWidget(self._start_btn)
+        # Pause winds the running job down and keeps its progress; this
+        # discards whatever is in flight. Two buttons because they are two
+        # different answers to "I want this to stop", and the destructive one
+        # should never be the one you reach for by default.
+        self._stop_btn = QPushButton("■  Stop job", self)
+        self._stop_btn.setProperty("variant", "danger")
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.setToolTip(
+            "Cancel the running job outright, discarding whatever it has in "
+            "flight. Pause queue winds it down instead, keeping its progress.")
+        self._stop_btn.clicked.connect(self.stopRequested)
+        hl.addWidget(self._stop_btn)
         self._add_analyze_btn = QPushButton("+ Queue current Analyze run", self)
         self._add_analyze_btn.setProperty("variant", "secondary")
         self._add_analyze_btn.clicked.connect(self.addAnalyzeRequested)
@@ -298,3 +314,7 @@ class JobQueuePage(QWidget):
 
     def set_started(self, started: bool) -> None:
         self._start_btn.setText("⏸  Pause queue" if started else "▶  Start queue")
+
+    def set_job_running(self, running: bool) -> None:
+        """Stop only means something while a job is actually in flight."""
+        self._stop_btn.setEnabled(bool(running))

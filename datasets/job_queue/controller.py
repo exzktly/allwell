@@ -57,6 +57,10 @@ class QueueableController(Protocol):
     def show_job(self, spec: dict) -> None: ...
     def stop(self) -> None: ...
     def is_busy(self) -> bool: ...
+    # Optional. Probed with getattr, not required: only Analyze has a boundary
+    # it can wind down to, so the Datasets tools omit both and get a cancel.
+    # def suspend(self) -> None: ...
+    # def was_suspended(self) -> bool: ...
 
 
 class QueueBridge(QObject):
@@ -156,6 +160,33 @@ class QueueBridge(QObject):
             runner.stop()
         self.pause()
 
+    def suspend_current(self) -> bool:
+        """Wind the in-flight job down instead of killing it, and pause.
+
+        The job keeps its place in the queue and its progress on disk, so
+        starting the queue again picks it up rather than needing it re-added.
+        Returns whether a runner actually supported being suspended — only
+        Analyze does today; the Datasets tools have no equivalent boundary to
+        stop at, so for those this is a plain cancel and the caller is told so.
+        """
+        if self._current is None:
+            return False
+        job_id, kind = self._current
+        runner = self._runners.get(kind)
+        suspender = getattr(runner, "suspend", None) if runner is not None else None
+        if not callable(suspender):
+            self.stop_current()
+            return False
+        suspender()
+        # Marked here rather than waiting for jobFinished: the run may take a
+        # while to wind down, and the row should say what is happening now.
+        # _on_job_finished sees the state is already SUSPENDED and leaves it.
+        self._queue.mark_suspended(job_id, "suspending — finishing the current field")
+        self._save()
+        self.queueChanged.emit()
+        self.pause()
+        return True
+
     # ── scheduling ───────────────────────────────────────────────────────
     def _advance(self) -> None:
         if not self._queue.is_started or self._current is not None:
@@ -188,6 +219,15 @@ class QueueBridge(QObject):
         produced = {}
         if ok and output_path:
             produced[_PRODUCED_KEY.get(kind, "dataset_root")] = output_path
+        if not ok and self._was_suspended(kind, job_id):
+            # Suspended, not cancelled: the job keeps its place and its
+            # progress, its successors keep waiting rather than blocking, and
+            # the queue stays paused until the user starts it again.
+            self._queue.mark_suspended(job_id)
+            self._save()
+            self.queueChanged.emit()
+            self.pause()
+            return
         cancelled = (not ok) and self._was_cancelled(kind, message)
         self._queue.mark_finished(
             job_id, ok=ok, message=message, cancelled=cancelled, produced=produced,
@@ -197,6 +237,21 @@ class QueueBridge(QObject):
         if cancelled:
             self.pause()
         self._advance()
+
+    def _was_suspended(self, kind: str, job_id: str) -> bool:
+        """Whether this job wound down rather than failing or being cancelled.
+
+        Two ways to know, because they cover different moments:
+        ``suspend_current`` already marked the row SUSPENDED when the user
+        clicked, and the runner reports it for a run that was suspended from
+        the Analyze page directly, where the queue never saw the click.
+        """
+        job = self._queue.get(job_id)
+        if job is not None and job.state == JobState.SUSPENDED:
+            return True
+        runner = self._runners.get(kind)
+        probe = getattr(runner, "was_suspended", None)
+        return bool(probe()) if callable(probe) else False
 
     def _was_cancelled(self, kind: str, message: str) -> bool:
         runner = self._runners.get(kind)
@@ -227,6 +282,7 @@ class JobQueueController(QObject):
 
         self.page = JobQueuePage()
         self.page.startToggled.connect(self._on_start_toggled)
+        self.page.stopRequested.connect(self._on_stop_requested)
         self.page.addAnalyzeRequested.connect(self._on_add_analyze)
         self.page.removeRequested.connect(self.bridge.remove_job)
         self.page.moveUpRequested.connect(lambda job_id: self.bridge.move_job(job_id, -1))
@@ -257,14 +313,25 @@ class JobQueueController(QObject):
 
     def _on_start_toggled(self) -> None:
         if self.bridge.queue.is_started:
-            self.bridge.stop_current() if self.bridge.current_job_id() else self.bridge.pause()
+            # Pause winds the in-flight job down rather than killing it: it
+            # keeps its place and its progress, and starting the queue again
+            # resumes it. Stop job, beside it, is the destructive answer.
+            if self.bridge.current_job_id():
+                self.bridge.suspend_current()
+            else:
+                self.bridge.pause()
         else:
             self.bridge.start()
+        self._refresh_page()
+
+    def _on_stop_requested(self) -> None:
+        self.bridge.stop_current()
         self._refresh_page()
 
     def _refresh_page(self) -> None:
         self.page.set_jobs(self.bridge.queue.jobs)
         self.page.set_started(self.bridge.queue.is_started)
+        self.page.set_job_running(self.bridge.current_job_id() is not None)
 
     def shutdown(self) -> None:
         """Stop the in-flight job (called on app close), mirroring every

@@ -45,6 +45,10 @@ _THIRD_PARTY_PINS = (
     "PySide6", "matplotlib", "scipy", "python", "Python", "ruff", "pytest",
     "protobuf", "keras", "csbdeep", "stardist", "tifffile", "Pillow",
     "shiboken6", "mamba create",
+    # The client shells out to whatever rsync the machine has, and which
+    # version that is changes behaviour the docs have to state — macOS ships
+    # 2.6.9, which predates both --info=name1 and --append-verify.
+    "rsync",
 )
 
 

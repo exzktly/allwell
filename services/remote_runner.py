@@ -66,6 +66,7 @@ from services.remote_config import (
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
 from util.fov import sort_key as fov_sort_key
 from util.timepoint import sort_key as tp_sort_key
+from pipeline.well_skip import _canonical_force_wells
 from pipeline.incremental_keys import (
     fov_tp_from_name,
     read_done_fov_keys,
@@ -477,6 +478,7 @@ def stage_local_zips(
     incremental: bool = False,
     prior_output_dir: Path | None = None,
     csv_prefix: str = "measurements",
+    force_wells: Iterable[str] | None = None,
 ) -> ZippedInput:
     """Return a directory of per-well zips for ``input_dir``.
 
@@ -541,8 +543,16 @@ def stage_local_zips(
             csv_prefix=csv_prefix,
             filename_schema=filename_schema,
             filename_sep=filename_sep,
+            force_wells=_canonical_force_wells(force_wells),
             log_fn=log_fn,
         )
+        if log_fn is not None:
+            # Planning emits a line only for a well it drops or rewrites, so a
+            # plate whose remaining wells all stage unchanged went silent right
+            # after the two or three wells it did report — reading as a stall
+            # with most of the plate still to go. Say what the pass concluded.
+            log_fn(f"[remote] planned {len(plans)} well archive(s) to upload, "
+                   f"{len(up_to_date_list)} already up to date.\n")
         _raise_on_zero_channel_match(zero_match)
         # Opened only if something actually has to be rewritten; when the
         # filter drops nothing from any archive there is no local copy at all.
@@ -1129,6 +1139,7 @@ def _plan_staging(
     csv_prefix: str = "measurements",
     filename_schema: str = "",
     filename_sep: str = "_",
+    force_wells: frozenset[str] = frozenset(),
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[list[_StagePlan], list[str], list[str]]:
     """Decide, per well, which members need staging — reading no member bytes.
@@ -1185,6 +1196,19 @@ def _plan_staging(
                 continue
 
         well = _canonical_well_from_path(wz.stem)
+        if well is not None and well in force_wells:
+            # Asked for in full, so the incremental diff below is skipped
+            # outright. Without this the split drops the well before a single
+            # byte is uploaded and the remote never sees it — so
+            # ``--force_wells`` on the remote command line has nothing to act
+            # on, and the well that most needs reprocessing is the one
+            # guaranteed not to be. Logged, because "up to date — not uploaded"
+            # for the well the user just forced is exactly the confusion this
+            # avoids.
+            if log_fn:
+                log_fn(f"[remote] ↻ {well}: forced — uploading in full\n")
+            plans.append(_StagePlan(src=wz, keep=None, n_members=len(images)))
+            continue
         if incremental and prior_output_dir is not None and well is not None:
             # CSV is the primary done-set; fall back to the well's local output
             # zip so a missing / lost CSV doesn't re-upload already-done FOVs.
@@ -1479,7 +1503,17 @@ def _filter_new_fovs_in_staging(
     filename_sep: str,
     log_fn: Callable[[str], None] | None = None,
 ) -> tuple[tuple[Path, ...], tuple[str, ...]]:
-    """Client-side incremental split: rewrite each staged well zip to keep only
+    """**Superseded and unused in production** — see :func:`_plan_staging`.
+
+    The live remote path plans from each archive's central directory and never
+    copies an archive it does not have to rewrite; this earlier shape copied
+    every archive into scratch first, which dragged a whole NAS-resident plate
+    across the network before a byte went to the remote. Only
+    ``tests/test_remote_incremental.py`` still calls it. Anything changed about
+    the incremental split has to change ``_plan_staging`` to reach a real run —
+    fixing this one alone looks right and does nothing.
+
+    Client-side incremental split: rewrite each staged well zip to keep only
     members whose ``(fov, timepoint)`` is NOT already in the well's local CSV,
     and drop wells whose every input FOV is already done.
 

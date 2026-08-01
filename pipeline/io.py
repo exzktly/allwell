@@ -24,6 +24,8 @@ import time
 import zipfile
 from pathlib import Path
 
+from util.well_token import safe_well
+
 import numpy as np
 import imageio.v3 as iio
 from tifffile import imwrite
@@ -638,9 +640,10 @@ def _verify_files_complete(paths: list[Path], min_size: int = 1) -> list[Path]:
     return ok
 
 
-def _safe_well(label: str) -> str:
-    """Sanitise a well label for use as a filename component."""
-    return label.replace("/", "_").replace("\\", "_")
+# Re-exported from util.well_token so pipeline.io stays its historical home
+# for this name while the implementation sits somewhere an imaging-stack-free
+# caller can reach.
+_safe_well = safe_well
 
 
 def _write_single_csv(records: list[dict], out_path: Path) -> None:

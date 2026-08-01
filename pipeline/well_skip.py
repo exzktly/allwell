@@ -18,8 +18,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipeline.io import _safe_well
-from util.well_token import canonical_well_label as _canonical_well_label
+from util.well_token import (
+    canonical_well_label as _canonical_well_label,
+    safe_well as _safe_well,
+)
 
 
 def _canonical_force_wells(force_wells) -> frozenset[str]:

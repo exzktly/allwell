@@ -1,5 +1,10 @@
 """Client-side incremental split for remote runs.
 
+NOTE: ``_filter_new_fovs_in_staging`` is no longer what a real run uses —
+``_plan_staging`` is (see its docstring). These tests still pin the older
+shape's behaviour; a change to the incremental split has to land in
+``_plan_staging`` as well, or it will not reach a run at all.
+
 ``_filter_new_fovs_in_staging`` is the "split" half of the remote incremental
 design: the client rewrites each staged well zip to upload only the new-FOV
 members and drops wells whose local output already covers every input FOV, so
@@ -163,3 +168,72 @@ def test_refresh_pipeline_info_noop_without_sidecar(tmp_path):
     out = tmp_path / "out"
     out.mkdir()
     assert refresh_pipeline_info_available_from_outputs(out) is False
+
+
+def test_plan_staging_uploads_a_forced_well_in_full(tmp_path):
+    """The live staging path must honour the per-well force list.
+
+    Validate flags a well with images and no measurements CSV, and the
+    completion handoff asks for it by name. On a REMOTE run the client-side
+    split gets there first: it computes its own done-set (CSV rows unioned with
+    the local out-zip's members), finds this well covered, drops it before a
+    single byte is uploaded, and logs "up to date (local) — not uploaded". The
+    remote then never sees the well, so ``--force_wells`` on the remote command
+    line has nothing to act on — the one well that most needs reprocessing is
+    the one guaranteed not to be.
+    """
+    from services.remote_runner import _plan_staging
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    members = [f"exp_GFP_C08_F001_{tp}.tif" for tp in ("0h", "24h")]
+    wz = in_dir / "C08.zip"
+    with zipfile.ZipFile(wz, "w") as zf:
+        for m in members:
+            zf.writestr(m, b"img")
+    # The well's local output already covers every input FOV — which is exactly
+    # why the split would otherwise skip it.
+    with zipfile.ZipFile(out_dir / "C08_out.zip", "w") as zf:
+        for m in members:
+            zf.writestr(m, b"mask")
+
+    common = dict(
+        keep_tokens=None, incremental=True, prior_output_dir=out_dir,
+        csv_prefix="measurements",
+        filename_schema="experiment:channel:well:fov:timepoint", filename_sep="_",
+    )
+    plans, up_to_date, _zero = _plan_staging((wz,), **common)
+    assert plans == [] and up_to_date == ["C08"]        # the reported behaviour
+
+    plans, up_to_date, _zero = _plan_staging(
+        (wz,), **common, force_wells=frozenset({"C08"}))
+    assert up_to_date == []
+    assert len(plans) == 1
+    # keep=None means "upload this archive as it is" — the whole well.
+    assert plans[0].keep is None
+
+
+def test_plan_staging_force_list_matches_wells_canonically(tmp_path):
+    """``C8`` typed in the GUI and ``C08.zip`` on disk are one well."""
+    from services.remote_runner import _plan_staging
+    from pipeline.well_skip import _canonical_force_wells
+
+    in_dir = tmp_path / "in"
+    out_dir = tmp_path / "out"
+    in_dir.mkdir()
+    out_dir.mkdir()
+    wz = in_dir / "C08.zip"
+    with zipfile.ZipFile(wz, "w") as zf:
+        zf.writestr("exp_GFP_C08_F001_0h.tif", b"img")
+    with zipfile.ZipFile(out_dir / "C08_out.zip", "w") as zf:
+        zf.writestr("exp_GFP_C08_F001_0h.tif", b"mask")
+
+    plans, up_to_date, _zero = _plan_staging(
+        (wz,), keep_tokens=None, incremental=True, prior_output_dir=out_dir,
+        csv_prefix="measurements",
+        filename_schema="experiment:channel:well:fov:timepoint", filename_sep="_",
+        force_wells=_canonical_force_wells(["c8"]))
+    assert up_to_date == []
+    assert len(plans) == 1

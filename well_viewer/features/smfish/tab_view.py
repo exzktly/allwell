@@ -142,11 +142,11 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     )
     ctrl.add_scope("Channel", channel_cb)
 
-    fov_cb = reg.register("_smfish_fov_cb", QComboBox())
+    fov_cb = reg.register("_smfish_fov_cb", LabeledComboBox("FOV"))
     fov_cb.currentIndexChanged.connect(
         lambda _i: _smfish_load_selected_images(ctx)
     )
-    ctrl.add_scope("FOV", fov_cb)
+    ctrl.add_scope("", fov_cb)
 
     tp_cb = reg.register("_smfish_tp_cb", LabeledComboBox("Timepoint"))
     tp_cb.currentIndexChanged.connect(

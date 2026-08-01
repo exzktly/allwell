@@ -90,12 +90,12 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # under both names so ctx.widgets resolves either.
     reg.register("_review_image_chan_var", chan_cb)
 
-    fov_menu = reg.register("_review_image_fov_menu", QComboBox())
+    fov_menu = reg.register("_review_image_fov_menu", LabeledComboBox("FOV"))
     fov_menu.addItems(["—"])
     fov_menu.currentIndexChanged.connect(
         lambda _i: refresh_review_image_ctx(ctx)
     )
-    ctrl.add_scope("FOV", fov_menu)
+    ctrl.add_scope("", fov_menu)
 
     tp_menu = reg.register("_review_image_tp_menu", LabeledComboBox("Timepoint"))
     tp_menu.addItems(["—"])

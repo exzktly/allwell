@@ -2251,6 +2251,23 @@ itself uses — keeping them potentially reusable for a CLI driver.
 A run touches two classes of storage, and keeping them apart is what makes it
 survive an unreliable output volume.
 
+**Remote staging moves only what it uploads.** A remote run in zip mode with a
+channel filter or `--incremental` cannot use the user's archives directly — both
+paths rewrite the zip (dropping unused channels / already-done FOV-groups), and
+rewriting in place would corrupt the user's dataset. So it stages. The staging is
+**plan-then-materialise** (`remote_runner._plan_staging` / `_materialize_staging`):
+the plan pass reads each archive's *member list* only — that comes from the zip's
+central directory, a small read at the end of the file, so planning a whole plate
+costs a handful of seeks even across a network mount — and the materialise pass
+then writes only the members that will actually be uploaded, reading nothing
+else. A well with nothing new is never copied at all; a well that survives intact
+is copied wholesale rather than decompressed and recompressed. This ordering is
+the point: staging by copying each archive in full and *then* rewriting it down
+to the wanted members pulls the entire dataset across the network before a single
+byte reaches the remote, which is exactly backwards when the data lives on a NAS
+— the normal case. The channel-filter typo guard runs in the plan pass, so a
+mistyped channel name names every offending well before any bytes move.
+
 **Scratch (bulk, transient).** `pipeline.io.scratch_base_for(output_dir)` decides
 where per-well working files go: the extracted input TIFs, every intermediate
 image, and the per-FOV checkpoints. Resolution order is `$ALLWELL_SCRATCH_DIR`

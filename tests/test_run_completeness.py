@@ -220,37 +220,135 @@ def test_non_io_failures_do_not_trip_the_storage_abort(monkeypatch):
 # ── A remote run says what it is doing while it stages ──────────────────────
 
 
-def test_staging_reports_progress_per_archive(tmp_path, monkeypatch):
-    """The longest silent stretch of a remote run: the whole plate is copied
-    into scratch before a byte is uploaded, and the copy helper logs only on
-    RETRY — so a healthy run printed nothing between "[remote] target:" and the
-    staged-count line, which reads as a hang on a slow input volume."""
+def _make_well_zip(path, well, fovs, tps, channels=("RFP", "GFP")):
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as z:
+        for fov in fovs:
+            for tp in tps:
+                for chan in channels:
+                    z.writestr(f"Exp_{chan}_{well}_{fov}_{tp}.tif", b"x" * 4096)
+
+
+def test_staging_writes_only_the_members_that_will_be_uploaded(tmp_path, monkeypatch):
+    """The point of the plan-then-materialise split.
+
+    An incremental remote run uploads only the FOV-groups that are new. The
+    previous shape copied every archive into scratch *in full* and only then
+    rewrote it down to those members — so a run sending a few hundred megabytes
+    still dragged the whole plate across the network first. That is precisely
+    backwards when the dataset lives on a NAS, which is the normal case.
+    """
+    import csv
+
     import services.remote_runner as rr
 
     src = tmp_path / "in"
     src.mkdir()
-    for well in ("C02", "C03", "D04"):
-        (src / f"{well}.zip").write_bytes(b"x" * 1024)
+    prior = tmp_path / "out"
+    prior.mkdir()
+    for well in ("C02", "C03"):
+        _make_well_zip(src / f"{well}.zip", well,
+                       fovs=("f0", "f1", "f2"), tps=("t0", "t1"))
+        # C02 already has f0 and f1 done locally; C03 has nothing done.
+        if well == "C02":
+            with (prior / f"measurements_{well}.csv").open("w", newline="") as fh:
+                w = csv.DictWriter(fh, fieldnames=["well", "fov", "timepoint"])
+                w.writeheader()
+                for fov in ("f0", "f1"):
+                    for tp in ("t0", "t1"):
+                        w.writerow({"well": well, "fov": fov, "timepoint": tp})
+
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
+    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
 
     lines: list[str] = []
-    monkeypatch.setattr(rr, "_new_scratch_dir",
-                        lambda prefix: tmp_path / "stage")
-    (tmp_path / "stage").mkdir()
-    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
-    monkeypatch.setattr(rr, "_filter_zip_channels",
-                        lambda *a, **k: None, raising=False)
-
     out = rr.stage_local_zips(
         src, filename_schema="experiment:channel:well:fov:timepoint",
-        filename_sep="_", fluor_tokens=None, nuclear_token=None,
-        log_fn=lines.append, incremental=True, prior_output_dir=tmp_path / "out",
+        filename_sep="_", log_fn=lines.append,
+        incremental=True, prior_output_dir=prior,
     )
-    assert out is not None
+
+    import zipfile
+    staged = {p.stem: p for p in out.well_zips}
+    assert set(staged) == {"C02", "C03"}
+    with zipfile.ZipFile(staged["C02"]) as z:
+        c02 = z.namelist()
+    with zipfile.ZipFile(staged["C03"]) as z:
+        c03 = z.namelist()
+
+    # C02: only its two NEW FOV-groups (f2 × 2 timepoints × 2 channels).
+    assert len(c02) == 4, c02
+    assert all("_f2_" in m for m in c02), c02
+    assert staged["C02"].stat().st_size < (src / "C02.zip").stat().st_size
+    # C03: nothing done, so the whole archive is taken.
+    assert len(c03) == 12
+
     text = "".join(lines)
-    assert "scanning input" in text, "the very first slow step must announce itself"
-    assert "staging 3 well archive(s)" in text
-    for well in ("C02", "C03", "D04"):
-        assert f"{well} —" in text, f"no per-archive tick for {well}: {text}"
+    assert "scanning input" in text, "the first slow step must announce itself"
+    assert "planning 2 well archive(s)" in text
+    assert "staged (1/2)" in text and "staged (2/2)" in text
+    assert "4/12 member(s)" in text, f"per-well kept/total tick missing: {text}"
+
+
+def test_a_fully_processed_well_is_never_staged_at_all(tmp_path, monkeypatch):
+    """Nothing to upload means nothing to copy — not a full copy then a delete."""
+    import csv
+
+    import services.remote_runner as rr
+
+    src = tmp_path / "in"
+    src.mkdir()
+    prior = tmp_path / "out"
+    prior.mkdir()
+    _make_well_zip(src / "C02.zip", "C02", fovs=("f0",), tps=("t0",))
+    with (prior / "measurements_C02.csv").open("w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["well", "fov", "timepoint"])
+        w.writeheader()
+        w.writerow({"well": "C02", "fov": "f0", "timepoint": "t0"})
+
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
+    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+
+    lines: list[str] = []
+    out = rr.stage_local_zips(
+        src, filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_", log_fn=lines.append,
+        incremental=True, prior_output_dir=prior,
+    )
+    assert out.well_zips == ()
+    assert out.up_to_date_wells == ("C02",)
+    assert list(staging.iterdir()) == [], "an up-to-date well must not be copied"
+    assert "up to date" in "".join(lines)
+
+
+def test_a_typo_d_channel_filter_names_every_offending_well(tmp_path, monkeypatch):
+    """A filter matching nothing is nearly always a mistyped channel; finding
+    that out one well at a time is useless, so every offender is named at once
+    — and no bytes move before the check."""
+    import services.remote_runner as rr
+
+    src = tmp_path / "in"
+    src.mkdir()
+    for well in ("C02", "C03"):
+        _make_well_zip(src / f"{well}.zip", well, fovs=("f0",), tps=("t0",))
+
+    staging = tmp_path / "stage"
+    staging.mkdir()
+    monkeypatch.setattr(rr, "_new_scratch_dir", lambda prefix: staging)
+    monkeypatch.setattr(rr, "sweep_stale_scratch", lambda **kw: 0)
+
+    with pytest.raises(RuntimeError) as exc:
+        rr.stage_local_zips(
+            src, filename_schema="experiment:channel:well:fov:timepoint",
+            filename_sep="_", fluor_tokens=["GP"], nuclear_token="RFPX",
+            log_fn=lambda m: None,
+        )
+    assert "C02" in str(exc.value) and "C03" in str(exc.value)
 
 
 # ── The viewer says so at load ──────────────────────────────────────────────

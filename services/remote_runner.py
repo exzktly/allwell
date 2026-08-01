@@ -492,71 +492,46 @@ def stage_local_zips(
         # zips too, so it likewise requires staging.
         staging = _new_scratch_dir("allwell-stage-")
         try:
-            staged: list[Path] = []
-            # Copying the whole plate into scratch is the longest silent stretch
-            # of a remote run — tens of GB off the user's input volume before a
-            # single byte is uploaded — and ``_copy_into_staging`` logs only when
-            # a copy has to be RETRIED, so a healthy run printed nothing at all
-            # between "[remote] target:" and the staged-count line. On a slow
-            # input volume that reads as a hang. Announce the work and tick per
-            # archive, so the log always says what it is doing and roughly how
-            # far along it is.
-            _total_bytes = 0
-            for wz in well_zips:
-                try:
-                    _total_bytes += wz.stat().st_size
-                except OSError:
-                    pass
-            _n = len(well_zips)
+            # Plan before moving anything. Reading each archive's member list is
+            # a small read of its central directory, so the whole plate can be
+            # planned for the cost of a few seeks even over a network mount —
+            # and then only the members that will actually be uploaded are ever
+            # read. The previous shape copied every archive in full into scratch
+            # and *then* rewrote it down to the members it wanted, which on a
+            # NAS-resident dataset dragged the entire plate across the network
+            # before a single byte went to the remote.
             if log_fn is not None:
-                log_fn(
-                    f"[remote] staging {_n} well archive(s) "
-                    f"({_total_bytes / float(1 << 30):.1f} GiB) → {staging}\n"
+                log_fn(f"[remote] planning {len(well_zips)} well archive(s)…\n")
+            plans, up_to_date_list, zero_match = _plan_staging(
+                well_zips,
+                keep_tokens=(_required_tokens(nuclear_token, fluor_tokens)
+                             if fluor_tokens is not None else None),
+                incremental=incremental,
+                prior_output_dir=prior_output_dir,
+                csv_prefix=csv_prefix,
+                filename_schema=filename_schema,
+                filename_sep=filename_sep,
+                log_fn=log_fn,
+            )
+            if zero_match:
+                sample = ", ".join(zero_match[:5])
+                more = (f" (and {len(zero_match) - 5} more)"
+                        if len(zero_match) > 5 else "")
+                raise RuntimeError(
+                    f"Channel filter matched zero images in {len(zero_match)} "
+                    f"well(s): {sample}{more}. Likely a typo in the channel "
+                    f"name(s) on the Analyze tab — check your nuclear and fluor "
+                    f"channel tokens against the filenames inside the well zips."
                 )
-                _free = _staging_free_bytes(staging)
-                if _free is not None and _free < _total_bytes:
-                    log_fn(
-                        f"[remote] WARN: staging needs "
-                        f"{_total_bytes / float(1 << 30):.1f} GiB but only "
-                        f"{_free / float(1 << 30):.1f} GiB is free on "
-                        f"{staging} — set ALLWELL_SCRATCH_DIR to a roomier "
-                        f"volume (it is not the input volume).\n"
-                    )
-            _done_bytes = 0
-            for idx, wz in enumerate(well_zips, 1):
-                dest = staging / wz.name
-                _copy_into_staging(wz, dest, log_fn=log_fn)
-                staged.append(dest)
-                try:
-                    _done_bytes += wz.stat().st_size
-                except OSError:
-                    pass
-                if log_fn is not None:
-                    log_fn(
-                        f"[remote] staged ({idx}/{_n}): {wz.stem} — "
-                        f"{_done_bytes / float(1 << 30):.1f}/"
-                        f"{_total_bytes / float(1 << 30):.1f} GiB\n"
-                    )
-            staged_zips = tuple(staged)
-            up_to_date: tuple[str, ...] = ()
-            if fluor_tokens is not None:
-                zin = _filter_channels_in_staging(
-                    staging, staged_zips, mode,
-                    keep_tokens=_required_tokens(nuclear_token, fluor_tokens),
-                    log_fn=log_fn,
-                )
-                staged_zips = zin.well_zips
-            # Incremental: keep only new-FOV members and drop up-to-date wells,
-            # so the remote uploads / processes only the genuinely-new files.
-            if incremental and prior_output_dir is not None:
-                staged_zips, up_to_date = _filter_new_fovs_in_staging(
-                    staged_zips,
-                    prior_output_dir=prior_output_dir,
-                    csv_prefix=csv_prefix,
-                    filename_schema=filename_schema,
-                    filename_sep=filename_sep,
-                    log_fn=log_fn,
-                )
+            _to_move = sum(
+                (len(p_.keep) if p_.keep is not None else p_.n_members)
+                for p_ in plans
+            )
+            if log_fn is not None:
+                log_fn(f"[remote] staging {len(plans)} well archive(s), "
+                       f"{_to_move} member(s) → {staging}\n")
+            staged_zips = _materialize_staging(plans, staging, log_fn=log_fn)
+            up_to_date = tuple(up_to_date_list)
             return ZippedInput(
                 zip_dir=staging,
                 mode=mode,
@@ -1058,6 +1033,168 @@ def _stage_mixed_mode(
         cleanup=None,
         on_pipeline_success=_on_success,
     )
+
+
+@dataclass(frozen=True)
+class _StagePlan:
+    """What of one source archive needs to reach the upload staging dir.
+
+    ``keep`` is ``None`` when every member survives (the archive is taken
+    wholesale) and a member-name tuple otherwise. Deciding this BEFORE any bytes
+    move is the whole point: a zip's member list comes from its central
+    directory — a small read at the end of the file — so planning the entire
+    plate costs a handful of seeks even when the archives live on a NAS, and the
+    materialise pass then reads only the members that are actually going to be
+    uploaded.
+    """
+
+    src: Path
+    keep: tuple[str, ...] | None
+    n_members: int
+    note: str = ""
+
+
+def _plan_staging(
+    well_zips: tuple[Path, ...],
+    *,
+    keep_tokens: set[str] | None,
+    incremental: bool,
+    prior_output_dir: Path | None,
+    csv_prefix: str,
+    filename_schema: str,
+    filename_sep: str,
+    log_fn: Callable[[str], None] | None = None,
+) -> tuple[list[_StagePlan], list[str], list[str]]:
+    """Decide, per well, which members need staging — reading no member bytes.
+
+    Returns ``(plans, up_to_date_wells, zero_channel_match_wells)``. A well whose
+    every member is already processed contributes nothing to *plans*; a well
+    whose channel filter matches nothing is named in the third list so the caller
+    can fail with every offender at once (a filter matching zero images is nearly
+    always a typo'd channel name, and finding out one well at a time is useless).
+    """
+    plans: list[_StagePlan] = []
+    up_to_date: list[str] = []
+    zero_match: list[str] = []
+    n_total = len(well_zips)
+
+    for idx, wz in enumerate(well_zips, start=1):
+        try:
+            with zipfile.ZipFile(wz, "r") as zf:
+                members = zf.namelist()
+        except (OSError, zipfile.BadZipFile) as exc:
+            # Unreadable here means unreadable later too, but staging it whole
+            # keeps the previous behaviour: the remote gets the archive and
+            # reports the real error against the data, not against our planning.
+            if log_fn:
+                log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
+                       f"WARN unreadable ({exc.__class__.__name__}: {exc}); "
+                       f"staging whole\n")
+            plans.append(_StagePlan(src=wz, keep=None, n_members=0,
+                                    note="unreadable"))
+            continue
+        if not members:
+            if log_fn:
+                log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
+                       f"WARN empty zip; skipping\n")
+            continue
+
+        keep = list(members)
+        if keep_tokens:
+            keep = [m for m in keep if _member_matches(m, keep_tokens)]
+            if not keep:
+                zero_match.append(wz.stem)
+                if log_fn:
+                    log_fn(f"[remote] plan ({idx}/{n_total}): {wz.stem} → "
+                           f"WARN zero channel matches; will fail after pass\n")
+                continue
+
+        well = _canonical_well_from_path(wz.stem)
+        if incremental and prior_output_dir is not None and well is not None:
+            # CSV is the primary done-set; fall back to the well's local output
+            # zip so a missing / lost CSV doesn't re-upload already-done FOVs.
+            done = read_done_fov_keys(prior_output_dir / f"{csv_prefix}_{well}.csv")
+            done |= read_done_fov_keys_from_zip(
+                prior_output_dir / f"{well}_out.zip",
+                schema=filename_schema, sep=filename_sep)
+            if done:
+                keep = [
+                    m for m in keep
+                    if fov_tp_from_name(m, schema=filename_schema,
+                                        sep=filename_sep) not in done
+                ]
+                if not keep:
+                    up_to_date.append(well)
+                    if log_fn:
+                        log_fn(f"[remote] ✓ {well}: up to date (local) — "
+                               f"not uploaded\n")
+                    continue
+
+        take_all = len(keep) == len(members)
+        plans.append(_StagePlan(
+            src=wz, keep=None if take_all else tuple(keep),
+            n_members=len(members),
+        ))
+    return plans, up_to_date, zero_match
+
+
+def _materialize_staging(
+    plans: list[_StagePlan],
+    staging: Path,
+    *,
+    log_fn: Callable[[str], None] | None = None,
+) -> tuple[Path, ...]:
+    """Write each plan into *staging*, moving only the bytes that will be sent.
+
+    A plan that keeps everything is copied wholesale (no point decompressing and
+    recompressing an archive that survives intact); a filtered plan is written
+    member by member straight from the source, so the members it drops are never
+    read at all. That is the difference that matters when the source is a network
+    volume: the previous code copied every archive in full and only then rewrote
+    it down to the members it wanted, so a run uploading a few hundred megabytes
+    still dragged the whole plate across the network first.
+    """
+    staged: list[Path] = []
+    n_total = len(plans)
+    kept_members = 0
+    total_members = 0
+    for idx, plan in enumerate(plans, start=1):
+        dest = staging / plan.src.name
+        t0 = time.monotonic()
+        total_members += plan.n_members
+        if plan.keep is None:
+            _copy_into_staging(plan.src, dest, log_fn=log_fn)
+            kept_members += plan.n_members
+            if log_fn:
+                mb = dest.stat().st_size / (1024 * 1024) if dest.exists() else 0.0
+                log_fn(f"[remote] staged ({idx}/{n_total}): {plan.src.stem} → "
+                       f"all {plan.n_members} member(s), {mb:.1f} MB "
+                       f"in {_fmt_secs(time.monotonic() - t0)}\n")
+        else:
+            def _write(_plan=plan, _dest=dest) -> None:
+                with atomic_zip(_dest) as dst:
+                    with zipfile.ZipFile(_plan.src, "r") as src:
+                        for member in _plan.keep or ():
+                            dst.writestr(src.getinfo(member), src.read(member))
+
+            retry_io(
+                _write,
+                what=f"{plan.src.name} into the upload staging dir",
+                cleanup=lambda d=dest: d.unlink(missing_ok=True),
+                advice=_TRANSFER_ADVICE,
+                log_fn=log_fn,
+            )
+            kept_members += len(plan.keep)
+            if log_fn:
+                mb = dest.stat().st_size / (1024 * 1024) if dest.exists() else 0.0
+                log_fn(f"[remote] staged ({idx}/{n_total}): {plan.src.stem} → "
+                       f"{len(plan.keep)}/{plan.n_members} member(s), "
+                       f"{mb:.1f} MB in {_fmt_secs(time.monotonic() - t0)}\n")
+        staged.append(dest)
+    if log_fn and total_members and kept_members < total_members:
+        log_fn(f"[remote] staging: summary — {kept_members}/{total_members} "
+               f"member(s) across {n_total} well(s); the rest were never read.\n")
+    return tuple(staged)
 
 
 def _filter_channels_in_staging(

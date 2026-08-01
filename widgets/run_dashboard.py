@@ -219,8 +219,18 @@ class RunDashboard(PlateProgress):
                 return theme.Colors.success               # fetched locally — done
             if self._has("process", w) or self._has("threshold", w):
                 return theme.Colors.accent                # computed on server, awaiting fetch
-            if w in self._active or self._has("upload", w):
-                return theme.Colors.warn                   # actively uploading / computing
+            if w in self._active:
+                return theme.Colors.warn                   # computing right now
+            if self._has("upload", w):
+                # On the remote, waiting its turn. This used to share ``warn``
+                # with a computing well, so a plate mid-run was a solid block of
+                # amber that said nothing about which wells were actually being
+                # worked on — and now that a computing well carries a dial, the
+                # two differed in shape while their colour still claimed they
+                # were the same state. ``accent2`` is a neighbour of the
+                # ``accent`` used for "computed, awaiting fetch": both mean "it
+                # is over there", and the pair reads as one family.
+                return theme.Colors.accent2
             if self._has("group", w):
                 return theme.Colors.text_muted             # grouped, queued for processing
             return None
@@ -289,7 +299,10 @@ class RunDashboard(PlateProgress):
         head = QLabel("Wells", self._legend_host)
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._legend_lay.addWidget(head)
-        items = [(theme.Colors.text_muted, "pending"), (theme.Colors.warn, "processing")]
+        items = [(theme.Colors.text_muted, "pending")]
+        if self._remote:
+            items.append((theme.Colors.accent2, "uploaded"))
+        items.append((theme.Colors.warn, "processing"))
         items.append((theme.Colors.accent, "on server" if self._remote else "processed"))
         items.append((theme.Colors.success, "downloaded" if self._remote else "complete"))
         items.append((theme.Colors.danger, "failed"))

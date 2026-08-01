@@ -90,6 +90,53 @@ def test_dashboard_per_stage_counts_and_tooltip(qapp):
     assert d2._plate._grid._markers                      # ✕ survives
 
 
+def test_uploaded_and_computing_are_different_colours(qapp):
+    """They used to share ``warn``, so a plate mid-run was one block of amber.
+
+    Now that a computing well also carries a dial, the two differed in shape
+    while their colour still claimed they were the same state.
+    """
+    import theme
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=2)
+    d.set_well_stage("A01", "upload")
+    d.set_well_stage("A02", "upload")
+    d.set_well_stage("A02", "active")
+    assert d._well_color("A01") == theme.Colors.accent2      # on the remote
+    assert d._well_color("A02") == theme.Colors.warn         # being computed
+    assert d._well_color("A01") != d._well_color("A02")
+
+
+def test_uploaded_wears_no_dial_because_nothing_is_measured_yet(qapp):
+    """The dial is FOV-group progress, which upload has none of.
+
+    Per-well upload is a single event — the archive landed or it did not — so
+    there is no fraction to draw. Plate-wide transfer progress is the bar.
+    """
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    d.set_well_stage("A01", "upload")
+    assert d._plate._grid._fractions == {}
+
+
+def test_the_legend_names_uploaded_on_remote_runs_only(qapp):
+    from PySide6.QtWidgets import QLabel
+
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    remote_terms = {lbl.text() for lbl in d._legend_host.findChildren(QLabel)}
+    assert "uploaded" in remote_terms
+    d.reset(remote=False, total=1)
+    local_terms = {lbl.text() for lbl in d._legend_host.findChildren(QLabel)}
+    assert "uploaded" not in local_terms, "a local run never uploads"
+
+
 def test_remote_threshold_does_not_count_as_download(qapp):
     # the bug: on a remote run the server thresholds before the client downloads;
     # "threshold" must NOT make Download read N/N before anything is fetched.

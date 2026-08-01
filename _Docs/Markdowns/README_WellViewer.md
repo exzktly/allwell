@@ -523,7 +523,11 @@ A cell counts only when it is manually kept **and** it passes QC.
   left, filling clockwise. So you can see at a glance whether a slow well is
   nearly through or has barely started, without hunting for it in the progress
   bars underneath. There is no longer a cog on the well — the dial and its
-  colour say it is working.
+  colour say it is working. Only wells being computed have a dial: uploading and
+  downloading a well are single steps with no fraction to show, so those wells
+  stay plain discs and the transfer bar covers the plate as a whole. On a remote
+  run an uploaded well waiting its turn has its own colour, distinct from one
+  being computed — see the **Wells** legend beside the plate.
 - During a remote transfer the **status line** beside the progress bar carries
   the live figure (how much has come across, how long it has taken) and updates
   in place. The log gets the events — each well starting, each one landing, the

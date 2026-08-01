@@ -53,7 +53,7 @@ from well_viewer.features.image_browser.image_table.grid_layout import (
     _channel_options, _fov_options, _timepoint_options, _well_options,
 )
 from well_viewer.features.image_browser.image_table.image_compose import (
-    LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant,
+    LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant, _is_nuc_seg,
 )
 
 _MIME = "application/x-aw-imgtable-token"
@@ -1025,25 +1025,61 @@ def _build_fixed(ctx, spec) -> None:
     lay.addStretch(1)
 
 
+def _has_display_range(cs) -> bool:
+    """Whether *cs* renders a greyscale intensity image the LUT window applies to.
+
+    A binary render (``mask`` / ``≥threshold``) paints a black-and-white silhouette
+    and the ``NUC+SEG`` channel is a pre-rendered RGB segmentation overlay; the
+    render seam (``image_compose._compose_image_table_rgb``) passes both through
+    without consulting the LUT window, colormap, or log flag. Neither has a display
+    range, so neither may be offered one.
+    """
+    return (cs.render in ("raw", "corrected")
+            and not _is_nuc_seg(cs.channel))
+
+
 def _table_channels(spec) -> dict:
     """Distinct LUT-adjustable channels in the table, in row-then-column order,
     mapped to every ChannelSpec that shares that channel — so a channel shown once
     here edits all of its instances.
 
-    Keyed by the BASE channel (not ``axis_token``): a binary render (``mask`` /
-    ``≥threshold``) has no display range, so it never gets a LUT row. A channel
-    shown as both its fluorescence and its ≥Thresh binary therefore appears
-    exactly once (its fluorescence instance drives the LUT); a channel shown only
-    as binary/mask gets no LUT row."""
+    Keyed by the BASE channel (not ``axis_token``): a channel with no display range
+    (:func:`_has_display_range`) never gets a LUT row, because editing one would
+    repaint nothing. A channel shown as both its fluorescence and its ≥Thresh binary
+    therefore appears exactly once (its fluorescence instance drives the LUT); a
+    channel shown only as binary/mask, or the ``NUC+SEG`` overlay, gets no LUT row.
+    """
     seen: dict = {}
     for axis in ("rows", "cols"):
         for cs in getattr(spec, axis).channels:
-            if cs.render not in ("raw", "corrected"):
-                continue  # binary/mask renders ignore the LUT — no row for them
+            if not _has_display_range(cs):
+                continue
             key = str(cs.channel or "").strip().upper()
             if key:
                 seen.setdefault(key, []).append(cs)
     return seen
+
+
+def _lut_inert_channels(spec) -> list[str]:
+    """Axis tokens in the table the LUT panel does NOT govern, in axis order.
+
+    These are the cells that keep the same pixels through every LUT edit — binary
+    and mask renders, and the pre-rendered ``NUC+SEG`` overlay. They still draw an
+    image, so without naming them a LUT edit reads as "only some of the grid
+    updated": the panel lists a row per adjustable channel and says nothing about
+    the rest. Listing them makes the shortfall visible in the control itself.
+    """
+    out: list[str] = []
+    for axis in ("rows", "cols"):
+        for cs in getattr(spec, axis).channels:
+            if _has_display_range(cs):
+                continue
+            tok = cs.axis_token()
+            if cs.render == "mask":
+                tok = f"{tok} (mask)"
+            if tok and tok not in out:
+                out.append(tok)
+    return out
 
 
 def _build_lut_box(ctx, spec) -> None:
@@ -1053,11 +1089,16 @@ def _build_lut_box(ctx, spec) -> None:
     _clear(body)
     lay = body.layout()
     chans = _table_channels(spec)
-    if not chans:
+    inert = _lut_inert_channels(spec)
+    if not chans and not inert:
         lay.addWidget(_text("channels dragged into the table appear here", "ITBHint"))
         return
     for token, specs in chans.items():
         lay.addWidget(_lut_row(ctx, token, specs))
+    if inert:
+        lay.addWidget(_text(
+            "no display range (unchanged by any LUT edit): " + ", ".join(inert),
+            "ITBHint"))
 
 
 def _lut_row(ctx, token: str, specs: list) -> QFrame:

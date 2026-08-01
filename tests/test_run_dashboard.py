@@ -342,3 +342,44 @@ def test_an_upload_in_flight_reads_as_heading_to_the_remote(qtbot):
     # so a stale upload marker must not repaint it away from amber.
     dash.set_well_stage("B02", "active")
     assert dash._well_color("B02") == theme.Colors.warn
+
+
+def test_local_auto_threshold_records_reach_the_line_stream():
+    """The post-fetch auto-threshold pass runs in-process and reports itself
+    through ``logging``. The GUI drives its Threshold stage by parsing the run's
+    LINE stream, so those records were invisible to it — the only things on the
+    stream were the two bookend lines the method logs itself, leaving a full
+    plate's worth of silence at the end of a run.
+
+    The forwarder must pass the pipeline's own message text through unchanged:
+    the consumer regexes match that wording, so a prefix or timestamp here
+    would break them exactly as a missing progress flag does."""
+    import logging
+
+    from services.remote_runner import _LogToLineStream
+
+    lines = []
+    log = logging.getLogger("allwell.test_auto_threshold_forward")
+    log.handlers = []
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    handler = _LogToLineStream(lines.append)
+    log.addHandler(handler)
+    try:
+        log.info("Auto-threshold: scanning %d well(s) for channels: %s", 40, "gfp")
+        log.info("Auto-threshold: completed well %d/%d (%s)", 7, 40, "C08")
+    finally:
+        log.removeHandler(handler)
+
+    assert lines == [
+        "Auto-threshold: scanning 40 well(s) for channels: gfp\n",
+        "Auto-threshold: completed well 7/40 (C08)\n",
+    ]
+
+    # And the shipped consumers actually match what came through.
+    from services.pipeline_runner import _RE_TF_PROG, _RE_TF_SCAN, _RE_THRESH_WELL
+
+    assert _RE_TF_SCAN.search(lines[0]).group(1) == "40"
+    m = _RE_TF_PROG.search(lines[1])
+    assert (m.group(1), m.group(2)) == ("7", "40")
+    assert _RE_THRESH_WELL.search(lines[1]).group(1) == "C08"

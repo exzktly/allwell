@@ -2095,6 +2095,30 @@ def _rsync_supports_info_flag() -> bool:
     return _rsync_version() >= (3, 1)
 
 
+class _LogToLineStream(__import__("logging").Handler):
+    """Forward a ``logging`` record onto the run's own line stream.
+
+    The GUI reads a run's progress off that stream, so a phase that reports
+    itself through ``logging`` is invisible to it unless its records are put
+    there. Used for the post-fetch auto-threshold pass, which runs in-process
+    rather than as a subprocess and so has no stdout of its own to be read.
+
+    Deliberately format-free: the consumer's regexes match the pipeline's own
+    message text, so a prefix or a timestamp here would stop them matching —
+    the same class of break as a progress flag that is never passed.
+    """
+
+    def __init__(self, emit_line) -> None:
+        super().__init__()
+        self._emit_line = emit_line
+
+    def emit(self, record) -> None:
+        try:
+            self._emit_line(record.getMessage() + "\n")
+        except Exception:  # a log line must never break the pass it describes
+            self.handleError(record)
+
+
 def _rsync_progress_flags() -> list[str]:
     """Flags that make rsync narrate a transfer, for whatever rsync is here.
 
@@ -3723,7 +3747,19 @@ class _BatchedRemoteProcess:
         """Re-run the pipeline's auto-threshold pass locally against
         the full ``local_output_dir`` after every batch has drained.
         Failures are logged but non-fatal (matches the remote
-        pipeline's "informational only" stance on auto-threshold)."""
+        pipeline's "informational only" stance on auto-threshold).
+
+        The pass reports itself through the ``logging`` module — "Auto-threshold:
+        scanning N well(s)", then "completed well i/N (WELL)" as it goes — and
+        the GUI parses exactly those strings off the run's line stream to drive
+        the Threshold stage. In a *subprocess* run they reach it because the
+        pipeline's stdout is that stream. Here the pass runs in-process, so its
+        records went to a logger nobody was reading and the only things on the
+        line stream were this method's own two bookends: one line as it started
+        and one when it finished. Over a full plate that is a long silence right
+        at the end of a run, with the rail sitting still. Forwarding the records
+        onto the same stream closes it, and the regexes that were always there
+        start matching."""
         try:
             # Late import: ``process_microscopy`` is a heavy module
             # (pulls TensorFlow indirectly). Don't pay that cost on
@@ -3737,13 +3773,20 @@ class _BatchedRemoteProcess:
                 f"{self._local_output_dir} (full plate, all batches drained)\n"
             )
             args = _auto_threshold_args_from_argv(self._pipeline_argv)
-            written = run_auto_threshold_pass(
-                args,
-                self._local_output_dir,
-                [args.nuclear_token, *args.fluor_tokens] if args.nuclear_token
-                else list(args.fluor_tokens),
-                log_pylog,
-            )
+            forwarder = _LogToLineStream(self._log)
+            log_pylog.addHandler(forwarder)
+            log_pylog.setLevel(logging.INFO)
+            log_pylog.propagate = False
+            try:
+                written = run_auto_threshold_pass(
+                    args,
+                    self._local_output_dir,
+                    [args.nuclear_token, *args.fluor_tokens] if args.nuclear_token
+                    else list(args.fluor_tokens),
+                    log_pylog,
+                )
+            finally:
+                log_pylog.removeHandler(forwarder)
             if written:
                 self._log(
                     "[remote] local auto-threshold defaults written for "

@@ -3148,6 +3148,19 @@ staged archives and the host's measured bandwidth actually support. Which side
 is faster is a question it does not answer, and a better-guessed answer would
 have been the same failure in a smarter disguise.
 
+**A phase that logs is invisible unless it logs to the stream.** The GUI drives
+its stages by parsing the run's line stream, so the post-fetch auto-threshold
+pass — which runs *in-process* (`_run_local_auto_threshold`) rather than as a
+subprocess, and reports itself through `logging` — had its records going
+somewhere nothing was reading. The only things on the stream were that method's
+own two bookends, one line as it started and one when it finished, so a full
+plate's auto-threshold sat silent at the end of every remote run with the
+Threshold stage unmoved. `_LogToLineStream` forwards the records onto the same
+stream, unformatted: the consumers (`_RE_TF_SCAN`, `_RE_TF_PROG`,
+`_RE_THRESH_WELL`) match the pipeline's own message text, so a prefix or
+timestamp added here would break them the same way a never-passed progress flag
+does.
+
 **A transfer is painted in the colour it is heading toward.** The dial fills
 from a light tint of its colour to the full one, so a download painted in the
 "on server" blue the well is *leaving* filled blue-into-blue — light meaning

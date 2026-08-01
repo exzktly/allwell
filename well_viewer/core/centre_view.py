@@ -323,14 +323,15 @@ def build_centre(win, parent: QWidget) -> None:
         from widgets.labeled_combo import LabeledComboBox as _QComboBox
         win._plotting_channel_cb = win._ctx.widgets.register(
             "_plotting_channel_cb", _QComboBox("Channel"))
-        win._plotting_channel_cb.setMinimumContentsLength(8)
+        # No min-width / setMinimumContentsLength — LabeledComboBox sizes
+        # itself to exactly the painted "Channel: …" text, and a floor here
+        # would just re-introduce the wasted space that sizing exists to cut.
         win._plotting_channel_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
-            f"font-size: {_T.caption_size}px; font-weight: 500; "
-            f"min-width: 88px; }}"
+            f"font-size: {_T.caption_size}px; font-weight: 500; }}"
             f"QComboBox:hover {{ color: {_C.text_primary}; }}"
         )
 
@@ -359,14 +360,13 @@ def build_centre(win, parent: QWidget) -> None:
         from well_viewer.data.metric_labels import METRIC_ORDER as _METRIC_ORDER
         win._plotting_metric_cb = win._ctx.widgets.register(
             "_plotting_metric_cb", _QComboBox("Property"))
-        win._plotting_metric_cb.setMinimumContentsLength(8)
+        # No min-width / setMinimumContentsLength — see the Channel combo above.
         win._plotting_metric_cb.setStyleSheet(
             f"QComboBox {{ background-color: {_C.panel_elevated}; "
             f"color: {_C.text_secondary}; "
             f"border: 1px solid {_C.border_subtle}; "
             f"border-radius: {_R.pill}px; padding: 2px 22px 2px 10px; "
-            f"font-size: {_T.caption_size}px; font-weight: 500; "
-            f"min-width: 110px; }}"
+            f"font-size: {_T.caption_size}px; font-weight: 500; }}"
             f"QComboBox:hover {{ color: {_C.text_primary}; }}"
         )
         win._plotting_metric_cb.addItems(_METRIC_ORDER)

@@ -300,3 +300,105 @@ def test_shorten_headline_ignores_empty_paths():
     assert dp.shorten_headline(text, "", "/home/user/data/loose") == (
         "Grouped loose TIFs in loose into 2 per-well zip(s)."
     )
+
+
+def test_progress_dial_paints_the_state_colour_for_the_done_part(qtbot):
+    """The per-well dial is a two-tone pie of the well's own state colour. The
+    done wedge is that colour — the same orange a solid processing well has
+    always been — and the remainder is a lighter tint of it, both shaded by the
+    same sphere gradient a plain well gets. The earlier form was inverted
+    (done = darker(210), remainder = lighter(130)) and flat-filled, so a well
+    that started progressing turned muddy brown AND changed from a sphere into
+    a flat disc — reading as a different kind of object rather than the same
+    well further along."""
+    from PySide6.QtGui import QColor
+
+    import theme
+    from widgets.well_plate_selector import _PlateGrid
+
+    grid = _PlateGrid()
+    qtbot.addWidget(grid)
+
+    base = QColor(theme.Colors.warn)
+    done, remainder = _dial_tones(grid, base)
+
+    # Both halves carry the state's hue, shaded as a sphere — so neither is an
+    # exact match for the flat base colour, and the assertions are about the
+    # relationship rather than a literal value.
+    assert done.hueF() == pytest.approx(base.hueF(), abs=0.02), "done keeps the hue"
+    assert remainder.hueF() == pytest.approx(base.hueF(), abs=0.02), "so does the rest"
+    assert remainder.lightnessF() > done.lightnessF(), "the rest is the lighter tint"
+    # The inversion this replaced: the done part must not be the dark one. The
+    # old finished tone was base.darker(210) — a muddy brown well below this.
+    assert done.lightnessF() > QColor(base).darker(210).lightnessF()
+
+
+def _dial_tones(grid, base):
+    """Render a half-full dial and sample the two halves off the pixels.
+
+    Sampling the real paint rather than intercepting brush calls: the dial is
+    drawn clockwise from twelve o'clock, so at fraction 0.5 the right half is
+    the done wedge and the left half the remainder. Both points sit well inside
+    the rim.
+    """
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    img = QImage(40, 40, QImage.Format_ARGB32)
+    img.fill(0)
+    painter = QPainter(img)
+    try:
+        grid._paint_fraction(painter, QRectF(2, 2, 36, 36), QColor(base), 0.5, False)
+    finally:
+        painter.end()
+    done = QColor(img.pixelColor(28, 20))       # right of centre
+    remainder = QColor(img.pixelColor(12, 20))  # left of centre
+    return done, remainder
+
+
+def test_progress_dial_is_the_same_shape_as_a_plain_well(qtbot):
+    """A well that starts progressing must not change what kind of object it
+    is. The dial was flat-filled while every other well got a radial gradient,
+    a rim at 0.04x width and a specular arc — so a progressing well appeared as
+    a flat disc with an outer band beside spherical grey neighbours. Both now
+    go through the same `_sphere_gradient` / `_paint_specular` helpers, so a
+    dial is shaded, rimmed and highlighted exactly like the well it replaces.
+    """
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    import theme
+    from widgets.well_plate_selector import _PlateGrid
+
+    grid = _PlateGrid()
+    qtbot.addWidget(grid)
+    base = QColor(theme.Colors.warn)
+    rect = QRectF(2, 2, 36, 36)
+
+    def render(paint):
+        img = QImage(40, 40, QImage.Format_ARGB32)
+        img.fill(0)
+        painter = QPainter(img)
+        try:
+            paint(painter)
+        finally:
+            painter.end()
+        return img
+
+    plain = render(lambda pr: grid._paint_lit(pr, rect, base, False))
+    # A fully-done dial: the whole face is the done tone, so it should render
+    # as the plain well does rather than as a flat disc.
+    full = render(lambda pr: grid._paint_fraction(pr, rect, base, 1.0, False))
+
+    # Shaded, not flat: the lit upper-left is lighter than the lower-right in
+    # both, by a comparable amount.
+    def shading(img):
+        return (QColor(img.pixelColor(14, 14)).lightnessF()
+                - QColor(img.pixelColor(26, 26)).lightnessF())
+
+    assert shading(plain) > 0.02, "a plain well is shaded as a sphere"
+    assert shading(full) == pytest.approx(shading(plain), abs=0.05), (
+        "a full dial is shaded like one too")
+    # And the specular highlight is present in both.
+    assert QColor(full.pixelColor(20, 8)).lightnessF() > \
+        QColor(full.pixelColor(20, 20)).lightnessF()

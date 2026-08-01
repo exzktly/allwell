@@ -197,8 +197,12 @@ def test_stage_local_zips_mixed_mode_resumes_from_leftover_folders(tmp_path):
 
     # No tempdir was created → no cleanup callback needed.
     assert zipped.cleanup is None
-    # The source folders are intact too — user verifies before deleting.
-    assert (tmp_path / "B03" / "B03_NIR_F001.tif").exists()
+    # Each source folder is removed the moment its own archive is published,
+    # so the input dir never holds two full copies of a well at once. The
+    # archive beside it is complete — `_zip_well_folder` publishes atomically.
+    assert not (tmp_path / "B03").exists()
+    assert not (tmp_path / "B04").exists()
+    assert "folder removed" in blob
 
 
 def test_stage_local_zips_mixed_mode_persisted_zips_survive_for_next_run(tmp_path):
@@ -501,6 +505,87 @@ def test_a_filter_that_drops_nothing_stages_nothing(monkeypatch, tmp_path):
     assert zipped.zip_dir == src
     assert zipped.cleanup is None
     assert list(scratch.glob("allwell-stage-*")) == []
+
+
+def test_junk_members_never_force_a_rewrite(monkeypatch, tmp_path):
+    """A `.DS_Store` is not a channel, so the channel filter has no say on it.
+
+    Reported from a live run: 40 archives holding only the two requested
+    channels still reported "rewriting 40 well archive(s)" and "keeps 276/279".
+    The three extras per zip were a macOS `.DS_Store` and two directory entries.
+    Letting the channel filter drop them made every archive look changed, which
+    rebuilt the entire plate into scratch to remove a few hundred bytes a well.
+    """
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(scratch))
+    src = tmp_path / "in"
+    src.mkdir()
+    for well in ("C02", "C03"):
+        z = src / f"{well}.zip"
+        with zipfile.ZipFile(z, "w") as zf:
+            for ch in ("RFP", "GFP"):
+                zf.writestr(f"Exp_{ch}_{well}_f0.tif", b"\0" * 128)
+            zf.writestr(".DS_Store", b"junk")          # macOS
+            zf.writestr(f"{well}/", b"")               # a directory entry
+            zf.writestr("._Exp_RFP.tif", b"resource")  # AppleDouble sidecar
+
+    zipped = stage_local_zips(
+        src,
+        filename_schema="experiment:channel:well:fov",
+        filename_sep="_",
+        nuclear_token="RFP",
+        fluor_tokens=["GFP"],
+    )
+
+    assert sorted(p.name for p in zipped.well_zips) == ["C02.zip", "C03.zip"]
+    assert all(p.parent == src for p in zipped.well_zips)
+    assert zipped.cleanup is None
+    assert list(scratch.glob("allwell-stage-*")) == []
+
+
+def test_a_real_channel_drop_still_rewrites_past_the_junk(tmp_path, monkeypatch):
+    """The junk must not mask a genuine drop, and is not carried into the copy."""
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setenv("ALLWELL_SCRATCH_DIR", str(scratch))
+    src = tmp_path / "in"
+    src.mkdir()
+    with zipfile.ZipFile(src / "C02.zip", "w") as zf:
+        for ch in ("RFP", "GFP", "Cy5"):
+            zf.writestr(f"Exp_{ch}_C02_f0.tif", b"\0" * 128)
+        zf.writestr(".DS_Store", b"junk")
+
+    zipped = stage_local_zips(
+        src,
+        filename_schema="experiment:channel:well:fov",
+        filename_sep="_",
+        nuclear_token="RFP",
+        fluor_tokens=["GFP"],
+    )
+
+    staged = zipped.well_zips[0]
+    assert staged.parent != src
+    with zipfile.ZipFile(staged) as zf:
+        assert sorted(zf.namelist()) == ["Exp_GFP_C02_f0.tif", "Exp_RFP_C02_f0.tif"]
+
+
+def test_a_typoed_channel_still_fails_even_with_junk_present(tmp_path):
+    """The zero-match guard reads the images, so junk cannot satisfy it."""
+    src = tmp_path / "in"
+    src.mkdir()
+    with zipfile.ZipFile(src / "C02.zip", "w") as zf:
+        zf.writestr("Exp_RFP_C02_f0.tif", b"\0" * 128)
+        zf.writestr(".DS_Store", b"junk")
+
+    with pytest.raises(RuntimeError, match="matched zero images"):
+        stage_local_zips(
+            src,
+            filename_schema="experiment:channel:well:fov",
+            filename_sep="_",
+            nuclear_token="NIR",          # not in these filenames
+            fluor_tokens=["GP"],          # typo
+        )
 
 
 def test_only_the_archives_that_change_are_staged(monkeypatch, tmp_path):

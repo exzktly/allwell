@@ -887,6 +887,16 @@ count) — plus a CDF.
   done) are rebuilt, into `~/.allwell/scratch` unless the *Scratch disk* field
   says otherwise. If your data is on a network or external drive, this pass reads
   only the images it will upload, so it is roughly as fast as the upload itself.
+  Whether an archive counts as unchanged is judged on its images only, so the
+  `.DS_Store` and other stray files a zip picks up never cause a rebuild.
+- **Grouping loose TIFs: the folders go away as they are packed** — when a run
+  has to group your images into per-well folders and pack each into a
+  `<well>.zip`, each folder is deleted as soon as its own archive is written, so
+  the input folder never holds two full copies of the plate. A folder is kept in
+  two cases: it contained no TIFs (nothing was packed, so nothing replaces it),
+  or that well already had a zip from an earlier run (that archive is yours and
+  was not checked against the folder). If a run dies partway, the wells already
+  packed keep their archives — restart and it picks up from there.
 - **"N well(s) are incomplete" at load** — those wells' results cover fewer
   fields of view than their input holds: FOV-groups failed during the analysis
   run, and the well still wrote a CSV and an `_out.zip` from the ones that

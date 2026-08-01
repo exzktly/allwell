@@ -2298,6 +2298,20 @@ when the data lives on a NAS — the normal case. The channel-filter typo guard
 runs in the plan pass, so a mistyped channel name names every offending well
 before any bytes move.
 
+**"Changed" is decided on the images alone.** `_is_image_member` splits each
+archive's member list before the channel filter sees it: anything with a leading
+dot or a non-image suffix — `.DS_Store`, directory entries, AppleDouble sidecars
+— is not a channel, so the filter has no opinion on it and it can never be the
+reason an archive counts as changed. Without that split a single stray file per
+zip made every archive on the plate look filtered (a report of 276 of 279 members
+kept, on a plate whose zips held only the two requested channels) and rebuilt the
+whole dataset into scratch to strip a few hundred bytes a well. The zero-match
+guard and the incremental up-to-date check read the images too, so junk can
+neither satisfy a typo'd channel filter nor keep a finished well in the upload.
+An archive that survives is used exactly as it is, junk and all — the remote
+ignores it anyway, since `find_image_groups_in_zip` skips the same members — and
+one that is rewritten carries only the images the remote will read.
+
 **Only an archive that actually changes is staged.** A plan that keeps every
 member is not written anywhere: its source path goes straight into the upload
 list and rsync reads it from the input dir. Copying it into scratch first would
@@ -2323,6 +2337,25 @@ place to keep one. Its leftover folders are still zipped into the *input* dir
 nothing), and with no channel filter it uploads from the input dir with no
 staging at all. `_filter_channels_in_staging` survives for the FOLDER / FLAT
 path, which filters zips it has just written itself.
+
+**Grouping consumes each well folder as it goes.** The FOLDER / FLAT staging
+path (and the MIXED leftover zip-up) turns every `<well>/` into `<well>.zip`, and
+removes that folder the moment its own archive is published rather than at the
+end of the run. `_zip_well_folder` writes through `util.zip_write.atomic_zip`,
+which renames a verified archive into place or leaves nothing at all, so a folder
+is only ever removed once a complete archive sits beside it — the same standard
+`process_microscopy.compress_folder_images_to_zip_and_remove` and the Datasets
+pane's `_zip_well_folders` already apply. Deferring the deletion to the
+post-success hook meant the input dir carried both `<well>/` and `<well>.zip` for
+every well for the whole run: two full copies of the plate on the user's own
+volume at peak, on exactly the runs where the input is largest. Two folders are
+left alone — one holding no TIFs (there is no archive to replace it with, and it
+may hold other content) and one whose well already had a user-written zip (that
+archive was not written by this run and nothing here verified it covers the
+folder). There is no rollback of the archives written in the pass: unlinking them
+on a later well's failure would now delete the only remaining copy of every well
+that had already succeeded, and a part-zipped plate is the correct resume state
+anyway — the finished wells read as ZIP mode on the next run.
 
 The remote client resolves its own scratch base — the staging rewrites, transit
 output zips, and incremental merge temps — through `remote_runner._scratch_dir`,

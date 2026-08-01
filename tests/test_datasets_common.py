@@ -300,3 +300,52 @@ def test_shorten_headline_ignores_empty_paths():
     assert dp.shorten_headline(text, "", "/home/user/data/loose") == (
         "Grouped loose TIFs in loose into 2 per-well zip(s)."
     )
+
+
+def test_progress_dial_paints_the_state_colour_for_the_done_part(qtbot):
+    """The per-well dial is a two-tone pie of the well's own state colour. The
+    done wedge is that colour undarkened — the same orange a solid processing
+    well has always been — and the remainder is a lighter tint of it, so a dial
+    and a solid well of the same state read as the same colour. The earlier
+    form was inverted (done = darker(210), remainder = lighter(130)), which
+    made a mostly-finished well a muddy brown matching neither the legend
+    swatch nor an unstarted well beside it."""
+    from PySide6.QtGui import QColor
+
+    import theme
+    from widgets.well_plate_selector import _PlateGrid
+
+    grid = _PlateGrid()
+    qtbot.addWidget(grid)
+
+    base = QColor(theme.Colors.warn)
+    done, remainder = _dial_tones(grid, base)
+
+    assert done == base, "the finished part is the state's own colour"
+    assert remainder.lightnessF() > base.lightnessF(), "the rest is a lighter tint"
+    assert remainder.hueF() == pytest.approx(base.hueF(), abs=0.02), "same hue"
+    # The inversion this replaced: the done part must not be the dark one.
+    assert done.lightnessF() > QColor(base).darker(210).lightnessF()
+
+
+def _dial_tones(grid, base):
+    """Render a half-full dial and sample the two halves off the pixels.
+
+    Sampling the real paint rather than intercepting brush calls: the dial is
+    drawn clockwise from twelve o'clock, so at fraction 0.5 the right half is
+    the done wedge and the left half the remainder. Both points sit well inside
+    the rim.
+    """
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    img = QImage(40, 40, QImage.Format_ARGB32)
+    img.fill(0)
+    painter = QPainter(img)
+    try:
+        grid._paint_fraction(painter, QRectF(2, 2, 36, 36), QColor(base), 0.5, False)
+    finally:
+        painter.end()
+    done = QColor(img.pixelColor(28, 20))       # right of centre
+    remainder = QColor(img.pixelColor(12, 20))  # left of centre
+    return done, remainder

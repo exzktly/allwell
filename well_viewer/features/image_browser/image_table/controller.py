@@ -25,7 +25,10 @@ from PySide6.QtWidgets import (
 from well_viewer.core.safe import swallow, swallowed
 from well_viewer.core.ui_helpers import set_combo_values
 from well_viewer.domain.viewer_state import parse_rc
-from well_viewer.core.channel_state_controller import set_thresh_frac_on
+from well_viewer.core.channel_state_controller import (
+    refresh_thresh_frac_quick_edit,
+    set_thresh_frac_on,
+)
 
 
 # ── LUT colour palette ──────────────────────────────────────────────────────
@@ -214,6 +217,11 @@ def image_table_repopulate_dropdowns(ctx) -> None:
     thresh_cb = ctx.widgets.get_or_none("_image_table_thresh_chan_cb")
     if thresh_cb is not None:
         set_combo_values(thresh_cb, [c for c in chan_opts if " (binary)" not in c])
+        # ``set_combo_values`` blocks signals while it repopulates, so the
+        # stepper's own ``currentTextChanged`` sync never fires here — without
+        # this the box would keep showing its construction-time 50.0 while the
+        # picked channel's real ON threshold was something else entirely.
+        refresh_thresh_frac_quick_edit(ctx)
 
 
 # ── Per-cell render model build / rebuild ────────────────────────────────────
@@ -1028,6 +1036,13 @@ def image_table_generate(ctx) -> None:
     if unrendered:
         msg += f" {unrendered} could not be drawn"
         msg += f" ({failed} raised)." if failed else " — see the log."
+    # Cells served the raw frame because the corrected (top-hat) set doesn't
+    # cover them. They DO draw, so the count above says nothing about them — and
+    # a grid silently mixing corrected and raw frames is exactly the kind of
+    # degraded output that reads as a finished one.
+    n_raw = len(getattr(ctx.state.image_table, "raw_fallbacks", None) or ())
+    if n_raw:
+        msg += f" {n_raw} shown uncorrected (no corrected image)."
     ctx.notify.set_status(msg)
     if n == 0 and rendered:
         # Zero hits across the whole grid means key drift somewhere — log

@@ -383,15 +383,21 @@ def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
     return bool(spec.get("log", False)) if spec is not None else False
 
 def reset_scan_misses(ctx) -> None:
-    """Start a render pass with a clean set of empty-scan results.
+    """Start a render pass with clean per-pass load bookkeeping.
 
-    Called at the top of every Generate / export run. Without the reset a
+    Called at the top of every Generate / export run. Two records are scoped to
+    a single pass and cleared here: the empty-scan set (without the reset a
     well/channel that came up empty once would stay written off for the rest of
-    the session; with it, the suppression lasts exactly one pass.
+    the session) and the raw-fallback set (which the status line counts, so it
+    has to describe the pass that just ran and no earlier one).
     """
     st = getattr(getattr(ctx, "state", None), "image_table", None)
-    if st is not None and isinstance(getattr(st, "scan_misses", None), set):
-        st.scan_misses.clear()
+    if st is None:
+        return
+    for attr in ("scan_misses", "raw_fallbacks"):
+        rec = getattr(st, attr, None)
+        if isinstance(rec, set):
+            rec.clear()
 
 
 def _scan_misses(ctx) -> set:
@@ -406,6 +412,19 @@ def _scan_misses(ctx) -> set:
     st = getattr(getattr(ctx, "state", None), "image_table", None)
     misses = getattr(st, "scan_misses", None)
     return misses if isinstance(misses, set) else set()
+
+
+def _raw_fallbacks(ctx) -> set:
+    """The current render pass's set of ``(well, channel, tp, fov)`` cells that
+    asked for the corrected (top-hat) image and were served the raw one instead.
+
+    Same lifetime and same stub tolerance as :func:`_scan_misses`. The Generate
+    status line reports its size, so a grid that quietly mixes corrected and raw
+    frames says so rather than looking like a uniformly corrected table.
+    """
+    st = getattr(getattr(ctx, "state", None), "image_table", None)
+    rec = getattr(st, "raw_fallbacks", None)
+    return rec if isinstance(rec, set) else set()
 
 
 def _load_well_channel(
@@ -576,19 +595,39 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
     When ``fov`` is empty (e.g. pipeline_info has no available_fovs and the
     dropdown is empty), match the first available FOV for the requested
     timepoint so single-FOV datasets still render.
+
+    The corrected (top-hat) variant falls back to raw **per cell**, not only
+    when the whole well/channel has no top-hat set. A pipeline commonly corrects
+    a subset of a well's frames — it was interrupted, it was re-run over fewer
+    timepoints, or the correction was only ever asked for on some fields — and
+    the resulting dict is non-empty but does not cover every ``(fov, tp)`` the
+    grid asks for. Resolving only against it left exactly those cells with no
+    image at all while their neighbours drew, even though the raw frame for the
+    same cell was already sitting in ``cache[(well, channel, "raw")]``. Each
+    fallback is recorded in :func:`_raw_fallbacks` so the pass can say how many
+    cells it served uncorrected.
     """
     # A "GFP (binary)" token loads the same pixels as "GFP" — the binary render is
     # applied downstream (cell_display_rgb); here we just resolve the base channel.
     chan_lower = _binary_base(chan_upper).strip().lower()
+    is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=use_tophat)
-    # When tophat is requested but not produced for this well/channel, drop
-    # back to raw rather than rendering "(no image)".
-    if (use_tophat and not fluor and chan_lower != NUC_SEG_TOKEN.lower()):
-        fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=False)
-    if not fluor:
-        return None
-
-    ref, kind = _match_image_ref(fluor, fov, tp)
+    ref, kind = _match_image_ref(fluor, fov, tp) if fluor else (None, "")
+    # An unresolved top-hat cell drops back to raw rather than rendering
+    # "(no image)". ``kind == "ambiguous_fov"`` is a deliberate refusal (an empty
+    # FOV spanning several fields), not a gap in the corrected set, so it is left
+    # to stand instead of being retried against a dict with the same ambiguity.
+    if ref is None and kind != "ambiguous_fov" and use_tophat and not is_overlay:
+        raw = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=False)
+        if raw:
+            ref, kind = _match_image_ref(raw, fov, tp)
+            if ref is not None:
+                _raw_fallbacks(ctx).add((well, chan_lower, str(tp), str(fov)))
+                logger.info(
+                    "image_table: no corrected image for well=%r channel=%r "
+                    "tp=%r fov=%r — showing the raw frame",
+                    well, chan_lower, tp, fov,
+                )
     if ref is None:
         return None
     if kind != "exact":

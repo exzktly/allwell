@@ -608,6 +608,24 @@ change. The Threshold stepper keeps its separate `add_scope("Threshold", …)`
 caption — `LabeledComboBox` is a `QComboBox` specialisation, and folding a
 static label into an editable numeric field isn't the same operation.
 
+Threshold is added with **`trailing=True`**, which pins it to the end of the
+scope zone whatever order its tab built its controls in. It is the one scope
+control that *narrows* the data rather than choosing which data is shown, so it
+reads last; but `add_scope` appends in call order and each tab's builder runs in
+its own order, which left Threshold mid-row with Timepoints after it. The flag
+keeps the rule with the control instead of asking every builder to remember to
+call it last. `FlowLayout.move_to_end` does the reordering — `removeWidget`
+followed by `addWidget` cannot, because Qt deletes the `QWidgetItem` that
+`takeAt` returns and the re-add would then operate on a dead object.
+
+The stepper is also pinned to `stepper.control_row_height()`, which measures a
+`LabeledComboBox` rather than hardcoding a number, so the band's controls share
+one height through any theme or font change. Left to itself a `Stepper` is
+taller — its two stacked step buttons each want a full text row, which came to
+35px against the combos' 25px and made the row read as ragged. The measurement
+has to use the same subclass the band uses: a bare `QComboBox` is 3px taller,
+so probing one reproduced the mismatch the function exists to remove.
+
 The five sub-tabs share that one band; none builds its own. A sub-tab claims a
 `ControlBandSlot` through `ui_helpers.plotting_band_slot(ctx, title[, mode])` and
 adds its controls to it exactly as it would to a band — the slot mirrors

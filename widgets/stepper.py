@@ -32,6 +32,34 @@ from PySide6.QtWidgets import (
 import theme
 
 
+def control_row_height() -> int:
+    """The height a themed combo box takes, measured rather than guessed.
+
+    A stepper sits in the same control row as the channel and property combos,
+    so it has to be the same height as them or the row reads as ragged. Left to
+    itself it is taller: its two stacked step buttons each want a full text
+    row, which came to 35px against the combos' 25px.
+
+    The number is derived from a throwaway combo rather than written down,
+    because it depends on the application stylesheet and the current font —
+    exactly the two things a literal would go stale against. This mirrors
+    ``widgets.mode_bar.tab_bar_height``, which measures a ``QTabBar`` for the
+    same reason, and is deliberately not cached for the same reason: a widget
+    built during startup would freeze a stylesheet that has not been applied.
+    """
+    from widgets.labeled_combo import LabeledComboBox
+
+    # A LabeledComboBox, not a bare QComboBox: the band's combos are that
+    # subclass and it is 3px shorter, so measuring the plain one silently
+    # reproduced the mismatch this function exists to remove.
+    probe = LabeledComboBox("Ag")
+    probe.addItem("Ag")              # ascender + descender: the tallest case
+    probe.ensurePolished()
+    height = probe.sizeHint().height()
+    probe.deleteLater()
+    return height
+
+
 class Stepper(QFrame):
     valueChanged = Signal(float)
 
@@ -85,6 +113,21 @@ class Stepper(QFrame):
 
         lay.addWidget(self._edit, 1)
         lay.addLayout(btn_col)
+
+        # Match the combos beside us. The two step buttons split the row
+        # between them; without the explicit split each still asks for a full
+        # text row and the frame is forced taller than it was just pinned to.
+        row_h = control_row_height()
+        self.setFixedHeight(row_h)
+        # The frame's own 1px border top and bottom is the only thing outside
+        # the two children, so pin them to what is left. Without pinning the
+        # edit as well, its vertical text padding keeps the layout's minimum
+        # above the height the frame was just given and the frame renders
+        # taller than it was asked to be.
+        inner = max(1, row_h - 2)
+        self._edit.setFixedHeight(inner)
+        for b in (self._up, self._down):
+            b.setFixedHeight(inner // 2)
 
         self._edit.installEventFilter(self)
         self.setStyleSheet(self._build_qss())

@@ -190,6 +190,25 @@ class FlowLayout(QLayout):
             return self._items[index]
         return None
 
+    def move_to_end(self, widget: QWidget) -> bool:
+        """Move *widget*'s item to the end of the flow, keeping the item alive.
+
+        The ``removeWidget`` + ``addWidget`` round trip a caller would reach for
+        first does not work here: ``takeAt`` hands the item back and Qt then
+        deletes the ``QWidgetItem``, so the re-add operates on a dead object.
+        Reordering the internal list moves the item without ever detaching it.
+
+        Used for scope controls a band pins to the end of the row (see
+        ``ControlBand.add_scope(..., trailing=True)``) so their position does
+        not depend on the order a tab happens to build its controls in.
+        """
+        for i, item in enumerate(self._items):
+            if item.widget() is widget:
+                self._items.append(self._items.pop(i))
+                self.invalidate()
+                return True
+        return False
+
     def takeAt(self, index: int):
         if 0 <= index < len(self._items):
             item = self._items.pop(index)

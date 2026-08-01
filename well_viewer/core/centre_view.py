@@ -409,7 +409,7 @@ def build_centre(win, parent: QWidget) -> None:
             lambda v: win._set_thresh_frac_on(v)
         )
         win._plotting_thresh_frac_grp = band.add_scope(
-            "Threshold", win._plotting_thresh_frac_stepper)
+            "Threshold", win._plotting_thresh_frac_stepper, trailing=True)
 
         # "+ Add panel" button retired — the underlying per-renderer
         # multi-subplot story was never wired (the _add_panel handler

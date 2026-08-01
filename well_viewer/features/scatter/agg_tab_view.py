@@ -7,7 +7,7 @@ from well_viewer.core.plot_card_actions import (
 )
 
 from PySide6.QtWidgets import (
-    QComboBox, QLabel, QPushButton, QVBoxLayout,
+    QComboBox, QPushButton, QVBoxLayout,
     QWidget,
 )
 
@@ -82,15 +82,16 @@ def build_scatter_agg_tab(ctx, parent: QWidget) -> None:
     stat_y_cb.hide()
     reg.register("_scatter_agg_stat_y_var", stat_y_cb)
 
-    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Select Timepoints"))
+    # Self-describing — the button's own text carries the "Timepoints: …
+    # selected" readout (see update_tp_selection_display), so it needs no
+    # separate caption or count label beside it.
+    agg_tp_button = reg.register("_scatter_agg_tp_button", QPushButton("Timepoints: 0 selected"))
     agg_tp_button.setProperty("variant", "secondary")
     agg_tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
-    agg_tp_label = reg.register("_scatter_agg_tp_label", QLabel("(0 selected)"))
-    agg_tp_label.setObjectName("Muted")
-    ctrl.add_scope("Timepoints", agg_tp_button, agg_tp_label)
+    ctrl.add_scope("", agg_tp_button)
     ctx.runtime.scatter.agg_tp_selections = {}
     # Stash the aggregate tp-selection summary refresher so view_state restore can
-    # repaint the "(X selected)" label without importing this feature module.
+    # repaint the button's readout without importing this feature module.
     ctx.runtime.scatter.agg_tp_display_refresh = update_tp_selection_display
 
     # Error band (SEM/SD) for the aggregate's mean±spread points collapses into

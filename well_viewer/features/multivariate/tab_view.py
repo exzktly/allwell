@@ -42,6 +42,7 @@ _AGGS = ("mean", "median", "count", "std")
 
 
 from widgets.control_band import ControlBand
+from widgets.labeled_combo import LabeledComboBox
 
 def _muted(text: str, parent) -> QLabel:
     """A control label in the band's own idiom — muted, no trailing colon.
@@ -246,18 +247,17 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     reg.register("_mv_facet_frame", fc_frame)
     band.add_scope("", fc_frame)
 
-    # Timepoint filter — shared across modes. ``add_scope`` bundles the label
-    # and the combo as ONE flow item, so the row can never wrap between them
-    # and strand "Timepoint" at the end of a line with its combo on the next —
-    # which is what happened when the wide Faceting option group sat ahead of
-    # them.
-    tp_cb = QComboBox()
+    # Timepoint filter — shared across modes. Self-describing (LabeledComboBox
+    # paints its own "Timepoint: …" prefix), so ``add_scope`` adds it alone —
+    # no separate caption to strand on a different line when the wide Faceting
+    # option group ahead of it wraps.
+    tp_cb = LabeledComboBox("Timepoint")
     tp_cb.addItem("All timepoints", None)
     tp_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_timepoints(
             ctx, [] if tp_cb.currentData() is None else [tp_cb.currentData()]))
     reg.register("_mv_tp_cb", tp_cb)
-    band.add_scope("Timepoint", tp_cb)
+    band.add_scope("", tp_cb)
     layout.addWidget(band)
 
     # ── the figure ───────────────────────────────────────────────────────────

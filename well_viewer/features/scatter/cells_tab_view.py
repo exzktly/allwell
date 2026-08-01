@@ -77,12 +77,13 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("property", metric_y_cb)
     reg.register("_scatter_metric_y_var", metric_y_cb)
 
-    tp_button = reg.register("_scatter_tp_button", QPushButton("Select Timepoints", ctrl))
+    # Self-describing — the button's own text carries the "Timepoints: …
+    # selected" readout (see update_scatter_tp_selection_display), so it needs
+    # no separate caption or count label beside it.
+    tp_button = reg.register("_scatter_tp_button", QPushButton("Timepoints: 0 selected", ctrl))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(lambda _=False: _open_timepoint_selector(ctx))
-    tp_label = reg.register("_scatter_tp_label", QLabel("(0 selected)", ctrl))
-    tp_label.setObjectName("Muted")
-    ctrl.add_scope("Timepoints", tp_button, tp_label)
+    ctrl.add_scope("", tp_button)
     # Hidden legacy single-tp combo — kept so export / save-figure paths that
     # still read ``_scatter_tp_var.currentText()`` see a valid timepoint string
     # (the first selected one).
@@ -92,7 +93,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     reg.register("_scatter_tp_var", tp_cb)
     ctx.runtime.scatter.tp_selections = {}
     # Stash the per-cell tp-selection summary refresher so view_state restore can
-    # repaint the "(X selected)" label without importing this feature module.
+    # repaint the button's readout without importing this feature module.
     ctx.runtime.scatter.tp_display_refresh = update_scatter_tp_selection_display
 
     # Secondary display options (Layout + Colour-by-time) collapse into a

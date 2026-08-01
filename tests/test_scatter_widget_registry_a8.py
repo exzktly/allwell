@@ -23,7 +23,7 @@ _CELLS = (
     "_scatter_export_dock", "_scatter_ch_x_cb", "_scatter_ch_x_var",
     "_scatter_metric_x_cb", "_scatter_metric_x_var", "_scatter_ch_y_cb",
     "_scatter_ch_y_var", "_scatter_metric_y_cb", "_scatter_metric_y_var",
-    "_scatter_tp_button", "_scatter_tp_label", "_scatter_tp_cb", "_scatter_tp_var",
+    "_scatter_tp_button", "_scatter_tp_cb", "_scatter_tp_var",
     "_scatter_layout_cb", "_scatter_layout_var", "_scatter_color_by_tp_btn",
     "_scatter_card", "_scatter_fig", "_ax_scatter", "_scatter_canvas",
 )
@@ -32,7 +32,7 @@ _AGG = (
     "_scatter_agg_export_dock", "_scatter_agg_ch_x_cb", "_scatter_agg_metric_x_cb",
     "_scatter_agg_ch_y_cb", "_scatter_agg_metric_y_cb", "_scatter_agg_stat_x_cb",
     "_scatter_agg_stat_x_var", "_scatter_agg_stat_y_cb", "_scatter_agg_stat_y_var",
-    "_scatter_agg_tp_button", "_scatter_agg_tp_label", "_scatter_agg_card",
+    "_scatter_agg_tp_button", "_scatter_agg_card",
     "_scatter_agg_fig", "_ax_scatter_agg", "_scatter_agg_canvas",
 )
 

@@ -98,9 +98,12 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_slider.setMaximum(0)
     tp_slider.setFixedWidth(160)
     tp_slider.valueChanged.connect(lambda _v: _on_tp_changed(ctx))
-    tp_label = reg.register("_heatmap_tp_label", QLabel("—"))
-    tp_label.setMinimumWidth(64)
-    band.add_scope("Timepoint", tp_slider, tp_label)
+    # Self-describing — the live-value readout carries its own "Timepoint: …"
+    # prefix (see refresh_heatmap_timepoints / _on_tp_changed), so the slider
+    # needs no separate caption beside it.
+    tp_label = reg.register("_heatmap_tp_label", QLabel("Timepoint: —"))
+    tp_label.setMinimumWidth(112)
+    band.add_scope("", tp_slider, tp_label)
 
     status_lbl = reg.register("_heatmap_status_lbl", QLabel(""))
     status_lbl.setObjectName("Muted")
@@ -297,9 +300,9 @@ def refresh_heatmap_timepoints(ctx) -> None:
         slider.blockSignals(blocked)
     if label is not None:
         if tps:
-            label.setText(f"t = {tps[start_idx]:g} h")
+            label.setText(f"Timepoint: {tps[start_idx]:g} h")
         else:
-            label.setText("—")
+            label.setText("Timepoint: —")
     _redraw(ctx)
 
 
@@ -311,7 +314,7 @@ def _on_tp_changed(ctx) -> None:
         return
     idx = max(0, min(slider.value(), len(tps) - 1))
     if label is not None:
-        label.setText(f"t = {tps[idx]:g} h")
+        label.setText(f"Timepoint: {tps[idx]:g} h")
     # Publish the shared focus timepoint (N5). In Split View, emit so the other
     # pane (Distribution) redraws live; otherwise update the value silently and
     # redraw only this tab — keeps slider scrubbing as cheap as before (no

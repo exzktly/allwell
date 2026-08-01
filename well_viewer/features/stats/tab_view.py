@@ -12,6 +12,7 @@ from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, build_hline_separator, build_section_header,
 )
 from widgets.control_band import ControlBand
+from widgets.labeled_combo import LabeledComboBox
 from well_viewer.features.stats.controller import stats_active_group
 from well_viewer.features.stats.controller import stats_apply_drag
 from well_viewer.features.stats.controller import stats_on_test_change
@@ -193,9 +194,9 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     )
     stats_ctrl.add_scope("Statistic", statistic_cb)
 
-    tp_cb = reg.register("_stats_tp_cb", QComboBox())
+    tp_cb = reg.register("_stats_tp_cb", LabeledComboBox("Timepoint"))
     tp_cb.addItems(["—"])
-    stats_ctrl.add_scope("Timepoint", tp_cb)
+    stats_ctrl.add_scope("", tp_cb)
 
     test_cb = reg.register("_stats_test_cb", QComboBox())
     test_cb.addItems([

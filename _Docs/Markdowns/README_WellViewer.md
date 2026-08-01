@@ -820,7 +820,7 @@ grouped **bars**, a **violin** of the per-cell distribution, or a **beeswarm**
 of individual cells. This is the default Plotting sub-tab.
 
 - **Needs** — at least one selected well and a channel. The **Timepoints**
-  dropdown (`Select Timepoints`) fills from the selected wells'
+  button (reads e.g. `Timepoints: 3/8 selected`) fills from the selected wells'
   `timepoint_hours`; tick any set.
 - **Controls** (the **Display ▾** menu gathers the view options):
   - **Grouping** — how bars are grouped (default *Well*; a replicate set groups
@@ -875,8 +875,8 @@ Y-axis dropdowns below — the shared controls have nothing to act on.
 
 - **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis
-  dropdowns. A **Timepoints** multi-select (`Select Timepoints`) restricts the
-  frames drawn.
+  dropdowns. A **Timepoints** multi-select button (reads e.g.
+  `Timepoints: All 5 selected`) restricts the frames drawn.
 - **Per-cell controls** — X-axis / Y-axis / Channel pickers inline, with
   **Layout** (*Overlay* all wells on one axis, or *Separate axes* one panel per
   well), **Color by time** (one well → a single cloud's trajectory; several

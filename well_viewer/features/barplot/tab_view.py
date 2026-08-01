@@ -105,14 +105,15 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     # violins/beeswarms over multiple timepoints simultaneously. Shares the
     # band's scope zone with the other selectors; the flow wraps them onto a new
     # line only when the pane is too narrow.
-    tp_button = reg.register("_bar_tp_button", QPushButton("Select Timepoints"))
+    # Self-describing — the button's own text carries the "Timepoints: …
+    # selected" readout (see ``update_bar_tp_selection_display``), so it needs
+    # no separate caption or count label beside it.
+    tp_button = reg.register("_bar_tp_button", QPushButton("Timepoints: 0 selected"))
     tp_button.setProperty("variant", "secondary")
     tp_button.clicked.connect(
         lambda _=False: open_bar_timepoint_selector(ctx)
     )
-    tp_label = reg.register("_bar_tp_label", QLabel("(0 selected)"))
-    tp_label.setObjectName("Muted")
-    bar_ctrl.add_scope("Timepoints", tp_button, tp_label)
+    bar_ctrl.add_scope("", tp_button)
     # Hidden legacy single-tp combo — kept so export / save-figure code that
     # reads ``_bar_tp_cb.currentText()`` (export/service.py, view_state.py,
     # batch_export/bar_panel.py, plot_orchestrator.py) sees the first

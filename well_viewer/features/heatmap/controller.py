@@ -136,7 +136,7 @@ def sync_heatmap_slider_to_focus(ctx) -> None:
             slider.blockSignals(blocked)
     label = ctx.widgets.get_or_none("_heatmap_tp_label")
     if label is not None:
-        label.setText(f"t = {tps[i]:g} h")
+        label.setText(f"Timepoint: {tps[i]:g} h")
 
 
 def _repsets_loaded(ctx) -> list:

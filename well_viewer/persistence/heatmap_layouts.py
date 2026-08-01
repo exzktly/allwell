@@ -180,7 +180,7 @@ def apply_persisted_settings(ctx) -> None:
             tps = list((hm.tp_values if hm is not None else None) or [])
             label = ctx.widgets.get_or_none("_heatmap_tp_label")
             if label is not None and tps and clamped < len(tps):
-                label.setText(f"t = {tps[clamped]:g} h")
+                label.setText(f"Timepoint: {tps[clamped]:g} h")
 
     # Successfully applied — keep the dict around in case the tab rebuilds.
     # (No need to clear it; a subsequent save_to_data_dir overwrites the file

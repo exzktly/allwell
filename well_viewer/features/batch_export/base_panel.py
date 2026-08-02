@@ -1016,12 +1016,20 @@ class BatchExportPanel(QWidget):
             return
         rset = next((r for r in _rep_sets_loaded(self._ctx) if tok in r.wells), None)
         if rset is not None:
+            # Membership is tested by *name*, not by object identity.
+            # ``rep_sets_loaded`` builds a fresh ``ReplicateSet`` on every call
+            # and the class has no ``__eq__``, so ``rset in grp.members`` was
+            # always False: dragging across two wells of one sample appended
+            # that sample twice (the group then exports the condition twice),
+            # and dragging a sample back off a group removed nothing at all.
+            # The name is already the identity key everywhere else — it is what
+            # ``_serialize_groups`` persists and what hydration matches on.
+            existing = next((m for m in grp.members if m.name == rset.name), None)
             if self._drag_adding:
-                if rset not in grp.members:
+                if existing is None:
                     grp.members.append(rset)
-            else:
-                if rset in grp.members:
-                    grp.members.remove(rset)
+            elif existing is not None:
+                grp.members.remove(existing)
         else:
             if self._drag_adding:
                 if tok not in grp.solo_wells:

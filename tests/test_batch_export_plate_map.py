@@ -184,3 +184,135 @@ def test_a_real_drag_gesture_reaches_the_group(loaded_app):
                                buttons=Qt.NoButton))
 
     assert set(panel._groups[0].wells) >= set(wells)
+
+
+def _define_replicate_set(app, name: str, wells: list[str]) -> None:
+    """Add a sample definition the way the Sample Definitions tab would."""
+    app._ctx.state.selection.selections.append({"name": name, "wells": list(wells)})
+
+
+def test_dragging_one_well_of_a_replicate_set_adds_the_whole_set(loaded_app):
+    """A group's model is replicate sets + solo wells, not a flat well list.
+    Touching any well of a defined sample adds that *sample* as a member, so
+    the group keeps meaning "this condition" rather than "these three wells".
+
+    The plate swap changed everything around `_apply_drag` — the gesture's
+    source, its polarity latch, and the repaint — so this drives the real
+    press/drag/release through the plate to prove the resolution still runs.
+    """
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from widgets.well_plate_selector import _parse_well_id
+    from well_viewer.features.batch_export._common import BarGroup
+
+    have = list(loaded_app._app_state.dataset.well_paths)
+    if len(have) < 3:
+        import pytest
+        pytest.skip("fixture dataset has fewer than three wells")
+    rep_wells, other = have[:2], have[2]
+    _define_replicate_set(loaded_app, "Condition A", rep_wells)
+
+    panel = _panel(loaded_app)
+    panel._groups.append(BarGroup("G1"))
+    panel._active_grp = 0
+    panel._refresh_map()
+    panel._map_plate.resize(480, 320)
+    grid = _grid(panel)
+
+    def _ev(well, kind, buttons=Qt.LeftButton):
+        row, col = _parse_well_id(well)
+        return QMouseEvent(kind, QPointF(grid._cell_rect(row, col).center()),
+                           Qt.LeftButton, buttons, Qt.NoModifier)
+
+    # Press on ONE well of the replicate set.
+    grid.mousePressEvent(_ev(rep_wells[0], QMouseEvent.Type.MouseButtonPress))
+    grid.mouseReleaseEvent(_ev(rep_wells[0], QMouseEvent.Type.MouseButtonRelease,
+                               buttons=Qt.NoButton))
+
+    grp = panel._groups[0]
+    # The whole sample joined, as a member — not as one solo well.
+    assert [m.name for m in grp.members] == ["Condition A"]
+    assert grp.solo_wells == []
+    assert set(grp.wells) == set(rep_wells)
+
+    # A well outside any sample still joins as a solo.
+    grid.mousePressEvent(_ev(other, QMouseEvent.Type.MouseButtonPress))
+    grid.mouseReleaseEvent(_ev(other, QMouseEvent.Type.MouseButtonRelease,
+                               buttons=Qt.NoButton))
+    assert grp.solo_wells == [other]
+    assert [m.name for m in grp.members] == ["Condition A"]
+    assert set(grp.wells) == set(rep_wells) | {other}
+
+
+def test_dragging_a_replicate_set_back_off_removes_the_whole_set(loaded_app):
+    """Remove is the mirror: the polarity latched on the press applies to the
+    member, so one touch takes the sample out rather than orphaning the rest
+    of its wells in the group."""
+    from well_viewer.features.batch_export._common import BarGroup
+
+    have = list(loaded_app._app_state.dataset.well_paths)
+    if len(have) < 2:
+        import pytest
+        pytest.skip("fixture dataset has fewer than two wells")
+    rep_wells = have[:2]
+    _define_replicate_set(loaded_app, "Condition B", rep_wells)
+
+    panel = _panel(loaded_app)
+    panel._groups.append(BarGroup("G1"))
+    panel._active_grp = 0
+
+    panel._plate_press(rep_wells[0])
+    assert [m.name for m in panel._groups[0].members] == ["Condition B"]
+
+    # Pressing a well the group already owns latches the remove polarity.
+    panel._plate_press(rep_wells[0])
+    assert panel._drag_adding is False
+    assert panel._groups[0].members == []
+    assert panel._groups[0].wells == []
+
+
+def test_a_replicate_set_spanning_the_drag_is_added_once(loaded_app):
+    """Dragging across several wells of the same sample must not append the
+    sample twice — the group would then export it doubled."""
+    from well_viewer.features.batch_export._common import BarGroup
+
+    have = list(loaded_app._app_state.dataset.well_paths)
+    if len(have) < 2:
+        import pytest
+        pytest.skip("fixture dataset has fewer than two wells")
+    rep_wells = have[:2]
+    _define_replicate_set(loaded_app, "Condition C", rep_wells)
+
+    panel = _panel(loaded_app)
+    panel._groups.append(BarGroup("G1"))
+    panel._active_grp = 0
+
+    panel._plate_press(rep_wells[0])
+    panel._plate_dragged(rep_wells[1])      # second well of the SAME sample
+    assert [m.name for m in panel._groups[0].members] == ["Condition C"]
+
+
+def test_the_whole_replicate_set_takes_the_group_colour_after_the_gesture(loaded_app):
+    """Adding a sample by touching one of its wells colours all of them —
+    the mid-drag repaint only knows the well under the cursor, so the
+    end-of-gesture `_refresh_map` is what makes the rest catch up."""
+    from widgets.well_plate_selector import _parse_well_id
+    from well_viewer.features.batch_export._common import BarGroup
+
+    have = list(loaded_app._app_state.dataset.well_paths)
+    if len(have) < 2:
+        import pytest
+        pytest.skip("fixture dataset has fewer than two wells")
+    rep_wells = have[:2]
+    _define_replicate_set(loaded_app, "Condition D", rep_wells)
+
+    panel = _panel(loaded_app)
+    panel._groups.append(BarGroup("G1"))
+    panel._active_grp = 0
+    panel._plate_press(rep_wells[0])
+    panel._plate_release()                  # end of gesture → full refresh
+
+    grid = _grid(panel)
+    for well in rep_wells:
+        assert grid._colors.get(_parse_well_id(well)) is not None, well
+        assert _parse_well_id(well) in grid._rings, well

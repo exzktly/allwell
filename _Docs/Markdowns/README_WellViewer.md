@@ -39,7 +39,6 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Running from source](#running-from-source)
 3. [Quick start](#quick-start)
 4. [Analyze mode — running the pipeline](#analyze-mode--running-the-pipeline)
-   - [Preview — see the settings on a real frame before running](#preview--see-the-settings-on-a-real-frame-before-running)
 5. [Review mode — exploring results](#review-mode--exploring-results)
    - [The Review window at a glance](#the-review-window-at-a-glance)
    - [Controls shared by every tab](#controls-shared-by-every-tab)
@@ -381,46 +380,10 @@ You can also explicitly override the output folder.
     neighbours stay separate; **turn it down** if one nucleus is being counted
     twice.
   - Both take a value between 0 and 1; anything else is ignored and the model's
-    own default is used. Rather than guessing, switch the right-hand panel from
-    **Run** to **Preview** and watch a real frame from your input folder while
-    you change them — see [Preview](#preview--see-the-settings-on-a-real-frame-before-running) below.
-
-### Preview — see the settings on a real frame before running
-
-The right-hand panel of the Analyze tab has two pages, **Run** and **Preview**.
-Run is the progress dashboard and log. Preview shows one image from your input
-folder, drawn with the settings you have set on the left.
-
-**It has no settings of its own.** Everything it draws with — flat-field,
-background method, radius, mesh, and the two StarDist thresholds — is read from
-the form. Change a value on the left and the preview follows it immediately.
-That is deliberate: there is no "apply" step to forget, and no way for the frame
-you tuned to differ from the run you launch.
-
-- **Needs** — an input folder. No processed dataset, no previous run.
-- **Frame** — pick which image to look at. The list is drawn from your input
-  folder in whichever layout it uses (loose images, images under `in/`, or
-  per-well zips), and starts on the segmentation channel, since that is the one
-  StarDist actually sees. **Reload** re-scans the folder.
-- **LUT** — display brightness only; leave blank for automatic. Hovering the
-  image reports the pixel value under the cursor; **− / + / Fit** zoom, and you
-  can drag to pan.
-- **Segment** — runs StarDist on the displayed frame with the thresholds from
-  the form and outlines what it found, so you can see what a threshold change
-  actually does. The status line reports the nucleus count and the thresholds
-  that produced it.
-  - **The first Segment of a session is slow** — around 10–30 seconds, because
-    it loads TensorFlow and the StarDist model, and about 1–2 GB stays in use
-    until you quit. Every later Segment takes a few seconds.
-  - Change the frame or any setting and the outlines no longer describe what is
-    on screen, so they are removed and the status line says they are stale.
-    Press **Segment** again.
-- **One thing the preview cannot do**: `empty_well` and `basic` flat-field
-  measure their correction from a whole reference well across the plate, which a
-  single frame cannot supply. The preview says so in its status line and draws
-  without it — **your run will still apply it.**
-
-Pressing **Run** switches back to the Run page automatically.
+    own default is used. Rather than guessing, tune them against a real image in
+    **Review → Image Browser → [Playground](#playground)**, which segments with
+    these same two values and can open any image straight from disk — then type
+    what worked into the two fields here.
 
 ### 5. Auto-threshold — picking each channel's "on" cut
 
@@ -1603,9 +1566,9 @@ exact correction and segmentation code).
 
 - **Needs** — nothing. With a dataset loaded it works on that dataset's frames
   and can show the pipeline's saved mask alongside; with no dataset at all,
-  **Open image…** loads any TIFF from disk. (Choosing settings for a run you are
-  about to launch belongs in the Analyze tab's [Preview](#preview--see-the-settings-on-a-real-frame-before-running) instead — it
-  draws with the run's own settings.)
+  **Open image…** loads any TIFF from disk. That second source is what makes
+  this usable *before* a plate has been run, which is when segmentation settings
+  most want choosing.
 - **Choosing the frame** — either pick the **well on the ever-present left-rail
   plate** (single-well here — the tab has no plate of its own, it drives the
   sidebar picker) plus the **channel / timepoint / FOV** dropdowns, or press
@@ -1630,11 +1593,11 @@ exact correction and segmentation code).
   - Change the frame or any correction setting and the labels no longer describe
     what is on screen, so they are **removed** and the status line says they are
     stale. Press **Segment** again.
-- **Optimal use** — checking a well that came out wrong: compare corrections on
-  a frame you have already processed, with the pipeline's own mask to compare
-  against. To choose the settings *for* a run, use the Analyze tab's
-  [Preview](#preview--see-the-settings-on-a-real-frame-before-running) instead — it draws with the run's own settings, so there
-  is nothing to copy across.
+- **Optimal use** — two jobs, both here. *Before* a run: **Open image…** a
+  representative frame, dial in a correction method and the two segmentation
+  thresholds, then type those values into the Analyze tab's matching fields and
+  run the plate. *After* a run: load the dataset and check a well that came out
+  wrong, comparing live segmentation against the pipeline's own saved mask.
 
 ### smFISH
 

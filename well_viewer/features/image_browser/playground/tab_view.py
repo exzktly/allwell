@@ -211,8 +211,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sbl.setContentsMargins(0, 2, 0, 2)
     seg_btn = QPushButton("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
-    hint = QLabel("To choose the settings for a run, use Analyze → Preview: it "
-                  "draws a frame with the run's own settings.", controls)
+    hint = QLabel("Tuned here, then run the plate: type the same two values into "
+                  "Analyze → Channel Tokens → Nucleus probability / Overlap.",
+                  controls)
     hint.setObjectName("Muted")
     hint.setWordWrap(True)
 

@@ -122,6 +122,10 @@ def snapshot(ctx) -> dict:
         "use_fov_replicates": bool(ctx.state.plot.use_fov_replicates),
         "show_threshold_line": bool(ctx.state.plot.show_threshold_line),
         "show_significance": bool(ctx.state.plot.show_significance),
+        # The time-axis label multiplier. Captured because it changes what every
+        # time axis in a restored view reads, and a saved plot whose axis said
+        # 4, 8, 12 must not come back saying 1, 2, 3 with no explanation.
+        "time_scale": float(ctx.state.plot.time_scale),
         # Per-panel legend-trace visibility, the user's Line-graph draw order (the
         # Bar draw order rides in the per-tab block), and the cross-tab focus
         # timepoint — all shape the rendered plot but were previously uncaptured.
@@ -373,6 +377,16 @@ def restore(ctx, state: dict) -> None:
     if "show_significance" in state:
         try:
             ctx.state.plot.show_significance = bool(state["show_significance"])
+        except Exception:
+            swallowed()
+
+    if "time_scale" in state:
+        # Through ``coerce_factor`` rather than ``float()``: a hand-edited or
+        # truncated file could hold a zero or a negative, which would collapse or
+        # mirror every time axis. An unusable value restores the off state.
+        try:
+            from well_viewer.domain.time_rescale import coerce_factor
+            ctx.state.plot.time_scale = coerce_factor(state["time_scale"])
         except Exception:
             swallowed()
 

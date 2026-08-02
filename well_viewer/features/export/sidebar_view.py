@@ -597,6 +597,32 @@ class ExportStyleSidebar(QWidget):
         thr_tog.toggled.connect(_on_threshold_line_toggle)
         add_row(s_over, "", thr_tog)
 
+        # Time-axis label multiplier. Drives PlotState.time_scale, read by the
+        # Line, Bar and Spatial renderers. Label-only: the plotted values, the
+        # timepoint menus, the Statistics tab and every export keep the hours
+        # the pipeline parsed out of the filenames, and any axis it changes says
+        # so in its label.
+        time_scale = _Stepper(minimum=0.001, maximum=1000.0, single_step=0.5,
+                              value=float(getattr(
+                                  self._app._app_state.plot, "time_scale", 1.0)),
+                              decimals=3)
+        time_scale.setToolTip(
+            "Multiply the time-axis labels by this factor. For a plate whose "
+            "filenames are numbered T01…T12 but which was imaged every 4 hours, "
+            "set 4 and the axis reads 4, 8, 12 …\n\n"
+            "Labels only — the timepoint menus, the Statistics tab and every "
+            "exported CSV keep the hours read from the filenames, so a rescaled "
+            "axis names the factor to say why the numbers differ. 1 = off.")
+
+        def _on_time_scale(value: float) -> None:
+            self._app._app_state.plot.time_scale = float(value)
+            try:
+                self._redraw_active_plot()
+            except Exception:
+                swallowed()
+        time_scale.valueChanged.connect(_on_time_scale)
+        add_row(s_over, "Rescale time", time_scale)
+
         # ── Lines & Markers ─────────────────────────────────────────────────
         s_lm = section("Lines & Markers", expanded=False)
         ls_cb = QComboBox()
@@ -1024,6 +1050,13 @@ class ExportStyleSidebar(QWidget):
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
                 scatter_redraw_active(app._ctx)
+            elif tab == "Spatial":
+                # Spatial renders from its own cached result and is not part of
+                # ``redraw_app``'s fan-out, so without this branch a Properties
+                # edit made while looking at it changed nothing until the tab
+                # was left and re-entered.
+                from well_viewer.features.spatial.renderer import render_spatial
+                render_spatial(app._ctx)
             else:
                 app._redraw()
         except Exception:

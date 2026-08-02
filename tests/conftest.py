@@ -189,6 +189,11 @@ class MockApp:
         # (A8) read the toggle here instead of the ``_use_fov_spread_active``
         # method, so mirror the MockApp override field into typed state.
         st.plot.use_fov_replicates = getattr(self, "_use_fov_replicates", False)
+        # Time-axis label multiplier (Properties → "Rescale time"). Mirrored
+        # from a MockApp field for the same reason as the FOV flag above: this
+        # state object is rebuilt on every access, so a test cannot set it by
+        # mutating the returned AppState.
+        st.plot.time_scale = getattr(self, "_time_scale", 1.0)
         st.plot.fc_vs_control_on = self.fc_vs_control_on
         st.plot.fc_control_label = self.fc_control_label
         st.plot.fc_vs_t0_on = self.fc_vs_t0_on

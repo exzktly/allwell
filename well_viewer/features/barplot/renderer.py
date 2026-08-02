@@ -806,7 +806,11 @@ def redraw_bars(ctx) -> None:
         draw_bar_empty_state(ctx, ax_mean, ax_frac, "Select a timepoint above", ax_n=ax_n)
         return
     target_ts = [t for t, _ in tp_list]
-    tp_strs = [s for _, s in tp_list]
+    # The panel titles ("t = … h") are read off the same figure as the tick
+    # labels, so they follow the rescale factor too — the selection keys these
+    # come from stay in the hours the pipeline parsed.
+    _tp_scale = ctx.state.plot.time_scale
+    tp_strs = [_rescale_tp(t, _tp_scale) for t in target_ts]
     tp_str_combined = ", ".join(tp_strs)
 
     if draw_per_cell_bar_mode(

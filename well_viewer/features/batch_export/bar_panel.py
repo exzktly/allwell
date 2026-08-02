@@ -423,7 +423,15 @@ class BarBatchExportPanel(BatchExportPanel):
         else:
             target_ts = [float(target_t)]
             tp_strs = [str(tp_str)] if not isinstance(tp_str, (list, tuple)) else list(tp_str)
-        tp_title = tp_strs[0] if len(tp_strs) == 1 else f"[{', '.join(tp_strs)}]"
+        # The suptitle names the same timepoints the bar tick labels do, so it
+        # follows the Properties sidebar's rescale factor. Built from the
+        # numeric targets rather than the incoming strings, which are selection
+        # keys and stay in the hours the pipeline parsed.
+        from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+        _tp_scale = self._ctx.state.plot.time_scale
+        _tp_titles = [_rescale_tp(t, _tp_scale) for t in target_ts]
+        tp_title = (_tp_titles[0] if len(_tp_titles) == 1
+                    else f"[{', '.join(_tp_titles)}]")
         fig = _Figure(figsize=(8, 10), dpi=300, facecolor=theme.CPub.bg)
         ax_mean = fig.add_subplot(3, 1, 1)
         ax_frac = fig.add_subplot(3, 1, 2)

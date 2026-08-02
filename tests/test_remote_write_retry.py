@@ -261,6 +261,12 @@ def _rsync_glob_stub(monkeypatch, *, listed: list[str], pull_ok: bool):
         host=types.SimpleNamespace(ssh_argv=lambda **k: ["ssh", "h"]),
         _rsync=lambda _argv: pull_ok,
     )
+    # ``_rsync_glob`` is now a two-line composition of the listing and the pull,
+    # split so the CSV half of a well's fetch can learn its byte total before it
+    # starts. Bind the real halves onto the stub so this still exercises them.
+    from services.remote_runner import Fetcher
+    stub._list_remote_glob = lambda src: Fetcher._list_remote_glob(stub, src)
+    stub._pull_listed = lambda h, f, d: Fetcher._pull_listed(stub, h, f, d)
     return stub
 
 

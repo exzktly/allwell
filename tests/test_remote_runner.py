@@ -1720,7 +1720,13 @@ def test_fetcher_fetch_one_logs_size_and_timing(host, tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(Fetcher, "_rsync", fake_rsync)
-    monkeypatch.setattr(Fetcher, "_rsync_glob", lambda self, src, dst: (1, 1))
+    # The CSV half is listed before the zip is pulled — the dial needs its byte
+    # total up front to span both transfers on one gauge — so the seam here is
+    # the listing plus the pull, not the combined ``_rsync_glob``.
+    monkeypatch.setattr(Fetcher, "_list_remote_glob",
+                        lambda self, src: ("h", ["/r/out/m_A01.csv"], 512))
+    monkeypatch.setattr(Fetcher, "_pull_listed",
+                        lambda self, host, files, dest: len(files))
     monkeypatch.setattr(Fetcher, "_materialize", lambda self, w, z: True)
     # The size query is a real ssh; there is no remote here.
     monkeypatch.setattr(Fetcher, "_remote_file_size", lambda self, p: None)

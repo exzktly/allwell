@@ -106,13 +106,6 @@ _RE_WELL_SKIP = re.compile(r"SKIP well (\S+)\s+\S+\s+output already exists")
 # Remote incremental: the runner emits this for wells it didn't need to upload /
 # re-fetch because their local output is already current — marks them complete.
 _RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
-# The end-of-run backstop re-pulled a well whose in-stream fetch fell short. It
-# bypasses the two-part zip+CSV handshake below entirely — by the time it runs
-# the well may have registered neither part — so it marks the well downloaded on
-# its own. Without this the backstop was silent and a well it rescued stayed
-# painted "computed, awaiting fetch" with its data already local.
-_RE_REMOTE_RETRIED = re.compile(
-    r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): re-fetched by the end-of-run retry")
 # Remote per-well lifecycle: input zip uploaded, then the output is fetched as
 # TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
@@ -277,6 +270,12 @@ class ProgressTracker:
         # A well is "downloaded" only once BOTH its output zip and its CSV(s)
         # have transferred — not on the first part, and not on ``✓ materialised``
         # (which fires even when the CSV pull failed and is deferred to a retry).
+        # The end-of-run retry backstop emits these same two lines (tagged
+        # "(end-of-run retry)") for a well it rescues, so a well fixed at the
+        # end completes the pair by the same route. It has to report both halves
+        # even where it only had to pull one: the in-stream fetcher returns on a
+        # failed zip pull *before* reaching the CSVs, so a well that reaches the
+        # backstop has usually registered neither.
         mz = _RE_FETCH_ZIP.search(line)
         if mz and self._mark_fetch_part(mz.group(1), "zip"):
             events.append(("well_stage", (mz.group(1), "download")))
@@ -299,10 +298,6 @@ class ProgressTracker:
         mru = _RE_REMOTE_UPTODATE.search(line)
         if mru:
             events.append(("well_stage", (mru.group(1), "download")))
-        # Remote: the end-of-run backstop re-pulled this well's artefacts.
-        mrr = _RE_REMOTE_RETRIED.search(line)
-        if mrr:
-            events.append(("well_stage", (mrr.group(1), "download")))
         # Finalize-phase status — replace the generic "Finalizing…" with what
         # the run is actually doing so it doesn't read as a hang.
         if _RE_TF_SCAN.search(line):

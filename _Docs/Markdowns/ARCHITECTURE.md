@@ -3310,17 +3310,32 @@ prevent. The regression guards for it assert on what the plate was *told*
 green throughout while the widget painted blue, so asserting the computed value
 is what hid it.
 
-**A well's output arrives as two transfers, and only the first has a size.** The
-zip is measurable; the CSVs that follow are not, and the well is not fetched
-until both have landed. So a download reaching 1.0 does *not* end the transfer
-the way an upload does — the ring **freezes at the last measured fraction**,
-green and visibly short of full, until `set_well_stage` marks the well
-`download`. Both alternatives are indistinguishable from some other state:
-dropping the entry returns the well to a full ring in the computed blue (a well
-that has not started downloading), and storing the 1.0 fills the ring green (a
-well already fetched). A closing 1.0 with no prior tick creates nothing — a well
-whose remote size probe failed never had a dial, and inventing one at the end
-would report progress that was never measured.
+**A well's output arrives as two transfers, and the dial spans both.** The
+`{well}_out.zip` and the well's CSVs are separate rsyncs, and the well is not
+fetched until both have landed — so `Fetcher._fetch_one_well` **lists the CSVs
+before it pulls the zip**, purely to learn their byte total, and both halves
+then measure against one combined denominator. The listing is the same ssh the
+pull needs anyway, moved earlier, so this costs no extra round trip.
+`_list_remote_glob` returns `(host, paths, total bytes)` — the paths from
+`ls -1` exactly as the pull has always parsed them, the total from an `ls -ln |
+awk` sum in the *same* script, kept separate because those columns vary between
+GNU and BSD and break on a filename with a space. `_transfer_heartbeat` takes a
+`bytes_so_far` counter (the CSVs land as several files, not one named path) and
+a `base_bytes` offset carrying everything the zip already contributed, so the
+gauge continues rather than restarting near zero — a dial that dropped back
+partway through a fetch would read as a retry.
+
+Either size being unknown drops the combined total to the zip's own, or to
+`None`, and the dial simply stops or never runs: an unknown denominator must not
+become an invented one. That is when the widget's **freeze** rule carries the
+rendering. A download reaching 1.0 does not end the transfer the way an upload
+does; the ring holds at the last measured fraction — green, visibly short of
+full — until `set_well_stage` marks the well `download`. Both alternatives are
+indistinguishable from some other state: dropping the entry returns the well to
+a full ring in the computed blue (a well that has not started downloading), and
+storing the 1.0 fills the ring green (a well already fetched). A closing 1.0
+with no prior tick creates nothing, since a well whose size probe failed never
+had a dial at all.
 
 **Rail denominators are per stage.** A remote run's stages do not count the
 same population: every well on the plate is grouped locally, while only the
@@ -4126,12 +4141,15 @@ sample every `interval`, and a durable breadcrumb every `_BREADCRUMB_INTERVAL_S`
 where both are present. Two paths bypass that handshake, and both must announce
 themselves or the well stays painted "computed, awaiting fetch" with its data
 already on disk: a well the remote skipped as already current
-(`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop
-(`[remote] ✓ W: re-fetched by the end-of-run retry`, emitted by
-`RemoteRunner._retry_missing_wells`). The backstop needs its own line because by
-the time it runs the well may have registered *neither* half — the in-stream
-fetcher returns early when the zip pull fails, before it reaches the CSVs — so
-there is nothing for the handshake to complete. The drain's own chatter
+(`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop. The
+backstop reports in the **same two lines** the in-stream fetch uses, tagged
+`(end-of-run retry)` — `RemoteRunner._retry_missing_wells` emits both halves for
+every well it finishes with, including a half it did not have to re-pull,
+because by the time it runs the well has usually registered *neither*: the
+in-stream fetcher returns early when the zip pull fails, before it reaches the
+CSVs. Reusing the fetch vocabulary rather than inventing a form of its own means
+a rescued well reaches green by the same route, with nothing extra for the
+tracker to learn. The drain's own chatter
 (`draining fetcher: N well(s)`, `still downloading… (5/8 wells)`) carries counts
 rather than well ids and deliberately marks nothing.
 

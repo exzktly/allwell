@@ -534,7 +534,13 @@ A cell counts only when it is manually kept **and** it passes QC.
     across processes, so more workers don't help GPU throughput.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
-- **Force re-run.** Re-processes wells whose output ZIPs already exist.
+- **Force re-run.** Re-processes wells whose output ZIPs already exist. On a
+  remote run this now carries all the way to the end: the run will not decide
+  the remote's existing outputs make the work unnecessary, the fetch will not
+  skip a well because its local copy looks complete, and — if a well's output
+  file comes back with the same size and timestamp it had before the run — the
+  run says so by name and fails rather than reporting success over an artefact
+  it never replaced.
 - **Force these wells.** Comma-separated wells to reprocess in full, whatever
   else the run decides. This is the only thing that recovers a well whose
   `<WELL>_out.zip` exists but whose measurements CSV is missing: its own
@@ -1004,6 +1010,14 @@ count) — plus a CDF.
   only the images it will upload, so it is roughly as fast as the upload itself.
   Whether an archive counts as unchanged is judged on its images only, so the
   `.DS_Store` and other stray files a zip picks up never cause a rebuild.
+- **Remote runs: what came back, in a file you can read later** — a remote run
+  writes `remote_fetch_report.txt` into the output folder listing every well the
+  remote produced output for and what happened to it: `fetched`, `skipped`
+  (with the reason its local copy was judged already complete), or
+  `never-announced` (no completion marker was seen for it, so nothing was
+  pulled). The run log says the same thing while it runs, but the log drawer
+  closes and this does not — if a well's numbers look like the previous run's,
+  this file is the first thing to read.
 - **Grouping loose TIFs: the folders go away as they are packed** — when a run
   has to group your images into per-well folders and pack each into a
   `<well>.zip`, each folder is deleted as soon as its own archive is written, so

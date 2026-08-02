@@ -71,6 +71,7 @@ from pipeline.run_report import (
     read_run_report_block,
 )
 from pipeline.well_skip import _canonical_force_wells
+from util.well_token import canonical_well_label as _canonical_well_label
 from pipeline.incremental_keys import (
     fov_tp_from_name,
     read_done_fov_keys,
@@ -250,7 +251,13 @@ def _staging_free_bytes(path: Path) -> int | None:
 # as "Well A01 â€" done."). Without this the Fetcher never fired per-well during
 # the run — no download progress, and the out dir only filled from the
 # end-of-run backstop.
-_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{2})\s+\S+\s+done\.")
+# One or two digits: the pipeline logs whatever label the input carried, so a
+# plate zipped as ``C8.zip`` announces "Well C8 — done." A two-digit-only
+# pattern never matched that, the well never entered ``expected_wells``, and
+# it was therefore never fetched — the same class of mismatch
+# ``_canonical_force_wells`` exists to prevent on the other side of this
+# comparison. The label is canonicalised at the match site.
+_RE_WELL_DONE = re.compile(r"(?:\bWell\s+)?(?P<well>[A-Ha-h]\d{1,2})\s+\S+\s+done\.")
 _RE_MODE_WELLS = re.compile(r"(?:Zip mode|Flat mode|Folder mode):\s+(\d+)\s+well")
 
 # Default output-filter glob set: just CSVs and the top-level metadata
@@ -910,6 +917,92 @@ def _compute_run_id(cache_key: str, pipeline_argv: list[str]) -> str:
         i += 1
     digest = hashlib.blake2b("|".join(filtered).encode(), digest_size=8).hexdigest()
     return f"{cache_key[:16]}-{digest}"
+
+
+def _snapshot_local_artifacts(local_output_dir: Path) -> dict:
+    """Fingerprint the output artefacts already on disk, before the run.
+
+    ``(size, mtime_ns)`` per path. Cheap — one ``stat`` per file, no reads — and
+    it is the only way verify can tell "this well's output was replaced" from
+    "this well's output is still the one from yesterday", which are otherwise
+    the same observation: a file that exists and is non-empty.
+    """
+    out: dict = {}
+    try:
+        entries = list(local_output_dir.glob("*"))
+    except OSError:
+        return out
+    for path in entries:
+        try:
+            if path.is_file():
+                st = path.stat()
+                out[path.name] = (st.st_size, st.st_mtime_ns)
+        except OSError:
+            continue
+    return out
+
+
+def _artifact_changed(run, path: Path) -> bool:
+    """Whether *path* differs from its pre-run fingerprint.
+
+    A file absent from the snapshot is new, so it changed. Anything that cannot
+    be stat'd now is reported as changed rather than failing the run on an
+    unreadable file — this check exists to catch output that was silently *not*
+    written, not to invent new ways for a good run to fail.
+    """
+    before = (run.pre_run_artifacts or {}).get(path.name)
+    if before is None:
+        return True
+    try:
+        st = path.stat()
+    except OSError:
+        return True
+    return (st.st_size, st.st_mtime_ns) != before
+
+
+def _forced_from_argv(pipeline_argv: list[str]) -> tuple[bool, frozenset[str]]:
+    """The run's re-processing intent, read back off the argv it will run.
+
+    The argv is the only place both spawn paths agree on what the user asked
+    for, and the batched runner already reads ``--force`` back out of it the
+    same way. Returns ``(force_all, forced_wells)``.
+    """
+    force_all = "--force" in pipeline_argv
+    wells: list[str] = []
+    if "--force_wells" in pipeline_argv:
+        i = pipeline_argv.index("--force_wells") + 1
+        while i < len(pipeline_argv) and not pipeline_argv[i].startswith("--"):
+            wells.append(pipeline_argv[i])
+            i += 1
+    return force_all, _canonical_force_wells(wells)
+
+
+def _pipeline_launch_is_pointless(
+    pipeline_argv: list[str], expected_well_count: int, completed_remote: set[str],
+) -> bool:
+    """Whether the remote pipeline can be replaced with a no-op.
+
+    True only when the remote already holds output for every well **and the run
+    has not been asked to reprocess anything**. That second clause is the whole
+    point of this predicate existing.
+
+    ``_compute_run_id`` deliberately leaves ``--force`` out of its hash so a
+    forced re-run lands in the *same* remote output dir and overwrites it —
+    which is exactly what stocks that dir with a complete set of ``_out.zip``
+    files from the previous run. Without a force term here, those two reasonable
+    decisions compose into a guarantee: a forced run always resolves to a dir
+    that always looks like a cache hit, so the pipeline is replaced by ``true``,
+    nothing is recomputed, nothing is fetched, and every local artefact keeps
+    the previous run's bytes and mtime while the run reports success. The
+    stronger the user's demand to reprocess, the more certain it was to be
+    ignored.
+    """
+    if expected_well_count <= 0:
+        return False
+    force_all, forced_wells = _forced_from_argv(pipeline_argv)
+    if force_all or forced_wells:
+        return False
+    return len(completed_remote) >= expected_well_count
 
 
 def _required_tokens(
@@ -3130,6 +3223,23 @@ class _RemoteRun:
     # Fetcher merges them into the existing local CSV / out-zip instead of
     # overwriting.
     incremental: bool = False
+    # What the run was told to reprocess. Carried here because the decisions
+    # that act on it are downstream of the staging planner, which is where the
+    # intent used to stop: the Fetcher decides whether a local artefact is
+    # replaced, and "it already exists locally" is precisely the wrong reason to
+    # skip a well the user asked to have replaced.
+    force: bool = False
+    force_wells: frozenset[str] = frozenset()
+    # Pre-run fingerprint of the local output artefacts, ``path -> (size,
+    # mtime_ns)``. Verify compares against it so a run that was told to replace
+    # a well's output has to prove it did, rather than proving the old file is
+    # still there.
+    pre_run_artifacts: dict = field(default_factory=dict)
+    # Why each well the Fetcher declined to transfer was declined, ``well ->
+    # reason``. "Why was this well not fetched?" was answerable only from
+    # stdout as it streamed, which is no help once the log window is closed;
+    # this is what the end-of-run reconciliation reads.
+    skipped_wells: dict = field(default_factory=dict)
 
 
 class _RemoteProcess:
@@ -3358,6 +3468,7 @@ class _BatchedRemoteProcess:
             check=True,
         )
 
+        _force, _forced_wells = _forced_from_argv(pipeline_argv)
         runner._run = _RemoteRun(
             run_id=run_id,
             cache_key=key,
@@ -3368,6 +3479,8 @@ class _BatchedRemoteProcess:
             local_input_mode=zipped.mode,
             output_filter=output_filter,
             incremental=zipped.incremental,
+            force=_force, force_wells=_forced_wells,
+            pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
         )
 
         # One Fetcher persisting across batches. Pre-set the total well
@@ -3878,7 +3991,7 @@ class Fetcher:
         # regex never matches and per-well rsync never fires.
         m = _RE_WELL_DONE.search(stdout_line)
         if m:
-            well = m.group("well").upper()
+            well = _canonical_well_label(m.group("well")) or m.group("well").upper()
             self.run.expected_wells.add(well)
             self._pending.put(well)
 
@@ -4164,6 +4277,13 @@ class Fetcher:
         run = self.run
         if well in run.expected_wells:
             return None                       # this run produced new output
+        if run.force or well in run.force_wells:
+            # The user asked for this well to be reprocessed, so the local
+            # artefact is the thing being replaced — "it already exists" is the
+            # one reason that cannot justify keeping it. A forced well missing
+            # from ``expected_wells`` means its completion marker was never
+            # seen, which is a reason to look harder, not to skip.
+            return None
         if run.output_filter is OutputFilter.FULL:
             local_zip = run.local_output_dir / f"{well}_out.zip"
             if not (local_zip.exists() and _zip_is_complete(local_zip)):
@@ -4190,6 +4310,7 @@ class Fetcher:
         skip_reason = self._already_local(well)
         if skip_reason is not None:
             self._log(f"[remote] ⤼ {well}: {skip_reason} — not re-fetched\n")
+            self.run.skipped_wells[well] = skip_reason
             self.run.fetched_wells.add(well)
             return
         tmp_zip = _scratch_dir() / f"allwell-{self.run.run_id}-{well}_out.zip"
@@ -4201,12 +4322,16 @@ class Fetcher:
         prefix = f"({position}/{total}) " if total else ""
 
         # Say *why* this well is being pulled. A fetch that sits on one well
-        # for minutes is only diagnosable if the log distinguishes "this run
-        # produced new output for it" from "the end-of-run sweep found it
-        # missing locally" — the second, on a well whose files are already on
-        # disk, is work that should not be happening at all.
-        why = ("this run produced new output" if well in self.run.expected_wells
-               else "end-of-run sweep: not complete locally")
+        # for minutes is only diagnosable if the log distinguishes the three
+        # reasons a well reaches this point: it announced completion, the run
+        # was told to reprocess it, or its local copy is incomplete. The last
+        # one, on a well whose files look present, is the interesting case.
+        if well in self.run.expected_wells:
+            why = "this run produced new output"
+        elif self.run.force or well in self.run.force_wells:
+            why = "forced reprocess — the local copy is being replaced"
+        else:
+            why = "not complete locally"
         self._log(
             f"[remote] ↓ {prefix}{well}: starting download from "
             f"{self.host.ssh_alias} ({why})\n")
@@ -4895,6 +5020,7 @@ class RemoteRunner:
             check=True,
         )
 
+        _force, _forced_wells = _forced_from_argv(pipeline_argv)
         self._run = _RemoteRun(
             run_id=run_id,
             cache_key=key,
@@ -4905,6 +5031,8 @@ class RemoteRunner:
             local_input_mode=zipped.mode,
             output_filter=output_filter,
             incremental=zipped.incremental,
+            force=_force, force_wells=_forced_wells,
+            pre_run_artifacts=_snapshot_local_artifacts(local_output_dir),
         )
 
         # v5.2.27: pre-flight cache-hit check. Before launching the
@@ -4944,12 +5072,22 @@ class RemoteRunner:
                 f"{sorted(completed_remote)[:5]}"
                 f"{'…' if len(completed_remote) > 5 else ''})\n"
             )
-            if len(completed_remote) >= expected_well_count:
+            if _pipeline_launch_is_pointless(
+                    pipeline_argv, expected_well_count, completed_remote):
                 cache_hit = True
                 log(
                     "[remote] FULL CACHE HIT — every well has output "
                     "already; skipping pipeline launch and proceeding "
                     "straight to verify + fetch.\n"
+                )
+            elif len(completed_remote) >= expected_well_count:
+                # The remote has everything, but the run was told to reprocess.
+                # Say so: the cache-hit line above is the one a user expects
+                # here, and its absence is otherwise unexplained.
+                log(
+                    "[remote] remote output dir is already complete, but this "
+                    "run was asked to reprocess — launching the pipeline "
+                    "anyway (it will overwrite).\n"
                 )
 
         if cache_hit:
@@ -5129,6 +5267,10 @@ class RemoteRunner:
         # back. A transient connection blip during a per-well rsync no
         # longer requires a full pipeline re-run — we re-pull the
         # missing files using the same retry-aware helpers.
+        # Record what happened to every well before verify passes judgement on
+        # it, so the classification survives whether or not verify fails.
+        self._reconcile_fetch(log=log)
+
         missing = self._verify_local_manifest(log=log)
         if missing:
             self._retry_missing_wells(missing, log=log)
@@ -5366,9 +5508,72 @@ class RemoteRunner:
             if want_zip:
                 zip_t0 = time.monotonic()
                 out_zip = run.local_output_dir / f"{well}_out.zip"
-                if not out_zip.exists() or out_zip.stat().st_size == 0:
+                # A well the run undertook to reprocess is the exception to
+                # "present means nothing to pull": the file sitting there is
+                # the one the new output was supposed to replace, so its mere
+                # presence is the symptom rather than the all-clear. Re-pull it
+                # when it still carries the pre-run size and timestamp — that
+                # is the difference between reporting the loss and repairing it.
+                stale = (
+                    (run.force or well in run.force_wells)
+                    and out_zip.exists()
+                    and not _artifact_changed(run, out_zip)
+                )
+                if not out_zip.exists() or out_zip.stat().st_size == 0 or stale:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
                 _report_zip(well, time.monotonic() - zip_t0)
+
+    def _reconcile_fetch(self, *, log: Callable[[str], None]) -> str:
+        """Classify every well the remote holds output for, and record it.
+
+        Three outcomes are possible for a well by the time the fetch is over:
+        it was transferred, it was skipped because its local copy already
+        looked complete, or the run never saw a completion marker for it. The
+        first is the normal case; the other two are the ones a user has to be
+        able to ask about afterwards, and until now the answer existed only in
+        the run log as it streamed. A report written beside the outputs
+        outlives the log drawer.
+        """
+        run = self._run
+        if run is None:
+            return ""
+        remote_wells = sorted(self._list_remote_completed_wells())
+        lines = [
+            f"run_id: {run.run_id}",
+            f"force: {run.force}",
+            f"force_wells: {', '.join(sorted(run.force_wells)) or '(none)'}",
+            f"incremental: {run.incremental}",
+            f"wells with output on the remote: {len(remote_wells)}",
+            "",
+        ]
+        counts = {"fetched": 0, "skipped": 0, "never-announced": 0}
+        for well in remote_wells:
+            if well in run.skipped_wells:
+                counts["skipped"] += 1
+                lines.append(f"{well}  skipped        {run.skipped_wells[well]}")
+            elif well in run.expected_wells:
+                counts["fetched"] += 1
+                lines.append(f"{well}  fetched        this run produced new output")
+            else:
+                counts["never-announced"] += 1
+                lines.append(
+                    f"{well}  never-announced no completion marker was seen "
+                    f"for this well")
+        summary = (
+            f"[remote] fetch reconciliation: {counts['fetched']} fetched, "
+            f"{counts['skipped']} skipped (already complete locally), "
+            f"{counts['never-announced']} never announced completion.\n"
+        )
+        log(summary)
+        report = run.local_output_dir / "remote_fetch_report.txt"
+        try:
+            report.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except OSError as exc:
+            swallowed(f"could not write {report}")
+            log(f"[remote] could not write the fetch reconciliation: {exc}\n")
+        else:
+            log(f"[remote] fetch reconciliation written to {report.name}.\n")
+        return summary
 
     def _verify_local_manifest(
         self, *, log: Callable[[str], None]
@@ -5413,6 +5618,13 @@ class RemoteRunner:
         # this branched on FOLDER mode and expected a <well>/ dir, which no
         # longer exists — that mismatch failed verify and skipped cleanup.)
         want_zip_artifact = run.output_filter is OutputFilter.FULL
+        # Wells this run undertook to rewrite. A forced run promised all of
+        # them; otherwise only the wells that announced completion produced
+        # anything new, and a well legitimately left alone must not be failed.
+        must_be_replaced = (
+            set(all_wells) if run.force
+            else (set(run.force_wells) | set(run.expected_wells))
+        )
         for well in sorted(all_wells):
             csvs = list(run.local_output_dir.glob(f"*_{well}.csv"))
             if not csvs:
@@ -5429,6 +5641,18 @@ class RemoteRunner:
                 out_zip = run.local_output_dir / f"{well}_out.zip"
                 if not out_zip.exists() or out_zip.stat().st_size == 0:
                     missing.append(f"missing {well}_out.zip locally")
+                elif well in must_be_replaced and not _artifact_changed(
+                        run, out_zip):
+                    # Existence is not the question for a well the run was told
+                    # to reprocess: the file that is present may be the one the
+                    # new output was supposed to replace. Byte-size and mtime
+                    # both unchanged means nothing was written here, and a run
+                    # that reports success over that is the failure mode this
+                    # check exists for — hours of remote compute discarded with
+                    # nothing on screen saying so.
+                    missing.append(
+                        f"{well}_out.zip was not replaced (same size and "
+                        f"timestamp as before the run)")
         if missing:
             for m in missing[:10]:
                 log(f"[remote] verify: {m}\n")

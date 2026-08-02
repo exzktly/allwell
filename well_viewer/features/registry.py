@@ -457,6 +457,15 @@ def _loaded_image_browser(ctx) -> None:
     ri = ctx.state.feature_slice("review_image")
     if ri is not None:
         ri.clear_caches()
+        # The armed drag-delete scope names wells from the *previous* plate, so
+        # it is disarmed here rather than carried across the swap — and its
+        # button relabelled, or the control row would still advertise a scope
+        # that no longer exists.
+        ri.reset_delete_scope()
+        from well_viewer.features.preview.delete_scope_view import (
+            refresh_delete_scope_button,
+        )
+        refresh_delete_scope_button(ctx)
     pv = ctx.state.feature_slice("preview")
     if pv is not None:
         pv.clear_caches()

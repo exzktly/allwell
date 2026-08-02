@@ -12,9 +12,16 @@ from well_viewer.features.image_browser.review_image.renderer import render_revi
 from well_viewer.features.image_browser.review_image.renderer import update_preview_ctx
 from well_viewer.features.image_browser.review_image.renderer import (
     review_image_get_color, review_image_set_color,
+    zoom_review_image_to_selected_nucleus,
+    zoom_review_image_to_selected_nucleus_ctx,  # noqa: F401  (re-export)
 )
 from well_viewer.features.image_browser.review_image.box_select import (
     box_select_begin, box_select_finish, box_select_update,
+)
+# What a finished drag *does* lives in callbacks.py; the handlers here decide
+# only which gesture is in progress. The dependency runs one way.
+from well_viewer.features.image_browser.review_image.callbacks import (  # noqa: F401
+    apply_box_delete, commit_included_overrides, override_key,
 )
 from well_viewer.core.channel_state_controller import set_active_image_channel
 from well_viewer.core.ui_helpers import set_combo_values as _set_combo_values
@@ -583,10 +590,9 @@ def set_review_cell_included(ctx, fov: str, tp: str, nid: str, included: str) ->
     from well_viewer.core.selection_controller import invalidate_stats_cache
     if ctx.state.preview.selected_well is None:
         return
-    fov_n, tp_n, nid_n = review_row_keys(ctx, {"fov": fov, "tp": tp, "nucleus_id": nid})
-    if not (fov_n and tp_n and nid_n):
+    key = override_key(ctx.state.preview.selected_well, fov, tp, nid)
+    if key is None:
         return
-    key = (ctx.state.preview.selected_well, fov_n, tp_n, nid_n)
     ctx.runtime.review.included_overrides[key] = str(included).strip() or "1"
     # Project the override onto the cached row immediately so other tabs
     # (Bar/Line/Distribution/Stats/Heatmap) honor it without waiting for
@@ -614,137 +620,6 @@ def set_review_cell_included(ctx, fov: str, tp: str, nid: str, included: str) ->
     ctx.state.review_image.zoom = prev_zoom
     ctx.state.review_image.pan_x = prev_pan_x
     ctx.state.review_image.pan_y = prev_pan_y
-    render_review_image_display(ctx)
-
-
-def set_review_cells_included_batch(
-    ctx, items: list[Tuple[str, str, str, str]]
-) -> None:
-    """Apply many (fov, tp, nid, included) overrides with a single redraw.
-
-    Mirrors _set_review_cell_included but coalesces the per-call
-    cache-projection, stats invalidation, save-schedule, and image
-    refresh — otherwise a 100-cell box delete would redraw 100 times.
-    """
-    from well_viewer.core.selection_controller import invalidate_stats_cache
-    if ctx.state.preview.selected_well is None or not items:
-        return
-    well = ctx.state.preview.selected_well
-    any_changed = False
-    for fov, tp, nid, included in items:
-        fov_n, tp_n, nid_n = review_row_keys(
-            ctx, {"fov": fov, "tp": tp, "nucleus_id": nid}
-        )
-        if not (fov_n and tp_n and nid_n):
-            continue
-        ctx.runtime.review.included_overrides[(well, fov_n, tp_n, nid_n)] = (
-            str(included).strip() or "1"
-        )
-        any_changed = True
-    if not any_changed:
-        return
-    apply_review_overrides_to_cache(ctx, well)
-    try:
-        invalidate_stats_cache(ctx)
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    ctx.persistence.schedule_save("cell_overrides")
-    ctx.state.review_image.override_version += 1
-    prev_zoom = float(ctx.state.review_image.zoom)
-    prev_pan_x = float(ctx.state.review_image.pan_x)
-    prev_pan_y = float(ctx.state.review_image.pan_y)
-    refresh_review_image_ctx(ctx)
-    ctx.state.review_image.zoom = prev_zoom
-    ctx.state.review_image.pan_x = prev_pan_x
-    ctx.state.review_image.pan_y = prev_pan_y
-    render_review_image_display(ctx)
-
-
-def apply_box_delete(ctx, x0: int, y0: int, x1: int, y1: int) -> None:
-    """Mark every cell with any pixel in mask[y0:y1, x0:x1] as Included=0.
-
-    Coordinates are in mask-array pixel space (already converted from
-    label-local pixels by _on_review_image_release using the current
-    _review_image_scale, so window position, scroll, and zoom are
-    already accounted for).
-    """
-    label = ctx.runtime.review_image.label
-    mask = getattr(label, "_mask_arr", None) if label is not None else None
-    if mask is None or ctx.state.preview.selected_well is None:
-        return
-    h, w = int(mask.shape[0]), int(mask.shape[1])
-    xa, xb = sorted((max(0, min(w, int(x0))), max(0, min(w, int(x1)))))
-    ya, yb = sorted((max(0, min(h, int(y0))), max(0, min(h, int(y1)))))
-    if xb - xa < 1 or yb - ya < 1:
-        return
-    sub = mask[ya:yb, xa:xb]
-    nids = [int(n) for n in _np.unique(sub) if int(n) > 0]
-    if not nids:
-        ctx.notify.set_status("Box selection: no cells inside rectangle.")
-        return
-    fov_cb = ctx.runtime.review_image.fov_menu or ctx.widgets.get_or_none("_preview_fov_cb")
-    if fov_cb is None:
-        return
-    fov = fov_cb.currentText().strip()
-    tp_cb = ctx.runtime.review_image.tp_cb
-    tp = tp_cb.currentText().strip() if tp_cb is not None else ""
-    set_review_cells_included_batch(ctx,
-        [(fov, tp, str(nid), "0") for nid in nids]
-    )
-    ctx.notify.set_status(
-        f"Box delete: marked {len(nids)} cell(s) Included=0."
-    )
-
-
-def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
-    """ctx-native entry point (kept for the cell-browser caller)."""
-    zoom_review_image_to_selected_nucleus(ctx, zoom)
-
-
-def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
-    # A8 E4-review: ctx-native pixmap-service leaf. The QLabel host + QScrollArea
-    # canvas + decoded RGB buffer are live objects on ``ctx.runtime.review_image``;
-    # zoom/pan/base_pil are typed state on ``ctx.state.review_image``.
-    rt = ctx.runtime.review_image
-    label = rt.label
-    canvas = rt.canvas
-    if label is None or canvas is None:
-        return
-    ri = ctx.state.review_image
-    nid = ri.selected_nucleus
-    mask_arr = getattr(label, "_mask_arr", None)
-    if nid is None or mask_arr is None:
-        return
-    ys, xs = _np.where(mask_arr == int(nid))
-    if len(xs) == 0 or len(ys) == 0:
-        return
-    cx = float(xs.mean())
-    cy = float(ys.mean())
-    ri.zoom = float(max(1.0, zoom))
-    rgb = rt.base_rgb
-    if rgb is not None:
-        ih, iw = rgb.shape[:2]
-    else:
-        img = ri.base_pil
-        if img is None:
-            return
-        iw, ih = img.size
-    vp = canvas.viewport()
-    cw = max(1, vp.width())
-    ch = max(1, vp.height())
-    fit = min(cw / max(iw, 1), ch / max(ih, 1))
-    scale = max(0.05, fit * max(0.1, float(ri.zoom)))
-    nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
-    # The renderer derives the scrollbar value as
-    #     scroll = max(0, (max(nw, cw) - cw) // 2) - int(pan)
-    # and the QLabel host's pixmap sits at x=0 inside it when the
-    # scaled image exceeds the viewport (nw > cw), so the centring
-    # formula has to be pan = nw/2 - cx*scale (and likewise for y).
-    # The old `cw/2 - base_x - cx*scale` form mis-offset the pan by
-    # roughly (nw - cw)/2 px once you zoomed in, which is why the
-    # yellow nucleus ended up off-screen.
-    ri.pan_x = (nw / 2.0) - (cx * scale)
-    ri.pan_y = (nh / 2.0) - (cy * scale)
     render_review_image_display(ctx)
 
 

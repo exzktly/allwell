@@ -37,6 +37,22 @@ class ReviewImageState:
     box_anchor: tuple[float, float] | None = None
     box_active: bool = False
 
+    # Armed scope for the drag-delete: which wells / FOVs / timepoints the next
+    # rubber-band delete applies to, beyond the frame it is drawn on.
+    #
+    # ``None`` means "whatever the control row is showing" — the displayed well,
+    # FOV or timepoint. An *empty set* is a different thing: the user unchecked
+    # every entry in that dropdown, which resolves to no targets at all. The two
+    # must not collide, which is why this is ``set | None`` rather than the
+    # empty-set-means-all convention ``ImageTableState.active_fovs`` uses.
+    #
+    # Transient by design: never persisted, and cleared on a dataset swap, so an
+    # armed plate-wide scope can never come back on the next session or bind to
+    # a different plate's wells.
+    delete_scope_wells: set[str] | None = None
+    delete_scope_fovs: set[str] | None = None
+    delete_scope_tps: set[str] | None = None
+
     # view transform
     zoom: float = 1.0
     pan_x: float = 0.0
@@ -88,6 +104,18 @@ class ReviewImageState:
         self.zoom = 1.0
         self.pan_x = 0.0
         self.pan_y = 0.0
+
+    def reset_delete_scope(self) -> None:
+        """Disarm the drag-delete scope back to "the displayed frame only".
+
+        Called on a dataset swap alongside ``PreviewState.clear_caches`` — the
+        well tokens in an armed scope belong to the plate that was loaded when
+        it was armed, and silently carrying them into the next dataset is how a
+        stray plate-wide delete happens.
+        """
+        self.delete_scope_wells = None
+        self.delete_scope_fovs = None
+        self.delete_scope_tps = None
 
     def clear_caches(self) -> None:
         """Drop the decoded-frame / include / threshold caches — call when the

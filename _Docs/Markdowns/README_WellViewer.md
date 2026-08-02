@@ -565,13 +565,17 @@ A cell counts only when it is manually kept **and** it passes QC.
   every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
   being computed it fills with the fields measured; while its input archive is
-  being uploaded, or its results downloaded, it fills with the bytes moved. A
-  well that has entered a step but finished none of it — one sitting on the
-  remote waiting its turn, for instance — shows an empty dial, so the part of
-  the plate that is merely waiting is visibly distinct from the part that has
-  not been reached at all. Wells still to be started have no dial, and neither
-  does a failed well: a part-filled ring beside the ✕ would suggest it was
-  still going.
+  being uploaded, or its results downloaded, it fills with the bytes moved. It
+  never runs backwards: once a well's archive is uploaded the dial stays full
+  while it waits its turn on the remote — its colour is what says the well is
+  waiting rather than finished — and it empties only when that well actually
+  starts computing, then fills again with the fields measured. Wells still to
+  be started have no dial, and neither does a failed well: a part-filled ring
+  beside the ✕ would suggest it was still going.
+- The line under the headline reports the plate-wide transfer while one is
+  running (`Transferring… 42%`), and clears itself the moment the pipeline
+  starts computing rather than lingering on whatever percentage the transfer
+  last reported.
 - Hover a well for its exact numbers — the stage it is in plus its field count
   (`FOV 7/12`) or transfer percentage. On a remote run an uploaded well waiting
   its turn has its own colour, distinct from one being computed — see the
@@ -1841,6 +1845,13 @@ points. The bar and line batch panels also expose the same
 [Fold-change normalization](#fold-change-normalization) dropdowns, with
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
+
+The groups you build are **shared by all four Batch Export modes** — define
+them once and they are there whether you export Line, Bar, Scatter (cells) or
+Scatter (aggregate). They describe your plate's conditions, not the shape of
+the plot. (Datasets analysed before this carried a separate set per mode; those
+are merged on first open, with a group appearing in more than one of them kept
+just once.)
 
 Groups are built on a **plate map**, the same plate control used everywhere else
 in the app rather than a separate grid of squares. Left-drag across it to add

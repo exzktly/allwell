@@ -27,6 +27,13 @@ class PlaygroundState:
     timepoint: str | None = None
     fov: str | None = None
 
+    # Loose-image mode: one file opened straight from disk, bypassing the
+    # dataset loaders entirely. Set, this WINS over the four selectors above —
+    # it is how the tab is usable before a plate has ever been analysed, which
+    # is exactly when segmentation parameters want tuning. Cleared on dataset
+    # load (see clear_caches) so opening a plate returns to the plate.
+    loose_image_path: str | None = None
+
     # correction method selection (same values as the Analyze tab / pipeline)
     flatfield_mode: str = "none"        # FLATFIELD_MODES
     background_method: str = "none"     # BACKGROUND_METHODS
@@ -64,6 +71,27 @@ class PlaygroundState:
     qc_min_area: float = 0.0
     qc_max_area: float = 0.0
 
+    # ── live StarDist preview ────────────────────────────────────────────────
+    # Segment the displayed frame here, with tunable thresholds, instead of only
+    # showing the labels a pipeline run already baked. ``seg_live`` gates the
+    # whole feature; the thresholds are None for "the pretrained model's own
+    # default", the same spelling the pipeline uses.
+    seg_live: bool = False
+    seg_prob_thresh: float | None = None
+    seg_nms_thresh: float | None = None
+    # The last computed label image and the identity it was computed from
+    # (frame + correction + thresholds). When the key no longer matches what is
+    # on screen the labels are STALE and must be reported as such rather than
+    # drawn as if they described the current frame.
+    seg_labels: object = None
+    seg_key: tuple | None = None
+    seg_status: str = ""
+    seg_running: bool = False
+    # An out-of-range threshold typed into either field. Held separately from
+    # seg_status so it is reported even with the preview switched off — a value
+    # that is quietly not being used has to say so wherever it was typed.
+    seg_param_error: str = ""
+
     # per-render caches (rebuilt on change; never persisted)
     raw_arr: object = None              # last-loaded raw frame
     mask_arr: object = None             # last-loaded precomputed labels
@@ -91,3 +119,10 @@ class PlaygroundState:
         self.model_well = None
         self.last_correction_key = None
         self.last_corrected_arr = None
+        # Loading a plate is a deliberate "work on this dataset" act, so it ends
+        # loose-image mode rather than leaving the tab showing a stray file while
+        # the sidebar plate appears to drive it.
+        self.loose_image_path = None
+        self.seg_labels = None
+        self.seg_key = None
+        self.seg_status = ""

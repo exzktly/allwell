@@ -367,6 +367,22 @@ You can also explicitly override the output folder.
 - **Top-hat radii.** Nuclear and per-fluor radii in pixels. `0` or
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
+- **Nucleus probability** and **Overlap (NMS)** — the two StarDist detection
+  thresholds, shown for both StarDist methods. Leave them **blank** and the run
+  uses the thresholds built into the pretrained model, which is what every
+  earlier run did.
+  - **Nucleus probability** (0–1) is how confident StarDist must be that
+    something is a nucleus. **Turn it down** when the run is missing real cells —
+    dim, out-of-focus or faint nuclei come back. **Turn it up** when debris is
+    being counted as cells.
+  - **Overlap (NMS)** (0–1) is how much two detected nuclei may overlap before
+    they are merged into one. **Turn it up** on confluent, touching cells so
+    neighbours stay separate; **turn it down** if one nucleus is being counted
+    twice.
+  - Both take a value between 0 and 1; anything else is ignored and the model's
+    own default is used. Rather than guessing, tune them against a real frame in
+    **Review → Image Browser → Playground** and press **Use in Analyze** to copy
+    the values back here.
 
 ### 5. Auto-threshold — picking each channel's "on" cut
 
@@ -1543,22 +1559,43 @@ actually looks like at the single-cell level.
 #### Playground
 
 **What it shows.** An interactive testbed for the pipeline's
-background-flattening / subtraction methods on a **single raw frame**, without
-re-running the pipeline (it shares the pipeline's exact correction code).
+background-flattening / subtraction methods **and its StarDist segmentation**,
+on a **single frame**, without re-running the pipeline (it shares the pipeline's
+exact correction and segmentation code).
 
-- **Needs** — a loaded dataset with image ZIPs.
-- **Controls** — all in the **right-hand panel**, where every other per-tab
-  inspector in the app sits. Pick the frame's **well on the ever-present
-  left-rail plate** (single-well here — the tab has no plate of its own, it
-  drives the sidebar picker), and the **channel / timepoint / FOV** from the
-  panel's dropdowns;
-  choose any flat-field + background method and tune its parameters; a **Raw /
-  Flat-field / Corrected** toggle; LUT / colormap / binary + precomputed-mask
-  overlay; pan / zoom; per-source LUT memory; a frame-local binary threshold; a
-  hover pixel-intensity readout; a QC size-cleanup preview.
-- **Optimal use** — dial in a correction method + radius here on a
-  representative frame *before* committing to a full Analyze re-run with those
-  settings.
+- **Needs** — nothing. With a dataset loaded it works on that dataset's frames;
+  with no dataset at all, **Open image…** loads any TIFF from disk, which is how
+  you tune settings for a plate you have not run yet.
+- **Choosing the frame** — either pick the **well on the ever-present left-rail
+  plate** (single-well here — the tab has no plate of its own, it drives the
+  sidebar picker) plus the **channel / timepoint / FOV** dropdowns, or press
+  **Open image…** and choose a file. While a file is open the dropdowns grey out
+  and **Use dataset** returns to the plate. A lone file has no reference well to
+  sample, so the `empty_well` and `basic` correction modes cannot run on one —
+  the status line says which correction was skipped rather than showing you an
+  uncorrected frame labelled as corrected.
+- **Correction controls** — all in the **right-hand panel**, where every other
+  per-tab inspector in the app sits: any flat-field + background method and its
+  parameters; a **Raw / Flat-field / Corrected** toggle; LUT / colormap / binary
+  + mask overlay; pan / zoom; per-source LUT memory; a frame-local binary
+  threshold; a hover pixel-intensity readout; a QC size-cleanup preview.
+- **Segmentation controls** — tick **Live StarDist**, set **Probability** and
+  **Overlap (NMS)** (blank = the pretrained model's own values), and press
+  **Segment**. The nuclei it finds replace the pipeline's saved mask in the
+  overlay, so you can see what a threshold change actually does. The status line
+  reports the nucleus count and the thresholds that produced it.
+  - **The first Segment of a session is slow** — around 10–30 seconds, because
+    it loads TensorFlow and the StarDist model into the application, and about
+    1–2 GB stays in use until you quit. Every later Segment takes a few seconds.
+  - Change the frame or any correction setting and the labels no longer describe
+    what is on screen, so they are **removed** and the status line says they are
+    stale. Press **Segment** again.
+  - **Use in Analyze** copies the two thresholds into the Analyze tab's
+    segmentation settings and switches to it, so the plate runs with what you
+    just tuned.
+- **Optimal use** — dial in a correction method + radius, then the two
+  segmentation thresholds, on a representative frame *before* committing to a
+  full Analyze run with those settings.
 
 ### smFISH
 

@@ -9,8 +9,10 @@ live here too (the form reads them) and are re-exported by ``analyze_tab``.
 Restoring a prior run's settings from its ``pipeline_info.json`` sidecar is its
 own cohesive job and lives in ``analyze_tab_pinfo.py``; the form's own chrome
 (``_section``/``_row``/``_entry``/``_info_icon``/``reveal_section``) lives in
-``analyze_tab_chrome.py``. This mixin inherits both, so every name stays
-reachable on the form exactly where callers expect it.
+``analyze_tab_chrome.py``; the per-method segmentation parameter pages and the
+StarDist thresholds live in ``analyze_tab_seg_params.py``. This mixin inherits
+all three, so every name stays reachable on the form exactly where callers
+expect it.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from analyze_tab_fields import (  # noqa: F401 — re-exported for analyze_tab
     _safe_seg_float,
 )
 from analyze_tab_pinfo import AnalyzePipelineInfoMixin
+from analyze_tab_seg_params import AnalyzeSegParamsMixin
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
 from widgets.run_dashboard import RunDashboard
@@ -56,7 +59,8 @@ _LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
 _FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
 
 
-class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
+class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
+                          AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
@@ -180,79 +184,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
         sec.layout().addWidget(add_btn)
         self._fluor_add_btn = add_btn  # hidden for OME input (role picker drives it)
 
-        # Per-method parameter panel — swapped by _refresh_segmentation_hints so
-        # only the selected routine's controls are shown.
-        from well_viewer.core.centre_view import NamedPageStack
-        self._seg_param_stack = NamedPageStack(sec)
-        # A QStackedWidget's height is the max over *all* pages, so the short
-        # default (StarDist, no params) would still reserve the tall Cellpose
-        # page's height — a big empty gap under the channel-tokens section.
-        # Collapse it to the current page by giving the hidden pages a vertical
-        # size policy of Ignored, re-applied on every page switch.
-        self._seg_param_stack.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
-        self._seg_param_stack.currentChanged.connect(
-            lambda _=None: self._collapse_seg_param_stack())
-        sec.layout().addWidget(self._seg_param_stack)
-
-        def _page() -> QWidget:
-            p = QWidget()
-            v = QVBoxLayout(p)
-            v.setContentsMargins(0, 0, 0, 0)
-            v.setSpacing(2)
-            return p
-
-        # StarDist (nuclei): no extra parameters.
-        self._seg_param_stack.addPage("stardist_nuclei", _page())
-
-        # StarDist + watershed: cytoplasm token + min nucleus area.
-        ws = _page()
-        cyto_cell = self._row(ws, "Cytoplasm token")
-        self._cytoplasm_edit = self._entry(cyto_cell, "", width=80)
-        cyto_cell.layout().addStretch(1)
-        self._cytoplasm_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
-        area_cell = self._row(ws, "Min nucleus area")
-        self._min_nucleus_area_edit = self._entry(area_cell, "50", width=60)
-        _px = QLabel("pixels", area_cell)
-        _px.setObjectName("Muted")
-        area_cell.layout().addWidget(_px)
-        area_cell.layout().addStretch(1)
-        self._min_nucleus_area_edit.textChanged.connect(lambda _: self._refresh_segmentation_hints())
-        self._seg_param_stack.addPage("stardist_seeded_watershed_cell", ws)
-
-        # Cellpose (general): model, diameter, flow/cell-prob thresholds, optional
-        # second (nucleus) channel for cyto models. Segments the Segmentation
-        # channel above (fluorescent or brightfield).
-        cp = _page()
-        m_cell = self._row(cp, "Model")
-        self._cellpose_model_cb = QComboBox(cp)
-        self._cellpose_model_cb.addItems(["cyto3", "cyto2", "cyto", "nuclei"])
-        m_cell.layout().addWidget(self._cellpose_model_cb)
-        m_cell.layout().addStretch(1)
-        d_cell = self._row(cp, "Diameter (px, 0=auto)")
-        self._cellpose_diameter_edit = self._entry(d_cell, "0", width=70)
-        d_cell.layout().addStretch(1)
-        f_cell = self._row(cp, "Flow threshold")
-        self._cellpose_flow_thr_edit = self._entry(f_cell, "0.4", width=70)
-        f_cell.layout().addStretch(1)
-        c_cell = self._row(cp, "Cell-prob threshold")
-        self._cellpose_cellprob_thr_edit = self._entry(c_cell, "0.0", width=70)
-        c_cell.layout().addStretch(1)
-        n_cell = self._row(cp, "Nucleus channel (opt)")
-        self._cellpose_nuclei_channel_edit = self._entry(n_cell, "", width=80)
-        n_cell.layout().addStretch(1)
-        self._seg_param_stack.addPage("cellpose", cp)
-
-        # Label-free (Cellpose preset on the Phase channel) — no exposed params.
-        lf = _page()
-        lf_lbl = QLabel("Segments the channel marked 'Phase' above, using a Cellpose "
-                        "brightfield preset (cyto3, auto diameter).", lf)
-        lf_lbl.setObjectName("Muted")
-        lf_lbl.setWordWrap(True)
-        lf.layout().addWidget(lf_lbl)
-        self._seg_param_stack.addPage("cellpose_labelfree", lf)
-
-        # Classical (Otsu + watershed): no extra parameters.
-        self._seg_param_stack.addPage("classical_threshold", _page())
+        # Per-method parameter pages + the shared StarDist thresholds
+        # (analyze_tab_seg_params.AnalyzeSegParamsMixin).
+        self._build_seg_param_stack(sec)
 
         self._segmentation_hint_lbl = QLabel("", sec)
         self._segmentation_hint_lbl.setObjectName("Muted")
@@ -1109,6 +1043,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
         cyto = self._cytoplasm_edit.text().strip()
         if method != "stardist_seeded_watershed_cell":
             cyto = ""
+        sd_prob, sd_nms = self._stardist_threshold_values()
         opts = dict(
             raw=Path(self._input_edit.text().strip()),
             scratch_dir=self._scratch_edit.text().strip() or None,
@@ -1142,6 +1077,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin):
             tf_threads=self._tf_threads_edit.text(),
             workers=self._workers_edit.text(),
             stardist_tile_px=self._stardist_tile_px_edit.text(),
+            stardist_prob_thresh=sd_prob,
+            stardist_nms_thresh=sd_nms,
             filename_schema=self._build_schema_arg(),
             filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
             smfish_tokens=self._smfish_tokens_list(),

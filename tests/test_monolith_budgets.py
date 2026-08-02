@@ -73,7 +73,18 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # its folder twin, plus the per-well force normaliser and incremental_for_well)
 # moved into the stdlib-only pipeline/well_skip.py. Genuine extraction — ratchet
 # down to the new size.
-PROCESS_MICROSCOPY_BUDGET = 4692
+# 4692 -> 4745: RAISED, deliberately, for the tunable StarDist detection
+# thresholds (--stardist_prob_thresh / --stardist_nms_thresh: argparse entries,
+# validation, worker-init plumbing and the run-log line that states them). The
+# cohesive extraction this file's rules call for is the model-cache and
+# download-lock cluster (_CORRUPT_MODEL_MARKERS / _purge_stardist_cache /
+# _pid_alive / _stardist_lock_is_dead / _stardist_cache_models_dir /
+# _stardist_download_lock / _load_stardist_pretrained, ~200 lines) into a
+# pipeline/stardist_model.py — but a new file under pipeline/ is a new entry in
+# services.remote_runner._REQUIRED_REMOTE_FILES, i.e. a change to what every
+# remote machine is sent, and that was explicitly out of scope for this change.
+# That cluster remains the extraction to take when this budget next binds.
+PROCESS_MICROSCOPY_BUDGET = 4745
 # 1494 -> 1333: the smart-layout builder cluster (flat + nested grid assembly,
 # per-channel LUT re-keying, the Build presets, and the row-channel styling
 # helper) moved into ``image_table/build_layout.py``. The nested / compound-axis
@@ -118,7 +129,11 @@ ANALYZE_TAB_BUDGET = 964
 # analyze_tab_chrome.AnalyzeFormChromeMixin) and the entry-boundary field
 # parsers (_safe_qc_float / _safe_seg_float / _INT_FIELDS /
 # _numeric_option_errors → analyze_tab_fields.py) all did.
-ANALYZE_TAB_FORM_BUDGET = 1170
+# 1170 -> 1107: the per-method segmentation parameter pages (the NamedPageStack
+# and its StarDist / watershed / Cellpose / label-free / classical pages) moved
+# to analyze_tab_seg_params.AnalyzeSegParamsMixin, which is also where the
+# StarDist detection thresholds landed rather than growing this form again.
+ANALYZE_TAB_FORM_BUDGET = 1107
 
 
 def _line_count(rel: str) -> int:

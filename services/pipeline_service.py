@@ -67,6 +67,29 @@ def _emit_execution_flags(args: list[str], opts: dict) -> None:
             args += [flag, str(v)]
 
 
+def _emit_stardist_threshold_flags(args: list[str], opts: dict) -> None:
+    """Append the StarDist detection thresholds when the form supplied one.
+
+    These are probabilities, not counts, so they get their own loop rather than
+    being forced into the integer one above: a blank field, the word ``auto``,
+    or anything unparseable means "use the threshold the pretrained model ships
+    with" and emits nothing. A value outside [0, 1] also emits nothing — the
+    pipeline would reject it outright, and the Analyze form validates before the
+    run, so this path only guards the CLI-shaped callers.
+    """
+    for key, flag in (("stardist_prob_thresh", "--stardist_prob_thresh"),
+                      ("stardist_nms_thresh", "--stardist_nms_thresh")):
+        raw = opts.get(key)
+        if raw is None or (isinstance(raw, str) and raw.strip().lower() in ("", "auto")):
+            continue
+        try:
+            v = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if 0.0 <= v <= 1.0:
+            args += [flag, str(v)]
+
+
 def _emit_auto_threshold_flags(args: list[str], opts: dict) -> None:
     """Append the end-of-run threshold flags.
 
@@ -228,6 +251,7 @@ def build_pipeline_args(
                 args += [flag, str(v)]
 
     _emit_execution_flags(args, opts)
+    _emit_stardist_threshold_flags(args, opts)
 
     return args
 

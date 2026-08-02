@@ -115,3 +115,57 @@ def test_stardist_tile_px_off_by_default_or_zero():
 
     with pytest.raises(ValueError):
         _emit_num_flag([], {"r": "x"}, "r", "--r", int)  # present+invalid → raise
+
+
+# ── StarDist detection thresholds ────────────────────────────────────────────
+# Blank / "auto" / out-of-range must emit nothing, so the run falls back to the
+# threshold the pretrained model ships with. Emitting a rejected value instead
+# would fail the run at argparse; emitting a silently corrected one would
+# segment the plate with a threshold the operator never chose.
+
+def test_stardist_thresholds_emitted_when_set():
+    args = build_pipeline_args(_P, _IN, _OUT, _opts(
+        stardist_prob_thresh="0.25", stardist_nms_thresh="0.5"))
+    assert float(_flag_value(args, "--stardist_prob_thresh")) == 0.25
+    assert float(_flag_value(args, "--stardist_nms_thresh")) == 0.5
+
+
+def test_stardist_thresholds_absent_by_default():
+    args = build_pipeline_args(_P, _IN, _OUT, _opts())
+    assert "--stardist_prob_thresh" not in args
+    assert "--stardist_nms_thresh" not in args
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "auto", "AUTO", None])
+def test_blank_or_auto_means_the_models_own_default(blank):
+    args = build_pipeline_args(_P, _IN, _OUT, _opts(stardist_prob_thresh=blank))
+    assert "--stardist_prob_thresh" not in args
+
+
+@pytest.mark.parametrize("bad", ["1.5", "-0.2", "abc"])
+def test_out_of_range_threshold_is_not_emitted(bad):
+    args = build_pipeline_args(_P, _IN, _OUT, _opts(stardist_prob_thresh=bad))
+    assert "--stardist_prob_thresh" not in args
+
+
+def test_zero_threshold_is_emitted():
+    """0 is a real threshold (detect everything), not an absent one."""
+    args = build_pipeline_args(_P, _IN, _OUT, _opts(stardist_prob_thresh="0"))
+    assert float(_flag_value(args, "--stardist_prob_thresh")) == 0.0
+
+
+def test_the_pipeline_accepts_what_the_form_emits():
+    """The two halves must agree: every flag build_pipeline_args produces has to
+    parse on the pipeline side, and the sentinel default has to survive."""
+    import process_microscopy as pm
+
+    args = build_pipeline_args(_P, _IN, _OUT, _opts(
+        stardist_prob_thresh="0.25", stardist_nms_thresh="0.5"))
+    parsed = pm.build_parser().parse_args(
+        ["--input_dir", "/in", "--output_dir", "/out"] + args[2:])
+    assert pm._stardist.parse_threshold(parsed.stardist_prob_thresh) == 0.25
+    assert pm._stardist.parse_threshold(parsed.stardist_nms_thresh) == 0.5
+
+    default = pm.build_parser().parse_args(["--input_dir", "/in", "--output_dir", "/out"])
+    assert pm._stardist.parse_threshold(default.stardist_prob_thresh) is None
+    assert pm._stardist.parse_threshold(default.stardist_nms_thresh) is None

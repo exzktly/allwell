@@ -142,6 +142,7 @@ class AnalyzePipelineInfoMixin:
         s("_cellpose_nuclei_channel_edit", d.get("cellpose_nuclei_channel"))
         s("_cytoplasm_edit", d.get("cytoplasm_token"))
         s("_min_nucleus_area_edit", d.get("min_nucleus_area_px"))
+        self._restore_stardist_thresholds(d)
 
         # Shape features.
         feats = d.get("shape_features")

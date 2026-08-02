@@ -2607,7 +2607,7 @@ def _load_stardist_pretrained(StarDist2D, name: str = "2D_versatile_fluo"):
 
 def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
                  segmentation_method: str = DEFAULT_SEGMENTATION_METHOD,
-                 stardist_tile_px: int = 0) -> None:
+                 stardist_params: dict | None = None) -> None:
     """
     Called once in each worker process before any image pairs are processed.
 
@@ -2619,6 +2619,8 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
                            Other  -> CPU only (CUDA available if a CUDA-enabled
                                      TF build is installed and force_cpu=False).
     *threads_per_worker* CPU threads per worker for TF/BLAS inference.
+    *stardist_params*    Keyword dict for :class:`pipeline.stardist.StarDistParams`
+                         (prob/nms thresholds + the tiling cap). None = defaults.
 
     Platform logic
     --------------
@@ -2708,8 +2710,9 @@ def _worker_init(force_cpu: bool = False, threads_per_worker: int = 0,
     thr_note = (f"{threads_per_worker} TF thread(s)" if threads_per_worker > 0
                 else "TF default threads")
 
-    # Install the per-run StarDist tiling threshold (0 = off) before any predict.
-    _stardist.set_tile_px(stardist_tile_px)
+    # Install the per-run StarDist settings (detection thresholds + the tiling
+    # cap) before any predict.
+    _stardist.set_params(_stardist.StarDistParams(**(stardist_params or {})))
 
     # Label-free methods (cellpose / classical_threshold) don't use the StarDist
     # TF model — skip the (heavy, network-touching) load entirely. Cellpose
@@ -3561,7 +3564,7 @@ def _run_well_worker_pool(
         initializer=_worker_init,
         initargs=(force_cpu, threads_per_worker,
                   shared_kwargs_template.get("segmentation_method", DEFAULT_SEGMENTATION_METHOD),
-                  int(shared_kwargs_template.get("_stardist_tile_px", 0) or 0)),
+                  dict(shared_kwargs_template.get("_stardist_params") or {})),
     ) as executor:
         future_to_well = {
             submit_task(executor, well_label, path): well_label
@@ -4210,6 +4213,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p.add_argument(
+        "--stardist_prob_thresh",
+        type=float,
+        default=-1.0,
+        help=(
+            "StarDist object-probability threshold (0-1). Candidate nuclei whose "
+            "predicted objectness falls below it are dropped before polygon NMS. "
+            "LOWER detects more nuclei, including dim / marginal ones; HIGHER "
+            "keeps only confident detections. Negative (the default) = use the "
+            "threshold the pretrained model ships with (~0.479 for "
+            "2D_versatile_fluo)."
+        ),
+    )
+    p.add_argument(
+        "--stardist_nms_thresh",
+        type=float,
+        default=-1.0,
+        help=(
+            "StarDist polygon non-maximum-suppression overlap threshold (0-1). "
+            "HIGHER lets more overlapping nuclei survive, which recovers touching "
+            "nuclei in a confluent field but can double-count one; LOWER merges "
+            "more aggressively, removing duplicates at the risk of fusing "
+            "neighbours. Negative (the default) = the pretrained model's own "
+            "value (0.3 for 2D_versatile_fluo)."
+        ),
+    )
+
     p.add_argument("--csv_prefix", default="measurements",
                    help="Filename prefix for per-well CSVs (<prefix>_<well>.csv)")
 
@@ -4318,6 +4348,15 @@ def main() -> None:
         parser.error("Invalid --filename_schema:\n" + "\n".join(f"  {e}" for e in schema_errors))
     if args.min_nucleus_area_px <= 0:
         parser.error("--min_nucleus_area_px must be a positive integer.")
+    # Both StarDist thresholds are probabilities. A value above 1 is rejected
+    # rather than clamped: clamping would segment the plate with a parameter the
+    # operator did not choose and never say so.
+    for _flag, _val in (("--stardist_prob_thresh", args.stardist_prob_thresh),
+                        ("--stardist_nms_thresh", args.stardist_nms_thresh)):
+        try:
+            _stardist.parse_threshold(_val)
+        except ValueError as exc:
+            parser.error(f"{_flag}: {exc}")
     if args.segmentation_method == "stardist_seeded_watershed_cell":
         if not args.cytoplasm_token:
             parser.error(
@@ -4477,6 +4516,14 @@ def main() -> None:
     fft_small_fluor     = [args.fft_small_fluor] * n_fluor
 
     log.info("Segmentation method : %s", args.segmentation_method)
+    if args.segmentation_method in _STARDIST_METHODS:
+        # A nucleus count is only interpretable next to the thresholds that
+        # produced it, so the run states them even when they are the defaults.
+        _prob = _stardist.parse_threshold(args.stardist_prob_thresh)
+        _nms = _stardist.parse_threshold(args.stardist_nms_thresh)
+        log.info("StarDist thresholds : prob=%s, nms=%s",
+                 "model default" if _prob is None else f"{_prob:g}",
+                 "model default" if _nms is None else f"{_nms:g}")
     if args.segmentation_method == "stardist_seeded_watershed_cell":
         log.info("Cytoplasm token     : %s", args.cytoplasm_token)
         log.info("Min nucleus area px : %d", args.min_nucleus_area_px)
@@ -4523,8 +4570,14 @@ def main() -> None:
         cellpose_nuclei_channel=args.cellpose_nuclei_channel,
         # Private (leading _) so it's filtered out of the process_image_group
         # kwargs but still read by _run_well_worker_pool to seed each worker's
-        # StarDist tiling via _worker_init/set_tile_px. Mirrors _fov_threads.
-        _stardist_tile_px=int(args.stardist_tile_px or 0),
+        # StarDist settings via _worker_init/set_params. Mirrors _fov_threads.
+        # A plain dict, not the frozen dataclass, because it crosses a spawn-pool
+        # pickle boundary into initargs.
+        _stardist_params=dict(
+            prob_thresh=_stardist.parse_threshold(args.stardist_prob_thresh),
+            nms_thresh=_stardist.parse_threshold(args.stardist_nms_thresh),
+            tile_px=int(args.stardist_tile_px or 0),
+        ),
     )
 
     # If the selected input is an "in" directory, normalise any loose TIF/TIFF

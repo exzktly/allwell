@@ -232,6 +232,7 @@ class AppRuntime:
         # Playground testbed transient scratch (prefix ``_playground_``): the
         # current frame identity key (``ctx.runtime.playground.frame_key`` <->
         # ``app._playground_frame_key``), the reference-field worker bridge
-        # (``.ref_bridge``), and the pan-drag origin tuple (``.pan_drag``). Live
-        # session objects the Playground controller reads/writes, never persisted.
+        # (``.ref_bridge``), the live-StarDist worker bridge (``.seg_bridge``),
+        # and the pan-drag origin tuple (``.pan_drag``). Live session objects the
+        # Playground controller reads/writes, never persisted.
         object.__setattr__(self, "playground", _FeatureRuntime(s, "_playground_"))

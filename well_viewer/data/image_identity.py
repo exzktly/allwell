@@ -355,8 +355,14 @@ def normalize_tp(value: Any) -> str:
     """Canonical timepoint key form. Parseable forms (``T01`` / ``24h``
     / ``1.0`` / bare numeric) collapse to ``f"{hours:g}"``; opaque
     labels (``"treated_arm_2"``) pass through stripped. Used by every
-    site that compares timepoint identity."""
-    raw = str(value or "").strip()
+    site that compares timepoint identity.
+
+    Emptiness is decided on the *string*, never on the value's truthiness: a
+    numeric ``0`` is falsy, so testing the value itself made the baseline
+    timepoint normalise to ``""`` when it arrived as a float and to ``"0"`` when
+    it arrived as text — two keys for the same timepoint, and the empty one
+    matching nothing at all."""
+    raw = "" if value is None else str(value).strip()
     if not raw:
         return ""
     hours = parse_timepoint_hours(raw)

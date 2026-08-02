@@ -176,3 +176,44 @@ class TestSortKey:
         # a sorted() call); prove it delegates rather than reimplements.
         for token in ("2hpCh", "T01", "abc", "48h"):
             assert rr._tp_sort_key(token) == sort_key(token)
+
+
+class TestCanonicalKeyForm:
+    """``normalize_tp`` — the one key form every identity comparison uses."""
+
+    def test_zero_is_a_timepoint_not_an_absence(self):
+        """Regression: the baseline timepoint used to normalise to ``""``.
+
+        The guard tested the *value's* truthiness (``str(value or "")``), and a
+        numeric ``0`` is falsy — so the same t=0 produced ``"0"`` when it arrived
+        as text and ``""`` when it arrived as a float. The empty key matches
+        nothing, so a lookup keyed on a float 0.0 silently found no images and no
+        rows. Emptiness is a property of the string, not of the number.
+        """
+        from well_viewer.data.image_identity import normalize_tp
+        assert normalize_tp(0.0) == "0"
+        assert normalize_tp(0) == "0"
+        assert normalize_tp("0") == "0"
+        assert normalize_tp("0.0") == "0"
+        assert normalize_tp("T00") == "0"
+
+    def test_genuinely_absent_values_still_normalise_to_empty(self):
+        from well_viewer.data.image_identity import normalize_tp
+        assert normalize_tp(None) == ""
+        assert normalize_tp("") == ""
+        assert normalize_tp("   ") == ""
+
+    def test_numeric_and_text_spellings_agree_for_every_timepoint(self):
+        """The property the zero case violated: one timepoint, one key."""
+        from well_viewer.data.image_identity import normalize_tp
+        for hours in (0.0, 0.5, 1.0, 4.0, 23.5, 48.0):
+            assert normalize_tp(hours) == normalize_tp(str(hours))
+
+    def test_the_ctx_leaf_delegates_rather_than_reimplements(self):
+        """``core.ui_helpers.norm_timepoint`` is the ctx-shaped wrapper. It
+        carried its own copy of the rule, which is how it kept the zero bug
+        after ``normalize_tp`` was fixed."""
+        from well_viewer.core.ui_helpers import norm_timepoint
+        from well_viewer.data.image_identity import normalize_tp
+        for value in (0.0, 0, "0", "T01", "1h30m", "treated_arm_2", "", None):
+            assert norm_timepoint(None, value) == normalize_tp(value)

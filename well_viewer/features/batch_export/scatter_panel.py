@@ -455,6 +455,24 @@ class ScatterBatchExportPanel(BatchExportPanel):
             out_dir=out_dir,
         )
 
+    def _tp_figure_label(self, tp_h: float) -> str:
+        """The timepoint as a scatter figure's title should name it.
+
+        A scatter figure has no time axis — x and y are both metrics — so the
+        title is the only place the timepoint appears, and it has to carry the
+        rescale marker itself. Without this a single batch run wrote a bar figure
+        titled ``t = 4 h`` beside a scatter figure titled ``t=1.0h`` for the same
+        data.
+
+        The progress line and the "no data at t=…" messages deliberately do not
+        use this: those name a *job* the user picked out of the timepoint list,
+        and that list is unscaled, so restating it in rescaled units would point
+        at an entry they never saw. A failed job also writes no figure, so there
+        is nothing for the message to disagree with.
+        """
+        from well_viewer.domain.time_rescale import figure_timepoint_label
+        return figure_timepoint_label(tp_h, self._ctx.state.plot.time_scale)
+
     def _run_scatter_cells_job(
         self, grp: BarGroup, tp_h: float, csv_path: Path, fig_path: Path, fmt: str,
     ) -> str | None:
@@ -498,7 +516,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             with self._app_group_scope(grp):
                 self._render_scatter_cells_figure(
                     scatter_data, col_x=col_x, col_y=col_y, tps_list=[tp_h],
-                    title=f"{grp.name} \u2014 Scatter Cells (t={tp_h:.1f}h)",
+                    title=(f"{grp.name} \u2014 Scatter Cells "
+                           f"({self._tp_figure_label(tp_h)})"),
                     fig_path=fig_path, fmt=fmt,
                 )
         except Exception as exc:
@@ -656,7 +675,8 @@ class ScatterBatchExportPanel(BatchExportPanel):
             self._export_scatter_figure(
                 _draw,
                 xlabel=_xl, ylabel=_yl,
-                title=f"{grp.name} \u2014 Scatter Aggregate (t={tp_h:.1f}h)",
+                title=(f"{grp.name} \u2014 Scatter Aggregate "
+                       f"({self._tp_figure_label(tp_h)})"),
                 fig_path=fig_path, fmt=fmt,
             )
         except Exception as exc:

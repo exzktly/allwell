@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 import re
 from pathlib import Path
-from types import SimpleNamespace
 
 import matplotlib
 
@@ -46,20 +45,15 @@ def test_the_off_state_is_byte_identical(base):
 
 # ── the Bar plot's marker, which is an x-label it otherwise has none of ────
 
-def _bar_ctx(factor):
-    return SimpleNamespace(state=SimpleNamespace(
-        plot=SimpleNamespace(time_scale=factor)))
-
-
 def test_bar_panels_gain_a_marker_label_only_while_rescaled():
-    from well_viewer.features.barplot.renderer import _label_time_rescale
+    from well_viewer.core.plot_style import mark_time_rescale
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
-        _label_time_rescale(_bar_ctx(1), ax_mean, ax_frac)
+        mark_time_rescale(ax_mean, ax_frac, factor=1)
         assert ax_frac.get_xlabel() == ""
 
-        _label_time_rescale(_bar_ctx(4), ax_mean, ax_frac)
+        mark_time_rescale(ax_mean, ax_frac, factor=4)
         assert "4" in ax_frac.get_xlabel()
         # Only the bottom panel: three stacked copies of the same sentence is
         # noise, and the panels share one x-axis reading.
@@ -69,11 +63,11 @@ def test_bar_panels_gain_a_marker_label_only_while_rescaled():
 
 
 def test_bar_marker_lands_on_the_n_panel_when_there_is_one():
-    from well_viewer.features.barplot.renderer import _label_time_rescale
+    from well_viewer.core.plot_style import mark_time_rescale
 
     fig, (ax_mean, ax_frac, ax_n) = plt.subplots(3, 1)
     try:
-        _label_time_rescale(_bar_ctx(4), ax_mean, ax_frac, ax_n)
+        mark_time_rescale(ax_mean, ax_frac, ax_n, factor=4)
         assert "4" in ax_n.get_xlabel()
         assert ax_frac.get_xlabel() == ""
     finally:
@@ -81,11 +75,11 @@ def test_bar_marker_lands_on_the_n_panel_when_there_is_one():
 
 
 def test_bar_marker_tolerates_a_missing_n_panel():
-    from well_viewer.features.barplot.renderer import _label_time_rescale
+    from well_viewer.core.plot_style import mark_time_rescale
 
     fig, (ax_mean, ax_frac) = plt.subplots(2, 1)
     try:
-        _label_time_rescale(_bar_ctx(4), ax_mean, ax_frac, None)
+        mark_time_rescale(ax_mean, ax_frac, None, factor=4)
         assert "4" in ax_frac.get_xlabel()
     finally:
         plt.close(fig)

@@ -38,6 +38,7 @@ __all__ = [
     "axis_label",
     "coerce_factor",
     "describe",
+    "figure_timepoint_label",
     "format_scaled",
     "is_active",
     "scaled",
@@ -113,6 +114,32 @@ def describe(factor) -> str:
     if not is_active(factor):
         return ""
     return f"filename value × {normalize_tp(coerce_factor(factor))}"
+
+
+def figure_timepoint_label(value, factor, *, unit: str = "h") -> str:
+    """A timepoint named in a figure *title*, carrying its own marker.
+
+    Returns the whole parenthetical body — ``"t=4 h"`` while the factor is off,
+    ``"t=4 h, filename value × 4"`` while it is on — so a caller writes
+    ``f"… ({figure_timepoint_label(tp, factor)})"`` and the unit stays beside the
+    number instead of ending up outside the bracket.
+
+    For figures with no time axis to hang a label on: the batch-export scatter
+    plots, whose x and y are both metrics, so the title is the only place the
+    timepoint appears. One call cannot produce a rescaled figure that reads like
+    real hours.
+
+    Figures that already carry the marker elsewhere — the Line panels on their
+    axis label, the Bar panels via :func:`core.plot_style.mark_time_rescale` —
+    keep using :func:`format_scaled` for their titles: two copies of the same
+    sentence on one figure is noise.
+    """
+    text = format_scaled(value, factor)
+    if not text:
+        return ""
+    body = f"t={text}{' ' + unit if unit else ''}"
+    marker = describe(factor)
+    return f"{body}, {marker}" if marker else body
 
 
 def axis_label(base: str, factor) -> str:

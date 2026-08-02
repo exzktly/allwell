@@ -248,6 +248,36 @@ def apply_time_rescale(ax, factor) -> None:
         FuncFormatter(lambda v, _pos, _f=factor: format_scaled(v, _f)))
 
 
+def mark_time_rescale(*axes, factor) -> None:
+    """Name the rescale factor under a stack of categorical time panels.
+
+    The companion to :func:`apply_time_rescale`, for the figures whose x-axis is
+    *categorical* — the Bar tab and its batch-export twin, where the timepoint is
+    the tick text rather than a position, so there is no formatter to carry the
+    marker and no x-label in the ordinary case.
+
+    The label goes on the bottom-most panel only: the panels are stacked over one
+    shared x reading, and three copies of the same sentence is noise. Nothing is
+    written while the factor is off, so an unrescaled figure draws exactly as it
+    did before this existed.
+
+    Without it a bar reading ``t=16`` sits under a Timepoint menu reading 4 and
+    beside an exported CSV reading 4, with nothing on the figure saying why.
+
+    Lives here rather than in the bar renderer because the batch-export panel
+    builds its own figure and needs it too — reaching across from
+    ``features/batch_export`` into ``features/barplot`` for it would be a feature
+    importing a feature.
+    """
+    from well_viewer.domain.time_rescale import describe
+
+    marker = describe(factor)
+    present = [ax for ax in axes if ax is not None]
+    if not marker or not present:
+        return
+    present[-1].set_xlabel(marker, fontsize=8, labelpad=4)
+
+
 def apply_axis_log_scale(ax, which: str, on: bool) -> None:
     """Set an axis to log scale, honouring a scatter ``_aw_log_plus1`` request.
 

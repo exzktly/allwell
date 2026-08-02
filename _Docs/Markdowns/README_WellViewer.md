@@ -847,10 +847,15 @@ so a rescaled figure can't be mistaken for one drawn on the hours the run
 recorded. The factor is saved with the rest of the view state.
 
 Applies to the Line Graphs panels, the Bar Plots tick labels and panel titles,
-the Spatial summary panel, and the Batch Export figures for those tabs. The Heat
-Map and Distribution tabs pick a timepoint from a menu rather than drawing a time
-axis, so their titles keep naming the filename's own value, matching the menu the
-choice came from.
+the Spatial summary panel, and every Batch Export figure — including the scatter
+figures, which have no time axis and so name the timepoint in their title
+instead. Batch **CSV** columns and output **filenames** are unaffected: those hold
+what the pipeline measured and what you picked from the timepoint list, so a
+downstream script reads the same numbers whatever this is set to.
+
+The Heat Map and Distribution tabs pick a timepoint from a menu rather than
+drawing a time axis, so their titles keep naming the filename's own value,
+matching the menu the choice came from.
 
 #### Fold-change normalization
 

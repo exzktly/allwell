@@ -37,6 +37,7 @@ from well_viewer.features.batch_export._common import (
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.plot_style import mark_time_rescale
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     get_thresh_frac_on as _get_thresh_frac_on,
@@ -520,6 +521,13 @@ class BarBatchExportPanel(BatchExportPanel):
             disabled_well_color=_CLR_DISABLED_WELL,
             err_bar_color=_CLR_ERR_BAR,
         )
+        # This figure is built here rather than by the on-tab renderer, so the
+        # marker that renderer adds has to be added here too: the tick labels and
+        # the suptitle above already follow the rescale factor, and without this
+        # a saved PNG reads t=4, t=8 with nothing on it saying those are not the
+        # hours the run recorded. No-op while the factor is off.
+        mark_time_rescale(ax_mean, ax_frac, ax_n,
+                          factor=self._ctx.state.plot.time_scale)
         return fig
 
     def _render_per_cell_panels(

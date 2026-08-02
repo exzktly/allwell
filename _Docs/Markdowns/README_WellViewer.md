@@ -922,7 +922,13 @@ of individual cells. This is the default Plotting sub-tab.
   - **Violin** / **Beeswarm** — swap the bars for a per-cell distribution
     (violin) or every individual cell (beeswarm). **Smooth** is active only
     when Violin is on and tunes the KDE bandwidth.
-  - **Significance** (On / Off) — draw pairwise significance brackets.
+  - **Significance** (On / Off) — draw pairwise significance brackets from the
+    comparisons the [Statistics](#statistics) tab last ran. A bracket appears
+    over the two bars its comparison was computed from, whether those bars are
+    replicate sets or individual wells — a group holding a single well brackets
+    that well's own bar. When a comparison doesn't line up with any bar (a group
+    spread across several bars, say), the status line says so instead of the
+    bracket quietly going missing.
   - **Reset Order** — restore the default order after you **drag bars to
     reorder** them.
   - The shared [Fold-change](#fold-change-normalization) dropdowns, applied in

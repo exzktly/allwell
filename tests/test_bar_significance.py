@@ -133,6 +133,54 @@ def test_brackets_draw_on_wells_match_when_names_differ():
     assert _artists(ax_mean) > 0
 
 
+def _per_well_bars(keys=("C08", "D02")):
+    """Bars as drawn in per-well mode: the bar's key IS the well token."""
+    return [SimpleNamespace(key=k, has_mean=True, mean=5.0 + i, spread=0.5,
+                            has_frac=True, frac=0.4, frac_spread=0.05)
+            for i, k in enumerate(keys)]
+
+
+def test_solo_well_groups_bracket_their_own_per_well_bars():
+    """Two one-well groups, per-well bars, no replicate sets defined.
+
+    Regression: the wells-to-bar map was built only from the active replicate
+    sets, so a Statistics group holding a single well had nothing to match
+    through — its own bar is keyed by the well token, not by any set — and the
+    comparison was silently dropped with a "pool replicates" hint. A one-well
+    group must bracket the bar for that well.
+    """
+    ax_mean, ax_frac = _axes()
+    pairwise = [{"a": "Ctrl", "b": "Treated",
+                 "a_wells": ["C08"], "b_wells": ["D02"],
+                 "p": 0.001, "p_adj": 0.001, "stat": "mean"}]
+    app = _app(pairwise)
+    app._app_state.dataset.well_paths = {"C08": None, "D02": None}
+    app._bar_xs_keys = ["C08", "D02"]
+    draw_significance_brackets(app._ctx, _per_well_bars(),
+                               ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_mean) > 0
+
+
+def test_solo_well_group_does_not_bracket_a_pooled_bar_of_the_same_name():
+    """A replicate set may be named after one of the wells it pools.
+
+    That bar stands for the whole set, so a comparison computed on the single
+    well of the same name must not be drawn over it — the well-token fallback
+    skips any key that is a replicate set's name.
+    """
+    ax_mean, ax_frac = _axes()
+    rsets = [SimpleNamespace(name="C08", wells=["C08", "C09"]),
+             SimpleNamespace(name="D02", wells=["D02", "D03"])]
+    pairwise = [{"a": "Ctrl", "b": "Treated",
+                 "a_wells": ["C08"], "b_wells": ["D02"],
+                 "p": 0.001, "p_adj": 0.001, "stat": "mean"}]
+    app = _app(pairwise, rsets=rsets)
+    app._bar_xs_keys = ["C08", "D02"]
+    draw_significance_brackets(app._ctx, _per_well_bars(),
+                               ax_mean=ax_mean, ax_frac=ax_frac)
+    assert _artists(ax_mean) == 0
+
+
 def test_no_match_sets_status_and_draws_nothing():
     ax_mean, ax_frac = _axes()
     msgs = []

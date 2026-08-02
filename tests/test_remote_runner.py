@@ -2353,10 +2353,10 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     assert not any(c and c[0] == "rm" for c in rm_calls), (
         f"dry-run must not delete; got rm calls: {rm_calls}"
     )
-    # Three probes: the v5.2.25 verify backstop (lists *_out.zip on
-    # the remote output dir) plus one dry-run probe per cleanup
-    # target (run dir + dataset cache).
-    assert len(script_calls) == 3
+    # Four probes: the verify backstop and the end-of-run reconciliation each
+    # list *_out.zip on the remote output dir, plus one dry-run probe per
+    # cleanup target (run dir + dataset cache).
+    assert len(script_calls) == 4
     dry_run_probes = [s for s in script_calls if "du -sb" in s]
     assert len(dry_run_probes) == 2
     blob = "".join(log_lines)

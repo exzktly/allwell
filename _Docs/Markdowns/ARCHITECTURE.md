@@ -3251,6 +3251,13 @@ well it drops or rewrites, so a plate whose remaining wells all stage unchanged
 went silent right after the two or three it did report, which reads as a stall
 with most of the plate still to go.
 
+Staging is not the last place the intent has to reach. Three further decisions
+downstream of it can each discard a forced run's work on their own — the
+pre-flight cache-hit check that decides whether to launch the pipeline at all,
+the Fetcher's decision to skip a well whose local copy looks complete, and
+verify's judgement of whether the output arrived — so `_RemoteRun` carries
+`force` / `force_wells` and all three consult it. §6.4 has the mechanics.
+
 **What the end-of-run sweep brings back.** Two things beyond the per-well
 outputs, both because a remote run's records are useless if they stay on the
 remote. `out/errors/` — the per-failure tracebacks — is pulled, so Validate's
@@ -3389,11 +3396,59 @@ already complete (a readable `<WELL>_out.zip` under the FULL filter, plus a
 pulling it anyway costs an ssh size probe and two retry-wrapped
 `rsync --timeout=120` invocations — the shape behind a fetch that sits on one
 well for minutes while the file it is pulling is already on disk and untouched.
-The skip is deliberately narrow: a well this run *did* process is always
-re-fetched however complete the local copy looks, because that local artefact is
-exactly what the new output replaces. Each fetch also logs why it is happening
-(`this run produced new output` vs `end-of-run sweep: not complete locally`),
-since a slow fetch is only diagnosable if those two are distinguishable.
+The skip is deliberately narrow, and there are two ways out of it: a well this
+run *did* process is always re-fetched however complete the local copy looks,
+because that local artefact is exactly what the new output replaces; and so is a
+well the run was **told to reprocess**. "It already exists locally" is the one
+reason that cannot justify skipping a forced well, since that file is the thing
+being replaced — and a forced well missing from `expected_wells` means its
+completion marker was never seen, which is a reason to look harder rather than
+to skip. Each fetch logs which of the three reasons applies (`this run produced
+new output`, `forced reprocess — the local copy is being replaced`, or `not
+complete locally`), since a slow fetch is only diagnosable if they are
+distinguishable.
+
+**Force is carried to the decisions that act on it.** `_RemoteRun` holds
+`force` / `force_wells`, read off the pipeline argv by `_forced_from_argv` at
+both construction sites (the single-shot and batched paths). Before that the
+force intent reached the staging planner and stopped there, which left the two
+decisions that actually determine whether a local artefact gets replaced — the
+Fetcher's skip and verify — structurally unable to know a replacement had been
+demanded.
+
+**The pre-flight cache hit has a force term.** `_compute_run_id` deliberately
+excludes `--force` from its hash so a forced re-run lands in the *same* remote
+output dir and overwrites it. That makes the dir complete precisely when a
+forced run starts, so counting `*_out.zip` files there is not on its own a
+reason to skip the pipeline: `_pipeline_launch_is_pointless` answers yes only
+when the remote is complete **and** nothing was asked to be reprocessed. When
+the remote is complete but the run is forced, the log says so explicitly — the
+cache-hit line is what a user expects there, and its silent absence is otherwise
+unexplained.
+
+**Verify proves replacement, not existence.** `_snapshot_local_artifacts`
+fingerprints the output dir (`name -> (size, mtime_ns)`) at run construction
+and parks it on `_RemoteRun.pre_run_artifacts`. `_verify_local_manifest` still
+requires the CSV and (under the FULL filter) a non-empty `<WELL>_out.zip`, and
+additionally requires that the zip **differ from the pre-run fingerprint** for
+every well the run undertook to rewrite — all of them when `force` is set,
+otherwise `force_wells | expected_wells`. A well whose artefact carries the same
+size and mtime it had before the run is reported by name as *not replaced*,
+which fails verify and so leaves the remote state in place. An empty snapshot
+means every artefact is new rather than none changed, so a run over a clean
+output dir is unaffected. `_retry_missing_wells` treats such a well as the one
+exception to its "a present zip needs no re-pull" cost guard and re-pulls it,
+turning the report into a repair.
+
+**Every well is classified in a file beside the outputs.**
+`RemoteRunner._reconcile_fetch` runs before verify and writes
+`<output_dir>/remote_fetch_report.txt`: the run id, the force intent, and one
+line per well the remote holds output for, marked `fetched`,
+`skipped` (with the Fetcher's reason, recorded on `_RemoteRun.skipped_wells`),
+or `never-announced`. "Why was this well not fetched?" was previously answerable
+only from stdout as it streamed, which is no use once the log drawer is closed;
+a diagnostic that only exists live is not a diagnostic. A failure to write the
+report is logged and never fails the run.
 
 `_filter_new_fovs_in_staging` is an **older, production-dead** split kept only by
 `tests/test_remote_incremental.py`. A change to the incremental split has to land

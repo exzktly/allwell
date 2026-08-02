@@ -405,9 +405,18 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     zl.addStretch(1)
     cl.addWidget(zoom_row)
 
+    # The read-out. Everything this tab can be ambiguous about is stated here in
+    # words, because none of it is visible in the picture: which mask the
+    # outlines came from and whether it even fits the frame, how many labels the
+    # QC filter threw away, which of binary mode's three rules drew what is on
+    # screen, and the data range (the LUT auto-scales, so a correction can move
+    # the data without moving the image). Selectable so a line can be pasted
+    # into a bug report.
+    _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)
     status.setObjectName("Muted")
     status.setWordWrap(True)
+    status.setTextInteractionFlags(Qt.TextSelectableByMouse)
     cl.addWidget(status)
     app._playground_status = status
     cl.addStretch(1)

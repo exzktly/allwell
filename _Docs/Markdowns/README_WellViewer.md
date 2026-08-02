@@ -1590,16 +1590,28 @@ exact correction and segmentation code).
 - **Display controls** — LUT / colormap / binary + outlines; pan / zoom;
   per-stage LUT memory; a frame-local binary threshold; a hover pixel-intensity
   readout; a QC size-cleanup preview.
-- **The status line** under the controls always reports the same four things:
-  the stage and the correction actually applied, the frame, **which mask the
-  outlines came from**, and the displayed image's **range and mean**. That last
-  one matters: the LUT auto-scales to whatever is on screen, so a background
-  change can leave the picture looking identical while the data underneath it
-  moved. If the numbers change, the correction ran.
-- **Outlines** come from one of two places and the status line says which.
-  *pipeline mask* is the mask a run already produced — it does **not** respond to
-  the Correction controls, because changing a correction does not re-segment.
-  *live StarDist* is what this tab computed; press **Segment** to refresh it.
+- **What you're looking at** — the read-out at the bottom of the panel. None of
+  what it says is visible in the picture, which is why it is written out:
+
+  - **Frame** and **Stage** — the frame on screen and the correction *actually*
+    applied to it (not what the controls say, if the stage ignores some of them).
+  - **Image** — the displayed image's **range and mean**. Worth watching: the
+    LUT auto-scales to whatever is on screen, so a background change can leave
+    the picture looking identical while the data underneath it moved. If these
+    numbers change, the correction ran.
+  - **Mask** — where the outlines came from, how many labels it holds, how many
+    the QC size filter removed, and a warning if the mask does not fit the frame.
+    *pipeline mask* is the mask a run already produced: it does **not** respond
+    to the Correction controls, because changing a correction does not
+    re-segment. *live StarDist* is what this tab computed; press **Segment** to
+    refresh it.
+  - **Shown** — exactly what is drawn. This matters most in Binary mode, which
+    can mean three different things that all look like white shapes on black:
+    each label filled when its **mean** intensity clears the threshold (the real
+    per-cell measurement); every **pixel** above the threshold, if there is no
+    usable mask; or every labelled pixel with the threshold ignored. The
+    read-out names which one you are seeing, and where the threshold came from —
+    set on this tab, or the channel's app-wide ON threshold.
 - **Segmentation controls** — tick **Live StarDist**, set **Probability** and
   **Overlap (NMS)** (blank = the pretrained model's own values), and press
   **Segment**. The nuclei it finds replace the pipeline's saved mask in the

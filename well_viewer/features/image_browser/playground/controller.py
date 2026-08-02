@@ -267,25 +267,93 @@ def _range_text(arr) -> str:
             f"(mean {float(a.mean()):.4g})")
 
 
+def _threshold_source(st) -> str:
+    """Where the binary threshold came from — the two are easy to confuse."""
+    return ("set on this tab" if st.threshold is not None
+            else "this channel's ON threshold")
+
+
+_PROVENANCE_PHRASE = {
+    "pipeline mask": ("the mask a pipeline run already saved for this frame. It "
+                      "does NOT change when you change a correction — nothing "
+                      "here re-segments it"),
+    "live StarDist": "labels this tab computed with the thresholds above",
+    "none": "none",
+}
+
+
+def _cells(n: int) -> str:
+    return f"{n} label" if n == 1 else f"{n} labels"
+
+
+def _describe_mask(facts: dict) -> str:
+    """What mask was calculated, in words, including what was thrown away."""
+    provenance = facts.get("provenance", "none")
+    if provenance == "none":
+        return "Mask: none — nothing to outline or fill."
+    parts = [f"Mask: {provenance} — {_PROVENANCE_PHRASE[provenance]}.",
+             f"{_cells(facts['labels_in'])} found."]
+    kept, total = facts["labels_kept"], facts["labels_in"]
+    if kept != total:
+        parts.append(f"QC size filter kept {kept} of {total}.")
+    if not facts["shape_ok"]:
+        mh, mw = facts["mask_shape"] or (0, 0)
+        fh, fw = facts["frame_shape"]
+        parts.append(f"⚠ It does NOT match this frame (mask {mw}×{mh}, frame "
+                     f"{fw}×{fh}), so it cannot be used per cell.")
+    return " ".join(parts)
+
+
+def _describe_shown(facts: dict) -> str:
+    """What is actually on screen, naming *which* rule drew it."""
+    if not facts["binary"]:
+        if facts["outlines"] and facts["labels_kept"]:
+            return (f"Shown: the image, with outlines around "
+                    f"{_cells(facts['labels_kept'])}.")
+        if facts["outlines"]:
+            return "Shown: the image only — outlines are on, but there is no mask."
+        return "Shown: the image only — outlines are off."
+
+    thr = facts["threshold"]
+    thr_txt = "—" if thr is None else f"{float(thr):g}"
+    rule = facts["binary_rule"]
+    if rule == "per-cell":
+        return (f"Shown: binary — white where a label's MEAN intensity in this "
+                f"image exceeds {thr_txt} ({facts['threshold_source']}). "
+                f"{facts['above']} of {facts['labels_kept']} pass.")
+    if rule == "per-pixel":
+        return (f"Shown: binary — but with no usable mask this is a PER-PIXEL "
+                f"threshold: every pixel above {thr_txt} is white. That is not a "
+                f"per-cell measurement.")
+    return (f"Shown: binary — every labelled pixel is white "
+            f"({_cells(facts['labels_kept'])}); the threshold is not used.")
+
+
 def _status_text(ctx, frame_lbl: str, ff_mode: str, bg_method: str,
                  refusal: str = "") -> str:
-    """The one line that says what is on screen and what produced it.
+    """The read-out: what was calculated, and what is on screen, in words.
 
-    Always the same four things in the same order — stage + correction, frame,
-    whose mask the outlines are, and the data range — so a reader can tell at a
-    glance which of them changed. Call it *after* ``_render``, which is what
-    sets ``display_arr``.
+    Every ambiguity this tab can produce is spelled out here rather than left to
+    be inferred from the picture — because the picture cannot show any of them.
+    Binary mode in particular renders three different rules identically (see
+    :func:`_binary_rule`), the outlines can come from a pipeline run or from
+    this tab, and the LUT auto-scales so a correction can move the data without
+    moving the image. Call it *after* ``_render``, which records the facts.
     """
     st = _st(ctx)
+    facts = st.display_facts or {}
     stage = _STAGE_LABELS.get(st.source, st.source)
-    head = (stage if st.source == "raw"
-            else f"{stage} ({_correction_text(st, ff_mode, bg_method)})")
-    text = "  ·  ".join([head, frame_lbl,
-                         f"outline: {_mask_source(ctx)[1]}",
-                         _range_text(st.display_arr)])
+    correction = ("no correction applied on this stage" if st.source == "raw"
+                  else _correction_text(st, ff_mode, bg_method))
+    lines = [f"Frame: {frame_lbl}",
+             f"Stage: {stage} — {correction}",
+             f"Image: {_range_text(st.display_arr)}",
+             _describe_mask(facts),
+             _describe_shown(facts)]
     if refusal:
-        text = f"{text}  ⚠ {refusal}"
-    return _with_seg_note(ctx, text)
+        lines.append(f"⚠ {refusal}")
+    lines += _describe_segmentation(ctx)
+    return "\n".join(lines)
 
 
 # ── main render ──────────────────────────────────────────────────────────────
@@ -583,21 +651,69 @@ def _mask_source(ctx):
     return None, "none"
 
 
+def _label_count(mask) -> int:
+    """How many non-zero labels a mask holds (0 for no mask)."""
+    if mask is None:
+        return 0
+    ids = np.unique(np.asarray(mask, dtype=np.int32))
+    return int((ids > 0).sum())
+
+
+def _binary_rule(mask, above_ids, threshold, shape_ok: bool) -> str:
+    """Which of ``build_frame_rgb``'s three binary rules this render will take.
+
+    They produce identical-looking white-on-black and mean completely different
+    things, and the choice is made silently by what happens to be available:
+
+    * ``per-cell`` — a label is filled when its MEAN intensity clears the
+      threshold. What the pipeline's cell gating means.
+    * ``per-pixel`` — no usable mask, so every *pixel* above the threshold is
+      filled. Not a cell measurement at all.
+    * ``footprint`` — a mask but no per-cell verdict; every labelled pixel is
+      filled and the threshold is not consulted.
+
+    Naming the rule is the whole point of the read-out: a user cannot tell these
+    apart by looking.
+    """
+    if mask is not None and shape_ok and above_ids is not None:
+        return "per-cell"
+    if threshold is not None:
+        return "per-pixel"
+    return "footprint"
+
+
 def _render(ctx, arr) -> None:
     st = _st(ctx)
     st.display_arr = np.asarray(arr, dtype=np.float32)
     lo, hi = _resolve_lut(ctx.window, arr)
     # Apply the QC size-based cleanup to the mask before display, so the overlay
     # and binary reflect the debris gate.
-    source_mask, _provenance = _mask_source(ctx)
+    source_mask, provenance = _mask_source(ctx)
     qc_mask = _qc_size_filtered(source_mask, st.qc_min_area, st.qc_max_area)
     mask = qc_mask if (st.show_overlay or st.binary_mask) else None
     above_ids = None
     thr = None
+    shape_ok = (qc_mask is not None
+                and np.asarray(qc_mask).shape[:2] == np.asarray(arr).shape[:2])
     if st.binary_mask:
         thr = _effective_threshold(ctx)
         if qc_mask is not None:
             above_ids = _cells_above(arr, qc_mask, thr)
+    st.display_facts = {
+        "provenance": provenance,
+        "labels_in": _label_count(source_mask),
+        "labels_kept": _label_count(qc_mask),
+        "shape_ok": bool(shape_ok),
+        "mask_shape": None if source_mask is None else tuple(
+            np.asarray(source_mask).shape[:2]),
+        "frame_shape": tuple(np.asarray(arr).shape[:2]),
+        "outlines": bool(st.show_overlay),
+        "binary": bool(st.binary_mask),
+        "threshold": thr,
+        "threshold_source": _threshold_source(st),
+        "above": None if above_ids is None else len(above_ids),
+        "binary_rule": _binary_rule(qc_mask, above_ids, thr, shape_ok),
+    }
     st.base_rgb = build_playground_rgb(
         arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
         show_boundary=st.show_overlay, tint=tuple(st.tint_color),
@@ -663,30 +779,33 @@ def _seg_is_stale(ctx) -> bool:
     return st.seg_labels is not None and st.seg_key != _seg_key(ctx)
 
 
-def _with_seg_note(ctx, text: str) -> str:
-    """Append the live-preview's own state to a status line.
+def _describe_segmentation(ctx) -> list[str]:
+    """The live preview's own state, as read-out lines.
 
-    The preview can be in four states and each has to be distinguishable: off,
-    running, holding labels for this frame, or holding STALE labels. The last
-    one is the reason this exists — labels that no longer match the frame are
-    not drawn, so without a note the overlay would simply be missing.
+    It can be in five states and each has to be distinguishable: a bad threshold
+    typed in, off, running, holding labels for this frame, or holding STALE
+    ones. The stale case is the reason this exists — those labels are not drawn,
+    so without a line saying why, the overlay would simply be missing.
     """
     st = _st(ctx)
+    lines: list[str] = []
     if st.seg_param_error:
         # Reported whether or not the preview is on: the number in the box is
         # not the number being used, and only saying so in live mode would let
         # a typo sit there looking accepted.
-        text = f"{text}  ⚠ {st.seg_param_error}"
+        lines.append(f"⚠ {st.seg_param_error}")
     if not st.seg_live:
-        return text
+        return lines
     if st.seg_running:
-        return f"{text}  •  StarDist running…"
-    if st.seg_labels is None:
-        return f"{text}  •  {st.seg_status or 'press Segment to run StarDist'}"
-    if _seg_is_stale(ctx):
-        return (f"{text}  ⚠ StarDist labels are stale (computed for a different "
-                f"frame or settings) — press Segment again")
-    return f"{text}  •  {st.seg_status}"
+        lines.append("StarDist running…")
+    elif st.seg_labels is None:
+        lines.append(st.seg_status or "StarDist: press Segment to run.")
+    elif _seg_is_stale(ctx):
+        lines.append("⚠ StarDist labels are stale (the frame or the settings "
+                     "changed since they were computed) — press Segment again.")
+    else:
+        lines.append(st.seg_status)
+    return lines
 
 
 def _segmentation_frame(ctx):

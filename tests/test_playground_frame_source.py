@@ -328,7 +328,7 @@ def test_the_raw_stage_ignores_the_correction_controls_and_says_so(ctx, gradient
         st.background_method = method
         C.playground_on_change(ctx)
         assert np.array_equal(_rendered(ctx), first)
-    assert ctx.statuses[-1].startswith("Raw")
+    assert "Stage: Raw" in ctx.statuses[-1]
 
 
 def test_the_flatfield_stage_names_the_flatfield_it_applied(ctx, gradient_tif):
@@ -453,3 +453,148 @@ def test_a_reference_mode_without_its_field_refuses_by_name(ctx, gradient_tif):
     arr, reason = C._segmentation_frame(ctx)
     assert arr is None
     assert "reference field" in reason and "Bg well" in reason
+
+
+# ── the read-out: what was calculated, and what is on screen ─────────────────
+#
+# None of what follows is visible in the picture. The outlines from a pipeline
+# run and from this tab look identical; binary mode renders three different
+# rules identically; and a mask that does not fit the frame silently changes
+# what binary mode even means. So it is stated in words, and asserted here.
+
+def _with_mask(ctx, monkeypatch, mask):
+    """Give the loose-image path a mask, which it otherwise never has."""
+    real = C._resolve_frame
+
+    def _patched(c):
+        raw, label, key = real(c)
+        c.state.playground.mask_arr = mask
+        return raw, label, key
+    monkeypatch.setattr(C, "_resolve_frame", _patched)
+
+
+def _labels_3():
+    lab = np.zeros((64, 64), dtype=np.int32)
+    lab[10:20, 10:20] = 1                     # bright, large
+    lab[40:48, 40:48] = 2                     # dim, large
+    lab[55:58, 55:58] = 3                     # tiny — the QC filter drops it
+    return lab
+
+
+@pytest.fixture
+def framed(ctx, gradient_tif):
+    st = ctx.state.playground
+    st.source = "corrected"
+    st.radius = 12
+    st.background_method = "sliding_disk"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    return ctx
+
+
+def test_the_readout_states_the_frame_stage_and_range(framed):
+    status = framed.statuses[-1]
+    assert "Frame: gradient.tif" in status
+    assert "Stage: Corrected" in status and "sliding_disk" in status
+    assert "Image: range" in status and "mean" in status
+
+
+def test_the_readout_says_a_pipeline_mask_will_not_follow_the_correction(
+        ctx, gradient_tif, monkeypatch):
+    """The reported confusion: outlines that cannot move, with nothing saying so."""
+    _with_mask(ctx, monkeypatch, _labels_3())
+    ctx.state.playground.source = "corrected"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+
+    status = ctx.statuses[-1]
+    assert "Mask: pipeline mask" in status
+    assert "does NOT change when you change a correction" in status
+    assert "3 labels found" in status
+
+
+def test_the_readout_reports_what_the_qc_filter_removed(ctx, gradient_tif, monkeypatch):
+    _with_mask(ctx, monkeypatch, _labels_3())
+    st = ctx.state.playground
+    st.qc_min_area = 50                       # drops the 3x3 label
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+
+    status = ctx.statuses[-1]
+    assert "QC size filter kept 2 of 3" in status
+    assert "outlines around 2 labels" in status
+
+
+def test_binary_names_the_per_cell_rule_and_the_threshold_source(
+        ctx, gradient_tif, monkeypatch):
+    _with_mask(ctx, monkeypatch, _labels_3())
+    st = ctx.state.playground
+    st.binary_mask = True
+    # After the frame, not before: opening a frame clears any local threshold so
+    # the control falls back to the channel's value (see playground_on_change).
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    st.threshold = 800.0
+    C.playground_on_change(ctx)
+
+    status = ctx.statuses[-1]
+    assert "MEAN intensity" in status
+    assert "800" in status and "set on this tab" in status
+    assert "pass." in status
+
+
+def test_binary_says_when_it_fell_back_to_a_per_pixel_threshold(
+        ctx, gradient_tif, monkeypatch):
+    """A mask that does not fit the frame turns binary mode into something else
+    entirely — a pixel threshold — and the picture cannot show the difference."""
+    wrong_size = np.zeros((32, 32), dtype=np.int32)
+    wrong_size[2:10, 2:10] = 1
+    _with_mask(ctx, monkeypatch, wrong_size)
+    st = ctx.state.playground
+    st.binary_mask = True
+    st.threshold = 500.0
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+
+    status = ctx.statuses[-1]
+    assert "does NOT match this frame" in status
+    assert "PER-PIXEL" in status
+    assert "not a per-cell measurement" in status
+
+
+def test_binary_with_no_mask_at_all_is_also_named(framed):
+    st = framed.state.playground
+    st.binary_mask = True
+    st.threshold = 500.0
+    C.playground_on_change(framed)
+
+    status = framed.statuses[-1]
+    assert "Mask: none" in status
+    assert "PER-PIXEL" in status
+
+
+def test_the_readout_distinguishes_the_two_threshold_sources(
+        ctx, gradient_tif, monkeypatch):
+    """Whether the cut came from this tab or from the channel's app-wide ON
+    threshold changes what the binary picture means."""
+    _with_mask(ctx, monkeypatch, _labels_3())
+    st = ctx.state.playground
+    st.binary_mask = True
+    st.threshold = None                       # fall back to the channel's value
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    assert "this channel's ON threshold" in ctx.statuses[-1]
+
+    st.threshold = 123.0
+    C.playground_on_change(ctx)
+    assert "set on this tab" in ctx.statuses[-1]
+
+
+def test_the_readout_says_when_outlines_are_simply_off(framed):
+    st = framed.state.playground
+    st.show_overlay = False
+    C.playground_on_change(framed)
+    assert "outlines are off" in framed.statuses[-1]
+
+
+def test_a_single_label_reads_as_singular(framed, monkeypatch):
+    one = np.zeros((64, 64), dtype=np.int32)
+    one[10:20, 10:20] = 1
+    _with_mask(framed, monkeypatch, one)
+    C.playground_on_change(framed)
+    status = framed.statuses[-1]
+    assert "1 label found" in status and "1 labels" not in status

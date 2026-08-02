@@ -97,6 +97,12 @@ class PlaygroundState:
     # that is quietly not being used has to say so wherever it was typed.
     seg_param_error: str = ""
 
+    # What the last render actually did, recorded by ``_render`` so the read-out
+    # can state it rather than re-derive it (a second derivation is a second
+    # chance to describe something the renderer did not do). Keys are documented
+    # by ``controller._display_facts``.
+    display_facts: dict = field(default_factory=dict)
+
     # per-render caches (rebuilt on change; never persisted)
     raw_arr: object = None              # last-loaded raw frame
     mask_arr: object = None             # last-loaded precomputed labels

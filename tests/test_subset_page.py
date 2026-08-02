@@ -383,6 +383,168 @@ def test_run_progress_overlays_onto_the_picker_plate(qapp, tmp_path):
         # accessibility-unreadable to anyone who can't distinguish
         # success-green from the other states' colours.
         assert grid._markers.get(key) == "✓"
+        # ...and a copied well ends as a full dial, not a bare disc: the
+        # picker plate is where this page's per-well progress is drawn, so a
+        # run that finished must leave it saying so.
+        assert grid._fractions.get(key) == 1.0
+    ctrl.shutdown()
+
+
+def test_per_well_progress_fills_a_dial_on_the_picker_plate(qapp, tmp_path):
+    """The sibling Datasets controllers hand their worker's ``wellFraction``
+    signal to ``dashboard.set_well_progress``. Subset's dashboard has no plate
+    of its own (``PlateProgress(show_plate=False)``), so that call lands on
+    ``PlateProgress.set_well_fraction``'s documented ``self._plate is None``
+    no-op and every fraction the worker computes is silently discarded — the
+    one tool that emits per-well sub-progress and rendered none of it. The
+    fractions must reach the picker plate the page actually shows."""
+    from widgets.well_plate_selector import _parse_well_id
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    grid = page._plate._grid
+    key = _parse_well_id("A01")
+    ctrl._on_well_fraction("A01", 2, 4)
+    assert grid._fractions.get(key) == 0.5
+    ctrl._on_well_fraction("A01", 4, 4)
+    assert grid._fractions.get(key) == 1.0
+    ctrl.shutdown()
+
+
+def test_an_uncounted_well_gets_no_dial_rather_than_an_empty_one(qapp, tmp_path):
+    """A caller that has not counted the work yet is reporting "unknown", and
+    unknown must not render as a definite zero-filled dial — that is the same
+    picture as a well that has genuinely done nothing
+    (``widgets.plate_progress.fraction_or_none``)."""
+    from widgets.well_plate_selector import _parse_well_id
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    ctrl._on_well_fraction("A01", 0, 0)
+    assert page._plate._grid._fractions.get(_parse_well_id("A01")) is None
+    ctrl.shutdown()
+
+
+def test_a_copying_well_carries_a_dial_and_no_glyph(qapp, tmp_path):
+    """A well being copied is drawn as a dial, so it carries no in-flight
+    glyph: the "⚙" it used to wear sat in the middle of exactly the area the
+    dial fills, and the fill plus the colour already say the well is working.
+    Terminal states keep their markers — those have no dial competing for the
+    space, and colour alone is unreadable to anyone who can't distinguish
+    success-green from accent-lilac."""
+    from widgets.well_plate_selector import _parse_well_id
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01", "B02"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    grid = page._plate._grid
+    ctrl._on_well_stage("A01", "copying")
+    assert grid._markers.get(_parse_well_id("A01")) is None
+    ctrl._on_well_stage("A01", "done")
+    assert grid._markers.get(_parse_well_id("A01")) == "✓"
+    ctrl.shutdown()
+
+
+def test_a_terminal_stage_settles_the_dial(qapp, tmp_path):
+    """Neither terminal state is left to whatever the last sub-progress tick
+    happened to be: a copied well reads as a full circle, and a well nothing
+    matched has no copy progress to describe at all — a part-filled dial
+    beside its "!" would suggest it is still going."""
+    from widgets.well_plate_selector import _parse_well_id
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01", "B02"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    grid = page._plate._grid
+    ctrl._on_well_fraction("A01", 1, 4)
+    ctrl._on_well_stage("A01", "done")
+    assert grid._fractions.get(_parse_well_id("A01")) == 1.0
+
+    ctrl._on_well_fraction("B02", 1, 4)
+    ctrl._on_well_stage("B02", "empty")
+    assert grid._fractions.get(_parse_well_id("B02")) is None
+    ctrl.shutdown()
+
+
+def test_a_second_run_does_not_inherit_the_first_run_s_dials(qapp, tmp_path):
+    """``reset`` clearing colours and markers but not fractions is exactly the
+    bug a test caught on the run dashboard when the dial first shipped: every
+    second run would start wearing the first run's progress."""
+    from widgets.well_plate_selector import _parse_well_id
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    build_dataset(src, wells=["A01"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+    assert page._plate._grid._fractions.get(_parse_well_id("A01")) == 1.0
+
+    # A fresh source wipes the plate, dials included.
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    assert page._plate._grid._fractions == {}
+    ctrl.shutdown()
+
+
+def test_changing_the_selection_after_a_run_clears_the_dials(qapp, tmp_path):
+    """The plate goes interactive again when the run ends, and every copied
+    well is a full circle. Without clearing them, the pre-run ``accent_dim``
+    tint would be painted underneath a plate still wearing the last run's
+    progress."""
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    build_dataset(src, wells=["A01", "B02"], timepoints=["0h"])
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+    assert page._plate._grid._fractions != {}
+
+    page._plate.setSelectedWellIds(["A01"])
+    assert page._plate._grid._fractions == {}
     ctrl.shutdown()
 
 

@@ -99,15 +99,17 @@ def test_terminal_well_states_carry_a_marker_not_just_colour(qapp):
     """Regression guard (UX audit P2-12): "merged" and "warned" painted
     colour only -- accessibility-unreadable to anyone who can't distinguish
     success-green from accent-lilac, and the one state (warned) that means
-    "look at this, something's off" had no glyph at all once the transient
-    "⚙" cleared."""
+    "look at this, something's off" had no glyph at all.
+
+    A *merging* well carries no glyph: it is drawn as a progress dial, and a
+    glyph sits in the middle of exactly the area the dial fills."""
     from datasets.concatenate.dashboard import ConcatDashboard
     from widgets.well_plate_selector import _parse_well_id
 
     d = ConcatDashboard()
     d.set_wells(["A01", "A02", "A03"])
     d.set_well_stage("A01", "merging")
-    assert d._plate._grid._markers.get(_parse_well_id("A01")) == "⚙"
+    assert d._plate._grid._markers.get(_parse_well_id("A01")) is None
     d.set_well_stage("A01", "merged")
     assert d._plate._grid._markers.get(_parse_well_id("A01")) == "✓"
     d.set_well_stage("A02", "warned")

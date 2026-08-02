@@ -352,7 +352,12 @@ class SubsetPage(QWidget):
         # theme.Colors.accent, the exact hue a plain unselected-but-enabled
         # well already renders in a faint tint by default). accent_dim reads
         # as "chosen, not yet run" without colliding with either.
+        # Dials as well as colours: after a run every copied well is a full
+        # circle, and the plate becomes interactive again when the run ends, so
+        # without this the pre-run tint would be painted underneath a plate
+        # still wearing the last run's progress.
         self._plate.clearWellColors()
+        self._plate.clearWellFractions()
         for w in wells:
             self._plate.setWellColor(w, theme.Colors.accent_dim)
         self._refresh_run_enabled()

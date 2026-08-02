@@ -132,8 +132,19 @@ class AnalyzeProgressMixin:
             stage, total = payload  # type: ignore[misc]
             self._dashboard.set_stage_total(str(stage), int(total))
 
+    #: Events that only ever arrive once the pipeline is actually computing.
+    #: Any one of them means a remote transfer, if there was one, is over — so
+    #: the transfer label goes with it. Keyed off the pipeline's own progress
+    #: rather than off rsync reaching exactly 100%, which it need not do: the
+    #: last tick before rsync exits can be any value, and in batched mode it is
+    #: scaled per batch. The label used to be left holding whatever that last
+    #: number was for the whole compute phase.
+    _COMPUTE_PHASE_EVENTS = ("well_total", "well_done", "well_fov")
+
     def _apply_progress_event(self, kind: str, payload: object) -> None:
         """Render a progress event from :class:`ProgressTracker` to the UI."""
+        if kind in self._COMPUTE_PHASE_EVENTS:
+            self._dashboard.set_transfer(None)
         if kind == "well_total":
             # Announced once at the start of the run, and again if more wells
             # finish than were announced (the tracker treats its total as a

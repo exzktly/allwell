@@ -555,8 +555,9 @@ A cell counts only when it is manually kept **and** it passes QC.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a
-  slow well is nearly through or has barely started. There is no longer a cog on
-  the well — the dial and its colour say it is working.
+  slow well is nearly through or has barely started. A well with a dial carries
+  no cog — the dial and its colour already say it is working. That holds for
+  every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
   being computed it fills with the fields measured; while its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. A
@@ -2010,7 +2011,10 @@ trimming a drifted tail of timepoints.
 3. Press **Subset**. The same well plate you picked wells with now shows
    each one being copied — locked against further clicks until the run
    finishes, so it can double as the progress view instead of a second
-   plate map elsewhere on the page.
+   plate map elsewhere on the page. A well being copied fills clockwise as a
+   dial, the same way Analyze's run plate does, so you can see whether a big
+   well is nearly through or has barely started; it ends as a full circle
+   with a ✓, or as a plain `!` well if nothing in it matched your filter.
 
 Timepoints keep their original hours — a subset spanning 24h–72h stays
 labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-

@@ -67,8 +67,12 @@ class ImportLooseDashboard(PlateProgress):
         self._plate.setWellColor(w, self._well_color(w))
         # Terminal states carry a marker too, not just colour (accessibility
         # — colour alone is unreadable to anyone who can't distinguish
-        # success-green from text-muted grey).
-        marker = {"writing": "⚙", "done": "✓"}.get(stage)
+        # success-green from text-muted grey). A well that is *writing*
+        # carries none: it is drawn as a progress dial, and a glyph would sit
+        # in the middle of exactly the area the dial fills, while the fill and
+        # the colour already say the well is being worked on. Every plate map
+        # in the app follows that rule.
+        marker = {"done": "✓"}.get(stage)
         self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_stage.values() if s == "done"))
         self._refresh_rail()

@@ -59,13 +59,16 @@ def test_rail_and_legend_use_the_same_word_for_the_done_state(qapp):
 def test_done_wells_carry_a_marker_not_just_colour(qapp):
     """Regression guard (UX audit P2-12): "done" painted colour only --
     accessibility-unreadable to anyone who can't distinguish success-green
-    from the other states' colours, unlike "writing"'s own "⚙"."""
+    from the other states' colours.
+
+    A *writing* well carries no glyph: it is drawn as a progress dial, and a
+    glyph sits in the middle of exactly the area the dial fills."""
     from widgets.well_plate_selector import _parse_well_id
 
     d = ImportLooseDashboard()
     d.set_wells(["A01", "B02"])
     d.set_well_stage("A01", "writing")
-    assert d._plate._grid._markers.get(_parse_well_id("A01")) == "⚙"
+    assert d._plate._grid._markers.get(_parse_well_id("A01")) is None
     d.set_well_stage("A01", "done")
     assert d._plate._grid._markers.get(_parse_well_id("A01")) == "✓"
     d.set_well_stage("B02", "pending")

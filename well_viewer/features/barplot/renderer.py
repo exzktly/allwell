@@ -527,11 +527,23 @@ def draw_significance_brackets(ctx, items, *, ax_mean, ax_frac=None,
     # WELLS match so a comparison still lands on the right bar when the
     # Statistics group and the bar's replicate set are named differently.
     wells_to_key: dict[frozenset, str] = {}
+    rset_names: set[str] = set()
     for rset in active_replicate_sets(ctx.state.selection.selections,
                                       ctx.state.dataset.well_paths):
         fw = frozenset(getattr(rset, "wells", []) or [])
         if fw:
             wells_to_key.setdefault(fw, rset.name)
+            rset_names.add(rset.name)
+    # Per-well bars are keyed by the well token itself, so a Statistics group
+    # holding exactly that one well has no replicate set to match through. Map
+    # each such bar to its own well, skipping any key that is a replicate set's
+    # name — there the key stands for whatever wells that set pools, which is
+    # not necessarily the single well of the same name.
+    well_paths = ctx.state.dataset.well_paths
+    for key in top_by_key:
+        if key in rset_names or key not in well_paths:
+            continue
+        wells_to_key.setdefault(frozenset({key}), key)
 
     def _bar_key_for(name, wells):
         if name in top_by_key:

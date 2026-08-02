@@ -1,11 +1,12 @@
-"""Playground tab — pure rendering + zoom/pan blit.
+"""Playground tab — the zoom/pan blit onto the Playground canvas.
 
-``build_playground_rgb`` is app-free: it turns ``(fluor_arr, mask_arr)`` plus LUT
-/ colormap / tint / binary options into an (H, W, 3) uint8 RGB, reusing
-``ui_helpers.lut_colormap_to_rgb`` for the LUT+colormap math and the same
-padded-diff boundary trick the Image Table / Review Image renderers use. The
-binary branch mirrors ``review_image.renderer.draw_review_image`` (labelled cells
-white). ``render_playground_display`` is the only app-touching function — a
+The RGB build itself lives in ``well_viewer.core.frame_render.build_frame_rgb``
+— the Analyze pane's Preview page renders the same thing, and it cannot import
+this package (the Playground is a *removable* feature, and only
+``features/registry.py`` may import a feature at all). ``build_playground_rgb``
+stays here as the name this package's callers and tests use.
+
+``render_playground_display`` is the only app-touching function — a
 self-contained zoom/pan loop modelled on ``render_review_image_display`` that
 writes to ``app._playground_image_label`` so it can never destabilise the Review
 Image canvas.
@@ -17,75 +18,10 @@ import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 
-from well_viewer.core.ui_helpers import lut_colormap_to_rgb
-
-
-def _boundary_mask(mask_arr, shape) -> np.ndarray | None:
-    """Bool boundary of an int label array (padded-diff), or None if absent."""
-    if mask_arr is None:
-        return None
-    center = np.asarray(mask_arr, dtype=np.int32)
-    if center.shape[:2] != tuple(shape[:2]):
-        return None
-    padded = np.pad(center, 1, mode="constant", constant_values=0)
-    c = padded[1:-1, 1:-1]
-    return (c > 0) & (
-        (c != padded[:-2, 1:-1]) | (c != padded[2:, 1:-1]) |
-        (c != padded[1:-1, :-2]) | (c != padded[1:-1, 2:])
-    )
-
-
-def build_playground_rgb(fluor_arr, mask_arr, *, lo=None, hi=None,
-                         cmap_name: str = "", binary: bool = False,
-                         show_boundary: bool = True,
-                         boundary_color=(255, 255, 255),
-                         tint=(255, 255, 255), above_ids=None,
-                         threshold=None) -> np.ndarray:
-    """Render a corrected frame (+ optional precomputed-mask overlay) to RGB.
-
-    ``binary`` paints an above-threshold mask white on black. With a label mask
-    and ``above_ids`` (the label ids whose mean intensity clears the frame-local
-    threshold) those cells are filled; with no mask it falls back to a pixel
-    threshold (``arr > threshold``); otherwise it shows the labelled footprint.
-    Non-binary shows the LUT+colormap image with an optional tint and white cell
-    boundaries from ``mask_arr``.
-    """
-    arr = np.asarray(fluor_arr, dtype=np.float32)
-    h, w = arr.shape[:2]
-
-    if binary:
-        rgb = np.zeros((h, w, 3), dtype=np.uint8)
-        center = None
-        if mask_arr is not None:
-            c = np.asarray(mask_arr, dtype=np.int32)
-            if c.shape[:2] == (h, w):
-                center = c
-        if center is not None and above_ids is not None:
-            ids = np.fromiter((int(i) for i in above_ids), dtype=center.dtype,
-                              count=len(above_ids))
-            if ids.size:
-                rgb[np.isin(center, ids)] = (255, 255, 255)
-        elif threshold is not None:
-            rgb[arr > float(threshold)] = (255, 255, 255)
-        elif center is not None:
-            rgb[center > 0] = (255, 255, 255)
-        return rgb
-
-    rgb = lut_colormap_to_rgb(arr, lo, hi, cmap_name)
-    tr, tg, tb = (max(0, min(255, int(c))) for c in tint)
-    if (tr, tg, tb) != (255, 255, 255):
-        f = rgb.astype(np.float32)
-        f[..., 0] *= tr / 255.0
-        f[..., 1] *= tg / 255.0
-        f[..., 2] *= tb / 255.0
-        rgb = np.clip(f, 0, 255).astype(np.uint8)
-
-    if show_boundary:
-        boundary = _boundary_mask(mask_arr, arr.shape)
-        if boundary is not None:
-            rgb = np.ascontiguousarray(rgb)
-            rgb[boundary] = np.asarray(boundary_color, dtype=np.uint8)
-    return np.ascontiguousarray(rgb)
+from well_viewer.core.frame_render import (  # noqa: F401 — re-exported
+    boundary_mask as _boundary_mask,
+    build_frame_rgb as build_playground_rgb,
+)
 
 
 def render_playground_display(win) -> None:

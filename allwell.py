@@ -1442,33 +1442,6 @@ class AllWellApp(QMainWindow):
         self._announce_analyze_handoff(
             dataset_path, bool(pipeline_info), incremental, forced)
 
-    def send_stardist_params_to_analyze(self, prob_thresh, nms_thresh) -> bool:
-        """Copy StarDist thresholds tuned in the Playground into the Analyze form.
-
-        The Playground can segment one frame with arbitrary thresholds, but the
-        plate is segmented by a pipeline run configured on the Analyze pane —
-        so without this the tuning has to be transcribed by hand, which is where
-        a digit gets dropped. ``None`` means "the model's own default" on both
-        sides and is written as an empty field, matching how the form spells it.
-
-        Like ``_open_dataset_in_analyze``, the handoff has to be legible on
-        arrival, so it switches to the pane rather than changing fields on a
-        screen the user is not looking at. No section needs unfolding here:
-        the thresholds live in **Channel Tokens**, which is not collapsible.
-        Returns False when there is no Analyze pane to hand to, so the caller
-        can say so.
-        """
-        if self._analyze is None:
-            return False
-        for attr, value in (("_stardist_prob_thresh_edit", prob_thresh),
-                            ("_stardist_nms_thresh_edit", nms_thresh)):
-            edit = getattr(self._analyze, attr, None)
-            if edit is None:
-                return False
-            edit.setText("" if value is None else f"{float(value):g}")
-        self._nb.setCurrentIndex(1)
-        return True
-
     def _announce_analyze_handoff(
         self, dataset_path: Path, applied_settings: bool, incremental: bool,
         force_wells: list[str] | None = None,

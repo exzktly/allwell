@@ -117,7 +117,12 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV
 # Ratcheted to 964: the grouping-phase events (zipper_start / stage_total)
 # moved to analyze_progress._apply_grouping_event, beside the rest of the
 # progress rendering the tab only hosts.
-ANALYZE_TAB_BUDGET = 964
+# 964 -> 899: the segmentation hints and their validation
+# (_refresh_segmentation_hints / _segmentation_validation_errors /
+# _collapse_seg_param_stack) moved to analyze_tab_seg_params.py, beside the
+# parameter panel they drive. That paid for the two lines the Run | Preview
+# stack needs here (the _build_right_pane swap and the run-start page switch).
+ANALYZE_TAB_BUDGET = 899
 
 # analyze_tab_form.py carried no budget while analyze_tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
@@ -133,6 +138,9 @@ ANALYZE_TAB_BUDGET = 964
 # and its StarDist / watershed / Cellpose / label-free / classical pages) moved
 # to analyze_tab_seg_params.AnalyzeSegParamsMixin, which is also where the
 # StarDist detection thresholds landed rather than growing this form again.
+# Held at 1107 through the Analyze Preview page: the right pane's Run | Preview
+# stack is analyze_tab_preview.AnalyzePreviewMixin, and _build_log stayed here
+# untouched as the Run page's builder.
 ANALYZE_TAB_FORM_BUDGET = 1107
 
 

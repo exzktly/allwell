@@ -25,7 +25,6 @@ from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from well_viewer.features.image_browser.playground.controller import (
     playground_clear_loose_image, playground_on_change, playground_open_loose_image,
     playground_repopulate_dropdowns, playground_segment_now,
-    playground_send_params_to_analyze,
 )
 from well_viewer.features.image_browser.playground.renderer import render_playground_display
 
@@ -212,25 +211,19 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sbl.setContentsMargins(0, 2, 0, 2)
     seg_btn = QPushButton("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
-    use_btn = QPushButton("Use in Analyze", seg_btn_row)
-    use_btn.setProperty("variant", "secondary")
-    use_btn.setToolTip("Copy these thresholds into the Analyze tab's "
-                       "segmentation settings and switch to it.")
+    hint = QLabel("To choose the settings for a run, use Analyze → Preview: it "
+                  "draws a frame with the run's own settings.", controls)
+    hint.setObjectName("Muted")
+    hint.setWordWrap(True)
 
     def _on_segment() -> None:
         seg_live_cb.setChecked(True)
         playground_segment_now(ctx)
-
-    def _on_use_in_analyze() -> None:
-        if not playground_send_params_to_analyze(ctx):
-            status.setText("Analyze pane is not available in this build — the "
-                           "thresholds were not copied.")
     seg_btn.clicked.connect(lambda _=False: _on_segment())
-    use_btn.clicked.connect(lambda _=False: _on_use_in_analyze())
     sbl.addWidget(seg_btn)
-    sbl.addWidget(use_btn)
     sbl.addStretch(1)
     cl.addWidget(seg_btn_row)
+    cl.addWidget(hint)
 
     # Display options
     _section("Display")

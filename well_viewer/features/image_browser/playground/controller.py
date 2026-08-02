@@ -637,20 +637,6 @@ def playground_clear_loose_image(ctx) -> None:
     playground_on_change(ctx)
 
 
-def playground_send_params_to_analyze(ctx) -> bool:
-    """Hand the tuned thresholds to the Analyze form and switch to that pane.
-
-    Returns False when the shell cannot take them (no Analyze pane built), so
-    the caller can say so instead of appearing to have done something.
-    """
-    st = _st(ctx)
-    _read_widgets_into_state(ctx)     # hand over what is in the boxes right now
-    send = getattr(ctx.window, "send_stardist_params_to_analyze", None)
-    if not callable(send):
-        return False
-    return bool(send(st.seg_prob_thresh, st.seg_nms_thresh))
-
-
 def _refresh_threshold_display(ctx) -> None:
     """Sync the Threshold stepper to the effective threshold (signals blocked so
     the display sync doesn't trigger a re-render)."""

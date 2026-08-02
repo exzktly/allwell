@@ -178,6 +178,79 @@ class AnalyzeSegParamsMixin:
         for w in rows:
             w.setVisible(on)
 
+    # ── hints + validation for the selected routine ──────────────────────────
+
+    def _segmentation_validation_errors(self) -> list[str]:
+        errors: list[str] = []
+        method = self._seg_method()
+        if method == "stardist_seeded_watershed_cell":
+            cyto = self._cytoplasm_edit.text().strip()
+            nuc = self._nuclear_token_edit.text().strip()
+            if not cyto:
+                errors.append("Watershed mode requires a cytoplasm token.")
+            if cyto and cyto == nuc:
+                errors.append("Cytoplasm token must differ from nuclear token.")
+            try:
+                area = int(self._min_nucleus_area_edit.text().strip())
+                if area <= 0:
+                    errors.append("Minimum nucleus area must be a positive integer.")
+            except ValueError:
+                errors.append("Minimum nucleus area must be a positive integer.")
+        elif method == "cellpose_labelfree":
+            if not self._phase_token():
+                errors.append(
+                    "Label-free segmentation requires exactly one channel marked "
+                    "'Phase' (the brightfield image to segment).")
+        return errors
+
+    def _collapse_seg_param_stack(self) -> None:
+        """Size the per-method parameter stack to its *current* page only.
+
+        A ``QStackedWidget`` reports the max sizeHint over all pages, so without
+        this the empty StarDist page reserves the tall Cellpose page's height
+        (the gap the user saw under channel tokens). Giving every non-current
+        page a vertically-Ignored policy drops it from the height calculation.
+        """
+        stack = getattr(self, "_seg_param_stack", None)
+        if stack is None:
+            return
+        cur = stack.currentIndex()
+        for i in range(stack.count()):
+            page = stack.widget(i)
+            pol = page.sizePolicy()
+            pol.setVerticalPolicy(
+                QSizePolicy.Preferred if i == cur else QSizePolicy.Ignored)
+            page.setSizePolicy(pol)
+        stack.adjustSize()
+        stack.updateGeometry()
+
+    def _refresh_segmentation_hints(self) -> None:
+        if not hasattr(self, "_segmentation_hint_lbl"):
+            return
+        method = self._seg_method()
+        # Show only the selected routine's parameter page.
+        if hasattr(self, "_seg_param_stack"):
+            self._seg_param_stack.setCurrentByName(method)
+            self._collapse_seg_param_stack()
+        # The Label-free preset segments the Phase channel — the explicit
+        # Segmentation-channel field doesn't apply there (it's taken at runtime).
+        phase_locked = method == "cellpose_labelfree"
+        if hasattr(self, "_nuclear_row_widget"):
+            self._nuclear_row_widget.setVisible(not phase_locked)
+        errors = self._segmentation_validation_errors()
+        if errors:
+            self._segmentation_hint_lbl.setText("  ".join(errors))
+            return
+        # Each hint leads with *when to use this* so a first-time user can pick.
+        hint = {
+            "stardist_nuclei": "Best default for a nuclear stain (DAPI/Hoechst/NIR): StarDist segments the 'Segmentation channel' above into nuclei.",
+            "stardist_seeded_watershed_cell": "Use for whole-cell (cytoplasm) measurements: StarDist seeds + a cytoplasm mask; also quantifies the cytoplasm channel.",
+            "cellpose": "Use for non-nuclear or tricky morphologies: Cellpose on the 'Segmentation channel' above (fluorescent or brightfield).",
+            "cellpose_labelfree": "Use when there's no stain at all: Cellpose (cyto3) on the channel marked 'Phase' — label-free.",
+            "classical_threshold": "Fast model-free fallback for clean, separated objects: Otsu threshold + watershed on the 'Segmentation channel' above.",
+        }.get(method, "")
+        self._segmentation_hint_lbl.setText(hint)
+
     def _restore_stardist_thresholds(self, d: dict) -> None:
         """Put a prior run's recorded thresholds back into the two fields.
 

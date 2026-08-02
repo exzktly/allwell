@@ -454,7 +454,72 @@ this word — and check each candidate mechanism against those constraints befor
 investigating any of them. Investigation that has not been narrowed by the report
 is just reading, and reading is what produced all three wrong answers.
 
-## 7.3 Debugging entry points
+## 7.3 Verifying the fix, and verifying the verification
+
+§7.1 says run the code rather than read it. This is the next layer: the thing
+you run to prove the fix can itself be wrong, and a check that cannot fail is
+worse than no check because it is reported as evidence.
+
+1. **A comparison that printed PASS on two empty files is not a pass.** An A/B
+   script rendered the Review rail picker on this branch and on a worktree of
+   `origin/main`, diffed the JSON, and printed `IDENTICAL`. Both runs had died on
+   a `sizePolicy` repr before writing a byte, so the diff compared nothing to
+   nothing. Check the exit status and that the artifact is non-empty *before*
+   reading the verdict — a harness that fails open will happily confirm anything.
+2. **Prove a new regression test fails against the pre-fix code.** Copy it into
+   a `git worktree` of `origin/main` and run it there. The dial-colour test came
+   back failing for `accent2` and `accent`, passing for `warn` and `success`,
+   which did double duty: it proved the test bites, and it named exactly which
+   state tokens the bug touched. A regression test written after the fix and
+   never seen red is a hypothesis, not a guard.
+3. **"Did I break this?" is a question with an experiment.** Two Batch Export
+   bugs surfaced while checking a refactor and looked exactly like its
+   regressions. A probe run inside a worktree of `origin/main` reproduced both,
+   so they predated it by a long way. Reproduce on the base branch before
+   calling something yours *or* pre-existing; the diff of the one function
+   involved (`_apply_drag` was byte-identical) is corroboration, not proof.
+4. **Check the platform API's semantics instead of recalling them.** The
+   white-well bug was `QColor.lighter()`, which does not merely raise HSV value —
+   once value saturates it *drops saturation*, lightening toward white. Two lines
+   in a REPL settle that. I had reasoned confidently from the wrong memory in the
+   same session I then measured it.
+5. **A shared painter or helper has a blast radius: enumerate the hosts and
+   measure one.** Fixing the dial's tone meant touching `_sphere_gradient`, which
+   every lit well in the app goes through — fine, but it belongs in the PR body,
+   not discovered later. The same change picked `role="rail"` for a panel plate;
+   `"rail"` is the one role exempt from the size caps, and measuring both
+   branches showed the plate reserving 389px against the old grid's 212, taking
+   164px from the group list beneath it.
+6. **Do not contradict the doc you wrote in the same commit.** That `role="rail"`
+   choice sat a few hundred lines from a new ARCHITECTURE.md row explaining that
+   the rail exemption exists *because* the rail picker is Review's primary
+   interaction surface. When a change adds a rule, re-read the rule against the
+   rest of the change.
+7. **Search the history before building a remembered feature.** A report that
+   Batch Export's Quick Setup "used to take an N for serial rows" turned out to
+   be Sample Definitions' *Quick Replicates* (`Group along` / `Replicates per
+   group` / `Order`, backed by `grouping.controller.make_replicate_pairs`).
+   `git log -S` across the plausible strings found no such control in Batch
+   Export at any point. One question beat implementing the wrong thing.
+
+**On self-review.** A fresh agent pointed at the pushed diff — told what the
+change claims to do and asked to be adversarial — found six real defects in one
+pass, including the `role="rail"` contradiction above and a stale-dial bug that
+shipped invisible because no test looked at the plate after a run ended. Worth
+doing by default on a diff that touches shared code, and worth reading its
+"cleared" section too: it also proved the parts I was unsure of (a threading
+question I had flagged to myself turned out not to be a race, because the wells
+are partitioned disjointly).
+
+**One refinement to §7.2.** That section says do arithmetic on the reported
+numbers, and it is right — but a reported number can be incidental. "Stuck at
+`Transferring… 92%`" pointed straight at the label, and 92 was then a dead end:
+rsync's last progress line need not be 100%, so guaranteeing a terminal 100%
+would have frozen the display at a rounder number. The number located the bug;
+the *structure* around it (six writers, both clears inside end-of-run handling)
+was the bug. Use the number to narrow, then ask what owns the thing.
+
+## 7.4 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

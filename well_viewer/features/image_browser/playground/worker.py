@@ -8,14 +8,14 @@ estimators (``estimate_background_field`` / ``estimate_basic_flatfield``), so th
 math matches a batch run.
 
 Both requests run on a daemon thread and marshal their result back through
-``core.worker_bridge.run_off_thread`` — the one-shot queued-signal bridge shared
-with the Analyze pane's Preview page (a worker thread has no Qt event loop, so
-this is the only way a result reaches the GUI).
+``core.worker_bridge.run_off_thread`` — the shared one-shot queued-signal bridge
+(a worker thread has no Qt event loop, so this is the only way a result reaches
+the GUI).
 
-The segmentation itself lives in ``services.frame_preview``, not here: the
-Analyze Preview page runs the same inference and cannot import this package (the
-Playground is a *removable* feature). Keeping it there also means both panes
-share **one** loaded StarDist model rather than a copy each.
+The segmentation itself lives in ``services.frame_preview``, not here, because
+the Playground is a *removable* feature and no other pane may import it: the
+session's single loaded StarDist model has to outlive any one tab, and a model
+that costs 10-30 s and 1-2 GB to load must never be loaded twice.
 """
 
 from __future__ import annotations

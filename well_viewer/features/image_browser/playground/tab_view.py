@@ -261,6 +261,22 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sbl.addWidget(seg_btn)
     sbl.addStretch(1)
     cl.addWidget(seg_btn_row)
+
+    # The count, directly under the controls that change it — this is the number
+    # the two thresholds are being tuned against, and reading it out of the
+    # paragraph read-out below is not the same as seeing it. Written by
+    # ``controller._count_text`` from the facts of the render that just ran, so
+    # it can never describe a different picture than the one on screen.
+    count = QLabel("Cells: —", controls)
+    count.setWordWrap(True)
+    count.setToolTip(
+        "How many labels the current render actually drew, and — in binary mode "
+        "with a usable mask — how many of them clear the threshold.\n"
+        "Reads “—” rather than 0 when there is no count to give: no mask at all, "
+        "or live labels that no longer describe this frame.")
+    cl.addWidget(count)
+    ctx.widgets.register("_playground_count", count)
+
     cl.addWidget(hint)
 
     # Display options
@@ -353,6 +369,18 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     tl = QHBoxLayout(toggles)
     tl.setContentsMargins(0, 2, 0, 2)
     binary_cb = QCheckBox("Binary", toggles)
+    binary_cb.setToolTip(
+        "Fill the cells the mask found, on black, instead of showing the image.")
+    colors_cb = QCheckBox("Colour cells", toggles)
+    colors_cb.setToolTip(
+        "In Binary mode, give every label its own colour instead of painting "
+        "them all white — two nuclei that touch are otherwise one white shape, "
+        "and whether the segmentation split them is the thing you are looking "
+        "for.\n"
+        "The colour is a fixed function of the label id, so it does not change "
+        "between redraws. It has no effect where there is no usable mask: that "
+        "fallback thresholds pixels, and pixels have no labels to colour.")
+    colors_cb.setChecked(True)
     overlay_cb = QCheckBox("Outlines", toggles)
     overlay_cb.setToolTip(
         "Draw cell outlines over the image. Which mask they come from is named "
@@ -368,16 +396,23 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         app._app_state.playground.binary_mask = bool(v)
         on_change()
 
+    def _on_colors(v: bool) -> None:
+        app._app_state.playground.binary_label_colors = bool(v)
+        on_change()
+
     def _on_overlay(v: bool) -> None:
         app._app_state.playground.show_overlay = bool(v)
         on_change()
     binary_cb.toggled.connect(_on_binary)
+    colors_cb.toggled.connect(_on_colors)
     overlay_cb.toggled.connect(_on_overlay)
     tl.addWidget(binary_cb)
+    tl.addWidget(colors_cb)
     tl.addWidget(overlay_cb)
     tl.addStretch(1)
     cl.addWidget(toggles)
     app._playground_binary_cb = binary_cb
+    ctx.widgets.register("_playground_binary_colors_cb", colors_cb)
     app._playground_overlay_cb = overlay_cb
 
     # Zoom buttons

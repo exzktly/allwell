@@ -1588,6 +1588,14 @@ exact correction and segmentation code).
   per-tab inspector in the app sits: any flat-field + background method and its
   parameters. Correction re-runs as you change them; segmentation waits for the
   Segment button.
+  - The `empty_well` and `basic` modes first estimate a field from every frame
+    of the **Bg well** you choose, for the channel you are viewing. That takes a
+    moment the first time you pick a well, a channel or one of those two modes;
+    afterwards it is cached. If the chosen well has no readable frames for that
+    channel, the read-out says the field could not be built and names it — and
+    the Stage line then shows the correction that *actually* ran, which is
+    `none` for that half. A correction that could not run never looks like one
+    that did.
 - **Display controls** — LUT / colormap / binary + outlines; pan / zoom;
   per-stage LUT memory; a frame-local binary threshold; a hover pixel-intensity
   readout; a QC size-cleanup preview.
@@ -1613,11 +1621,23 @@ exact correction and segmentation code).
     usable mask; or every labelled pixel with the threshold ignored. The
     read-out names which one you are seeing, and where the threshold came from —
     set on this tab, or the channel's app-wide ON threshold.
+  - **Colour cells** (on by default) gives every cell its own colour in Binary
+    mode instead of painting them all white. Two nuclei that touch are one white
+    shape otherwise, so a segmentation that merged them looks exactly like one
+    that separated them. Each colour is fixed to the label, so it does not
+    change as you redraw. The per-pixel fallback stays white — there are no
+    cells there to colour.
 - **Segmentation controls** — tick **Live StarDist**, set **Probability** and
   **Overlap (NMS)** (blank = the pretrained model's own values), and press
   **Segment**. The nuclei it finds replace the pipeline's saved mask in the
   overlay, so you can see what a threshold change actually does. The status line
   reports the nucleus count and the thresholds that produced it.
+  - **Cells** — directly under the Segment button, the count the thresholds are
+    being tuned against: how many objects the current picture actually draws,
+    what the QC size filter dropped, and — in Binary mode with a usable mask —
+    how many of them clear the threshold. It reads **—**, not `0`, whenever
+    there is no count to give: no mask at all, or labels that no longer describe
+    this frame. Zero cells and an unknown number of cells are different answers.
   - **The first Segment of a session is slow** — around 10–30 seconds, because
     it loads TensorFlow and the StarDist model into the application, and about
     1–2 GB stays in use until you quit. Every later Segment takes a few seconds.

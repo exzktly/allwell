@@ -43,9 +43,11 @@ def ctx(monkeypatch):
         runtime=types.SimpleNamespace(playground=types.SimpleNamespace()),
     )
     c.statuses = []
+    c.counts = []
     c.masks = []
     c.rendered = []
     monkeypatch.setattr(C, "_set_status", lambda win, text: c.statuses.append(text))
+    monkeypatch.setattr(C, "_set_count", lambda win, text: c.counts.append(text))
     monkeypatch.setattr(C, "render_playground_display", lambda win: None)
     def _capture(arr, mask, **kw):
         c.masks.append(mask)
@@ -598,3 +600,240 @@ def test_a_single_label_reads_as_singular(framed, monkeypatch):
     C.playground_on_change(framed)
     status = framed.statuses[-1]
     assert "1 label found" in status and "1 labels" not in status
+
+
+# ── the reference-well cache: which field a mode actually gets ───────────────
+#
+# Reported as "when I change to empty well for correction, it applies no change.
+# The other flat fields do appear to work". gaussian is estimated from the frame
+# itself, so it always works; empty_well and basic estimate a field from a whole
+# reference well first, and the cache that held those fields was keyed on the
+# well ALONE. It therefore answered "already built" for fields it had never
+# built — a different channel's, a different mode's, or one whose build found no
+# frames — and ``apply_flatfield`` no-ops silently on the None that followed.
+
+@pytest.fixture
+def builds(monkeypatch):
+    """Capture reference-field build requests instead of running a worker.
+
+    Each entry exposes the ``on_done`` the controller passed, so a test can land
+    a result (or the absence of one) at the moment of its choosing.
+    """
+    calls = []
+
+    def _request(ctx, well, chan, *, flatfield_mode, background_method,
+                 on_done, on_failed=None, max_samples=30):
+        calls.append(types.SimpleNamespace(
+            well=well, chan=chan, ff_mode=flatfield_mode,
+            bg_method=background_method, on_done=on_done))
+        return object()
+
+    monkeypatch.setattr(C, "request_reference_fields", _request)
+    return calls
+
+
+@pytest.fixture
+def plate(ctx, monkeypatch):
+    """A *dataset* frame rather than a loose file, so the reference-well modes
+    are live (they are dropped by name on a loose image)."""
+    frame = (400.0 + 3 * np.mgrid[0:32, 0:32][0]).astype(np.float32)
+
+    def _resolve(c):
+        c.state.playground.mask_arr = None
+        return frame, "H12 GFP t1 fov1", ("A01", "GFP", "1", "1")
+
+    monkeypatch.setattr(C, "_resolve_frame", _resolve)
+    st = ctx.state.playground
+    st.source = "corrected"
+    st.channel = "GFP"
+    st.background_well = "H12"
+    return ctx
+
+
+def _field(value: float):
+    return np.full((32, 32), value, dtype=np.float32)
+
+
+def test_switching_basic_to_empty_well_rebuilds_instead_of_reusing_the_field(
+        plate, builds):
+    """The reported case. ``basic`` and ``empty_well`` estimate DIFFERENT fields
+    from the same frames, so a cache that cannot tell them apart hands the second
+    mode the first one's field and the picture never changes."""
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    assert len(builds) == 1
+    builds[0].on_done("H12", "gfp", _field(1.5), None)
+    with_basic = _rendered(plate)
+
+    st.flatfield_mode = "empty_well"
+    C.playground_on_change(plate)
+    assert len(builds) == 2, "empty_well was served the basic field"
+    assert builds[1].ff_mode == "empty_well"
+    builds[1].on_done("H12", "gfp", _field(3.0), None)
+
+    assert not np.allclose(with_basic, _rendered(plate))
+
+
+def test_switching_channel_rebuilds_rather_than_correcting_with_no_field(
+        plate, builds):
+    """The fields are per channel. A cache keyed on the well alone says "built"
+    for a channel it never sampled."""
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    builds[0].on_done("H12", "gfp", _field(1.5), None)
+
+    st.channel = "DAPI"
+    C.playground_on_change(plate)
+    assert len(builds) == 2 and builds[1].chan == "dapi"
+
+
+def test_turning_on_the_empty_well_background_builds_its_own_field(plate, builds):
+    """The additive background field is only estimated when the BACKGROUND is
+    empty_well. Having built a flat-field for the same well must not stand in
+    for it."""
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    builds[0].on_done("H12", "gfp", _field(1.5), None)
+
+    st.background_method = "empty_well"
+    C.playground_on_change(plate)
+    assert len(builds) == 2 and builds[1].bg_method == "empty_well"
+
+
+def test_a_field_that_cannot_be_built_is_named_and_attempted_only_once(
+        plate, builds):
+    """A build that finds no frames must neither respawn on the next keystroke
+    nor let the read-out claim the mode ran."""
+    st = plate.state.playground
+    st.flatfield_mode = "empty_well"
+    C.playground_on_change(plate)
+    builds[0].on_done("H12", "gfp", None, None)
+
+    status = plate.statuses[-1]
+    assert "could not be built" in status and "H12" in status
+    # Downgraded to what actually ran, not named as if it had been applied.
+    assert "empty_well" not in status.split("Stage:")[1].split("\n")[0]
+
+    C.playground_on_change(plate)
+    assert len(builds) == 1, "an impossible build was retried"
+
+
+def test_a_build_is_filed_under_the_modes_it_was_requested_with(plate, builds):
+    """A dropdown changed while the worker runs must not relabel its result."""
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    st.flatfield_mode = "empty_well"                  # changed mid-build
+    builds[0].on_done("H12", "gfp", _field(1.5), None)
+
+    assert ("ff", "H12", "gfp", "basic") in st.ref_fields
+    assert ("ff", "H12", "gfp", "empty_well") not in st.ref_fields
+
+
+def test_segmentation_and_display_resolve_the_same_reference_fields(plate, builds):
+    """Both go through one resolver, so the pixels StarDist sees are the pixels
+    on screen — the two gates cannot drift apart again."""
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    builds[0].on_done("H12", "gfp", _field(1.5), None)
+
+    arr, note = C._segmentation_frame(plate)
+    assert arr is not None and note == ""
+    assert np.allclose(arr, _rendered(plate))
+
+
+def test_segmentation_waits_rather_than_segmenting_an_uncorrected_frame(
+        plate, builds):
+    st = plate.state.playground
+    st.flatfield_mode = "empty_well"
+    C.playground_on_change(plate)                     # build requested, pending
+
+    arr, reason = C._segmentation_frame(plate)
+    assert arr is None and "building" in reason
+
+
+# ── the Cells count ─────────────────────────────────────────────────────────
+#
+# A formatting of the same display_facts the paragraph read-out uses, so the two
+# cannot disagree. Its whole job at the edges is to print "—" where there is no
+# count, because 0 is a measurement and "unknown" is not.
+
+def test_the_count_names_the_drawn_number_and_its_source():
+    txt = C._count_text({"provenance": "live StarDist", "labels_in": 3,
+                         "labels_kept": 3, "shape_ok": True,
+                         "binary_rule": "footprint"})
+    assert "Cells: 3 drawn" in txt and "live StarDist" in txt
+    assert "above" not in txt
+
+
+def test_no_mask_reads_as_a_dash_not_as_zero():
+    assert C._count_text({"provenance": "none"}) == "Cells: — (no mask)"
+
+
+def test_stale_labels_read_as_a_dash_not_as_zero():
+    txt = C._count_text({"provenance": "none", "stale_labels": True})
+    assert "—" in txt and "Segment" in txt and "0" not in txt
+
+
+def test_the_threshold_subset_appears_only_under_the_per_cell_rule():
+    facts = {"provenance": "pipeline mask", "labels_in": 3, "labels_kept": 3,
+             "shape_ok": True, "binary_rule": "per-cell", "above": 2,
+             "threshold": 120.0}
+    assert "2 above 120" in C._count_text(facts)
+    # Under the other two rules no per-cell verdict was reached at all.
+    facts["binary_rule"] = "per-pixel"
+    assert "above" not in C._count_text(facts)
+
+
+def test_the_count_flags_a_mask_that_does_not_fit_the_frame():
+    txt = C._count_text({"provenance": "pipeline mask", "labels_in": 3,
+                         "labels_kept": 3, "shape_ok": False,
+                         "binary_rule": "footprint"})
+    assert "does not fit" in txt
+
+
+def test_the_count_reports_what_the_qc_filter_dropped():
+    txt = C._count_text({"provenance": "pipeline mask", "labels_in": 3,
+                         "labels_kept": 2, "shape_ok": True,
+                         "binary_rule": "footprint"})
+    assert "Cells: 2 drawn" in txt and "QC dropped 1 of 3" in txt
+
+
+def test_the_count_row_is_written_by_every_render(framed):
+    assert framed.counts and framed.counts[-1].startswith("Cells:")
+
+
+def test_the_count_clears_when_no_frame_can_be_shown(ctx):
+    C.playground_on_change(ctx)
+    assert ctx.counts[-1] == "Cells: —"
+
+
+# ── binary mode's fill colour ────────────────────────────────────────────────
+
+def test_the_readout_names_the_fill_colour_binary_mode_used(framed, monkeypatch):
+    """All-white and one-colour-per-label answer different questions, and the
+    read-out has to say which one is on screen."""
+    st = framed.state.playground
+    _with_mask(framed, monkeypatch, _labels_3())
+    st.binary_mask = True
+    C.playground_on_change(framed)
+    assert "own colour" in framed.statuses[-1]
+
+    st.binary_label_colors = False
+    C.playground_on_change(framed)
+    assert "white" in framed.statuses[-1] and "own colour" not in framed.statuses[-1]
+
+
+def test_a_mask_that_does_not_fit_reports_no_label_colours(framed, monkeypatch):
+    """That render falls through to the per-pixel threshold, which has no labels
+    — so the facts must not claim colours the renderer never drew."""
+    st = framed.state.playground
+    _with_mask(framed, monkeypatch, np.ones((8, 8), dtype=np.int32))
+    st.binary_mask = True
+    st.binary_label_colors = True
+    C.playground_on_change(framed)
+    assert st.display_facts["label_colors"] is False

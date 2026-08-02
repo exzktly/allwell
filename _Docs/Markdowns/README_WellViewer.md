@@ -2010,7 +2010,15 @@ trimming a drifted tail of timepoints.
 3. Press **Subset**. The same well plate you picked wells with now shows
    each one being copied — locked against further clicks until the run
    finishes, so it can double as the progress view instead of a second
-   plate map elsewhere on the page.
+   plate map elsewhere on the page. Each well fills as a dial while its
+   files are being copied, so a large well shows how far through it is
+   rather than sitting on one colour until it lands.
+
+Subsetting copies files rather than rebuilding them, so it runs at roughly
+the speed of copying the archives yourself in Finder or Explorer. Narrowing
+by well only is the fastest case — nothing inside those wells' archives has
+to be touched at all — and narrowing by timepoint or FOV costs roughly in
+proportion to how much you keep.
 
 Timepoints keep their original hours — a subset spanning 24h–72h stays
 labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-

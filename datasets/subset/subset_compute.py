@@ -13,7 +13,7 @@ rewritten at all**. Filtering is a pure predicate over what's already there.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from util.timepoint import parse_hours
@@ -89,24 +89,38 @@ class SubsetFilter:
     member's own FOV is read through the same normalizer (a purely-numeric
     label like ``"001"`` normalizes to ``"1"``; comparing that against a raw,
     unnormalized ``fovs`` set silently matched nothing).
+
+    Both resolved sets are computed **once**, at construction, into fields the
+    comparison sites read straight off. They used to be properties, which put a
+    ``parse_hours`` / ``normalize_fov`` pass over the whole label set on every
+    read — and :func:`member_matches` reads them up to four times for every
+    member of every archive on the plate, so that pass ran hundreds of
+    thousands of times a run to answer a question whose answer never changes.
     """
 
     wells: frozenset[str] | None = None
     timepoint_labels: frozenset[str] | None = None
     fovs: frozenset[str] | None = None
+    # Derived, not passed in: kept out of init/repr/eq so the filter's identity
+    # and equality stay exactly what its three real fields say.
+    timepoint_hours: frozenset[float] | None = field(
+        init=False, repr=False, compare=False, default=None,
+    )
+    fov_tokens: frozenset[str] | None = field(
+        init=False, repr=False, compare=False, default=None,
+    )
 
-    @property
-    def timepoint_hours(self) -> frozenset[float] | None:
-        if self.timepoint_labels is None:
-            return None
-        hours = {parse_hours(t) for t in self.timepoint_labels}
-        return frozenset(h for h in hours if h is not None)
+    def __post_init__(self) -> None:
+        hours = None
+        if self.timepoint_labels is not None:
+            parsed = {parse_hours(t) for t in self.timepoint_labels}
+            hours = frozenset(h for h in parsed if h is not None)
+        object.__setattr__(self, "timepoint_hours", hours)
 
-    @property
-    def fov_tokens(self) -> frozenset[str] | None:
-        if self.fovs is None:
-            return None
-        return frozenset(normalize_fov(f) for f in self.fovs)
+        tokens = None
+        if self.fovs is not None:
+            tokens = frozenset(normalize_fov(f) for f in self.fovs)
+        object.__setattr__(self, "fov_tokens", tokens)
 
 
 @dataclass(frozen=True)

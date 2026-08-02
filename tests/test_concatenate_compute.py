@@ -703,3 +703,45 @@ def test_build_merge_plan_rejects_identical_source_roots(tmp_path):
     _make_dataset(tmp_path / "d1", wells=["A01"], timepoints=["0h", "24h"])
     with pytest.raises(cc.ConcatError, match="[Ss]ame"):
         cc.build_merge_plan(tmp_path / "d1", tmp_path / "d1", tmp_path / "dest")
+
+
+# ── the merge moves bytes, it does not rebuild them ──────────────────────────
+def _zip_members(path):
+    with zipfile.ZipFile(path) as zf:
+        return {i.filename: zf.read(i.filename) for i in zf.infolist() if not i.is_dir()}
+
+
+def test_a_merged_well_carries_both_datasets_bytes_unaltered(tmp_path):
+    """Concatenate renames dataset 2's members to offset their timepoint and
+    renames nothing on dataset 1's. Neither side's data may change: a name
+    lives in a member's headers, not in its compressed payload."""
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    # Junk on dataset 1 only: Concatenate treats any name collision between the
+    # two sides as a failed merge (see _verify), and both datasets carrying an
+    # identically-named ``.DS_Store`` is a collision.
+    _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+    _make_dataset(ds2, wells=["A01"], timepoints=["0h", "24h"])
+
+    plan = cc.build_merge_plan(ds1, ds2, dest)
+    apply.execute_plan(plan)
+
+    merged = _zip_members(dest / "in" / "A01.zip")
+    first = _zip_members(ds1 / "in" / "A01.zip")
+    for name, data in first.items():
+        assert merged[name] == data, f"dataset 1's {name} came back different"
+    # Dataset 2's members arrive under timepoint-offset names, bytes untouched.
+    second = _zip_members(ds2 / "in" / "A01.zip")
+    offset = {n for n in merged if n not in first}
+    assert offset, "dataset 2 contributed no members"
+    for name in offset:
+        assert merged[name] in second.values(), f"dataset 2's {name} came back different"
+
+
+def test_a_well_on_one_side_only_is_copied_whole(tmp_path):
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+    _make_dataset(ds2, wells=["B02"], timepoints=["0h", "24h"])
+
+    apply.execute_plan(cc.build_merge_plan(ds1, ds2, dest))
+
+    assert (dest / "in" / "A01.zip").read_bytes() == (ds1 / "in" / "A01.zip").read_bytes()

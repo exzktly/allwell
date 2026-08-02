@@ -29,8 +29,7 @@ from datasets._common.containers import (
     OVERRIDES_SCHEMA_VERSION,
     WellFraction,
     clear_destination,
-    read_members,
-    write_zip,
+    copy_container_members,
 )
 from datasets._common.member_names import rewrite_member_field
 from datasets.merge_plates.merge_plates_compute import (
@@ -59,17 +58,34 @@ def _null_sub_progress(_well: str, _done: int, _total: int) -> None:
     return None
 
 
-# One destination well is four passes over files — read the source raw-input
-# container, write the remapped one, then the same again for the QC
-# ``<WELL>_out.zip`` — fused by :class:`WellFraction` into a single 0 → 100%
-# dial per well.
-_SLICES_PER_WELL = 4
+# One destination well is two passes over files — the source raw-input
+# container, then the QC ``<WELL>_out.zip`` — fused by :class:`WellFraction`
+# into a single 0 → 100% dial per well. Each pass is a single publish rather
+# than a read followed by a write, because ``copy_container_members`` moves
+# each member's bytes straight across instead of decoding them into a list
+# first; a well-token remap changes only the name in the member's header.
+_SLICES_PER_WELL = 2
 
 
 def _remap_well_field(name: str, *, schema, channels, old_well: str, new_well: str) -> tuple[str, bool]:
     def _predicate(old_token: str) -> str | None:
         return new_well if canonical_well_label(old_token) == old_well else None
     return rewrite_member_field(name, schema=schema, channels=channels, field="well", new_value=_predicate)
+
+
+def _remap(plan: PlateMergePlan, src_well: str, dest_well: str):
+    """The per-member rename ``copy_container_members`` applies for this well.
+
+    Merge plates drops nothing — every member of a remapped container is kept,
+    under a name whose well token has been rewritten — so this never returns
+    ``None``.
+    """
+    def _rename(_container: Path, name: str) -> str | None:
+        return _remap_well_field(
+            name, schema=plan.schema, channels=plan.channels,
+            old_well=src_well, new_well=dest_well,
+        )[0]
+    return _rename
 
 
 def _copy_container_as_is(src: Path, dest_dir: Path) -> None:
@@ -95,17 +111,17 @@ def _merge_input(
     a folder-mode input, or an unmapped (identity) well — so there is
     nothing rewritten to check against.
 
-    *fraction* owns this well's dashboard dial; this pass claims its first
-    two slices (read, then write). A byte-for-byte copy has no member-level
-    steps to report, so it closes both slices out at once rather than
-    leaving the dial stuck below half for a well that is in fact done.
+    *fraction* owns this well's dashboard dial; this pass claims the first of
+    its two slices. A byte-for-byte copy has no member-level steps to report,
+    so it closes that slice out at once rather than leaving the dial stuck
+    below half for a well that is in fact done.
     """
     if container is None:
-        fraction.skip(2)
+        fraction.skip()
         return None
     if not _needs_rewrite(src_well, dest_well):
         _copy_container_as_is(container, plan.dest.in_dir)
-        fraction.skip(2)
+        fraction.skip()
         return None
     if container.is_dir():
         raise MergePlatesError(
@@ -114,14 +130,9 @@ def _merge_input(
             "rewrite well tokens inside zip archives. Re-run the pipeline with "
             "compressed input, or don't remap this well."
         )
-    members = read_members(container, progress=fraction.slice_progress())
-    rewritten = [
-        (_remap_well_field(name, schema=plan.schema, channels=plan.channels,
-                           old_well=src_well, new_well=dest_well)[0], data)
-        for name, data in members
-    ]
-    written, _dropped = write_zip(
-        plan.dest.in_dir / f"{dest_well}.zip", rewritten,
+    written, _dropped = copy_container_members(
+        plan.dest.in_dir / f"{dest_well}.zip", [container],
+        _remap(plan, src_well, dest_well),
         progress=fraction.slice_progress(),
     )
     return written
@@ -132,22 +143,17 @@ def _merge_qc_zip(
     *, fraction: WellFraction,
 ) -> None:
     """Copy a well's QC ``<WELL>_out.zip`` into the destination ``out/``,
-    claiming the second half of *fraction*'s slices (see :func:`_merge_input`)."""
+    claiming the second of *fraction*'s slices (see :func:`_merge_input`)."""
     if container is None:
-        fraction.skip(2)
+        fraction.skip()
         return
     if not _needs_rewrite(src_well, dest_well):
         shutil.copy2(container, plan.dest.out_dir / f"{dest_well}_out.zip")
-        fraction.skip(2)
+        fraction.skip()
         return
-    members = read_members(container, progress=fraction.slice_progress())
-    rewritten = [
-        (_remap_well_field(name, schema=plan.schema, channels=plan.channels,
-                           old_well=src_well, new_well=dest_well)[0], data)
-        for name, data in members
-    ]
-    write_zip(
-        plan.dest.out_dir / f"{dest_well}_out.zip", rewritten,
+    copy_container_members(
+        plan.dest.out_dir / f"{dest_well}_out.zip", [container],
+        _remap(plan, src_well, dest_well),
         progress=fraction.slice_progress(),
     )
 

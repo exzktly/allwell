@@ -46,6 +46,22 @@ ROW_COLUMNS = [
 ]
 
 
+# What a well archive actually holds beyond its images, on a Mac or a share.
+JUNK_MEMBERS = {
+    ".DS_Store": b"\x00\x01junk",
+    "__MACOSX/._sidecar": b"appledouble",
+    "readme.txt": b"free text, parses to nothing",
+}
+
+
+def _add_junk(zf: zipfile.ZipFile, junk: bool) -> None:
+    if not junk:
+        return
+    zf.writestr(zipfile.ZipInfo("thumbs/"), b"")
+    for name, data in JUNK_MEMBERS.items():
+        zf.writestr(name, data)
+
+
 def build_dataset(
     root: Path,
     *,
@@ -56,6 +72,7 @@ def build_dataset(
     fovs=("F001",),
     info_extra=None,
     columns=ROW_COLUMNS,
+    junk=False,
 ) -> Path:
     """Build a dataset (``in/`` zips, ``out/`` QC zips + measurements CSV +
     sidecar) whose CSV matches the real pipeline's column shape.
@@ -64,6 +81,14 @@ def build_dataset(
     needs beyond what Concatenate ever exercised: Validate needs a
     non-default ``--csv_prefix`` dataset to test its mixed-prefix finding, and
     Subset needs more than one FOV to filter on.
+
+    ``junk=True`` adds the debris a real well archive picks up — a
+    ``.DS_Store``, a directory entry, an AppleDouble sidecar, a file whose name
+    parses to nothing — to every ``in/`` and ``out/`` zip. It is opt-in because
+    most callers assert exact member counts, but any test of a *filter* wants
+    it: a predicate that partitions an archive has to decide which members it
+    is entitled to judge, and a corpus of nothing but well-formed TIFs cannot
+    tell a correct answer from one that never faced the question.
     """
     in_dir = root / "in"
     out_dir = root / "out"
@@ -82,11 +107,13 @@ def build_dataset(
             for fov in fovs:
                 for tp in timepoints:
                     zf.writestr(f"{exp}_GFP_{well}_{fov}_{tp}.tif", b"img")
+            _add_junk(zf, junk)
         with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
             for fov in fovs:
                 for tp in timepoints:
                     zf.writestr(f"{exp}_GFP_{well}_{fov}_{tp}_labels.tif", b"mask")
                     zf.writestr(f"{exp}_GFP_{well}_{fov}_{tp}_tophat_gfp.tif", b"tophat")
+            _add_junk(zf, junk)
         with (out_dir / f"{csv_prefix}_{well}.csv").open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns)
             writer.writeheader()

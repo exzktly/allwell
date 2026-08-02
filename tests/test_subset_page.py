@@ -471,3 +471,39 @@ def test_source_and_destination_fields_are_locked_during_a_run(qapp, tmp_path):
     assert page._src_field._browse_btn.isEnabled() is True
     assert page._dest_field._browse_btn.isEnabled() is True
     ctrl.shutdown()
+
+
+def test_well_sub_progress_reaches_the_picker_plate(qapp, tmp_path):
+    """``wellFraction`` used to be wired to ``dashboard.set_well_progress``.
+
+    ``SubsetDashboard`` is built ``PlateProgress(show_plate=False)`` precisely
+    because this controller paints onto the page's own picker plate instead, so
+    that slot had no plate to reach and returned without drawing — every one of
+    a run's per-member progress signals was a no-op, and a well being copied
+    showed only the flat "copying" colour until the whole well landed.
+    """
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    build_dataset(src, wells=["A01"], timepoints=["0h", "24h"], fovs=("F001",))
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    assert not hasattr(page.dashboard, "_plate"), (
+        "the dashboard has no plate map of its own — see SubsetDashboard"
+    )
+
+    seen: list[tuple[str, float | None]] = []
+    page._plate.setWellFraction = lambda well, fraction: seen.append((well, fraction))
+
+    ctrl._on_well_fraction("A01", 40, 100)
+    ctrl._on_well_fraction("A01", 100, 100)
+    # "Not counted yet" must clear the dial, not render as a definite zero.
+    ctrl._on_well_fraction("A01", 0, 0)
+    ctrl._on_well_fraction("", 1, 1)
+
+    assert seen == [("A01", 0.4), ("A01", 1.0), ("A01", None)]
+    ctrl.shutdown()

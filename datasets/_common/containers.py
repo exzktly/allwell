@@ -1,20 +1,48 @@
 """Shared well-container (zip/folder) IO for the Datasets-pane features.
 
-Lifted from ``datasets.concatenate.apply``: reading a well's raw-input or
-QC-output container as a flat list of ``(member_name, bytes)``, and writing
-one back out as a fresh deflated zip with a collision-safe, first-write-wins
-policy. Every feature that copies or re-packs a well's archives (Concatenate,
-Subset, Merge plates) shares this rather than re-implementing zip/folder IO.
+Every feature that copies or re-packs a well's archives (Concatenate, Subset,
+Merge plates) shares this rather than re-implementing zip/folder IO.
+
+:func:`copy_container_members` is the entry point all three use. It publishes
+one destination archive from one or more source containers, deciding per
+member what it is called in the destination and whether it belongs there at
+all — which is the whole of what these tools do to a container. None of them
+alters image bytes, so it moves bytes rather than reconstructing them, in
+three tiers:
+
+1. **Whole-file copy.** A single zip source with every member kept under its
+   own name is copied with :func:`shutil.copy2` and never opened for reading.
+   This is a wells-only Subset, and it is the case a user would otherwise do
+   by hand in Finder — so it must cost what Finder costs.
+2. **Raw member passthrough.** Otherwise each kept member's *already
+   compressed* bytes are streamed into the destination by
+   :mod:`datasets._common.zip_passthrough` — no inflate, no deflate, no CRC
+   recomputation. A dropped member is never read at all, so a filter that
+   keeps a quarter of an archive costs about a quarter of it.
+3. **Fallback.** A folder source, or a member the passthrough is not entitled
+   to handle, goes through :func:`read_members`/:func:`write_zip`'s ordinary
+   decompress-and-recompress, one member at a time.
+
+The plan pass that chooses between them reads member *lists* only. For a zip
+that is the central directory, a small read at the end of the file, so
+planning costs a couple of seeks however large the archive is and however slow
+the volume holding it.
+
+:func:`read_members` and :func:`write_zip` remain the tier-3 primitives and
+the shape a caller reaches for when it genuinely needs a member's decoded
+bytes in hand.
 """
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from datasets._common.dataset_paths import DatasetPaths
+from datasets._common.zip_passthrough import copy_member_raw, member_is_raw_copyable
 
 TIMEPOINT_COLUMN = "timepoint"
 TIMEPOINT_HOURS_COLUMN = "timepoint_hours"
@@ -27,6 +55,13 @@ OVERRIDES_SCHEMA_VERSION = 2
 # ``len(members)``), which is what makes a real fraction — rather than a bare
 # "started"/"finished" pair — available to a caller that wants one.
 MemberProgress = Callable[[int, int], None]
+
+# Decides one member's fate: given the source container it came from and its
+# name inside that container, return the name it takes in the destination, or
+# ``None`` to leave it out. Identity for a pure filter (Subset), a rewritten
+# name for a tool that renames as it copies (Concatenate's timepoint offset,
+# Merge plates' well-token remap).
+MemberRename = Callable[[Path, str], "str | None"]
 
 # Denominator the fused per-well fraction reports against. It is a fixed,
 # coarse scale rather than a raw member count on purpose: a well's copy is
@@ -175,6 +210,133 @@ def write_zip(
                 archive.writestr(name, data)
             if progress is not None:
                 progress(done, total)
+    return frozenset(written), frozenset(dropped)
+
+
+def _close_progress(progress: MemberProgress | None) -> None:
+    """Report a pass with no member-level steps as finished.
+
+    A container that is copied whole, or whose filter kept nothing, still owns
+    its slice of the caller's :class:`WellFraction`; without this the well's
+    dial would stop short of full on a well that is in fact done.
+    """
+    if progress is not None:
+        progress(1, 1)
+
+
+def _plan_members(
+    sources: Sequence[Path], rename: MemberRename, stack: contextlib.ExitStack,
+) -> tuple[list[tuple[zipfile.ZipFile | None, object, str]], set[str], set[str], int]:
+    """Decide every member's destination name before any bytes move.
+
+    Returns ``(planned, written, dropped, offered)``. *planned* pairs each kept
+    member with the open archive it comes from (``None`` for a folder source,
+    whose entry is a :class:`~pathlib.Path`); *offered* counts every member
+    across every source, so a caller can tell "kept all of them" from "kept
+    most of them" without a second walk.
+
+    First-write-wins on a name collision, matching :func:`write_zip`: callers
+    that list the base dataset's members first can rely on a same-named member
+    from elsewhere never displacing it, and *dropped* names it so a caller can
+    tell a genuine collision from data that never made it in.
+    """
+    planned: list[tuple[zipfile.ZipFile | None, object, str]] = []
+    written: set[str] = set()
+    dropped: set[str] = set()
+    offered = 0
+    for container in sources:
+        if container.is_dir():
+            archive: zipfile.ZipFile | None = None
+            entries: list[tuple[str, object]] = [
+                (path.relative_to(container).as_posix(), path)
+                for path in sorted(container.rglob("*")) if path.is_file()
+            ]
+        else:
+            archive = stack.enter_context(zipfile.ZipFile(container))
+            entries = [
+                (info.filename, info) for info in archive.infolist() if not info.is_dir()
+            ]
+        for name, entry in entries:
+            offered += 1
+            dest_name = rename(container, name)
+            if dest_name is None:
+                continue
+            if dest_name in written:
+                dropped.add(dest_name)
+                continue
+            written.add(dest_name)
+            planned.append((archive, entry, dest_name))
+    return planned, written, dropped, offered
+
+
+def copy_container_members(
+    dest: Path,
+    sources: Sequence[Path],
+    rename: MemberRename,
+    *,
+    progress: MemberProgress | None = None,
+) -> tuple[frozenset[str], frozenset[str]]:
+    """Publish *dest* from *sources*, keeping and naming members by *rename*.
+
+    *sources* are well containers (zips, or folders of files) in priority
+    order — a later source's member never displaces an earlier one's of the
+    same name. Returns ``(written, dropped)`` exactly as :func:`write_zip`
+    does: *written* is what actually landed, so a caller can verify a CSV
+    row's ``filename`` is really there, and *dropped* is the names lost to a
+    collision, which is real data loss and must not be read as success. A
+    member *rename* declined is not "dropped" — it was never asked for.
+
+    **Nothing is created when nothing is kept.** A zero-member zip is
+    structurally valid but macOS Archive Utility refuses to expand it and
+    All-Well reads it as a well whose images have vanished, so a filter that
+    matches nothing leaves no file behind rather than an empty one — the same
+    rule :func:`util.zip_write.atomic_zip` enforces for the pipeline's own
+    archives.
+
+    *progress* is called ``progress(done, total)`` once per member written,
+    and once as ``(1, 1)`` for a pass that has no member-level steps (a
+    whole-file copy, or a filter that kept nothing). Either way the pass
+    closes out its slice of the caller's :class:`WellFraction`, so one
+    container is one slice whichever tier serves it.
+
+    See the module docstring for the three tiers and why they exist.
+    """
+    sources = [Path(source) for source in sources]
+    with contextlib.ExitStack() as stack:
+        planned, written, dropped, offered = _plan_members(sources, rename, stack)
+
+        if not planned:
+            _close_progress(progress)
+            return frozenset(), frozenset(dropped)
+
+        # Tier 1 — one zip source, every member kept under its own name.
+        if (
+            len(sources) == 1
+            and sources[0].is_file()
+            and len(planned) == offered
+            and not dropped
+            and all(dest_name == entry.filename for _archive, entry, dest_name in planned)
+        ):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(sources[0], dest)
+            _close_progress(progress)
+            return frozenset(written), frozenset()
+
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        total = len(planned)
+        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+            for done, (source_archive, entry, dest_name) in enumerate(planned, start=1):
+                if source_archive is None:
+                    # Tier 3 — a folder source has no compressed form to pass
+                    # through, so its file is read and deflated like any other.
+                    archive.writestr(dest_name, entry.read_bytes())
+                elif member_is_raw_copyable(entry):
+                    copy_member_raw(source_archive, entry, archive, dest_name)  # tier 2
+                else:
+                    archive.writestr(dest_name, source_archive.read(entry.filename))
+                if progress is not None:
+                    progress(done, total)
+
     return frozenset(written), frozenset(dropped)
 
 

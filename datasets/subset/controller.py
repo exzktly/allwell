@@ -89,7 +89,7 @@ class SubsetController(QObject):
         worker.logLine.connect(self.page.append_log)
         worker.wellsPlanned.connect(self._on_wells_planned)
         worker.wellStage.connect(self._on_well_stage)
-        worker.wellFraction.connect(self.page.dashboard.set_well_progress)
+        worker.wellFraction.connect(self._on_well_fraction)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)
@@ -140,11 +140,15 @@ class SubsetController(QObject):
         self._well_stage = {}
         self.page._plate.clearWellColors()
         self.page._plate.clearWellMarkers()
+        self.page._plate.clearWellFractions()
 
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Copying {len(wells)} well(s)…")
         self._well_stage = dict.fromkeys((canon_well(w) for w in wells), "pending")
+        # A previous run's dials would otherwise sit at whatever they reached,
+        # reading as progress this run has not made.
+        self.page._plate.clearWellFractions()
         for w in self._well_stage:
             self.page._plate.setWellColor(w, well_color("pending"))
 
@@ -160,6 +164,27 @@ class SubsetController(QObject):
         # success-green from accent-lilac).
         marker = {"copying": "⚙", "done": "✓", "empty": "!"}.get(stage)
         self.page._plate.setWellMarker(w, marker)
+
+    def _on_well_fraction(self, well_id: str, done: int, total: int) -> None:
+        """Fill the picker plate's dial for one in-progress well.
+
+        This goes to ``page._plate``, not to the dashboard: ``SubsetDashboard``
+        is built ``show_plate=False`` precisely because this controller paints
+        onto the picker instead, so ``PlateProgress.set_well_progress`` has no
+        plate to reach and returns without drawing anything. Routed there, every
+        one of these was a no-op and a well's copy showed no sub-progress at all
+        — only the flat "copying" colour ``_on_well_stage`` sets, held until the
+        whole well landed.
+        """
+        well = canon_well(well_id)
+        if not well:
+            return
+        if int(total) <= 0:
+            # "Not counted yet" is not "none done" — an unknown amount of
+            # progress must not render as a definite empty dial.
+            self.page._plate.setWellFraction(well, None)
+            return
+        self.page._plate.setWellFraction(well, max(0.0, min(1.0, int(done) / int(total))))
 
     def _well_tooltip(self, well_id: str) -> str:
         w = canon_well(well_id)

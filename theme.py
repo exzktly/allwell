@@ -454,6 +454,13 @@ QLabel#Muted, QLabel[muted="true"] {{
 QLabel#Accent, QLabel[accent="true"] {{
     color: {c.accent};
 }}
+/* The ⓘ hover-for-more marker (widgets/info_icon.py). Muted so it reads as an
+   affordance beside a control rather than as content of its own, and slightly
+   larger than caption text so the glyph stays legible at that weight. */
+QLabel#InfoHint {{
+    color: {c.text_muted};
+    font-size: {t.small_size}px;
+}}
 /* Text roles that were named at their call sites but styled nowhere. */
 QLabel#MutedCaption {{
     color: {c.text_muted};

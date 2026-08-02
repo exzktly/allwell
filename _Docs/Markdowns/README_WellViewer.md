@@ -1578,12 +1578,12 @@ exact correction and segmentation code).
   sample, so the `empty_well` and `basic` correction modes cannot run on one —
   the status line says which correction was skipped rather than showing you an
   uncorrected frame labelled as corrected.
-- **Stage** — the first control in the Correction section, and the one that
-  decides what everything below it does: **Raw** shows the unprocessed frame and
-  runs no correction at all, **Flat-field only** applies the flat-field and
-  ignores the background method, **Corrected** applies both (what a run
-  produces). Controls the chosen stage does not use are greyed out, so you can
-  see at a glance why one is not responding.
+- **Correct up to** — the first control in the Correction section, and the one
+  that decides what everything below it does: **Raw** shows the unprocessed
+  frame and runs no correction at all, **Flat-field only** applies the
+  flat-field and ignores the background method, **Corrected** applies both (what
+  a run produces). Controls the chosen stage does not use are greyed out, so you
+  can see at a glance why one is not responding.
 - **Correction controls** — all in the **right-hand panel**, where every other
   per-tab inspector in the app sits: any flat-field + background method and its
   parameters. Correction re-runs as you change them; segmentation waits for the
@@ -1641,6 +1641,12 @@ exact correction and segmentation code).
   - **The first Segment of a session is slow** — around 10–30 seconds, because
     it loads TensorFlow and the StarDist model into the application, and about
     1–2 GB stays in use until you quit. Every later Segment takes a few seconds.
+    The status bar at the bottom of the window shows a progress bar while it
+    runs and says which phase it is in, so the long first load is visibly a load
+    rather than a hang. Building an `empty_well` or `basic` reference field
+    shows the same bar, counting the frames it samples. Ordinary corrections do
+    not: they run on the interface's own thread, take a second or two, and
+    finish before a bar could tell you anything.
   - Change the frame or any correction setting and the labels no longer describe
     what is on screen, so they are **removed** and the status line says they are
     stale. Press **Segment** again.

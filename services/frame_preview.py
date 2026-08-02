@@ -44,7 +44,15 @@ def missing_stardist_deps() -> list[str]:
             if importlib.util.find_spec(name) is None]
 
 
-def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0):
+#: The two phases of a first-of-session segmentation, named for the caller to
+#: display. The first is the 10-30 s one and only happens once, so a UI that
+#: reports them identically leaves the user watching an unexplained stall.
+STAGE_LOADING = "loading TensorFlow and the StarDist model"
+STAGE_SEGMENTING = "segmenting"
+
+
+def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0,
+                  on_stage=None):
     """Segment one displayed frame and return its int32 label image.
 
     Runs the pipeline's own :func:`pipeline.stardist.segment_nuclei`, so the
@@ -55,6 +63,11 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0):
 
     ``prob_thresh`` / ``nms_thresh`` of ``None`` mean the pretrained model's own
     values, the same spelling the CLI and the Analyze form use.
+
+    ``on_stage(name)`` — a plain callable, so this module stays Qt-free — is
+    called with :data:`STAGE_LOADING` and :data:`STAGE_SEGMENTING` as each
+    begins. Only the first run of a session loads anything; after that the two
+    arrive back to back and the caller simply shows the second.
     """
     missing = missing_stardist_deps()
     if missing:
@@ -65,6 +78,8 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0):
     from pipeline.stardist import StarDistParams, segment_nuclei
 
     if _GUI_STARDIST_MODEL is None:
+        if on_stage is not None:
+            on_stage(STAGE_LOADING)
         pm._ensure_pkg_resources_shim()
         from stardist.models import StarDist2D
         # The pipeline workers' loader: recovers from a cache left truncated by
@@ -73,6 +88,8 @@ def segment_frame(arr, *, prob_thresh=None, nms_thresh=None, tile_px: int = 0):
         _GUI_STARDIST_MODEL = pm._load_stardist_pretrained(
             StarDist2D, "2D_versatile_fluo")
 
+    if on_stage is not None:
+        on_stage(STAGE_SEGMENTING)
     return segment_nuclei(
         arr, model=_GUI_STARDIST_MODEL,
         params=StarDistParams(prob_thresh=prob_thresh, nms_thresh=nms_thresh,

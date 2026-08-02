@@ -23,8 +23,36 @@ import types
 import numpy as np
 import pytest
 
+from well_viewer.core.widget_registry import WidgetRegistry
 from well_viewer.features.image_browser.playground import controller as C
 from well_viewer.features.image_browser.playground.state import PlaygroundState
+
+
+class _FakeBar:
+    """The QProgressBar API the three progress helpers actually use."""
+
+    def __init__(self) -> None:
+        self.visible = False
+        self.minimum_, self.maximum_, self.value_ = 0, 1, 0
+        self.shown_ranges: list[tuple[int, int]] = []
+        self.values: list[int] = []
+
+    def setRange(self, lo: int, hi: int) -> None:
+        self.minimum_, self.maximum_ = lo, hi
+
+    def maximum(self) -> int:
+        return self.maximum_
+
+    def setValue(self, v: int) -> None:
+        self.value_ = v
+        self.values.append(v)
+
+    def show(self) -> None:
+        self.visible = True
+        self.shown_ranges.append((self.minimum_, self.maximum_))
+
+    def hide(self) -> None:
+        self.visible = False
 
 
 @pytest.fixture
@@ -41,7 +69,13 @@ def ctx(monkeypatch):
             playground=PlaygroundState(),
             dataset=types.SimpleNamespace(data_dir=None, well_paths={})),
         runtime=types.SimpleNamespace(playground=types.SimpleNamespace()),
+        widgets=WidgetRegistry(),
     )
+    # A stand-in for the shared status-row QProgressBar: the controller drives it
+    # through the same three helpers the real one uses, so its visibility and
+    # range are assertable without building a widget tree.
+    c.bar = _FakeBar()
+    c.widgets.register("_progress_bar", c.bar)
     c.statuses = []
     c.counts = []
     c.masks = []
@@ -225,7 +259,8 @@ def test_a_failed_run_clears_the_labels_and_names_the_reason(ctx, tif, monkeypat
 
     captured = {}
 
-    def _fake_request(arr, *, prob_thresh, nms_thresh, on_done, on_failed=None):
+    def _fake_request(arr, *, prob_thresh, nms_thresh, on_done, on_failed=None,
+                      on_stage=None):
         captured["on_failed"] = on_failed
         return object()
 
@@ -246,8 +281,10 @@ def test_a_finished_run_reports_the_count_and_the_thresholds(ctx, tif, monkeypat
 
     captured = {}
 
-    def _fake_request(arr, *, prob_thresh, nms_thresh, on_done, on_failed=None):
+    def _fake_request(arr, *, prob_thresh, nms_thresh, on_done, on_failed=None,
+                      on_stage=None):
         captured["on_done"] = on_done
+        captured["on_stage"] = on_stage
         captured["thresholds"] = (prob_thresh, nms_thresh)
         return object()
 
@@ -622,10 +659,11 @@ def builds(monkeypatch):
     calls = []
 
     def _request(ctx, well, chan, *, flatfield_mode, background_method,
-                 on_done, on_failed=None, max_samples=30):
+                 on_done, on_failed=None, on_progress=None, max_samples=30):
         calls.append(types.SimpleNamespace(
             well=well, chan=chan, ff_mode=flatfield_mode,
-            bg_method=background_method, on_done=on_done))
+            bg_method=background_method, on_done=on_done,
+            on_failed=on_failed, on_progress=on_progress))
         return object()
 
     monkeypatch.setattr(C, "request_reference_fields", _request)
@@ -837,3 +875,81 @@ def test_a_mask_that_does_not_fit_reports_no_label_colours(framed, monkeypatch):
     st.binary_label_colors = True
     C.playground_on_change(framed)
     assert st.display_facts["label_colors"] is False
+
+
+# ── the shared progress bar ─────────────────────────────────────────────────
+#
+# The Playground's two long jobs run off-thread and used to report only a line
+# of text. They now drive the same status-row bar smFISH and the dataset load
+# use. The rule the tests below encode is that the bar is *hidden on every exit
+# path*: one left sweeping after a failure says the work continues.
+
+def test_the_reference_build_shows_a_determinate_bar_and_counts_frames(
+        plate, builds):
+    C_bar = plate.bar
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    assert C_bar.visible is True
+    assert C_bar.shown_ranges[-1][1] > 0          # determinate: it knows the total
+
+    builds[0].on_progress(3, 30)
+    assert C_bar.maximum() == 30 and C_bar.value_ == 3
+    assert "3/30 frames" in plate.statuses[-1]
+
+    builds[0].on_done("H12", "gfp", _field(1.5), None)
+    assert C_bar.visible is False
+
+
+def test_a_failed_reference_build_hides_the_bar(plate, builds):
+    st = plate.state.playground
+    st.flatfield_mode = "basic"
+    C.playground_on_change(plate)
+    assert plate.bar.visible is True
+    builds[0].on_failed("the well vanished")
+    assert plate.bar.visible is False
+    assert "Model build failed" in plate.statuses[-1]
+
+
+def _segment_stub(monkeypatch, captured):
+    def _fake(arr, *, prob_thresh, nms_thresh, on_done, on_failed=None,
+              on_stage=None):
+        captured.update(on_done=on_done, on_failed=on_failed, on_stage=on_stage)
+        return object()
+    monkeypatch.setattr(C, "request_stardist_labels", _fake)
+
+
+def test_segmentation_shows_an_indeterminate_bar_and_names_its_phases(
+        ctx, tif, monkeypatch):
+    """One frame's inference has no interior milestones, so a percentage would be
+    invented — but the phases are worth naming, because the model load is the
+    10-30 s one."""
+    captured: dict = {}
+    _segment_stub(monkeypatch, captured)
+    C.playground_open_loose_image(ctx, str(tif))
+    C.playground_segment_now(ctx)
+
+    assert ctx.bar.visible is True
+    assert ctx.bar.shown_ranges[-1] == (0, 0)      # indeterminate
+    captured["on_stage"]("loading TensorFlow and the StarDist model")
+    assert "loading TensorFlow" in ctx.statuses[-1]
+    captured["on_stage"]("segmenting")
+    assert "segmenting" in ctx.statuses[-1]
+
+    captured["on_done"](_labels())
+    assert ctx.bar.visible is False
+
+
+def test_a_failed_segmentation_hides_the_bar(ctx, tif, monkeypatch):
+    """The commonest failure in a fresh environment is "StarDist is not
+    installed", and a bar still sweeping under that message would say the work
+    is continuing."""
+    captured: dict = {}
+    _segment_stub(monkeypatch, captured)
+    C.playground_open_loose_image(ctx, str(tif))
+    C.playground_segment_now(ctx)
+    assert ctx.bar.visible is True
+
+    captured["on_failed"]("StarDist is not installed in this environment")
+    assert ctx.bar.visible is False
+    assert "not installed" in ctx.state.playground.seg_status

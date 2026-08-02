@@ -387,6 +387,7 @@ def explode_ome_tiff(
     workers: int = 0,
     log_fn: "Callable[[str], None] | None" = None,
     progress_fn: "Callable[[int, int], None] | None" = None,
+    well_progress_fn: "Callable[[str, int, int], None] | None" = None,
     should_abort: "Callable[[], bool] | None" = None,
 ) -> ExplodeResult:
     """Explode a packed OME-TIFF into per-well ``<WELL>.zip`` archives in *out_in_dir*.
@@ -412,7 +413,14 @@ def explode_ome_tiff(
     archive alone (no locking on the zip handles). *fovs_per_well* is the
     fields-of-view per well; ``None`` derives it.
 
-    *progress_fn* receives ``(planes_written, total_planes)`` as it proceeds.
+    *progress_fn* receives ``(planes_written, total_planes)`` as it proceeds, and
+    *well_progress_fn* receives ``(well, planes_written_for_that_well,
+    planes_per_well)`` — the same work split per well, so a caller can draw one
+    well's share of the conversion rather than only the run's total. It fires
+    once per plane and is deliberately not throttled here: what counts as "often
+    enough to be worth a repaint" is a UI question, so the quantising belongs to
+    the caller that owns a UI (``datasets.ome_import.apply``), not to the
+    pipeline.
     *should_abort*, polled per plane, raises :class:`OmeExplodeCancelled` when it
     returns True -- each in-flight well's staged archive is discarded, so no
     partial ``<WELL>.zip`` is left (a re-run overwrites cleanly). Raises
@@ -471,14 +479,22 @@ def explode_ome_tiff(
 
     lock = threading.Lock()
     done = 0
+    # Planes one well accounts for: its FOVs x timepoints x channels. Every well
+    # writes the same number, so this is the denominator of each well's share.
+    planes_per_well = max(1, fovs * n_timepoints * layout.size_c)
 
-    def _bump() -> None:
+    def _bump(well: "str | None" = None, well_done: int = 0) -> None:
         nonlocal done
         with lock:
             done += 1
             d = done
         if progress_fn:
             progress_fn(d, total)
+        # Outside the lock: each call names its own well, so interleaving is
+        # harmless, and taking the lock per plane would serialise the parallel
+        # per-well conversion this reports on.
+        if well_progress_fn and well is not None:
+            well_progress_fn(well, well_done, planes_per_well)
 
     if progress_fn:
         progress_fn(0, total)
@@ -494,6 +510,7 @@ def explode_ome_tiff(
                 if _abort():
                     raise OmeExplodeCancelled()
                 label = well_labels[i]
+                well_written = 0
                 base = i * fovs
                 with atomic_zip(out_in_dir / f"{label}.zip",
                                 compression=zipfile.ZIP_STORED) as zf:
@@ -523,7 +540,8 @@ def explode_ome_tiff(
                                 zf.writestr(member, _encode_tiff(plane))
                                 write_s += time.perf_counter() - w0
                                 written += 1
-                                _bump()
+                                well_written += 1
+                                _bump(label, well_written)
                 wells.append(label)
         return written, wells, read_s, write_s
 

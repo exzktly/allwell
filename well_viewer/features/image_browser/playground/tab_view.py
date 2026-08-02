@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
+from widgets.info_icon import info_icon
 from well_viewer.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
     playground_open_loose_image, playground_repopulate_dropdowns,
@@ -30,7 +32,14 @@ from well_viewer.features.image_browser.playground.controller import (
 from well_viewer.features.image_browser.playground.renderer import render_playground_display
 
 
-def _row(parent, label_text: str) -> QWidget:
+def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
+    """A two-column label+widget row; returns the right-hand cell.
+
+    *tooltip* lands on the row **and its label**, not only on what the caller
+    puts in the cell — the label is the word being read and the bigger target,
+    and an explanation that answers only over a narrow entry box is one most
+    people never find.
+    """
     row = QWidget(parent)
     rl = QHBoxLayout(row)
     rl.setContentsMargins(0, 1, 0, 1)
@@ -38,6 +47,9 @@ def _row(parent, label_text: str) -> QWidget:
     lbl = QLabel(label_text, row)
     lbl.setObjectName("Muted")
     lbl.setFixedWidth(96)
+    if tooltip:
+        row.setToolTip(tooltip)
+        lbl.setToolTip(tooltip)
     rl.addWidget(lbl)
     cell = QWidget(row)
     QHBoxLayout(cell).setContentsMargins(0, 0, 0, 0)
@@ -154,16 +166,21 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     # Correction method
     _section("Correction")
-    # The STAGE is the master switch for everything below it: on Raw the
+    # This control is the master switch for everything below it: on Raw the
     # controller returns before any correction runs, and on Flat-field only the
     # background half is skipped. It used to live in the Display section two
     # groups down, dressed as a view option, so the controls it silently
     # disabled looked broken instead of inactive. It heads this section now, and
     # _sync_method_rows greys out whatever the chosen stage does not consult.
+    #
+    # It is labelled "Correct up to", not "Stage", and carries a caption saying
+    # what it governs. "Stage" names a step of the pipeline — true, but it
+    # describes the value rather than the effect, and the effect (half this
+    # panel does nothing) is the part a reader needs before hovering anything.
     # (Its signal is connected further down, where the per-stage LUT memory that
     # the handler needs is defined.)
     from widgets.segmented_control import SegmentedControl
-    stage_row = _row(controls, "Stage")
+    stage_row = _row(controls, "Correct up to")
     source_seg = SegmentedControl(stage_row)
     for _lbl, _data in (("Raw", "raw"), ("Flat-field only", "flatfield"),
                         ("Corrected", "corrected")):
@@ -180,6 +197,11 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     stage_row.layout().addWidget(source_seg)
     stage_row.layout().addStretch(1)
     app._playground_source_seg = source_seg
+    stage_note = QLabel("decides which controls below run — Raw runs none",
+                        controls)
+    stage_note.setObjectName("Muted")
+    stage_note.setWordWrap(True)
+    cl.addWidget(stage_note)
 
     ff_cb = _combo(_row(controls, "Flat-field"), FLATFIELD_MODES, "_playground_ff_cb")
     bg_cb = _combo(_row(controls, "Background"), BACKGROUND_METHODS, "_playground_bg_cb")
@@ -228,20 +250,21 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(seg_live_cb)
     app._playground_seg_live_cb = seg_live_cb
 
-    prob_row = _row(controls, "Probability")
+    # One help text per threshold, defined in pipeline.stardist and shown by both
+    # panels that expose these two numbers — the two used to keep private copies
+    # and had already drifted into describing the same knobs differently. Applied
+    # to the whole row, to the entry, and to an ⓘ marker, so the explanation is
+    # both findable and reachable from anywhere on the line.
+    prob_row = _row(controls, "Probability", tooltip=PROB_THRESH_HELP)
     prob_edit = _edit(prob_row, "", "_playground_seg_prob_edit")
     prob_edit.setPlaceholderText("auto")
-    prob_edit.setToolTip(
-        "Object-probability threshold (0-1). LOWER finds more nuclei, including "
-        "dim and marginal ones; HIGHER keeps only confident detections. Blank = "
-        "the pretrained model's own default (~0.479).")
-    nms_row = _row(controls, "Overlap (NMS)")
+    prob_edit.setToolTip(PROB_THRESH_HELP)
+    prob_row.layout().addWidget(info_icon(prob_row, PROB_THRESH_HELP))
+    nms_row = _row(controls, "Overlap (NMS)", tooltip=NMS_THRESH_HELP)
     nms_edit = _edit(nms_row, "", "_playground_seg_nms_edit")
     nms_edit.setPlaceholderText("auto")
-    nms_edit.setToolTip(
-        "Polygon overlap threshold (0-1). HIGHER lets more overlapping nuclei "
-        "survive, recovering touching nuclei on a confluent field; LOWER merges "
-        "them more aggressively. Blank = the model's own default (0.3).")
+    nms_edit.setToolTip(NMS_THRESH_HELP)
+    nms_row.layout().addWidget(info_icon(nms_row, NMS_THRESH_HELP))
 
     seg_btn_row = QWidget(controls)
     sbl = QHBoxLayout(seg_btn_row)

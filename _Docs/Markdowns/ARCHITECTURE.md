@@ -2387,7 +2387,20 @@ parent process supervises the per-well worker pool:
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
   `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
   mirroring `_dump_well_failure_trace`), and `classify_log_line` treats
-  "failed" as ERROR so it surfaces in the GUI live log. Whole-well vs
+  "failed" as ERROR so it surfaces in the GUI live log. **A line that states its
+  own severity is believed before it is sniffed**: an explicit `[info]` /
+  `[warn]` / `[error]` tag wins, and so does a `note:` marker, because the
+  keyword pass reads whole lines *including paths* and this directory is called
+  `errors/`. On a remote run the fetch pulls that directory back so Validate &
+  Repair can read it, and a clean run has none to pull — so
+  `[remote] note: …/errors/ not pulled` was painted red by the name of the
+  folder whose absence it was reporting, while the identical line about
+  `pipeline_info.json` came out INFO. The note itself now says what the absence
+  means (`_rsync_optional`'s `absent_note`), since "not pulled" alone reads as a
+  fault for a source whose absence is the good case. It stops short of declaring
+  the run clean: a non-zero rc covers both "nothing was there" and "something
+  was, and it could not be fetched", and the fetch cannot tell those apart.
+  Whole-well vs
   partial-FOV failures are accounted separately, with a per-well breakdown and
   PARTIAL warnings that point at `--incremental`. Transient short/zero NAS
   writes are shielded by `pipeline.io._safe_imwrite`'s retry-with-backoff, which

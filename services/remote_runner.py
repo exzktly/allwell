@@ -5103,6 +5103,12 @@ class RemoteRunner:
             f"{self.host.ssh_alias}:{run.remote_output_dir}/errors/",
             run.local_output_dir / "errors",
             log_fn=log,
+            # The pipeline creates errors/ only when a well or FOV-group
+            # actually fails, so a clean run has none and this note is the
+            # expected outcome, not a problem. Saying so here is the difference
+            # between a line that reads as bad news and one that reads as none.
+            absent_note="The pipeline only creates errors/ when a well or "
+                        "FOV-group fails, so a clean run has none.",
         )
 
         # The fetched pipeline_info.json reflects only the (partial) input the
@@ -5206,8 +5212,18 @@ class RemoteRunner:
         )
 
     def _rsync_optional(
-        self, src: str, dest: Path, *, log_fn: Callable[[str], None]
+        self, src: str, dest: Path, *, log_fn: Callable[[str], None],
+        absent_note: str = "",
     ) -> None:
+        """Pull *src* if the remote has it; say so plainly if it does not.
+
+        ``absent_note`` explains what the absence *means* for this particular
+        source, because "not present" alone reads as a fault for a source whose
+        absence is the normal, good case. It is deliberately not phrased as a
+        verdict on the run: a non-zero rc means the pull did not happen, which
+        covers both "there was nothing there" and "there was, and it could not
+        be fetched", and this cannot tell those apart.
+        """
         dest.parent.mkdir(parents=True, exist_ok=True)
         result = _rsync_with_retry(
             [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
@@ -5215,9 +5231,10 @@ class RemoteRunner:
             log_fn=log_fn, timeout=60,
         )
         if result.returncode != 0:
+            tail = f" {absent_note}" if absent_note else ""
             log_fn(
-                f"[remote] note: {src} not present on remote "
-                f"(rc={result.returncode}).\n"
+                f"[remote] note: {src} not pulled "
+                f"(rc={result.returncode}).{tail}\n"
             )
 
     def _retry_missing_wells(

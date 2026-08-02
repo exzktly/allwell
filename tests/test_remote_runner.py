@@ -2272,7 +2272,7 @@ def test_verify_and_cleanup_run_mode_removes_run_dir_only(runner_with_run, monke
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="run", log_fn=lambda _m: None)
     assert ok
@@ -2293,7 +2293,7 @@ def test_verify_and_cleanup_all_mode_removes_both(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=lambda _m: None)
     rm_calls = [c for c in calls if c and c[0] == "rm"]
@@ -2313,7 +2313,7 @@ def test_verify_and_cleanup_none_mode_removes_nothing(runner_with_run, monkeypat
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     runner.verify_and_cleanup(ok=True, cleanup_mode="none", log_fn=lambda _m: None)
     rm_calls = [c for c in calls if c and c[0] == "rm"]
@@ -2341,7 +2341,7 @@ def test_verify_and_cleanup_dry_run_does_not_rm(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_script", fake_ssh_script)
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
     ok = runner.verify_and_cleanup(
@@ -2387,7 +2387,7 @@ def test_verify_and_cleanup_dry_run_handles_missing_remote_path(runner_with_run,
     )
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
     runner.verify_and_cleanup(
@@ -2419,7 +2419,7 @@ def test_verify_and_cleanup_dry_run_with_none_mode_is_a_noop(runner_with_run, mo
     )
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     log_lines: list[str] = []
     runner.verify_and_cleanup(
@@ -2445,7 +2445,7 @@ def test_verify_and_cleanup_skips_when_failure(runner_with_run, monkeypatch):
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     ok = runner.verify_and_cleanup(ok=False, cleanup_mode="all", log_fn=lambda _m: None)
     assert not ok
@@ -2468,7 +2468,7 @@ def test_verify_and_cleanup_skips_when_local_missing(runner_with_run, monkeypatc
     monkeypatch.setattr(DatasetCache, "_ssh_run", fake_ssh_run)
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
     logs: list[str] = []
     ok = runner.verify_and_cleanup(ok=True, cleanup_mode="all", log_fn=logs.append)
@@ -3044,7 +3044,7 @@ def test_verify_and_cleanup_defaults_to_none(host, tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         RemoteRunner, "_rsync_optional",
-        lambda self, src, dest, log_fn: None,
+        lambda self, src, dest, log_fn, **kw: None,
     )
 
     # Default call (no cleanup_mode arg)

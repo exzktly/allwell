@@ -485,15 +485,30 @@ def test_a_closing_download_with_no_prior_tick_invents_nothing(qapp):
 
 
 def test_a_finished_upload_still_ends_its_transfer(qapp):
-    """Unchanged, and it must stay unchanged: a well is marked ``upload`` as
-    rsync starts sending it, so holding the dial full afterwards would claim
-    progress for a well that has not begun computing."""
+    """Only a *download* holds its entry past 1.0; an upload still drops one.
+
+    The asymmetry is the point. A download's 1.0 marks the end of the zip, with
+    the CSVs still to come, so the ring has to keep describing a fetch that is
+    not over. An upload's 1.0 is the whole transfer, so the entry goes and the
+    stages take the dial back.
+
+    What the dial then *reads* is not this test's business — an uploaded well
+    holds a full dial so the fill never rewinds at the upload → compute
+    handover, which ``test_a_finished_upload_hands_the_dial_back_to_the_stages``
+    covers. This asserts only that the transfer itself ended.
+    """
     from widgets.run_dashboard import RunDashboard
 
     d = RunDashboard()
     d.reset(remote=True, total=1)
     d.set_well_stage("A01", "upload")
     d.set_well_transfer("A01", "up", 0.5)
+    assert d._xfer["A01"] == ("up", 0.5)
     d.set_well_transfer("A01", "up", 1.0)
-    assert "A01" not in d._xfer
-    assert d._well_fraction("A01") == 0.0          # waiting its turn
+    assert "A01" not in d._xfer, "an upload's 1.0 ends it"
+
+    # ...where a download's does not.
+    d.set_well_stage("B02", "process")
+    d.set_well_transfer("B02", "down", 0.5)
+    d.set_well_transfer("B02", "down", 1.0)
+    assert d._xfer["B02"] == ("down", 0.5), "the zip is done; the CSVs are not"

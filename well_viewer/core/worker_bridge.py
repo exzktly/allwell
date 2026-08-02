@@ -12,8 +12,9 @@ the first fire, so a button pressed repeatedly — which is exactly what a previ
 control is for — does not leak a connected ``QObject`` holding the callbacks and,
 through them, the widgets and the app.
 
-Lives in ``core`` rather than in any one feature because the Analyze pane needs
-it too, and the Analyze pane may not import a feature package.
+Lives in ``core`` rather than in the Playground, its present sole caller, because
+the Playground is a removable feature: a bridge every background job in the app
+may want cannot sit inside a package that a build profile can drop.
 """
 
 from __future__ import annotations

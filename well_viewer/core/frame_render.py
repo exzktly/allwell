@@ -8,14 +8,12 @@ binary branch mirrors ``review_image.renderer.draw_review_image`` (labelled cell
 white).
 
 It lives in ``core`` rather than in the Playground package that grew it because
-the Analyze pane's Preview page renders the same thing, and the Playground is a
-*removable* feature (``profiles/full.toml``) — a build that drops it must not
-take the Analyze preview down with it, and nothing outside
-``features/registry.py`` may import a feature package anyway.
+the Playground is a *removable* feature (``profiles/full.toml``): nothing outside
+``features/registry.py`` may import a feature package, so anything a second pane
+might ever render a frame with has to sit outside it.
 
 Qt-free: pure numpy in, numpy out. The blit that puts the result on screen is
-``widgets.frame_preview.FramePreview`` (Analyze) or
-``playground.renderer.render_playground_display`` (Review).
+``playground.renderer.render_playground_display``.
 """
 
 from __future__ import annotations

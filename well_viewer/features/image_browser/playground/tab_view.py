@@ -261,6 +261,22 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sbl.addWidget(seg_btn)
     sbl.addStretch(1)
     cl.addWidget(seg_btn_row)
+
+    # The count, directly under the controls that change it — this is the number
+    # the two thresholds are being tuned against, and reading it out of the
+    # paragraph read-out below is not the same as seeing it. Written by
+    # ``controller._count_text`` from the facts of the render that just ran, so
+    # it can never describe a different picture than the one on screen.
+    count = QLabel("Cells: —", controls)
+    count.setWordWrap(True)
+    count.setToolTip(
+        "How many labels the current render actually drew, and — in binary mode "
+        "with a usable mask — how many of them clear the threshold.\n"
+        "Reads “—” rather than 0 when there is no count to give: no mask at all, "
+        "or live labels that no longer describe this frame.")
+    cl.addWidget(count)
+    ctx.widgets.register("_playground_count", count)
+
     cl.addWidget(hint)
 
     # Display options

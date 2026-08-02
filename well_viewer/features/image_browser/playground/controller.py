@@ -15,6 +15,7 @@ through ``app._app_state.playground`` in headless tests.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 
 import numpy as np
 
@@ -229,6 +230,47 @@ def _resolve_lut(win, arr):
 def _set_status(win, text: str) -> None:
     from well_viewer.core.ui_helpers import set_widget_text
     set_widget_text(win, "_playground_status", text)
+
+
+def _set_count(win, text: str) -> None:
+    from well_viewer.core.ui_helpers import set_widget_text
+    set_widget_text(win, "_playground_count", text)
+
+
+def _count_text(facts: dict) -> str:
+    """The Cells read-out: how many objects this render actually drew.
+
+    A second *formatting* of ``display_facts`` — the dict :func:`_render`
+    records — never a second derivation, so it cannot disagree with the
+    paragraph read-out or with the picture. It is the number the two StarDist
+    thresholds are tuned against, which is why it gets a line of its own instead
+    of living five lines into a paragraph.
+
+    Every branch that has no count prints ``—``, never ``0``: a frame whose
+    labels went stale, or that has no mask at all, has an *unknown* number of
+    cells, and printing zero for it would be a measurement the tab never made.
+    """
+    if not facts:
+        return "Cells: —"
+    if facts.get("stale_labels"):
+        return "Cells: — (stale — press Segment)"
+    if facts.get("provenance", "none") == "none":
+        return "Cells: — (no mask)"
+
+    kept, found = facts.get("labels_kept", 0), facts.get("labels_in", 0)
+    line = f"Cells: {kept} drawn"
+    if kept != found:
+        line += f" (QC dropped {found - kept} of {found})"
+    # Only with the per-cell rule is "above" a statement about cells; under the
+    # per-pixel and footprint rules no per-cell verdict was reached, so there is
+    # no subset to name.
+    if facts.get("binary_rule") == "per-cell" and facts.get("above") is not None:
+        thr = facts.get("threshold")
+        thr_txt = "—" if thr is None else f"{float(thr):g}"
+        line += f"  ·  {facts['above']} above {thr_txt}"
+    if not facts.get("shape_ok"):
+        line += "  ⚠ mask does not fit this frame"
+    return f"{line}\n({facts.get('provenance')})"
 
 
 # ── the status line: what is on screen, and what produced it ─────────────────
@@ -475,6 +517,86 @@ def _effective_correction_modes(ctx, *, loose: bool,
         f"{' and '.join(dropped)} need a loaded plate to sample — not applied")
 
 
+class _RefFields(NamedTuple):
+    """What the reference-well cache can supply for one set of modes.
+
+    ``ff_mode`` / ``bg_method`` come back **downgraded to** ``"none"`` when the
+    field that mode needs is absent, so a caller cannot ask
+    ``correct_single_frame`` for a correction it has no field for — which is a
+    silent no-op inside ``apply_flatfield`` — nor report a mode that did not run.
+    """
+
+    ff_mode: str
+    bg_method: str
+    ff: object
+    bg: object
+    pending: bool        # a needed field has not been built yet → build it
+    refusal: str         # a needed field was attempted and cannot be built
+
+
+def _needs_reference(ff_mode: str, bg_method: str) -> bool:
+    """True when these *effective* modes need a field estimated from a whole
+    reference well. Derived from the effective modes, not the widget values, so
+    it cannot disagree with :func:`_effective_correction_modes` about the stage."""
+    return ff_mode in ("empty_well", "basic") or bg_method == "empty_well"
+
+
+def _reference_keys(well, chan: str, ff_mode: str, bg_method: str):
+    """``(ff_key, bg_key)`` — the cache keys these modes need, None where they
+    need nothing.
+
+    The flat-field key carries the mode because ``basic`` and ``empty_well``
+    estimate **different** fields from the same frames
+    (``estimate_basic_flatfield`` versus ``normalize_flatfield(B)``); a key
+    without it hands one mode the other's field. The additive background field
+    has a single estimator, so its key does not need one.
+    """
+    ff_key = ("ff", well, chan, ff_mode) if ff_mode in ("empty_well", "basic") else None
+    bg_key = ("bg", well, chan) if bg_method == "empty_well" else None
+    return ff_key, bg_key
+
+
+def _reference_fields_for(ctx, *, ff_mode: str, bg_method: str, chan: str) -> _RefFields:
+    """Resolve the reference fields these modes need, from the cache alone.
+
+    The single seam both the render path and the Segment button go through, so
+    the frame on screen and the frame handed to StarDist can never be corrected
+    differently. It never builds anything — it reports ``pending`` and lets the
+    caller decide (the render path starts a worker; the Segment button refuses
+    and says to wait).
+    """
+    st = _st(ctx)
+    well = st.background_well
+    ff_key, bg_key = _reference_keys(well, chan, ff_mode, bg_method)
+    needed = [k for k in (ff_key, bg_key) if k is not None]
+    if not needed:
+        return _RefFields(ff_mode, bg_method, None, None, False, "")
+    if any(k not in st.ref_fields and k not in st.ref_missing for k in needed):
+        return _RefFields(ff_mode, bg_method, None, None, True, "")
+
+    ff = st.ref_fields.get(ff_key) if ff_key is not None else None
+    bg = st.ref_fields.get(bg_key) if bg_key is not None else None
+    dropped: list[str] = []
+    reasons: list[str] = []
+    if ff_key is not None and ff is None:
+        dropped.append(f"flat-field {ff_mode}")
+        reasons.append(st.ref_missing.get(ff_key, "no field"))
+        ff_mode = "none"
+    if bg_key is not None and bg is None:
+        dropped.append(f"background {bg_method}")
+        reasons.append(st.ref_missing.get(bg_key, "no field"))
+        bg_method = "none"
+    if not dropped:
+        return _RefFields(ff_mode, bg_method, ff, bg, False, "")
+    return _RefFields(ff_mode, bg_method, ff, bg, False,
+                      f"{' and '.join(dropped)} could not be built from well "
+                      f"{well} ({reasons[0]}) — not applied")
+
+
+def _join_refusals(*parts: str) -> str:
+    return "; ".join(p for p in parts if p)
+
+
 def playground_on_change(ctx) -> None:
     """Reload + recorrect + rerender on any selector / param / toggle change."""
     st = _st(ctx)
@@ -484,7 +606,11 @@ def playground_on_change(ctx) -> None:
     raw, frame_lbl, frame_key = _resolve_frame(ctx)
     if raw is None:
         st.raw_arr = None
+        # Nothing is rendered on this path, so the facts from the previous frame
+        # would otherwise keep a count on screen beside a blank canvas.
+        st.display_facts = {}
         _set_status(win, frame_lbl)          # frame_lbl carries the reason
+        _set_count(win, _count_text(st.display_facts))
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
     # The decoded frame's identity, for the correction memo — see _corrected_frame.
@@ -509,18 +635,22 @@ def playground_on_change(ctx) -> None:
 
     ff_mode, bg_method, refusal = _effective_correction_modes(ctx, loose=loose)
     chan_lower = (st.channel or "").lower()
-    if not loose and _source_needs_reference(st):
+    ff = bg = None
+    if not loose and _needs_reference(ff_mode, bg_method):
         if not st.background_well:
             _set_status(win, "Pick a background well for empty_well / basic.")
             _render(ctx, st.raw_arr)
             return
-        if st.model_well != st.background_well:
-            _build_reference_then_render(ctx, chan_lower)
+        ref = _reference_fields_for(ctx, ff_mode=ff_mode, bg_method=bg_method,
+                                    chan=chan_lower)
+        if ref.pending:
+            _build_reference_then_render(ctx, chan_lower, ff_mode=ff_mode,
+                                         bg_method=bg_method)
             return
-        ff = st.ff_field_by_chan.get(chan_lower)
-        bg = st.bg_field_by_chan.get(chan_lower)
-    else:
-        ff = bg = None
+        # Downgraded where a field could not be built, so what follows corrects
+        # — and reports — only what it actually has a field for.
+        ff_mode, bg_method, ff, bg = ref.ff_mode, ref.bg_method, ref.ff, ref.bg
+        refusal = _join_refusals(refusal, ref.refusal)
 
     corrected = _corrected_frame(ctx, ff_mode=ff_mode, bg_method=bg_method,
                                  ff=ff, bg=bg)
@@ -559,16 +689,6 @@ def _corrected_frame(ctx, *, ff_mode: str, bg_method: str, ff, bg, store: bool =
         st.last_correction_key = key
         st.last_corrected_arr = corrected
     return corrected
-
-
-def _source_needs_reference(st) -> bool:
-    """A reference-well field is needed for empty_well/basic flat-field (any
-    non-raw source) and for empty_well background (corrected source only)."""
-    if st.source == "raw":
-        return False
-    if st.flatfield_mode in ("empty_well", "basic"):
-        return True
-    return st.source == "corrected" and st.background_method == "empty_well"
 
 
 def _effective_threshold(ctx) -> float:
@@ -701,6 +821,13 @@ def _render(ctx, arr) -> None:
             above_ids = _cells_above(arr, qc_mask, thr)
     st.display_facts = {
         "provenance": provenance,
+        # Live labels exist but describe a different frame/settings, so
+        # ``_mask_source`` dropped them. Recorded separately because provenance
+        # is "none" here for the same reason it is when there was never a mask
+        # at all, and those two must not read as the same thing — one has no
+        # cells, the other has an unknown number.
+        "stale_labels": bool(st.seg_live and st.seg_labels is not None
+                             and _seg_is_stale(ctx)),
         "labels_in": _label_count(source_mask),
         "labels_kept": _label_count(qc_mask),
         "shape_ok": bool(shape_ok),
@@ -718,29 +845,56 @@ def _render(ctx, arr) -> None:
         arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
         show_boundary=st.show_overlay, tint=tuple(st.tint_color),
         above_ids=above_ids, threshold=thr)
+    _set_count(ctx.window, _count_text(st.display_facts))
     render_playground_display(ctx.window)
 
 
-def _build_reference_then_render(ctx, chan_lower: str) -> None:
-    """Kick off the reference-field worker; re-render when it lands."""
+def _build_reference_then_render(ctx, chan_lower: str, *, ff_mode: str,
+                                 bg_method: str) -> None:
+    """Kick off the reference-field worker; re-render when it lands.
+
+    The modes and the well are captured **here**, at request time, and the
+    result is filed under keys built from those captures — never from live
+    state. A dropdown changed while the worker runs would otherwise file the
+    field under the settings in force when it returned, i.e. under settings it
+    was not computed for.
+    """
     st = _st(ctx)
-    _set_status(ctx.window, f"Building {st.flatfield_mode}/{st.background_method} model "
-                            f"from well {st.background_well}…")
+    req_well = st.background_well
+    ff_key, bg_key = _reference_keys(req_well, chan_lower, ff_mode, bg_method)
+    _set_status(ctx.window, f"Building {ff_mode}/{bg_method} model "
+                            f"from well {req_well}…")
 
     def _on_done(well, chan, ff_field, bg_field):
-        if ff_field is not None:
-            st.ff_field_by_chan[chan] = ff_field
-        if bg_field is not None:
-            st.bg_field_by_chan[chan] = bg_field
-        st.model_well = st.background_well
+        # A build that produced nothing is recorded as ATTEMPTED, with a reason.
+        # Leaving the key simply absent would respawn this worker on the next
+        # keystroke, forever; recording it as built would silently correct with
+        # no field at all. Both were the shape of the bug this replaced.
+        why = f"no usable {chan.upper()} frames in well {well}"
+        if ff_key is not None:
+            if ff_field is None:
+                st.ref_missing[ff_key] = why
+            else:
+                st.ref_fields[ff_key] = ff_field
+        if bg_key is not None:
+            if bg_field is None:
+                st.ref_missing[bg_key] = why
+            else:
+                st.ref_fields[bg_key] = bg_field
+        elif bg_field is not None:
+            # The empty_well flat-field estimates B on the way to B/mean(B), so
+            # the additive field is already paid for — cache it under its own
+            # key rather than re-sampling the well if the background is switched
+            # to empty_well next.
+            st.ref_fields[("bg", well, chan)] = bg_field
         playground_on_change(ctx)
 
     def _on_failed(msg):
         _set_status(ctx.window, f"Model build failed: {msg}")
 
     ctx.runtime.playground.ref_bridge = request_reference_fields(
-        ctx, st.background_well, chan_lower,
-        flatfield_mode=st.flatfield_mode, background_method=st.background_method,
+        ctx, req_well, chan_lower,
+        flatfield_mode=ff_mode, background_method=bg_method,
         on_done=_on_done, on_failed=_on_failed)
 
 
@@ -766,6 +920,13 @@ def _seg_key(ctx) -> tuple:
     # exactly the same pixels.
     ff_mode, bg_method, _ = _effective_correction_modes(ctx, loose=loose,
                                                         stage="corrected")
+    if not loose and _needs_reference(ff_mode, bg_method):
+        # The RESOLVED modes, so labels computed while a reference field was
+        # missing (the correction downgraded to none) are not mistaken for
+        # labels computed with it once the field exists.
+        ref = _reference_fields_for(ctx, ff_mode=ff_mode, bg_method=bg_method,
+                                    chan=(st.channel or "").lower())
+        ff_mode, bg_method = ref.ff_mode, ref.bg_method
     return (getattr(ctx.runtime.playground, "frame_key", None),
             ff_mode, bg_method, st.radius, st.fft_small, st.mesh_ratio,
             st.mesh_sigma, None if loose else st.background_well,
@@ -828,23 +989,33 @@ def _segmentation_frame(ctx):
         ctx, loose=loose, stage="corrected")
 
     ff = bg = None
-    if not loose and (ff_mode in ("empty_well", "basic") or bg_method == "empty_well"):
-        if not st.background_well or st.model_well != st.background_well:
+    refusal = ""
+    if not loose and _needs_reference(ff_mode, bg_method):
+        if not st.background_well:
             return None, ("The corrected frame needs the empty_well / basic "
                           "reference field — pick a Bg well and let it build first.")
-        chan = (st.channel or "").lower()
-        ff = st.ff_field_by_chan.get(chan)
-        bg = st.bg_field_by_chan.get(chan)
+        # The same resolver the render path uses, so the pixels StarDist sees are
+        # corrected exactly as the ones on screen.
+        ref = _reference_fields_for(ctx, ff_mode=ff_mode, bg_method=bg_method,
+                                    chan=(st.channel or "").lower())
+        if ref.pending:
+            return None, ("The corrected frame needs the empty_well / basic "
+                          "reference field — let it finish building first.")
+        ff_mode, bg_method, ff, bg = ref.ff_mode, ref.bg_method, ref.ff, ref.bg
+        refusal = ref.refusal
 
     # Only cache when this IS the displayed correction; otherwise the memo's one
     # slot would evict the frame on screen and cost a full recompute on the next
     # render.
     arr = _corrected_frame(ctx, ff_mode=ff_mode, bg_method=bg_method, ff=ff,
                            bg=bg, store=st.source == "corrected")
-    note = ("" if st.source == "corrected"
-            else f"segmented the corrected frame (you are viewing "
-                 f"{_STAGE_LABELS.get(st.source, st.source)})")
-    return arr, note
+    notes = []
+    if st.source != "corrected":
+        notes.append(f"segmented the corrected frame (you are viewing "
+                     f"{_STAGE_LABELS.get(st.source, st.source)})")
+    if refusal:
+        notes.append(refusal)
+    return arr, _join_refusals(*notes)
 
 
 def playground_segment_now(ctx) -> None:

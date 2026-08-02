@@ -1,10 +1,10 @@
 """Playground tab — the zoom/pan blit onto the Playground canvas.
 
-The RGB build itself lives in ``well_viewer.core.frame_render.build_frame_rgb``
-— the Analyze pane's Preview page renders the same thing, and it cannot import
-this package (the Playground is a *removable* feature, and only
-``features/registry.py`` may import a feature at all). ``build_playground_rgb``
-stays here as the name this package's callers and tests use.
+The RGB build itself lives in ``well_viewer.core.frame_render.build_frame_rgb``,
+outside this package, because the Playground is a *removable* feature and only
+``features/registry.py`` may import a feature at all — anything a second pane
+could want to reuse has to live in ``core``. ``build_playground_rgb`` stays here
+as the name this package's callers and tests use.
 
 ``render_playground_display`` is the only app-touching function — a
 self-contained zoom/pan loop modelled on ``render_review_image_display`` that

@@ -42,11 +42,22 @@ class PlaygroundState:
     mesh_ratio: float = 3.0
     mesh_sigma: float = 3.0
 
-    # reference-well models (empty_well / basic), keyed by lowercase channel token
+    # Reference-well models (empty_well / basic).
+    #
+    # Keyed by everything that decides WHICH field gets estimated, because the
+    # estimators differ: ``("ff", well, chan, mode)`` for the mean-1 illumination
+    # field — ``basic`` and ``empty_well`` produce different fields from the same
+    # frames, so the mode is part of the key — and ``("bg", well, chan)`` for the
+    # additive background, which has only one estimator. A cache keyed on less
+    # than this answers "already built" for a field it never built, and the
+    # correction then silently does nothing (``apply_flatfield`` no-ops on None).
     background_well: str | None = None
-    ff_field_by_chan: dict = field(default_factory=dict)   # token -> mean-1 field
-    bg_field_by_chan: dict = field(default_factory=dict)   # token -> raw additive field
-    model_well: str | None = None     # which well the cached fields were built from
+    ref_fields: dict = field(default_factory=dict)    # key -> field array
+    # Keys whose build was ATTEMPTED and produced nothing, with the reason. Held
+    # apart from ref_fields so "not built yet" and "cannot be built" stay
+    # distinguishable: the first triggers a build, the second must not (it would
+    # respawn a worker on every keystroke) and is reported instead of applied.
+    ref_missing: dict = field(default_factory=dict)   # key -> why
 
     # view
     source: str = "corrected"           # "raw" | "flatfield" | "corrected"
@@ -125,9 +136,8 @@ class PlaygroundState:
         self.display_arr = None
         self.base_rgb = None
         self.image_cache.clear()
-        self.ff_field_by_chan.clear()
-        self.bg_field_by_chan.clear()
-        self.model_well = None
+        self.ref_fields.clear()
+        self.ref_missing.clear()
         self.last_correction_key = None
         self.last_corrected_arr = None
         # Loading a plate is a deliberate "work on this dataset" act, so it ends

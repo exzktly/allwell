@@ -220,6 +220,34 @@ def _to_float_or_none(value: str):
     return float(s)
 
 
+def apply_time_rescale(ax, factor) -> None:
+    """Print a time axis's ticks multiplied by *factor*, leaving the data alone.
+
+    Used by the plots whose x-axis is elapsed time (the Line tab's three panels).
+    The tick *positions* stay at the values the pipeline parsed out of the
+    filenames, so nothing that reads the axis — limits, picks, exports — sees a
+    different number; only the text changes.
+
+    The factor is stamped on the axes as ``_aw_time_scale`` because
+    :func:`apply_export_style_prefs` runs after the renderer and calls
+    ``set_xscale``, which resets an axis's locator and formatter. That pass reads
+    the stamp back and re-installs, the same way ``_aw_log_plus1`` and
+    ``_categorical_xaxis`` let an axes carry its own requirements through the
+    shared restyle.
+
+    A factor of one installs nothing: every redraw rebuilds its axes, so an
+    unstamped axis is already showing the default formatter.
+    """
+    from well_viewer.domain.time_rescale import format_scaled, is_active
+
+    ax._aw_time_scale = factor
+    if not is_active(factor):
+        return
+    from matplotlib.ticker import FuncFormatter
+    ax.xaxis.set_major_formatter(
+        FuncFormatter(lambda v, _pos, _f=factor: format_scaled(v, _f)))
+
+
 def apply_axis_log_scale(ax, which: str, on: bool) -> None:
     """Set an axis to log scale, honouring a scatter ``_aw_log_plus1`` request.
 
@@ -742,6 +770,12 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 _fy = getattr(ax, "_aw_force_ylog", None)
                 _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
                 apply_axis_log_scale(ax, "y", _ylog)
+            # ``set_xscale`` above resets the axis's locator and formatter, so a
+            # time axis that asked to have its ticks rescaled has to say so
+            # again. The renderer stamped the factor; re-install from it.
+            _ts = getattr(ax, "_aw_time_scale", None)
+            if _ts is not None:
+                apply_time_rescale(ax, _ts)
 
         _tick_minor = bool(_axis_style(idx, "tick_minor", False))
         if _tick_minor:

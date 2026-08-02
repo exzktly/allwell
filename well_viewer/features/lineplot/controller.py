@@ -22,6 +22,8 @@ from well_viewer.core.channel_state_controller import (
 from well_viewer.data.data_loading import get_rows
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current
+from well_viewer.core.plot_style import apply_time_rescale
+from well_viewer.domain.time_rescale import axis_label as time_axis_label
 
 
 NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
@@ -662,9 +664,16 @@ def redraw_line_plots(
     apply_ax_style(ax_cdf, cdf_lbl, "Cumulative fraction")
     # Every time panel carries its own timepoints + x-label (the panels are
     # well-separated by hspace, so each reads as its own graph).
-    ax_mean.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
-    ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
-    ax_n.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
+    # The three time panels share the Properties sidebar's "Rescale time"
+    # factor: their ticks print the filename's hours multiplied by it, and the
+    # label carries the factor so a rescaled axis can't be mistaken for one
+    # drawn on the hours the run actually recorded (the timepoint menus and
+    # every export still show those).
+    _time_scale = ctx.state.plot.time_scale
+    _time_lbl = time_axis_label("Time (hours)", _time_scale)
+    for _ax_time in (ax_mean, ax_frac, ax_n):
+        _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
+        apply_time_rescale(_ax_time, _time_scale)
     ax_frac.set_ylim(-0.05, 1.05)
     ax_cdf.set_xlabel(f"{_ch} {metric_label}", fontsize=8, labelpad=5)
     ax_cdf.set_ylim(-0.02, 1.05)

@@ -1577,11 +1577,29 @@ exact correction and segmentation code).
   sample, so the `empty_well` and `basic` correction modes cannot run on one —
   the status line says which correction was skipped rather than showing you an
   uncorrected frame labelled as corrected.
+- **Stage** — the first control in the Correction section, and the one that
+  decides what everything below it does: **Raw** shows the unprocessed frame and
+  runs no correction at all, **Flat-field only** applies the flat-field and
+  ignores the background method, **Corrected** applies both (what a run
+  produces). Controls the chosen stage does not use are greyed out, so you can
+  see at a glance why one is not responding.
 - **Correction controls** — all in the **right-hand panel**, where every other
   per-tab inspector in the app sits: any flat-field + background method and its
-  parameters; a **Raw / Flat-field / Corrected** toggle; LUT / colormap / binary
-  + mask overlay; pan / zoom; per-source LUT memory; a frame-local binary
-  threshold; a hover pixel-intensity readout; a QC size-cleanup preview.
+  parameters. Correction re-runs as you change them; segmentation waits for the
+  Segment button.
+- **Display controls** — LUT / colormap / binary + outlines; pan / zoom;
+  per-stage LUT memory; a frame-local binary threshold; a hover pixel-intensity
+  readout; a QC size-cleanup preview.
+- **The status line** under the controls always reports the same four things:
+  the stage and the correction actually applied, the frame, **which mask the
+  outlines came from**, and the displayed image's **range and mean**. That last
+  one matters: the LUT auto-scales to whatever is on screen, so a background
+  change can leave the picture looking identical while the data underneath it
+  moved. If the numbers change, the correction ran.
+- **Outlines** come from one of two places and the status line says which.
+  *pipeline mask* is the mask a run already produced — it does **not** respond to
+  the Correction controls, because changing a correction does not re-segment.
+  *live StarDist* is what this tab computed; press **Segment** to refresh it.
 - **Segmentation controls** — tick **Live StarDist**, set **Probability** and
   **Overlap (NMS)** (blank = the pretrained model's own values), and press
   **Segment**. The nuclei it finds replace the pipeline's saved mask in the
@@ -1593,6 +1611,10 @@ exact correction and segmentation code).
   - Change the frame or any correction setting and the labels no longer describe
     what is on screen, so they are **removed** and the status line says they are
     stale. Press **Segment** again.
+  - Segmentation always runs on the **corrected** frame, whatever stage you are
+    looking at — that is what the pipeline segments. If you press Segment while
+    viewing Raw, the status says so rather than letting the count look like it
+    came from the picture.
 - **Optimal use** — two jobs, both here. *Before* a run: **Open image…** a
   representative frame, dial in a correction method and the two segmentation
   thresholds, then type those values into the Analyze tab's matching fields and

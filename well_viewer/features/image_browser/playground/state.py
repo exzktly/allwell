@@ -87,6 +87,11 @@ class PlaygroundState:
     seg_key: tuple | None = None
     seg_status: str = ""
     seg_running: bool = False
+    # Set when the frame segmented was not the stage on screen (segmentation
+    # always runs on the corrected frame, as the pipeline does). Reported with
+    # the nucleus count so a count can never be read as belonging to a picture
+    # it did not come from.
+    seg_stage_note: str = ""
     # An out-of-range threshold typed into either field. Held separately from
     # seg_status so it is reported even with the preview switched off — a value
     # that is quietly not being used has to say so wherever it was typed.

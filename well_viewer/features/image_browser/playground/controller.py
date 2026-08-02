@@ -231,6 +231,63 @@ def _set_status(win, text: str) -> None:
     set_widget_text(win, "_playground_status", text)
 
 
+# ── the status line: what is on screen, and what produced it ─────────────────
+
+_STAGE_LABELS = {"raw": "Raw", "flatfield": "Flat-field only",
+                 "corrected": "Corrected"}
+
+
+def _correction_text(st, ff_mode: str, bg_method: str) -> str:
+    """The correction actually applied, with the parameter that fed it.
+
+    Names the *effective* modes rather than the widget values, so a stage that
+    silently drops the background half (or a loose image that cannot do a
+    reference-well correction) reads as what ran, not what was asked for.
+    """
+    radius_methods = ("top_hat", "sliding_disk", "robust_mesh", "fft_bandpass")
+    bg = f"{bg_method} r={st.radius:g}" if bg_method in radius_methods else bg_method
+    return f"{ff_mode} + {bg}"
+
+
+def _range_text(arr) -> str:
+    """min–max and mean of the displayed array.
+
+    Load-bearing, not decoration. The LUT re-derives its window from this array
+    on every render while it reads ``auto``, so a background change can leave
+    the picture looking identical while the data underneath moved — for
+    ``fov_median``, a scalar subtraction, the two are pixel-identical after
+    auto-scaling. These numbers are how a correction proves it ran.
+    """
+    if arr is None:
+        return "range —"
+    a = np.asarray(arr, dtype=np.float32)
+    if not a.size:
+        return "range —"
+    return (f"range {float(a.min()):.4g}–{float(a.max()):.4g} "
+            f"(mean {float(a.mean()):.4g})")
+
+
+def _status_text(ctx, frame_lbl: str, ff_mode: str, bg_method: str,
+                 refusal: str = "") -> str:
+    """The one line that says what is on screen and what produced it.
+
+    Always the same four things in the same order — stage + correction, frame,
+    whose mask the outlines are, and the data range — so a reader can tell at a
+    glance which of them changed. Call it *after* ``_render``, which is what
+    sets ``display_arr``.
+    """
+    st = _st(ctx)
+    stage = _STAGE_LABELS.get(st.source, st.source)
+    head = (stage if st.source == "raw"
+            else f"{stage} ({_correction_text(st, ff_mode, bg_method)})")
+    text = "  ·  ".join([head, frame_lbl,
+                         f"outline: {_mask_source(ctx)[1]}",
+                         _range_text(st.display_arr)])
+    if refusal:
+        text = f"{text}  ⚠ {refusal}"
+    return _with_seg_note(ctx, text)
+
+
 # ── main render ──────────────────────────────────────────────────────────────
 
 def _load_loose_frame(ctx, path: str):
@@ -294,8 +351,36 @@ def _resolve_frame(ctx):
             (st.well, st.channel, st.timepoint, st.fov))
 
 
-def _effective_correction_modes(ctx, *, loose: bool) -> tuple[str, str, str]:
-    """``(flatfield_mode, background_method, refusal)`` for this render.
+def correction_controls_enabled(stage: str) -> dict[str, bool]:
+    """Which Correction controls the chosen stage actually consults.
+
+    The stage is a master switch, not a view option: ``raw`` returns before any
+    correction runs, and ``flatfield`` applies only the flat-field half — radius,
+    small-px and the two mesh values are *background* parameters
+    (``correct_single_frame`` passes them to ``_subtract_background_step`` and
+    nowhere else), so they are dead there too.
+
+    Returned as a mapping rather than decided inline in the widget builder so the
+    rule is testable without constructing the tab, and so the builder cannot
+    drift from what :func:`_effective_correction_modes` actually does.
+    """
+    flat_or_corrected = stage in ("flatfield", "corrected")
+    corrected = stage == "corrected"
+    return {
+        "flatfield": flat_or_corrected,
+        "background": corrected,
+        "background_params": corrected,      # radius / small px / mesh ratio+sigma
+        "background_well": flat_or_corrected,
+    }
+
+
+def _effective_correction_modes(ctx, *, loose: bool,
+                                stage: str | None = None) -> tuple[str, str, str]:
+    """``(flatfield_mode, background_method, refusal)`` for a stage.
+
+    *stage* defaults to the one on screen; the Segment button passes
+    ``"corrected"`` explicitly, because the pipeline segments the corrected
+    channel whatever the Playground happens to be displaying.
 
     The reference-well modes (``empty_well`` / ``basic``) estimate their field
     from a whole reference well, which a lone file on disk does not have. Rather
@@ -304,8 +389,9 @@ def _effective_correction_modes(ctx, *, loose: bool) -> tuple[str, str, str]:
     returned refusal so the status line can say what did not run.
     """
     st = _st(ctx)
-    ff_mode = st.flatfield_mode
-    bg_method = st.background_method if st.source == "corrected" else "none"
+    stage = stage or st.source
+    ff_mode = st.flatfield_mode if stage in ("flatfield", "corrected") else "none"
+    bg_method = st.background_method if stage == "corrected" else "none"
     if not loose:
         return ff_mode, bg_method, ""
     dropped: list[str] = []
@@ -333,6 +419,8 @@ def playground_on_change(ctx) -> None:
         _set_status(win, frame_lbl)          # frame_lbl carries the reason
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
+    # The decoded frame's identity, for the correction memo — see _corrected_frame.
+    ctx.runtime.playground.raw_id = id(raw)
     loose = bool(str(st.loose_image_path or "").strip())
 
     # The binary threshold is per-frame: when the frame identity changes, drop
@@ -343,10 +431,12 @@ def playground_on_change(ctx) -> None:
         st.threshold = None
         _refresh_threshold_display(ctx)
 
-    # Raw — no correction.
+    # Raw — no correction. Every Correction control is inert here; the stage
+    # control greys them out, and the status names the stage so it is legible
+    # why nothing responds.
     if st.source == "raw":
         _render(ctx, st.raw_arr)
-        _set_status(win, _with_seg_note(ctx, f"Raw — {frame_lbl}"))
+        _set_status(win, _status_text(ctx, frame_lbl, "none", "none", ""))
         return
 
     ff_mode, bg_method, refusal = _effective_correction_modes(ctx, loose=loose)
@@ -364,36 +454,43 @@ def playground_on_change(ctx) -> None:
     else:
         ff = bg = None
 
-    # id(raw) (the pre-np.asarray object _resolve_frame returned, above) is a
-    # valid identity proxy for "is this the same decoded frame" ONLY because
-    # image_discovery.open_imgref_as_array's decode cache guarantees a returned
-    # array is shared by reference on a hit -- same frame -> same object -> same
-    # id(); a real frame change, or a test monkeypatching _load_array to return
-    # different data for the same nominal (well, channel, tp, fov), correctly
-    # misses instead. id(st.raw_arr) would NOT work here -- it's a fresh
-    # np.asarray(...) object every single call, never stable across calls.
-    # (_load_loose_frame caches by path for the same reason.)
-    correction_key = (
-        id(raw), st.source, ff_mode, bg_method, st.radius,
-        st.fft_small, st.mesh_ratio, st.mesh_sigma, id(ff), id(bg),
-    )
-    if correction_key == st.last_correction_key and st.last_corrected_arr is not None:
-        corrected = st.last_corrected_arr
-    else:
-        corrected = pm.correct_single_frame(
-            st.raw_arr, flatfield_mode=ff_mode,
-            background_method=bg_method, radius=st.radius,
-            fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
-            ff_field=ff, bg_field=bg)
-        st.last_correction_key = correction_key
-        st.last_corrected_arr = corrected
+    corrected = _corrected_frame(ctx, ff_mode=ff_mode, bg_method=bg_method,
+                                 ff=ff, bg=bg)
     _render(ctx, corrected)
-    label = ("Flat-field" if st.source == "flatfield"
-             else f"Corrected ({ff_mode}+{bg_method})")
-    text = f"{label} — {frame_lbl}"
-    if refusal:
-        text = f"{text}  ⚠ {refusal}"
-    _set_status(win, _with_seg_note(ctx, text))
+    _set_status(win, _status_text(ctx, frame_lbl, ff_mode, bg_method, refusal))
+
+
+def _corrected_frame(ctx, *, ff_mode: str, bg_method: str, ff, bg, store: bool = True):
+    """``correct_single_frame`` for these settings, memoized.
+
+    Shared by the render path and the Segment button so a preview and the
+    segmentation drawn over it can never come from different pixels.
+
+    The memo key carries the frame's identity via
+    ``ctx.runtime.playground.raw_id`` — ``id()`` of the pre-``np.asarray`` object
+    ``_resolve_frame`` returned. That is a valid proxy for "same decoded frame"
+    ONLY because ``image_discovery.open_imgref_as_array``'s decode cache returns
+    the same array object on a hit, and ``_load_loose_frame`` caches by path for
+    the same reason. ``id(st.raw_arr)`` would NOT work — that is a fresh
+    ``np.asarray(...)`` every call, never stable.
+
+    *store* is False when the Segment button computes a correction for a stage
+    that is not the one on screen: caching it would evict the displayed frame's
+    entry and make the next render recompute (~1.8 s at 1024²) for nothing.
+    """
+    st = _st(ctx)
+    key = (getattr(ctx.runtime.playground, "raw_id", None), ff_mode, bg_method,
+           st.radius, st.fft_small, st.mesh_ratio, st.mesh_sigma, id(ff), id(bg))
+    if key == st.last_correction_key and st.last_corrected_arr is not None:
+        return st.last_corrected_arr
+    corrected = pm.correct_single_frame(
+        st.raw_arr, flatfield_mode=ff_mode, background_method=bg_method,
+        radius=st.radius, fft_small=st.fft_small, mesh_ratio=st.mesh_ratio,
+        mesh_sigma=st.mesh_sigma, ff_field=ff, bg_field=bg)
+    if store:
+        st.last_correction_key = key
+        st.last_corrected_arr = corrected
+    return corrected
 
 
 def _source_needs_reference(st) -> bool:
@@ -458,19 +555,41 @@ def _cells_above(arr, mask, threshold: float):
     return {int(i) for i, m in zip(ids, means) if float(m) > threshold}
 
 
+def _mask_source(ctx):
+    """``(mask, provenance)`` for the overlay — and *which* mask it is.
+
+    The outlines come from one of two very different things and look identical
+    either way, so the caller has to be able to say which:
+
+    * ``"pipeline mask"`` — the mask a run already produced, read out of the
+      dataset's output zip. **It does not respond to anything in the Correction
+      section**, because changing a correction does not re-segment. A user
+      watching outlines that cannot move needs to be told why.
+    * ``"live StarDist"`` — labels this tab computed, and only while they still
+      describe the frame and settings on screen.
+    * ``"none"`` — nothing to draw.
+
+    With live mode on and the labels stale, this returns nothing rather than
+    quietly falling back to the pipeline's mask: showing one mask under a status
+    line that describes another is a substitution the user cannot detect.
+    """
+    st = _st(ctx)
+    if st.seg_live:
+        if st.seg_labels is not None and not _seg_is_stale(ctx):
+            return st.seg_labels, "live StarDist"
+        return None, "none"
+    if st.mask_arr is not None:
+        return st.mask_arr, "pipeline mask"
+    return None, "none"
+
+
 def _render(ctx, arr) -> None:
     st = _st(ctx)
     st.display_arr = np.asarray(arr, dtype=np.float32)
     lo, hi = _resolve_lut(ctx.window, arr)
     # Apply the QC size-based cleanup to the mask before display, so the overlay
-    # and binary reflect the debris gate. In live mode the labels the preview
-    # just computed stand in for the pipeline's precomputed ones — but only
-    # while they still describe THIS frame and these settings; stale labels are
-    # dropped (and named in the status line) rather than drawn over a frame they
-    # were not computed from.
-    source_mask = st.mask_arr
-    if st.seg_live and st.seg_labels is not None and not _seg_is_stale(ctx):
-        source_mask = st.seg_labels
+    # and binary reflect the debris gate.
+    source_mask, _provenance = _mask_source(ctx)
     qc_mask = _qc_size_filtered(source_mask, st.qc_min_area, st.qc_max_area)
     mask = qc_mask if (st.show_overlay or st.binary_mask) else None
     above_ids = None
@@ -525,8 +644,13 @@ def _seg_key(ctx) -> tuple:
     """
     st = _st(ctx)
     loose = bool(str(st.loose_image_path or "").strip())
-    ff_mode, bg_method, _ = _effective_correction_modes(ctx, loose=loose)
-    return (getattr(ctx.runtime.playground, "frame_key", None), st.source,
+    # Pinned to "corrected": segmentation always runs on the corrected frame
+    # whatever stage is displayed, so the display stage must NOT appear here —
+    # switching Raw ↔ Corrected would otherwise mark labels stale that describe
+    # exactly the same pixels.
+    ff_mode, bg_method, _ = _effective_correction_modes(ctx, loose=loose,
+                                                        stage="corrected")
+    return (getattr(ctx.runtime.playground, "frame_key", None),
             ff_mode, bg_method, st.radius, st.fft_small, st.mesh_ratio,
             st.mesh_sigma, None if loose else st.background_well,
             st.seg_prob_thresh, st.seg_nms_thresh)
@@ -565,8 +689,47 @@ def _with_seg_note(ctx, text: str) -> str:
     return f"{text}  •  {st.seg_status}"
 
 
+def _segmentation_frame(ctx):
+    """``(array, note)`` — the frame StarDist should see.
+
+    Always the **corrected** frame, whatever stage the tab is displaying,
+    because that is what the pipeline segments. Segmenting the raw frame because
+    the view happened to be on Raw — and reporting the nucleus count identically
+    — is the silent substitution this returns a *note* to prevent: when the
+    stage on screen is not the one segmented, the caller says so.
+
+    ``(None, reason)`` when the corrected frame cannot be built, which happens
+    only for the reference-well modes before their field exists.
+    """
+    st = _st(ctx)
+    if st.raw_arr is None:
+        return None, "Nothing to segment yet — open an image or pick a frame."
+    loose = bool(str(st.loose_image_path or "").strip())
+    ff_mode, bg_method, _refusal = _effective_correction_modes(
+        ctx, loose=loose, stage="corrected")
+
+    ff = bg = None
+    if not loose and (ff_mode in ("empty_well", "basic") or bg_method == "empty_well"):
+        if not st.background_well or st.model_well != st.background_well:
+            return None, ("The corrected frame needs the empty_well / basic "
+                          "reference field — pick a Bg well and let it build first.")
+        chan = (st.channel or "").lower()
+        ff = st.ff_field_by_chan.get(chan)
+        bg = st.bg_field_by_chan.get(chan)
+
+    # Only cache when this IS the displayed correction; otherwise the memo's one
+    # slot would evict the frame on screen and cost a full recompute on the next
+    # render.
+    arr = _corrected_frame(ctx, ff_mode=ff_mode, bg_method=bg_method, ff=ff,
+                           bg=bg, store=st.source == "corrected")
+    note = ("" if st.source == "corrected"
+            else f"segmented the corrected frame (you are viewing "
+                 f"{_STAGE_LABELS.get(st.source, st.source)})")
+    return arr, note
+
+
 def playground_segment_now(ctx) -> None:
-    """Run StarDist on the frame currently displayed, on a worker thread.
+    """Run StarDist on the corrected frame, on a worker thread.
 
     Explicitly button-driven: inference is seconds per frame and
     ``playground_on_change`` fires on every keystroke, so running it implicitly
@@ -578,15 +741,16 @@ def playground_segment_now(ctx) -> None:
         return
     # Re-render first, so the pixels handed to StarDist are the ones the current
     # widget values produce. Without it a control edited since the last render
-    # would go into ``_seg_key`` while ``display_arr`` still held the previous
-    # frame — labels tagged as describing settings they were not computed under,
-    # which is the exact confusion ``seg_key`` exists to prevent. Cheap: the
-    # correction is memoized, so an unchanged frame costs a blit.
+    # would go into ``_seg_key`` while the frame still held the previous
+    # settings — labels tagged as describing settings they were not computed
+    # under, which is the exact confusion ``seg_key`` exists to prevent. Cheap:
+    # the correction is memoized, so an unchanged frame costs a blit.
     playground_on_change(ctx)
-    arr = st.display_arr
+    arr, note = _segmentation_frame(ctx)
     if arr is None:
-        _set_status(win, "Nothing to segment yet — open an image or pick a frame.")
+        _set_status(win, note)
         return
+    st.seg_stage_note = note
     st.seg_live = True
     st.seg_running = True
     key = _seg_key(ctx)
@@ -601,6 +765,8 @@ def playground_segment_now(ctx) -> None:
         st.seg_status = (f"StarDist: {n} nuclei "
                          f"(prob={_thr_text(st.seg_prob_thresh)}, "
                          f"nms={_thr_text(st.seg_nms_thresh)})")
+        if st.seg_stage_note:
+            st.seg_status = f"{st.seg_status} — {st.seg_stage_note}"
         playground_on_change(ctx)
 
     def _on_failed(msg: str) -> None:

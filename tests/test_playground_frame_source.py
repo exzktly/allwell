@@ -44,12 +44,14 @@ def ctx(monkeypatch):
     )
     c.statuses = []
     c.masks = []
+    c.rendered = []
     monkeypatch.setattr(C, "_set_status", lambda win, text: c.statuses.append(text))
     monkeypatch.setattr(C, "render_playground_display", lambda win: None)
-    monkeypatch.setattr(
-        C, "build_playground_rgb",
-        lambda arr, mask, **kw: c.masks.append(mask) or np.zeros((*np.shape(arr), 3),
-                                                                dtype=np.uint8))
+    def _capture(arr, mask, **kw):
+        c.masks.append(mask)
+        c.rendered.append((np.asarray(arr).copy(), mask))
+        return np.zeros((*np.shape(arr), 3), dtype=np.uint8)
+    monkeypatch.setattr(C, "build_playground_rgb", _capture)
     return c
 
 
@@ -255,3 +257,199 @@ def test_a_finished_run_reports_the_count_and_the_thresholds(ctx, tif, monkeypat
     assert st.seg_live is True
     assert "2 nuclei" in st.seg_status
     assert "prob=0.25" in st.seg_status and "nms=model" in st.seg_status
+
+
+# ── the stage control: which correction actually runs ────────────────────────
+#
+# Reported as "changing any mode of background correction or flat field does
+# nothing". Four causes stacked; three are covered here (the fourth, the LUT
+# auto-window, is deliberately unchanged — which is why these assert on the
+# rendered ARRAY, not on the picture).
+
+@pytest.fixture
+def gradient_tif(tmp_path):
+    """A frame with a real background gradient, so subtracting one is visible."""
+    tifffile = pytest.importorskip("tifffile")
+    yy, xx = np.mgrid[0:64, 0:64]
+    img = (400 + 3 * yy + 2 * xx).astype(np.float32)
+    img[20:30, 20:30] += 2000                     # something object-like
+    path = tmp_path / "gradient.tif"
+    tifffile.imwrite(path, img.astype(np.uint16))
+    return path
+
+
+def _rendered(ctx):
+    """The array handed to the renderer on the last draw."""
+    return ctx.rendered[-1][0]
+
+
+@pytest.mark.parametrize(("stage", "expected"), [
+    ("raw", {"flatfield": False, "background": False,
+             "background_params": False, "background_well": False}),
+    ("flatfield", {"flatfield": True, "background": False,
+                   "background_params": False, "background_well": True}),
+    ("corrected", {"flatfield": True, "background": True,
+                   "background_params": True, "background_well": True}),
+])
+def test_which_controls_each_stage_consults(stage, expected):
+    """The rule the panel greys out by. Radius / small-px / mesh are background
+    parameters — ``correct_single_frame`` passes them nowhere else — so they are
+    dead on the flat-field stage too."""
+    assert C.correction_controls_enabled(stage) == expected
+
+
+def test_changing_the_background_method_changes_the_pixels(ctx, gradient_tif):
+    """The regression test for the report. Asserts on the rendered array rather
+    than the image, so it is unaffected by the auto-LUT that can make all four of
+    these look identical on screen."""
+    st = ctx.state.playground
+    st.source = "corrected"
+    st.radius = 12
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+
+    seen = {}
+    for method in ("none", "fov_median", "sliding_disk", "robust_mesh"):
+        st.background_method = method
+        C.playground_on_change(ctx)
+        arr = _rendered(ctx)
+        seen[method] = (round(float(arr.min()), 3), round(float(arr.max()), 3),
+                        round(float(arr.mean()), 3))
+    assert len(set(seen.values())) == 4, f"methods produced identical data: {seen}"
+
+
+def test_the_raw_stage_ignores_the_correction_controls_and_says_so(ctx, gradient_tif):
+    """Inert *by design* on this stage — the bug was that nothing said so."""
+    st = ctx.state.playground
+    st.source = "raw"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    first = _rendered(ctx).copy()
+
+    for method in ("sliding_disk", "robust_mesh"):
+        st.background_method = method
+        C.playground_on_change(ctx)
+        assert np.array_equal(_rendered(ctx), first)
+    assert ctx.statuses[-1].startswith("Raw")
+
+
+def test_the_flatfield_stage_names_the_flatfield_it_applied(ctx, gradient_tif):
+    """It used to print a bare ``Flat-field — <frame>``, naming neither mode —
+    so the one remaining signal went quiet exactly where the Background control
+    had gone inert."""
+    st = ctx.state.playground
+    st.source = "flatfield"
+    st.flatfield_mode = "gaussian"
+    st.background_method = "robust_mesh"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+
+    status = ctx.statuses[-1]
+    assert "Flat-field only" in status
+    assert "gaussian" in status
+    # The background is not applied on this stage, and the line says "+ none"
+    # rather than implying robust_mesh ran.
+    assert "robust_mesh" not in status
+
+
+def test_the_status_line_carries_the_data_range(ctx, gradient_tif):
+    """The mitigation for the untouched auto-LUT: when the picture cannot show
+    that a correction ran, these numbers can."""
+    st = ctx.state.playground
+    st.source = "corrected"
+    st.background_method = "none"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    before = ctx.statuses[-1]
+
+    st.background_method = "fov_median"
+    C.playground_on_change(ctx)
+    after = ctx.statuses[-1]
+
+    assert "range" in before and "mean" in before
+    assert before != after, "the range readout must move when the data does"
+
+
+# ── outline provenance ───────────────────────────────────────────────────────
+
+def test_the_overlay_names_whose_mask_it_is(ctx):
+    """Outlines from a pipeline run and outlines from this tab look identical,
+    and only one of them responds to the Correction controls."""
+    st = ctx.state.playground
+    st.mask_arr = np.zeros((16, 16), dtype=np.int32)
+    st.mask_arr[4:8, 4:8] = 1
+
+    st.seg_live = False
+    mask, provenance = C._mask_source(ctx)
+    assert mask is st.mask_arr and provenance == "pipeline mask"
+
+    st.seg_live = True
+    st.seg_labels = np.zeros((16, 16), dtype=np.int32)
+    st.seg_key = C._seg_key(ctx)
+    mask, provenance = C._mask_source(ctx)
+    assert mask is st.seg_labels and provenance == "live StarDist"
+
+
+def test_stale_live_labels_drop_the_overlay_instead_of_reverting(ctx):
+    """The subtle one. On a dataset frame the overlay used to fall back to the
+    pipeline's saved mask while the status said the live labels were stale — two
+    different claims on screen, with no way to tell which was drawn."""
+    st = ctx.state.playground
+    st.mask_arr = np.zeros((16, 16), dtype=np.int32)
+    st.mask_arr[4:8, 4:8] = 1
+    st.seg_live = True
+    st.seg_labels = np.zeros((16, 16), dtype=np.int32)
+    st.seg_key = C._seg_key(ctx)
+
+    st.radius = 99                                # invalidates the labels
+    assert C._seg_is_stale(ctx)
+    mask, provenance = C._mask_source(ctx)
+    assert mask is None and provenance == "none"
+
+
+def test_switching_display_stage_does_not_make_labels_stale(ctx):
+    """Segmentation always runs on the corrected frame, so the *displayed* stage
+    is not part of what the labels describe."""
+    st = ctx.state.playground
+    st.source = "corrected"
+    st.seg_labels = np.zeros((16, 16), dtype=np.int32)
+    st.seg_key = C._seg_key(ctx)
+
+    st.source = "raw"
+    assert not C._seg_is_stale(ctx)
+
+
+# ── segmentation runs on the corrected frame, whatever is displayed ──────────
+
+def test_segmentation_uses_the_corrected_frame_while_viewing_raw(ctx, gradient_tif):
+    """The pipeline segments the corrected channel. Segmenting raw because the
+    view happened to be on Raw, and reporting the count identically, is the
+    substitution this prevents."""
+    st = ctx.state.playground
+    st.radius = 12
+    st.background_method = "sliding_disk"
+    st.source = "raw"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+
+    arr, note = C._segmentation_frame(ctx)
+    assert not np.array_equal(arr, st.raw_arr), "must not segment the raw frame"
+    assert "corrected frame" in note and "Raw" in note
+
+
+def test_no_stage_note_when_the_corrected_frame_is_what_is_shown(ctx, gradient_tif):
+    st = ctx.state.playground
+    st.source = "corrected"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    _arr, note = C._segmentation_frame(ctx)
+    assert note == ""
+
+
+def test_a_reference_mode_without_its_field_refuses_by_name(ctx, gradient_tif):
+    """empty_well needs a field built from a whole well. Rather than segment
+    something else, say what is missing."""
+    st = ctx.state.playground
+    st.source = "corrected"
+    C.playground_open_loose_image(ctx, str(gradient_tif))
+    st.loose_image_path = None                    # pretend a dataset frame
+    st.background_method = "empty_well"
+    st.background_well = ""
+
+    arr, reason = C._segmentation_frame(ctx)
+    assert arr is None
+    assert "reference field" in reason and "Bg well" in reason

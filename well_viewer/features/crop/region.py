@@ -44,6 +44,45 @@ def normalize_region(
     return (r0, c0, r1, c1)
 
 
+def has_centroid_columns(df) -> bool:
+    """Whether ``df`` carries both ``shape_centroid_*`` columns.
+
+    A frame without them cannot be placed against any region, so every
+    region-based verdict has to decide what that means for it — the crop keeps
+    the cell, the region delete spares it.
+    """
+    if df is None or len(getattr(df, "columns", ())) == 0:
+        return False
+    return CENTROID_ROW_COL in df.columns and CENTROID_COL_COL in df.columns
+
+
+def centroids_inside(df, region: CropRegion | None):
+    """Return a boolean Series — ``True`` where the cell's centroid is placeable
+    *and* lands inside ``region``. Bounds are inclusive.
+
+    The shared geometry behind both region verdicts. It answers only the
+    positive question ("is this cell definitely inside the box?"), which is what
+    lets the two callers take opposite sides on the unplaceable cells: a NaN or
+    missing centroid is ``False`` here, so :func:`compute_crop_pass` inverts it
+    into a keep (fail-open) while the Segmentation region delete reads it
+    straight and spares the cell (fail-closed). Neither acts on a cell it cannot
+    place; they just disagree about which action that is.
+    """
+    import pandas as pd
+
+    if df is None or len(df) == 0:
+        return pd.Series([], dtype=bool, index=getattr(df, "index", None))
+    if region is None or not has_centroid_columns(df):
+        return pd.Series(False, index=df.index, dtype=bool)
+
+    r0, c0, r1, c1 = region
+    row = pd.to_numeric(df[CENTROID_ROW_COL], errors="coerce")
+    col = pd.to_numeric(df[CENTROID_COL_COL], errors="coerce")
+    inside = (row >= r0) & (row <= r1) & (col >= c0) & (col <= c1)
+    # NaN centroid → unplaceable → not inside.
+    return (inside & row.notna() & col.notna()).astype(bool)
+
+
 def compute_crop_pass(df, region: CropRegion | None):
     """Return an int Series (1 = centroid inside the crop, 0 = outside) for ``df``.
 
@@ -60,19 +99,15 @@ def compute_crop_pass(df, region: CropRegion | None):
         region is None
         or df is None
         or len(df) == 0
-        or CENTROID_ROW_COL not in df.columns
-        or CENTROID_COL_COL not in df.columns
+        or not has_centroid_columns(df)
     ):
         return passed
 
-    r0, c0, r1, c1 = region
+    # Unplaceable cells are False in ``centroids_inside``; OR them back in so
+    # they keep passing the crop.
     row = pd.to_numeric(df[CENTROID_ROW_COL], errors="coerce")
     col = pd.to_numeric(df[CENTROID_COL_COL], errors="coerce")
-    inside = (
-        (row >= r0) & (row <= r1) & (col >= c0) & (col <= c1)
-    )
-    # NaN centroid → unplaceable → keep (fail-open), matching compute_qc_pass.
-    inside = inside | row.isna() | col.isna()
+    inside = centroids_inside(df, region) | row.isna() | col.isna()
     return inside.astype(int)
 
 

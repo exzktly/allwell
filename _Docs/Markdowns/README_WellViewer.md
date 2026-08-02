@@ -1384,8 +1384,11 @@ reviewing and curating individual cells.
 - **Needs** — a loaded well with image ZIPs; pick the FOV / timepoint / channel
   from the in-tab pickers.
 - **Navigational controls** — click a nucleus to **flag / unflag** it for
-  inclusion; **draw a crop rectangle** to keep only cells whose centroid is
-  inside it (applied dataset-wide across every FOV/timepoint/channel/well),
+  inclusion; **Delete Cell** turns the canvas into a delete tool, where a click
+  drops one cell and a dragged rectangle drops every cell inside it (see
+  *Deleting a region across the plate* below); **draw a crop rectangle** to keep
+  only cells whose centroid is inside it (applied dataset-wide across every
+  FOV/timepoint/channel/well),
   with **Reset** to restore every cell and **Clear crop** to remove just the
   box; click-drag to pan and scroll to zoom (zoom is kept when you switch
   wells). **Zoom controls** sit on the control row — **−** and **+** step
@@ -1402,6 +1405,46 @@ reviewing and curating individual cells.
   passes QC. Overrides persist to `cell_overrides.json` next to the CSVs.
 - **Optimal use** — exclude a well's edge artifacts in one gesture with the
   crop rectangle; click away obvious mis-segmentations.
+
+##### Deleting a region across the plate
+
+A dragged delete normally lands on the one frame you are looking at. Artifacts
+rarely do: a dust speck at a fixed stage position, a bright corner, a scratch on
+the plate bottom all sit in the same part of the image in well after well, field
+after field, timepoint after timepoint. **Delete scope ▾**, next to the Delete
+Cell button, widens the next drag to cover them in one gesture.
+
+Open it and tick the wells, FOVs and timepoints you want. The button then reads
+back what is armed — *Delete scope: this frame*, or *Delete scope: 3 wells · all
+FOVs · 2 TPs* — so a wide scope is always visible on the control row rather than
+hiding inside a menu. **Use plate selection** arms whatever wells you have
+selected on the plate (it does not change that selection), and **Reset to this
+frame** disarms everything. The scope stays armed across drags until you reset
+it, and is cleared whenever you load a different dataset.
+
+Two things are worth knowing about what "inside the box" means:
+
+- On the frame you drew on, a cell is deleted if **any of its pixels** fall in
+  the rectangle — its mask is loaded, so the box means exactly what it looks
+  like.
+- On every other frame in scope, a cell is deleted if its **centroid** falls in
+  the rectangle. Those masks are not loaded, so the cell's recorded centre is
+  what decides; this is the same rule the crop rectangle uses. A dataset
+  processed without shape features has no centroids, so nothing can be deleted
+  in those wells — a warning appears rather than a quietly smaller number. The
+  same warning covers wells whose data will not load and wells the scope names
+  that this dataset does not have.
+
+The status line reports both counts after every drag, e.g. *Region delete: 412
+cell(s) Included=0 — 38 in this frame (pixel overlap); 374 across 11 other
+frame(s) in 3 well(s) (centroid inside).* The deletes are ordinary per-cell
+edits, saved to `cell_overrides.json` like any other, and **Edit ▾ → Reset**
+undoes them along with the rest of your curation.
+
+A wide scope takes a few seconds: the app reads every scoped well's data and
+re-applies your curation across it, with the cursor showing busy while it does.
+A plate-wide drag over roughly 300,000 cells takes about two and a half seconds
+on a warm dataset, longer if the wells have not been read yet.
 
 #### Image Table
 

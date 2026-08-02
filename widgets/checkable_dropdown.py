@@ -72,6 +72,19 @@ class CheckableDropdown(QWidget):
     def count(self) -> int:
         return len(self._labels)
 
+    def clear(self) -> None:
+        """Drop every option and its checked state.
+
+        For callers that refill the list from live data each time it is shown,
+        rather than building it once. Never emits ``changed`` — the option list
+        is not the selection, and a refill that happens to end with the same
+        ticks is not an edit.
+        """
+        self._labels.clear()
+        self._data.clear()
+        self._checked.clear()
+        self._refresh_summary()
+
     def checkedIndices(self) -> list[int]:
         return [i for i, on in enumerate(self._checked) if on]
 

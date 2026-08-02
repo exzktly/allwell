@@ -1,21 +1,32 @@
-"""Playground tab — reference-well field estimation (empty_well / basic).
+"""Playground tab — off-GUI-thread compute (reference fields + live StarDist).
 
 The ``empty_well`` / ``basic`` correction modes need a per-channel field built
 from a reference well's frames. ``build_reference_fields`` is the pure (IO-only,
 no Qt) compute — it loads that well's RAW frames via the same image_table /
 image_discovery loaders the Playground already uses and calls the pipeline's
 estimators (``estimate_background_field`` / ``estimate_basic_flatfield``), so the
-math matches a batch run. ``request_reference_fields`` runs it on a daemon thread
-and marshals the result back to the GUI thread through a queued-signal bridge
-(the worker thread has no Qt event loop — same constraint as the smFISH worker).
+math matches a batch run.
+
+Both requests run on a daemon thread and marshal their result back through
+``core.worker_bridge.run_off_thread`` — the one-shot queued-signal bridge shared
+with the Analyze pane's Preview page (a worker thread has no Qt event loop, so
+this is the only way a result reaches the GUI).
+
+The segmentation itself lives in ``services.frame_preview``, not here: the
+Analyze Preview page runs the same inference and cannot import this package (the
+Playground is a *removable* feature). Keeping it there also means both panes
+share **one** loaded StarDist model rather than a copy each.
 """
 
 from __future__ import annotations
 
-import threading
-
 import numpy as np
-from PySide6.QtCore import QObject, Signal
+
+from well_viewer.core.worker_bridge import WorkerBridge, run_off_thread
+
+# Re-exported so this module stays the Playground's single worker entry point.
+_ReferenceBridge = WorkerBridge
+_SegmentationBridge = WorkerBridge
 
 
 def build_reference_fields(ctx, well: str, chan_lower: str, *,
@@ -60,56 +71,51 @@ def build_reference_fields(ctx, well: str, chan_lower: str, *,
     return ff_field, bg_field
 
 
-class _ReferenceBridge(QObject):
-    """Marshal worker-thread results back to the GUI thread (queued signals)."""
-
-    done = Signal(object)      # (well, chan_lower, ff_field, bg_field)
-    failed = Signal(str)
-
-
 def request_reference_fields(ctx, well: str, chan_lower: str, *,
                              flatfield_mode: str, background_method: str,
                              on_done, on_failed=None, max_samples: int = 30):
     """Build reference fields on a daemon thread; call ``on_done(well,
     chan_lower, ff_field, bg_field)`` on the GUI thread when finished. Returns
     the bridge (keep a reference alive for the duration)."""
-    bridge = _ReferenceBridge()
+    def _compute():
+        ff, bg = build_reference_fields(
+            ctx, well, chan_lower, flatfield_mode=flatfield_mode,
+            background_method=background_method, max_samples=max_samples)
+        return (well, chan_lower, ff, bg)
 
-    def _disconnect() -> None:
-        # One-shot: drop both connections after the bridge fires so the bridge
-        # (and the widget/app captured by on_done/on_failed) can be released
-        # instead of leaking a fresh connected QObject on every call (audit
-        # E23). Disconnecting an already-empty signal raises, so guard it.
-        for sig in (bridge.done, bridge.failed):
-            try:
-                sig.disconnect()
-            except (TypeError, RuntimeError):
-                pass
+    return run_off_thread(_compute,
+                          on_done=lambda payload: on_done(*payload),
+                          on_failed=on_failed)
 
-    def _handle_done(payload) -> None:
-        try:
-            on_done(*payload)
-        finally:
-            _disconnect()
 
-    def _handle_failed(msg: str) -> None:
-        try:
-            if on_failed is not None:
-                on_failed(msg)
-        finally:
-            _disconnect()
+# ── live StarDist preview ────────────────────────────────────────────────────
 
-    bridge.done.connect(_handle_done)
-    bridge.failed.connect(_handle_failed)
+def stardist_labels_for_frame(arr, *, prob_thresh=None, nms_thresh=None,
+                              tile_px: int = 0):
+    """Segment one displayed frame and return its int32 label image.
 
-    def _run() -> None:
-        try:
-            ff, bg = build_reference_fields(
-                ctx, well, chan_lower, flatfield_mode=flatfield_mode,
-                background_method=background_method, max_samples=max_samples)
-            bridge.done.emit((well, chan_lower, ff, bg))
-        except Exception as exc:  # never raise off the GUI thread
-            bridge.failed.emit(str(exc))
+    A thin delegate to ``services.frame_preview.segment_frame``, which holds the
+    session's model and runs the pipeline's own ``segment_nuclei``. Kept as a
+    name here because this is the Playground's worker seam.
+    """
+    from services.frame_preview import segment_frame
+    return segment_frame(arr, prob_thresh=prob_thresh, nms_thresh=nms_thresh,
+                         tile_px=tile_px)
 
-    threading.Thread(target=_run, daemon=True).start()
-    return bridge
+
+def _missing_stardist_deps() -> list[str]:
+    """Which of StarDist's imports are absent, without importing any of them."""
+    from services.frame_preview import missing_stardist_deps
+    return missing_stardist_deps()
+
+
+def request_stardist_labels(arr, *, prob_thresh=None, nms_thresh=None,
+                            tile_px: int = 0, on_done, on_failed=None):
+    """Segment *arr* on a daemon thread; call ``on_done(labels)`` on the GUI
+    thread when finished. Returns the bridge (keep a reference alive)."""
+    # Resolved through the module global, not captured at import, so a test (or
+    # a future caller) monkeypatching ``stardist_labels_for_frame`` is honoured.
+    return run_off_thread(
+        lambda: stardist_labels_for_frame(
+            arr, prob_thresh=prob_thresh, nms_thresh=nms_thresh, tile_px=tile_px),
+        on_done=on_done, on_failed=on_failed)

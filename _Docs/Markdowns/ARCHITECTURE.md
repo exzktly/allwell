@@ -115,6 +115,8 @@ allwell/
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
 ├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
 ├── analyze_tab_chrome.py        ← Analyze mixin: form chrome (sections, rows, entries, ⓘ markers)
+├── analyze_tab_seg_params.py    ← Analyze mixin: per-method segmentation params + StarDist thresholds
+├── analyze_tab_preview.py       ← Analyze mixin: the right pane's Run | Preview stack
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
@@ -129,7 +131,7 @@ allwell/
 │   ├── flatfield.py            ← flat-field illumination estimators (GUI validation view too)
 │   ├── shape_features.py       ← per-cell shape-feature catalog (pipeline emits, GUI labels)
 │   ├── cellpose.py             ← Cellpose segmenters (Torch imported lazily)
-│   ├── stardist.py             ← StarDist segmenters + per-worker model state (TF lazy)
+│   ├── stardist.py             ← StarDist segmenters + StarDistParams + per-worker model state (TF lazy)
 │   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into per-well .zip
 │   │                              archives (Z max-projected; positions → wells via §OME)
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
@@ -233,6 +235,8 @@ well_viewer/
 │   ├── feature_registry.py           ← FeatureDescriptor + build_feature_registry (§5.3)
 │   ├── profile.py                    ← build-profile manifest loader (stdlib-only)
 │   ├── lazy.py                       ← call-time proxy so core never imports a feature
+│   ├── frame_render.py               ← build_frame_rgb: one frame + label mask → RGB (both panes)
+│   ├── worker_bridge.py              ← run_off_thread: the one-shot queued-signal bridge
 │   ├── bus_wiring.py, redraw_coordinator.py, selection_coordinator.py,
 │   │   scope_registry.py, projector_registry.py
 │   ├── load_controller.py, tab_controller.py, selection_controller.py,
@@ -1331,7 +1335,7 @@ Per-feature controllers / renderers (under `well_viewer/features/`):
 | `data/image_identity.py` | **Single source of truth for image filenames, cell identity, and the suffix/role catalog.** Owns three concerns deliberately co-located so they cannot drift: (1) `CellKey` — `(well, fov, timepoint, nucleus_id)` with one canonical normalisation chain; every site that joins CSV-row data to image-derived data builds keys via `CellKey.from_row` / `cell_keys_for_dataframe` (the smFISH writer, `cell_overrides`, `review_image`'s row keys, and `_process_well`'s counts construction all consume it). (2) `parse_image_filename` / `build_image_filename` — exact inverses driven by a `PipelineSchema` loaded once from `pipeline_info.json` via `load_schema(...)`. No parallel regex fallbacks; single-FOV pipelines are modelled by `has_fov=False` rather than a special-case extractor synthesising `"1"` (the empty-FOV-to-`"1"` rule is enforced uniformly by `normalize_fov`). (3) `ROLE_CATALOG` — declarative `RoleSpec` per role (`fluor`/`tophat`/`mask`/`overlay`/`smfish`) mapping suffix, output extensions, channel-scoping, and precedence; `classify_filename_role` and `role_output_filename` both consume it. (As of the §6.2 self-sufficiency fix this catalog is **reader-side only** — the pipeline writer, `process_microscopy.build_processed_output_path`, uses explicit `suffix=` strings rather than importing `well_viewer`. If catalog-driven *writing* is revived, move `ROLE_CATALOG` into a Qt-free `*_core` module first so the pipeline can import it without breaking the contract.) The full time-format matrix (`T01`/`24`/`24h`/`1.0`/`day3`/`02d04h30m`/`timepoint_hours` float) collapses to a single canonical form via `normalize_tp`. Stdlib-only at import; pandas is lazy inside `normalize_fov_series` and `cell_keys_for_dataframe` so `process_microscopy.py` can import the module without adding pandas as a pipeline dependency. |
 | `features/smfish/{controller,worker}.py` | smFISH spot detection + the background worker. Apply Global Threshold rewrites every per-well CSV's `<channel>_smfish_count` column, then in its after-csv callback persists the threshold to `pipeline_info.json::smfish_thresholds` via `persistence/smfish.py`, drops the per-well DataFrame cache + the aggregation stats cache, redraws plots, and refreshes the Review CSV table — without those last three steps, downstream plots and the review table kept showing pre-apply counts. The after-csv callback is routed through `_WorkerBridge.after_csv` (a queued `Signal(object)`) rather than invoked directly from `apply_global_threshold_async`'s daemon thread — the worker thread has no Qt event loop, so the previous `QTimer.singleShot(0, …)`-from-worker scheme silently dropped the refresh on the floor and the user had to close and reopen the app to see the new counts. Progress crosses the same bridge: the worker's `progress_cb(done, total)` fires once per well in the counting pass and again per well in the CSV-write pass, `_WorkerBridge.progress` (a queued `Signal(int, int)`) marshals it onto the GUI thread, and the tab drives the shared status-row `_progress_bar` — the widget a dataset load steps — through `ctx.widgets.get_or_none`, so the bar is simply absent rather than fatal in a build without it. The bar is shown when the run is launched and hidden by the `done` signal, which every terminal path emits: success, cancel, a crash caught by `_run_guarded`, and the empty-channel guard (that guard returning on a status line alone left the tab's `apply_running` flag set, so the button rejected every later click as "already running"). The write loop reports from a `finally`, so a well skipped for an unresolvable or locked CSV still advances the bar instead of parking it short of its maximum. The writer takes the explicit `well_to_csv` map the loader populated (not a `out_dir.glob("*_<well>.csv")` lookup, which silently skipped wells whose CSVs had no underscore prefix), drops any case-equivalent column before reassigning (so a stale `W3Cy5_smfish_count` from an older pipeline run is overwritten cleanly), and builds both producer (`_process_well`) and consumer (`_write_counts_to_csvs`) keys via `data/image_identity.CellKey` — the unified identity module enforces the same well/fov/tp/nid normalisation chain on both sides, so empty-fov, `"-1"`, letter-prefixed tp like `"T01"`, padding like `"001"`, and `.0` float artefacts on nid all collapse identically. A `matched == 0` WARN fires from the writer when every lookup misses so future `(fov, timepoint, nucleus_id)` format drift names itself in the log drawer. |
 | `features/image_browser/review_image/{controller,renderer}.py` | Segmentation tab review-image + Review-CSV jump-to-image. A **Raw / Flat-field / Corrected** `SegmentedControl` (`ReviewImageState.image_source`) picks which image stage the canvas shows: "Corrected" (the saved final = flat-field + background, default), "Raw" (unprocessed), or "Flat-field" — the raw frame with *only* the selected flat-field applied, recomputed live via `core.flatfield` (`flatfield_field_for`, cached per channel) to validate the flat-field step before any background subtraction. The Segmentation and Image Table control rows each host an **ON-threshold quick-edit** `Stepper` (mirroring Plotting's band) that edits the active channel's `ThreshFracOn` via `set_thresh_frac_on` and re-renders so the binary "≥ ON threshold" overlay updates live; `channel_state_controller.refresh_thresh_frac_quick_edit` keeps all three steppers in sync on channel switch / edit. Double-clicking a Review-CSV row jumps to that cell: the handler switches to the Segmentation sub-tab, sets `preview.selected_well`, renders, drives the FOV and timepoint combos, and zooms to the nucleus. It ends by re-running the sidebar well picker's refresh — the sub-tab activation hook already refreshed it, but that ran before the row's well was chosen, so without the second pass the jump lands on the right image while the sidebar still reads "No well selected" with no well lit on the plate. The Review-CSV table normalises its FOV combo values through the same `review_norm_fov` chain the cell-click navigation uses (the combo is non-editable, so a raw-vs-normalised mismatch would silently miss `setCurrentText` and strand the filter), and `refresh_review_csv_rows` hard-caps the materialised rows (5000) — a `QTableWidget` builds one heavyweight item per cell, so an unbounded build (the no-match fallback, or a multi-well selection spanning every FOV/timepoint) could OOM-kill the process. The Segmentation control strip (`preview/panel_view.py`) is the shared `ControlBand`, with **Edit / View / LUT / Colors ▾** menu-buttons (built with the shared `ui_helpers.make_action_menu_button` / `add_menu_action` helpers) in its action zone so it wraps instead of clipping when Split View halves the pane; every widget keeps its registered name / runtime attribute, so the renderer and controllers reach them exactly as before. Zoom is the exception to the popover treatment: **− / readout / + / Fit** sit inline on that row, since zoom is in constant use while reviewing segmentation. The readout (`_review_image_zoom_lbl`) shows the factor relative to fit-to-window and is refreshed by `renderer.refresh_review_image_zoom_label` from inside `render_review_image_display` — the single point every zoom path funnels through, so the buttons, the scroll wheel, and the Review-CSV jump's zoom-to-nucleus all keep it honest. |
-| `features/image_browser/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods on a single raw frame chosen by well/channel/timepoint/FOV. Loads the raw frame + precomputed mask via the Image Table loaders (`_load_array` / `_load_mask_array`) and applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern); the correction itself stays synchronous on the GUI thread, so `playground_on_change` memoizes its result (`state.last_correction_key`/`last_corrected_arr`, keyed on the decoded frame's identity — safe because `image_discovery`'s decode cache returns the same array object on a hit — plus every correction parameter) and skips recomputing when nothing that affects the output changed; `build_playground_tab` triggers exactly one render on first open (via `registry._activate_playground`, which always follows the tab's construction in the same dispatch), not its own redundant call plus the activation hook's. Display reuses the LUT/colormap (`ui_helpers.lut_colormap_to_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. |
+| `features/image_browser/playground/{controller,renderer,worker}.py` | Segmentation-page **Playground** sub-tab: an interactive testbed for the pipeline's background-flattening / subtraction methods *and* its StarDist segmentation, on a single frame. **Two frame sources**, resolved by `_resolve_frame`: the dataset frame addressed by the sidebar plate's well plus the channel / timepoint / FOV combos, or — winning when set — a **loose image** opened straight from disk with "Open image…" (`state.loose_image_path`, read through the pipeline's own `load_2d_gray`, cached by path so the correction memo's `id()` key still hits). The loose source is what makes the tab usable with **no dataset loaded at all**, which is the state you are in when choosing settings for a plate you have not run yet; it disables the dataset selectors, has no precomputed mask, and refuses the reference-well correction modes (`empty_well` / `basic`, which need a whole well to sample) **by name** in the status line rather than presenting an uncorrected frame as corrected. Loading a dataset ends loose mode (`PlaygroundState.clear_caches`). Applies the chosen flat-field + background method through `process_microscopy.correct_single_frame` — the **same** per-frame orchestration the batch worker's `_correct` uses (extracted so pipeline and Playground share one code path; a parity test pins the equivalence), so no method is reimplemented. The `empty_well` / `basic` reference fields are estimated from a chosen background well on a daemon thread via a queued-signal bridge (smFISH pattern); the correction itself stays synchronous on the GUI thread, so `playground_on_change` memoizes its result (`state.last_correction_key`/`last_corrected_arr`, keyed on the decoded frame's identity — safe because `image_discovery`'s decode cache returns the same array object on a hit — plus every correction parameter) and skips recomputing when nothing that affects the output changed; `build_playground_tab` triggers exactly one render on first open (via `registry._activate_playground`, which always follows the tab's construction in the same dispatch), not its own redundant call plus the activation hook's. Display goes through `core.frame_render.build_frame_rgb` (shared with the Analyze Preview page; re-exported here as `build_playground_rgb`) and a binary/boundary overlay; per-source LUT memory, click-drag pan, frame-local binary threshold (defaults from but never writes back to the app-wide `ThreshFracOn`), and a QC size-cleanup preview are Playground-local. **Live StarDist preview** (the Segmentation section): a *Live StarDist* toggle, the two detection thresholds, and an explicit **Segment** button run `pipeline.stardist.segment_nuclei` on the frame currently displayed, so the preview is the pipeline's own inference rather than a lookalike — including the input scrubbing and near-constant-field refusal that make StarDist's uncatchable ClipperLib abort unreachable, which matters more here because an abort in the GUI process would take the whole application down. The inference itself lives in `services.frame_preview` — shared with the Analyze pane's Preview page, which cannot import this removable package, and which therefore also shares the one loaded model rather than holding a second copy. `worker.stardist_labels_for_frame` is the thin seam onto it; `request_stardist_labels` and `request_reference_fields` both marshal their result back through `core.worker_bridge.run_off_thread`, the one-shot queued-signal bridge (`ctx.runtime.playground.seg_bridge` / `.ref_bridge`). Live labels stand in for the precomputed mask in the overlay / binary / QC-area path — but only while `state.seg_key` (frame + correction + thresholds, all derived from state so it survives the thread round trip) still matches what is on screen; **stale labels are dropped and said to be stale**, never drawn over a frame they do not describe. The tab's job is **post-run diagnosis** — a frame you have already processed, with the pipeline's own mask to compare against. Choosing the settings *for* a run is the Analyze pane's Preview page, which draws with the run's own widgets and so needs no handoff. |
 | `features/image_browser/cell_browser/{controller,collect,worker,tab_view,criteria_view}.py` | Cell Browser gallery: a filtered grid of per-cell crops composed off-thread (`worker.CellImageLoader`, reusing the Image Table loaders + zip cache). Sources cells from the active **plate selection** (`collect.cell_browser_source_wells`). **Deferred render:** every control — filters (criteria/timepoint/FOV/sort), channel chips, the per-channel `LUT ▾` popover (LUT min/max + a colour swatch editing `tint_by_channel`), and the **Raw / Corrected** source `SegmentedControl` (`CellBrowserState.use_tophat`, threaded through `load_page` → `compose_cell_rgb` → `_load_array`) — only *stages* state; the single top-bar **Generate** button (`controller.apply_filters`) re-collects and re-composites. There is no separate "Apply filters" button. **Gate-source mode** (the sidebar's *From scatter gate* checkbox, `CellBrowserState.scatter_gate_mode`) swaps the numeric filter for the scatter gate(s): `criteria_view._set_criteria_enabled` disables the criteria rows + *Add criterion* and reveals a muted line stating why. The checkbox is deliberately sticky — nothing resets it on tab switch or dataset load — so that line is the only on-screen account of an editor that is otherwise inertly greyed out. |
 | `features/grouping/controller.py` | Sample-Definitions group editor logic. |
 | `features/export/{service,style}.py` | CSV export (`service.py`) + the floating Export Style sidebar's prefs + apply pipeline (`style.py`); `style.py` also owns `copy_figure_to_clipboard` (Copy SVG → native macOS pasteboard via pyobjc, Qt-clipboard fallback). |
@@ -1538,7 +1542,7 @@ owning its own invariants (behaviour lives *in* the type, not just data):
 | `StatsState` | Statistics-tab comparison groups + the structured **pairwise** results (`pairwise`, N7 — fed to the Bar plot's significance brackets). The group-statistics result cache lives in core (`AppState.stats_cache`), not here. | `features/stats/state.py` |
 | `ReviewImageState` / `PreviewState` | Review-image view transform + caches; preview image maps (`fluor` / `overlay` / `mask`) shared by the Segmentation review-image and Image Table | `features/image_browser/review_image/state.py` |
 | `ImageViewState` | Cross-view image display shared by the image viewers. The per-channel display LUT (`lut_by_channel`), so a brightness tuned in Review Image is the default an *auto* Image Table row inherits (per-row edits override). The **Cell Browser** participates too: its `LUT ▾` popover edits the same `lut_by_channel` (blank = auto per crop), and a per-channel **display colour** (`tint_by_channel`, `get_tint`/`set_tint`) overrides the additive composite tint a channel is painted with (`worker.resolve_channel_tint` — override wins, else the fixed per-index palette) | `core/image_view_state.py` |
-| `PlaygroundState` | Playground frame selection + chosen correction method/params, per-source LUT memory, frame-local binary threshold, QC size cleanup, and zoom/pan + caches | `features/image_browser/playground/state.py` |
+| `PlaygroundState` | Playground frame selection (dataset well/channel/timepoint/FOV **or** a loose image path) + chosen correction method/params, the live-StarDist thresholds and last label image with the key it was computed from, per-source LUT memory, frame-local binary threshold, QC size cleanup, and zoom/pan + caches | `features/image_browser/playground/state.py` |
 
 `AppState` (`core/app_state.py`) is a plain aggregate of all of the above —
 *not* a mega-dataclass with behaviour. `WellViewerApp` builds one as
@@ -1905,7 +1909,40 @@ section on demand: the fold-by-default rule is right for a user filling the form
 in and wrong for a control something else just changed on their behalf, which
 otherwise leaves no visible trace at all (see `_open_dataset_in_analyze`).
 
-Restoring a prior run's settings is a fifth mixin,
+The Analyze pane's **right side is a two-page stack** — **Run** (the progress
+dashboard and log) and **Preview** — built by
+`analyze_tab_preview.AnalyzePreviewMixin`. The Preview page renders one frame
+from the input folder, **using the form's own parameter widgets**: it owns no
+flat-field / background / radius / threshold control of its own, only view
+controls (which frame, the display LUT, zoom). That is the whole design. The
+settings used to exist twice — here and in the Review Playground's panel — with a
+button to copy one into the other, so a tuned preview could describe a run that
+never happened; with one set of widgets there is nothing to copy and no way for
+"what I tuned" and "what will run" to differ. `_wire_preview_to_form` connects
+the preview to those widgets' change signals, so it follows the form with no sync
+step; segmentation stays behind an explicit **Segment** button because inference
+takes seconds and those signals fire on every keystroke. Frames come from
+`services.frame_preview.sample_input_frames`, which walks the same roots as the
+schema scan Analyze already runs on folder selection, and the segmentation
+channel leads the list because that is what StarDist sees. A correction the form
+asks for that one frame cannot do — `empty_well` / `basic` estimate their field
+from a whole reference well — is **named** in the status line rather than
+silently skipped. `tests/test_analyze_preview.py` asserts the no-parameter-widget
+property directly.
+
+The per-method segmentation parameters are their own mixin,
+`analyze_tab_seg_params.AnalyzeSegParamsMixin`: the `NamedPageStack` of
+per-routine pages (StarDist / watershed / Cellpose / label-free / classical) plus
+the StarDist detection thresholds, which sit *below* the stack because both
+StarDist routines share them and ride the stack's own `currentChanged` for
+visibility (so no second hook in `_refresh_segmentation_hints` is needed). The
+hints and per-method validation (`_refresh_segmentation_hints` /
+`_segmentation_validation_errors` / `_collapse_seg_param_stack`) live here too,
+beside the panel they drive. Every widget still lands on the `AnalyzeTab`
+instance under the attribute name it had when this lived in the form, so
+`analyze_tab_pinfo` and `_collect_run_options` reach them unchanged.
+
+Restoring a prior run's settings is another mixin,
 `analyze_tab_pinfo.AnalyzePipelineInfoMixin` (`_open_pipeline_info` →
 `_pinfo_flat` → `_apply_pipeline_info`), inherited by `AnalyzeTabFormMixin` so
 those names stay reachable on the form where every caller expects them. Three
@@ -2213,21 +2250,56 @@ settings are recorded as a `qc_options` block in `pipeline_info.json`
 **Segmentation routines + parameters.** `--segmentation_method` selects the
 segmenter in `process_image_group`'s dispatch; the Analyze "Channel Tokens"
 section shows a **per-method parameter panel** (a `NamedPageStack` swapped by
-`_refresh_segmentation_hints`) so only the chosen routine's controls appear. All
-routines segment the **Segmentation channel** (`--nuclear_token`, which may be any
-fluorescent or brightfield channel) unless noted:
+`_refresh_segmentation_hints`) built by
+`analyze_tab_seg_params.AnalyzeSegParamsMixin`, so only the chosen routine's
+controls appear. All routines segment the **Segmentation channel**
+(`--nuclear_token`, which may be any fluorescent or brightfield channel) unless
+noted:
 - `stardist_nuclei` / `stardist_seeded_watershed_cell` — StarDist (needs a
   fluorescent stain); watershed adds a cytoplasm token + min-nucleus-area.
-  **Tiling.** Large frames blow up StarDist's
-  peak memory, so `pipeline.stardist` can tile the prediction:
-  `--stardist_tile_px` (an Analyze-tab spinner with an ⓘ bubble, default `0` =
-  **off** = predict the whole frame; also env-tunable) sets the **max pixels
-  per tile side**, and `set_tile_px` (read once per worker in `_worker_init`,
-  mirroring `set_model`) makes each worker split any frame larger than that
-  into an `n_tiles` grid (a 4K frame → 2×2 ≈ ¼ the peak); small frames stay
-  untiled (`n_tiles=None`) so nothing slows needlessly. `n_tiles` is logged per
-  FOV. The tile-size math is pure integer logic covered by
-  `tests/test_stardist_tiling.py`.
+
+  **Detection thresholds.** Both methods take `--stardist_prob_thresh` (the
+  object-probability cut applied to the network's objectness map before polygon
+  NMS: lower detects more nuclei, including dim and marginal ones; higher keeps
+  only confident detections) and `--stardist_nms_thresh` (the polygon overlap
+  cut: higher lets more overlapping nuclei survive, recovering touching nuclei
+  on a confluent field; lower merges more aggressively). Both default to a
+  **negative sentinel** meaning *use the threshold the pretrained weights ship
+  in their own `thresholds.json`* (≈ 0.479 / 0.3 for `2D_versatile_fluo`) —
+  which is also what `predict_instances` does with `None`, so an untuned run
+  makes byte-identical calls to one from before the thresholds were exposed
+  (`tests/test_stardist_params.py` asserts the empty kwargs). The rows sit under
+  the method stack, shown for both StarDist methods; the run log states the
+  thresholds in force beside `Segmentation method`, because a nucleus count is
+  only interpretable next to them.
+
+  **One spelling of "auto".** `pipeline.stardist.parse_threshold` is the single
+  rule: blank, the word `auto`, unparseable, or the CLI's negative sentinel all
+  resolve to `None` (model default); anything else must be a probability in
+  `[0, 1]` and is **rejected rather than clamped**, since a silently clamped
+  threshold segments a plate with a parameter nobody chose. The CLI validates
+  through it in `main()`, the Analyze form emits blank-or-in-range text through
+  `pipeline_service._emit_stardist_threshold_flags`, and the Playground parses
+  its own two fields with it.
+
+  **Where the parameters live.** `StarDistParams` (frozen dataclass:
+  `prob_thresh`, `nms_thresh`, `tile_px`) is installed once per worker by
+  `_worker_init` via `set_params`, mirroring `set_model`. The inference itself is
+  `pipeline.stardist.segment_nuclei(img, *, model, params)`, which reads **no**
+  module state — `_segment_stardist_nuclei` is the worker-global wrapper over it,
+  and the Review pane's Playground calls the same function directly, so an
+  interactive preview and a batch run cannot diverge.
+
+  **Tiling.** Large frames blow up StarDist's peak memory, so `pipeline.stardist`
+  can tile the prediction: `--stardist_tile_px` (an Analyze-tab spinner with an
+  ⓘ bubble, default `0` = **off** = predict the whole frame) sets the **max
+  pixels per tile side** as `StarDistParams.tile_px`, and each worker splits any
+  frame larger than that into an `n_tiles` grid (a 4K frame → 2×2 ≈ ¼ the peak);
+  small frames stay untiled (`n_tiles=None`) so nothing slows needlessly.
+  `set_tile_px` sets that one field without disturbing the detection thresholds —
+  tiling is a memory knob, not a detection one, and must never move what is
+  detected. `n_tiles` is logged per FOV. The tile-size math is pure integer logic
+  covered by `tests/test_stardist_tiling.py`.
 - `cellpose` — **general** Cellpose, not phase-locked. Exposes model
   (cyto3/cyto2/cyto/nuclei), diameter, `flow_threshold`, `cellprob_threshold`,
   and an optional second **nucleus channel** (`channels=[seg, nuc]`). Models are
@@ -2329,7 +2401,8 @@ Small dependency-light service modules used by `analyze_tab.py`:
 
 | Module | What |
 |--------|------|
-| `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into a small table-driven emitter to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). |
+| `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into small table-driven emitters to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). The StarDist detection thresholds get their own emitter (`_emit_stardist_threshold_flags`) rather than the integer one: they are probabilities, and blank / `auto` / out-of-range emits nothing so the run falls back to the pretrained model's own value. |
+| `frame_preview.py` | Qt-free single-frame preview compute, shared by the Analyze Preview page and the Review Playground. `sample_input_frames` finds previewable frames in every input layout Analyze accepts (loose TIFs, loose TIFs under `in/`, per-well zips — the same roots `util/schema_infer.sample_stems` walks) and parses each stem with the caller's schema; `load_frame` delegates to `process_microscopy._load_image_source`; `correct_frame` and `segment_frame` call the pipeline's own `correct_single_frame` / `segment_nuclei`, so a preview cannot disagree with the run it previews. Holds the GUI session's single loaded StarDist model (`_GUI_STARDIST_MODEL`) and the `find_spec` dependency probe — **TF and StarDist are imported inside `segment_frame`, never at module scope**, because the Analyze tab imports this at GUI start-up. `correction_needs_a_plate` names the reference-well modes one frame cannot honour so callers can report them instead of silently skipping them. |
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch against a shared remote input directory: a well whose input zip outlives its batch is announced a second time by the next batch, and counting markers drove the headline to "N / N wells (100%)" with wells still outstanding. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
 | `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `scripts/_bootstrap_lib.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). The `remotes.toml` schema is the live contract in `services/remote_config.py`. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. Each batch is its own pipeline launch and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
@@ -3871,6 +3944,14 @@ Every widget under `widgets/` is:
   `theme.Colors` / QSS object names. No hardcoded device pixels.
 - **DPI-aware.** Geometry is computed from `fontMetrics()`, so the widgets
   scale correctly at 1×, 1.5×, 2×.
+`frame_preview.py` is the newest member and the clearest illustration of the
+rule: `FramePreview` is handed an `(H, W, 3)` array and reports the image pixel
+under the cursor, owning its own zoom/pan. It knows nothing about wells,
+channels, corrections or datasets, which is what lets both the Analyze Preview
+page and (in future) the Review Playground mount the same canvas — the RGB is
+built upstream by `well_viewer.core.frame_render.build_frame_rgb`, which needs
+`ui_helpers`' LUT math and therefore cannot live under `widgets/` at all.
+
 - **Singly responsible.** One widget per file. The file may contain a
   helper class or two but never another reusable widget.
 

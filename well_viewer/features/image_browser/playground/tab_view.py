@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
 import theme
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from well_viewer.features.image_browser.playground.controller import (
-    playground_on_change, playground_repopulate_dropdowns,
+    playground_clear_loose_image, playground_on_change, playground_open_loose_image,
+    playground_repopulate_dropdowns, playground_segment_now,
 )
 from well_viewer.features.image_browser.playground.renderer import render_playground_display
 
@@ -102,9 +103,53 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # on this tab — see the Playground descriptor's ``single_well_selection`` +
     # ``on_selection_changed`` hook in ``features/registry.py``). No in-tab plate:
     # the one on the left rail is the picker, so we don't duplicate it here.
-    _combo(_row(controls, "Channel"), [], "_playground_chan_cb")
-    _combo(_row(controls, "Timepoint"), [], "_playground_tp_cb")
-    _combo(_row(controls, "FOV"), [], "_playground_fov_cb")
+    chan_cb = _combo(_row(controls, "Channel"), [], "_playground_chan_cb")
+    tp_cb = _combo(_row(controls, "Timepoint"), [], "_playground_tp_cb")
+    fov_cb = _combo(_row(controls, "FOV"), [], "_playground_fov_cb")
+
+    # A second frame source: any image file on disk. The four selectors above
+    # address a loaded dataset, so without this the tab — and the StarDist
+    # preview below — is unusable until a plate has been analysed, which is
+    # backwards for a tool whose job is choosing the settings to analyse it with.
+    file_row = QWidget(controls)
+    frl = QHBoxLayout(file_row)
+    frl.setContentsMargins(0, 2, 0, 2)
+    open_btn = QPushButton("Open image…", file_row)
+    open_btn.setProperty("variant", "secondary")
+    open_btn.setToolTip(
+        "Load a single image file straight from disk, instead of a frame from "
+        "the loaded dataset. Works with no dataset open at all — the intended "
+        "way to tune segmentation before running a plate.")
+    clear_btn = QPushButton("Use dataset", file_row)
+    clear_btn.setProperty("variant", "secondary")
+    clear_btn.setToolTip("Go back to the frame selected above.")
+    frl.addWidget(open_btn)
+    frl.addWidget(clear_btn)
+    frl.addStretch(1)
+    cl.addWidget(file_row)
+
+    def _sync_frame_source() -> None:
+        """Grey the dataset selectors while a loose file is the frame."""
+        loose = bool(str(app._app_state.playground.loose_image_path or "").strip())
+        for cb in (chan_cb, tp_cb, fov_cb):
+            cb.setEnabled(not loose)
+        clear_btn.setEnabled(loose)
+
+    def _on_open_image() -> None:
+        from PySide6.QtWidgets import QFileDialog
+        path, _filt = QFileDialog.getOpenFileName(
+            controls, "Open an image to work on", "",
+            "Images (*.tif *.tiff *.png *.jpg *.jpeg);;All files (*)")
+        if not path:
+            return
+        playground_open_loose_image(ctx, path)
+        _sync_frame_source()
+
+    def _on_clear_image() -> None:
+        playground_clear_loose_image(ctx)
+        _sync_frame_source()
+    open_btn.clicked.connect(lambda _=False: _on_open_image())
+    clear_btn.clicked.connect(lambda _=False: _on_clear_image())
 
     # Correction method
     _section("Correction")
@@ -126,6 +171,59 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     bgwell_edit.editingFinished.connect(on_change)
     bgwell_row.layout().addWidget(bgwell_edit)
     app._playground_bgwell_edit = bgwell_edit
+
+    # Live StarDist preview — the same segmentation a pipeline run performs,
+    # against the frame on screen, so the two thresholds can be chosen by
+    # looking at the result instead of by re-running a plate.
+    _section("Segmentation")
+    seg_live_cb = QCheckBox("Live StarDist", controls)
+    seg_live_cb.setToolTip(
+        "Show StarDist labels computed here, instead of the ones a pipeline run "
+        "already produced.\n"
+        "The first Segment of a session loads TensorFlow into the application "
+        "(~10-30 s, and roughly 1-2 GB that stays in use until you quit); after "
+        "that each frame takes a few seconds.")
+
+    def _on_seg_live(v: bool) -> None:
+        app._app_state.playground.seg_live = bool(v)
+        on_change()
+    seg_live_cb.toggled.connect(_on_seg_live)
+    cl.addWidget(seg_live_cb)
+    app._playground_seg_live_cb = seg_live_cb
+
+    prob_row = _row(controls, "Probability")
+    prob_edit = _edit(prob_row, "", "_playground_seg_prob_edit")
+    prob_edit.setPlaceholderText("auto")
+    prob_edit.setToolTip(
+        "Object-probability threshold (0-1). LOWER finds more nuclei, including "
+        "dim and marginal ones; HIGHER keeps only confident detections. Blank = "
+        "the pretrained model's own default (~0.479).")
+    nms_row = _row(controls, "Overlap (NMS)")
+    nms_edit = _edit(nms_row, "", "_playground_seg_nms_edit")
+    nms_edit.setPlaceholderText("auto")
+    nms_edit.setToolTip(
+        "Polygon overlap threshold (0-1). HIGHER lets more overlapping nuclei "
+        "survive, recovering touching nuclei on a confluent field; LOWER merges "
+        "them more aggressively. Blank = the model's own default (0.3).")
+
+    seg_btn_row = QWidget(controls)
+    sbl = QHBoxLayout(seg_btn_row)
+    sbl.setContentsMargins(0, 2, 0, 2)
+    seg_btn = QPushButton("Segment", seg_btn_row)
+    seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
+    hint = QLabel("To choose the settings for a run, use Analyze → Preview: it "
+                  "draws a frame with the run's own settings.", controls)
+    hint.setObjectName("Muted")
+    hint.setWordWrap(True)
+
+    def _on_segment() -> None:
+        seg_live_cb.setChecked(True)
+        playground_segment_now(ctx)
+    seg_btn.clicked.connect(lambda _=False: _on_segment())
+    sbl.addWidget(seg_btn)
+    sbl.addStretch(1)
+    cl.addWidget(seg_btn_row)
+    cl.addWidget(hint)
 
     # Display options
     _section("Display")
@@ -335,6 +433,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     bg_cb.currentIndexChanged.connect(_sync_method_rows)
     ff_cb.currentIndexChanged.connect(_sync_method_rows)
     _sync_method_rows()
+    _sync_frame_source()
 
     playground_repopulate_dropdowns(app._ctx)
     # No trailing on_change() here: build_playground_tab is only ever reached

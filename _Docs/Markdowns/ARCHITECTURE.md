@@ -3299,6 +3299,29 @@ lands. The colour change *is* the arrival. A well that has moved on (already
 computing, already fetched) keeps its own colour, so a stale transfer marker
 cannot repaint it backwards.
 
+**`set_well_transfer` pushes the colour as well as the fraction**, and that is
+the whole of what makes the paragraph above true on screen rather than only in
+the model. `set_well_stage` writes both to the plate; a transfer that wrote only
+the fraction left the destination colour computed and discarded on every tick,
+so a downloading well kept the blue of its last stage change and filled
+blue-into-blue — the exact rendering the destination-colour rule exists to
+prevent. The regression guards for it assert on what the plate was *told*
+(`setWellColor` calls), not on what `_well_color` returns: the computed value was
+green throughout while the widget painted blue, so asserting the computed value
+is what hid it.
+
+**A well's output arrives as two transfers, and only the first has a size.** The
+zip is measurable; the CSVs that follow are not, and the well is not fetched
+until both have landed. So a download reaching 1.0 does *not* end the transfer
+the way an upload does — the ring **freezes at the last measured fraction**,
+green and visibly short of full, until `set_well_stage` marks the well
+`download`. Both alternatives are indistinguishable from some other state:
+dropping the entry returns the well to a full ring in the computed blue (a well
+that has not started downloading), and storing the 1.0 fills the ring green (a
+well already fetched). A closing 1.0 with no prior tick creates nothing — a well
+whose remote size probe failed never had a dial, and inventing one at the end
+would report progress that was never measured.
+
 **Rail denominators are per stage.** A remote run's stages do not count the
 same population: every well on the plate is grouped locally, while only the
 subset the incremental split sends is uploaded, processed and thresholded, and
@@ -4096,6 +4119,21 @@ cycle. `Fetcher._transfer_heartbeat` runs two cadences out of one loop: the live
 sample every `interval`, and a durable breadcrumb every `_BREADCRUMB_INTERVAL_S`
 (60s) that *does* go to the log — a status line cannot answer "was it stuck at
 3am?" the next morning, and one line a minute is a record rather than a flood.
+
+**A well turns green only when both halves of its output have landed** — the
+`{well}_out.zip` and its per-well CSV(s) are two separate rsyncs, and
+`ProgressTracker._mark_fetch_part` fires the `download` stage on the transition
+where both are present. Two paths bypass that handshake, and both must announce
+themselves or the well stays painted "computed, awaiting fetch" with its data
+already on disk: a well the remote skipped as already current
+(`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop
+(`[remote] ✓ W: re-fetched by the end-of-run retry`, emitted by
+`RemoteRunner._retry_missing_wells`). The backstop needs its own line because by
+the time it runs the well may have registered *neither* half — the in-stream
+fetcher returns early when the zip pull fails, before it reaches the CSVs — so
+there is nothing for the handshake to complete. The drain's own chatter
+(`draining fetcher: N well(s)`, `still downloading… (5/8 wells)`) carries counts
+rather than well ids and deliberately marks nothing.
 
 **Per-well transfer progress** rides the same marker. `WELL_XFER_PREFIX` is
 `TRANSIENT_PREFIX` plus `xfer `, so the "never write this to the log" rule

@@ -5225,6 +5225,13 @@ class RemoteRunner:
                 out_zip = run.local_output_dir / f"{well}_out.zip"
                 if not out_zip.exists() or out_zip.stat().st_size == 0:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
+            # Say so. Every other way a well's output lands emits a line the
+            # progress tracker reads, and the plate turns the well green off the
+            # back of it; this backstop pulled the same files and said nothing,
+            # so a well rescued here stayed painted "computed, awaiting fetch"
+            # for the rest of the run with its data already on disk. A fetch
+            # that worked has to be as visible as one that failed.
+            log(f"[remote] ✓ {well}: re-fetched by the end-of-run retry\n")
 
     def _verify_local_manifest(
         self, *, log: Callable[[str], None]

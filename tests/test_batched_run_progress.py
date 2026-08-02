@@ -272,3 +272,46 @@ def test_repeat_marker_is_logged_as_a_warning(tab):
     assert tab._well_repeats == 1
     assert "C07" in tab._log.toPlainText()
     assert "more than once" in tab._log.toPlainText()
+
+
+# ── the end-of-run retry backstop reports what it rescued ────────────────────
+
+def test_the_retry_backstop_marks_its_well_downloaded():
+    """A well whose in-stream fetch fell short is re-pulled at the end of the
+    run. That backstop used to log nothing per well, so the plate never heard:
+    the files landed and the well stayed painted "computed, awaiting fetch" for
+    the rest of the run. A fetch that worked has to be as visible as one that
+    failed.
+    """
+    tracker = ProgressTracker()
+    # The in-stream fetch gave up on the zip and returned before the CSVs, so
+    # this well registered NEITHER half of the usual zip+CSV handshake.
+    tracker.parse("[remote] ↓ D04: starting download from h:/out (this run produced new output)\n")
+    tracker.parse("[remote] ↓ D04: WARN could not pull D04_out.zip from /out; "
+                  "will retry at end of run.\n")
+    tracker.parse("[remote] end-of-run retry: re-pulling 1 well(s)…\n")
+
+    events = tracker.parse("[remote] ✓ D04: re-fetched by the end-of-run retry\n")
+    assert ("well_stage", ("D04", "download")) in events
+
+
+def test_the_ordinary_two_part_fetch_still_needs_both_halves():
+    """The backstop's line is an override, not a loosening: a well that has only
+    landed its zip is still not downloaded."""
+    tracker = ProgressTracker()
+    zip_only = tracker.parse("[remote] ↓ E05: 12.4 MB zip in 3.2s\n")
+    assert not any(k == "well_stage" for k, _ in zip_only)
+
+    both = tracker.parse("[remote] ↓ E05: 3 CSV file(s) in 0.4s\n")
+    assert ("well_stage", ("E05", "download")) in both
+
+
+def test_the_drain_chatter_marks_nothing():
+    """The fetcher's drain lines are status, not per-well outcomes — they name a
+    count of wells, and reading a well id out of them would mark the wrong one."""
+    tracker = ProgressTracker()
+    for line in ("[remote] ↓ draining fetcher: 3 well(s) still to fetch…\n",
+                 "[remote] ↓ still downloading… (5/8 wells)\n",
+                 "[remote] ↓ fetcher: 8/8 wells downloaded in 4m12s\n",
+                 "[remote] end-of-run retry: re-pulling 2 well(s)…\n"):
+        assert not any(k == "well_stage" for k, _ in tracker.parse(line)), line

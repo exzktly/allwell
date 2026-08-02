@@ -108,3 +108,79 @@ def test_wells_the_dataset_lacks_are_disabled_not_hand_tinted(loaded_app):
     grid = _grid(panel)
     have = set(loaded_app._app_state.dataset.well_paths)
     assert grid._enabled == {_parse_well_id(w) for w in have}
+
+
+def test_the_plate_is_capped_so_it_cannot_eat_the_group_list(loaded_app):
+    """``role="rail"`` is exempt from the size caps because Review's left-rail
+    picker is the app's primary interaction surface and scales to whatever
+    width the rail gives it. This plate sits in a panel above the group list;
+    uncapped it reserves a card as tall as ``heightForWidth`` allows (389px
+    against the old button grid's 212) and takes that room from the list."""
+    from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MAX_WIDTH
+
+    panel = _panel(loaded_app)
+    assert panel._map_plate.maximumWidth() == PLATE_MAX_WIDTH
+    assert panel._map_plate.maximumHeight() == PLATE_MAX_HEIGHT
+
+
+def test_a_dataset_with_no_wells_leaves_every_well_disabled(loaded_app):
+    """``setEnabledWells(None)`` means "all 96 enabled", so passing
+    ``sorted(avail) or None`` turned an empty dataset into a full plate of
+    live-looking wells that silently reject every click."""
+    panel = _panel(loaded_app)
+    panel._ctx.state.dataset.well_paths.clear()
+    panel._refresh_map()
+    assert _grid(panel)._enabled == set()
+
+
+def test_the_ring_follows_a_well_out_of_the_active_group_mid_drag(loaded_app):
+    """The ring says "in the group being edited", so it has to move with the
+    colour. Left to the end-of-gesture refresh, a well dragged out of the
+    active group sits ringed but uncoloured for the rest of the drag."""
+    from widgets.well_plate_selector import _parse_well_id
+    from well_viewer.features.batch_export._common import BarGroup
+
+    panel = _panel(loaded_app)
+    well = next(iter(loaded_app._app_state.dataset.well_paths))
+    panel._groups.append(BarGroup("G1", solo_wells=[well]))
+    panel._active_grp = 0
+    panel._refresh_map()
+    assert _parse_well_id(well) in _grid(panel)._rings
+
+    panel._plate_press(well)        # starts a remove gesture, mid-drag repaint
+    assert _parse_well_id(well) not in _grid(panel)._rings
+    assert _parse_well_id(well) not in _grid(panel)._colors
+
+
+def test_a_real_drag_gesture_reaches_the_group(loaded_app):
+    """End to end through the plate's own mouse handling, not the panel's
+    slots: press, drag across two more wells, release."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from widgets.well_plate_selector import _parse_well_id
+    from well_viewer.features.batch_export._common import BarGroup
+
+    panel = _panel(loaded_app)
+    panel._map_plate.resize(480, 320)
+    wells = [w for w in loaded_app._app_state.dataset.well_paths][:3]
+    if len(wells) < 3:
+        import pytest
+        pytest.skip("fixture dataset has fewer than three wells")
+    panel._groups.append(BarGroup("G1"))
+    panel._active_grp = 0
+    panel._refresh_map()
+
+    grid = _grid(panel)
+
+    def _ev(well, kind, buttons=Qt.LeftButton):
+        row, col = _parse_well_id(well)
+        return QMouseEvent(kind, QPointF(grid._cell_rect(row, col).center()),
+                           Qt.LeftButton, buttons, Qt.NoModifier)
+
+    grid.mousePressEvent(_ev(wells[0], QMouseEvent.Type.MouseButtonPress))
+    grid.mouseMoveEvent(_ev(wells[1], QMouseEvent.Type.MouseMove))
+    grid.mouseMoveEvent(_ev(wells[2], QMouseEvent.Type.MouseMove))
+    grid.mouseReleaseEvent(_ev(wells[2], QMouseEvent.Type.MouseButtonRelease,
+                               buttons=Qt.NoButton))
+
+    assert set(panel._groups[0].wells) >= set(wells)

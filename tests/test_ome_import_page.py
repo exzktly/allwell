@@ -321,3 +321,58 @@ def test_the_plate_is_locked_while_a_conversion_runs(qapp):
     page.set_running(False)
     assert page._plate.isEnabled()
     ctrl.shutdown()
+
+
+def test_editing_the_order_after_a_run_drops_the_dials(qapp):
+    """A dial says how far through *this* order a conversion got, so a
+    different order makes it a statement about wells no longer on screen.
+
+    Without this the plate mixes a finished run's fills with a freshly edited
+    path: the well the user just removed keeps its full accent disc, because a
+    well carrying a fraction is drawn *as* the dial and never reaches the
+    depressed branch."""
+    from datasets.ome_import.controller import OmeImportController
+    from widgets.well_plate_selector import _parse_well_id
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    grid = page._plate._grid
+
+    page._plate.set_order(["A01", "A02", "A03"])
+    for well in ("A01", "A02", "A03"):
+        page.set_well_fraction(well, 4, 4)
+    assert len(grid._fractions) == 3
+
+    # A click removing A02 from the order.
+    page._plate.set_order(["A01", "A03"])
+    assert grid._fractions == {}
+    assert _parse_well_id("A02") not in grid._fractions
+    ctrl.shutdown()
+
+
+def test_a_grid_edit_preview_also_drops_the_dials(qapp):
+    """The same applies to the non-dirty serpentine preview a grid edit
+    pushes — it is still a different set of wells."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    page._plate.set_preview(["A01", "A02"])
+    page.set_well_fraction("A01", 1, 1)
+    page._plate.set_preview(["A01", "A02", "A03"])
+    assert page._plate._grid._fractions == {}
+    ctrl.shutdown()
+
+
+def test_the_acquisition_plate_is_capped_like_every_other_plate(qapp):
+    """It sits in a page, not the rail, so it takes the shared caps — an
+    uncapped plate grows to the scroll area's full width and pushes the run
+    button below the fold, which is why this page used to hardcode 330/210."""
+    from datasets.ome_import.controller import OmeImportController
+    from widgets.plate_geometry import PLATE_MAX_HEIGHT, PLATE_MAX_WIDTH
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    plate = ctrl.page._plate
+    assert plate.maximumWidth() == PLATE_MAX_WIDTH
+    assert plate.maximumHeight() == PLATE_MAX_HEIGHT   # action row hidden
+    ctrl.shutdown()

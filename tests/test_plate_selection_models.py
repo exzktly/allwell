@@ -79,12 +79,6 @@ def test_the_default_model_is_the_unordered_set(qapp):
     assert p.pathWellIds() == []
 
 
-def test_an_unknown_model_is_ignored_rather_than_raising(qapp):
-    p = _plate()
-    p.setSelectionModel("nonsense")
-    assert p._grid.selection_model() == "set"
-
-
 # ── "path" ───────────────────────────────────────────────────────────────────
 def test_a_path_click_appends_and_a_second_removes(qapp):
     p = _plate("path")
@@ -224,3 +218,48 @@ def test_painting_runs_with_every_decoration_at_once(qapp):
     img = QImage(480, 320, QImage.Format_ARGB32)
     p.render(img)
     assert not img.isNull()
+
+
+# ── regressions found in review ──────────────────────────────────────────────
+def test_disabling_a_well_prunes_every_decoration_it_wore(qapp):
+    """A disabled well paints as an empty socket. A ring or a dial on a socket
+    describes a well that is not there — the colour and selection were already
+    pruned here, the newer decoration layers were not."""
+    p = _plate("path")
+    p.setWellRing("A01")
+    p.setWellFraction("A01", 0.5)
+    p.setWellColor("A01", "#ff0000")
+    p.setPathWellIds(["A01", "A02"])
+
+    p.setEnabledWells(["A02"])
+    grid = p._grid
+    assert grid._rings == set()
+    assert grid._fractions == {}
+    assert grid._colors == {}
+    assert p.pathWellIds() == ["A02"]
+
+
+def test_disabling_one_well_prunes_only_that_well(qapp):
+    p = _plate()
+    p.setWellRings(["A01", "A02"])
+    p.setWellFraction("A01", 0.5)
+    p.setWellFraction("A02", 0.5)
+    p.setWellEnabled("A01", False)
+    grid = p._grid
+    assert grid._rings == {_parse_well_id("A02")}
+    assert set(grid._fractions) == {_parse_well_id("A02")}
+
+
+def test_an_unknown_selection_model_is_rejected_loudly(qapp):
+    """Silently staying in "set" is the degraded-output shape: a host that
+    asked for an ordered route and quietly got an unordered selection looks
+    like it worked."""
+    p = _plate()
+    with pytest.raises(ValueError):
+        p.setSelectionModel("nonsense")
+    assert p.selectionModel() == "set"
+
+
+def test_the_selection_model_is_readable_without_reaching_inside(qapp):
+    p = _plate("paint")
+    assert p.selectionModel() == "paint"

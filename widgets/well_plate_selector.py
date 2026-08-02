@@ -294,6 +294,11 @@ class _PlateGrid(QWidget):
             self._selected = {k: v for k, v in self._selected.items() if k in new}
             self._colors = {k: v for k, v in self._colors.items() if k in new}
             self._fractions = {k: v for k, v in self._fractions.items() if k in new}
+            # Rings too: a disabled well paints as an empty socket, and an
+            # accent ring around a socket says the host is marking a well that
+            # is not there.
+            self._rings = {k for k in self._rings if k in new}
+            self._path = [k for k in self._path if k in new]
             if self._hover_cell is not None and self._hover_cell not in new:
                 self._hover_cell = None
         self._recolor()
@@ -314,6 +319,10 @@ class _PlateGrid(QWidget):
             self._enabled.discard(parsed)
             self._selected.pop(parsed, None)
             self._colors.pop(parsed, None)
+            self._fractions.pop(parsed, None)
+            self._rings.discard(parsed)
+            if parsed in self._path:
+                self._path.remove(parsed)
         self._recolor()
         self.update()
 
@@ -384,7 +393,10 @@ class _PlateGrid(QWidget):
                      several groups overlap on the same plate).
         """
         if model not in ("set", "path", "paint"):
-            return
+            raise ValueError(
+                f"unknown selection model {model!r}; "
+                "expected 'set', 'path' or 'paint'"
+            )
         self._selection_model = model
 
     def selection_model(self) -> str:
@@ -1414,8 +1426,16 @@ class WellPlateSelector(QWidget):
 
     # ── ordered-path model ───────────────────────────────────────────────
     def setSelectionModel(self, model: str) -> None:
-        """``"set"`` (default) or ``"path"`` — see ``_PlateGrid``."""
+        """``"set"`` (default), ``"path"`` or ``"paint"`` — see ``_PlateGrid``.
+
+        An unrecognised name is rejected loudly rather than silently leaving
+        the plate in ``"set"``: a host that asked for an ordered route and
+        quietly got an unordered selection would look like it worked.
+        """
         self._grid.set_selection_model(model)
+
+    def selectionModel(self) -> str:
+        return self._grid.selection_model()
 
     def pathWellIds(self) -> list[str]:
         return self._grid.path_ids()

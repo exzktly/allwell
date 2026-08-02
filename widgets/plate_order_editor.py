@@ -61,7 +61,7 @@ class PlateOrderEditor(WellPlateSelector):
 
     def set_order(self, labels) -> None:
         """Set the path from *labels* as a user-owned (dirty) order, no signal."""
-        self.setPathWellIds(labels)
+        self._set_path(labels)
         self._dirty = True
 
     def set_preview(self, labels) -> None:
@@ -73,7 +73,7 @@ class PlateOrderEditor(WellPlateSelector):
         """
         if self._dirty:
             return
-        self.setPathWellIds(labels)
+        self._set_path(labels)
 
     def is_dirty(self) -> bool:
         return self._dirty
@@ -82,12 +82,31 @@ class PlateOrderEditor(WellPlateSelector):
         """Empty the path and drop dirty state, emitting the (empty) order."""
         if not self.pathWellIds() and not self._dirty:
             return
-        self.setPathWellIds([])
+        self._set_path([])
         self._dirty = False
         self.orderChanged.emit([])
 
     # ── internals ────────────────────────────────────────────────────────────
+    def _set_path(self, labels) -> bool:
+        """Replace the path, dropping any progress dials it was wearing.
+
+        A dial describes how far through *this* order a conversion got, so a
+        different order makes it a statement about wells that are no longer the
+        ones on screen. Without this the plate mixes a finished run's fills
+        with a freshly edited path — the well the user just removed keeps its
+        full accent disc, because the paint path draws a well with a fraction
+        as the dial and never reaches the depressed branch. Subset's picker
+        carries the same guard for the same reason.
+        """
+        changed = self.setPathWellIds(labels)
+        if changed:
+            self.clearWellFractions()
+        return changed
+
     def _on_path_changed(self, ids: list) -> None:
         """A click on the plate is the user taking ownership of the order."""
         self._dirty = True
+        # A click goes straight to the grid, so the dial-clearing that
+        # ``_set_path`` does for programmatic changes has to happen here too.
+        self.clearWellFractions()
         self.orderChanged.emit(list(ids))

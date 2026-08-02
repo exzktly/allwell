@@ -327,7 +327,14 @@ class BatchExportPanel(QWidget):
         # grid do not read as a plate, and this was the one well grid in the
         # app that shared nothing with the others.
         self._map_plate = WellPlateSelector()
-        apply_plate_geometry(self._map_plate, role="rail")
+        # "editor", not "rail": the rail role is exempt from the size caps
+        # because Review's left-rail picker is the app's primary interaction
+        # surface and scales to whatever width the rail gives it. This plate
+        # sits in a panel above a group list, and uncapped it reserves a card
+        # as tall as heightForWidth allows — 389px against the old grid's 212,
+        # taking 164px from the group list in the side-by-side layout, with the
+        # grid floating in the middle of a mostly-empty card.
+        apply_plate_geometry(self._map_plate, role="editor")
         self._map_plate.setSelectionModel("paint")
         self._map_plate.setColoredWellsLit(True)
         self._map_plate.wellPaintPressed.connect(self._plate_press)
@@ -1049,6 +1056,12 @@ class BatchExportPanel(QWidget):
                       if tok in self._groups[gi].wells), None)
         self._map_plate.setWellColor(
             tok, self._group_color(owner) if owner is not None else None)
+        # The ring says "in the group being edited", so it has to move with the
+        # colour. Left to the end-of-gesture ``_refresh_map``, a well dragged
+        # out of the active group would sit ringed but uncoloured for the rest
+        # of the drag.
+        grp = self._active_group()
+        self._map_plate.setWellRing(tok, bool(grp is not None and tok in grp.wells))
 
     def _refresh_map(self) -> None:
         avail = set(self._ctx.state.dataset.well_paths.keys())
@@ -1065,7 +1078,11 @@ class BatchExportPanel(QWidget):
         # Wells the dataset does not have are disabled rather than tinted grey
         # by hand — the plate already draws an absent well as an empty socket,
         # and a disabled well ignores the paint gesture for free.
-        self._map_plate.setEnabledWells(sorted(avail) or None)
+        # ``sorted(avail)``, never ``or None`` — ``None`` means "all 96
+        # enabled", so a dataset with no wells at all would render a full plate
+        # of live-looking wells that silently reject every click, instead of 96
+        # empty sockets.
+        self._map_plate.setEnabledWells(sorted(avail))
         self._map_plate.setWellColors(
             {tok: tok_color.get(tok) for tok in self._all_well_tokens()})
         # The active group's wells carry an accent ring on top of their group

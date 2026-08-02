@@ -597,6 +597,21 @@ A cell counts only when it is manually kept **and** it passes QC.
   in place. The log gets the events — each well starting, each one landing, the
   final total — plus a "still transferring" note about once a minute, so a run
   left overnight still leaves a readable trail without burying it.
+- **Waiting for a cluster scheduler.** If your remote host runs the pipeline
+  through a scheduler (an `srun …` compute launcher — set up in the remote host
+  dialog), the run does not start the moment the upload finishes: it joins a
+  queue, and on a busy cluster that can be minutes or hours. The status line
+  says so and counts up — *Waiting for the scheduler — 4m12s (job 4812345)* —
+  and the log repeats it every couple of minutes together with the exact
+  request that was made. A batched run queues once per batch, and the log names
+  which batch is waiting.
+  - **Use the job number.** It is the one you would pass to `squeue -j 4812345`
+    on the cluster to see why the job is pending. `Priority` or `Resources`
+    usually means simply wait; anything naming a limit or a partition usually
+    means the request cannot be satisfied as written — which is why the log
+    repeats the request beside the wait.
+  - All-Well does not query the scheduler itself, so it can tell you the run is
+    queued and for how long, but not *why*. The number is what lets you ask.
 - **Suspend** winds the run down cleanly. It finishes the fields already being
   computed, then lets every well that got any work done write its results, and
   remembers what you were running. Use it when the run is fine but you need the

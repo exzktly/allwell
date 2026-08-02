@@ -385,3 +385,74 @@ def test_an_unknown_csv_total_leaves_the_dial_alone(tmp_path):
     combined = (expected_bytes + csv_bytes
                 if expected_bytes and csv_bytes else expected_bytes)
     assert combined is None, "no zip size means no dial at all"
+
+
+# ── a scheduler queue wait is announced, not silent ──────────────────────────
+#
+# Reported: after "batch 1 completed upload … launching pipeline" the run went
+# quiet with the status still reading "Transferring… 100%", and nothing said it
+# was queued on SLURM. The non-batched path already announced the hand-off; the
+# batched one composed the same launcher and said nothing, so a batched run fell
+# silent at the precise moment it began waiting.
+
+def test_the_handoff_lines_name_the_launcher_and_the_batch():
+    from services.remote_runner import _scheduler_handoff_lines
+
+    lines = _scheduler_handoff_lines("srun -p gpu --time=4:00:00", batch=2)
+    assert "batch 2" in lines
+    assert "srun -p gpu --time=4:00:00" in lines
+    assert "this can queue" in lines
+
+
+def test_a_host_with_no_launcher_is_not_told_it_is_waiting():
+    """A direct-ssh host queues for nothing. Returning "" lets every caller
+    emit unconditionally without inventing a wait that does not exist."""
+    from services.remote_runner import _scheduler_handoff_lines
+
+    assert _scheduler_handoff_lines("") == ""
+    assert _scheduler_handoff_lines("   ") == ""
+
+
+def test_both_launch_paths_announce_the_handoff():
+    """The defect itself: one launcher announced, the other did not. Asserted
+    against the source so the batched path cannot fall silent again."""
+    import inspect
+
+    import services.remote_runner as rr
+
+    src = inspect.getsource(rr)
+    # Once as the definition, once per launch site.
+    assert src.count("_scheduler_handoff_lines") >= 3
+    batched = inspect.getsource(rr._BatchedRemoteProcess._run_batches)
+    assert "_scheduler_handoff_lines" in batched, "the batched path went quiet"
+
+
+def test_the_tracker_reads_the_whole_scheduler_handshake():
+    tracker = ProgressTracker()
+
+    request = tracker.parse(
+        "[remote] scheduler: batch 1: requesting allocation via: srun -p gpu\n")
+    assert ("sched", ("waiting", "", "srun -p gpu")) in request
+
+    # SLURM's own line is the only place the job id exists before the
+    # allocation does — the .slurm sidecar is written from inside it.
+    queued = tracker.parse("srun: job 4812345 queued and waiting for resources\n")
+    assert ("sched", ("queued", "4812345", "")) in queued
+
+    for granted_line in (
+        "srun: job 4812345 has been allocated resources\n",
+        "[remote] scheduler: allocation granted — job 4812345 on node gpu-07\n",
+    ):
+        events = tracker.parse(granted_line)
+        assert ("sched", ("granted", "4812345", "")) in events, granted_line
+
+
+def test_ordinary_lines_do_not_look_like_a_scheduler_event():
+    """Including ones that merely mention the words."""
+    tracker = ProgressTracker()
+    for line in ("2026-08-01 10:00:00  INFO      Zip mode: 12 wells\n",
+                 "[remote] scheduler: waiting for the scheduler to grant a "
+                 "node (this can queue)…\n",
+                 "[remote] ↓ A01: 1.0 MB zip in 2s\n",
+                 "Well A01 — done.\n"):
+        assert not any(k == "sched" for k, _ in tracker.parse(line)), line

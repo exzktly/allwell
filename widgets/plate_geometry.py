@@ -21,7 +21,11 @@ behavioural things:
 ``"rail"``   hidden (host has its own)   interactive (``"select"``)
 ``"picker"`` shown                       interactive (``"select"``)
 ``"status"`` hidden                      read-only (``"passive"``)
+``"editor"`` hidden (host has its own)   interactive (``"select"``)
 ===========  ==========================  ===============================
+
+``"rail"`` and ``"editor"`` differ only in the size caps: the rail picker is
+exempt from them (see below), an editor plate sitting in a page is not.
 
 Why a maximum *width* as well as a maximum height: ``WellPlateSelector`` paints
 its panel background and border across its entire allocated widget box, while
@@ -71,7 +75,7 @@ PLATE_ALIGNMENT = Qt.AlignHCenter
 #: Qt's QWIDGETSIZE_MAX — "no ceiling", used to exempt the rail picker.
 _UNCAPPED = 16_777_215
 
-_ROLES = ("rail", "picker", "status")
+_ROLES = ("rail", "picker", "status", "editor")
 
 #: ``objectName`` of the grid child inside a ``WellPlateSelector``. Everything
 #: else in the selector's layout is chrome around the grid.
@@ -106,11 +110,19 @@ def _action_row_allowance(plate) -> int:
 def apply_plate_geometry(plate, *, role: str = "rail") -> None:
     """Give *plate* the app-wide plate-map geometry for *role*.
 
-    *role* is ``"rail"``, ``"picker"`` or ``"status"`` (see the module
-    docstring): it selects whether the built-in action row is shown and whether
-    the plate owns an interactive selection. It does **not** affect size,
-    alignment or panel treatment — those are the same for all three, which is
-    the point of the helper.
+    *role* is ``"rail"``, ``"picker"``, ``"status"`` or ``"editor"`` (see the
+    module docstring): it selects whether the built-in action row is shown and
+    whether the plate owns an interactive selection. It does **not** affect
+    size, alignment or panel treatment — those are the same for all of them,
+    which is the point of the helper.
+
+    ``"editor"`` is an interactive plate whose host supplies its own actions,
+    so the built-in All / Invert / Clear row would operate on a model the host
+    does not use: Convert OME-TIFF's acquisition-path plate, whose model is an
+    ordered route with its own Generate / Clear buttons beneath it. It takes
+    the size caps rather than the rail's exemption — it sits in a page, not in
+    the rail, and uncapped it grows to the scroll area's full width and pushes
+    the run button below the fold.
 
     Everything else about the plate stays the caller's business: which wells are
     enabled, drag behaviour, tooltips, colour overrides, and any later switch of

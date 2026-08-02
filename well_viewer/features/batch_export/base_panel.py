@@ -11,13 +11,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -32,6 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+from widgets.well_plate_selector import WellPlateSelector
 from well_viewer.features.batch_export._common import (
     WELL_COLORS,
     BarGroup,
@@ -49,7 +49,6 @@ from well_viewer.features.batch_export._common import (
     _CLR_WHITE,
     get_color,
 )
-from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 # Qt-free export-execution service (A14 / X3) — safe to import at module level.
 from well_viewer.features.batch_export.service import (
     commit_staged_export,
@@ -165,7 +164,6 @@ class BatchExportPanel(QWidget):
         self._groups: list[BarGroup] = self._groups_from_persistence()
         self._active_grp = 0 if self._groups else -1
         self._auto_named_group_ids: set[int] = set()
-        self._map_btns: dict[str, _WellGridButton] = {}
         self._drag_adding = True
         self._drag_visited: set = set()
 
@@ -315,35 +313,32 @@ class BatchExportPanel(QWidget):
         hint.setContentsMargins(6, 2, 6, 2)
         layout.addWidget(hint)
 
-        map_widget = QWidget()
-        map_grid = QGridLayout(map_widget)
-        map_grid.setSpacing(2)
-        map_grid.setContentsMargins(4, 2, 4, 2)
-        for ci, col in enumerate(_PLATE_COLS):
-            lbl = QLabel(col)
-            lbl.setAlignment(Qt.AlignCenter)
-            map_grid.addWidget(lbl, 0, ci + 1)
-        for ri, row in enumerate(_PLATE_ROWS):
-            rlbl = QLabel(row)
-            rlbl.setAlignment(Qt.AlignCenter)
-            map_grid.addWidget(rlbl, ri + 1, 0)
-            for ci, col in enumerate(_PLATE_COLS):
-                tok = f"{row}{col}"
-                btn = _WellGridButton(tok)
-                self._map_btns[tok] = btn
-                map_grid.addWidget(btn, ri + 1, ci + 1)
-
-        # Per-button forwarding: enabled buttons consume mouse events, so
-        # the parent-level handlers never fire. Forward directly instead.
-        for _b in self._map_btns.values():
-            _b.setMouseTracking(True)
-            _b.mousePressEvent = self._plate_press
-            _b.mouseMoveEvent = self._plate_move
-            _b.mouseReleaseEvent = self._plate_release
-        map_widget.mousePressEvent = self._plate_press
-        map_widget.mouseMoveEvent = self._plate_move
-        map_widget.mouseReleaseEvent = self._plate_release
-        layout.addWidget(map_widget)
+        # The app's plate control, in its "paint" selection model: the plate
+        # reports the press/drag/release gesture and this panel applies it to
+        # the active group. It owns no selection of its own, because export
+        # group membership is not a set of clicked wells — dropping one well
+        # can pull in the replicate set it belongs to, and several groups
+        # overlap on the same plate with the last one winning the colour.
+        #
+        # This used to be 96 flat 28x22px QPushButtons in a QGridLayout, with
+        # each one's mousePressEvent/mouseMoveEvent/mouseReleaseEvent
+        # reassigned to this panel's methods (enabled buttons swallow mouse
+        # events, so the container's handlers never fired). Rectangles on a
+        # grid do not read as a plate, and this was the one well grid in the
+        # app that shared nothing with the others.
+        self._map_plate = WellPlateSelector()
+        apply_plate_geometry(self._map_plate, role="rail")
+        self._map_plate.setSelectionModel("paint")
+        self._map_plate.setColoredWellsLit(True)
+        self._map_plate.wellPaintPressed.connect(self._plate_press)
+        self._map_plate.wellPaintDragged.connect(self._plate_dragged)
+        self._map_plate.paintDragFinished.connect(self._plate_release)
+        # Headers stay inert. The panel's only row/column action ("One group
+        # per row / column") replaces every existing group, so putting it on a
+        # header click would make a stray click on the plate's edge destroy the
+        # groups the user had built.
+        self._map_plate.setRowColumnSelectable(False)
+        layout.addWidget(self._map_plate, 0, PLATE_ALIGNMENT)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
@@ -358,15 +353,20 @@ class BatchExportPanel(QWidget):
         self._grp_scroll.setWidget(self._grp_inner)
         layout.addWidget(self._grp_scroll, 1)
 
-    def _tok_at(self, global_pos) -> str | None:
-        for tok, btn in self._map_btns.items():
-            if btn.isVisible() and btn.rect().contains(btn.mapFromGlobal(global_pos)):
-                return tok
-        return None
+    def _all_well_tokens(self) -> list[str]:
+        """Every plate position, so a colour map can clear the ones no group
+        owns as well as set the ones that do."""
+        return [f"{row}{col}" for row in _PLATE_ROWS for col in _PLATE_COLS]
 
-    def _plate_press(self, event) -> None:
-        tok = self._tok_at(event.globalPosition().toPoint())
-        if tok is None or tok not in self._ctx.state.dataset.well_paths:
+    def _plate_press(self, tok: str) -> None:
+        """Left-press on *tok*: latch the gesture's polarity and apply it.
+
+        Whether the whole drag adds or removes is decided by the well it
+        started on, so dragging across a group's own wells removes them and
+        dragging across empty ones adds — one gesture, one direction, rather
+        than each well toggling under the cursor.
+        """
+        if tok not in self._ctx.state.dataset.well_paths:
             return
         grp = self._active_group()
         if grp is None:
@@ -375,14 +375,10 @@ class BatchExportPanel(QWidget):
         self._drag_visited = set()
         self._apply_drag(tok)
 
-    def _plate_move(self, event) -> None:
-        if not (event.buttons() & Qt.LeftButton):
-            return
-        tok = self._tok_at(event.globalPosition().toPoint())
-        if tok and tok not in self._drag_visited:
-            self._apply_drag(tok)
+    def _plate_dragged(self, tok: str) -> None:
+        self._apply_drag(tok)
 
-    def _plate_release(self, _event) -> None:
+    def _plate_release(self) -> None:
         if self._drag_visited:
             self._refresh_map()
             self._refresh_group_list()
@@ -1041,16 +1037,18 @@ class BatchExportPanel(QWidget):
         return WELL_COLORS[index % len(WELL_COLORS)]
 
     def _refresh_single_btn(self, tok: str) -> None:
-        btn = self._map_btns.get(tok)
-        if btn is None or tok not in self._ctx.state.dataset.well_paths:
+        """Repaint one well mid-drag, without the whole-plate pass.
+
+        A drag can cross dozens of wells, and each one only changes its own
+        colour; ``_refresh_map`` runs once at the end of the gesture.
+        """
+        if tok not in self._ctx.state.dataset.well_paths:
             return
         # Last group containing the well wins, matching _refresh_map.
         owner = next((gi for gi in range(len(self._groups) - 1, -1, -1)
                       if tok in self._groups[gi].wells), None)
-        if owner is not None:
-            btn.set_colors(self._group_color(owner), _CLR_WHITE)
-            return
-        btn.set_colors(theme.Colors.panel_elevated, theme.Colors.text_primary)
+        self._map_plate.setWellColor(
+            tok, self._group_color(owner) if owner is not None else None)
 
     def _refresh_map(self) -> None:
         avail = set(self._ctx.state.dataset.well_paths.keys())
@@ -1064,13 +1062,17 @@ class BatchExportPanel(QWidget):
         if grp:
             for w in grp.wells:
                 active_wells.add(w)
-        for tok, btn in self._map_btns.items():
-            if tok not in avail:
-                btn.set_colors(theme.Colors.well_unavailable, theme.Colors.text_muted, enabled=False)
-            elif tok in tok_color:
-                btn.set_colors(tok_color[tok], _CLR_WHITE, active=(tok in active_wells))
-            else:
-                btn.set_colors(theme.Colors.panel_elevated, theme.Colors.text_primary)
+        # Wells the dataset does not have are disabled rather than tinted grey
+        # by hand — the plate already draws an absent well as an empty socket,
+        # and a disabled well ignores the paint gesture for free.
+        self._map_plate.setEnabledWells(sorted(avail) or None)
+        self._map_plate.setWellColors(
+            {tok: tok_color.get(tok) for tok in self._all_well_tokens()})
+        # The active group's wells carry an accent ring on top of their group
+        # colour: which group you are editing is a different question from
+        # which group a well is in, so it gets its own channel rather than
+        # overloading the fill.
+        self._map_plate.setWellRings(sorted(active_wells & avail))
 
     def _clear_layout(self, layout) -> None:
         _clear_layout_helper(layout)

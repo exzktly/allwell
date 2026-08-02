@@ -126,7 +126,7 @@ def test_channel_roles_prefill_analyze_on_open(qapp, tmp_path):
 
 def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
     from datasets.ome_import.controller import OmeImportController
-    from widgets.plate_order_editor import _parse_well_id
+    from widgets.well_plate_selector import _parse_well_id
 
     ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
     page = ctrl.page
@@ -148,8 +148,11 @@ def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
     row, col = _parse_well_id("H12")
     from PySide6.QtCore import QPointF, Qt
     from PySide6.QtGui import QMouseEvent
-    center = page._plate._cell_rect(row, col).center()
-    page._plate.mousePressEvent(QMouseEvent(
+    # The plate is a WellPlateSelector, so its painted grid child is what
+    # handles mouse events.
+    grid = page._plate._grid
+    center = grid._cell_rect(row, col).center()
+    grid.mousePressEvent(QMouseEvent(
         QMouseEvent.Type.MouseButtonPress, QPointF(center), Qt.LeftButton,
         Qt.LeftButton, Qt.NoModifier))
     assert page.params().well_order == ("A01", "A02", "A03", "H12")
@@ -259,3 +262,62 @@ def test_analyze_redirects_a_raw_ome_tiff(qapp, tmp_path):
 def _select(combo, value):
     combo.setCurrentIndex(
         [combo.itemData(i) for i in range(combo.count())].index(value))
+
+
+def test_conversion_progress_fills_dials_on_the_acquisition_plate(qapp):
+    """The page's only progress readout used to be one run-wide bar, with an
+    8x12 plate sitting right above it that never changed during a run. The
+    plate that defines the visit order is exactly the set of wells being
+    written, so it doubles as the progress view — the same thing Subset's
+    picker does."""
+    from datasets.ome_import.controller import OmeImportController
+    from widgets.well_plate_selector import _parse_well_id
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    grid = page._plate._grid
+
+    page.set_well_fraction("A01", 2, 4)
+    assert grid._fractions[_parse_well_id("A01")] == 0.5
+    page.set_well_fraction("A01", 4, 4)
+    assert grid._fractions[_parse_well_id("A01")] == 1.0
+
+    # "Not counted yet" must not render as a definite zero-filled dial.
+    page.set_well_fraction("A02", 0, 0)
+    assert _parse_well_id("A02") not in grid._fractions
+
+    page.clear_well_fractions()
+    assert grid._fractions == {}
+    ctrl.shutdown()
+
+
+def test_progress_bar_is_hidden_until_a_conversion_starts(qapp):
+    """An idle bar reading 0% from page load describes a run nobody asked for
+    — the same 'reads as a stuck state' problem every other Datasets page's
+    status strip was fixed against."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    assert page._progress.isHidden()
+    page.set_running(True)
+    assert not page._progress.isHidden()
+    # Stays up afterwards — it is the result, not just the activity.
+    page.set_running(False)
+    assert not page._progress.isHidden()
+    ctrl.shutdown()
+
+
+def test_the_plate_is_locked_while_a_conversion_runs(qapp):
+    """It is the progress display during a run; a click would edit the very
+    order being converted."""
+    from datasets.ome_import.controller import OmeImportController
+
+    ctrl = OmeImportController(on_open_in_analyze=lambda *_a: None)
+    page = ctrl.page
+    assert page._plate.isEnabled()
+    page.set_running(True)
+    assert not page._plate.isEnabled()
+    page.set_running(False)
+    assert page._plate.isEnabled()
+    ctrl.shutdown()

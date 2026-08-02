@@ -39,7 +39,9 @@ import theme
 from util.plate_grid import serpentine_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
+from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.plate_order_editor import PlateOrderEditor
+from widgets.plate_progress import fraction_or_none
 from datasets.ome_import.ome_import_compute import (
     CHANNEL_ROLES,
     ConversionParams,
@@ -247,13 +249,15 @@ class OmeImportPage(QWidget):
 
         self._plate = PlateOrderEditor(self)
         self._plate.orderChanged.connect(lambda _=None: self.refresh_readout())
-        # Capped like every other Datasets/Analyze plate map (PlateProgress's
-        # own 330x210 convention) -- PlateOrderEditor's QSizePolicy.Expanding
-        # otherwise grows to fill the scroll area's full width/height, which
-        # used to push the Convert button (now above it) far below the fold.
-        self._plate.setMaximumWidth(330)
-        self._plate.setMaximumHeight(210)
-        outer.addWidget(self._plate)
+        # The one sizing and placement rule every plate map in the app goes
+        # through. The "editor" role hides the built-in action row (this page
+        # carries its own Generate/Clear buttons below the plate), keeps the
+        # plate interactive, and takes the shared size caps rather than this
+        # page restating them as literals — which is how it ended up the one
+        # plate whose numbers had to be kept in step with plate_geometry.py by
+        # hand.
+        apply_plate_geometry(self._plate, role="editor")
+        outer.addWidget(self._plate, 0, PLATE_ALIGNMENT)
 
         btn_row = QWidget(self)
         bl = QHBoxLayout(btn_row)
@@ -373,6 +377,11 @@ class OmeImportPage(QWidget):
         self._progress = QProgressBar(self)
         self._progress.setRange(0, 100)
         self._progress.setValue(0)
+        # Hidden until a conversion actually starts. An idle bar reading 0%
+        # from the moment the page loads describes a run that has not been
+        # asked for — the same "reads as a stuck state" problem every other
+        # Datasets page's status strip was fixed against.
+        self._progress.setVisible(False)
         outer.addWidget(self._progress)
 
         self._log_sep = _hrule(self)
@@ -473,6 +482,19 @@ class OmeImportPage(QWidget):
     def clear_log(self) -> None:
         self._status.clear()
 
+    def set_well_fraction(self, well_id: str, done: int, total: int) -> None:
+        """Fill *well_id*'s dial on the acquisition plate.
+
+        The plate that defines the visit order doubles as the progress view
+        while a conversion runs, the same way Subset's well picker does — the
+        wells on it are exactly the wells being written, so a second plate map
+        would be a copy of this one.
+        """
+        self._plate.setWellFraction(well_id, fraction_or_none(done, total))
+
+    def clear_well_fractions(self) -> None:
+        self._plate.clearWellFractions()
+
     def set_progress(self, done: int, total: int) -> None:
         if total <= 0:
             self._progress.setRange(0, 0)  # indeterminate
@@ -484,9 +506,15 @@ class OmeImportPage(QWidget):
         self._run_btn.setText("Converting…" if running else "▶  Convert")
         self._run_btn.setEnabled(not running and self._can_convert())
         self._queue_btn.setEnabled(not running and self._can_convert())
+        # The bar appears with the run and stays afterwards to show the result;
+        # what it must not do is sit at 0% before anything has been asked for.
         if running:
+            self._progress.setVisible(True)
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
+        # Locked for the run's duration — the plate is the progress display
+        # now, and a click would edit the very order being converted.
+        self._plate.setEnabled(not running)
 
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root

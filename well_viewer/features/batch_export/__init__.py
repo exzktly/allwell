@@ -9,11 +9,9 @@ Each batch panel lives in its own module:
 from .base_panel import BatchExportPanel
 from .bar_panel import BarBatchExportPanel
 from .scatter_panel import ScatterBatchExportPanel
-from .well_grid_button import _WellGridButton
 
 __all__ = [
     "BatchExportPanel",
     "BarBatchExportPanel",
     "ScatterBatchExportPanel",
-    "_WellGridButton",
 ]

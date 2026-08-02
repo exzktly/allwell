@@ -30,6 +30,10 @@ class OmeImportWorker(QThread):
 
     logLine = Signal(str)          # one line for the status window
     progress = Signal(int, int)    # (planes_written, total_planes)
+    # (well, done, total) — one well's share of the conversion, so its cell on
+    # the acquisition plate can fill as a dial rather than the page having only
+    # a single run-wide bar. Quantised in ``apply.convert``; see that module.
+    wellFraction = Signal(str, int, int)
     succeeded = Signal(str, str)   # (destination root, summary line)
     failed = Signal(str)           # user-facing error message
 
@@ -60,6 +64,7 @@ class OmeImportWorker(QThread):
                 log=self.logLine.emit,
                 is_cancelled=self.isInterruptionRequested,
                 progress=self.progress.emit,
+                well_progress=self.wellFraction.emit,
             )
         except OmeExplodeCancelled:
             self.failed.emit(

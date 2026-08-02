@@ -29,16 +29,21 @@ def qapp():
 
 
 def _click_well(w: PlateOrderEditor, well_id: str) -> None:
-    """Synthesise a left-click on the centre of *well_id*'s cell."""
-    from widgets.plate_order_editor import _parse_well_id
+    """Synthesise a left-click on the centre of *well_id*'s cell.
+
+    The editor is a ``WellPlateSelector``, so the painted grid that handles
+    mouse events is the ``_grid`` child, not the card itself.
+    """
+    from widgets.well_plate_selector import _parse_well_id
 
     row, col = _parse_well_id(well_id)
-    center = w._cell_rect(row, col).center()
+    grid = w._grid
+    center = grid._cell_rect(row, col).center()
     ev = QMouseEvent(
         QMouseEvent.Type.MouseButtonPress, QPointF(center), Qt.LeftButton,
         Qt.LeftButton, Qt.NoModifier,
     )
-    w.mousePressEvent(ev)
+    grid.mousePressEvent(ev)
 
 
 def test_set_order_round_trips(qapp):

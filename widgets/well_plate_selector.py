@@ -967,13 +967,27 @@ class _PlateGrid(QWidget):
         90° offset and the negative span.
         """
         base = QColor(base)
+        relief = self._DIAL_RELIEF
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(self._sphere_gradient(wr, self._lighten(base, 0.55))))
+        p.setBrush(QBrush(self._sphere_gradient(
+            wr, self._remaining_tone(base), relief)))
         p.drawEllipse(wr)
         span = max(0.0, min(1.0, fraction))
         if span > 0.0:
-            p.setBrush(QBrush(self._sphere_gradient(wr, base)))
-            p.drawPie(wr, 90 * 16, -int(round(span * 360.0 * 16)))
+            angle = -int(round(span * 360.0 * 16))
+            p.setBrush(QBrush(self._sphere_gradient(wr, base, relief)))
+            p.drawPie(wr, 90 * 16, angle)
+            # Stroke the wedge — its two radii and its arc — so the division
+            # reads even where the two fills are closest. Tone alone cannot
+            # carry it for every state: green's halves stay within 33 luminance
+            # of each other under the highlight even at the damped relief, and a
+            # 96-well plate draws each of these about twelve pixels across.
+            # Skipped at a full dial, where the "boundary" is the rim the well
+            # already has and stroking it again only thickens that line.
+            if span < 1.0:
+                p.setBrush(Qt.NoBrush)
+                p.setPen(QPen(base.darker(170), max(1.0, wr.width() * 0.03)))
+                p.drawPie(wr, 90 * 16, angle)
         # Exactly the rim and specular highlight a plain well gets, at the same
         # widths, so a dial is the same object as every other well and not a
         # flat disc that appeared where a sphere used to be. A well that starts
@@ -985,8 +999,50 @@ class _PlateGrid(QWidget):
         p.drawEllipse(wr)
         self._paint_specular(p, wr)
 
+    #: How much of a plain well's relief a *dial* keeps.
+    #:
+    #: A dial draws two tones in the same pixels, and the sphere's highlight
+    #: blends toward white — which compresses two tones *together*, because the
+    #: nearer both are to white the smaller the gap between them. At full
+    #: relief the done and remaining halves of a green well came within 25
+    #: luminance of each other under the highlight, against 39 at the centre,
+    #: and the done wedge was itself 35% of the way to white: reported as "the
+    #: completed portion is too light, I can't see the difference".
+    #:
+    #: 0.43 puts the highlight at 15% toward white and the shadow at
+    #: ``darker(115)``, which lifts that worst case to 33. A plain well keeps
+    #: the full relief (see :meth:`_paint_lit`): it has no internal boundary for
+    #: the highlight to compress, so its shading costs nothing. Only the dial
+    #: carries a second signal in the same pixels, so only the dial pays.
+    _DIAL_RELIEF = 0.43
+
     @classmethod
-    def _sphere_gradient(cls, wr: QRectF, tone: QColor) -> QRadialGradient:
+    def _remaining_tone(cls, base: QColor) -> QColor:
+        """The unfinished half of a dial: the state's colour, paler."""
+        return cls._lighten(QColor(base), 0.55)
+
+    @classmethod
+    def _sphere_stops(cls, tone: QColor, relief: float = 1.0):
+        """The three gradient stops for *tone*, scaled by *relief*.
+
+        Separated from :meth:`_sphere_gradient` so the tones can be measured
+        without painting — the guard that the two halves of a dial stay apart
+        is arithmetic over exactly these values.
+
+        The highlight blends toward white rather than calling
+        ``tone.lighter(150)``: at these tokens' value that call desaturates to
+        pure white, so the sphere's upper-left blew out to a colourless patch on
+        every lit well. ``darker`` needs no such treatment — lowering value
+        never touches saturation.
+        """
+        relief = max(0.0, min(1.0, float(relief)))
+        return (cls._lighten(tone, 0.35 * relief),
+                QColor(tone),
+                tone.darker(int(round(100 + 35 * relief))))
+
+    @classmethod
+    def _sphere_gradient(cls, wr: QRectF, tone: QColor,
+                         relief: float = 1.0) -> QRadialGradient:
         """The shading that makes a well read as a sphere, in *tone*.
 
         Shared by the plain well and by each half of a progress dial, so a well
@@ -994,20 +1050,19 @@ class _PlateGrid(QWidget):
         itself. Two separate flat-fill and gradient-fill paths had the dial
         rendering as a flat disc beside spherical neighbours, which read as a
         different kind of object rather than the same well further along.
+
+        *relief* scales the shading. A dial passes :attr:`_DIAL_RELIEF`, for the
+        reason recorded there.
         """
         grad = QRadialGradient(
             wr.center().x() - wr.width() * 0.15,
             wr.center().y() - wr.height() * 0.20,
             wr.width() * 0.75,
         )
-        # The highlight blends toward white rather than calling
-        # ``tone.lighter(150)``: at these tokens' value that call desaturates to
-        # pure white, so the sphere's upper-left blew out to a colourless patch
-        # on every lit well. ``darker`` needs no such treatment — lowering value
-        # never touches saturation.
-        grad.setColorAt(0.0, cls._lighten(tone, 0.35))
-        grad.setColorAt(0.55, tone)
-        grad.setColorAt(1.0, tone.darker(135))
+        hi, mid, lo = cls._sphere_stops(tone, relief)
+        grad.setColorAt(0.0, hi)
+        grad.setColorAt(0.55, mid)
+        grad.setColorAt(1.0, lo)
         return grad
 
     @staticmethod

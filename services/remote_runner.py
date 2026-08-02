@@ -2066,6 +2066,36 @@ def _conda_env_guard(selector: EnvSelector) -> str:
     )
 
 
+def _scheduler_handoff_lines(launcher: str, *, batch: int | None = None) -> str:
+    """The lines announcing that the run is now waiting on a scheduler.
+
+    Emitted by **every** launch path, which is the point of it being a function.
+    A scheduler-backed host queues the pipeline instead of starting it, and a
+    queue wait looks exactly like a hang: the upload finishes, the log stops,
+    and nothing on screen says what is being waited for. The non-batched path
+    said so; the batched one composed the same launcher and said nothing, so a
+    batched run went quiet at the precise moment it began waiting.
+
+    Returns ``""`` when the host has no launcher, so a caller can emit it
+    unconditionally — a direct-ssh host is not waiting for anything and must not
+    be told that it is.
+
+    The job id is deliberately absent here. ``$SLURM_JOB_ID`` is written to the
+    ``.slurm`` sidecar from *inside* the allocation, so at this moment it does
+    not exist yet; the id first appears in the scheduler's own stderr, which
+    ``ProgressTracker`` picks up.
+    """
+    launcher = (launcher or "").strip()
+    if not launcher:
+        return ""
+    where = f"batch {batch}: " if batch is not None else ""
+    return (
+        f"[remote] scheduler: {where}requesting allocation via: {launcher}\n"
+        f"[remote] scheduler: waiting for the scheduler to grant a node "
+        f"(this can queue)…\n"
+    )
+
+
 def _compose_remote_cmd(
     launcher: str,
     remote_pidfile: str,
@@ -3737,6 +3767,11 @@ class _BatchedRemoteProcess:
                     f"[remote] batch {batch_idx + 1}: upload complete "
                     f"({sent_bytes / (1024**2):.1f} MB); launching pipeline\n"
                 )
+                # Each batch is its own launch, so on a scheduler-backed host
+                # each one queues separately. Say which batch is waiting — with
+                # several of them that is the first thing worth knowing.
+                self._log(_scheduler_handoff_lines(
+                    self._runner.host.compute_launcher, batch=batch_idx + 1))
 
                 # Build the remote command for this batch. Input dir
                 # is shared across batches; the pipeline scans it
@@ -5147,13 +5182,10 @@ class RemoteRunner:
         # Surface the scheduler hand-off so a queue wait reads as "waiting",
         # not a hang. The ``[remote] scheduler: allocation granted …`` line
         # (emitted from inside the srun step) follows once a node is granted.
-        if self.host.compute_launcher.strip() and not cache_hit:
-            log(
-                f"[remote] scheduler: requesting allocation via: "
-                f"{self.host.compute_launcher.strip()}\n"
-                f"[remote] scheduler: waiting for the scheduler to grant a "
-                f"node (this can queue)…\n"
-            )
+        if not cache_hit:
+            # A cache hit short-circuits to a ``true`` no-op and consumes no
+            # allocation, so it is not waiting for one.
+            log(_scheduler_handoff_lines(self.host.compute_launcher))
 
         popen = subprocess.Popen(
             ssh_argv,

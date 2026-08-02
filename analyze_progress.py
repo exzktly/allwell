@@ -27,12 +27,125 @@ import time as _time
 from PySide6.QtCore import QTimer
 
 
+def _fmt_secs(secs: float) -> str:
+    """A duration for a label: ``42s``, ``7m03s``, ``2h15m``.
+
+    Module-level because two live clocks render into this pane — the ETA
+    counting down and the scheduler wait counting up — and two spellings of the
+    same duration in the same window is how they come to disagree.
+    """
+    secs = int(round(max(0.0, secs)))
+    if secs >= 3600:
+        return f"{secs // 3600}h{(secs % 3600) // 60:02d}m"
+    if secs >= 60:
+        return f"{secs // 60}m{secs % 60:02d}s"
+    return f"{secs}s"
+
+
 class AnalyzeProgressMixin:
     """Progress-event rendering for ``AnalyzeTab``.
 
     Expects the host to provide ``_dashboard``, ``_log_line``, ``_well_total``
     / ``_well_done`` / ``_well_repeats``, and ``_pipeline_started_at``.
     """
+
+    #: How often the log repeats what the run is waiting for while a scheduler
+    #: queues it. A queue wait can run to hours and is *normal*, so the status
+    #: line carries the live clock and the log gets a breadcrumb at this
+    #: interval — often enough that scrolling back explains the gap, rarely
+    #: enough that it does not bury the run's real events.
+    _SCHED_BREADCRUMB_S = 120.0
+
+    def _on_scheduler(self, state: str, job_id: str, launcher: str) -> None:
+        """A scheduler queued this run, or has just granted it a node.
+
+        The reported symptom this answers: after "launching pipeline" the run
+        went silent with the status still reading ``Transferring… 100%``, and
+        nothing said it was queued. Two separate causes — the batched launcher
+        announced nothing, and ``set_transfer(None)`` fires only on a *compute*
+        event, which by definition has not happened yet while the job waits.
+        """
+        if state == "granted":
+            self._stop_scheduler_timer()
+            self._set_scheduler_status(
+                f"Allocation granted{f' — job {job_id}' if job_id else ''}; "
+                f"starting the pipeline…")
+            return
+        # The upload is over and the pipeline has not begun. Retract the
+        # transfer label here rather than waiting for a compute event, which is
+        # exactly what never arrives during a queue wait.
+        self._dashboard.set_transfer(None)
+        if getattr(self, "_sched_since", None) is None:
+            self._sched_since = _time.monotonic()
+            self._sched_breadcrumb_at = self._sched_since
+        # "queued" carries the job id, "waiting" the launcher; each arrives in
+        # its own line, so keep whichever we have rather than overwriting one
+        # with the other's blank.
+        if job_id:
+            self._sched_job = job_id
+        if launcher:
+            self._sched_launcher = launcher
+        self._render_scheduler()
+        timer = getattr(self, "_sched_timer", None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setInterval(1000)
+            timer.timeout.connect(self._render_scheduler)
+            self._sched_timer = timer
+        if not timer.isActive():
+            timer.start()
+
+    def _render_scheduler(self) -> None:
+        """Write the live wait to the status line; breadcrumb it periodically."""
+        since = getattr(self, "_sched_since", None)
+        if since is None:
+            return
+        waited = _time.monotonic() - since
+        job = getattr(self, "_sched_job", "")
+        self._set_scheduler_status(
+            f"Waiting for the scheduler — {_fmt_secs(waited)}"
+            f"{f' (job {job})' if job else ''}")
+        last = getattr(self, "_sched_breadcrumb_at", since)
+        if waited > 0 and _time.monotonic() - last >= self._SCHED_BREADCRUMB_S:
+            self._sched_breadcrumb_at = _time.monotonic()
+            launcher = getattr(self, "_sched_launcher", "")
+            # The request goes in the breadcrumb because an unsatisfiable one —
+            # a partition that does not exist, a --gres the cluster cannot
+            # honour, a --time past the queue's limit — is the usual reason a
+            # job queues indefinitely, and seeing it beside the elapsed time is
+            # what lets the user recognise that without leaving the app.
+            self._log_line(
+                f"[info] still waiting for the scheduler after "
+                f"{_fmt_secs(waited)}"
+                f"{f' (job {job})' if job else ''}"
+                f"{f'; requested: {launcher}' if launcher else ''}\n",
+                "INFO",
+            )
+
+    def _set_scheduler_status(self, text: str) -> None:
+        """Write the status line and remember that this text is ours.
+
+        The status line has several writers (the finalize phase, the plate-wide
+        transfer). Recording ownership is what lets the scheduler message be
+        retracted when the wait ends without stomping a line somebody else put
+        there in the meantime.
+        """
+        self._sched_status_owned = True
+        self._dashboard.set_status(text)
+
+    def _clear_scheduler_status(self) -> None:
+        """Drop the scheduler message once, if it is still the one on screen."""
+        if getattr(self, "_sched_status_owned", False):
+            self._sched_status_owned = False
+            self._dashboard.set_status("")
+
+    def _stop_scheduler_timer(self) -> None:
+        timer = getattr(self, "_sched_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+        self._sched_since = None
+        self._sched_job = ""
+        self._sched_launcher = ""
 
     def _update_eta(self, done: int, total: int) -> None:
         # Remember the latest progress snapshot so the tick timer can
@@ -85,22 +198,13 @@ class AnalyzeProgressMixin:
             self._dashboard.set_eta("Finalizing…")
             return
         deadline = getattr(self, "_eta_deadline", None)
-
-        def _fmt(secs: float) -> str:
-            secs = int(round(max(0.0, secs)))
-            if secs >= 3600:
-                return f"{secs // 3600}h{(secs % 3600) // 60:02d}m"
-            if secs >= 60:
-                return f"{secs // 60}m{secs % 60:02d}s"
-            return f"{secs}s"
-
         if deadline is None:
             # Pipeline is running but no well has completed yet — show a
             # placeholder so the user sees the timer is alive.
             self._dashboard.set_eta("ETA")
             return
         remaining = deadline - _time.monotonic()
-        self._dashboard.set_eta(f"ETA {_fmt(remaining)}")
+        self._dashboard.set_eta(f"ETA {_fmt_secs(remaining)}")
 
     def _stop_eta_timer(self) -> None:
         timer = getattr(self, "_eta_timer", None)
@@ -109,6 +213,11 @@ class AnalyzeProgressMixin:
         self._eta_done = 0
         self._eta_total = 0
         self._eta_deadline = None
+        # Called at the phase boundaries and at the end of a run. Nothing is
+        # queued at any of them, and a scheduler clock still ticking after the
+        # run finished would be the same false "still waiting" this change
+        # exists to remove. A later hand-off restarts it.
+        self._stop_scheduler_timer()
 
     def _apply_grouping_event(self, kind: str, payload: object) -> None:
         """Render the grouping phase's own events onto the dashboard.
@@ -145,7 +254,17 @@ class AnalyzeProgressMixin:
         """Render a progress event from :class:`ProgressTracker` to the UI."""
         if kind in self._COMPUTE_PHASE_EVENTS:
             self._dashboard.set_transfer(None)
-        if kind == "well_total":
+            # The pipeline is demonstrably running, so whatever it was queued
+            # behind is over. A backstop for a host whose launcher announces
+            # nothing on the way out of the queue: without it the clock would
+            # keep counting a wait that had already ended, and the "allocation
+            # granted" line would sit there while wells were computing.
+            self._stop_scheduler_timer()
+            self._clear_scheduler_status()
+        if kind == "sched":
+            state, job_id, launcher = payload  # type: ignore[misc]
+            self._on_scheduler(str(state), str(job_id), str(launcher))
+        elif kind == "well_total":
             # Announced once at the start of the run, and again if more wells
             # finish than were announced (the tracker treats its total as a
             # floor). Carry the running count across rather than resetting to

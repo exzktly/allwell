@@ -362,7 +362,11 @@ def test_progress_dial_is_the_same_shape_as_a_plain_well(qtbot):
     a rim at 0.04x width and a specular arc — so a progressing well appeared as
     a flat disc with an outer band beside spherical grey neighbours. Both now
     go through the same `_sphere_gradient` / `_paint_specular` helpers, so a
-    dial is shaded, rimmed and highlighted exactly like the well it replaces.
+    dial is shaded, rimmed and highlighted like the well it replaces.
+
+    "Like", not "identically": the dial's relief is damped, because the sphere's
+    highlight was compressing its two tones together until the completed portion
+    could not be told from the unfinished one. See the assertions below.
     """
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QImage, QPainter
@@ -391,14 +395,25 @@ def test_progress_dial_is_the_same_shape_as_a_plain_well(qtbot):
     full = render(lambda pr: grid._paint_fraction(pr, rect, base, 1.0, False))
 
     # Shaded, not flat: the lit upper-left is lighter than the lower-right in
-    # both, by a comparable amount.
+    # both. The dial is deliberately *gentler* about it.
     def shading(img):
         return (QColor(img.pixelColor(14, 14)).lightnessF()
                 - QColor(img.pixelColor(26, 26)).lightnessF())
 
     assert shading(plain) > 0.02, "a plain well is shaded as a sphere"
-    assert shading(full) == pytest.approx(shading(plain), abs=0.05), (
-        "a full dial is shaded like one too")
+    assert shading(full) > 0.02, "and so is a dial — it is not a flat disc"
+    # ...but not as much. A dial draws two tones in the same pixels, and the
+    # sphere's highlight blends toward white, which compresses two tones
+    # together: at the plain well's full relief the done and remaining halves of
+    # a green well came within 25 luminance of each other under the highlight,
+    # and the completed wedge read as washed pale. The dial gives up relief
+    # (``_PlateGrid._DIAL_RELIEF``) so the boundary survives; a plain well has
+    # no boundary to lose and keeps all of it. Asserted rather than tolerated,
+    # so re-unifying the two cannot happen quietly.
+    assert shading(full) < shading(plain), (
+        "a dial trades relief for a legible boundary")
+    assert shading(full) > shading(plain) * 0.25, (
+        "but not so much that it stops reading as the same kind of object")
     # And the specular highlight is present in both.
     assert QColor(full.pixelColor(20, 8)).lightnessF() > \
         QColor(full.pixelColor(20, 20)).lightnessF()

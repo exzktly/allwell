@@ -271,3 +271,84 @@ def test_clearing_an_absent_transfer_leaves_other_status_text_alone(qapp):
     d.set_status("Running…")
     d.set_transfer(None)
     assert d._status.text() == "Running…"
+
+
+# ── a scheduler wait counts up instead of reading "Transferring… 100%" ───────
+
+def test_the_wait_replaces_the_stale_transfer_label(qapp):
+    """The reported symptom. ``set_transfer(None)`` fires only on a *compute*
+    event, and during a queue wait no compute event has happened — so the last
+    thing written stayed on screen while the run sat in SLURM's queue."""
+    host = _progress_host(qapp)
+    host._dashboard.set_transfer(1.0)
+    assert host._dashboard.transfer() == 1.0
+
+    host._apply_progress_event("sched", ("waiting", "", "srun -p gpu"))
+    assert host._dashboard.transfer() is None
+    assert "Waiting for the scheduler" in host._dashboard._status.text()
+
+
+def test_the_wait_names_the_job_once_the_scheduler_does(qapp):
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("waiting", "", "srun -p gpu"))
+    assert "job" not in host._dashboard._status.text(), "no id exists yet"
+
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    assert "4812345" in host._dashboard._status.text()
+
+
+def test_the_wait_counts_up(qapp):
+    import time as _time
+
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    host._sched_since = _time.monotonic() - 245
+    host._render_scheduler()
+    assert "4m05s" in host._dashboard._status.text()
+
+
+def test_a_long_wait_repeats_itself_in_the_log(qapp):
+    """With the request in it: an unsatisfiable one is the usual reason a job
+    queues indefinitely, and it is not otherwise visible from the app."""
+    logged: list[str] = []
+    host = _progress_host(qapp)
+    host._log_line = lambda text, level="INFO": logged.append(text)
+
+    host._apply_progress_event("sched", ("waiting", "", "srun -p nonesuch"))
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    host._sched_since -= 300
+    host._sched_breadcrumb_at -= 300
+    host._render_scheduler()
+
+    assert logged, "a long wait must leave a trace in the log"
+    assert "still waiting for the scheduler" in logged[-1]
+    assert "4812345" in logged[-1] and "srun -p nonesuch" in logged[-1]
+
+
+def test_being_granted_stops_the_clock(qapp):
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    host._apply_progress_event("sched", ("granted", "4812345", ""))
+    assert host._sched_since is None
+    assert "Allocation granted" in host._dashboard._status.text()
+
+
+def test_computing_stops_the_clock_and_retracts_the_message(qapp):
+    """The backstop, for a launcher that announces nothing on the way out of
+    the queue: the pipeline is demonstrably running, so the wait is over."""
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    assert host._sched_since is not None
+
+    host._apply_progress_event("well_fov", ("A01", 1, 4))
+    assert host._sched_since is None
+    assert host._dashboard._status.text() == ""
+
+
+def test_the_status_line_is_only_retracted_when_it_is_ours(qapp):
+    """Several writers share this line. A scheduler event must not clear one
+    that somebody else put there."""
+    host = _progress_host(qapp)
+    host._dashboard.set_status("Finalizing…")
+    host._apply_progress_event("well_done", (2, 2))
+    assert host._dashboard._status.text() == "Finalizing…"

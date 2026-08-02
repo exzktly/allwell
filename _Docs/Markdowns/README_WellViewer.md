@@ -2058,7 +2058,15 @@ trimming a drifted tail of timepoints.
    plate map elsewhere on the page. A well being copied fills clockwise as a
    dial, the same way Analyze's run plate does, so you can see whether a big
    well is nearly through or has barely started; it ends as a full circle
-   with a ✓, or as a plain `!` well if nothing in it matched your filter.
+   with a ✓, or as a plain `!` well if nothing in it matched your filter. A
+   well you kept whole is the exception: it is copied as a single file, so it
+   goes straight from empty to full with nothing to report in between.
+
+Subsetting copies files rather than rebuilding them, so it runs at roughly
+the speed of copying the archives yourself in Finder or Explorer. Narrowing
+by well only is the fastest case — nothing inside those wells' archives has
+to be touched at all — and narrowing by timepoint or FOV costs roughly in
+proportion to how much you keep.
 
 Timepoints keep their original hours — a subset spanning 24h–72h stays
 labelled 24h–72h in the new dataset, it isn't relabelled to start at 0. Cell-

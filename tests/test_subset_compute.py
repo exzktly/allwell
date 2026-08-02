@@ -12,7 +12,7 @@ import pytest
 
 from datasets.subset import apply as subset_apply
 from datasets.subset import subset_compute as sc
-from tests.fixtures.dataset_builder import build_dataset
+from tests.fixtures.dataset_builder import JUNK_MEMBERS, STRAY_MEMBERS, build_dataset
 
 
 def _build(root, **kw):
@@ -311,3 +311,77 @@ def test_channel_scoped_role_image_filtered_by_timepoint(tmp_path):
         f"filtered-out 24h tophat image leaked into destination: {members}"
     )
     assert not any("_24h_labels" in m for m in members)
+
+
+# ── the copy moves bytes, it does not rebuild them ───────────────────────────
+def _members(path):
+    with zipfile.ZipFile(path) as zf:
+        return {i.filename: zf.read(i.filename) for i in zf.infolist() if not i.is_dir()}
+
+
+def test_a_wells_only_subset_copies_each_archive_whole(tmp_path):
+    """The commonest way to use Subset is the one a user would otherwise do by
+    hand in Finder, so it must cost what Finder costs: no member of a wells-only
+    subset is ever decompressed, and the destination archive is the source file
+    byte for byte."""
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    _build(src, junk=True, stray=True)
+    plan = sc.build_subset_plan(src, dest, sc.SubsetFilter(wells=frozenset({"A01"})))
+    subset_apply.execute_plan(plan)
+
+    assert (dest / "in" / "A01.zip").read_bytes() == (src / "in" / "A01.zip").read_bytes()
+    assert (dest / "out" / "A01_out.zip").read_bytes() == (src / "out" / "A01_out.zip").read_bytes()
+    assert not (dest / "in" / "B02.zip").exists()
+
+
+def test_a_filtered_subset_keeps_every_surviving_member_byte_identical(tmp_path):
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    _build(src, wells=["A01"], junk=True, stray=True)
+    plan = sc.build_subset_plan(
+        src, dest, sc.SubsetFilter(timepoint_labels=frozenset({"24h", "48h"})),
+    )
+    subset_apply.execute_plan(plan)
+
+    for relative in ("in/A01.zip", "out/A01_out.zip"):
+        source, copied = _members(src / relative), _members(dest / relative)
+        assert copied, f"{relative} lost every member"
+        assert set(copied) < set(source), f"{relative} was not actually filtered"
+        for name, data in copied.items():
+            assert data == source[name], f"{relative}::{name} came back different"
+
+
+def test_junk_members_survive_a_filtered_subset(tmp_path):
+    """A predicate that partitions an archive must first decide which members
+    it is entitled to judge. ``.DS_Store``, a directory entry, an AppleDouble
+    sidecar and a name that parses to nothing are not this dataset's business,
+    and dropping them silently is data loss the run would report as success."""
+    src, dest = tmp_path / "src", tmp_path / "dest"
+    _build(src, wells=["A01"], junk=True, stray=True)
+    plan = sc.build_subset_plan(
+        src, dest, sc.SubsetFilter(timepoint_labels=frozenset({"24h"})),
+    )
+    subset_apply.execute_plan(plan)
+
+    copied = _members(dest / "in" / "A01.zip")
+    for name, data in {**JUNK_MEMBERS, **STRAY_MEMBERS}.items():
+        assert copied.get(name) == data, f"{name} did not survive the filter"
+
+
+def test_the_resolved_filter_sets_are_computed_once(tmp_path):
+    """``member_matches`` reads them per member, so they must be fields rather
+    than properties that re-normalize the whole label set on every read."""
+    filt = sc.SubsetFilter(
+        timepoint_labels=frozenset({"24h", "48h"}), fovs=frozenset({"001", "F002"}),
+    )
+    assert filt.timepoint_hours == frozenset({24.0, 48.0})
+    assert filt.fov_tokens == frozenset({"1", "F002"})
+    assert filt.timepoint_hours is filt.timepoint_hours
+    assert filt.fov_tokens is filt.fov_tokens
+    # The derived fields stay out of identity: two filters built from the same
+    # three real fields are still equal and still hash alike.
+    twin = sc.SubsetFilter(
+        timepoint_labels=frozenset({"24h", "48h"}), fovs=frozenset({"001", "F002"}),
+    )
+    assert filt == twin and hash(filt) == hash(twin)
+    assert sc.SubsetFilter().timepoint_hours is None
+    assert sc.SubsetFilter().fov_tokens is None

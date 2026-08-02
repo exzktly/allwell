@@ -95,3 +95,37 @@ def test_remap_merge_end_to_end_moves_four_coupled_values_then_reopens(tmp_path)
     with (ds2 / "out" / "measurements_A01.csv").open() as f:
         src_rows = list(csv.DictReader(f))
     assert all(r["well"] == "A01" for r in src_rows)  # ds2's own copy unmodified
+
+
+def _members(path):
+    with zipfile.ZipFile(path) as zf:
+        return {i.filename: zf.read(i.filename) for i in zf.infolist() if not i.is_dir()}
+
+
+def test_a_remapped_well_keeps_every_member_byte_identical(tmp_path):
+    """A well-token remap changes only the name in each member's header, so
+    every member's data must arrive unaltered — including the junk a real
+    archive carries, which no remap rule has any opinion about."""
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+    build_dataset(ds2, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+
+    plan = build_plate_merge_plan(ds1, ds2, dest, well_map={"A01": "B02"})
+    execute_plan(plan)
+
+    source = _members(ds2 / "in" / "A01.zip")
+    copied = _members(dest / "in" / "B02.zip")
+    assert set(copied) == {n.replace("A01", "B02") for n in source}
+    for name, data in source.items():
+        assert copied[name.replace("A01", "B02")] == data, f"{name} came back different"
+
+
+def test_an_unremapped_well_is_copied_whole(tmp_path):
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    build_dataset(ds1, wells=["A01"], timepoints=["0h"], junk=True)
+    build_dataset(ds2, wells=["D04"], timepoints=["0h"], junk=True)
+
+    execute_plan(build_plate_merge_plan(ds1, ds2, dest))
+
+    assert (dest / "in" / "A01.zip").read_bytes() == (ds1 / "in" / "A01.zip").read_bytes()
+    assert (dest / "in" / "D04.zip").read_bytes() == (ds2 / "in" / "D04.zip").read_bytes()

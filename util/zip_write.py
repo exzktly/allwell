@@ -93,6 +93,8 @@ def atomic_zip(
     target: Path | str,
     *,
     compression: int = zipfile.ZIP_DEFLATED,
+    compresslevel: int | None = None,
+    durable: bool = True,
 ) -> Iterator[zipfile.ZipFile]:
     """Build the archive *target* on a staging file, publish it once verified.
 
@@ -106,13 +108,33 @@ def atomic_zip(
     Raises :class:`ZipWriteError` if nothing was written to the archive: that
     means a caller-side guard is missing, and publishing the member-less result
     would leave the user with a ``<WELL>.zip`` that macOS refuses to expand.
+
+    *compresslevel* is passed straight through to :class:`zipfile.ZipFile`.
+    The Datasets tools pass ``1``: re-deflating already-dense microscopy image
+    data at the default level 6 spends a lot of CPU for negligible size
+    reduction, and those callers are performing a container-level copy rather
+    than a size-optimization pass.
+
+    ``durable=False`` skips the two ``fsync`` calls, keeping the staging file,
+    the member-list verification and the atomic rename. Everything a *reader*
+    can observe is unchanged — the target either does not exist or holds a
+    complete, verified archive, never a readable short one — and only
+    durability across a power loss is given up. Forcing a freshly written
+    archive to disk costs the bulk of the write (measured: ~77% of the time to
+    publish a filtered plate), which is worth paying when the archive is the
+    only copy of data a hard-killed pipeline just computed, and not worth
+    paying for a copy whose source is still sitting on disk beside it and which
+    the tool's own in-progress marker already tells the next attempt to redo.
+    Callers computing new data should leave it ``True``.
     """
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = staging_path(target)
     published = False
     try:
-        with zipfile.ZipFile(tmp, "w", compression=compression) as zf:
+        with zipfile.ZipFile(
+            tmp, "w", compression=compression, compresslevel=compresslevel,
+        ) as zf:
             yield zf
             # Read the member list before close() — the write-mode handle knows
             # what it was asked to store; the re-read below says what landed.
@@ -122,7 +144,8 @@ def atomic_zip(
                 f"refusing to publish {target.name}: nothing was written to it "
                 "(a member-less archive is one macOS will not expand)"
             )
-        fsync_path(tmp)
+        if durable:
+            fsync_path(tmp)
         try:
             landed = sorted(zip_members(tmp))
         except (OSError, zipfile.BadZipFile) as exc:
@@ -136,9 +159,11 @@ def atomic_zip(
             )
         os.replace(str(tmp), str(target))
         published = True
-        # The rename itself is metadata: fsync the directory so a crash right
-        # after this can't resurrect the older archive (or no archive).
-        fsync_path(target.parent)
+        if durable:
+            # The rename itself is metadata: fsync the directory so a crash
+            # right after this can't resurrect the older archive (or no
+            # archive).
+            fsync_path(target.parent)
     finally:
         if not published:
             try:

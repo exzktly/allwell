@@ -39,9 +39,9 @@ from datasets._common.containers import (
     TIMEPOINT_HOURS_COLUMN as _TIMEPOINT_HOURS_COLUMN,
     WellFraction,
     clear_destination,
-    read_members,
-    write_zip,
+    copy_container_members,
 )
+from datasets._common.member_names import is_os_junk_member
 from datasets.concatenate.concatenate_compute import (
     IN_PROGRESS_MARKER,
     ConcatError,
@@ -71,13 +71,15 @@ def _null_sub_progress(_well: str, _done: int, _total: int) -> None:
     return None
 
 
-# Merging one well is six passes over files: for the raw input, read dataset
-# 2's archive, read dataset 1's, then write the merged one — and the same
-# three again for the QC ``<WELL>_out.zip``. :class:`WellFraction` fuses them
+# Merging one well is two passes over files: the raw input, then the QC
+# ``<WELL>_out.zip``. Each is a single publish that draws on both datasets'
+# archives at once — ``copy_container_members`` moves each member's bytes
+# straight from whichever source holds it, rather than decoding both into
+# lists and re-encoding the concatenation. :class:`WellFraction` fuses the two
 # into a single 0 → 100% dial per well, so the well's dashboard cell fills
-# once rather than six times over.
-_INPUT_SLICES = 3
-_QC_SLICES = 3
+# once rather than twice over.
+_INPUT_SLICES = 1
+_QC_SLICES = 1
 _SLICES_PER_WELL = _INPUT_SLICES + _QC_SLICES
 
 
@@ -89,23 +91,67 @@ def _detached_fraction(well: str) -> WellFraction:
 
 
 # ── container IO ─────────────────────────────────────────────────────────────
-# read_members / write_zip now live in datasets._common.containers — see the
-# import block above.
-def _rewrite_members(plan: MergePlan, members: list[tuple[str, bytes]]) -> tuple[list[tuple[str, bytes]], int]:
-    """Rewrite every member's timepoint field. Returns ``(members, unmatched)``
-    — *unmatched* counts members that didn't match the filename schema and
-    were kept unchanged (see :func:`rewrite_member_name`)."""
-    out: list[tuple[str, bytes]] = []
-    unmatched = 0
-    for name, data in members:
+# read_members / write_zip / copy_container_members live in
+# datasets._common.containers — see the import block above.
+class _MemberRename:
+    """The per-member rename :func:`copy_container_members` applies to a well.
+
+    Dataset 1's members pass through untouched; dataset 2's carry a shifted
+    timepoint field. Renaming costs nothing at the byte level — the name lives
+    in the member's headers, not in its compressed data — which is why a merge
+    can move both archives across without decoding either.
+
+    **On a well both datasets hold, dataset 2's operating-system debris is
+    left out** rather than carried. A ``.DS_Store`` names no data, so its name
+    is the only thing it has, and both datasets have the same one as soon as
+    either folder has been opened in Finder — which is the normal state of a
+    plate someone has looked at. Carried through, the two copies collided in
+    the merged archive, one was dropped by first-write-wins, and ``_verify``
+    read that drop as dataset 2's data failing to survive the merge and
+    refused to publish: two ordinary plates could not be concatenated at all,
+    for files neither the pipeline nor Review has ever read.
+
+    The skip is conditioned on there *being* a dataset-1 side (*passthrough*
+    is not ``None``) for exactly that reason — it resolves a conflict, it does
+    not clean up. On a well only dataset 2 has, nothing can collide, so
+    dropping its debris would simply delete a file the user still has in the
+    source, and would leave a well whose archive held nothing else with no
+    destination archive at all.
+
+    Nor is it a loosening of the collision check: that check exists for
+    members which *carry data*, and a collision between two of those still
+    fails it. Only :func:`is_os_junk_member`'s narrow, explicitly-named set is
+    skipped, so a file a user put in an archive on purpose still counts as
+    real and still conflicts.
+
+    :attr:`unmatched` counts dataset-2 members that didn't match the filename
+    schema and were therefore kept under their original name (see
+    :func:`rewrite_member_name`); the caller surfaces a non-zero count rather
+    than treating a silently un-offset member as a clean merge.
+    """
+
+    def __init__(self, plan: MergePlan, passthrough: Path | None) -> None:
+        self._plan = plan
+        self._passthrough = passthrough
+        self.unmatched = 0
+        self.junk_skipped = 0
+
+    def __call__(self, container: Path, name: str) -> str | None:
+        if self._passthrough is not None and container == self._passthrough:
+            return name
+        if self._passthrough is not None and is_os_junk_member(name):
+            # Only when dataset 1 holds this well too. On a well dataset 2
+            # owns alone there is nothing to collide with and nothing to
+            # prefer, so skipping would just delete the user's file.
+            self.junk_skipped += 1
+            return None
         new_name, rewrote = rewrite_member_name(
-            name, schema=plan.schema, channels=plan.channels,
-            offset_hours=plan.offset_hours, tp_format=plan.tp_format,
+            name, schema=self._plan.schema, channels=self._plan.channels,
+            offset_hours=self._plan.offset_hours, tp_format=self._plan.tp_format,
         )
         if not rewrote:
-            unmatched += 1
-        out.append((new_name, data))
-    return out, unmatched
+            self.unmatched += 1
+        return new_name
 
 
 def _copy_container_as_is(src: Path, dest_in_dir: Path) -> None:
@@ -118,50 +164,58 @@ def _copy_container_as_is(src: Path, dest_in_dir: Path) -> None:
 def merge_input(
     plan: MergePlan, well: str, c1: Path | None, c2: Path | None,
     *, fraction: WellFraction | None = None,
-) -> tuple[int, frozenset[str] | None, frozenset[str]]:
+) -> tuple[int, frozenset[str] | None, frozenset[str], int]:
     """Merge a well's raw-input container into the destination ``in/``.
 
-    Returns ``(unmatched_member_count, written_names, dropped_names)`` —
+    Returns ``(unmatched_member_count, written_names, dropped_names,
+    junk_skipped)`` —
     *written_names* is ``None`` when the well came only from dataset 1 (a pure
     byte-copy, so there's nothing dataset-2-derived to check filenames
     against). *dropped_names* is the set of member names that collided and
-    were silently skipped by :func:`write_zip` — nonzero here means real data
-    never made it into the merged archive and must not be treated as success
-    (see :func:`execute_plan` and :func:`_verify`).
+    were silently skipped by :func:`copy_container_members` — nonzero here
+    means real data never made it into the merged archive and must not be
+    treated as success (see :func:`execute_plan` and :func:`_verify`).
+    *junk_skipped* counts dataset-2 members deliberately left out as
+    operating-system debris (see :class:`_MemberRename`); it is reported in the
+    run log so the behaviour is discoverable, and is emphatically **not** part
+    of *dropped_names* — nothing was lost.
 
     *fraction* owns this well's dashboard dial; this pass claims its first
-    :data:`_INPUT_SLICES` slices — dataset 2's read, dataset 1's read, and the
-    merged write, in that order. Any of the three that has no work (the well
-    is on one side only, or the whole container is copied byte-for-byte) is
-    closed out with ``skip`` rather than left unclaimed, so a well that is in
-    fact finished doesn't leave its dial short.
+    :data:`_INPUT_SLICES` slices. A pass with no work (the well is on neither
+    side, or the whole container is copied byte-for-byte) is closed out with
+    ``skip`` rather than left unclaimed, so a well that is in fact finished
+    doesn't leave its dial short.
     """
     frac = fraction if fraction is not None else _detached_fraction(well)
     dest_zip = plan.dest.in_dir / f"{well}.zip"
     if c1 and not c2:
         _copy_container_as_is(c1, plan.dest.in_dir)
         frac.skip(_INPUT_SLICES)
-        return 0, None, frozenset()
+        return 0, None, frozenset(), 0
     if c2 and not c1:
-        rewritten, unmatched = _rewrite_members(plan, read_members(c2, progress=frac.slice_progress()))
-        frac.skip()  # no dataset-1 archive on this well
-        written, dropped = write_zip(dest_zip, rewritten, progress=frac.slice_progress())
-        return unmatched, written, dropped
+        rename = _MemberRename(plan, passthrough=None)
+        written, dropped = copy_container_members(
+            dest_zip, [c2], rename, progress=frac.slice_progress(),
+        )
+        return rename.unmatched, written, dropped, rename.junk_skipped
     if c1 and c2:
-        rewritten, unmatched = _rewrite_members(plan, read_members(c2, progress=frac.slice_progress()))
-        members1 = read_members(c1, progress=frac.slice_progress())
-        written, dropped = write_zip(dest_zip, members1 + rewritten, progress=frac.slice_progress())
-        return unmatched, written, dropped
+        # Dataset 1 first: a same-named member from dataset 2 must never
+        # displace it (see copy_container_members' first-write-wins).
+        rename = _MemberRename(plan, passthrough=c1)
+        written, dropped = copy_container_members(
+            dest_zip, [c1, c2], rename, progress=frac.slice_progress(),
+        )
+        return rename.unmatched, written, dropped, rename.junk_skipped
     frac.skip(_INPUT_SLICES)
-    return 0, None, frozenset()
+    return 0, None, frozenset(), 0
 
 
 def merge_qc_zip(
     plan: MergePlan, well: str, z1: Path | None, z2: Path | None,
     *, fraction: WellFraction | None = None,
-) -> tuple[int, frozenset[str]]:
+) -> tuple[int, frozenset[str], int]:
     """Merge a well's ``<WELL>_out.zip`` QC archive into the destination
-    ``out/``. Returns ``(unmatched_member_count, dropped_names)`` (see
+    ``out/``. Returns ``(unmatched_member_count, dropped_names, junk_skipped)`` (see
     :func:`merge_input`, whose *fraction* contract this mirrors — this pass
     claims the well's remaining :data:`_QC_SLICES` slices)."""
     frac = fraction if fraction is not None else _detached_fraction(well)
@@ -169,19 +223,21 @@ def merge_qc_zip(
     if z1 and not z2:
         shutil.copy2(z1, dest_zip)
         frac.skip(_QC_SLICES)
-        return 0, frozenset()
+        return 0, frozenset(), 0
     if z2 and not z1:
-        rewritten, unmatched = _rewrite_members(plan, read_members(z2, progress=frac.slice_progress()))
-        frac.skip()  # no dataset-1 QC archive on this well
-        _written, dropped = write_zip(dest_zip, rewritten, progress=frac.slice_progress())
-        return unmatched, dropped
+        rename = _MemberRename(plan, passthrough=None)
+        _written, dropped = copy_container_members(
+            dest_zip, [z2], rename, progress=frac.slice_progress(),
+        )
+        return rename.unmatched, dropped, rename.junk_skipped
     if z1 and z2:
-        rewritten, unmatched = _rewrite_members(plan, read_members(z2, progress=frac.slice_progress()))
-        members1 = read_members(z1, progress=frac.slice_progress())
-        _written, dropped = write_zip(dest_zip, members1 + rewritten, progress=frac.slice_progress())
-        return unmatched, dropped
+        rename = _MemberRename(plan, passthrough=z1)
+        _written, dropped = copy_container_members(
+            dest_zip, [z1, z2], rename, progress=frac.slice_progress(),
+        )
+        return rename.unmatched, dropped, rename.junk_skipped
     frac.skip(_QC_SLICES)
-    return 0, frozenset()
+    return 0, frozenset(), 0
 
 
 # ── CSV row merge ─────────────────────────────────────────────────────────────
@@ -396,7 +452,7 @@ def _verify(
     so a failure never leaves a destination that looks finished.
 
     *dropped_members* — per-well sets of zip-member names that collided
-    during the merge and were silently discarded by :func:`write_zip`. A
+    during the merge and were silently discarded by :func:`copy_container_members`. A
     merge that discarded real data must never report success, so this is
     checked first: a colliding member usually means a same-named file exists
     on both sides under a name that still "looks fine" (it exists in the
@@ -569,6 +625,7 @@ def execute_plan(
     total_unmatched = 0
     images_without_csv: list[str] = []
     dropped_members: dict[str, frozenset[str]] = {}
+    total_junk_skipped = 0
 
     callback_lock = threading.Lock()
 
@@ -579,9 +636,9 @@ def execute_plan(
             emit(f"  {well}…")
             report(well, "merging")
         fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
-        unmatched_in, in_names, dropped_in = merge_input(
+        unmatched_in, in_names, dropped_in, junk_in = merge_input(
             plan, well, in1.get(well), in2.get(well), fraction=fraction)
-        unmatched_qc, dropped_qc = merge_qc_zip(
+        unmatched_qc, dropped_qc, junk_qc = merge_qc_zip(
             plan, well, zip1.get(well), zip2.get(well), fraction=fraction)
         stats = merge_measurements(plan, well, csv1.get(well), csv2.get(well), ds2_in_names=in_names)
         fraction.finish()
@@ -602,23 +659,32 @@ def execute_plan(
         if (in2.get(well) or zip2.get(well)) and not csv2.get(well):
             well_images_without_csv.append(f"{well} (dataset 2)")
             well_warned = True
-        return well, stats, unmatched_total, well_dropped, well_images_without_csv, well_warned
+        return (well, stats, unmatched_total, well_dropped, well_images_without_csv,
+                well_warned, junk_in + junk_qc)
 
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(all_wells))) as ex:
         futures = [ex.submit(_merge_one_well, well) for well in all_wells]
         for fut in as_completed(futures):
-            well, stats, unmatched_total, well_dropped, well_images_without_csv, well_warned = fut.result()
+            (well, stats, unmatched_total, well_dropped, well_images_without_csv,
+             well_warned, well_junk) = fut.result()
             well_stats[well] = stats
             total_unmatched += unmatched_total
             if well_dropped:
                 dropped_members[well] = well_dropped
             images_without_csv.extend(well_images_without_csv)
+            total_junk_skipped += well_junk
             report(well, "warned" if well_warned else "merged")
 
     if total_unmatched:
         emit(
             f"Note: {total_unmatched} file(s) didn't match the filename "
             "schema and were copied unchanged (their timepoint wasn't shifted)."
+        )
+    if total_junk_skipped:
+        emit(
+            f"Note: left out {total_junk_skipped} operating-system file(s) "
+            "(.DS_Store and the like) from dataset 2's archives — dataset 1's "
+            "copies of them are already in the merged archives."
         )
     if images_without_csv:
         emit(

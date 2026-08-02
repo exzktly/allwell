@@ -14,6 +14,8 @@ through ``app._app_state.playground`` in headless tests.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 
 import process_microscopy as pm
@@ -24,7 +26,9 @@ from well_viewer.features.image_browser.image_table.controller import (
 from well_viewer.features.image_browser.playground.renderer import (
     build_playground_rgb, render_playground_display,
 )
-from well_viewer.features.image_browser.playground.worker import request_reference_fields
+from well_viewer.features.image_browser.playground.worker import (
+    request_reference_fields, request_stardist_labels,
+)
 
 
 def _st(ctx):
@@ -159,10 +163,39 @@ def _read_widgets_into_state(ctx) -> None:
     st.mesh_sigma = _read_float(win, "_playground_mesh_sigma_edit", st.mesh_sigma)
     st.qc_min_area = _read_float(win, "_playground_qc_min_area_edit", st.qc_min_area)
     st.qc_max_area = _read_float(win, "_playground_qc_max_area_edit", st.qc_max_area)
+    _read_seg_thresholds(win, st)
     lut = getattr(win, "_playground_cmap_cb", None)
     if lut is not None and hasattr(lut, "lut"):
         name = lut.lut()
         st.cmap_name = (name + "_r") if (hasattr(lut, "isReversed") and lut.isReversed()) else name
+
+
+def _read_seg_thresholds(win, st) -> None:
+    """Pull the two StarDist threshold edits into state.
+
+    Blank / ``auto`` means the pretrained model's own default — the same rule the
+    CLI and the Analyze form use, applied by the same
+    ``pipeline.stardist.parse_threshold``. An out-of-range entry is *reported*,
+    not quietly treated as blank: silently segmenting with a different threshold
+    than the one on screen is the substitution this codebase keeps banning.
+    """
+    from pipeline.stardist import parse_threshold
+    errors: list[str] = []
+    for attr, field, label in (
+        ("_playground_seg_prob_edit", "seg_prob_thresh", "Probability"),
+        ("_playground_seg_nms_edit", "seg_nms_thresh", "Overlap (NMS)"),
+    ):
+        e = getattr(win, attr, None)
+        if e is None:
+            continue
+        try:
+            setattr(st, field, parse_threshold(e.text()))
+        except ValueError:
+            setattr(st, field, None)
+            errors.append(label)
+    st.seg_param_error = (
+        f"{' and '.join(errors)} must be between 0 and 1 — using the model's "
+        f"default instead" if errors else "")
 
 
 # ── LUT ──────────────────────────────────────────────────────────────────────
@@ -200,33 +233,111 @@ def _set_status(win, text: str) -> None:
 
 # ── main render ──────────────────────────────────────────────────────────────
 
+def _load_loose_frame(ctx, path: str):
+    """Load one image file straight from disk, cached by path.
+
+    Uses the pipeline's own ``load_2d_gray``, so the array is what a batch run
+    would have segmented rather than a lookalike read. Cached in ``image_cache``
+    because ``playground_on_change``'s correction memo is keyed on the returned
+    object's ``id()`` — a fresh array per call would miss it every time and
+    re-run the (~1.8 s at 1024²) correction on every keystroke.
+    """
+    cache = _st(ctx).image_cache
+    key = ("loose", path)
+    if key in cache:
+        return cache[key]
+    try:
+        arr = pm.load_2d_gray(Path(path))
+    except Exception as exc:
+        # Deliberately broad: the user can point this at any file, and each
+        # imaging library raises its own type for "that is not an image I can
+        # read" (tifffile's TiffFileError descends straight from Exception, not
+        # OSError). Not silent — it is logged here and named in the status line
+        # by the caller, so a file that will not open says so.
+        from well_viewer.core.safe import swallowed
+        swallowed(f"playground: could not read loose image {path!r}: {exc}")
+        return None
+    cache[key] = arr
+    return arr
+
+
+def _resolve_frame(ctx):
+    """The frame to work on: ``(raw, label, frame_key)``, or ``(None, msg, None)``.
+
+    Two sources, in priority order. A loose image opened from disk wins — it is
+    an explicit "work on this file" act and does not need a dataset at all. With
+    no loose image, the frame is the dataset one addressed by the sidebar plate's
+    well plus the channel / timepoint / FOV combos.
+    """
+    st = _st(ctx)
+    loose = str(st.loose_image_path or "").strip()
+    if loose:
+        raw = _load_loose_frame(ctx, loose)
+        if raw is None:
+            return None, f"Could not read {Path(loose).name}.", None
+        # An arbitrary file has no pipeline-produced segmentation, so the only
+        # mask it can show is one the live preview computes.
+        st.mask_arr = None
+        return raw, Path(loose).name, ("loose", loose)
+
+    if not (st.well and st.channel and st.timepoint and st.fov):
+        return None, "Select a well, channel, timepoint, and FOV — or open a single image.", None
+    if ctx.state.dataset.data_dir is None:
+        return None, "Load a dataset first, or open a single image.", None
+    raw = _load_array(ctx, st.image_cache, st.well, st.channel, st.timepoint,
+                      st.fov, use_tophat=False)
+    if raw is None:
+        return None, "No raw image for the selected frame.", None
+    st.mask_arr = _load_mask_array(ctx, st.image_cache, st.well, st.timepoint, st.fov)
+    return (raw,
+            f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}",
+            (st.well, st.channel, st.timepoint, st.fov))
+
+
+def _effective_correction_modes(ctx, *, loose: bool) -> tuple[str, str, str]:
+    """``(flatfield_mode, background_method, refusal)`` for this render.
+
+    The reference-well modes (``empty_well`` / ``basic``) estimate their field
+    from a whole reference well, which a lone file on disk does not have. Rather
+    than render an uncorrected frame while the controls still claim a correction
+    is applied, those modes are dropped for loose images and *named* in the
+    returned refusal so the status line can say what did not run.
+    """
+    st = _st(ctx)
+    ff_mode = st.flatfield_mode
+    bg_method = st.background_method if st.source == "corrected" else "none"
+    if not loose:
+        return ff_mode, bg_method, ""
+    dropped: list[str] = []
+    if ff_mode in ("empty_well", "basic"):
+        dropped.append(f"flat-field {ff_mode}")
+        ff_mode = "none"
+    if bg_method == "empty_well":
+        dropped.append("background empty_well")
+        bg_method = "none"
+    if not dropped:
+        return ff_mode, bg_method, ""
+    return ff_mode, bg_method, (
+        f"{' and '.join(dropped)} need a loaded plate to sample — not applied")
+
+
 def playground_on_change(ctx) -> None:
     """Reload + recorrect + rerender on any selector / param / toggle change."""
     st = _st(ctx)
     win = ctx.window
     _read_widgets_into_state(ctx)
-    if not (st.well and st.channel and st.timepoint and st.fov):
-        _set_status(win, "Select a well, channel, timepoint, and FOV.")
-        return
-    if ctx.state.dataset.data_dir is None:
-        _set_status(win, "Load a dataset first.")
-        return
 
-    cache = st.image_cache
-    raw = _load_array(ctx, cache, st.well, st.channel, st.timepoint, st.fov,
-                      use_tophat=False)
+    raw, frame_lbl, frame_key = _resolve_frame(ctx)
     if raw is None:
         st.raw_arr = None
-        _set_status(win, "No raw image for the selected frame.")
+        _set_status(win, frame_lbl)          # frame_lbl carries the reason
         return
     st.raw_arr = np.asarray(raw, dtype=np.float32)
-    st.mask_arr = _load_mask_array(ctx, cache, st.well, st.timepoint, st.fov)
-    frame_lbl = f"{st.well} {st.channel} t{st.timepoint} fov{st.fov}"
+    loose = bool(str(st.loose_image_path or "").strip())
 
     # The binary threshold is per-frame: when the frame identity changes, drop
     # any local override so the control falls back to the channel's app-wide
     # ThreshFracOn default, and refresh the displayed value.
-    frame_key = (st.well, st.channel, st.timepoint, st.fov)
     if getattr(ctx.runtime.playground, "frame_key", None) != frame_key:
         ctx.runtime.playground.frame_key = frame_key
         st.threshold = None
@@ -235,11 +346,12 @@ def playground_on_change(ctx) -> None:
     # Raw — no correction.
     if st.source == "raw":
         _render(ctx, st.raw_arr)
-        _set_status(win, f"Raw — {frame_lbl}")
+        _set_status(win, _with_seg_note(ctx, f"Raw — {frame_lbl}"))
         return
 
-    chan_lower = st.channel.lower()
-    if _source_needs_reference(st):
+    ff_mode, bg_method, refusal = _effective_correction_modes(ctx, loose=loose)
+    chan_lower = (st.channel or "").lower()
+    if not loose and _source_needs_reference(st):
         if not st.background_well:
             _set_status(win, "Pick a background well for empty_well / basic.")
             _render(ctx, st.raw_arr)
@@ -252,25 +364,24 @@ def playground_on_change(ctx) -> None:
     else:
         ff = bg = None
 
-    # Flat-field source applies only the flat-field (background = none).
-    bg_method = st.background_method if st.source == "corrected" else "none"
-    # id(raw) (the pre-np.asarray object _load_array returned, above) is a valid
-    # identity proxy for "is this the same decoded frame" ONLY because
+    # id(raw) (the pre-np.asarray object _resolve_frame returned, above) is a
+    # valid identity proxy for "is this the same decoded frame" ONLY because
     # image_discovery.open_imgref_as_array's decode cache guarantees a returned
     # array is shared by reference on a hit -- same frame -> same object -> same
     # id(); a real frame change, or a test monkeypatching _load_array to return
     # different data for the same nominal (well, channel, tp, fov), correctly
     # misses instead. id(st.raw_arr) would NOT work here -- it's a fresh
     # np.asarray(...) object every single call, never stable across calls.
+    # (_load_loose_frame caches by path for the same reason.)
     correction_key = (
-        id(raw), st.source, st.flatfield_mode, bg_method, st.radius,
+        id(raw), st.source, ff_mode, bg_method, st.radius,
         st.fft_small, st.mesh_ratio, st.mesh_sigma, id(ff), id(bg),
     )
     if correction_key == st.last_correction_key and st.last_corrected_arr is not None:
         corrected = st.last_corrected_arr
     else:
         corrected = pm.correct_single_frame(
-            st.raw_arr, flatfield_mode=st.flatfield_mode,
+            st.raw_arr, flatfield_mode=ff_mode,
             background_method=bg_method, radius=st.radius,
             fft_small=st.fft_small, mesh_ratio=st.mesh_ratio, mesh_sigma=st.mesh_sigma,
             ff_field=ff, bg_field=bg)
@@ -278,8 +389,11 @@ def playground_on_change(ctx) -> None:
         st.last_corrected_arr = corrected
     _render(ctx, corrected)
     label = ("Flat-field" if st.source == "flatfield"
-             else f"Corrected ({st.flatfield_mode}+{st.background_method})")
-    _set_status(win, f"{label} — {frame_lbl}")
+             else f"Corrected ({ff_mode}+{bg_method})")
+    text = f"{label} — {frame_lbl}"
+    if refusal:
+        text = f"{text}  ⚠ {refusal}"
+    _set_status(win, _with_seg_note(ctx, text))
 
 
 def _source_needs_reference(st) -> bool:
@@ -349,8 +463,15 @@ def _render(ctx, arr) -> None:
     st.display_arr = np.asarray(arr, dtype=np.float32)
     lo, hi = _resolve_lut(ctx.window, arr)
     # Apply the QC size-based cleanup to the mask before display, so the overlay
-    # and binary reflect the debris gate.
-    qc_mask = _qc_size_filtered(st.mask_arr, st.qc_min_area, st.qc_max_area)
+    # and binary reflect the debris gate. In live mode the labels the preview
+    # just computed stand in for the pipeline's precomputed ones — but only
+    # while they still describe THIS frame and these settings; stale labels are
+    # dropped (and named in the status line) rather than drawn over a frame they
+    # were not computed from.
+    source_mask = st.mask_arr
+    if st.seg_live and st.seg_labels is not None and not _seg_is_stale(ctx):
+        source_mask = st.seg_labels
+    qc_mask = _qc_size_filtered(source_mask, st.qc_min_area, st.qc_max_area)
     mask = qc_mask if (st.show_overlay or st.binary_mask) else None
     above_ids = None
     thr = None
@@ -386,6 +507,134 @@ def _build_reference_then_render(ctx, chan_lower: str) -> None:
         ctx, st.background_well, chan_lower,
         flatfield_mode=st.flatfield_mode, background_method=st.background_method,
         on_done=_on_done, on_failed=_on_failed)
+
+
+# ── live StarDist preview ────────────────────────────────────────────────────
+
+def _thr_text(value) -> str:
+    return "model" if value is None else f"{float(value):g}"
+
+
+def _seg_key(ctx) -> tuple:
+    """Identity of what a set of live labels describes.
+
+    Everything that decides the pixels StarDist is fed (the frame, the display
+    stage, the correction and its parameters) plus the two thresholds. Derived
+    from state alone — no array ``id()`` — so it stays comparable across the
+    worker-thread round trip that computes the labels.
+    """
+    st = _st(ctx)
+    loose = bool(str(st.loose_image_path or "").strip())
+    ff_mode, bg_method, _ = _effective_correction_modes(ctx, loose=loose)
+    return (getattr(ctx.runtime.playground, "frame_key", None), st.source,
+            ff_mode, bg_method, st.radius, st.fft_small, st.mesh_ratio,
+            st.mesh_sigma, None if loose else st.background_well,
+            st.seg_prob_thresh, st.seg_nms_thresh)
+
+
+def _seg_is_stale(ctx) -> bool:
+    """True when live labels exist but were computed for a different frame or
+    different settings than the ones now on screen."""
+    st = _st(ctx)
+    return st.seg_labels is not None and st.seg_key != _seg_key(ctx)
+
+
+def _with_seg_note(ctx, text: str) -> str:
+    """Append the live-preview's own state to a status line.
+
+    The preview can be in four states and each has to be distinguishable: off,
+    running, holding labels for this frame, or holding STALE labels. The last
+    one is the reason this exists — labels that no longer match the frame are
+    not drawn, so without a note the overlay would simply be missing.
+    """
+    st = _st(ctx)
+    if st.seg_param_error:
+        # Reported whether or not the preview is on: the number in the box is
+        # not the number being used, and only saying so in live mode would let
+        # a typo sit there looking accepted.
+        text = f"{text}  ⚠ {st.seg_param_error}"
+    if not st.seg_live:
+        return text
+    if st.seg_running:
+        return f"{text}  •  StarDist running…"
+    if st.seg_labels is None:
+        return f"{text}  •  {st.seg_status or 'press Segment to run StarDist'}"
+    if _seg_is_stale(ctx):
+        return (f"{text}  ⚠ StarDist labels are stale (computed for a different "
+                f"frame or settings) — press Segment again")
+    return f"{text}  •  {st.seg_status}"
+
+
+def playground_segment_now(ctx) -> None:
+    """Run StarDist on the frame currently displayed, on a worker thread.
+
+    Explicitly button-driven: inference is seconds per frame and
+    ``playground_on_change`` fires on every keystroke, so running it implicitly
+    would make the tab unusable.
+    """
+    st = _st(ctx)
+    win = ctx.window
+    if st.seg_running:
+        return
+    # Re-render first, so the pixels handed to StarDist are the ones the current
+    # widget values produce. Without it a control edited since the last render
+    # would go into ``_seg_key`` while ``display_arr`` still held the previous
+    # frame — labels tagged as describing settings they were not computed under,
+    # which is the exact confusion ``seg_key`` exists to prevent. Cheap: the
+    # correction is memoized, so an unchanged frame costs a blit.
+    playground_on_change(ctx)
+    arr = st.display_arr
+    if arr is None:
+        _set_status(win, "Nothing to segment yet — open an image or pick a frame.")
+        return
+    st.seg_live = True
+    st.seg_running = True
+    key = _seg_key(ctx)
+    _set_status(win, "StarDist: segmenting… (the first run of a session also "
+                     "loads TensorFlow — ~10-30 s, and it stays resident)")
+
+    def _on_done(labels) -> None:
+        st.seg_running = False
+        st.seg_labels = labels
+        st.seg_key = key
+        n = int(np.max(labels)) if getattr(labels, "size", 0) else 0
+        st.seg_status = (f"StarDist: {n} nuclei "
+                         f"(prob={_thr_text(st.seg_prob_thresh)}, "
+                         f"nms={_thr_text(st.seg_nms_thresh)})")
+        playground_on_change(ctx)
+
+    def _on_failed(msg: str) -> None:
+        st.seg_running = False
+        st.seg_labels = None
+        st.seg_key = None
+        st.seg_status = f"StarDist failed: {msg}"
+        playground_on_change(ctx)
+
+    ctx.runtime.playground.seg_bridge = request_stardist_labels(
+        arr, prob_thresh=st.seg_prob_thresh, nms_thresh=st.seg_nms_thresh,
+        on_done=_on_done, on_failed=_on_failed)
+
+
+def playground_open_loose_image(ctx, path: str) -> None:
+    """Adopt *path* as the frame, leaving dataset mode."""
+    st = _st(ctx)
+    st.loose_image_path = str(path) or None
+    st.seg_labels = None
+    st.seg_key = None
+    st.last_correction_key = None
+    st.last_corrected_arr = None
+    playground_on_change(ctx)
+
+
+def playground_clear_loose_image(ctx) -> None:
+    """Drop the loose image and go back to the dataset-driven frame."""
+    st = _st(ctx)
+    st.loose_image_path = None
+    st.seg_labels = None
+    st.seg_key = None
+    st.last_correction_key = None
+    st.last_corrected_arr = None
+    playground_on_change(ctx)
 
 
 def _refresh_threshold_display(ctx) -> None:

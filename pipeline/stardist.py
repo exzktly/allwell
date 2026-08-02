@@ -8,9 +8,16 @@ the model is loaded by ``process_microscopy._worker_init`` and injected via
 model is just ``None`` until a worker initialises it.
 
 Worker-global state lives here and is mutated through :func:`set_model` /
-:func:`set_fov_label`:
+:func:`set_params` / :func:`set_fov_label`:
 - ``_STARDIST_MODEL`` — the loaded StarDist2D model (per worker process).
+- ``_STARDIST_PARAMS`` — the run's :class:`StarDistParams` (detection thresholds
+  + the tiling cap), installed from the ``--stardist_*`` CLI args.
 - ``_SEG_FOV_LABEL`` — the FOV name currently being segmented (diagnostics).
+
+The inference itself is :func:`segment_nuclei`, which takes the model and the
+parameters as arguments and reads no module state, so an interactive caller can
+run the pipeline's exact segmentation on one frame.
+``_segment_stardist_nuclei`` is the worker-global wrapper over it.
 
 ``process_microscopy`` re-exports the two ``_segment_stardist_*`` functions, so
 the segmentation dispatch is unchanged.
@@ -21,6 +28,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from dataclasses import dataclass, replace
 
 import numpy as np
 from scipy import ndimage as ndi
@@ -46,6 +54,36 @@ _SEG_FOV_LABEL: str = ""
 # range" abort.
 _STARDIST_INPUT_CLIP = (0.0, 1.0)
 
+
+@dataclass(frozen=True)
+class StarDistParams:
+    """The per-run StarDist knobs, as one immutable value.
+
+    ``prob_thresh`` / ``nms_thresh`` are ``None`` by default, which means "use
+    the threshold the pretrained model ships in its own ``thresholds.json``"
+    (≈ 0.479 / 0.3 for ``2D_versatile_fluo``) — that is also what
+    ``predict_instances`` does with ``None``, so the default path is byte-for-byte
+    the behaviour of passing nothing at all.
+
+    * ``prob_thresh`` — object-probability cut applied to the network's
+      objectness map before polygon NMS. LOWER detects more nuclei, including
+      dim and marginal ones; HIGHER keeps only confident detections. This is the
+      knob for a plate that misses real cells or counts debris.
+    * ``nms_thresh`` — overlap threshold in the polygon non-maximum-suppression
+      pass. HIGHER lets more overlapping polygons survive, which recovers
+      touching nuclei in a confluent field at the risk of double-counting one;
+      LOWER merges more aggressively, which removes duplicates but can fuse
+      neighbours.
+    * ``tile_px`` — peak-memory cap, NOT a detection knob (see below).
+    """
+
+    prob_thresh: float | None = None
+    nms_thresh: float | None = None
+    tile_px: int = 0
+
+
+DEFAULT_STARDIST_PARAMS = StarDistParams()
+
 # Peak-memory cap for large images. An untiled ``predict_instances`` on a big
 # frame (e.g. ~4K×4K) allocates the full-resolution U-Net activations plus the
 # (H×W×n_rays) distance array in one shot — several GB per worker — so a handful
@@ -53,35 +91,79 @@ _STARDIST_INPUT_CLIP = (0.0, 1.0)
 # large microscopy frames). StarDist can process the frame in overlapping tiles
 # and stitch the result, which caps the peak at roughly one tile's worth.
 #
-# OFF by default (``0`` → no tiling, StarDist's native behaviour). The per-run
-# value is set by ``process_microscopy._worker_init`` from the ``--stardist_tile_px``
-# CLI arg (exposed in the Analyze GUI) via :func:`set_tile_px`. When set to N > 0,
-# a frame is tiled so no block exceeds N px per side; smaller N = less RAM, a bit
-# slower.
-_STARDIST_TILE_PX = 0
+# ``tile_px`` is OFF by default (``0`` → no tiling, StarDist's native
+# behaviour). When set to N > 0, a frame is tiled so no block exceeds N px per
+# side; smaller N = less RAM, a bit slower.
+#
+# The whole params value is installed per worker by
+# ``process_microscopy._worker_init`` from the ``--stardist_*`` CLI args (all
+# exposed in the Analyze GUI) via :func:`set_params`.
+_STARDIST_PARAMS = DEFAULT_STARDIST_PARAMS
+
+
+def parse_threshold(value) -> float | None:
+    """Normalise one StarDist threshold to ``float | None``.
+
+    The single rule shared by the CLI, the Analyze form and the Playground, so
+    the three can never disagree about what "auto" means: blank, ``None``,
+    unparseable, or negative (the CLI's ``-1`` sentinel) all mean *use the
+    model's own default*, and anything else must be a probability in [0, 1].
+    A value outside that range is rejected by raising, not clamped — a silently
+    clamped threshold would segment with parameters the operator did not choose.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text or text == "auto":
+            return None
+        value = text
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num < 0:
+        return None                     # the "-1 = model default" sentinel
+    if num > 1.0:
+        raise ValueError(f"StarDist threshold must be in [0, 1] (got {num!r}).")
+    return num
+
+
+def set_params(params: StarDistParams | None) -> None:
+    """Install the per-worker StarDist parameters (called from ``_worker_init``)."""
+    global _STARDIST_PARAMS
+    _STARDIST_PARAMS = params or DEFAULT_STARDIST_PARAMS
+
+
+def get_params() -> StarDistParams:
+    """The parameters this worker will segment with."""
+    return _STARDIST_PARAMS
 
 
 def set_tile_px(tile_px: int | None) -> None:
-    """Install the per-worker StarDist tiling threshold (px per side; 0 = off)."""
-    global _STARDIST_TILE_PX
+    """Install just the tiling threshold (px per side; 0 = off), leaving the
+    detection thresholds as they are."""
     try:
-        _STARDIST_TILE_PX = max(0, int(tile_px or 0))
+        px = max(0, int(tile_px or 0))
     except (TypeError, ValueError):
-        _STARDIST_TILE_PX = 0
+        px = 0
+    set_params(replace(_STARDIST_PARAMS, tile_px=px))
 
 
-def _stardist_n_tiles(img: np.ndarray) -> tuple[int, int] | None:
+def _stardist_n_tiles(img: np.ndarray, tile_px: int | None = None) -> tuple[int, int] | None:
     """StarDist ``n_tiles`` for *img*, or None to predict untiled.
 
     Tiles each spatial axis into ceil(size / tile_px) blocks so no block exceeds
-    ``_STARDIST_TILE_PX`` per side; returns None when the whole frame already
-    fits (both axes → 1 tile) or tiling is disabled.
+    *tile_px* per side; returns None when the whole frame already fits (both axes
+    → 1 tile) or tiling is disabled. *tile_px* defaults to the installed params'.
     """
-    if _STARDIST_TILE_PX <= 0:
+    if tile_px is None:
+        tile_px = _STARDIST_PARAMS.tile_px
+    if tile_px <= 0:
         return None
     h, w = int(img.shape[0]), int(img.shape[1])
-    ny = max(1, (h + _STARDIST_TILE_PX - 1) // _STARDIST_TILE_PX)
-    nx = max(1, (w + _STARDIST_TILE_PX - 1) // _STARDIST_TILE_PX)
+    ny = max(1, (h + tile_px - 1) // tile_px)
+    nx = max(1, (w + tile_px - 1) // tile_px)
     if ny == 1 and nx == 1:
         return None
     return (ny, nx)
@@ -130,9 +212,18 @@ def quiet_frozen_tf_logging() -> None:
         swallowed("quiet_frozen_tf_logging: TF import/config failed")
 
 
-def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
+def segment_nuclei(nir_corr: np.ndarray, *, model,
+                   params: StarDistParams = DEFAULT_STARDIST_PARAMS) -> np.ndarray:
+    """Segment nuclei in one corrected frame with an explicit model + params.
+
+    The whole of the pipeline's StarDist inference, with nothing read from
+    module state — so an interactive caller (the Review pane's Playground) runs
+    *this* function and therefore gets exactly what a batch run would produce,
+    including the input scrubbing and the near-constant-field refusal below.
+    ``_segment_stardist_nuclei`` is the worker-global-driven wrapper over it.
+    """
     from csbdeep.utils import normalize
-    if _STARDIST_MODEL is None:
+    if model is None:
         raise RuntimeError(
             "StarDist model is not initialised. "
             "Ensure _worker_init ran before process_image_group."
@@ -190,7 +281,7 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
     # the production path, and falls back silently if the split API differs.
     if os.environ.get("ALLWELL_SEG_DEBUG"):
         try:
-            pred = _STARDIST_MODEL.predict(nir_norm)
+            pred = model.predict(nir_norm)
             prob, dist = pred[0], pred[1]
             log.info("  seg-debug %s: prob[min=%.3g max=%.3g] dist[min=%.3g "
                      "max=%.3g] dist_nonfinite=%d prob_shape=%s dist_shape=%s",
@@ -202,21 +293,40 @@ def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
             log.warning("  seg-debug %s: predict() trace failed: %s", fov, exc)
 
     _t0 = time.perf_counter()
-    # Tile large frames to cap peak memory (see _STARDIST_TILE_PX). n_tiles=None
-    # → StarDist's own default (untiled) for small frames.
-    n_tiles = _stardist_n_tiles(nir_norm)
+    # Tile large frames to cap peak memory (see StarDistParams.tile_px).
+    # n_tiles=None → StarDist's own default (untiled) for small frames.
+    #
+    # A threshold left at None is OMITTED rather than passed: predict_instances
+    # treats None as "fall back to the model's own thresholds.json", so the two
+    # are equivalent, but omitting it keeps the default call identical to the
+    # one this function made before the thresholds were tunable.
+    kwargs: dict = {}
+    n_tiles = _stardist_n_tiles(nir_norm, params.tile_px)
     if n_tiles is not None:
-        labels, _ = _STARDIST_MODEL.predict_instances(nir_norm, n_tiles=n_tiles)
-    else:
-        labels, _ = _STARDIST_MODEL.predict_instances(nir_norm)
+        kwargs["n_tiles"] = n_tiles
+    if params.prob_thresh is not None:
+        kwargs["prob_thresh"] = float(params.prob_thresh)
+    if params.nms_thresh is not None:
+        kwargs["nms_thresh"] = float(params.nms_thresh)
+    labels, _ = model.predict_instances(nir_norm, **kwargs)
     # Per-FOV inference timing: a slow per-call number points at CPU contention /
     # thread starvation (vs the run merely doing more FOVs). Pairs with the
     # ``seg-input`` line above so each FOV's input stats + predict cost sit
-    # together in the log. n_tiles is logged so a memory/speed tradeoff is visible.
-    log.info("  seg %s: predict_instances %.1fs (%d nuclei, n_tiles=%s)",
+    # together in the log. n_tiles and the thresholds are logged so a memory /
+    # speed tradeoff and the detection settings in force are both visible — a
+    # nucleus count only means something next to the thresholds that produced it.
+    log.info("  seg %s: predict_instances %.1fs (%d nuclei, n_tiles=%s, "
+             "prob=%s, nms=%s)",
              fov, time.perf_counter() - _t0,
-             int(labels.max()) if labels.size else 0, n_tiles or "1")
+             int(labels.max()) if labels.size else 0, n_tiles or "1",
+             "model" if params.prob_thresh is None else f"{params.prob_thresh:g}",
+             "model" if params.nms_thresh is None else f"{params.nms_thresh:g}")
     return labels.astype(np.int32)
+
+
+def _segment_stardist_nuclei(nir_corr: np.ndarray) -> np.ndarray:
+    """Segment nuclei with the model and parameters installed in this worker."""
+    return segment_nuclei(nir_corr, model=_STARDIST_MODEL, params=_STARDIST_PARAMS)
 
 
 def _segment_stardist_seeded_watershed_cell(

@@ -810,3 +810,30 @@ def test_the_count_row_is_written_by_every_render(framed):
 def test_the_count_clears_when_no_frame_can_be_shown(ctx):
     C.playground_on_change(ctx)
     assert ctx.counts[-1] == "Cells: —"
+
+
+# ── binary mode's fill colour ────────────────────────────────────────────────
+
+def test_the_readout_names_the_fill_colour_binary_mode_used(framed, monkeypatch):
+    """All-white and one-colour-per-label answer different questions, and the
+    read-out has to say which one is on screen."""
+    st = framed.state.playground
+    _with_mask(framed, monkeypatch, _labels_3())
+    st.binary_mask = True
+    C.playground_on_change(framed)
+    assert "own colour" in framed.statuses[-1]
+
+    st.binary_label_colors = False
+    C.playground_on_change(framed)
+    assert "white" in framed.statuses[-1] and "own colour" not in framed.statuses[-1]
+
+
+def test_a_mask_that_does_not_fit_reports_no_label_colours(framed, monkeypatch):
+    """That render falls through to the per-pixel threshold, which has no labels
+    — so the facts must not claim colours the renderer never drew."""
+    st = framed.state.playground
+    _with_mask(framed, monkeypatch, np.ones((8, 8), dtype=np.int32))
+    st.binary_mask = True
+    st.binary_label_colors = True
+    C.playground_on_change(framed)
+    assert st.display_facts["label_colors"] is False

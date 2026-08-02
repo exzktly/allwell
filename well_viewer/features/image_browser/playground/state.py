@@ -71,6 +71,10 @@ class PlaygroundState:
     # entry texts, so each stage keeps the range the user set for it.
     lut_by_source: dict = field(default_factory=dict)
     binary_mask: bool = False
+    # Colour each label in binary mode instead of painting them all white.
+    # Default on: touching cells drawn the same white merge into one shape, and
+    # "did it split those two nuclei?" is the main question this tab is asked.
+    binary_label_colors: bool = True
     show_overlay: bool = True           # precomputed-mask boundary overlay on/off
     tint_color: tuple = (255, 255, 255)
     # Frame-local binary threshold (intensity units). None ⇒ fall back to the

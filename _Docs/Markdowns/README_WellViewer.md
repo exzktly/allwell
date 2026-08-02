@@ -1620,6 +1620,12 @@ exact correction and segmentation code).
     usable mask; or every labelled pixel with the threshold ignored. The
     read-out names which one you are seeing, and where the threshold came from —
     set on this tab, or the channel's app-wide ON threshold.
+  - **Colour cells** (on by default) gives every cell its own colour in Binary
+    mode instead of painting them all white. Two nuclei that touch are one white
+    shape otherwise, so a segmentation that merged them looks exactly like one
+    that separated them. Each colour is fixed to the label, so it does not
+    change as you redraw. The per-pixel fallback stays white — there are no
+    cells there to colour.
 - **Segmentation controls** — tick **Live StarDist**, set **Probability** and
   **Overlap (NMS)** (blank = the pretrained model's own values), and press
   **Segment**. The nuclei it finds replace the pipeline's saved mask in the

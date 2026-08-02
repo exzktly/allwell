@@ -359,15 +359,20 @@ def _describe_shown(facts: dict) -> str:
     thr = facts["threshold"]
     thr_txt = "—" if thr is None else f"{float(thr):g}"
     rule = facts["binary_rule"]
+    # Naming the fill colour matters as much as naming the rule: one colour per
+    # label is how touching cells stay countable, and all-white is how two of
+    # them read as one object.
+    paint = ("each label in its own colour" if facts.get("label_colors")
+             else "white")
     if rule == "per-cell":
-        return (f"Shown: binary — white where a label's MEAN intensity in this "
+        return (f"Shown: binary — {paint} where a label's MEAN intensity in this "
                 f"image exceeds {thr_txt} ({facts['threshold_source']}). "
                 f"{facts['above']} of {facts['labels_kept']} pass.")
     if rule == "per-pixel":
         return (f"Shown: binary — but with no usable mask this is a PER-PIXEL "
-                f"threshold: every pixel above {thr_txt} is white. That is not a "
-                f"per-cell measurement.")
-    return (f"Shown: binary — every labelled pixel is white "
+                f"threshold: every pixel above {thr_txt} is white. There are no "
+                f"labels to colour, and it is not a per-cell measurement.")
+    return (f"Shown: binary — every labelled pixel is filled, {paint} "
             f"({_cells(facts['labels_kept'])}); the threshold is not used.")
 
 
@@ -836,6 +841,9 @@ def _render(ctx, arr) -> None:
         "frame_shape": tuple(np.asarray(arr).shape[:2]),
         "outlines": bool(st.show_overlay),
         "binary": bool(st.binary_mask),
+        # Only true where there were labels to colour — the per-pixel fallback
+        # has none, so the read-out must not claim colours it did not draw.
+        "label_colors": bool(st.binary_label_colors and shape_ok),
         "threshold": thr,
         "threshold_source": _threshold_source(st),
         "above": None if above_ids is None else len(above_ids),
@@ -844,7 +852,8 @@ def _render(ctx, arr) -> None:
     st.base_rgb = build_playground_rgb(
         arr, mask, lo=lo, hi=hi, cmap_name=st.cmap_name, binary=st.binary_mask,
         show_boundary=st.show_overlay, tint=tuple(st.tint_color),
-        above_ids=above_ids, threshold=thr)
+        above_ids=above_ids, threshold=thr,
+        label_colors=bool(st.binary_label_colors))
     _set_count(ctx.window, _count_text(st.display_facts))
     render_playground_display(ctx.window)
 

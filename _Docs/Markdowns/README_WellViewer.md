@@ -2010,9 +2010,11 @@ trimming a drifted tail of timepoints.
 3. Press **Subset**. The same well plate you picked wells with now shows
    each one being copied — locked against further clicks until the run
    finishes, so it can double as the progress view instead of a second
-   plate map elsewhere on the page. Each well fills as a dial while its
-   files are being copied, so a large well shows how far through it is
-   rather than sitting on one colour until it lands.
+   plate map elsewhere on the page. A well that is being narrowed down
+   fills as a dial while its files are copied, so a large well shows how far
+   through it is rather than sitting on one colour until it lands. A well
+   kept whole is copied in one step and simply goes from empty to done —
+   there is nothing to report part-way through a single file copy.
 
 Subsetting copies files rather than rebuilding them, so it runs at roughly
 the speed of copying the archives yourself in Finder or Explorer. Narrowing

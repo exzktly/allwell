@@ -34,6 +34,7 @@ implementation uses, but they are private, so:
 
 from __future__ import annotations
 
+import contextlib
 import struct
 import zipfile
 
@@ -54,6 +55,11 @@ _FLAG_ENCRYPTED = 0x1
 _FLAG_DATA_DESCRIPTOR = 0x8
 
 _ZIP64_EXTRA_ID = 1
+# Info-ZIP's Unicode Path / Unicode Comment records. Each embeds a *copy* of
+# the member's name together with a CRC of the name it was computed against,
+# so a record carried across a rename describes the member's old name.
+_UNICODE_PATH_EXTRA_ID = 0x7075
+_UNICODE_COMMENT_EXTRA_ID = 0x6375
 
 
 class RawCopyUnsupported(Exception):
@@ -79,14 +85,24 @@ def member_is_raw_copyable(info: zipfile.ZipInfo) -> bool:
     return not info.flag_bits & _FLAG_ENCRYPTED
 
 
-def _strip_zip64_extra(extra: bytes) -> bytes:
-    """Drop any ZIP64 record from an extra field, keeping every other record.
+def _filtered_extra(extra: bytes, drop_ids: frozenset[int]) -> bytes:
+    """Drop the records in *drop_ids* from an extra field, keeping the rest.
 
-    ``ZipInfo.FileHeader`` appends a freshly-computed ZIP64 record when the
-    member needs one, so carrying the source's — which describes the member's
-    sizes at its *old* offsets — would leave two contradictory records in the
-    same header. Everything else in the extra field (timestamps, Unix
-    ownership) describes the member itself and is copied through.
+    ZIP64 (id 1) always goes: ``ZipInfo.FileHeader`` appends a freshly-computed
+    one when the member needs it, so carrying the source's — which describes
+    the member's sizes at its *old* offsets — would leave two contradictory
+    records in the same header.
+
+    The Unicode Path and Comment records go too, but only when the member is
+    being **renamed**. Each carries its own copy of the name plus a CRC of the
+    name it was derived from, so across a rename it is a second, stale name
+    for the same member: a reader that honours it and skips the CRC check
+    restores the file under its pre-rename name, silently undoing the well
+    remap or timepoint offset that was the entire point of the copy. A member
+    keeping its own name keeps its records, which still describe it correctly.
+
+    Everything else (timestamps, Unix ownership) describes the member itself
+    and is copied through.
     """
     kept = bytearray()
     index = 0
@@ -98,10 +114,19 @@ def _strip_zip64_extra(extra: bytes) -> bytes:
             # the field cannot be parsed, so it is dropped rather than emitted
             # as a header a reader would misparse.
             break
-        if header_id != _ZIP64_EXTRA_ID:
+        if header_id not in drop_ids:
             kept += extra[index:end]
         index = end
     return bytes(kept)
+
+
+def _drop_ids(source_name: str, dest_name: str) -> frozenset[int]:
+    """Which extra-field records must not survive into the copied member."""
+    if source_name == dest_name:
+        return frozenset({_ZIP64_EXTRA_ID})
+    return frozenset({
+        _ZIP64_EXTRA_ID, _UNICODE_PATH_EXTRA_ID, _UNICODE_COMMENT_EXTRA_ID,
+    })
 
 
 def _dest_info(info: zipfile.ZipInfo, dest_name: str, header_offset: int) -> zipfile.ZipInfo:
@@ -114,7 +139,7 @@ def _dest_info(info: zipfile.ZipInfo, dest_name: str, header_offset: int) -> zip
     out.external_attr = info.external_attr
     out.internal_attr = info.internal_attr
     out.comment = info.comment
-    out.extra = _strip_zip64_extra(info.extra)
+    out.extra = _filtered_extra(info.extra, _drop_ids(info.filename, dest_name))
     out.CRC = info.CRC
     out.compress_size = info.compress_size
     out.file_size = info.file_size
@@ -178,8 +203,12 @@ def copy_member_raw(
             dst.fp.write(chunk)
             remaining -= len(chunk)
     except Exception:
-        dst.fp.seek(resume)
-        dst.fp.truncate()
+        # Suppressed because the rollback is a courtesy on a failure path: a
+        # destination handle that cannot be truncated would otherwise replace
+        # the real error with its own, and the caller needs the first one.
+        with contextlib.suppress(Exception):
+            dst.fp.seek(resume)
+            dst.fp.truncate()
         raise
 
     dst.filelist.append(out)

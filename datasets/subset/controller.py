@@ -208,6 +208,12 @@ class SubsetController(QObject):
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
+        # Every well ends at a full dial (WellFraction.finish), and the plate
+        # paints a well that has a fraction *as* the dial — the branch runs
+        # ahead of the selected/deselected rendering, not beside it. Left in
+        # place, the picker stops showing which wells are selected, so the
+        # next subset can't be composed on it.
+        self.page._plate.clearWellFractions()
         self.page.set_running(False)
         self.page._plate.setEnabled(True)
         self.page.revalidate_fields()

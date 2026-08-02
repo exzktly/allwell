@@ -101,19 +101,28 @@ class _MemberRename:
     in the member's headers, not in its compressed data — which is why a merge
     can move both archives across without decoding either.
 
-    **Dataset 2's operating-system debris is left out** rather than carried.
-    A ``.DS_Store`` names no data, so its name is the only thing it has, and
-    both datasets have the same one as soon as either folder has been opened
-    in Finder — which is the normal state of a plate someone has looked at.
-    Carried through, the two copies collided in the merged archive, one was
-    dropped by first-write-wins, and ``_verify`` read that drop as dataset 2's
-    data failing to survive the merge and refused to publish: two ordinary
-    plates could not be concatenated at all, for files neither the pipeline
-    nor Review has ever read. Dropping them is not a loosening of that check —
-    a collision between two members that *do* carry data still fails it, which
-    is the case it exists for. Only :func:`is_os_junk_member`'s narrow,
-    explicitly-named set is skipped, so a file a user put in an archive on
-    purpose still counts as real and still conflicts.
+    **On a well both datasets hold, dataset 2's operating-system debris is
+    left out** rather than carried. A ``.DS_Store`` names no data, so its name
+    is the only thing it has, and both datasets have the same one as soon as
+    either folder has been opened in Finder — which is the normal state of a
+    plate someone has looked at. Carried through, the two copies collided in
+    the merged archive, one was dropped by first-write-wins, and ``_verify``
+    read that drop as dataset 2's data failing to survive the merge and
+    refused to publish: two ordinary plates could not be concatenated at all,
+    for files neither the pipeline nor Review has ever read.
+
+    The skip is conditioned on there *being* a dataset-1 side (*passthrough*
+    is not ``None``) for exactly that reason — it resolves a conflict, it does
+    not clean up. On a well only dataset 2 has, nothing can collide, so
+    dropping its debris would simply delete a file the user still has in the
+    source, and would leave a well whose archive held nothing else with no
+    destination archive at all.
+
+    Nor is it a loosening of the collision check: that check exists for
+    members which *carry data*, and a collision between two of those still
+    fails it. Only :func:`is_os_junk_member`'s narrow, explicitly-named set is
+    skipped, so a file a user put in an archive on purpose still counts as
+    real and still conflicts.
 
     :attr:`unmatched` counts dataset-2 members that didn't match the filename
     schema and were therefore kept under their original name (see
@@ -130,7 +139,10 @@ class _MemberRename:
     def __call__(self, container: Path, name: str) -> str | None:
         if self._passthrough is not None and container == self._passthrough:
             return name
-        if is_os_junk_member(name):
+        if self._passthrough is not None and is_os_junk_member(name):
+            # Only when dataset 1 holds this well too. On a well dataset 2
+            # owns alone there is nothing to collide with and nothing to
+            # prefer, so skipping would just delete the user's file.
             self.junk_skipped += 1
             return None
         new_name, rewrote = rewrite_member_name(

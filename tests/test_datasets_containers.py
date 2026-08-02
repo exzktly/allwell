@@ -21,6 +21,7 @@ corpus of well-formed TIFs validates the happy path and hides everything else.
 from __future__ import annotations
 
 import io
+import struct
 import zipfile
 from pathlib import Path
 
@@ -28,8 +29,10 @@ import pytest
 
 from datasets._common.containers import copy_container_members
 from datasets._common.zip_passthrough import (
+    _UNICODE_PATH_EXTRA_ID,
+    _ZIP64_EXTRA_ID,
     RawCopyUnsupported,
-    _strip_zip64_extra,
+    _filtered_extra,
     copy_member_raw,
     member_is_raw_copyable,
 )
@@ -197,18 +200,31 @@ def test_renaming_a_member_does_not_touch_its_bytes(tmp_path):
         assert data == _PAYLOAD + bytes([_NAMES.index(name)])
 
 
-def test_directory_entries_are_never_written(tmp_path):
+def test_a_repacked_archive_carries_no_directory_entries(tmp_path):
+    """Scoped to the re-pack path on purpose — a whole-file copy keeps them.
+
+    A tier-1 copy reproduces the source file byte for byte, directory entries
+    included, so the two tiers genuinely differ here. Nothing downstream reads
+    them (``find_image_groups_in_zip``, ``zip_members``, Validate and
+    ``incremental_keys`` all filter by basename/extension or on a trailing
+    slash), which is why the difference is allowed to stand rather than tier 1
+    being made to strip them and stop being a file copy.
+    """
     src = tmp_path / "A01.zip"
     _build_zip(src, _NAMES, directory_entry=True)
-    dest = tmp_path / "dest.zip"
 
     def _drop_last(_container: Path, name: str) -> str | None:
         return None if name == _NAMES[-1] else name
 
-    copy_container_members(dest, [src], _drop_last)
-
-    with zipfile.ZipFile(dest) as archive:
+    repacked = tmp_path / "repacked.zip"
+    copy_container_members(repacked, [src], _drop_last)
+    with zipfile.ZipFile(repacked) as archive:
         assert not [info for info in archive.infolist() if info.is_dir()]
+
+    whole = tmp_path / "whole.zip"
+    copy_container_members(whole, [src], _keep_all)
+    with zipfile.ZipFile(whole) as archive:
+        assert [info.filename for info in archive.infolist() if info.is_dir()] == ["frames/"]
 
 
 def test_non_ascii_names_and_extra_fields_round_trip(tmp_path):
@@ -449,14 +465,89 @@ def test_a_failed_member_leaves_the_destination_where_it_was(tmp_path):
 
 
 # ── extra-field surgery ──────────────────────────────────────────────────────
-def test_strip_zip64_extra_keeps_every_other_record():
+def test_filtered_extra_keeps_every_record_it_was_not_asked_to_drop():
     zip64 = b"\x01\x00\x08\x00" + b"\x00" * 8
     timestamp = b"\x55\x54\x05\x00\x01\x00\x00\x00\x00"
     unix = b"\x75\x78\x04\x00\xe8\x03\xe8\x03"
+    drop = frozenset({_ZIP64_EXTRA_ID})
 
-    assert _strip_zip64_extra(timestamp + zip64 + unix) == timestamp + unix
-    assert _strip_zip64_extra(zip64) == b""
-    assert _strip_zip64_extra(b"") == b""
+    assert _filtered_extra(timestamp + zip64 + unix, drop) == timestamp + unix
+    assert _filtered_extra(zip64, drop) == b""
+    assert _filtered_extra(b"", drop) == b""
     # A record whose declared length runs past the buffer is dropped, not
     # emitted as a header a reader would misparse.
-    assert _strip_zip64_extra(timestamp + b"\x99\x99\xff\xff\x00") == timestamp
+    assert _filtered_extra(timestamp + b"\x99\x99\xff\xff\x00", drop) == timestamp
+
+
+# ── a failure must not leave a complete-looking archive ──────────────────────
+def test_a_member_failing_mid_archive_publishes_nothing(tmp_path, monkeypatch):
+    """The destination must not exist at all rather than exist and read clean.
+
+    A plain ``with ZipFile(dest, "w")`` writes a central directory for whatever
+    landed before the exception, so a well that failed half way through left a
+    structurally valid archive holding fewer images than it was asked for, with
+    nothing on it saying so. The tools do write an in-progress marker and clear
+    the destination on the next attempt, but nothing stops a user opening that
+    half-written folder in Review first.
+    """
+    src = tmp_path / "A01.zip"
+    _build_zip(src, _NAMES, junk=False, directory_entry=False)
+    dest = tmp_path / "dest.zip"
+
+    real = copy_member_raw
+    calls = {"n": 0}
+
+    def _fail_on_third(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise RawCopyUnsupported("simulated mid-archive failure")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr("datasets._common.containers.copy_member_raw", _fail_on_third)
+    with pytest.raises(RawCopyUnsupported):
+        copy_container_members(
+            dest, [src], lambda _c, n: None if n == _NAMES[-1] else n,
+        )
+
+    assert not dest.exists()
+    assert not list(tmp_path.glob("__aw_tmp_*")), "staging file was left behind"
+
+
+def test_a_rename_drops_the_records_that_carry_the_old_name(tmp_path):
+    """Info-ZIP's Unicode Path record embeds its own copy of the member name.
+
+    Carried across a rename it is a second, stale name for the same member: a
+    reader that honours it and skips its name-CRC restores the file under its
+    pre-rename name, silently undoing the well remap or timepoint offset the
+    copy existed to perform.
+    """
+    unicode_path = (
+        struct.pack("<HH", _UNICODE_PATH_EXTRA_ID, 5 + len(b"A01_old.tif"))
+        + b"\x01" + struct.pack("<I", 0) + b"A01_old.tif"
+    )
+    timestamp = b"\x55\x54\x05\x00\x01\x00\x00\x00\x00"
+
+    src = tmp_path / "A01.zip"
+    with zipfile.ZipFile(src, "w", zipfile.ZIP_DEFLATED) as archive:
+        info = zipfile.ZipInfo("A01_old.tif", (2024, 5, 1, 12, 0, 0))
+        info.compress_type = zipfile.ZIP_DEFLATED
+        info.extra = timestamp + unicode_path
+        archive.writestr(info, _PAYLOAD)
+        archive.writestr("keep_me.tif", b"keep")
+
+    renamed = tmp_path / "renamed.zip"
+    copy_container_members(
+        renamed, [src],
+        lambda _c, n: "B07_new.tif" if n == "A01_old.tif" else None,
+    )
+    copied = _infos(renamed)["B07_new.tif"]
+    assert b"A01_old.tif" not in copied.extra, "the old name survived the rename"
+    assert b"\x55\x54" in copied.extra, "unrelated records must still be carried"
+    assert _read_all(renamed) == {"B07_new.tif": _PAYLOAD}
+
+    # A member keeping its own name keeps its records — they still describe it.
+    kept = tmp_path / "kept.zip"
+    copy_container_members(
+        kept, [src], lambda _c, n: n if n == "A01_old.tif" else None,
+    )
+    assert b"A01_old.tif" in _infos(kept)["A01_old.tif"].extra

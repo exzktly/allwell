@@ -507,3 +507,34 @@ def test_well_sub_progress_reaches_the_picker_plate(qapp, tmp_path):
 
     assert seen == [("A01", 0.4), ("A01", 1.0), ("A01", None)]
     ctrl.shutdown()
+
+
+def test_the_picker_selection_is_visible_again_once_a_run_finishes(qapp, tmp_path):
+    """Every well ends at a full dial, and the plate paints a well that has a
+    fraction *as* the dial — that branch runs ahead of the selected/deselected
+    rendering rather than beside it. Left in place, the picker stops showing
+    which wells are selected and the next subset can't be composed on it.
+    """
+    from datasets.subset.controller import SubsetController
+
+    src = tmp_path / "src"
+    dest = tmp_path / "dest"
+    build_dataset(src, wells=["A01", "B02"], timepoints=["0h", "24h"], fovs=("F001",))
+
+    ctrl = SubsetController(on_open_in_review=lambda _p: None)
+    page = ctrl.page
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(dest))
+    page._refresh_run_enabled()
+    page._plate.setSelectedWellIds(["A01"])
+
+    page.runRequested.emit()
+    _run_worker_to_completion(ctrl)
+    ctrl._on_finished()
+
+    assert (dest / "out" / "measurements_A01.csv").exists()
+    assert not page._plate._grid._fractions, (
+        f"dials left on the picker after the run: {page._plate._grid._fractions}"
+    )
+    ctrl.shutdown()

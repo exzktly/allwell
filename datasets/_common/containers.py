@@ -28,6 +28,11 @@ that is the central directory, a small read at the end of the file, so
 planning costs a couple of seeks however large the archive is and however slow
 the volume holding it.
 
+Tiers 2 and 3 publish through :func:`util.zip_write.atomic_zip`, the same
+staged-then-verified-then-renamed writer the pipeline's own archives use, so a
+member that fails part-way through a well can never leave a complete-looking
+destination archive that is quietly missing images.
+
 :func:`read_members` and :func:`write_zip` remain the tier-3 primitives and
 the shape a caller reaches for when it genuinely needs a member's decoded
 bytes in hand.
@@ -41,6 +46,7 @@ import zipfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from util.zip_write import atomic_zip
 from datasets._common.dataset_paths import DatasetPaths
 from datasets._common.zip_passthrough import copy_member_raw, member_is_raw_copyable
 
@@ -322,9 +328,30 @@ def copy_container_members(
             _close_progress(progress)
             return frozenset(written), frozenset()
 
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Published through ``atomic_zip``, not written straight to *dest*.
+        # A plain ``with ZipFile(dest, "w")`` writes a central directory for
+        # whatever landed before an exception, so a member that fails part-way
+        # through a well leaves a structurally valid archive holding fewer
+        # images than it was asked for, with nothing on it saying so. The tools
+        # do write an in-progress marker and clear the destination on the next
+        # attempt, but nothing stops a user opening that half-written folder in
+        # Review first, and a truncated archive that reads clean is exactly the
+        # silent substitution this codebase refuses to make. Staging and
+        # renaming also means the destination never exists in a partial state
+        # on disk at all.
+        #
+        # ``durable=False`` keeps the staging file, the member-list check and
+        # the atomic rename, and drops only the fsyncs. Nothing a reader can
+        # observe changes; what is given up is durability across a power loss,
+        # which costs the bulk of the write and buys little here — the source
+        # dataset is still on disk beside the destination, so a lost copy is
+        # reproducible by re-running, and the tool's in-progress marker already
+        # tells the next attempt to clear and redo.
         total = len(planned)
-        with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+        with atomic_zip(
+            dest, compression=zipfile.ZIP_DEFLATED, compresslevel=1,
+            durable=False,
+        ) as archive:
             for done, (source_archive, entry, dest_name) in enumerate(planned, start=1):
                 if source_archive is None:
                     # Tier 3 — a folder source has no compressed form to pass

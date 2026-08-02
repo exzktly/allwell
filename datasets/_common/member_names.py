@@ -57,7 +57,7 @@ def is_os_junk_member(name: str) -> bool:
     archive on purpose is not junk, and if two datasets disagree about one
     that is a real conflict a caller should still refuse to paper over.
     """
-    parts = [part for part in name.replace("\\\\", "/").split("/") if part]
+    parts = [part for part in name.replace("\\", "/").split("/") if part]
     if not parts:
         return False
     if any(part.lower() in _JUNK_DIRECTORIES for part in parts[:-1]):

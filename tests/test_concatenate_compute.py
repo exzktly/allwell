@@ -799,6 +799,12 @@ def test_junk_is_recognised_by_name_not_by_being_unparseable():
         ".DS_Store", "frames/.DS_Store", "Thumbs.db", "desktop.ini",
         "__MACOSX/._exp_GFP_A01_F001_24h.tif", "._exp_GFP_A01_F001_24h.tif",
         ".Spotlight-V100/store.db",
+        # Backslash-separated, as a Windows-authored archive writes them. The
+        # normalisation for these was a no-op ("\\\\" in a non-raw literal is
+        # two characters, not one), so they were missed — and being missed is
+        # not harmless: two datasets each carrying "frames\\.DS_Store" collide,
+        # and the merge is refused for exactly the reason this skip exists.
+        "frames\\.DS_Store", "__MACOSX\\._exp_GFP_A01_F001_24h.tif",
     ):
         assert is_os_junk_member(name), name
     for name in (
@@ -806,3 +812,24 @@ def test_junk_is_recognised_by_name_not_by_being_unparseable():
         "protocol.pdf", "frames/exp_GFP_A01_F001_24h.tif", "",
     ):
         assert not is_os_junk_member(name), name
+
+
+def test_a_well_only_dataset_2_has_keeps_its_own_debris(tmp_path):
+    """The debris skip resolves a conflict; it is not a cleanup pass.
+
+    On a well dataset 1 doesn't have there is nothing to collide with and
+    nothing to prefer, so skipping would simply delete a file — and, for an
+    archive holding nothing else, would leave no destination archive at all
+    while the run still reported the well as having image data.
+    """
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+    _make_dataset(ds2, wells=["B02"], timepoints=["0h", "24h"], junk=True)
+
+    log = []
+    apply.execute_plan(cc.build_merge_plan(ds1, ds2, dest), log.append)
+
+    copied = _zip_members(dest / "in" / "B02.zip")
+    for name, data in JUNK_MEMBERS.items():
+        assert copied[name] == data, f"{name} was deleted from a ds2-only well"
+    assert not any("operating-system file" in line for line in log), log

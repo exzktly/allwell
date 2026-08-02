@@ -1799,8 +1799,11 @@ in the app rather than a separate grid of squares. Left-drag across it to add
 wells to the selected group, or drag across wells the group already has to
 remove them — the direction is decided by the well you start on, so one sweep
 adds or removes throughout instead of flipping each well under the cursor.
-Each group has its own colour and a well takes the colour of the group that owns
-it; the wells of the group you are **currently editing** also carry an accent
+Wells belonging to a **sample definition** are added and removed as that whole
+sample, not one well at a time — touch any well of it and the condition joins
+the group; touch it again and the condition leaves. A well no sample claims
+joins on its own. Each group has its own colour and a well takes the colour of
+the group that owns it; the wells of the group you are **currently editing** also carry an accent
 ring, so "which group is this well in" and "which group am I editing" stay
 readable at the same time. Wells the dataset doesn't have are drawn as empty
 sockets and ignore the drag.

@@ -1050,13 +1050,19 @@ class ExportStyleSidebar(QWidget):
             elif tab == "Scatter Plot":
                 from well_viewer.features.scatter.tab_view import scatter_redraw_active
                 scatter_redraw_active(app._ctx)
-            elif tab == "Spatial":
+            elif tab == "Spatial" and app._ctx.features.redraw(app._ctx, tab):
                 # Spatial renders from its own cached result and is not part of
-                # ``redraw_app``'s fan-out, so without this branch a Properties
-                # edit made while looking at it changed nothing until the tab
-                # was left and re-entered.
-                from well_viewer.features.spatial.renderer import render_spatial
-                render_spatial(app._ctx)
+                # ``redraw_app``'s fan-out, so without this a Properties edit
+                # made while looking at it changed nothing until the tab was
+                # left and re-entered. Resolved by name through the registry
+                # rather than imported, so this sidebar names no other feature's
+                # module and a profiled-out Spatial just falls through.
+                #
+                # Named rather than "any feature with a redraw hook": the
+                # registry calls the hook as ``redraw()(ctx)`` and Line Graphs'
+                # takes required keyword arguments, so a blanket dispatch would
+                # raise on that tab.
+                pass
             else:
                 app._redraw()
         except Exception:

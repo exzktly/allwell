@@ -830,6 +830,28 @@ row, holding four actions:
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. Settings persist across redraws.
 
+#### Rescale time
+
+Under **Properties → Overlays**, **Rescale time** multiplies the numbers printed
+on every time axis. It is there for plates whose filenames don't encode the real
+acquisition cadence: a run numbered `T01 … T12` but imaged every four hours is
+read by the pipeline as 1, 2, 3 … hours, and setting the factor to `4` makes the
+axes read 4, 8, 12 … instead. `1` — the default — turns it off.
+
+It changes **labels only**. The plotted points, the **Timepoint** dropdowns, the
+Statistics tab and every exported CSV keep the hours read from the filenames, so
+while a factor is in force a bar reading `t=16` sits under a Timepoint menu
+reading `4`. That is deliberate — nothing that another part of All-Well reads is
+touched — and it is why any axis the factor changes names it in the axis label,
+so a rescaled figure can't be mistaken for one drawn on the hours the run
+recorded. The factor is saved with the rest of the view state.
+
+Applies to the Line Graphs panels, the Bar Plots tick labels and panel titles,
+the Spatial summary panel, and the Batch Export figures for those tabs. The Heat
+Map and Distribution tabs pick a timepoint from a menu rather than drawing a time
+axis, so their titles keep naming the filename's own value, matching the menu the
+choice came from.
+
 #### Fold-change normalization
 
 The Bar Plots and Line Graphs tabs (and their Batch Export panels) carry

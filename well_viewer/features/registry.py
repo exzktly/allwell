@@ -389,6 +389,11 @@ def _redraw_heatmap():
     return redraw_heatmap
 
 
+def _redraw_spatial():
+    from well_viewer.features.spatial.renderer import render_spatial
+    return render_spatial
+
+
 def _heatmap_view_state_io():
     """Heat Map's (snapshot, apply) view-state pair (lazy). ``view_state`` fans
     this out via the registry so it never names Heat Map — a profiled-out Heat Map
@@ -681,6 +686,7 @@ def _features() -> list[FeatureDescriptor]:
             on_activate=_activate_spatial,
             on_selection_changed=_sel_spatial,
             on_channel_changed=_channel_spatial,
+            redraw=_redraw_spatial,
             per_well_selection=True,
         ),
         # ── Images ────────────────────────────────────────────────────────

@@ -165,6 +165,12 @@ class RunDashboard(PlateProgress):
         else:
             self._done.setdefault(stage, set()).add(w)
             self._active.discard(w)
+            if stage == "download":
+                # The well is fetched, so the frozen download ring has done its
+                # job. Both _well_color and _well_fraction already ignore a
+                # transfer once this stage is set; dropping it keeps the dict
+                # from carrying an entry that can no longer be read.
+                self._xfer.pop(w, None)
         self._plate.setWellColor(w, self._well_color(w))
         self.set_well_fraction(w, self._well_fraction(w))
         # Only the error mark survives. A computing well used to carry a ⚙,
@@ -186,21 +192,47 @@ class RunDashboard(PlateProgress):
                           fraction: float) -> None:
         """Per-well upload (``"up"``) or download (``"down"``) progress, 0..1.
 
-        A fraction of 1.0 ends the transfer rather than pinning the dial full:
-        the entry is dropped, and the well goes back to being described by the
-        stages it has reached. That matters most on upload, where the well is
-        marked ``upload`` as rsync *starts* sending it — leaving a completed
-        transfer in place would hold the dial at full for a well that has not
-        begun computing.
+        **Repaints the well as well as filling its dial.** A transfer changes
+        which state the well is in, and :meth:`_well_color` says so — a download
+        is painted in the colour it is travelling *toward*. Pushing only the
+        fraction left that colour computed and discarded, so a downloading well
+        kept the blue of the last stage change and filled blue-into-blue: the
+        arrival, the one thing the colour exists to show, never happened on
+        screen. Every write here goes through both calls for that reason.
+
+        An **upload** reaching 1.0 ends the transfer: the entry is dropped and
+        the well goes back to being described by the stages it has reached. A
+        well is marked ``upload`` as rsync *starts* sending it, so holding the
+        dial full afterwards would claim progress for a well that has not begun
+        computing.
+
+        A **download** reaching 1.0 does not end anything, because the well's
+        zip is only the first of two transfers — its CSVs follow, and only when
+        both have landed is the well fetched. The closing 1.0 is *ignored*: the
+        ring freezes at the last fraction actually measured, so the well stays
+        green and visibly short of full through the CSV pull, and only
+        :meth:`set_well_stage` marking it ``download`` fills it. Two rejected
+        alternatives, for the record — dropping the entry returned the well to a
+        *full ring in the computed blue*, indistinguishable from one that had
+        not started downloading (the reported bug), and storing the 1.0 fills
+        the ring green, indistinguishable from one already fetched. A frozen
+        near-full ring is the only rendering that is true of both halves.
+
+        The freeze needs a fraction to freeze *at*, so a closing 1.0 with no
+        prior tick creates nothing: a well whose size probe failed never had a
+        dial, and inventing one at the end would report progress never measured.
         """
         w = canon_well(well_id)
         if not w or direction not in (_XFER_UP, _XFER_DOWN):
             return
         frac = max(0.0, min(1.0, float(fraction)))
         if frac >= 1.0:
-            self._xfer.pop(w, None)
+            if direction == _XFER_UP:
+                self._xfer.pop(w, None)
+            # else: a finished download holds its last measured fraction.
         else:
             self._xfer[w] = (direction, frac)
+        self._plate.setWellColor(w, self._well_color(w))
         self.set_well_fraction(w, self._well_fraction(w))
 
     def _well_fraction(self, well: str) -> float | None:

@@ -126,3 +126,56 @@ def test_summary_line_is_not_an_error():
     """
     assert "failed" in _SUMMARY
     assert classify_log_line(f"2026-07-26 08:34:13,214  INFO      {_SUMMARY}") == "INFO"
+
+
+# ── a line's own severity beats a keyword sniffed out of its text ────────────
+
+def test_a_note_about_the_errors_directory_is_not_an_error():
+    """Reported: a red line saying the ``errors`` directory could not be found.
+
+    Two things were wrong with it. The pipeline creates ``<output>/errors/``
+    only when a well or FOV-group actually fails, so a clean run has none and
+    the note is the *good* outcome — and ``classify_log_line`` sniffs keywords
+    out of the whole line, paths included, so the name of the directory it was
+    reporting the absence of painted it red. Good news, rendered as an alarm.
+
+    The tell is that the identical line about ``pipeline_info.json`` came out
+    INFO.
+    """
+    from services.pipeline_runner import classify_log_line
+
+    errors = ("[remote] note: h:/out/errors/ not pulled (rc=23). The pipeline "
+              "only creates errors/ when a well or FOV-group fails, so a clean "
+              "run has none.\n")
+    info = "[remote] note: h:/out/pipeline_info.json not pulled (rc=23).\n"
+    assert classify_log_line(errors) == "INFO"
+    assert classify_log_line(errors) == classify_log_line(info)
+
+
+def test_an_explicit_tag_outranks_the_keyword_guess():
+    from services.pipeline_runner import classify_log_line
+
+    # The tag wins even though the text carries a red-flag keyword...
+    assert classify_log_line("[info] no errors were recorded\n") == "INFO"
+    assert classify_log_line("[warn] the CSV pull failed; retrying\n") == "WARNING"
+    # ...and a tag that says error still means error.
+    assert classify_log_line("[error] something went wrong\n") == "ERROR"
+
+
+def test_a_real_failure_is_still_red():
+    """The guard must not have bought its calm by going quiet on failures."""
+    from services.pipeline_runner import classify_log_line
+
+    for line in ("FAILED well A01: killed by signal 9\n",
+                 "Traceback (most recent call last):\n",
+                 "RuntimeError: 15334400 requested and 0 written\n",
+                 "2026-08-01 10:00:00  ERROR     could not write A01\n"):
+        assert classify_log_line(line) == "ERROR", line
+
+
+def test_a_clean_runs_summary_is_still_not_red():
+    """The lesson this classifier already carried: those are column labels."""
+    from services.pipeline_runner import classify_log_line
+
+    assert classify_log_line(
+        "2026-08-01 10:00:00  INFO      wells failed (no output) : 0\n") == "INFO"

@@ -56,6 +56,16 @@ _LEVEL_TO_TAG = {
     "ERROR": "ERROR", "CRITICAL": "ERROR",
 }
 
+# Severity a line states about itself, for the lines that carry no ``levelname``
+# — the app's own ``[warn]`` / ``[info]`` tags, and the ``note:`` marker the
+# remote runner uses for "this is context, not a verdict". Checked *before* the
+# keyword heuristics below, which read paths as well as prose and so cannot tell
+# a failure from a directory named ``errors/``.
+_RE_EXPLICIT_TAG = re.compile(r"\[(info|warn|warning|error)\]", re.IGNORECASE)
+_TAG_TO_LEVEL = {"info": "INFO", "warn": "WARNING", "warning": "WARNING",
+                 "error": "ERROR"}
+_RE_SELF_DECLARED_NOTE = re.compile(r"\bnote:", re.IGNORECASE)
+
 
 def classify_log_line(line: str) -> str:
     """Return the severity tag for a single pipeline stdout line.
@@ -68,10 +78,27 @@ def classify_log_line(line: str) -> str:
     the end-of-run summary is logged at INFO and reads "wells failed (no output)
     : 0 … FOV-groups failed : 0", so a substring test for "failed" painted a
     clean run's summary red. Those are column labels, not a verdict.
+
+    **A line that declares its own severity is believed before it is sniffed.**
+    The keyword pass reads whole lines, including *paths*, and the pipeline
+    writes its per-failure tracebacks to a directory called ``errors/``. So
+    ``[remote] note: …/errors/ not present on remote`` — which a clean run
+    always emits, because that directory is only created when something fails —
+    was painted red by the name of the folder it was reporting the absence of.
+    Good news, rendered as an alarm. The same line about ``pipeline_info.json``
+    came out INFO, which is how the mechanism gives itself away.
     """
     m = _RE_LOG_LEVEL.match(line)
     if m:
         return _LEVEL_TO_TAG[m.group(1)]
+
+    tag = _RE_EXPLICIT_TAG.search(line)
+    if tag:
+        return _TAG_TO_LEVEL[tag.group(1).lower()]
+    if _RE_SELF_DECLARED_NOTE.search(line):
+        # "note:" is the author saying this is context, not a verdict. Nothing
+        # that reports a failure introduces itself as a note.
+        return "INFO"
 
     ll = line.lower()
     # "failed" catches the per-FOV-group "FAILED <fov> …" line and the run
@@ -270,6 +297,12 @@ class ProgressTracker:
         # A well is "downloaded" only once BOTH its output zip and its CSV(s)
         # have transferred — not on the first part, and not on ``✓ materialised``
         # (which fires even when the CSV pull failed and is deferred to a retry).
+        # The end-of-run retry backstop emits these same two lines (tagged
+        # "(end-of-run retry)") for a well it rescues, so a well fixed at the
+        # end completes the pair by the same route. It has to report both halves
+        # even where it only had to pull one: the in-stream fetcher returns on a
+        # failed zip pull *before* reaching the CSVs, so a well that reaches the
+        # backstop has usually registered neither.
         mz = _RE_FETCH_ZIP.search(line)
         if mz and self._mark_fetch_part(mz.group(1), "zip"):
             events.append(("well_stage", (mz.group(1), "download")))

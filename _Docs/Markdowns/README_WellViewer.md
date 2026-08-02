@@ -368,13 +368,18 @@ You can also explicitly override the output folder.
   `--no_tophat_*` flags disable per-channel.
 - **Min nucleus area** in pixels (rejects garbage detections).
 - **Nucleus probability** and **Overlap (NMS)** — the two StarDist detection
-  thresholds, shown for both StarDist methods. Leave them **blank** and the run
-  uses the thresholds built into the pretrained model, which is what every
-  earlier run did.
+  thresholds, shown for both StarDist methods. A field left **blank** means the
+  run uses the threshold built into the pretrained model.
   - **Nucleus probability** (0–1) is how confident StarDist must be that
     something is a nucleus. **Turn it down** when the run is missing real cells —
     dim, out-of-focus or faint nuclei come back. **Turn it up** when debris is
     being counted as cells.
+    The field **starts at 0.2**, which is more sensitive than the pretrained
+    model's own ~0.479 — so a run you start without touching it finds more
+    nuclei, faint ones included, than the model's default would. Clear the field
+    to go back to the model's own value. The Playground's matching control still
+    starts blank, so an untouched preview there is *not* what an untouched run
+    here would produce.
   - **Overlap (NMS)** (0–1) is how much two detected nuclei may overlap before
     they are merged into one. **Turn it up** on confluent, touching cells so
     neighbours stay separate; **turn it down** if one nucleus is being counted

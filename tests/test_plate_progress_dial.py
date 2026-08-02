@@ -170,7 +170,15 @@ def test_a_finished_upload_hands_the_dial_back_to_the_stages(qapp):
 def test_a_download_in_flight_outranks_having_computed(qapp):
     """A well being fetched has by definition already computed, so the compute
     stage would otherwise pin it full for the whole of the fetch — which on a
-    slow link is the longest single wait in the run."""
+    slow link is the longest single wait in the run.
+
+    The closing 1.0 used to end the transfer and return the well to the compute
+    stage's full ring. That was reported from a real run: the well "started
+    blue, then a pie that filled to blue, then stayed at blue despite the top
+    progress bar stating that wells were actively downloading". The zip is only
+    the first of two transfers — the CSVs follow, unmeasured — so the ring now
+    freezes at the last measured fraction until the well is marked ``download``.
+    """
     d = RunDashboard()
     d.reset(remote=True)
     d.set_well_stage("D07", "upload")
@@ -179,7 +187,11 @@ def test_a_download_in_flight_outranks_having_computed(qapp):
     d.set_well_transfer("D07", "down", 0.25)
     assert _fractions(d._plate)[(3, 6)] == pytest.approx(0.25)
     d.set_well_transfer("D07", "down", 1.0)
-    assert _fractions(d._plate)[(3, 6)] == 1.0, "back to 'computed'"
+    assert _fractions(d._plate)[(3, 6)] == pytest.approx(0.25), (
+        "the zip finished but the CSVs have not — the ring must not refill, "
+        "which would be indistinguishable from 'computed, not yet fetching'")
+    d.set_well_stage("D07", "download")
+    assert _fractions(d._plate)[(3, 6)] == 1.0, "fetched"
 
 
 def test_an_upload_does_not_speak_for_a_well_that_has_moved_on(qapp):

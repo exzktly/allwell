@@ -4032,7 +4032,9 @@ class Fetcher:
     def _transfer_heartbeat(self, label: str, dest_path: Path,
                             interval: float = 8.0,
                             breadcrumb_interval: float = _BREADCRUMB_INTERVAL_S,
-                            total_bytes: int | None = None):
+                            total_bytes: int | None = None,
+                            bytes_so_far=None,
+                            base_bytes: int = 0):
         """Emit a periodic "still transferring…" line showing bytes-so-far while a
         per-well rsync runs, so a long download is visibly *moving* rather than
         looking hung. The per-well fetch rsync is silent (capture_output), so
@@ -4046,12 +4048,23 @@ class Fetcher:
         slower ones. Without a total the status line still reports bytes-so-far
         and no fraction is claimed — an unknown denominator must not become a
         made-up percentage.
+
+        ``bytes_so_far`` overrides the counter for a transfer that does not land
+        in a single file — the CSV half of a well's fetch is a directory of
+        them. ``base_bytes`` is added to whatever the counter reports, so a
+        second phase continues the *same* gauge rather than restarting it: a
+        dial that dropped back toward zero partway through a fetch would read as
+        a retry. With both phases measured against one combined denominator the
+        number only ever goes up.
         """
         stop = threading.Event()
         t0 = time.monotonic()
+        _counter = bytes_so_far
 
         def _bytes_so_far() -> int:
-            total = 0
+            if _counter is not None:
+                return int(base_bytes) + int(_counter())
+            total = int(base_bytes)
             try:
                 # rsync streams into a hidden temp ``.{name}.XXXXXX`` (or the
                 # partial file) in the dest dir, renaming to dest on completion.
@@ -4205,11 +4218,24 @@ class Fetcher:
         expected_bytes = self._remote_file_size(
             f"{self.run.remote_output_dir}/{well}_out.zip")
 
+        # A well's output arrives as TWO transfers — the zip, then its CSVs —
+        # and the dial has to span both or it stops moving partway through a
+        # fetch that is still running. So the CSVs are *listed* here, before the
+        # zip is pulled, purely to learn their byte total: both halves then
+        # measure against one combined denominator and the gauge only goes up.
+        # The listing is the same ssh the pull needs anyway, just moved earlier,
+        # so this costs no extra round trip. Either size being unknown drops the
+        # combined total to None and the dial simply does not run — an unknown
+        # denominator must not become an invented one.
+        csv_host, csv_files, csv_bytes = self._list_remote_glob(csv_glob_src)
+        combined_bytes = (expected_bytes + csv_bytes
+                          if expected_bytes and csv_bytes else expected_bytes)
+
         # Output zip — exists iff the pipeline finished this well. Pull it
         # even under CSV-only mode: we'll discard it after extracting the
         # files we want.
         t0 = time.monotonic()
-        with self._transfer_heartbeat(well, tmp_zip, total_bytes=expected_bytes):
+        with self._transfer_heartbeat(well, tmp_zip, total_bytes=combined_bytes):
             ok = self._rsync(
                 # ``--timeout`` is rsync's own I/O-idle timeout: if the link
                 # stalls (or rsync hangs after the data is across, waiting on a
@@ -4252,12 +4278,45 @@ class Fetcher:
         # the per-well CSV is the most important file and any retry can
         # re-pull it.
         t1 = time.monotonic()
+        csv_listed = len(csv_files)
+
+        def _csv_bytes_landed(dest_dir: Path) -> int:
+            """Bytes of this well's CSVs on disk, including rsync's partials —
+            the same accounting the zip half uses, over several files."""
+            total = 0
+            try:
+                paths = [*dest_dir.glob(f"*_{well}.csv"),
+                         *dest_dir.glob(f".*_{well}.csv.*")]
+            except OSError:
+                return 0
+            for p in paths:
+                try:
+                    total += p.stat().st_size
+                except OSError:
+                    pass
+            return total
+
+        def _csv_dir_heartbeat(dest_dir: Path):
+            """The dial, continuing across the CSV half of this well's fetch.
+
+            The gauge carries on from the zip's byte count (``base_bytes``)
+            against the combined denominator, so the ring keeps climbing rather
+            than stopping — or, worse, restarting near zero, which reads as a
+            retry. The CSVs land as several files in a directory rather than one
+            named file, hence the counter override.
+            """
+            return self._transfer_heartbeat(
+                well, dest_dir, total_bytes=combined_bytes,
+                bytes_so_far=lambda: _csv_bytes_landed(dest_dir),
+                base_bytes=int(expected_bytes or 0))
+
         if self.run.incremental:
             # Partial CSV (new FOV rows only) — merge into the local full CSV
             # rather than overwriting it.
             tmp_csv_dir = _new_scratch_dir(f"allwell-csv-{well}-")
             try:
-                csv_listed, csv_count = self._rsync_glob(csv_glob_src, tmp_csv_dir)
+                with _csv_dir_heartbeat(tmp_csv_dir):
+                    csv_count = self._pull_listed(csv_host, csv_files, tmp_csv_dir)
                 if csv_count:
                     self._merge_fetched_csvs(tmp_csv_dir)
             finally:
@@ -4266,9 +4325,9 @@ class Fetcher:
             # what the user would have to look at.
             csv_dest = _scratch_dir()
         else:
-            csv_listed, csv_count = self._rsync_glob(
-                csv_glob_src, self.run.local_output_dir)
             csv_dest = self.run.local_output_dir
+            with _csv_dir_heartbeat(csv_dest):
+                csv_count = self._pull_listed(csv_host, csv_files, csv_dest)
         csv_elapsed = time.monotonic() - t1
         if csv_count > 0:
             self._log(
@@ -4511,6 +4570,62 @@ class Fetcher:
         )
         return result.returncode == 0
 
+    def _list_remote_glob(self, src_glob: str) -> tuple[str, list[str], int | None]:
+        """``(host, remote paths, total bytes)`` for a remote glob, in one ssh.
+
+        Split out of :meth:`_rsync_glob` so a caller can know what it is about
+        to pull *before* it pulls it — the CSV half of a well's fetch needs its
+        byte total up front, or the well's dial has no denominator for that half
+        and has to stop moving at the end of the zip.
+
+        The size is a second command in the *same* script, so this costs no
+        extra round trip. It is deliberately separate from the path listing:
+        ``ls -1`` gives one clean path per line and is what the pull has always
+        parsed, while summing sizes needs ``ls -ln``'s columns, which vary
+        between GNU and BSD and break on a filename with a space. If the sum is
+        missing or unparseable the paths are still returned and the total is
+        ``None`` — an unknown denominator means no dial, never an invented one.
+        """
+        host, path_glob = src_glob.split(":", 1)
+        script = (
+            f"ls -1 {path_glob} 2>/dev/null || true\n"
+            f"echo '---allwell-bytes---'\n"
+            f"ls -ln {path_glob} 2>/dev/null | awk '{{s+=$5}} END {{print s+0}}'\n"
+        )
+        try:
+            listing = subprocess.run(
+                self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
+                input=script.encode("utf-8"),
+                capture_output=True,
+                timeout=60,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return host, [], None
+        out = (listing.stdout.decode("utf-8", errors="replace")
+               if listing.stdout else "")
+        head, _, tail = out.partition("---allwell-bytes---")
+        files = [ln for ln in head.splitlines() if ln.strip()]
+        total: int | None = None
+        for token in tail.split():
+            if token.isdigit():
+                total = int(token) or None
+                break
+        return host, files, total
+
+    def _pull_listed(self, host: str, files: list[str], dest_dir: Path) -> int:
+        """Pull already-listed remote paths into *dest_dir*; return how many
+        landed. The transfer half of :meth:`_rsync_glob`, split so the listing
+        can happen earlier (see :meth:`_list_remote_glob`)."""
+        pulled = 0
+        dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
+        for f in files:
+            if self._rsync(
+                [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
+                 "-a", f"{host}:{f}", dest_str]
+            ):
+                pulled += 1
+        return pulled
+
     def _rsync_glob(self, src_glob: str, dest_dir: Path) -> tuple[int, int]:
         """Pull files matching a glob. Wraps the source in a quoted-glob
         rsync so the remote side expands ``*``, not the local shell.
@@ -4523,41 +4638,18 @@ class Fetcher:
         "no CSV files found" on the remote, which sent every diagnosis in the
         wrong direction.
         """
-        # We invoke `ssh host 'ls -1 GLOB'` first; rsync's own glob
-        # support requires the source to be quoted in a way that's awkward
-        # to spell cross-shell.
-        host, path_glob = src_glob.split(":", 1)
-        # v5.2.5: the ls-listing ssh and the per-file rsync both go
-        # through the runner's ssh policy (key, accept-new, batchmode).
-        # v5.2.11: pipe the script via stdin so the remote bash parses
-        # any ~ in path_glob normally — wrapping in shlex.quote here
-        # would lose tilde expansion and the listing would silently
-        # return nothing.
-        # v5.x.x: input as bytes so Windows text=True doesn't translate
-        # ``\n`` → ``\r\n`` and trip the remote bash with
-        # ``$'\r': command not found``.
-        listing = subprocess.run(
-            self.host.ssh_argv(allocate_tty=False) + ["bash", "-s"],
-            input=f"ls -1 {path_glob} 2>/dev/null || true".encode("utf-8"),
-            capture_output=True,
-            timeout=60,
-        )
-        listing_stdout = (
-            listing.stdout.decode("utf-8", errors="replace")
-            if listing.stdout else ""
-        )
-        files = [ln for ln in listing_stdout.splitlines() if ln.strip()]
+        # We list over ssh first; rsync's own glob support requires the source
+        # to be quoted in a way that's awkward to spell cross-shell. The listing
+        # and the per-file rsync both go through the runner's ssh policy (key,
+        # accept-new, batchmode), and the script is piped via stdin so the
+        # remote bash expands any ``~`` in the glob normally — shlex.quote here
+        # would lose that and the listing would silently return nothing — as
+        # bytes, so Windows text mode cannot translate ``\n`` → ``\r\n`` and
+        # trip the remote bash with ``$'\r': command not found``.
+        host, files, _total = self._list_remote_glob(src_glob)
         if not files:
             return 0, 0
-        pulled = 0
-        dest_str = to_rsync_path(dest_dir).rstrip("/") + "/"
-        for f in files:
-            if self._rsync(
-                [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
-                 "-a", f"{host}:{f}", dest_str]
-            ):
-                pulled += 1
-        return len(files), pulled
+        return len(files), self._pull_listed(host, files, dest_dir)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -5011,6 +5103,12 @@ class RemoteRunner:
             f"{self.host.ssh_alias}:{run.remote_output_dir}/errors/",
             run.local_output_dir / "errors",
             log_fn=log,
+            # The pipeline creates errors/ only when a well or FOV-group
+            # actually fails, so a clean run has none and this note is the
+            # expected outcome, not a problem. Saying so here is the difference
+            # between a line that reads as bad news and one that reads as none.
+            absent_note="The pipeline only creates errors/ when a well or "
+                        "FOV-group fails, so a clean run has none.",
         )
 
         # The fetched pipeline_info.json reflects only the (partial) input the
@@ -5114,8 +5212,18 @@ class RemoteRunner:
         )
 
     def _rsync_optional(
-        self, src: str, dest: Path, *, log_fn: Callable[[str], None]
+        self, src: str, dest: Path, *, log_fn: Callable[[str], None],
+        absent_note: str = "",
     ) -> None:
+        """Pull *src* if the remote has it; say so plainly if it does not.
+
+        ``absent_note`` explains what the absence *means* for this particular
+        source, because "not present" alone reads as a fault for a source whose
+        absence is the normal, good case. It is deliberately not phrased as a
+        verdict on the run: a non-zero rc means the pull did not happen, which
+        covers both "there was nothing there" and "there was, and it could not
+        be fetched", and this cannot tell those apart.
+        """
         dest.parent.mkdir(parents=True, exist_ok=True)
         result = _rsync_with_retry(
             [resolve_rsync_binary(), *_rsync_ssh_transport(self.host),
@@ -5123,9 +5231,10 @@ class RemoteRunner:
             log_fn=log_fn, timeout=60,
         )
         if result.returncode != 0:
+            tail = f" {absent_note}" if absent_note else ""
             log_fn(
-                f"[remote] note: {src} not present on remote "
-                f"(rc={result.returncode}).\n"
+                f"[remote] note: {src} not pulled "
+                f"(rc={result.returncode}).{tail}\n"
             )
 
     def _retry_missing_wells(
@@ -5189,7 +5298,39 @@ class RemoteRunner:
                 log_fn=log, timeout=None, stop_event=self._cancelled,
             )
 
+        # This backstop reports in the SAME per-well lines the in-stream fetch
+        # uses, rather than a form of its own. Those two lines are what the
+        # progress tracker pairs to turn a well green, so a well rescued here
+        # reaches the same state by the same route — no second vocabulary to
+        # keep in step with the first, and nothing for the tracker to learn.
+        # It logged nothing at all before, which is why a rescued well stayed
+        # painted "computed, awaiting fetch" with its data already on disk.
+        def _report_zip(well: str, elapsed: float) -> None:
+            """The in-stream fetcher's zip line, for a zip this pass secured.
+
+            Emitted whenever the well's zip is complete locally by the time this
+            pass is done with it — including the case where it was already
+            there. That is not padding: the pair only completes when *both*
+            halves are reported, and a well reaches this backstop having
+            registered neither, because the in-stream fetcher returns on a
+            failed zip pull before it ever gets to the CSVs.
+            """
+            out_zip = run.local_output_dir / f"{well}_out.zip"
+            try:
+                mb = out_zip.stat().st_size / (1024 * 1024)
+            except OSError:
+                return
+            log(f"[remote] ↓ {well}: {mb:.1f} MB zip in {_fmt_secs(elapsed)} "
+                f"(end-of-run retry)\n")
+
+        def _report_csvs(well: str, elapsed: float) -> None:
+            found = list(run.local_output_dir.glob(f"*_{well}.csv"))
+            if found:
+                log(f"[remote] ↓ {well}: {len(found)} CSV file(s) in "
+                    f"{_fmt_secs(elapsed)} (end-of-run retry)\n")
+
         for well in sorted(wells):
+            well_t0 = time.monotonic()
             if self._cancelled.is_set():
                 log("[remote] end-of-run retry cancelled by Stop.\n")
                 return
@@ -5217,14 +5358,17 @@ class RemoteRunner:
                 ]
                 for f in files:
                     _pull(f)
+            _report_csvs(well, time.monotonic() - well_t0)
             # Re-pull {well}_out.zip ONLY when the user's output mode wants it
             # AND it isn't already present locally. Pulling a multi-hundred-MB
             # zip just because a CSV was missing is what dragged this backstop
             # into the wall-clock retry loop in the first place.
             if want_zip:
+                zip_t0 = time.monotonic()
                 out_zip = run.local_output_dir / f"{well}_out.zip"
                 if not out_zip.exists() or out_zip.stat().st_size == 0:
                     _pull(f"{run.remote_output_dir}/{well}_out.zip")
+                _report_zip(well, time.monotonic() - zip_t0)
 
     def _verify_local_manifest(
         self, *, log: Callable[[str], None]

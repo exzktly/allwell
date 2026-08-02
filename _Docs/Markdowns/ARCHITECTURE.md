@@ -2268,6 +2268,19 @@ noted:
   `pipeline_service._emit_stardist_threshold_flags`, and the Playground parses
   its own two fields with it.
 
+  **The form's starting value is not the CLI's default.** The Analyze form ships
+  `analyze_tab_seg_params.DEFAULT_PROB_THRESH_TEXT` (`"0.2"`) in the Nucleus
+  probability field, because the pretrained model's own ~0.479 is conservative
+  for these plates — so a run started from an untouched form detects more nuclei
+  than the model default would. `--stardist_prob_thresh` keeps its `-1.0`
+  sentinel, so "no flag" still means the model's own threshold and a script that
+  passes nothing is unaffected; the GUI emits the number explicitly, so a GUI run
+  stays fully described by its command line and its sidecar. Clearing the field
+  restores the model's. Overlap (NMS) still starts blank, and the Playground's
+  matching control starts blank too — an untouched preview there is deliberately
+  not what an untouched Analyze run produces, which is why the help text names
+  the form's starting value even when read from the Playground.
+
   **One description, too.** `PROB_THRESH_HELP` / `NMS_THRESH_HELP` live in the
   same module and are the text both panels show — the Analyze form (through
   `analyze_tab_seg_params._threshold_help`, a function-local import so the form
@@ -2374,7 +2387,20 @@ parent process supervises the per-well worker pool:
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
   `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
   mirroring `_dump_well_failure_trace`), and `classify_log_line` treats
-  "failed" as ERROR so it surfaces in the GUI live log. Whole-well vs
+  "failed" as ERROR so it surfaces in the GUI live log. **A line that states its
+  own severity is believed before it is sniffed**: an explicit `[info]` /
+  `[warn]` / `[error]` tag wins, and so does a `note:` marker, because the
+  keyword pass reads whole lines *including paths* and this directory is called
+  `errors/`. On a remote run the fetch pulls that directory back so Validate &
+  Repair can read it, and a clean run has none to pull — so
+  `[remote] note: …/errors/ not pulled` was painted red by the name of the
+  folder whose absence it was reporting, while the identical line about
+  `pipeline_info.json` came out INFO. The note itself now says what the absence
+  means (`_rsync_optional`'s `absent_note`), since "not pulled" alone reads as a
+  fault for a source whose absence is the good case. It stops short of declaring
+  the run clean: a non-zero rc covers both "nothing was there" and "something
+  was, and it could not be fetched", and the fetch cannot tell those apart.
+  Whole-well vs
   partial-FOV failures are accounted separately, with a per-well breakdown and
   PARTIAL warnings that point at `--incremental`. Transient short/zero NAS
   writes are shielded by `pipeline.io._safe_imwrite`'s retry-with-backoff, which
@@ -3286,6 +3312,44 @@ lands. The colour change *is* the arrival. A well that has moved on (already
 computing, already fetched) keeps its own colour, so a stale transfer marker
 cannot repaint it backwards.
 
+**`set_well_transfer` pushes the colour as well as the fraction**, and that is
+the whole of what makes the paragraph above true on screen rather than only in
+the model. `set_well_stage` writes both to the plate; a transfer that wrote only
+the fraction left the destination colour computed and discarded on every tick,
+so a downloading well kept the blue of its last stage change and filled
+blue-into-blue — the exact rendering the destination-colour rule exists to
+prevent. The regression guards for it assert on what the plate was *told*
+(`setWellColor` calls), not on what `_well_color` returns: the computed value was
+green throughout while the widget painted blue, so asserting the computed value
+is what hid it.
+
+**A well's output arrives as two transfers, and the dial spans both.** The
+`{well}_out.zip` and the well's CSVs are separate rsyncs, and the well is not
+fetched until both have landed — so `Fetcher._fetch_one_well` **lists the CSVs
+before it pulls the zip**, purely to learn their byte total, and both halves
+then measure against one combined denominator. The listing is the same ssh the
+pull needs anyway, moved earlier, so this costs no extra round trip.
+`_list_remote_glob` returns `(host, paths, total bytes)` — the paths from
+`ls -1` exactly as the pull has always parsed them, the total from an `ls -ln |
+awk` sum in the *same* script, kept separate because those columns vary between
+GNU and BSD and break on a filename with a space. `_transfer_heartbeat` takes a
+`bytes_so_far` counter (the CSVs land as several files, not one named path) and
+a `base_bytes` offset carrying everything the zip already contributed, so the
+gauge continues rather than restarting near zero — a dial that dropped back
+partway through a fetch would read as a retry.
+
+Either size being unknown drops the combined total to the zip's own, or to
+`None`, and the dial simply stops or never runs: an unknown denominator must not
+become an invented one. That is when the widget's **freeze** rule carries the
+rendering. A download reaching 1.0 does not end the transfer the way an upload
+does; the ring holds at the last measured fraction — green, visibly short of
+full — until `set_well_stage` marks the well `download`. Both alternatives are
+indistinguishable from some other state: dropping the entry returns the well to
+a full ring in the computed blue (a well that has not started downloading), and
+storing the 1.0 fills the ring green (a well already fetched). A closing 1.0
+with no prior tick creates nothing, since a well whose size probe failed never
+had a dial at all.
+
 **Rail denominators are per stage.** A remote run's stages do not count the
 same population: every well on the plate is grouped locally, while only the
 subset the incremental split sends is uploaded, processed and thresholded, and
@@ -4085,6 +4149,24 @@ cycle. `Fetcher._transfer_heartbeat` runs two cadences out of one loop: the live
 sample every `interval`, and a durable breadcrumb every `_BREADCRUMB_INTERVAL_S`
 (60s) that *does* go to the log — a status line cannot answer "was it stuck at
 3am?" the next morning, and one line a minute is a record rather than a flood.
+
+**A well turns green only when both halves of its output have landed** — the
+`{well}_out.zip` and its per-well CSV(s) are two separate rsyncs, and
+`ProgressTracker._mark_fetch_part` fires the `download` stage on the transition
+where both are present. Two paths bypass that handshake, and both must announce
+themselves or the well stays painted "computed, awaiting fetch" with its data
+already on disk: a well the remote skipped as already current
+(`[remote] ✓ W: up to date`), and one rescued by the end-of-run backstop. The
+backstop reports in the **same two lines** the in-stream fetch uses, tagged
+`(end-of-run retry)` — `RemoteRunner._retry_missing_wells` emits both halves for
+every well it finishes with, including a half it did not have to re-pull,
+because by the time it runs the well has usually registered *neither*: the
+in-stream fetcher returns early when the zip pull fails, before it reaches the
+CSVs. Reusing the fetch vocabulary rather than inventing a form of its own means
+a rescued well reaches green by the same route, with nothing extra for the
+tracker to learn. The drain's own chatter
+(`draining fetcher: N well(s)`, `still downloading… (5/8 wells)`) carries counts
+rather than well ids and deliberately marks nothing.
 
 **Per-well transfer progress** rides the same marker. `WELL_XFER_PREFIX` is
 `TRANSIENT_PREFIX` plus `xfer `, so the "never write this to the log" rule

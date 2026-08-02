@@ -87,10 +87,21 @@ class PlaygroundState:
     seg_key: tuple | None = None
     seg_status: str = ""
     seg_running: bool = False
+    # Set when the frame segmented was not the stage on screen (segmentation
+    # always runs on the corrected frame, as the pipeline does). Reported with
+    # the nucleus count so a count can never be read as belonging to a picture
+    # it did not come from.
+    seg_stage_note: str = ""
     # An out-of-range threshold typed into either field. Held separately from
     # seg_status so it is reported even with the preview switched off — a value
     # that is quietly not being used has to say so wherever it was typed.
     seg_param_error: str = ""
+
+    # What the last render actually did, recorded by ``_render`` so the read-out
+    # can state it rather than re-derive it (a second derivation is a second
+    # chance to describe something the renderer did not do). Keys are documented
+    # by ``controller._display_facts``.
+    display_facts: dict = field(default_factory=dict)
 
     # per-render caches (rebuilt on change; never persisted)
     raw_arr: object = None              # last-loaded raw frame

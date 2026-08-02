@@ -206,16 +206,13 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         splitter.setStretchFactor(0, 0)
 
         self._build_form(form_host)
-        # The Preview page follows the form's own widgets, so it can only be
-        # wired once every one of them exists.
-        self._wire_preview_to_form()
 
         # Right — log panel
         right = QWidget()
         right.setMinimumWidth(300)
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
-        self._build_right_pane(right)
+        self._build_log(right)
 
         splitter.setSizes([RAIL_W, 600])
 
@@ -654,7 +651,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         self._well_done  = 0
         self._well_repeats = 0
         self._progress_tracker.reset()
-        self._show_run_page()
         self._dashboard.reset(remote=remote is not None)
         if getattr(self, "_last_run_card", None) is not None:
             self._last_run_card.setVisible(False)  # C4: hide stale summary while running

@@ -293,7 +293,7 @@ FEATURE_NAME_EXCEPTIONS = {
     # were normalized from bare view.py → tab_view.py, so no feature file uses
     # the bare name anymore.
     "models.py", "params.py", "region.py", "service.py", "style.py",
-    "box_select.py", "well_grid_button.py",
+    "box_select.py",
     "export.py", "grid_layout.py", "image_compose.py",
     # scatter density-coloring + rectangular-gating helpers (point rendering,
     # density math, gate stats, RectangleSelector wiring) — a draw-mode of the

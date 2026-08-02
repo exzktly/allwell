@@ -555,8 +555,9 @@ A cell counts only when it is manually kept **and** it passes QC.
   A well that has started is drawn as a dial rather than a flat circle: the
   darker part of it is the work already done, the lighter part what is left,
   filling clockwise from twelve o'clock. So you can see at a glance whether a
-  slow well is nearly through or has barely started. There is no longer a cog on
-  the well — the dial and its colour say it is working.
+  slow well is nearly through or has barely started. A well with a dial carries
+  no cog — the dial and its colour already say it is working. That holds for
+  every plate map in the app, including the ones on the Datasets tools.
 - The dial follows whichever step the well is actually in. While the well is
   being computed it fills with the fields measured; while its input archive is
   being uploaded, or its results downloaded, it fills with the bytes moved. A
@@ -1577,16 +1578,24 @@ exact correction and segmentation code).
   sample, so the `empty_well` and `basic` correction modes cannot run on one —
   the status line says which correction was skipped rather than showing you an
   uncorrected frame labelled as corrected.
-- **Stage** — the first control in the Correction section, and the one that
-  decides what everything below it does: **Raw** shows the unprocessed frame and
-  runs no correction at all, **Flat-field only** applies the flat-field and
-  ignores the background method, **Corrected** applies both (what a run
-  produces). Controls the chosen stage does not use are greyed out, so you can
-  see at a glance why one is not responding.
+- **Correct up to** — the first control in the Correction section, and the one
+  that decides what everything below it does: **Raw** shows the unprocessed
+  frame and runs no correction at all, **Flat-field only** applies the
+  flat-field and ignores the background method, **Corrected** applies both (what
+  a run produces). Controls the chosen stage does not use are greyed out, so you
+  can see at a glance why one is not responding.
 - **Correction controls** — all in the **right-hand panel**, where every other
   per-tab inspector in the app sits: any flat-field + background method and its
   parameters. Correction re-runs as you change them; segmentation waits for the
   Segment button.
+  - The `empty_well` and `basic` modes first estimate a field from every frame
+    of the **Bg well** you choose, for the channel you are viewing. That takes a
+    moment the first time you pick a well, a channel or one of those two modes;
+    afterwards it is cached. If the chosen well has no readable frames for that
+    channel, the read-out says the field could not be built and names it — and
+    the Stage line then shows the correction that *actually* ran, which is
+    `none` for that half. A correction that could not run never looks like one
+    that did.
 - **Display controls** — LUT / colormap / binary + outlines; pan / zoom;
   per-stage LUT memory; a frame-local binary threshold; a hover pixel-intensity
   readout; a QC size-cleanup preview.
@@ -1612,14 +1621,32 @@ exact correction and segmentation code).
     usable mask; or every labelled pixel with the threshold ignored. The
     read-out names which one you are seeing, and where the threshold came from —
     set on this tab, or the channel's app-wide ON threshold.
+  - **Colour cells** (on by default) gives every cell its own colour in Binary
+    mode instead of painting them all white. Two nuclei that touch are one white
+    shape otherwise, so a segmentation that merged them looks exactly like one
+    that separated them. Each colour is fixed to the label, so it does not
+    change as you redraw. The per-pixel fallback stays white — there are no
+    cells there to colour.
 - **Segmentation controls** — tick **Live StarDist**, set **Probability** and
   **Overlap (NMS)** (blank = the pretrained model's own values), and press
   **Segment**. The nuclei it finds replace the pipeline's saved mask in the
   overlay, so you can see what a threshold change actually does. The status line
   reports the nucleus count and the thresholds that produced it.
+  - **Cells** — directly under the Segment button, the count the thresholds are
+    being tuned against: how many objects the current picture actually draws,
+    what the QC size filter dropped, and — in Binary mode with a usable mask —
+    how many of them clear the threshold. It reads **—**, not `0`, whenever
+    there is no count to give: no mask at all, or labels that no longer describe
+    this frame. Zero cells and an unknown number of cells are different answers.
   - **The first Segment of a session is slow** — around 10–30 seconds, because
     it loads TensorFlow and the StarDist model into the application, and about
     1–2 GB stays in use until you quit. Every later Segment takes a few seconds.
+    The status bar at the bottom of the window shows a progress bar while it
+    runs and says which phase it is in, so the long first load is visibly a load
+    rather than a hang. Building an `empty_well` or `basic` reference field
+    shows the same bar, counting the frames it samples. Ordinary corrections do
+    not: they run on the interface's own thread, take a second or two, and
+    finish before a bar could tell you anything.
   - Change the frame or any correction setting and the labels no longer describe
     what is on screen, so they are **removed** and the status line says they are
     stale. Press **Segment** again.
@@ -1767,6 +1794,20 @@ points. The bar and line batch panels also expose the same
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
+Groups are built on a **plate map**, the same plate control used everywhere else
+in the app rather than a separate grid of squares. Left-drag across it to add
+wells to the selected group, or drag across wells the group already has to
+remove them — the direction is decided by the well you start on, so one sweep
+adds or removes throughout instead of flipping each well under the cursor.
+Wells belonging to a **sample definition** are added and removed as that whole
+sample, not one well at a time — touch any well of it and the condition joins
+the group; touch it again and the condition leaves. A well no sample claims
+joins on its own. Each group has its own colour and a well takes the colour of
+the group that owns it; the wells of the group you are **currently editing** also carry an accent
+ring, so "which group is this well in" and "which group am I editing" stay
+readable at the same time. Wells the dataset doesn't have are drawn as empty
+sockets and ignore the drag.
+
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each
 group is drawn in its own **distinct colour**, **solo wells are labelled by their
@@ -1836,8 +1877,12 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
 
 The readout shows how the file splits into wells × FOVs × timepoints and lists the
 channel names (any Z-stack is **maximum-intensity projected**; labels stay within
-the 96-well plate `A01`–`H12`). Press **Convert** — a progress bar fills as the
-wells are written in parallel (Cancel stops it cleanly), and the output is one
+the 96-well plate `A01`–`H12`). Press **Convert** — the acquisition plate above
+becomes the progress view: each well fills clockwise as its images are written,
+the same dial every other plate map in the app uses, and the plate locks against
+clicks until the run finishes so the order being converted can't be edited
+under it. A progress bar for the run as a whole appears below (Cancel stops it
+cleanly). The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
 (no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step
@@ -1946,9 +1991,10 @@ plain re-run would skip the very wells that need finishing.
    anything wrong — exactly which timepoints a well is missing, a sidecar
    that's out of sync with what's on disk, a CSV that looks like a well's
    data but isn't, or cell-inclusion overrides that no longer match the
-   current segmentation. The findings list holds a placeholder ("Pick a
-   dataset folder and press Check.") until then, and clears back to it if a
-   re-check fails, rather than leaving an earlier check's results on screen.
+   current segmentation. Before a check there is no findings list on screen at
+   all — it appears with the first thing it has to say, and disappears again
+   when you pick a different dataset rather than leaving an earlier check's
+   results up.
    Where the run left records of its own — the per-well completeness block in
    `pipeline_info.json` and any tracebacks under `out/errors/` — the findings
    use them rather than guessing. A well with images and no measurements CSV
@@ -1986,9 +2032,8 @@ plain re-run would skip the very wells that need finishing.
    the settings were **not** loaded — check the schema, channel tokens and CSV
    prefix by hand before running in that case.
 
-If a check fails, the findings list says why instead of going back to its
-"Pick a dataset folder" prompt, and the **Complete this run in Analyze**
-button disappears — the offer belonged to the report that failed, and taking
+If a check fails, the findings list says why instead of emptying, and the
+**Complete this run in Analyze** button disappears — the offer belonged to the report that failed, and taking
 it would hand Analyze a dataset whose settings had just proved unreadable.
 
 ### Subset / Split Dataset
@@ -2010,11 +2055,12 @@ trimming a drifted tail of timepoints.
 3. Press **Subset**. The same well plate you picked wells with now shows
    each one being copied — locked against further clicks until the run
    finishes, so it can double as the progress view instead of a second
-   plate map elsewhere on the page. A well that is being narrowed down
-   fills as a dial while its files are copied, so a large well shows how far
-   through it is rather than sitting on one colour until it lands. A well
-   kept whole is copied in one step and simply goes from empty to done —
-   there is nothing to report part-way through a single file copy.
+   plate map elsewhere on the page. A well being copied fills clockwise as a
+   dial, the same way Analyze's run plate does, so you can see whether a big
+   well is nearly through or has barely started; it ends as a full circle
+   with a ✓, or as a plain `!` well if nothing in it matched your filter. A
+   well you kept whole is the exception: it is copied as a single file, so it
+   goes straight from empty to full with nothing to report in between.
 
 Subsetting copies files rather than rebuilding them, so it runs at roughly
 the speed of copying the archives yourself in Finder or Explorer. Narrowing

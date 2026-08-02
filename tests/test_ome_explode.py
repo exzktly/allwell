@@ -369,3 +369,103 @@ def test_missing_channel_names_fall_back_to_positional_tokens(tmp_path):
     )
     layout = read_ome_layout(p)
     assert layout.channel_names == ["c0", "c1"]
+
+
+def test_per_well_progress_splits_the_run_by_well(tmp_path):
+    """The run-wide plane counter cannot say which well is being written, so a
+    page with a plate above its progress bar had nothing to paint onto it. Each
+    well's own share is reported alongside the total: four planes per well here
+    (1 FOV x 2 channels x 2 timepoints), counted from 1 to 4 for each."""
+    p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=2, size_c=2, size_z=1)
+    seen: list[tuple[str, int, int]] = []
+    explode_ome_tiff(
+        p, tmp_path / "in", grid_rows=2, grid_cols=2, origin_well="A01",
+        direction="row", experiment="exp", workers=1,
+        well_progress_fn=lambda w, d, t: seen.append((w, d, t)),
+    )
+    assert {w for w, _d, _t in seen} == {"A01", "A02", "B01", "B02"}
+    assert {t for _w, _d, t in seen} == {4}          # planes per well
+    for well in ("A01", "A02", "B01", "B02"):
+        ticks = [d for w, d, _t in seen if w == well]
+        assert ticks == [1, 2, 3, 4], (well, ticks)
+
+
+def test_per_well_progress_is_optional(tmp_path):
+    """Every existing caller passes no well_progress_fn and must be unaffected."""
+    p = _write_ome(tmp_path / "s.ome.tif", positions=2, size_t=1, size_c=1, size_z=1)
+    res = explode_ome_tiff(
+        p, tmp_path / "in", grid_rows=1, grid_cols=2, origin_well="A01",
+        direction="row", experiment="exp",
+    )
+    assert res.images_written == 2
+
+
+def test_per_well_progress_across_several_workers(tmp_path):
+    """The production path runs wells in parallel across a thread pool, so the
+    per-well counters must be independent — one worker's ticks must never be
+    counted into another's well. ``well_written`` lives inside the per-well
+    loop for that reason."""
+    p = _write_ome(tmp_path / "s.ome.tif", positions=8, size_t=1, size_c=2, size_z=1)
+    seen: list[tuple[str, int, int]] = []
+    lock = __import__("threading").Lock()
+
+    def _record(w, d, t):
+        with lock:
+            seen.append((w, d, t))
+
+    explode_ome_tiff(
+        p, tmp_path / "in", grid_rows=2, grid_cols=4, origin_well="A01",
+        direction="row", experiment="exp", workers=4,
+        well_progress_fn=_record,
+    )
+    per_well: dict[str, list[int]] = {}
+    for well, done, total in seen:
+        assert total == 2                       # 1 FOV x 2 channels x 1 timepoint
+        per_well.setdefault(well, []).append(done)
+    assert len(per_well) == 8
+    for well, ticks in per_well.items():
+        assert ticks == [1, 2], (well, ticks)
+
+
+def test_per_well_progress_counts_fovs_and_timepoints_into_the_denominator(tmp_path):
+    """A well's share is its FOVs x timepoints x channels, not its positions:
+    with 2 FOVs per well the well is only done after both are written."""
+    p = _write_ome(tmp_path / "s.ome.tif", positions=4, size_t=3, size_c=2, size_z=1)
+    seen: list[tuple[str, int, int]] = []
+    explode_ome_tiff(
+        p, tmp_path / "in", grid_rows=1, grid_cols=2, origin_well="A01",
+        direction="row", experiment="exp", workers=1, fovs_per_well=2,
+        well_progress_fn=lambda w, d, t: seen.append((w, d, t)),
+    )
+    assert {t for _w, _d, t in seen} == {12}    # 2 FOV x 3 tp x 2 ch
+    assert [d for w, d, _t in seen if w == "A01"] == list(range(1, 13))
+
+
+def test_convert_quantises_per_well_ticks_before_the_ui_sees_them(tmp_path):
+    """``explode_ome_tiff`` ticks once per plane; ``apply.convert`` folds those
+    into whole percentage steps, because every tick that survives becomes a
+    queued Qt signal and a plate repaint. A well of thousands of planes must
+    not drive thousands of repaints."""
+    from datasets.ome_import.apply import convert
+    from datasets.ome_import.ome_import_compute import ConversionParams
+
+    # 240 planes per well: 1 FOV x 120 timepoints x 2 channels, so the raw tick
+    # count per well is comfortably above the 100-step ceiling.
+    p = _write_ome(tmp_path / "s.ome.tif", positions=2, size_t=120, size_c=2, size_z=1)
+    seen: list[tuple[str, int, int]] = []
+    convert(
+        p, tmp_path / "out",
+        ConversionParams(grid_rows=1, grid_cols=2, experiment="exp", workers=1),
+        well_progress=lambda w, d, t: seen.append((w, d, t)),
+    )
+    per_well: dict[str, list[int]] = {}
+    for well, done, total in seen:
+        assert total == 100                     # reshaped onto whole percent
+        per_well.setdefault(well, []).append(done)
+
+    assert set(per_well) == {"A01", "A02"}
+    for well, steps in per_well.items():
+        assert len(steps) <= 101, (well, len(steps))    # 240 raw ticks, deduped
+        assert steps == sorted(steps), well             # monotonic, never resets
+        assert len(steps) == len(set(steps)), well      # no repeated step
+        assert steps[-1] == 100, well                   # ends full

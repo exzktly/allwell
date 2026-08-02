@@ -69,21 +69,43 @@ def test_apply_repairs_tooltip_explains_why_when_findings_cant_be_repaired(qapp,
     ctrl.shutdown()
 
 
-def test_findings_list_shows_an_empty_state_hint_before_any_check(qapp):
-    """Regression guard (UX audit P2-1): the findings list was a large,
-    entirely blank box until Check ran — its own empty-container problem,
-    the same class of "reads as broken" bug the dashboard hide/reveal fix
-    addressed. The hint text lives inside the list itself as a non-
-    selectable item, not as a separate caption elsewhere on the page."""
+def test_findings_list_is_absent_until_a_check_produces_something(qapp, tmp_path):
+    """The findings list carries a layout stretch and a panel border, so an
+    empty one is not a small widget — it drew a page-height bordered box
+    holding a single line of placeholder text. That line told the user to pick
+    a dataset folder and stayed exactly as it was after they picked one: the
+    largest thing on the page, describing a step already completed. It is now
+    hidden until there is a real finding, failure, or note to put in it."""
     from datasets.validate.controller import ValidateController
 
     ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
     page = ctrl.page
-    assert page._findings_list.count() == 1
-    item = page._findings_list.item(0)
-    assert "Pick a dataset folder and press Check." == item.text()
-    from PySide6.QtCore import Qt
-    assert not (item.flags() & Qt.ItemIsSelectable)
+    assert page._findings_list.count() == 0
+    assert page._findings_list.isHidden()
+
+    # Still absent once a valid folder is picked — that was the inaccurate
+    # part: the box went on asking for the folder it had already been given.
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    page.set_dataset_path(str(tmp_path))
+    assert page._findings_list.count() == 0
+    assert page._findings_list.isHidden()
+    ctrl.shutdown()
+
+
+def test_a_report_reveals_the_findings_list(qapp, tmp_path):
+    """The other half of hiding it: a check with something to say must bring
+    the list back, including the clean-dataset "No issues found." row."""
+    from datasets.validate.controller import ValidateController
+
+    build_dataset(tmp_path, wells=["A01"], timepoints=["0h"])
+    ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
+    page = ctrl.page
+    page.set_dataset_path(str(tmp_path))
+    page._check_btn.click()
+    _run_worker_to_completion(ctrl)
+
+    assert not page._findings_list.isHidden()
+    assert page._findings_list.count() >= 1
     ctrl.shutdown()
 
 
@@ -384,9 +406,8 @@ def test_failed_check_clears_the_previous_runs_findings(qapp, tmp_path):
     assert "Failed" in page.dashboard._headline.text()
     # The stale findings from the unrelated dataset are gone, which is what
     # this test guards -- and what replaces them is the reason the check
-    # failed. It used to be the "Pick a dataset folder and press Check."
-    # placeholder, which reads as "nothing happened" directly under a red
-    # Failed headline; see
+    # failed. It used to be an empty list, which reads as "nothing happened"
+    # directly under a red Failed headline; see
     # test_failed_check_shows_why_and_withdraws_the_completion_offer.
     assert page._findings_list.count() == 1
     assert "Check failed" in page._findings_list.item(0).text()
@@ -553,8 +574,8 @@ def test_live_well_paint_matches_the_finished_report(qapp, tmp_path):
 def test_failed_check_shows_why_and_withdraws_the_completion_offer(qapp, tmp_path):
     """Regression guard for the pair of symptoms a failed re-check produced.
 
-    The findings list reset to its "Pick a dataset folder and press Check."
-    placeholder -- which says nothing happened -- while the "Complete this run
+    The findings list reset to an empty state -- which says nothing
+    happened -- while the "Complete this run
     in Analyze" button left over from the earlier successful check stayed
     visible and live. Clicking it then handed Analyze a dataset root whose
     sidecar had just proved unreadable, so no settings could travel with it and
@@ -595,7 +616,7 @@ def test_failed_check_shows_why_and_withdraws_the_completion_offer(qapp, tmp_pat
     shown = [page._findings_list.item(i).text()
              for i in range(page._findings_list.count())]
     assert any("Check failed" in text for text in shown), shown
-    assert not any("Pick a dataset folder" in text for text in shown), shown
+    assert not page._findings_list.isHidden()
     assert not page._complete_btn.isVisibleTo(page)
     assert not page._repair_btn.isEnabled()
     ctrl.shutdown()

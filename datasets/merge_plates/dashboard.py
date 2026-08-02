@@ -72,15 +72,15 @@ class MergePlatesDashboard(PlateProgress):
         self._refresh_rail()
 
     def _well_marker(self, w: str) -> str | None:
-        # "merging" always wins -- it's transient and every dashboard's own
-        # in-flight marker convention (see ConcatDashboard/ImportLooseDashboard's
-        # "⚙"). A dataset-2 well keeps its "2" marker in every other state so
-        # its origin survives independently of colour -- colour alone
-        # (success vs. accent2) is unreadable to anyone who can't distinguish
-        # the two hues, and it's also the only thing telling the two datasets
-        # apart once both are "merged" green/lilac dots on a small plate.
-        if self._well_stage.get(w) == "merging":
-            return "⚙"
+        # A *merging* well carries no in-flight glyph of its own: it is drawn
+        # as a progress dial, and a glyph would sit in the middle of exactly
+        # the area the dial fills, while the fill and the colour already say
+        # the well is being worked on. Every plate map in the app follows that
+        # rule. A dataset-2 well keeps its "2" marker throughout, merging
+        # included -- that one is origin, not progress, and it is the only
+        # thing telling the two datasets apart once both are "merged"
+        # green/lilac dots on a small plate; colour alone (success vs.
+        # accent2) is unreadable to anyone who can't distinguish the two hues.
         if self._well_origin.get(w) == "ds2":
             return "2"
         # A dataset-1 well's own terminal "merged" state -- ds2's origin

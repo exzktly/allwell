@@ -252,7 +252,9 @@ def test_local_threshold_binary_does_not_touch_app_wide(playground_app, monkeypa
     st.threshold = 100.0          # local override between the two cells
     C.playground_on_change(app._ctx)
     rgb = st.base_rgb
-    assert (rgb[3, 3] == (255, 255, 255)).all()    # bright cell ON
+    # Drawn vs not drawn is what the threshold decides; which colour a drawn
+    # cell gets is the Colour cells toggle's business, tested separately.
+    assert (rgb[3, 3] != (0, 0, 0)).any()          # bright cell ON
     assert (rgb[14, 14] == (0, 0, 0)).all()        # dim cell OFF
     # The app-wide ThreshFracOn is untouched.
     assert get_thresh_frac_on(app._ctx, (st.channel or "").lower()) == before
@@ -274,11 +276,15 @@ def test_qc_size_filter_drops_out_of_range_cells(playground_app, monkeypatch):
     st.binary_mask = True
     st.threshold = 10.0
     C.playground_on_change(app._ctx)
-    assert int((st.base_rgb == 255).all(axis=2).sum()) == 109   # both cells
+    # Count the pixels DRAWN, not the white ones: each label is filled in its
+    # own colour, so "is this pixel white" no longer means "is this cell in".
+    drawn = (st.base_rgb > 0).any(axis=2)
+    assert int(drawn.sum()) == 109                              # both cells
     # qc_min_area is read from the widget each change — drive the widget.
     app._playground_qc_min_area_edit.setText("20")
     C.playground_on_change(app._ctx)
-    assert int((st.base_rgb == 255).all(axis=2).sum()) == 100   # small one dropped
+    drawn = (st.base_rgb > 0).any(axis=2)
+    assert int(drawn.sum()) == 100                              # small one dropped
 
 
 def test_per_source_lut_memory(playground_app, monkeypatch):

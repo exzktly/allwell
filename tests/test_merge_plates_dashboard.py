@@ -52,14 +52,18 @@ def test_dataset2_wells_use_accent2_not_the_anomaly_accent_colour(qapp):
 def test_dataset2_wells_carry_a_marker_independent_of_colour(qapp):
     """A dataset-2 well's origin must be readable from more than colour alone
     (e.g. for anyone who can't distinguish success-green from accent2-lilac)
-    -- it keeps its "2" marker whether pending or merged; only the transient
-    "merging" glyph takes priority while a well is actively being copied."""
+    -- it keeps its "2" marker in every state, merging included. That marker
+    is origin rather than progress, which is why it survives the rule that a
+    well being worked on carries no in-flight glyph of its own (it is drawn
+    as a progress dial instead); a ds1 well merging has no marker at all."""
     d = MergePlatesDashboard()
     d.set_wells(["A01"], ["C03"])
     assert d._well_marker("A01") is None
     assert d._well_marker("C03") == "2"
     d.set_well_stage("C03", "merging")
-    assert d._well_marker("C03") == "⚙"
+    assert d._well_marker("C03") == "2"
+    d.set_well_stage("A01", "merging")
+    assert d._well_marker("A01") is None
     d.set_well_stage("C03", "merged")
     assert d._well_marker("C03") == "2"
 

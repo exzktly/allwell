@@ -5,7 +5,15 @@ one difference: Subset's page already has an interactive well-plate selector
 for choosing the input wells, so this controller paints run progress directly
 onto that same widget (``page._plate``) instead of driving a second, separate
 status plate — ``SubsetDashboard`` (``PlateProgress(show_plate=False)``)
-carries only the headline, overall bar, counts rail and legend.
+carries only the headline, overall bar and counts rail.
+
+That difference reaches every kind of per-well progress, not just colour. The
+sibling controllers connect their worker's ``wellFraction`` signal straight to
+``dashboard.set_well_progress``; here that call would land on a dashboard with
+no plate behind it and silently do nothing, so the fractions are routed to
+``page._plate.setWellFraction`` instead. Same dial, same rule for what a
+non-positive total means (``widgets.plate_progress.fraction_or_none``), drawn
+on the plate this page actually shows.
 """
 
 from __future__ import annotations
@@ -18,7 +26,7 @@ from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
-from widgets.plate_progress import canon_well
+from widgets.plate_progress import canon_well, fraction_or_none
 from datasets._common.dataset_paths import shorten_headline
 from datasets.subset.dashboard import well_color, well_tooltip_label
 from datasets.subset.subset_compute import (
@@ -80,6 +88,9 @@ class SubsetController(QObject):
         self._well_stage = {}
         self.page._plate.clearWellColors()
         self.page._plate.clearWellMarkers()
+        # Dials too, not just colours and markers: a second run that kept the
+        # first one's fractions would start with every well already part-full.
+        self.page._plate.clearWellFractions()
         # Lock the picker for the duration of the run — it's about to become
         # the progress display for exactly the selection it holds right now.
         self.page._plate.setEnabled(False)
@@ -146,9 +157,6 @@ class SubsetController(QObject):
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Copying {len(wells)} well(s)…")
         self._well_stage = dict.fromkeys((canon_well(w) for w in wells), "pending")
-        # A previous run's dials would otherwise sit at whatever they reached,
-        # reading as progress this run has not made.
-        self.page._plate.clearWellFractions()
         for w in self._well_stage:
             self.page._plate.setWellColor(w, well_color("pending"))
 
@@ -161,30 +169,33 @@ class SubsetController(QObject):
         self.page._plate.setWellColor(w, well_color(stage))
         # Terminal states carry a marker too, not just colour (accessibility
         # — colour alone is unreadable to anyone who can't distinguish
-        # success-green from accent-lilac).
-        marker = {"copying": "⚙", "done": "✓", "empty": "!"}.get(stage)
+        # success-green from accent-lilac). A *copying* well carries none: it
+        # is drawn as a dial, and a glyph would sit in the middle of exactly
+        # the area the dial fills while the fill and the colour already say
+        # the well is working. Every plate map in the app follows that rule.
+        marker = {"done": "✓", "empty": "!"}.get(stage)
         self.page._plate.setWellMarker(w, marker)
+        # Make the terminal states definite rather than trusting the last
+        # sub-progress tick to have arrived: a copied well reads as a full
+        # circle, and a well nothing matched has no copy progress to describe
+        # — a part-filled dial beside its "!" would suggest it is still going.
+        if stage == "done":
+            self.page._plate.setWellFraction(w, 1.0)
+        elif stage == "empty":
+            self.page._plate.setWellFraction(w, None)
 
     def _on_well_fraction(self, well_id: str, done: int, total: int) -> None:
-        """Fill the picker plate's dial for one in-progress well.
+        """Fill *well_id*'s dial on the picker plate to ``done / total``.
 
-        This goes to ``page._plate``, not to the dashboard: ``SubsetDashboard``
-        is built ``show_plate=False`` precisely because this controller paints
-        onto the picker instead, so ``PlateProgress.set_well_progress`` has no
-        plate to reach and returns without drawing anything. Routed there, every
-        one of these was a no-op and a well's copy showed no sub-progress at all
-        — only the flat "copying" colour ``_on_well_stage`` sets, held until the
-        whole well landed.
+        The sibling Datasets controllers hand this signal to their dashboard's
+        ``set_well_progress``; ``SubsetDashboard`` has no plate of its own, so
+        the fraction goes to the page's picker — the plate this page actually
+        shows. See this module's docstring.
         """
-        well = canon_well(well_id)
-        if not well:
+        w = canon_well(well_id)
+        if not w:
             return
-        if int(total) <= 0:
-            # "Not counted yet" is not "none done" — an unknown amount of
-            # progress must not render as a definite empty dial.
-            self.page._plate.setWellFraction(well, None)
-            return
-        self.page._plate.setWellFraction(well, max(0.0, min(1.0, int(done) / int(total))))
+        self.page._plate.setWellFraction(w, fraction_or_none(done, total))
 
     def _well_tooltip(self, well_id: str) -> str:
         w = canon_well(well_id)
@@ -208,12 +219,6 @@ class SubsetController(QObject):
         self._last_result = (False, message, "")
 
     def _on_finished(self) -> None:
-        # Every well ends at a full dial (WellFraction.finish), and the plate
-        # paints a well that has a fraction *as* the dial — the branch runs
-        # ahead of the selected/deselected rendering, not beside it. Left in
-        # place, the picker stops showing which wells are selected, so the
-        # next subset can't be composed on it.
-        self.page._plate.clearWellFractions()
         self.page.set_running(False)
         self.page._plate.setEnabled(True)
         self.page.revalidate_fields()

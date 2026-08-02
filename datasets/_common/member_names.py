@@ -31,6 +31,42 @@ IMAGE_EXTS = frozenset(
     ext.lower() for spec in ROLE_CATALOG.values() for ext in spec.all_exts
 )
 
+# Files an operating system leaves in a folder it has merely displayed. None of
+# them is data: the pipeline skips them (``find_image_groups_in_zip``), Review
+# never reads them, and nothing in a dataset refers to them by name.
+_JUNK_BASENAMES = frozenset({
+    ".ds_store", "thumbs.db", "desktop.ini", ".localized",
+    ".spotlight-v100", ".trashes", ".fseventsd", ".temporaryitems",
+    ".documentrevisions-v100", ".apple_double",
+})
+_JUNK_DIRECTORIES = frozenset({"__macosx", ".appledouble", ".spotlight-v100"})
+
+
+def is_os_junk_member(name: str) -> bool:
+    """Whether a zip member is operating-system debris rather than data.
+
+    A ``.DS_Store`` is written by Finder for any folder a user has looked at,
+    so a well archive that has ever been browsed carries one — and two
+    archives browsed on the same machine carry byte-identical ones under
+    byte-identical names. That is not a coincidence to reconcile, it is noise
+    to leave out: merging two such archives has exactly one sensible outcome
+    however the two copies differ, because neither copy means anything.
+
+    Deliberately narrow. It names the specific files an OS creates, not
+    "anything that isn't an image": a stray ``notes.txt`` a user put in an
+    archive on purpose is not junk, and if two datasets disagree about one
+    that is a real conflict a caller should still refuse to paper over.
+    """
+    parts = [part for part in name.replace("\\\\", "/").split("/") if part]
+    if not parts:
+        return False
+    if any(part.lower() in _JUNK_DIRECTORIES for part in parts[:-1]):
+        return True
+    base = parts[-1]
+    # AppleDouble resource forks: the sidecar Finder writes beside a real file
+    # when copying onto a filesystem without extended attributes.
+    return base.lower() in _JUNK_BASENAMES or base.startswith("._")
+
 
 def discover_parsed_member(
     name: str, schema: PipelineSchema, channels: tuple[str, ...],

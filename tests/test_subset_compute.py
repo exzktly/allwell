@@ -12,7 +12,7 @@ import pytest
 
 from datasets.subset import apply as subset_apply
 from datasets.subset import subset_compute as sc
-from tests.fixtures.dataset_builder import JUNK_MEMBERS, build_dataset
+from tests.fixtures.dataset_builder import JUNK_MEMBERS, STRAY_MEMBERS, build_dataset
 
 
 def _build(root, **kw):
@@ -325,7 +325,7 @@ def test_a_wells_only_subset_copies_each_archive_whole(tmp_path):
     subset is ever decompressed, and the destination archive is the source file
     byte for byte."""
     src, dest = tmp_path / "src", tmp_path / "dest"
-    _build(src, junk=True)
+    _build(src, junk=True, stray=True)
     plan = sc.build_subset_plan(src, dest, sc.SubsetFilter(wells=frozenset({"A01"})))
     subset_apply.execute_plan(plan)
 
@@ -336,7 +336,7 @@ def test_a_wells_only_subset_copies_each_archive_whole(tmp_path):
 
 def test_a_filtered_subset_keeps_every_surviving_member_byte_identical(tmp_path):
     src, dest = tmp_path / "src", tmp_path / "dest"
-    _build(src, wells=["A01"], junk=True)
+    _build(src, wells=["A01"], junk=True, stray=True)
     plan = sc.build_subset_plan(
         src, dest, sc.SubsetFilter(timepoint_labels=frozenset({"24h", "48h"})),
     )
@@ -356,14 +356,14 @@ def test_junk_members_survive_a_filtered_subset(tmp_path):
     sidecar and a name that parses to nothing are not this dataset's business,
     and dropping them silently is data loss the run would report as success."""
     src, dest = tmp_path / "src", tmp_path / "dest"
-    _build(src, wells=["A01"], junk=True)
+    _build(src, wells=["A01"], junk=True, stray=True)
     plan = sc.build_subset_plan(
         src, dest, sc.SubsetFilter(timepoint_labels=frozenset({"24h"})),
     )
     subset_apply.execute_plan(plan)
 
     copied = _members(dest / "in" / "A01.zip")
-    for name, data in JUNK_MEMBERS.items():
+    for name, data in {**JUNK_MEMBERS, **STRAY_MEMBERS}.items():
         assert copied.get(name) == data, f"{name} did not survive the filter"
 
 

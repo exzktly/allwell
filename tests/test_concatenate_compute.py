@@ -26,6 +26,7 @@ import pytest
 
 from datasets.concatenate import apply
 from datasets.concatenate import concatenate_compute as cc
+from tests.fixtures.dataset_builder import JUNK_MEMBERS
 from tests.fixtures.dataset_builder import BASE_INFO as _BASE_INFO
 from tests.fixtures.dataset_builder import ROW_COLUMNS as _ROW_COLUMNS
 from tests.fixtures.dataset_builder import build_dataset as _make_dataset
@@ -716,11 +717,8 @@ def test_a_merged_well_carries_both_datasets_bytes_unaltered(tmp_path):
     renames nothing on dataset 1's. Neither side's data may change: a name
     lives in a member's headers, not in its compressed payload."""
     ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
-    # Junk on dataset 1 only: Concatenate treats any name collision between the
-    # two sides as a failed merge (see _verify), and both datasets carrying an
-    # identically-named ``.DS_Store`` is a collision.
     _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
-    _make_dataset(ds2, wells=["A01"], timepoints=["0h", "24h"])
+    _make_dataset(ds2, wells=["A01"], timepoints=["0h", "24h"], junk=True)
 
     plan = cc.build_merge_plan(ds1, ds2, dest)
     apply.execute_plan(plan)
@@ -740,8 +738,71 @@ def test_a_merged_well_carries_both_datasets_bytes_unaltered(tmp_path):
 def test_a_well_on_one_side_only_is_copied_whole(tmp_path):
     ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
     _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
-    _make_dataset(ds2, wells=["B02"], timepoints=["0h", "24h"])
+    _make_dataset(ds2, wells=["B02"], timepoints=["0h", "24h"], junk=True)
 
     apply.execute_plan(cc.build_merge_plan(ds1, ds2, dest))
 
     assert (dest / "in" / "A01.zip").read_bytes() == (ds1 / "in" / "A01.zip").read_bytes()
+
+
+# ── OS debris must not block a merge ─────────────────────────────────────────
+def test_two_plates_that_have_been_opened_in_finder_can_be_merged(tmp_path):
+    """Regression guard: both datasets carrying a ``.DS_Store`` used to be a
+    hard failure.
+
+    The two identically-named copies collided in the merged archive, one was
+    dropped by first-write-wins, and ``_verify`` read that drop as dataset 2's
+    data failing to survive — so two ordinary plates could not be concatenated
+    at all, over files neither the pipeline nor Review has ever read. Any plate
+    whose folder has been opened in Finder has one.
+    """
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+    _make_dataset(ds2, wells=["A01"], timepoints=["0h", "24h"], junk=True)
+
+    log = []
+    summary = apply.execute_plan(cc.build_merge_plan(ds1, ds2, dest), log.append)
+
+    assert "1 well" in summary
+    merged = _zip_members(dest / "in" / "A01.zip")
+    # Dataset 1's copies are there; dataset 2's duplicates were left out
+    # rather than colliding.
+    for name, data in JUNK_MEMBERS.items():
+        assert merged[name] == data
+    # The run says so rather than dropping them silently.
+    assert any("operating-system file" in line for line in log), log
+
+
+def test_a_real_name_collision_still_fails_the_merge(tmp_path):
+    """Skipping OS debris must not loosen the collision check it was blocking.
+
+    A member that carries data and collides is still real data loss, and a
+    merge that discarded it must not report success.
+    """
+    ds1, ds2, dest = tmp_path / "ds1", tmp_path / "ds2", tmp_path / "dest"
+    _make_dataset(ds1, wells=["A01"], timepoints=["0h", "24h"])
+    _make_dataset(ds2, wells=["A01"], timepoints=["0h", "24h"])
+    for root, payload in ((ds1, b"from-ds1"), (ds2, b"from-ds2")):
+        with zipfile.ZipFile(root / "in" / "A01.zip", "a") as zf:
+            zf.writestr("hand_written_notes.txt", payload)
+
+    with pytest.raises(cc.ConcatError, match="collided by name"):
+        apply.execute_plan(cc.build_merge_plan(ds1, ds2, dest))
+
+
+def test_junk_is_recognised_by_name_not_by_being_unparseable():
+    """The predicate names specific OS files rather than "anything that isn't
+    an image" — a file a user put in an archive on purpose is not debris."""
+    from datasets._common.member_names import is_os_junk_member
+
+    for name in (
+        ".DS_Store", "frames/.DS_Store", "Thumbs.db", "desktop.ini",
+        "__MACOSX/._exp_GFP_A01_F001_24h.tif", "._exp_GFP_A01_F001_24h.tif",
+        ".Spotlight-V100/store.db",
+    ):
+        assert is_os_junk_member(name), name
+    for name in (
+        "exp_GFP_A01_F001_24h.tif", "hand_written_notes.txt", "readme.md",
+        "protocol.pdf", "frames/exp_GFP_A01_F001_24h.tif", "",
+    ):
+        assert not is_os_junk_member(name), name

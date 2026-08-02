@@ -47,19 +47,27 @@ ROW_COLUMNS = [
 
 
 # What a well archive actually holds beyond its images, on a Mac or a share.
+# The two sets are kept apart because the tools treat them differently: OS
+# debris carries no data and no tool has any business reconciling two copies of
+# it, while a file a user dropped in on purpose is real content whose name can
+# genuinely conflict.
 JUNK_MEMBERS = {
     ".DS_Store": b"\x00\x01junk",
     "__MACOSX/._sidecar": b"appledouble",
+}
+STRAY_MEMBERS = {
     "readme.txt": b"free text, parses to nothing",
 }
 
 
-def _add_junk(zf: zipfile.ZipFile, junk: bool) -> None:
-    if not junk:
-        return
-    zf.writestr(zipfile.ZipInfo("thumbs/"), b"")
-    for name, data in JUNK_MEMBERS.items():
-        zf.writestr(name, data)
+def _add_junk(zf: zipfile.ZipFile, junk: bool, stray: bool) -> None:
+    if junk:
+        zf.writestr(zipfile.ZipInfo("thumbs/"), b"")
+        for name, data in JUNK_MEMBERS.items():
+            zf.writestr(name, data)
+    if stray:
+        for name, data in STRAY_MEMBERS.items():
+            zf.writestr(name, data)
 
 
 def build_dataset(
@@ -73,6 +81,7 @@ def build_dataset(
     info_extra=None,
     columns=ROW_COLUMNS,
     junk=False,
+    stray=False,
 ) -> Path:
     """Build a dataset (``in/`` zips, ``out/`` QC zips + measurements CSV +
     sidecar) whose CSV matches the real pipeline's column shape.
@@ -82,13 +91,17 @@ def build_dataset(
     non-default ``--csv_prefix`` dataset to test its mixed-prefix finding, and
     Subset needs more than one FOV to filter on.
 
-    ``junk=True`` adds the debris a real well archive picks up — a
-    ``.DS_Store``, a directory entry, an AppleDouble sidecar, a file whose name
-    parses to nothing — to every ``in/`` and ``out/`` zip. It is opt-in because
-    most callers assert exact member counts, but any test of a *filter* wants
-    it: a predicate that partitions an archive has to decide which members it
-    is entitled to judge, and a corpus of nothing but well-formed TIFs cannot
-    tell a correct answer from one that never faced the question.
+    ``junk=True`` adds the operating-system debris a real well archive picks
+    up — a ``.DS_Store``, a directory entry, an AppleDouble sidecar — and
+    ``stray=True`` adds a file a user dropped in on purpose, whose name parses
+    to nothing. Both are opt-in because most callers assert exact member
+    counts, but any test of a *filter* wants them: a predicate that partitions
+    an archive has to decide which members it is entitled to judge, and a
+    corpus of nothing but well-formed TIFs cannot tell a correct answer from
+    one that never faced the question. They are separate flags because the
+    tools treat the two kinds differently — Concatenate skips OS debris rather
+    than reconciling two copies of it, but a stray file's name collision is a
+    real conflict it still refuses.
     """
     in_dir = root / "in"
     out_dir = root / "out"
@@ -107,13 +120,13 @@ def build_dataset(
             for fov in fovs:
                 for tp in timepoints:
                     zf.writestr(f"{exp}_GFP_{well}_{fov}_{tp}.tif", b"img")
-            _add_junk(zf, junk)
+            _add_junk(zf, junk, stray)
         with zipfile.ZipFile(out_dir / f"{well}_out.zip", "w") as zf:
             for fov in fovs:
                 for tp in timepoints:
                     zf.writestr(f"{exp}_GFP_{well}_{fov}_{tp}_labels.tif", b"mask")
                     zf.writestr(f"{exp}_GFP_{well}_{fov}_{tp}_tophat_gfp.tif", b"tophat")
-            _add_junk(zf, junk)
+            _add_junk(zf, junk, stray)
         with (out_dir / f"{csv_prefix}_{well}.csv").open("w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=columns)
             writer.writeheader()

@@ -178,12 +178,22 @@ class ValidatePage(QWidget):
         # an empty log reads as "something is wrong" rather than "nothing
         # has happened yet". ValidateController reveals it in _run().
         self.dashboard.setVisible(False)
-        outer.addWidget(self.dashboard, 1)
+        outer.addWidget(self.dashboard)
 
+        # Hidden until a check produces something to put in it. An empty
+        # findings list is not a small widget: it carries a layout stretch and
+        # a panel border, so before a check it drew a page-height bordered box
+        # holding one line of text. That line said "Pick a dataset folder and
+        # press Check", which stayed exactly as it was after the user picked
+        # one — the single largest thing on the page, describing a step they
+        # had already completed. Showing nothing says the same thing honestly
+        # and takes no room; the run row above is where the state actually
+        # reads (Check enables the moment the folder is valid, and the
+        # dashboard appears beside it with the wells a check would cover).
         self._findings_list = QListWidget(self)
         self._findings_list.setObjectName("ValidateFindings")
+        self._findings_list.setVisible(False)
         outer.addWidget(self._findings_list, 1)
-        self._show_empty_findings_hint()
 
         self._log_sep = _hrule(self)
         outer.addWidget(self._log_sep)
@@ -204,6 +214,15 @@ class ValidatePage(QWidget):
         self._status.setFont(QFont("monospace"))
         self._status.setPlaceholderText("Log will appear here.")
         outer.addWidget(self._status, 1)
+        # The same trailing stretch every other Datasets page carries, and for
+        # the same reason: `QScrollArea.setWidgetResizable(True)` grows this
+        # content widget to fill the viewport, and with the findings list and
+        # the raw log both hidden nothing else in the column would absorb the
+        # leftover height — the dashboard would, turning into a growing dead
+        # zone below its own plate. A trailing stretch outranks every 0-stretch
+        # item above it, so the slack collects as blank page background at the
+        # bottom instead.
+        outer.addStretch(1)
         self._on_toggle_raw_log(False)
 
     def _on_toggle_raw_log(self, show: bool) -> None:
@@ -237,27 +256,27 @@ class ValidatePage(QWidget):
         self._status.clear()
 
     def clear_findings(self) -> None:
-        self._show_empty_findings_hint()
+        self._hide_findings()
 
     def show_failure(self, message: str) -> None:
         """Replace the findings with why the check failed, and withdraw the
         offer to complete a run.
 
-        A failed check used to reset the list to its "Pick a dataset folder and
-        press Check." placeholder — which says nothing happened, directly under
-        a red "Failed" headline and *next to a still-visible* "Complete this
-        run in Analyze" button left over from an earlier successful check. That
-        button then handed Analyze a dataset root whose sidecar had just proved
-        unreadable, so the settings could not travel with it and the user
-        landed on an Analyze tab that looked untouched. The failure is now what
-        the list says, and the completion offer goes with the report it
-        belonged to.
+        A failed check used to reset the list to an empty state — which says
+        nothing happened, directly under a red "Failed" headline and *next to a
+        still-visible* "Complete this run in Analyze" button left over from an
+        earlier successful check. That button then handed Analyze a dataset
+        root whose sidecar had just proved unreadable, so the settings could
+        not travel with it and the user landed on an Analyze tab that looked
+        untouched. The failure is now what the list says, and the completion
+        offer goes with the report it belonged to.
         """
         self._dataset_root = ""
         self._findings_list.clear()
         item = QListWidgetItem(f"✗ Check failed — {message}")
         item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
         self._findings_list.addItem(item)
+        self._show_findings()
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
 
@@ -272,17 +291,21 @@ class ValidatePage(QWidget):
         item = QListWidgetItem(message)
         item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
         self._findings_list.addItem(item)
+        self._show_findings()
 
-    def _show_empty_findings_hint(self) -> None:
-        # Lives inside the (otherwise large, blank) findings list itself,
-        # not as a separate caption below it — an empty container that big
-        # with no explanation inside it read as broken, the same class of
-        # problem the dashboard's own hide-until-ready fix addressed.
+    def _hide_findings(self) -> None:
+        """Empty the findings list and take it off the page entirely.
+
+        There is no empty-state text: a placeholder here is a page-height
+        bordered box saying one thing, and the only thing it had to say was
+        an instruction the run row above already carries.
+        """
         self._findings_list.clear()
-        item = QListWidgetItem("Pick a dataset folder and press Check.")
-        item.setTextAlignment(Qt.AlignCenter)
-        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
-        self._findings_list.addItem(item)
+        self._findings_list.setVisible(False)
+
+    def _show_findings(self) -> None:
+        """Reveal the list for the rows a caller is about to add to it."""
+        self._findings_list.setVisible(True)
 
     def set_running(self, running: bool) -> None:
         self._running = running
@@ -314,6 +337,7 @@ class ValidatePage(QWidget):
             text = f"{prefix} {f.message}"
             item = QListWidgetItem(text)
             self._findings_list.addItem(item)
+        self._show_findings()
         self._repair_btn.setEnabled(report.repairable)
         # A greyed button with findings still listed above it looks broken
         # ("it found problems, why won't it fix them?") with nothing on the
@@ -344,7 +368,7 @@ class ValidatePage(QWidget):
         self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)
-        self._show_empty_findings_hint()
+        self._hide_findings()
         self._update_status_preview()
 
     def _update_status_preview(self) -> None:

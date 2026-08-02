@@ -25,28 +25,31 @@ def _job(**kw):
     return JobSpec(**defaults)
 
 
-def test_empty_state_text_lives_inside_the_list_not_below_it(qapp):
-    """Regression guard (UX audit P2-1): the "No jobs queued yet" caption
-    used to sit in a separate QLabel below a large, entirely blank
-    QListWidget -- the empty container itself said nothing, reading as
-    broken. It must instead be the list's own (sole, non-interactive) item,
-    so the explanation lives inside the space it's explaining."""
+def test_an_empty_queue_is_a_caption_not_a_page_height_box(qapp):
+    """The "No jobs queued yet" sentence is worth keeping — it is the only
+    thing on this page saying where jobs come from. The box around it was not:
+    putting the sentence inside the list meant showing the list, and the list
+    is a bordered panel carrying a layout stretch, so one line of text
+    rendered as a page-height empty container. The caption stands on its own
+    and the list appears only when it has rows."""
     from datasets.job_queue.view import JobQueuePage
 
     page = JobQueuePage()
-    assert page._list.count() == 1
-    item = page._list.item(0)
-    assert not (item.flags() & Qt.ItemIsSelectable)
-    label = page._list.itemWidget(item)
-    assert "No jobs queued yet" in label.text()
+    assert page._list.isHidden()
+    assert page._list.count() == 0
+    assert not page._empty_hint.isHidden()
+    assert "No jobs queued yet" in page._empty_hint.text()
 
     page.set_jobs([JobSpec(id="j-1", kind="subset", label="Subset", spec={})])
+    assert not page._list.isHidden()
+    assert page._empty_hint.isHidden()
     assert page._list.count() == 1
     assert isinstance(page._list.itemWidget(page._list.item(0)), _JobRow)
 
     page.set_jobs([])
-    assert page._list.count() == 1
-    assert "No jobs queued yet" in page._list.itemWidget(page._list.item(0)).text()
+    assert page._list.isHidden()
+    assert page._list.count() == 0
+    assert not page._empty_hint.isHidden()
 
 
 def test_row_shows_a_pointing_hand_cursor_and_a_hover_hint(qapp):

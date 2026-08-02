@@ -1794,6 +1794,17 @@ points. The bar and line batch panels also expose the same
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
+Groups are built on a **plate map**, the same plate control used everywhere else
+in the app rather than a separate grid of squares. Left-drag across it to add
+wells to the selected group, or drag across wells the group already has to
+remove them — the direction is decided by the well you start on, so one sweep
+adds or removes throughout instead of flipping each well under the cursor.
+Each group has its own colour and a well takes the colour of the group that owns
+it; the wells of the group you are **currently editing** also carry an accent
+ring, so "which group is this well in" and "which group am I editing" stay
+readable at the same time. Wells the dataset doesn't have are drawn as empty
+sockets and ignore the drag.
+
 Batch figures are drawn through the **same renderers as the on-screen plots**, so
 a group's figure matches what the plotting tab shows for that selection: each
 group is drawn in its own **distinct colour**, **solo wells are labelled by their
@@ -1863,8 +1874,12 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
 
 The readout shows how the file splits into wells × FOVs × timepoints and lists the
 channel names (any Z-stack is **maximum-intensity projected**; labels stay within
-the 96-well plate `A01`–`H12`). Press **Convert** — a progress bar fills as the
-wells are written in parallel (Cancel stops it cleanly), and the output is one
+the 96-well plate `A01`–`H12`). Press **Convert** — the acquisition plate above
+becomes the progress view: each well fills clockwise as its images are written,
+the same dial every other plate map in the app uses, and the plate locks against
+clicks until the run finishes so the order being converted can't be edited
+under it. A progress bar for the run as a whole appears below (Cancel stops it
+cleanly). The output is one
 per-well `<WELL>.zip` in `<destination>/in/`, the layout Analyze reads directly
 (no regrouping step). Then **Open dataset in Analyze** — the Segmentation /
 fluorescent channel tokens arrive pre-filled from the channel roles you set (step
@@ -1973,9 +1988,10 @@ plain re-run would skip the very wells that need finishing.
    anything wrong — exactly which timepoints a well is missing, a sidecar
    that's out of sync with what's on disk, a CSV that looks like a well's
    data but isn't, or cell-inclusion overrides that no longer match the
-   current segmentation. The findings list holds a placeholder ("Pick a
-   dataset folder and press Check.") until then, and clears back to it if a
-   re-check fails, rather than leaving an earlier check's results on screen.
+   current segmentation. Before a check there is no findings list on screen at
+   all — it appears with the first thing it has to say, and disappears again
+   when you pick a different dataset rather than leaving an earlier check's
+   results up.
    Where the run left records of its own — the per-well completeness block in
    `pipeline_info.json` and any tracebacks under `out/errors/` — the findings
    use them rather than guessing. A well with images and no measurements CSV
@@ -2013,9 +2029,8 @@ plain re-run would skip the very wells that need finishing.
    the settings were **not** loaded — check the schema, channel tokens and CSV
    prefix by hand before running in that case.
 
-If a check fails, the findings list says why instead of going back to its
-"Pick a dataset folder" prompt, and the **Complete this run in Analyze**
-button disappears — the offer belonged to the report that failed, and taking
+If a check fails, the findings list says why instead of emptying, and the
+**Complete this run in Analyze** button disappears — the offer belonged to the report that failed, and taking
 it would hand Analyze a dataset whose settings had just proved unreadable.
 
 ### Subset / Split Dataset

@@ -29,16 +29,21 @@ def qapp():
 
 
 def _click_well(w: PlateOrderEditor, well_id: str) -> None:
-    """Synthesise a left-click on the centre of *well_id*'s cell."""
-    from widgets.plate_order_editor import _parse_well_id
+    """Synthesise a left-click on the centre of *well_id*'s cell.
+
+    The editor is a ``WellPlateSelector``, so the painted grid that handles
+    mouse events is the ``_grid`` child, not the card itself.
+    """
+    from widgets.well_plate_selector import _parse_well_id
 
     row, col = _parse_well_id(well_id)
-    center = w._cell_rect(row, col).center()
+    grid = w._grid
+    center = grid._cell_rect(row, col).center()
     ev = QMouseEvent(
         QMouseEvent.Type.MouseButtonPress, QPointF(center), Qt.LeftButton,
         Qt.LeftButton, Qt.NoModifier,
     )
-    w.mousePressEvent(ev)
+    grid.mousePressEvent(ev)
 
 
 def test_set_order_round_trips(qapp):
@@ -107,3 +112,42 @@ def test_paint_runs_with_path(qapp):
     img = QImage(480, 320, QImage.Format_ARGB32)
     w.render(img)   # must not crash exercising the number + arrow paint path
     assert not img.isNull()
+
+
+def test_set_order_and_set_preview_emit_nothing(qapp):
+    """The page calls both on every keystroke in the grid fields; either one
+    emitting would re-enter ``refresh_readout`` through ``orderChanged``.
+
+    This is the contract the rewrite onto ``WellPlateSelector`` most risked —
+    the shared widget has its own ``pathChanged``, and routing it straight to
+    ``orderChanged`` would have made every programmatic assignment a signal."""
+    w = PlateOrderEditor()
+    emitted: list[list[str]] = []
+    w.orderChanged.connect(emitted.append)
+    w.set_order(["A01", "B02"])
+    w.set_preview(["C03"])          # ignored (dirty), but must be silent either way
+    assert emitted == []
+
+
+def test_clear_on_an_already_clear_widget_emits_nothing(qapp):
+    w = PlateOrderEditor()
+    emitted: list[list[str]] = []
+    w.orderChanged.connect(emitted.append)
+    w.clear()
+    assert emitted == []
+    w.set_order(["A01"])
+    w.clear()
+    assert emitted == [[]]          # exactly one, for the clear that did something
+
+
+def test_editing_the_order_drops_any_progress_dials(qapp):
+    """A dial describes a conversion of the order that was on the plate when
+    it ran; a different order makes it a claim about other wells."""
+    w = PlateOrderEditor()
+    w.resize(480, 320)
+    w.set_order(["A01", "A02"])
+    w.setWellFraction("A01", 1.0)
+    assert w._grid._fractions != {}
+
+    _click_well(w, "H12")           # user edits the order
+    assert w._grid._fractions == {}

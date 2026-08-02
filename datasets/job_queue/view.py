@@ -266,35 +266,43 @@ class JobQueuePage(QWidget):
         hl.addStretch(1)
         outer.addWidget(header)
 
+        # The guidance for an empty queue is a plain caption, not a row inside
+        # the list. Put inside, it had to bring the whole list with it — a
+        # bordered box carrying a layout stretch, so one sentence rendered as
+        # a page-height empty panel. The sentence is worth keeping (it is the
+        # only thing on this page saying where jobs come from); the box around
+        # it was not.
+        self._empty_hint = QLabel(
+            "No jobs queued yet — use “+ Queue” on any Datasets tool's page, "
+            "or “+ Queue current Analyze run” above.", self,
+        )
+        self._empty_hint.setObjectName("Muted")
+        self._empty_hint.setWordWrap(True)
+        outer.addWidget(self._empty_hint)
+
         self._list = QListWidget(self)
         self._list.setObjectName("JobQueueList")
         self._list.setSelectionMode(QListWidget.NoSelection)
         outer.addWidget(self._list, 1)
+        # Trailing stretch so the empty page ends under its caption instead of
+        # stretching whatever is left to fill the scroll area's viewport.
+        outer.addStretch(1)
         self._show_empty_hint()
 
     # ── public API used by the controller ───────────────────────────────
     def _show_empty_hint(self) -> None:
-        # Lives inside the (otherwise large, blank) list itself, not as a
-        # separate caption below it — an empty container that big with no
-        # explanation inside it reads as broken, not "nothing queued yet".
-        label = QLabel(
-            "No jobs queued yet — use “+ Queue” on any Datasets tool's page, "
-            "or “+ Queue current Analyze run” above.", self._list,
-        )
-        label.setObjectName("Muted")
-        label.setWordWrap(True)
-        label.setAlignment(Qt.AlignCenter)
-        item = QListWidgetItem(self._list)
-        item.setFlags(item.flags() & ~(Qt.ItemIsSelectable | Qt.ItemIsEnabled))
-        item.setSizeHint(label.sizeHint())
-        self._list.addItem(item)
-        self._list.setItemWidget(item, label)
+        """Swap the list out for the one-line caption."""
+        self._list.clear()
+        self._list.setVisible(False)
+        self._empty_hint.setVisible(True)
 
     def set_jobs(self, jobs: list[JobSpec]) -> None:
         self._list.clear()
         if not jobs:
             self._show_empty_hint()
             return
+        self._empty_hint.setVisible(False)
+        self._list.setVisible(True)
         pending_ordinal = 0
         for job in jobs:
             ordinal = None

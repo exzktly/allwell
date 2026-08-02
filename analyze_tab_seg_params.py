@@ -20,6 +20,25 @@ from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidg
 # in ``process_microscopy`` just to name two strings.
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
 
+#: What the Nucleus probability field starts with on a fresh form.
+#:
+#: The pretrained model's own threshold (~0.479) is conservative for these
+#: plates, so the form ships a more sensitive starting point rather than asking
+#: for it to be typed in every time. **This decides what an untouched run does**:
+#: a run started without touching this field detects more nuclei — dim,
+#: out-of-focus and marginal ones included — than the model's default would.
+#:
+#: Text, not a float, because the field is text and every rule about it (blank /
+#: ``auto`` / out-of-range) is applied to text by ``parse_threshold``. Clearing
+#: the field still means the model's own threshold; this is a starting value,
+#: not a floor.
+#:
+#: The CLI's ``--stardist_prob_thresh`` deliberately keeps its own default (the
+#: ``-1.0`` "use the model's" sentinel), so a script that passes no flag is
+#: unaffected by this. The GUI emits the number explicitly, so a GUI run is
+#: still fully described by its command line and its ``pipeline_info.json``.
+DEFAULT_PROB_THRESH_TEXT = "0.2"
+
 
 def _threshold_help() -> tuple[str, str]:
     """``(prob, nms)`` help text, from the pipeline's single definition.
@@ -130,14 +149,21 @@ class AnalyzeSegParamsMixin:
         """The two StarDist detection thresholds, shared by both StarDist pages.
 
         Blank means "use the threshold baked into the pretrained weights", which
-        is what the pipeline does with its negative sentinel — so an untouched
-        form runs exactly the segmentation it ran before these fields existed.
+        is what the pipeline does with its negative sentinel.
+
+        The two fields start differently, and the asymmetry is deliberate.
+        Overlap starts blank, so an untouched form runs the model's own NMS.
+        Probability starts at :data:`DEFAULT_PROB_THRESH_TEXT` — the model's own
+        value is conservative for these plates — so an untouched form runs a
+        **more sensitive detection** than the pretrained default. Clearing the
+        field returns to the model's.
         """
         prob_help, nms_help = _threshold_help()
         # The help goes on the row too, so hovering the words "Nucleus
         # probability" answers — not only hovering the narrow entry box.
         prob_cell = self._row(sec, "Nucleus probability", tooltip=prob_help)
-        self._stardist_prob_thresh_edit = self._entry(prob_cell, "", width=70)
+        self._stardist_prob_thresh_edit = self._entry(
+            prob_cell, DEFAULT_PROB_THRESH_TEXT, width=70)
         self._stardist_prob_thresh_edit.setPlaceholderText("auto")
         self._stardist_prob_thresh_edit.setToolTip(prob_help)
         prob_cell.layout().addWidget(self._info_icon(prob_cell, prob_help))

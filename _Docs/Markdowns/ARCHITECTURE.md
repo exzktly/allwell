@@ -2268,6 +2268,19 @@ noted:
   `pipeline_service._emit_stardist_threshold_flags`, and the Playground parses
   its own two fields with it.
 
+  **The form's starting value is not the CLI's default.** The Analyze form ships
+  `analyze_tab_seg_params.DEFAULT_PROB_THRESH_TEXT` (`"0.2"`) in the Nucleus
+  probability field, because the pretrained model's own ~0.479 is conservative
+  for these plates — so a run started from an untouched form detects more nuclei
+  than the model default would. `--stardist_prob_thresh` keeps its `-1.0`
+  sentinel, so "no flag" still means the model's own threshold and a script that
+  passes nothing is unaffected; the GUI emits the number explicitly, so a GUI run
+  stays fully described by its command line and its sidecar. Clearing the field
+  restores the model's. Overlap (NMS) still starts blank, and the Playground's
+  matching control starts blank too — an untouched preview there is deliberately
+  not what an untouched Analyze run produces, which is why the help text names
+  the form's starting value even when read from the Playground.
+
   **One description, too.** `PROB_THRESH_HELP` / `NMS_THRESH_HELP` live in the
   same module and are the text both panels show — the Analyze form (through
   `analyze_tab_seg_params._threshold_help`, a function-local import so the form

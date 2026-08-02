@@ -93,6 +93,11 @@ DEFAULT_STARDIST_PARAMS = StarDistParams()
 # already import (for ``parse_threshold``). They previously carried their own
 # copies and had already drifted into describing the same numbers differently.
 #
+# The probability text names the Analyze form's starting value even though the
+# Playground shows the same string. That is deliberate: the two panels start from
+# different numbers, so a Playground reader needs to know what an untouched run
+# would actually use.
+#
 # Plain strings, no markup: they are set as Qt tooltips, and Qt wraps them.
 PROB_THRESH_HELP = (
     "StarDist object-probability threshold (0-1). Candidate nuclei whose "
@@ -102,7 +107,8 @@ PROB_THRESH_HELP = (
     "Turn it down when a plate is missing real cells.\n"
     "• HIGHER keeps only confident detections. Turn it up when debris is being "
     "counted as cells.\n"
-    "Blank = use the threshold the pretrained model ships with (~0.479)."
+    "The Analyze form starts at 0.2 — more sensitive than the pretrained "
+    "model's own ~0.479. Clear the field to go back to the model's."
 )
 
 NMS_THRESH_HELP = (

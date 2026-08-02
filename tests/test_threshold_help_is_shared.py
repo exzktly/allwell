@@ -23,12 +23,19 @@ from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 
 
 def test_both_thresholds_state_their_range_and_their_default():
-    """The two things the report asked for: what it does, and what range."""
+    """The two things the report asked for: what it does, and what range.
+
+    Each text must also say how to get back to the pretrained model's own
+    threshold — but the two say it differently now, because the two fields start
+    differently: Overlap starts blank, and Probability starts at the Analyze
+    form's shipped 0.2.
+    """
     for text in (PROB_THRESH_HELP, NMS_THRESH_HELP):
         assert "(0-1)" in text
-        assert "Blank =" in text
     assert "0.479" in PROB_THRESH_HELP        # the model's own prob default
+    assert "Clear the field" in PROB_THRESH_HELP
     assert "0.3" in NMS_THRESH_HELP           # ...and its nms default
+    assert "Blank =" in NMS_THRESH_HELP
 
 
 def test_the_playground_shows_the_pipeline_strings_not_its_own():

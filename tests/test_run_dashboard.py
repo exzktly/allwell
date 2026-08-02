@@ -109,14 +109,16 @@ def test_uploaded_and_computing_are_different_colours(qapp):
     assert d._well_color("A01") != d._well_color("A02")
 
 
-def test_uploaded_wears_an_empty_dial(qapp):
-    """Rewritten: per-well upload used to be treated as a single event — the
-    archive landed or it did not — so an uploaded well carried no dial at all
-    and a plate mid-run was a solid block of wells saying nothing.
+def test_an_upload_fills_the_dial_and_leaves_it_full(qapp):
+    """Per-well upload used to be a single event — the archive landed or it did
+    not — so an uploaded well carried no dial and a plate mid-run was a solid
+    block of wells saying nothing.
 
     Upload does have a fraction (rsync's own byte stream, attributed per
-    archive), and once it is finished the well is *waiting to compute*, which
-    is an empty dial rather than a plain disc.
+    archive). It fills the dial as the bytes go, and the dial *stays* full when
+    the transfer ends: the archive is on the remote in full, and what the well
+    waits for next is its turn to compute, not more transfer. Emptying it here
+    made the transfer appear to undo itself the moment it finished.
     """
     from widgets.run_dashboard import RunDashboard
 
@@ -126,6 +128,9 @@ def test_uploaded_wears_an_empty_dial(qapp):
     assert d._plate._grid._fractions[(0, 0)] == pytest.approx(0.6)
     d.set_well_stage("A01", "upload")
     d.set_well_transfer("A01", "up", 1.0)
+    assert d._plate._grid._fractions[(0, 0)] == 1.0
+    # …and only the start of compute takes it back to empty.
+    d.set_well_stage("A01", "active")
     assert d._plate._grid._fractions[(0, 0)] == 0.0
 
 

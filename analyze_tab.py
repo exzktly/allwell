@@ -792,13 +792,13 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                         self._pipeline_workers = 1
                     self._log_line(f"[info] Workers: {payload} parallel well(s).\n", "INFO")
                 elif kind == "remote_xfer":
-                    # Remote upload/download progress in [0,1] — show on the
-                    # status label, not the (not-yet-accurate) well bar.
+                    # Remote upload/download progress in [0,1]. The dashboard
+                    # owns the label so the compute phase can retract it.
                     try:
                         pct = float(payload)
                     except (TypeError, ValueError):
                         pct = 0.0
-                    self._dashboard.set_status(f"Transferring… {int(pct * 100)}%")
+                    self._dashboard.set_transfer(pct)
                 elif kind == "done":
                     self._run_ok = True
                     n = self._well_done or getattr(self, "_zipper_done", 0)

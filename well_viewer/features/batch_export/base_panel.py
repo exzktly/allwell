@@ -69,6 +69,17 @@ _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_l
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _get_all_profile_names = _lazy("well_viewer.features.export.style", "get_all_profile_names_ctx")
 _ensure_custom_export_profiles = _lazy("well_viewer.features.export.style", "ensure_custom_export_profiles_ctx")
+#: The one slot in ``ctx.runtime.batch_export.export_groups_doc`` that every
+#: Batch Export mode reads and writes. Export groups describe the dataset's
+#: conditions, not the plot type they happen to be drawn as.
+SHARED_PERSIST_KEY = "groups"
+
+#: The four per-mode slots written before the modes shared one. Read once, in
+#: this order, to seed the shared slot on a document that predates it; never
+#: written. They are left in the document rather than deleted, so rolling the
+#: app back finds them.
+_LEGACY_PERSIST_KEYS = ("line", "bar", "scatter_cells", "scatter_agg")
+
 # The Line-Graphs tab's shared renderer, reused by the batch line figure (proxy
 # is callable, so ``_LineAxes(...)`` constructs the dataclass) — a call, not an
 # import statement, so it stays off the deferred-import budget.
@@ -127,9 +138,11 @@ class BatchExportPanel(QWidget):
         self._ctx = ctx
         self._use_sidebar_groups = bool(use_sidebar_groups)
         # Which slot in ctx.runtime.batch_export.export_groups_doc this panel
-        # reads/writes. Resolved via a method so subclasses (bar / scatter) pick
-        # their own key; safe to call here because the subclass state it needs
-        # (e.g. _scatter_mode) is set before super().__init__.
+        # reads/writes. Every mode resolves to the same one — see
+        # _compute_persist_key. Still a method call so a future mode that
+        # genuinely needs its own slot has an obvious place to say so, and safe
+        # to call here because the subclass state it might need (e.g.
+        # _scatter_mode) is set before super().__init__.
         self._persist_key: str = self._compute_persist_key()
         # Suppress the persistence write-back while we build the UI and hydrate
         # groups from disk (otherwise the initial _refresh_group_list would echo
@@ -173,8 +186,17 @@ class BatchExportPanel(QWidget):
         self._suppress_persist = False
 
     def _compute_persist_key(self) -> str:
-        """Slot key in ``app._export_groups_doc`` for this panel (line plot)."""
-        return "line"
+        """Slot key in ``app._export_groups_doc`` — shared by every mode.
+
+        Line, Bar, Scatter (cells) and Scatter (aggregate) used to keep four
+        private sets under ``"line"`` / ``"bar"`` / ``"scatter_cells"`` /
+        ``"scatter_agg"``, so groups built in one mode were invisible in the
+        others and anyone exporting the same conditions four ways built them
+        four times. The groups are a property of the dataset, not of the plot
+        type, so there is one slot; :data:`_LEGACY_PERSIST_KEYS` covers the
+        documents written before that.
+        """
+        return SHARED_PERSIST_KEY
 
     def _build_ui(self) -> None:
         from PySide6.QtWidgets import QBoxLayout
@@ -1351,9 +1373,34 @@ class BatchExportPanel(QWidget):
         return new_groups
 
     def _groups_from_persistence(self) -> list[BarGroup]:
-        """Hydrate this panel's groups from the batch-export groups doc."""
+        """Hydrate the shared export groups from the batch-export groups doc.
+
+        A document written before the modes shared a slot has no shared key and
+        up to four per-mode ones. Those are merged, in
+        :data:`_LEGACY_PERSIST_KEYS` order, de-duplicated by group name with the
+        first occurrence winning — the common case being the same groups
+        rebuilt in several modes, which collapses to exactly the one set the
+        user meant. A union rather than picking one slot because the uncommon
+        case is four genuinely different sets, and picking would silently
+        delete three of them.
+
+        Only when the shared key is absent. Once it exists it is the whole
+        answer, so deleting a group cannot be undone by a legacy slot
+        re-supplying it on the next load.
+        """
         doc = self._ctx.runtime.batch_export.export_groups_doc or {}
-        return self._deserialize_groups(doc.get(self._persist_key))
+        if self._persist_key in doc:
+            return self._deserialize_groups(doc.get(self._persist_key))
+        merged: list = []
+        seen: set[str] = set()
+        for key in _LEGACY_PERSIST_KEYS:
+            for item in doc.get(key) or []:
+                name = str(item.get("name", "")) if isinstance(item, dict) else ""
+                if name in seen:
+                    continue
+                seen.add(name)
+                merged.append(item)
+        return self._deserialize_groups(merged)
 
     def _persist_groups(self) -> None:
         """Mirror the editor into the in-memory batch-export groups doc.

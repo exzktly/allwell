@@ -946,9 +946,13 @@ class _PlateGrid(QWidget):
 
         The done wedge is the state's own colour, undarkened — the same orange a
         solid processing well has always been — and the remainder is a lighter
-        tint of it. A dial and a solid well of the same state therefore read as
-        the same colour, which is the point: the dial adds a proportion to the
-        state, it does not restate it in a different hue. The earlier form had
+        tint of it, via :meth:`_lighten` rather than ``QColor.lighter``. That
+        distinction is the whole point of the tone: Qt's ``lighter`` desaturates
+        once value saturates, and at these tokens' value it returns pure white,
+        so an empty dial on an uploaded well used to be a white disc with no hue
+        left to say which stage it was in. A dial and a solid well of the same
+        state read as the same colour, which is what the dial is for: it adds a
+        proportion to the state, it does not restate it in a different hue. The earlier form had
         this the other way round, filling from bright toward a darker spent
         tone, which made a mostly-finished well a muddy brown that matched
         neither the legend swatch nor an unstarted well beside it.
@@ -964,7 +968,7 @@ class _PlateGrid(QWidget):
         """
         base = QColor(base)
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(self._sphere_gradient(wr, base.lighter(165))))
+        p.setBrush(QBrush(self._sphere_gradient(wr, self._lighten(base, 0.55))))
         p.drawEllipse(wr)
         span = max(0.0, min(1.0, fraction))
         if span > 0.0:
@@ -981,8 +985,8 @@ class _PlateGrid(QWidget):
         p.drawEllipse(wr)
         self._paint_specular(p, wr)
 
-    @staticmethod
-    def _sphere_gradient(wr: QRectF, tone: QColor) -> QRadialGradient:
+    @classmethod
+    def _sphere_gradient(cls, wr: QRectF, tone: QColor) -> QRadialGradient:
         """The shading that makes a well read as a sphere, in *tone*.
 
         Shared by the plain well and by each half of a progress dial, so a well
@@ -996,7 +1000,12 @@ class _PlateGrid(QWidget):
             wr.center().y() - wr.height() * 0.20,
             wr.width() * 0.75,
         )
-        grad.setColorAt(0.0, tone.lighter(150))
+        # The highlight blends toward white rather than calling
+        # ``tone.lighter(150)``: at these tokens' value that call desaturates to
+        # pure white, so the sphere's upper-left blew out to a colourless patch
+        # on every lit well. ``darker`` needs no such treatment — lowering value
+        # never touches saturation.
+        grad.setColorAt(0.0, cls._lighten(tone, 0.35))
         grad.setColorAt(0.55, tone)
         grad.setColorAt(1.0, tone.darker(135))
         return grad
@@ -1075,7 +1084,41 @@ class _PlateGrid(QWidget):
         p.drawPolygon(QPolygonF([tip, left, right]))
 
     @staticmethod
-    def _mix_with_rail(tint: QColor, t: float = 0.30) -> QColor:
+    def _blend(base: QColor, toward: QColor, t: float) -> QColor:
+        """Linear RGB blend from *base* toward *toward*, ``t`` in 0..1.
+
+        The one lerp in this file. Channel-wise in RGB rather than through
+        HSV, which matters for :meth:`_lighten` — see its docstring.
+        """
+        try:
+            br, bg, bb, _ = base.getRgb()
+        except Exception:
+            return QColor(toward)
+        tr, tg, tb, _ = toward.getRgb()
+        t = max(0.0, min(1.0, float(t)))
+        return QColor(
+            int(round(br * (1 - t) + tr * t)),
+            int(round(bg * (1 - t) + tg * t)),
+            int(round(bb * (1 - t) + tb * t)),
+        )
+
+    @classmethod
+    def _lighten(cls, color: QColor, t: float) -> QColor:
+        """A paler *color* that is still recognisably that colour.
+
+        **Not** ``QColor.lighter()``. Qt's version raises the HSV *value*, and
+        once value is already at the ceiling it starts dropping *saturation* —
+        it lightens toward white rather than toward a pale version of the hue.
+        Every state colour in this app sits at value 245–253, so
+        ``accent2 #B98CF7`` came back as literally ``#ffffff``, and a well
+        wearing it lost the hue that says which stage it is in. Blending toward
+        white in RGB keeps the hue: the same token comes back ``#e0cbfb`` at
+        ``t = 0.55``, still lilac.
+        """
+        return cls._blend(QColor(color), QColor("#ffffff"), t)
+
+    @classmethod
+    def _mix_with_rail(cls, tint: QColor, t: float = 0.30) -> QColor:
         """Blend *tint* with the ``rail`` token at ``t`` (0..1).
 
         ``t = 0`` returns pure rail (= the plain depressed look),
@@ -1083,19 +1126,7 @@ class _PlateGrid(QWidget):
         the recessed look stays dominant and the colour reads as a
         muted hint of the group rather than the full saturation.
         """
-        c = theme.Colors
-        rail = QColor(c.rail)
-        try:
-            tr, tg, tb, _ = tint.getRgb()
-        except Exception:
-            return rail
-        rr, rg, rb, _ = rail.getRgb()
-        t = max(0.0, min(1.0, float(t)))
-        return QColor(
-            int(round(rr * (1 - t) + tr * t)),
-            int(round(rg * (1 - t) + tg * t)),
-            int(round(rb * (1 - t) + tb * t)),
-        )
+        return cls._blend(QColor(tint), QColor(theme.Colors.rail), 1.0 - t)
 
     def _paint_depressed(self, p: QPainter, wr: QRectF, hovered: bool,
                          tint: QColor | None = None) -> None:

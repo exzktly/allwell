@@ -1431,14 +1431,20 @@ Two things are worth knowing about what "inside the box" means:
   the rectangle. Those masks are not loaded, so the cell's recorded centre is
   what decides; this is the same rule the crop rectangle uses. A dataset
   processed without shape features has no centroids, so nothing can be deleted
-  in those wells — the status line and a warning say so rather than reporting a
-  quietly smaller number.
+  in those wells — a warning appears rather than a quietly smaller number. The
+  same warning covers wells whose data will not load and wells the scope names
+  that this dataset does not have.
 
 The status line reports both counts after every drag, e.g. *Region delete: 412
 cell(s) Included=0 — 38 in this frame (pixel overlap); 374 across 11 other
 frame(s) in 3 well(s) (centroid inside).* The deletes are ordinary per-cell
 edits, saved to `cell_overrides.json` like any other, and **Edit ▾ → Reset**
 undoes them along with the rest of your curation.
+
+A wide scope takes a few seconds: the app reads every scoped well's data and
+re-applies your curation across it, with the cursor showing busy while it does.
+A plate-wide drag over roughly 300,000 cells takes about two and a half seconds
+on a warm dataset, longer if the wells have not been read yet.
 
 #### Image Table
 

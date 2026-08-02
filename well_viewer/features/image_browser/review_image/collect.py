@@ -619,6 +619,7 @@ def collect_region_delete_targets(
         "scanned_wells": 0,
         "no_centroid_wells": [],
         "unreadable_wells": [],
+        "unknown_wells": [],
     }
     if region is None or not wells:
         return targets, stats
@@ -632,6 +633,11 @@ def collect_region_delete_targets(
     hit_wells: set[str] = set()
     for well in wells:
         if well not in ctx.state.dataset.well_paths:
+            # An armed scope can outlive the wells it named (a scope carried
+            # from a hand-typed selection, a well removed from the folder).
+            # Record it so the caller can say so instead of quietly deleting
+            # from fewer wells than the button advertises.
+            stats["unknown_wells"].append(well)
             continue
         stats["scanned_wells"] += 1
         try:
@@ -647,23 +653,27 @@ def collect_region_delete_targets(
         if not has_centroid_columns(df):
             stats["no_centroid_wells"].append(well)
             continue
-        keys = cell_keys_for_dataframe(df, default_well=well)
-        if keys.empty:
+        # Slice to the cells inside the box *before* building keys. Key
+        # construction is the dominant cost of this whole path — a plate-wide
+        # scope over 288k rows spends ~1.6s of its 1.7s here — and the box
+        # normally holds a small fraction of the plate, so narrowing first is
+        # the difference between a stutter and a multi-second freeze.
+        inside = df.loc[centroids_inside(df, region)]
+        if inside.empty:
             continue
-        # Narrow to the cells inside the box before touching Python: on a full
-        # plate the loop below would otherwise run once per cell in the dataset,
-        # where the box typically holds a small fraction of them.
-        for key in keys[centroids_inside(df, region)]:
+        for key in cell_keys_for_dataframe(inside, default_well=well):
             if key.fov not in want_fovs or key.tp not in want_tps:
                 continue
-            if not (key.well and key.fov and key.tp and key.nid):
+            if not (key.fov and key.tp and key.nid):
                 continue
-            frame = (key.well, key.fov, key.tp)
+            # The well is the dataset's own label, uncanonicalised — see the
+            # note in ``callbacks.override_key``; every reader keys off it.
+            frame = (well, key.fov, key.tp)
             if skip is not None and frame == tuple(skip):
                 continue
-            targets.append(key.as_tuple())
+            targets.append((well, key.fov, key.tp, key.nid))
             frames.add(frame)
-            hit_wells.add(key.well)
+            hit_wells.add(well)
 
     stats["frames"] = len(frames)
     stats["wells"] = len(hit_wells)

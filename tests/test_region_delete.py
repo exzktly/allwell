@@ -215,23 +215,39 @@ def test_empty_scope_selects_nothing():
 
 
 def test_keys_match_the_override_map_normalisation():
-    """Targets are written into ``included_overrides`` and read back by
-    ``CellKey``-based lookups, so they must already be in that form: padded
-    well, leading-zero-stripped FOV, ``:g`` timepoint, integer nucleus id."""
-    from well_viewer.data.image_identity import CellKey
-
+    """FOV / timepoint / nucleus are normalised the way the read path
+    normalises them, so a written override is findable again: leading-zero
+    FOV stripped, ``:g`` timepoint, integer nucleus id."""
     spec = [("01", "T01", "7.0", *_INSIDE)]
-    ctx = _ctx({"A01": _rows("a1", spec)})
-    ctx.state.dataset.well_paths = {"a1": "/tmp/a1.csv"}
-    ctx.state.dataset.cache = {"a1": _rows("a1", spec)}
+    ctx = _ctx({"A01": _rows("A01", spec)})
     targets, _ = collect_region_delete_targets(
-        ctx, _REGION, wells={"a1"}, fovs={"1"}, tps={"1"},
+        ctx, _REGION, wells={"A01"}, fovs={"1"}, tps={"1"},
     )
-    expected = CellKey.from_row(
-        {"fov": "01", "timepoint": "T01", "nucleus_id": "7.0"}, well="a1",
-    ).as_tuple()
-    assert targets == [expected]
-    assert expected == ("A01", "1", "1", "7")
+    assert targets == [("A01", "1", "1", "7")]
+
+
+def test_well_label_is_kept_exactly_as_the_dataset_spells_it():
+    """The readers key off ``dataset.well_paths`` labels, which are
+    ``extract_well_token(stem) or stem`` — so a CSV whose stem is not a well
+    position keeps its raw stem. Canonicalising the well here would upper-case
+    it into something no reader ever asks for, and the delete would report
+    success while changing nothing."""
+    spec = [("1", "0", "1", *_INSIDE)]
+    ctx = _ctx({"measurements_ctrl": _rows("measurements_ctrl", spec)})
+    targets, _ = collect_region_delete_targets(
+        ctx, _REGION, wells={"measurements_ctrl"}, fovs={"1"}, tps={"0"},
+    )
+    assert targets == [("measurements_ctrl", "1", "0", "1")]
+
+
+def test_armed_well_missing_from_the_dataset_is_reported():
+    spec = [("1", "0", "1", *_INSIDE)]
+    ctx = _ctx({"A01": _rows("A01", spec)})
+    targets, stats = collect_region_delete_targets(
+        ctx, _REGION, wells={"A01", "H12"}, fovs={"1"}, tps={"0"},
+    )
+    assert targets == [("A01", "1", "0", "1")]
+    assert stats["unknown_wells"] == ["H12"]
 
 
 # ── scope resolution ─────────────────────────────────────────────────────────
@@ -246,14 +262,30 @@ def test_resolve_delete_scope_defaults_to_the_displayed_frame():
 
     ctx = SimpleNamespace(state=SimpleNamespace(review_image=ReviewImageState()))
     assert not delete_scope_is_armed(ctx)
-    assert resolve_delete_scope(ctx, "a1", "01", "T01") == ({"A01"}, {"1"}, {"1"})
+    # FOV and timepoint are normalised; the well is passed through untouched,
+    # because the readers key off the dataset's own label.
+    assert resolve_delete_scope(ctx, "a1", "01", "T01") == ({"a1"}, {"1"}, {"1"})
 
     ctx.state.review_image.delete_scope_wells = {"b2", "C03"}
     assert delete_scope_is_armed(ctx)
     wells, fovs, tps = resolve_delete_scope(ctx, "a1", "01", "T01")
-    assert wells == {"B02", "C03"}
+    assert wells == {"b2", "C03"}
     # the un-armed fields still track the displayed frame
     assert (fovs, tps) == ({"1"}, {"1"})
+
+
+def test_zero_timepoint_survives_normalisation():
+    """``normalize_tp(0.0)`` used to return "" because 0.0 is falsy, so a
+    numeric ``t=0`` baseline — the first column of most time courses — read as
+    "no timepoint" and dropped out of every scope and every override key."""
+    from well_viewer.data.image_identity import normalize_tp
+    from well_viewer.core.ui_helpers import norm_timepoint
+
+    assert normalize_tp(0.0) == "0"
+    assert normalize_tp(0) == "0"
+    assert norm_timepoint(None, 0.0) == "0"
+    assert normalize_tp(None) == ""
+    assert normalize_tp("") == ""
 
 
 # ── the whole apply path ─────────────────────────────────────────────────────
@@ -360,3 +392,38 @@ def test_nothing_in_range_reports_rather_than_going_quiet(apply_ctx):
     _box(apply_ctx)
     assert apply_ctx.runtime.review.included_overrides == {}
     assert "0 cell(s) Included=0" in apply_ctx.status[-1]
+
+
+def test_baseline_timepoint_is_deletable(apply_ctx):
+    """The frames in this fixture are all at ``t=0``. A falsy-zero bug in the
+    timepoint normaliser made that whole timepoint unaddressable — the drawn
+    frame fell outside its own scope and nothing was deleted."""
+    ri = apply_ctx.state.review_image
+    ri.delete_scope_wells = {"A01", "B02"}
+    ri.delete_scope_tps = {"0"}
+    _box(apply_ctx)
+    assert ("A01", "1", "0", "1") in apply_ctx.runtime.review.included_overrides
+    assert "in this frame (pixel overlap)" in apply_ctx.status[-1]
+
+
+def test_reported_count_is_what_was_written_not_what_was_matched(apply_ctx):
+    """Two CSV rows for one (fov, tp, nucleus_id) are two hits and one
+    override. Reporting the hits would overstate the edit."""
+    dup = _rows("B02", [("1", "0", "1", *_INSIDE), ("1", "0", "1", *_INSIDE)])
+    apply_ctx.state.dataset.cache["B02"] = dup
+    apply_ctx.state.review_image.delete_scope_wells = {"B02"}
+    _box(apply_ctx)
+    assert len(apply_ctx.runtime.review.included_overrides) == 1
+    assert "1 cell(s) Included=0" in apply_ctx.status[-1]
+
+
+def test_zero_area_box_and_missing_mask_are_not_silent(apply_ctx):
+    from well_viewer.features.image_browser.review_image.callbacks import (
+        apply_box_delete,
+    )
+    apply_box_delete(apply_ctx, 50, 50, 50, 50)
+    assert "no area" in apply_ctx.status[-1]
+
+    apply_ctx.runtime.review_image.label = SimpleNamespace(_mask_arr=None)
+    _box(apply_ctx)
+    assert "no segmentation mask" in apply_ctx.status[-1]

@@ -31,6 +31,21 @@ from widgets.checkable_dropdown import CheckableDropdown
 _SCOPE_BTN = "_review_delete_scope_btn"
 
 
+def _well_sort_key(label: str):
+    """Plate order, with a defined answer for labels that are not positions.
+
+    ``parse_rc`` returns ``(None, None)`` for anything it cannot read as a well
+    position, and a dataset folder can hold both — ``A01.csv`` beside a
+    ``summary_all.csv``. Sorting on ``parse_rc`` alone then raises ``TypeError``
+    comparing ``None`` with ``str`` and takes the whole popover down with it, so
+    unparseable labels sort last, alphabetically, instead.
+    """
+    row, col = parse_rc(label)
+    if row is None or col is None:
+        return (1, "", "", str(label))
+    return (0, str(row), str(col), str(label))
+
+
 def _current_frame(ctx) -> tuple[str, str, str]:
     """The well / FOV / timepoint the control row is showing.
 
@@ -39,10 +54,9 @@ def _current_frame(ctx) -> tuple[str, str, str]:
     combo reading ``T01`` and an option list holding ``1`` are the same
     timepoint, and comparing them raw would leave the dropdown looking empty.
     """
-    from well_viewer.data.image_identity import (
-        normalize_fov, normalize_tp, normalize_well,
-    )
-    well = normalize_well(ctx.state.preview.selected_well or "")
+    from well_viewer.data.image_identity import normalize_fov, normalize_tp
+    # The well stays as the dataset spells it — see ``callbacks.override_key``.
+    well = str(ctx.state.preview.selected_well or "").strip()
     fov_menu = (ctx.runtime.review_image.fov_menu
                 or ctx.widgets.get_or_none("_preview_fov_cb"))
     fov = normalize_fov(fov_menu.currentText()) if fov_menu is not None else ""
@@ -59,7 +73,7 @@ def _scope_options(ctx) -> tuple[list[str], list[str], list[str]]:
     once would offer the previous plate's wells.
     """
     from well_viewer.data.image_identity import normalize_fov, normalize_tp
-    wells = sorted(ctx.state.dataset.well_paths.keys(), key=parse_rc)
+    wells = sorted(ctx.state.dataset.well_paths.keys(), key=_well_sort_key)
     fovs = [normalize_fov(f) for f in (ctx.state.dataset.all_fovs_cache or [])]
     tps = [normalize_tp(t) for t in (ctx.state.dataset.all_timepoints_cache or [])]
     return wells, fovs, tps

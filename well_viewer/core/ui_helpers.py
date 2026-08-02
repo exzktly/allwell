@@ -1155,7 +1155,9 @@ def notes_schedule_save(ctx) -> None:
 
 
 def norm_timepoint(ctx, value: object) -> str:
-    raw = str(value or "").strip()
+    # ``None`` is the only value that means "no timepoint" — a numeric 0 is a
+    # real baseline. See image_identity._raw_token, whose rule this mirrors.
+    raw = ("" if value is None else str(value)).strip()
     if not raw:
         return ""
     parsed = parse_timepoint_hours(raw)

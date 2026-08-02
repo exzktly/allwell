@@ -144,6 +144,36 @@ def test_use_plate_selection_arms_selected_wells_without_writing_them(qtbot):
     assert ctx.state.selection.selected_wells == {"B02", "C03", "Z99"}
 
 
+def test_baseline_timepoint_is_offered_and_seeded(qtbot):
+    """A numeric ``t=0`` used to normalise to "" — a blank row in the dropdown
+    that the displayed frame could never match, so the popover read "No
+    timepoints" for the frame on screen and "All TPs" silently excluded it."""
+    ctx = _ctx(tps=(0.0, 24.0), tp="0")
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    btn = build_delete_scope_control(ctx, parent)
+    btn.menu().aboutToShow.emit()
+    from widgets.checkable_dropdown import CheckableDropdown
+    tps_dd = btn.menu().findChildren(CheckableDropdown)[2]
+    assert [str(d) for d in tps_dd.checkedData()] == ["0"]
+    assert "" not in [tps_dd._data[i] for i in range(tps_dd.count())]
+
+
+def test_mixed_parseable_and_opaque_well_labels_do_not_break_the_popover(qtbot):
+    """A dataset folder can hold ``A01.csv`` beside ``summary_all.csv``.
+    Sorting those on ``parse_rc`` alone raises comparing None with str, which
+    took every dropdown down with it and left the scope armable but unlabelled."""
+    ctx = _ctx(wells=("A01", "B02", "summary_all"))
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    btn = build_delete_scope_control(ctx, parent)
+    btn.menu().aboutToShow.emit()
+    from widgets.checkable_dropdown import CheckableDropdown
+    wells_dd = btn.menu().findChildren(CheckableDropdown)[0]
+    labels = [wells_dd._labels[i] for i in range(wells_dd.count())]
+    assert labels == ["A01", "B02", "summary_all"]
+
+
 def test_ticking_one_dropdown_arms_only_that_field(built):
     """Arming wells must not also pin the FOV and timepoint to whatever was on
     screen — the untouched fields keep following the displayed frame, or moving

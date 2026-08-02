@@ -237,6 +237,45 @@ def _set_count(win, text: str) -> None:
     set_widget_text(win, "_playground_count", text)
 
 
+# ── the shared status-row progress bar ───────────────────────────────────────
+#
+# The same widget smFISH's Apply-to-All and the dataset load drive
+# (``features/smfish/tab_view.py``), reached the same way, so the app reports
+# every long job in one place instead of one per tab. All three helpers run on
+# the GUI thread; the workers reach them only through the bridge's queued
+# ``progress`` / ``stage`` signals.
+
+def _show_progress(ctx, total: int) -> None:
+    """Show the bar. ``total <= 0`` means indeterminate — for a job whose length
+    is genuinely unknown, which is honest where a fake percentage is not."""
+    bar = ctx.widgets.get_or_none("_progress_bar")
+    if bar is None:
+        return
+    bar.setRange(0, max(0, int(total)))
+    bar.setValue(0)
+    bar.show()
+
+
+def _step_progress(ctx, done: int, total: int) -> None:
+    bar = ctx.widgets.get_or_none("_progress_bar")
+    if bar is None:
+        return
+    if bar.maximum() != max(1, int(total)):
+        bar.setRange(0, max(1, int(total)))
+    bar.setValue(int(done))
+
+
+def _hide_progress(ctx) -> None:
+    """Called on **every** exit path, including failure. A bar left running
+    after a job died is its own false statement about what is happening."""
+    bar = ctx.widgets.get_or_none("_progress_bar")
+    if bar is None:
+        return
+    bar.setRange(0, 1)
+    bar.setValue(0)
+    bar.hide()
+
+
 def _count_text(facts: dict) -> str:
     """The Cells read-out: how many objects this render actually drew.
 
@@ -873,8 +912,17 @@ def _build_reference_then_render(ctx, chan_lower: str, *, ff_mode: str,
     ff_key, bg_key = _reference_keys(req_well, chan_lower, ff_mode, bg_method)
     _set_status(ctx.window, f"Building {ff_mode}/{bg_method} model "
                             f"from well {req_well}…")
+    # Determinate: the build's cost is one decode per sampled frame, and it
+    # knows how many it will attempt.
+    _show_progress(ctx, 1)
+
+    def _on_progress(done: int, total: int) -> None:
+        _step_progress(ctx, done, total)
+        _set_status(ctx.window, f"Building {ff_mode}/{bg_method} model from "
+                                f"well {req_well}… ({done}/{total} frames)")
 
     def _on_done(well, chan, ff_field, bg_field):
+        _hide_progress(ctx)
         # A build that produced nothing is recorded as ATTEMPTED, with a reason.
         # Leaving the key simply absent would respawn this worker on the next
         # keystroke, forever; recording it as built would silently correct with
@@ -899,12 +947,13 @@ def _build_reference_then_render(ctx, chan_lower: str, *, ff_mode: str,
         playground_on_change(ctx)
 
     def _on_failed(msg):
+        _hide_progress(ctx)
         _set_status(ctx.window, f"Model build failed: {msg}")
 
     ctx.runtime.playground.ref_bridge = request_reference_fields(
         ctx, req_well, chan_lower,
         flatfield_mode=ff_mode, background_method=bg_method,
-        on_done=_on_done, on_failed=_on_failed)
+        on_done=_on_done, on_failed=_on_failed, on_progress=_on_progress)
 
 
 # ── live StarDist preview ────────────────────────────────────────────────────
@@ -1055,8 +1104,19 @@ def playground_segment_now(ctx) -> None:
     key = _seg_key(ctx)
     _set_status(win, "StarDist: segmenting… (the first run of a session also "
                      "loads TensorFlow — ~10-30 s, and it stays resident)")
+    # Indeterminate: one frame's inference has no interior milestones to count,
+    # and the wait is dominated by a one-off model load whose length depends on
+    # the machine. A percentage here would be invented.
+    _show_progress(ctx, 0)
+
+    def _on_stage(name: str) -> None:
+        # The model-load phase is the long one and happens once per session;
+        # reporting it identically to the segmentation leaves the first Segment
+        # looking like a hang.
+        _set_status(win, f"StarDist: {name}…")
 
     def _on_done(labels) -> None:
+        _hide_progress(ctx)
         st.seg_running = False
         st.seg_labels = labels
         st.seg_key = key
@@ -1069,6 +1129,11 @@ def playground_segment_now(ctx) -> None:
         playground_on_change(ctx)
 
     def _on_failed(msg: str) -> None:
+        # Hidden here too, which is the whole point of doing it per branch: the
+        # commonest failure in a fresh environment is "StarDist is not
+        # installed", and a bar still sweeping under that message would say the
+        # work continues.
+        _hide_progress(ctx)
         st.seg_running = False
         st.seg_labels = None
         st.seg_key = None
@@ -1077,7 +1142,7 @@ def playground_segment_now(ctx) -> None:
 
     ctx.runtime.playground.seg_bridge = request_stardist_labels(
         arr, prob_thresh=st.seg_prob_thresh, nms_thresh=st.seg_nms_thresh,
-        on_done=_on_done, on_failed=_on_failed)
+        on_done=_on_done, on_failed=_on_failed, on_stage=_on_stage)
 
 
 def playground_open_loose_image(ctx, path: str) -> None:

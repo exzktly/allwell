@@ -1045,7 +1045,26 @@ everything core used to hard-code:
   feature is present). Heat Map's captures the colormap / scale / vmin·vmax /
   toggles / active layout by reusing the layout-sidecar serializer. Image
   Table's `apply_image_table` restores `ctx.state.image_table`'s row/col dims,
-  channel options, and per-cell values, then calls `builder_view.builder_refresh`
+  channel options, per-cell values, **and the table's scope** — the
+  `active_wells` / `active_timepoints` / `active_fovs` selections that decide
+  *what the table is of*, as against how it is laid out. That scope is the half
+  that has to be captured deliberately, because an **empty** set does not mean
+  empty: `grid_layout._axis_dim_values` reads it as *all*
+  (`sel if sel else _well_options(ctx)`). A snapshot that omitted it therefore
+  restored a saved three-well, one-timepoint grid as the whole plate across the
+  whole time course, with the right channels on it — which reads as a restore
+  that did nothing rather than one that lost something. The sets are stored as
+  sorted lists (wells in `parse_rc` plate order) because the block is written
+  into `persistence.json` and `json.dump` cannot serialize a `set`; an empty
+  selection is omitted rather than written out well by well, since the omitted
+  and empty forms restore identically. A missing key **leaves the live value
+  alone** — the one place in this module that does not overwrite from state,
+  because every plot saved before the scope was captured is silent about it and
+  clearing the user's plate selection on their behalf would be its own bug.
+  Restoring the wells also re-lights the Image Table's sidebar plate, which is a
+  separate selection from `selection.selected_wells`; state is written first, so
+  `picker_view._on_plate_changed` short-circuits and no second layout rebuild
+  fires. It then calls `builder_view.builder_refresh`
   so the drag-and-drop shelf's own widget tree reflects the restored spec right
   away — the shelf caches its built spec (`ctx.runtime.image_table.builder_spec`)
   and only rebuilds when something invalidates it, so a restore that skipped

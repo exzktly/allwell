@@ -13,6 +13,12 @@ from typing import Any
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.image_table.builder_view import builder_refresh
+# Module scope, like ``builder_refresh`` above: ``controller`` does not import this
+# module, so there is no cycle to work around and no reason to spend one of the
+# deferred-feature-import budget's slots (``test_deferred_imports``) on it.
+from well_viewer.features.image_browser.image_table.controller import (
+    image_table_refresh_picker,
+)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -83,6 +89,81 @@ def _restore_display(ctx, state: dict) -> None:
             swallowed()
 
 
+# The three selection filters that decide *what the table is of*, as opposed to
+# how it is laid out or drawn. Kept together because they share one rule, stated
+# once here: in ``grid_layout._axis_dim_values`` an **empty** set means "all", not
+# "none" — ``sel if sel else _well_options(ctx)``. So an omitted key and an empty
+# set restore to the same table, which is what lets the snapshot skip the common
+# all-wells case instead of writing out ninety-six tokens.
+_SCOPE_FIELDS = ("active_wells", "active_timepoints", "active_fovs")
+
+
+def _snapshot_scope(ctx) -> dict:
+    """Which wells / timepoints / FOVs the table covers.
+
+    Without these the axes and the per-channel options round-trip while the
+    table's *scope* does not, and a saved three-well single-timepoint grid
+    restores as the whole plate across the whole time course — the channels look
+    right, so it reads as "the settings did not restore" rather than as an empty
+    tab.
+
+    Stored as sorted lists: these are ``set``s, which ``json.dump`` cannot
+    serialize, and sorting keeps the persisted file's diffs stable. Wells sort in
+    plate order (``parse_rc``) like every other well list in the app.
+    """
+    from well_viewer.domain.viewer_state import parse_rc
+
+    it = ctx.state.image_table
+    out: dict = {}
+    for fld in _SCOPE_FIELDS:
+        vals = {str(v) for v in (getattr(it, fld, None) or set())}
+        if not vals:
+            continue                      # empty == all; nothing to record
+        out[fld] = (sorted(vals, key=parse_rc) if fld == "active_wells"
+                    else sorted(vals))
+    return out
+
+
+def _restore_scope(ctx, state: dict) -> None:
+    """Put the scope back, and leave it alone when the block does not carry it.
+
+    Deliberately unlike the ``row_dims`` / ``col_dims`` loop in
+    :func:`apply_image_table`, which writes ``[]`` for a missing key: a plot
+    saved before the scope was captured has none of these keys, and clearing the
+    user's live plate selection because an old record is silent about it would
+    be a second bug wearing the first one's clothes.
+    """
+    it = ctx.state.image_table
+    for fld in _SCOPE_FIELDS:
+        vals = state.get(fld)
+        if not isinstance(vals, (list, tuple, set)):
+            continue                      # absent (or malformed) → keep current
+        try:
+            setattr(it, fld, {str(v) for v in vals})
+        except Exception:
+            swallowed()
+
+
+def _relight_sidebar_plate(ctx) -> None:
+    """Push the restored wells onto the Image Table's own sidebar plate.
+
+    ``state.image_table.active_wells`` is that plate's selection, separate from
+    ``selection.selected_wells``. Restoring the state without the widget leaves
+    the grid built from three wells while the plate shows none selected — the
+    state and the control disagreeing about the same thing.
+
+    State is written before this runs, so ``picker_view._on_plate_changed``
+    short-circuits on ``new == active_wells`` and this cannot provoke a second
+    layout rebuild.
+    """
+    if getattr(ctx.runtime.image_table, "sidebar_plate", None) is None:
+        return                            # sidebar not built yet (lazy tab)
+    try:
+        image_table_refresh_picker(ctx)
+    except Exception:
+        swallowed()
+
+
 def _snapshot_builder(ctx) -> dict:
     """Builder tree state: per-channel render options + Fixed panel pinned values."""
     out: dict = {}
@@ -137,6 +218,7 @@ def snapshot_image_table(ctx) -> dict:
         swallowed()
     out.update(_snapshot_builder(ctx))
     out.update(_snapshot_display(ctx))
+    out.update(_snapshot_scope(ctx))
     return out
 
 
@@ -241,6 +323,10 @@ def apply_image_table(ctx, state: dict) -> None:
 
     _restore_spacing(ctx, state)
     _restore_display(ctx, state)
+    # What the table is *of* — before the shelf refresh below, which reads these
+    # through ``spec_from_state``'s filters.
+    _restore_scope(ctx, state)
+    _relight_sidebar_plate(ctx)
     # Intentionally NOT calling image_table_generate here — restore only pre-fills
     # the dropdowns; the user clicks Generate to load images off disk.
 

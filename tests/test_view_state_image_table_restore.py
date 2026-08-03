@@ -86,6 +86,86 @@ def test_cells_and_channel_opts_round_trip_minimal():
     assert st.channel_opts["mCherry"]["colormap"] == "magma"
 
 
+def _scope_ctx(st, cells=None):
+    """A minimal ctx over *st* — the same shape the round-trip test above uses."""
+    from types import SimpleNamespace
+    return SimpleNamespace(
+        state=SimpleNamespace(image_table=st),
+        runtime=SimpleNamespace(image_table=_RuntimeNS(
+            cells=cells if cells is not None else [], crop_tool=None)),
+        widgets=SimpleNamespace(get_or_none=lambda _n: None),
+    )
+
+
+def test_the_tables_scope_round_trips():
+    """The reported bug: restoring a saved Image Table gave back the channels but
+    not *what the table was of*.
+
+    Nothing captured ``active_wells`` / ``active_timepoints`` / ``active_fovs``,
+    and an empty set does not mean empty — ``grid_layout._axis_dim_values`` reads
+    it as **all**. So a saved three-well, one-timepoint grid restored as the whole
+    plate across the whole time course, with the right channels on it, which is
+    why it read as "the settings did not restore".
+    """
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    st = ImageTableState(rows=3, cols=1)
+    st.active_wells = {"A01", "A02", "B01"}
+    st.active_timepoints = {"0"}
+    st.active_fovs = {"1"}
+    snap = vsio.snapshot_image_table(_scope_ctx(st, [[{"well": "A01"}]]))
+
+    fresh = ImageTableState()
+    vsio.apply_image_table(_scope_ctx(fresh), snap)
+    assert fresh.active_wells == {"A01", "A02", "B01"}
+    assert fresh.active_timepoints == {"0"}
+    assert fresh.active_fovs == {"1"}
+
+
+def test_the_scope_survives_json():
+    """These are ``set``s, which ``json.dump`` refuses — and the block is written
+    into ``persistence.json``. A fix that stored them raw would round-trip in
+    memory and fail on save, so the serialisable form is the contract."""
+    import json
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    st = ImageTableState(rows=1, cols=1)
+    st.active_wells = {"B02", "A01"}
+    snap = vsio.snapshot_image_table(_scope_ctx(st, [[{"well": "A01"}]]))
+    assert snap["active_wells"] == ["A01", "B02"], "wells are stored in plate order"
+    json.dumps(snap)
+
+
+def test_all_wells_round_trips_as_all():
+    """An empty selection means "all", so it is omitted rather than written out
+    as every well on the plate — and restores to the same table either way."""
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    st = ImageTableState(rows=1, cols=1)
+    snap = vsio.snapshot_image_table(_scope_ctx(st, [[{"well": "A01"}]]))
+    assert "active_wells" not in snap
+    fresh = ImageTableState()
+    vsio.apply_image_table(_scope_ctx(fresh), snap)
+    assert fresh.active_wells == set()
+
+
+def test_a_saved_plot_from_before_this_does_not_clear_the_live_selection():
+    """A block with no scope keys leaves the live plate alone.
+
+    Deliberately unlike the ``row_dims`` handling beside it, which writes ``[]``
+    for a missing key: every plot saved before the scope was captured is silent
+    about it, and wiping the user's plate selection on their behalf would be a
+    second bug rather than a graceful fallback."""
+    from well_viewer.features.image_browser.image_table.state import ImageTableState
+
+    st = ImageTableState()
+    st.active_wells = {"C05"}
+    st.active_timepoints = {"12"}
+    vsio.apply_image_table(_scope_ctx(st), {"rows": 1, "cols": 1})
+    assert st.active_wells == {"C05"}
+    assert st.active_timepoints == {"12"}
+
+
 def test_image_table_display_state_round_trips(image_table_app):
     # image_table_app builds the lazy Image Table sub-tab, so the plain-data
     # render model + crop tool live on ctx.runtime.image_table.

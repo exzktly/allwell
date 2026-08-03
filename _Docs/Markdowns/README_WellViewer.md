@@ -1512,9 +1512,22 @@ channel for every well).
   none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
   Corrected**, **Mask**, **≥ threshold** (renders that channel's ThreshFracOn
-  threshold-binary, positive cells white), a **boundary** outline overlay, and a
-  **colormap + LUT** min/max. The options travel with the channel wherever it sits,
-  so the same channel looks identical on either axis. Remove a chip with its **×**.
+  threshold-binary, positive cells white), **Colour cells**, a **boundary** outline
+  overlay, and a **colormap + LUT** min/max. The options travel with the channel
+  wherever it sits, so the same channel looks identical on either axis. Remove a
+  chip with its **×**.
+- **The render is part of the row** — drop the same channel twice and give each
+  chip a different render to see them side by side: DAPI's corrected image on one
+  row and its cell mask on the next. Each render gets its own row, labelled
+  **DAPI**, **DAPI (mask)**, **DAPI (raw)** or **DAPI (binary)**, so a channel can
+  appear as many times as you have renders for it.
+- **Colour cells** — in the **Mask** and **≥ threshold** views, give every cell its
+  own colour instead of painting them all white. Two nuclei that touch are
+  otherwise a single white shape, which is exactly the mistake you are looking at a
+  mask to catch. The colour is a fixed function of the cell's label id, so it does
+  not change between redraws, and it is the same colour the Playground gives that
+  cell. Off by default; it has no effect on a **Raw** or **Corrected** row, where
+  there are no per-cell labels to colour, and the menu item is greyed out there.
 - **Separate ↔ Overlay** — a switch on each root's channel group: **Separate** shows
   one cell per channel; **Overlay** additively blends that root's channels into one
   composite cell (LUT-coloured, clipped to white).
@@ -1596,7 +1609,8 @@ channel for every well).
   channel / timepoint / FOV; `(no mask)` means the cell's **Mask** or
   **≥ threshold** view has no segmentation mask for that frame (the intensity
   image is *not* shown in its place, so a threshold view is never half
-  silhouettes and half pictures); `(render failed)` means that one cell errored —
+  silhouettes and half pictures — and such a cell draws from its mask alone, so a
+  missing fluorescence frame does not stop it); `(render failed)` means that one cell errored —
   the rest of the table still draws, and the status line counts how many cells
   could not be drawn. A cell that failed because the source was briefly
   unavailable (an external drive spinning down, a folder still being written)

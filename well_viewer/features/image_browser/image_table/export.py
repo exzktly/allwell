@@ -21,6 +21,7 @@ from well_viewer.features.image_browser.image_table import renderer as _renderer
 from well_viewer.features.image_browser.image_table.image_compose import (
     OVERLAY_CHAN,
     _load_array,
+    _load_mask_array,
     _row_display_opts,
     cell_chrome_kwargs,
     cell_display_rgb,
@@ -409,8 +410,13 @@ def _build_export_figure(ctx, *, cell_max_px: int | None = None, progress=None):
             else:
                 arr = rendered.get((r, c))
                 if arr is None and well and chan and tp:
-                    use_tophat = _row_display_opts(ctx, r, chan)[0]
+                    use_tophat, _b, binary_mode = _row_display_opts(ctx, r, chan)
                     arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+                    if arr is None and binary_mode:
+                        # A binary cell draws its segmentation, not the
+                        # fluorescence — same fallback the live grid takes, so the
+                        # figure does not lose a row the screen shows.
+                        arr = _load_mask_array(ctx, cache, well, tp, fov)
                 # Render exactly the same RGB the live thumbnail shows —
                 # full mpl colormap + show_binary / show_boundaries toggles +
                 # crop — via the shared single-source helper, so anything that

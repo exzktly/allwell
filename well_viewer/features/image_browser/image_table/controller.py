@@ -48,6 +48,7 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     OVERLAY_CHAN,
     _binary_base,
     _is_binary_variant,
+    _is_mask_variant,
     _compose_image_table_rgb,
     _export_binary_mask,
     _format_pixel_intensity,
@@ -769,6 +770,8 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
     use_tophat, _bnd, binary_mode = _row_display_opts(ctx, r, chan)
     if _is_binary_variant(chan):
         binary_mode = "threshold"
+    elif _is_mask_variant(chan):
+        binary_mode = "mask"
     arr = None
     if well and chan and tp:
         ratio = _find_ratio_for_channel(ctx, chan)
@@ -776,8 +779,18 @@ def _render_cell(ctx, cache, cell, r, crop_tool, sz, overlay_chans, make_overlay
             arr = _load_ratio_array(ctx, cache, well, ratio, tp, fov, use_tophat=use_tophat)
         else:
             arr = _load_array(ctx, cache, well, chan, tp, fov, use_tophat=use_tophat)
+    if arr is None and binary_mode:
+        # A mask / ≥threshold cell draws its segmentation, never the fluorescence
+        # pixels — ``_compose_image_table_rgb`` returns the silhouette before it
+        # reads a single intensity value. Requiring the frame anyway made a whole
+        # row read "(no image)" on a dataset whose output zip carries the mask and
+        # the corrected frame but no raw one, which is both a cell that could have
+        # been drawn and a placeholder naming the wrong missing thing. The mask
+        # doubles as the cell's representative array: it has the source shape, so
+        # the crop-drag conversion and the pixel readout stay honest.
+        arr = _load_mask_array(ctx, cache, well, tp, fov)
     if arr is None:
-        return None, None, False, "(no image)"
+        return None, None, False, "(no mask)" if binary_mode else "(no image)"
     # A mask / threshold cell that can't resolve its mask is reported as such
     # (cell_display_rgb returns None rather than rendering the intensity image
     # the user did not ask for).

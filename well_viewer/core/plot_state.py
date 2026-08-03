@@ -40,6 +40,16 @@ class PlotState:
     # panel). Off by default — opt in via the Properties sidebar.
     show_threshold_line: bool = False
 
+    # Time-axis label multiplier (Properties → Overlays → "Rescale time").
+    # 1.0 = off. Applied by ``domain/time_rescale.py`` to what a time axis
+    # *prints* and to nothing else: the plotted values, the timepoint menus, the
+    # Statistics tab and every exported CSV keep the hours parsed out of the
+    # filenames. It exists for plates whose filename cadence isn't the real one
+    # (``T01…T12`` imaged every four hours), and every axis it touches carries
+    # the factor in its label — the numbers disagree with the rest of the app on
+    # purpose, so the figure has to say so.
+    time_scale: float = 1.0
+
     bar_order: list | None = None
     line_order_rsets: list[str] = field(default_factory=list)
     line_order_wells: list[str] = field(default_factory=list)

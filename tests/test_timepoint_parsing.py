@@ -28,6 +28,7 @@ from __future__ import annotations
 import math
 import random
 import string
+import textwrap
 
 import pytest
 
@@ -159,6 +160,17 @@ class TestSortKey:
         tokens = ["zzz", "24", "abc", "1"]
         assert sorted(tokens, key=sort_key) == ["1", "24", "abc", "zzz"]
 
+    def test_a_numeric_zero_sorts_first_not_last(self):
+        """Where the falsy-zero bug bit hardest. ``sort_key``'s fallback is not
+        "no value" but *unparseable*, so a numeric ``0`` — stringified to ``""``
+        and parsed as ``None`` — was sorted into the opaque-label block at the
+        end. The baseline timepoint came last in a list of numbers, after the
+        twelve-hour column."""
+        from util.timepoint import sort_key
+        assert sorted([0, 4, 12, 0.0], key=sort_key) == [0, 0.0, 4, 12]
+        # and it agrees with the same timepoint spelled as text
+        assert sort_key(0)[:2] == sort_key("0")[:2] == (False, 0.0)
+
     def test_every_timepoint_sort_uses_the_shared_key(self):
         """Six call sites wrote the ``(unparseable, hours, token)`` tuple by hand,
         which is how the tabs drifted out of agreement. This asserts the names
@@ -176,3 +188,97 @@ class TestSortKey:
         # a sorted() call); prove it delegates rather than reimplements.
         for token in ("2hpCh", "T01", "abc", "48h"):
             assert rr._tp_sort_key(token) == sort_key(token)
+
+
+class TestCanonicalKeyForm:
+    """``normalize_tp`` — the one key form every identity comparison uses."""
+
+    def test_zero_is_a_timepoint_not_an_absence(self):
+        """Regression: the baseline timepoint used to normalise to ``""``.
+
+        The guard tested the *value's* truthiness (``str(value or "")``), and a
+        numeric ``0`` is falsy — so the same t=0 produced ``"0"`` when it arrived
+        as text and ``""`` when it arrived as a float. The empty key matches
+        nothing, so a lookup keyed on a float 0.0 silently found no images and no
+        rows. Emptiness is a property of the string, not of the number.
+        """
+        from well_viewer.data.image_identity import normalize_tp
+        assert normalize_tp(0.0) == "0"
+        assert normalize_tp(0) == "0"
+        assert normalize_tp("0") == "0"
+        assert normalize_tp("0.0") == "0"
+        assert normalize_tp("T00") == "0"
+
+    def test_the_shared_parser_reads_a_numeric_zero_as_zero_hours(self):
+        """The root of the family. ``util.timepoint.parse_hours`` carried the
+        same ``str(value or "")`` guard, so it answered ``None`` — "not a
+        timepoint I can read" — for the one timepoint every time course starts
+        at, whenever it arrived as a number rather than as text.
+
+        ``normalize_tp`` was immune because it stringifies before calling in,
+        which is exactly why this survived being fixed there: the sibling that
+        does *not* stringify first, ``image_identity.tp_hours``, went on
+        reporting the baseline as unreadable.
+        """
+        from util.timepoint import parse_hours
+        from well_viewer.data.image_identity import tp_hours
+        for zero in (0, 0.0, "0", "0h", "T00"):
+            assert parse_hours(zero) == 0.0, zero
+        assert tp_hours(0) == 0.0
+        assert tp_hours(0.0) == 0.0
+
+    def test_booleans_are_not_timepoints(self):
+        """``False`` is falsy like ``0`` but is not a baseline — the fix keys on
+        ``None`` alone, so ``str(False)`` is read and rejected on its merits."""
+        from util.timepoint import parse_hours
+        assert parse_hours(False) is None
+        assert parse_hours(True) is None
+
+    def test_genuinely_absent_values_still_normalise_to_empty(self):
+        from well_viewer.data.image_identity import normalize_tp
+        assert normalize_tp(None) == ""
+        assert normalize_tp("") == ""
+        assert normalize_tp("   ") == ""
+
+    def test_numeric_and_text_spellings_agree_for_every_timepoint(self):
+        """The property the zero case violated: one timepoint, one key."""
+        from well_viewer.data.image_identity import normalize_tp
+        for hours in (0.0, 0.5, 1.0, 4.0, 23.5, 48.0):
+            assert normalize_tp(hours) == normalize_tp(str(hours))
+
+    def test_the_ctx_leaf_agrees_with_the_canonical_normaliser(self):
+        """``core.ui_helpers.norm_timepoint`` is the ctx-shaped wrapper. It
+        carried its own copy of the rule, which is how it kept the zero bug
+        after ``normalize_tp`` was fixed."""
+        from well_viewer.core.ui_helpers import norm_timepoint
+        from well_viewer.data.image_identity import normalize_tp
+        for value in (0.0, 0, "0", "T01", "1h30m", "treated_arm_2", "", None):
+            assert norm_timepoint(None, value) == normalize_tp(value)
+
+    def test_the_ctx_leaf_delegates_rather_than_reimplements(self):
+        """Structure, not behaviour — and the two are not the same guard.
+
+        The agreement test above passes against *any* correct copy of the rule,
+        including an inlined one, so it cannot see the thing that caused the bug:
+        a second implementation that is right today and drifts tomorrow. This
+        reads the function's own body and requires it to be a single delegating
+        return, which is what the docstring on the shipped function claims.
+        """
+        import ast
+        import inspect
+        from well_viewer.core import ui_helpers
+
+        src = inspect.getsource(ui_helpers.norm_timepoint)
+        fn = ast.parse(textwrap.dedent(src)).body[0]
+        body = [n for n in fn.body if not (isinstance(n, ast.Expr)
+                                           and isinstance(n.value, ast.Constant))]
+        assert len(body) == 1 and isinstance(body[0], ast.Return), (
+            "norm_timepoint should be one delegating return; it has grown a body "
+            "again, which is how the zero bug survived in it once already"
+        )
+        called = {n.func.id for n in ast.walk(body[0])
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "normalize_tp" in called, (
+            "norm_timepoint no longer calls image_identity.normalize_tp — the "
+            "timepoint rule has a second implementation again"
+        )

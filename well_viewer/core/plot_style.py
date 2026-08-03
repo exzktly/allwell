@@ -220,6 +220,94 @@ def _to_float_or_none(value: str):
     return float(s)
 
 
+def apply_time_rescale(ax, factor) -> None:
+    """Print a time axis's ticks multiplied by *factor*, leaving the data alone.
+
+    Used by the plots whose x-axis is elapsed time (the Line tab's three panels).
+    The tick *positions* stay at the values the pipeline parsed out of the
+    filenames, so nothing that reads the axis — limits, picks, exports — sees a
+    different number; only the text changes.
+
+    The factor is stamped on the axes as ``_aw_time_scale`` because
+    :func:`apply_export_style_prefs` runs after the renderer and calls
+    ``set_xscale``, which resets an axis's locator and formatter. That pass reads
+    the stamp back and re-installs, the same way ``_aw_log_plus1`` and
+    ``_categorical_xaxis`` let an axes carry its own requirements through the
+    shared restyle.
+
+    A factor of one installs nothing: every redraw rebuilds its axes, so an
+    unstamped axis is already showing the default formatter.
+    """
+    from well_viewer.domain.time_rescale import format_scaled, is_active
+
+    ax._aw_time_scale = factor
+    if not is_active(factor):
+        return
+    from matplotlib.ticker import FuncFormatter
+    ax.xaxis.set_major_formatter(
+        FuncFormatter(lambda v, _pos, _f=factor: format_scaled(v, _f)))
+
+
+def mark_time_rescale(*axes, factor) -> None:
+    """Name the rescale factor under a stack of categorical time panels.
+
+    The companion to :func:`apply_time_rescale`, for the figures whose x-axis is
+    *categorical* — the Bar tab and its batch-export twin, where the timepoint is
+    the tick text rather than a position, so there is no formatter to carry the
+    marker and no x-label in the ordinary case.
+
+    The label goes on the bottom-most panel only: the panels are stacked over one
+    shared x reading, and three copies of the same sentence is noise. Nothing is
+    written while the factor is off, so an unrescaled figure draws exactly as it
+    did before this existed.
+
+    **Called more than once per figure, it still marks exactly one panel.** The
+    Bar tab's per-cell modes (violin / beeswarm / all points) reach two callers:
+    ``redraw_bars`` marks the three-panel stack, then ``draw_violin`` marks the
+    two panels it drew — which put a second copy on the middle panel and left the
+    first on the bottom one. So each marked axes is tagged, and every call clears
+    the tags it finds on the same figure before writing to whichever candidate
+    sits lowest. The bottom is decided by axes position rather than by argument
+    order, because the caller that knows the factor is not always the one that
+    knows how many panels the figure ended up with.
+
+    Without it a bar reading ``t=16`` sits under a Timepoint menu reading 4 and
+    beside an exported CSV reading 4, with nothing on the figure saying why.
+
+    Lives here rather than in the bar renderer because the batch-export panel
+    builds its own figure and needs it too — reaching across from
+    ``features/batch_export`` into ``features/barplot`` for it would be a feature
+    importing a feature.
+    """
+    from well_viewer.domain.time_rescale import describe
+
+    marker = describe(factor)
+    present = [ax for ax in axes if ax is not None]
+    if not marker or not present:
+        return
+    # Candidates: the panels this call was handed, plus any this figure already
+    # carries a marker on. Clearing the old ones is what keeps a second call
+    # from leaving a stale copy on a panel that is no longer the lowest.
+    candidates = list(present)
+    fig = getattr(present[-1], "figure", None)
+    for ax in getattr(fig, "axes", ()) or ():
+        if getattr(ax, "_aw_time_marker", False):
+            ax.set_xlabel("")
+            ax._aw_time_marker = False
+            if ax not in candidates:
+                candidates.append(ax)
+
+    def _bottom(ax):
+        try:
+            return float(ax.get_position().y0)
+        except Exception:
+            return 0.0
+
+    target = min(candidates, key=_bottom)
+    target.set_xlabel(marker, fontsize=8, labelpad=4)
+    target._aw_time_marker = True
+
+
 def apply_axis_log_scale(ax, which: str, on: bool) -> None:
     """Set an axis to log scale, honouring a scatter ``_aw_log_plus1`` request.
 
@@ -742,6 +830,12 @@ def apply_export_style_prefs(fig, prefs: dict) -> None:
                 _fy = getattr(ax, "_aw_force_ylog", None)
                 _ylog = bool(prefs.get("y_log", False)) if _fy is None else bool(_fy)
                 apply_axis_log_scale(ax, "y", _ylog)
+            # ``set_xscale`` above resets the axis's locator and formatter, so a
+            # time axis that asked to have its ticks rescaled has to say so
+            # again. The renderer stamped the factor; re-install from it.
+            _ts = getattr(ax, "_aw_time_scale", None)
+            if _ts is not None:
+                apply_time_rescale(ax, _ts)
 
         _tick_minor = bool(_axis_style(idx, "tick_minor", False))
         if _tick_minor:

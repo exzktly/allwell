@@ -14,6 +14,7 @@ from well_viewer.domain.selections_model import (color_for_replicate_set, color_
 from well_viewer.core.channel_state_controller import get_all_fluor_gates, get_thresh_frac_on
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
+from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
 
 import logging
 import math
@@ -75,6 +76,7 @@ def _set_frac_ylim(ctx, ax_frac) -> None:
         return
     ax_frac.set_ylim(-0.05, 1.05)
 
+
 from well_viewer.data.data_loading import (
     _beeswarm_jitter,
     df_included_mask,
@@ -84,6 +86,7 @@ from well_viewer.data.data_loading import (
 from well_viewer.core.plot_style import (
     apply_ax_style,
     apply_export_style_to_current,
+    mark_time_rescale,
     tokens_for,
 )
 from well_viewer.domain.stats_compute import aggregate_well
@@ -280,6 +283,7 @@ def draw_violin(
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
     _set_frac_ylim(ctx, ax_frac)
+    mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import METRIC_KEY_TO_LABEL as _MLB, fraction_title
     from well_viewer.domain import fold_change as _fc
@@ -430,6 +434,7 @@ def draw_beeswarm(
             ax_mean.text(cx, 1.02, gk, transform=ax_mean.get_xaxis_transform(),
                          ha="center", va="bottom", fontsize=8, fontweight="bold")
     _set_frac_ylim(ctx, ax_frac)
+    mark_time_rescale(ax_mean, ax_frac, factor=ctx.state.plot.time_scale)
     ax_frac.set_ylabel("Fraction", fontsize=8, labelpad=5)
     from well_viewer.data.metric_labels import (
         METRIC_KEY_TO_LABEL as _MLB,
@@ -763,6 +768,7 @@ def redraw_bars(ctx) -> None:
                 "N(above)",
             )
     _set_frac_ylim(ctx, ax_frac)
+    mark_time_rescale(ax_mean, ax_frac, ax_n, factor=ctx.state.plot.time_scale)
 
     if not ctx.state.dataset.well_paths:
         draw_bar_empty_state(
@@ -781,7 +787,11 @@ def redraw_bars(ctx) -> None:
         draw_bar_empty_state(ctx, ax_mean, ax_frac, "Select a timepoint above", ax_n=ax_n)
         return
     target_ts = [t for t, _ in tp_list]
-    tp_strs = [s for _, s in tp_list]
+    # The panel titles ("t = … h") are read off the same figure as the tick
+    # labels, so they follow the rescale factor too — the selection keys these
+    # come from stay in the hours the pipeline parsed.
+    _tp_scale = ctx.state.plot.time_scale
+    tp_strs = [_rescale_tp(t, _tp_scale) for t in target_ts]
     tp_str_combined = ", ".join(tp_strs)
 
     if draw_per_cell_bar_mode(
@@ -969,7 +979,7 @@ def draw_per_cell_bar_mode(
     multi_tp = len(target_ts) > 1
     if group_mode == "timepoint":
         for t in target_ts:
-            tp_lbl = f"{t:.4g}"
+            tp_lbl = _rescale_tp(t, ctx.state.plot.time_scale)
             for w, c, short, full in zip(base_wells, base_colors, base_short, base_full):
                 plot_wells.append(w)
                 plot_colors.append(c)
@@ -980,7 +990,7 @@ def draw_per_cell_bar_mode(
     else:
         for w, c, short, full in zip(base_wells, base_colors, base_short, base_full):
             for t in target_ts:
-                tp_lbl = f"{t:.4g}"
+                tp_lbl = _rescale_tp(t, ctx.state.plot.time_scale)
                 plot_wells.append(w)
                 plot_colors.append(c)
                 # cluster header = well/rset identity; per-bar tick = tp

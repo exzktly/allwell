@@ -37,6 +37,7 @@ from well_viewer.features.batch_export._common import (
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.plot_style import mark_time_rescale
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     get_thresh_frac_on as _get_thresh_frac_on,
@@ -420,7 +421,15 @@ class BarBatchExportPanel(BatchExportPanel):
         else:
             target_ts = [float(target_t)]
             tp_strs = [str(tp_str)] if not isinstance(tp_str, (list, tuple)) else list(tp_str)
-        tp_title = tp_strs[0] if len(tp_strs) == 1 else f"[{', '.join(tp_strs)}]"
+        # The suptitle names the same timepoints the bar tick labels do, so it
+        # follows the Properties sidebar's rescale factor. Built from the
+        # numeric targets rather than the incoming strings, which are selection
+        # keys and stay in the hours the pipeline parsed.
+        from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+        _tp_scale = self._ctx.state.plot.time_scale
+        _tp_titles = [_rescale_tp(t, _tp_scale) for t in target_ts]
+        tp_title = (_tp_titles[0] if len(_tp_titles) == 1
+                    else f"[{', '.join(_tp_titles)}]")
         fig = _Figure(figsize=(8, 10), dpi=300, facecolor=theme.CPub.bg)
         ax_mean = fig.add_subplot(3, 1, 1)
         ax_frac = fig.add_subplot(3, 1, 2)
@@ -509,6 +518,13 @@ class BarBatchExportPanel(BatchExportPanel):
             disabled_well_color=_CLR_DISABLED_WELL,
             err_bar_color=_CLR_ERR_BAR,
         )
+        # This figure is built here rather than by the on-tab renderer, so the
+        # marker that renderer adds has to be added here too: the tick labels and
+        # the suptitle above already follow the rescale factor, and without this
+        # a saved PNG reads t=4, t=8 with nothing on it saying those are not the
+        # hours the run recorded. No-op while the factor is off.
+        mark_time_rescale(ax_mean, ax_frac, ax_n,
+                          factor=self._ctx.state.plot.time_scale)
         return fig
 
     def _render_per_cell_panels(
@@ -596,8 +612,17 @@ class BarBatchExportPanel(BatchExportPanel):
         plot_tps: list[float] = []
         group_keys: list[str] = []
         multi_tp = len(target_ts) > 1
+        # Everything below this line is figure *text* — cluster headers, tick
+        # labels, the panel-title suffix — so it follows the rescale factor, the
+        # way the on-tab twin's ``redraw_bars`` does. ``tp_strs`` are the job's
+        # selection keys and stay in the hours the pipeline parsed; reading the
+        # labels off them left this figure printing "t=1" under a suptitle
+        # reading "t = 4 h", with the rescale marker beneath both.
+        from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
+        _tp_scale = self._ctx.state.plot.time_scale
+        tp_labels = [_rescale_tp(t, _tp_scale) for t in target_ts]
         if group_mode == "timepoint":
-            for t, t_str in zip(target_ts, tp_strs):
+            for t, t_str in zip(target_ts, tp_labels):
                 for w, c, full in zip(base_wells, base_colors, base_full):
                     plot_wells.append(w)
                     plot_colors.append(c)
@@ -606,7 +631,7 @@ class BarBatchExportPanel(BatchExportPanel):
                     group_keys.append(t_str if multi_tp else "")
         else:
             for w, c, full in zip(base_wells, base_colors, base_full):
-                for t, t_str in zip(target_ts, tp_strs):
+                for t, t_str in zip(target_ts, tp_labels):
                     plot_wells.append(w)
                     plot_colors.append(c)
                     plot_labels.append(f"t={t_str}" if multi_tp else full)
@@ -614,7 +639,7 @@ class BarBatchExportPanel(BatchExportPanel):
                     group_keys.append(full if multi_tp else "")
 
         xs = cluster_x_for_group_keys(group_keys)
-        tp_str_combined = ", ".join(tp_strs)
+        tp_str_combined = ", ".join(tp_labels)
         if display_mode == "violin":
             draw_violin(
                 self._ctx, ax_mean, ax_frac,
@@ -640,4 +665,9 @@ class BarBatchExportPanel(BatchExportPanel):
                 xs=xs, group_keys=group_keys,
                 pool_groups=pool_groups,
             )
+        # Re-mark across all three panels. ``draw_violin`` / ``draw_beeswarm``
+        # only ever see the two they draw, so left to them the marker lands on
+        # the middle panel of a three-panel figure; naming the whole stack here
+        # moves it to the bottom one, where this figure's on-tab twin puts it.
+        mark_time_rescale(ax_mean, ax_frac, ax_n, factor=_tp_scale)
 

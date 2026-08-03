@@ -1796,9 +1796,15 @@ class BatchExportPanel(QWidget):
         # Each time panel (mean / fraction / N) shows its own timepoints +
         # x-label, matching the on-tab figure (lineplot/controller.py). The
         # panels are well-separated by hspace, so each reads as its own graph.
-        ax_mean.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
-        ax_frac.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
-        ax_n.set_xlabel("Time (hours)", fontsize=8, labelpad=5)
+        # Same rescale the on-tab Line figure applies, for the same reason: two
+        # figures of the same series must not print two different time axes.
+        from well_viewer.core.plot_style import apply_time_rescale
+        from well_viewer.domain.time_rescale import axis_label as _time_axis_label
+        _time_scale = self._ctx.state.plot.time_scale
+        _time_lbl = _time_axis_label("Time (hours)", _time_scale)
+        for _ax_time in (ax_mean, ax_frac, ax_n):
+            _ax_time.set_xlabel(_time_lbl, fontsize=8, labelpad=5)
+            apply_time_rescale(_ax_time, _time_scale)
         ax_frac.set_ylim(-0.05, 1.05)
         ax_cdf.set_xlabel(f"{_ch} {_metric_label}", fontsize=8, labelpad=5)
         ax_cdf.set_ylim(-0.02, 1.05)

@@ -18,7 +18,9 @@ import math
 import numpy as np
 
 import theme
-from well_viewer.core.plot_style import style_legend, tokens_for
+from well_viewer.core.plot_style import apply_time_rescale, style_legend, tokens_for
+from well_viewer.domain.time_rescale import axis_label as time_axis_label
+from well_viewer.domain.time_rescale import format_scaled as format_scaled_tp
 from well_viewer.features.spatial import state as sp_state
 
 _logger = logging.getLogger("well_viewer")
@@ -48,7 +50,7 @@ def render_spatial(ctx) -> None:
             if not st.last_result:
                 _draw_message(fig, "Select one or more wells to summarise.")
             else:
-                _render_summary_panel(fig, st)
+                _render_summary_panel(fig, st, ctx.state.plot.time_scale)
         elif not st.frames:
             _draw_message(fig, "Select a well to explore its spatial structure.")
         else:
@@ -505,7 +507,7 @@ def sp_state_metric_catalog():
     return SUMMARY_METRICS
 
 
-def _render_summary_panel(fig, st) -> None:
+def _render_summary_panel(fig, st, time_scale=1.0) -> None:
     payload = st.last_result
     key = payload.get("summary_metric_key") or "nnd_median"
     display = payload.get("summary_display") or sp_state.SUMMARY_DISPLAY_HEATMAP
@@ -517,15 +519,25 @@ def _render_summary_panel(fig, st) -> None:
     ylabel = f"{label} ({units})" if units else label
 
     if display == sp_state.SUMMARY_DISPLAY_HEATMAP:
-        _render_summary_heatmap(fig, matrix, wells, tps, label, units)
+        _render_summary_heatmap(fig, matrix, wells, tps, label, units,
+                                time_scale)
     else:
-        _render_summary_lines(fig, matrix, wells, tps, ylabel)
+        _render_summary_lines(fig, matrix, wells, tps, ylabel, time_scale)
 
 
-def _render_summary_heatmap(fig, matrix, wells, tps, label, units) -> None:
+def _render_summary_heatmap(fig, matrix, wells, tps, label, units,
+                            time_scale=1.0) -> None:
     ax = fig.add_subplot(111)
     _style_axes(ax, title=f"{label} · well × timepoint",
-                xlabel="Timepoint (h)", ylabel="Well")
+                xlabel=time_axis_label("Timepoint (h)", time_scale),
+                ylabel="Well")
+    # Both axes are category positions, not measurements: x is the index of a
+    # timepoint and y the index of a well. Without these flags the shared
+    # restyle pass calls ``set_xscale``, which resets the locator and formatter
+    # and replaced the timepoint / well tick labels with the raw index
+    # positions (-0.5, 0.0, 0.5 …) — a grid whose axes named nothing.
+    setattr(ax, "_categorical_xaxis", True)
+    setattr(ax, "_categorical_yaxis", True)
     finite = matrix[np.isfinite(matrix)]
     if finite.size:
         vmin, vmax = float(finite.min()), float(finite.max())
@@ -535,7 +547,7 @@ def _render_summary_heatmap(fig, matrix, wells, tps, label, units) -> None:
                    vmin=vmin, vmax=vmax, origin="lower",
                    interpolation="nearest")
     ax.set_xticks(range(len(tps)))
-    ax.set_xticklabels([f"{t:g}" for t in tps])
+    ax.set_xticklabels([format_scaled_tp(t, time_scale) for t in tps])
     ax.set_yticks(range(len(wells)))
     ax.set_yticklabels(wells)
     cbar = fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
@@ -544,10 +556,15 @@ def _render_summary_heatmap(fig, matrix, wells, tps, label, units) -> None:
     cbar.set_label(cbar_label, color=_tokens(ax)[2], fontsize=8)
 
 
-def _render_summary_lines(fig, matrix, wells, tps, ylabel: str) -> None:
+def _render_summary_lines(fig, matrix, wells, tps, ylabel: str,
+                          time_scale=1.0) -> None:
     ax = fig.add_subplot(111)
     _style_axes(ax, title="Summary vs timepoint · one line per well",
-                xlabel="Timepoint (h)", ylabel=ylabel)
+                xlabel=time_axis_label("Timepoint (h)", time_scale),
+                ylabel=ylabel)
+    # Real timepoint values on this one, so the labels are rescaled by the tick
+    # formatter rather than written out.
+    apply_time_rescale(ax, time_scale)
     import matplotlib
     cmap = matplotlib.colormaps["tab20"]
     for i, w in enumerate(wells):

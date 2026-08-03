@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QStackedWidget, QVBoxLayout, QWidget,
 )
 import theme
-from well_viewer.data.data_loading import parse_timepoint_hours
+from well_viewer.data.image_identity import normalize_tp
 from well_viewer.core.safe import swallowed
 
 
@@ -1155,13 +1155,13 @@ def notes_schedule_save(ctx) -> None:
 
 
 def norm_timepoint(ctx, value: object) -> str:
-    # ``None`` is the only value that means "no timepoint" — a numeric 0 is a
-    # real baseline. See image_identity._raw_token, whose rule this mirrors.
-    raw = ("" if value is None else str(value)).strip()
-    if not raw:
-        return ""
-    parsed = parse_timepoint_hours(raw)
-    if parsed is not None:
-        return f"{parsed:g}"
-    return raw
+    """The ctx-shaped leaf over :func:`data.image_identity.normalize_tp`.
+
+    A ctx signature so features can reach the canonical timepoint key through
+    the context rather than importing the data layer directly; the rule itself
+    lives in one place, because a second copy of it drifted once already (this
+    one kept the truthiness test that turned a numeric ``0`` into ``""`` after
+    the original had been fixed, and had to be fixed a second time to catch
+    up)."""
+    return normalize_tp(value)
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from functools import partial
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtWidgets import QLabel, QPushButton, QWidget
 
 from well_viewer.core.ui_helpers import make_popover_button
 from well_viewer.domain.viewer_state import parse_rc
@@ -112,16 +112,11 @@ def refresh_delete_scope_button(ctx) -> None:
     btn.setText(describe_delete_scope(ctx) + " ▾")
 
 
-def _row(parent: QWidget, caption: str, dropdown: CheckableDropdown) -> QWidget:
-    row = QWidget(parent)
-    lay = QHBoxLayout(row)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
-    lbl = QLabel(caption, row)
-    lbl.setMinimumWidth(74)
-    lay.addWidget(lbl)
-    lay.addWidget(dropdown, 1)
-    return row
+# Width the three dropdowns share, so they line up as a column. This is what a
+# caption label used to supply as a side effect of its own minimum width; the
+# alignment was worth keeping, the caption was not — see
+# :func:`build_delete_scope_control`.
+_FIELD_W = 190
 
 
 def build_delete_scope_control(ctx, ctrl: QWidget):
@@ -141,12 +136,20 @@ def build_delete_scope_control(ctx, ctrl: QWidget):
     hint.setObjectName("Muted")
     lay.addWidget(hint)
 
+    # Each dropdown names its own field — "2 of 3 timepoints", "No wells" — so a
+    # caption beside it printed the same word twice. That is the pattern every
+    # other Timepoint control in Review folded away, and
+    # ``test_timepoint_control_folding`` fails on a stranded caption label. The
+    # hint above says what the three fields are *for*; the buttons say which is
+    # which, in every state including un-armed (``_seed`` ticks the displayed
+    # frame's value, so a button reads "1 of 3 timepoints" rather than going
+    # blank).
     wells_dd = CheckableDropdown(panel, noun="wells", empty_text="No wells")
     fovs_dd = CheckableDropdown(panel, noun="FOVs", empty_text="No FOVs")
     tps_dd = CheckableDropdown(panel, noun="timepoints", empty_text="No timepoints")
-    lay.addWidget(_row(panel, "Wells", wells_dd))
-    lay.addWidget(_row(panel, "FOVs", fovs_dd))
-    lay.addWidget(_row(panel, "Timepoints", tps_dd))
+    for _dd in (wells_dd, fovs_dd, tps_dd):
+        _dd.setMinimumWidth(_FIELD_W)
+        lay.addWidget(_dd)
 
     def _seed(dropdown: CheckableDropdown, options, armed, current) -> None:
         """Refill *dropdown* and restore its ticks without emitting ``changed``.

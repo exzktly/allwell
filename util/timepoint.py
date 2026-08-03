@@ -50,6 +50,24 @@ _UNIT_RE = re.compile(
 _TRAILING_NUM_RE = re.compile(r"(\d+(?:\.\d+)?)$")
 
 
+def _token(value: Any) -> str:
+    """Stringify *value* for parsing, treating only ``None`` as absent.
+
+    The obvious ``str(value or "")`` is wrong here: ``0`` and ``0.0`` are falsy,
+    so a numeric baseline timepoint — the first column of most time courses —
+    stringified to ``""`` and read as no timepoint at all. Timepoints reach this
+    module both as text (``"0"``, truthy) and as numbers off a CSV column or a
+    parsed filename field (``0.0``, falsy), so the two spellings disagreed at
+    exactly ``t=0`` and nowhere else.
+
+    ``well_viewer.data.image_identity._raw_token`` is the same rule for the
+    viewer's identity tokens. The duplication is the cost of this module's
+    stdlib-only contract — the pipeline and ``services/`` import it and may not
+    reach into ``well_viewer``.
+    """
+    return "" if value is None else str(value)
+
+
 def parse_hours(value: Any) -> float | None:
     """Parse a timepoint token into fractional hours, or ``None``.
 
@@ -62,7 +80,7 @@ def parse_hours(value: Any) -> float | None:
     to tell them apart from a real measurement should check ``math.isfinite``
     rather than relying on the return being ``None``.
     """
-    s = str(value or "").strip()
+    s = _token(value).strip()
     if not s:
         return None
 
@@ -104,7 +122,13 @@ def sort_key(value: Any) -> tuple[bool, float, str]:
 
     Six call sites wrote this tuple out by hand before, which is how the
     ordering drifted between the tabs that show timepoints.
+
+    The falsy-zero bug bit hardest here, because the fallback is not "no value"
+    but *unparseable*: a numeric ``0`` stringified to ``""``, parsed as ``None``,
+    and sorted into the opaque-label block at the end. The baseline timepoint —
+    the one every time course starts at — came last in a list of numbers, after
+    the twelve-hour column.
     """
-    token = str(value or "").strip()
+    token = _token(value).strip()
     hours = parse_hours(token)
     return (hours is None, hours if hours is not None else 0.0, token)

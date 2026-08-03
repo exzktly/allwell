@@ -5420,6 +5420,18 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   grammar is deliberately strict: it will not scavenge a digit from anywhere in
   the token, because a guessed number becomes a canonical key nothing else
   recognises.
+  **Emptiness is decided on `None`, never on the value's truthiness.** Both
+  `parse_hours` and `sort_key` stringify through `util.timepoint._token`, the
+  stdlib-only twin of `data.image_identity._raw_token`, for the reason that rule
+  exists at all: a numeric `0` is falsy, and `0` is the timepoint every time
+  course starts at. Under `str(value or "")` a baseline arriving as a number
+  rather than as text read as no token at all, which each consumer then
+  expressed in its own vocabulary — `parse_hours` answered "unreadable",
+  `sort_key`'s `(unparseable, …)` tuple put it *after* the twelve-hour column
+  with the opaque labels, and `process_microscopy._parse_timepoint_hours`
+  returned the `nan` its `h != h` callers read as raw-passthrough. The
+  duplicated helper is the cost of this module's stdlib-only contract; both
+  copies say so.
 - **Selections survive a tab switch.** Whenever you read or write
   `_selected_wells`, you're touching app-wide state — clobbering it in a
   tab-local handler will leak across tabs.

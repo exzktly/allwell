@@ -160,6 +160,17 @@ class TestSortKey:
         tokens = ["zzz", "24", "abc", "1"]
         assert sorted(tokens, key=sort_key) == ["1", "24", "abc", "zzz"]
 
+    def test_a_numeric_zero_sorts_first_not_last(self):
+        """Where the falsy-zero bug bit hardest. ``sort_key``'s fallback is not
+        "no value" but *unparseable*, so a numeric ``0`` — stringified to ``""``
+        and parsed as ``None`` — was sorted into the opaque-label block at the
+        end. The baseline timepoint came last in a list of numbers, after the
+        twelve-hour column."""
+        from util.timepoint import sort_key
+        assert sorted([0, 4, 12, 0.0], key=sort_key) == [0, 0.0, 4, 12]
+        # and it agrees with the same timepoint spelled as text
+        assert sort_key(0)[:2] == sort_key("0")[:2] == (False, 0.0)
+
     def test_every_timepoint_sort_uses_the_shared_key(self):
         """Six call sites wrote the ``(unparseable, hours, token)`` tuple by hand,
         which is how the tabs drifted out of agreement. This asserts the names
@@ -197,6 +208,31 @@ class TestCanonicalKeyForm:
         assert normalize_tp("0") == "0"
         assert normalize_tp("0.0") == "0"
         assert normalize_tp("T00") == "0"
+
+    def test_the_shared_parser_reads_a_numeric_zero_as_zero_hours(self):
+        """The root of the family. ``util.timepoint.parse_hours`` carried the
+        same ``str(value or "")`` guard, so it answered ``None`` — "not a
+        timepoint I can read" — for the one timepoint every time course starts
+        at, whenever it arrived as a number rather than as text.
+
+        ``normalize_tp`` was immune because it stringifies before calling in,
+        which is exactly why this survived being fixed there: the sibling that
+        does *not* stringify first, ``image_identity.tp_hours``, went on
+        reporting the baseline as unreadable.
+        """
+        from util.timepoint import parse_hours
+        from well_viewer.data.image_identity import tp_hours
+        for zero in (0, 0.0, "0", "0h", "T00"):
+            assert parse_hours(zero) == 0.0, zero
+        assert tp_hours(0) == 0.0
+        assert tp_hours(0.0) == 0.0
+
+    def test_booleans_are_not_timepoints(self):
+        """``False`` is falsy like ``0`` but is not a baseline — the fix keys on
+        ``None`` alone, so ``str(False)`` is read and rejected on its merits."""
+        from util.timepoint import parse_hours
+        assert parse_hours(False) is None
+        assert parse_hours(True) is None
 
     def test_genuinely_absent_values_still_normalise_to_empty(self):
         from well_viewer.data.image_identity import normalize_tp

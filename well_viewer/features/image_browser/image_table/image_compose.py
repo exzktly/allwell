@@ -77,6 +77,15 @@ OVERLAY_CHAN = "⊕ OVERLAY"
 # (``_load_array`` for the image, ``cell_display_rgb`` for the render) decode it:
 # load the *base* channel, force ``binary_mode="threshold"``.
 _BINARY_SUFFIX = " (binary)"
+# The same idea for the other two non-default renders. A channel's render mode is
+# part of its axis token (``state.ChannelSpec.axis_token``) because the token is
+# the grid's identity for that channel: one token, one row. Without these, a
+# channel dropped twice — once as its image, once as its cell mask — produced one
+# token, one ``channel_opts`` key, and one row, and the second chip disappeared.
+# ``corrected`` keeps the bare token so previously saved views still resolve.
+_MASK_SUFFIX = " (mask)"
+_RAW_SUFFIX = " (raw)"
+_VARIANT_SUFFIXES = (_BINARY_SUFFIX, _MASK_SUFFIX, _RAW_SUFFIX)
 
 
 def _binary_variant(chan: str) -> str:
@@ -84,17 +93,40 @@ def _binary_variant(chan: str) -> str:
     return f"{chan}{_BINARY_SUFFIX}"
 
 
-def _is_binary_variant(chan: str) -> bool:
+def _has_suffix(chan: str, suffix: str) -> bool:
     s = str(chan or "").strip().lower()
-    return s.endswith(_BINARY_SUFFIX.lower()) and len(s) > len(_BINARY_SUFFIX)
+    return s.endswith(suffix.lower()) and len(s) > len(suffix)
+
+
+def _is_binary_variant(chan: str) -> bool:
+    return _has_suffix(chan, _BINARY_SUFFIX)
+
+
+def _is_mask_variant(chan: str) -> bool:
+    return _has_suffix(chan, _MASK_SUFFIX)
+
+
+def _is_raw_variant(chan: str) -> bool:
+    return _has_suffix(chan, _RAW_SUFFIX)
+
+
+def is_variant_token(chan: str) -> bool:
+    """Whether *chan* is any render variant rather than a plain channel token."""
+    return any(_has_suffix(chan, sfx) for sfx in _VARIANT_SUFFIXES)
+
+
+def _base_channel(chan: str) -> str:
+    """Strip a trailing render suffix (case-insensitive) → the base channel token."""
+    s = str(chan or "").strip()
+    for sfx in _VARIANT_SUFFIXES:
+        if _has_suffix(s, sfx):
+            return s[: len(s) - len(sfx)].strip()
+    return s
 
 
 def _binary_base(chan: str) -> str:
-    """Strip a trailing ``" (binary)"`` (case-insensitive) → the base channel token."""
-    s = str(chan or "").strip()
-    if _is_binary_variant(s):
-        return s[: len(s) - len(_BINARY_SUFFIX)].strip()
-    return s
+    """Back-compatible alias for :func:`_base_channel` (external importers)."""
+    return _base_channel(chan)
 
 
 def _is_nuc_seg(chan: str) -> bool:
@@ -174,10 +206,17 @@ def _row_cmap_name(ctx, r: int, chan=None) -> str | None:
 
 
 def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool):
-    """Compute the white-cells array for a binary-mode export cell (cropped).
+    """Compute the shown-cells array for a binary-mode cell (cropped).
 
     Mirrors the live ``_render_mask_binary`` / ``_render_threshold_binary``
     selection so the export matches the on-screen thumbnails.
+
+    The **label ids survive**: shown cells keep their own id and everything else
+    is 0, rather than the array being flattened to a 0/1 membership mask. ``> 0``
+    still selects exactly the same pixels, so the white silhouette is unchanged,
+    but the ids are what let a cell be painted one colour per nucleus (see
+    ``_compose_image_table_rgb``'s ``label_colors``); a boolean array has thrown
+    away the only thing that distinguishes one nucleus from its neighbour.
     """
     import numpy as _np
 
@@ -210,11 +249,12 @@ def _export_binary_mask(ctx, cache, well, chan, tp, fov, binary_mode, crop_tool)
         passing = [nid for nid, ok in above_by_nid.items() if ok]
         bm = _np.isin(m, passing) if passing else _np.zeros(m.shape, dtype=bool)
     else:  # "mask"
-        bm = _np.asarray(mask_arr) > 0
-    bm = bm.astype(_np.uint8)
+        m = _np.asarray(mask_arr)
+        bm = m > 0
+    labels = _np.where(bm, m, 0).astype(_np.int32)
     if crop_tool is not None:
-        bm = crop_tool.apply_to_array(bm)
-    return bm
+        labels = crop_tool.apply_to_array(labels)
+    return labels
 
 def _compose_image_table_rgb(
     arr,
@@ -227,6 +267,7 @@ def _compose_image_table_rgb(
     binary_mask=None,
     show_boundaries: bool,
     log_scale: bool = False,
+    label_colors: bool = False,
 ):
     """Render the cell's display state to a uint8 RGB array.
 
@@ -264,12 +305,18 @@ def _compose_image_table_rgb(
                    / (rmax - rmin) * 255.0).astype(_np.uint8)
         return rgb
 
-    # 2. Binary toggle wins over the fluorescence: paint a black-and-white
-    # silhouette of the supplied cells (full mask, or above-threshold cells).
+    # 2. Binary toggle wins over the fluorescence: paint the supplied cells (the
+    # full mask, or the above-threshold ones) on black. ``label_colors`` gives
+    # each one its own colour instead of white — all-white cells that touch read
+    # as a single blob, so two nuclei sharing a border are indistinguishable from
+    # one large object. The white-or-colour decision is ``core.frame_render``'s,
+    # shared with the Playground so a nucleus looks the same in both panes.
     if binary_mask is not None:
-        cm = _np.asarray(binary_mask)
-        binary = (cm > 0).astype(_np.uint8) * 255
-        return _np.stack([binary, binary, binary], axis=-1)
+        from well_viewer.core.frame_render import fill_label_rgb
+        cm = _np.asarray(binary_mask, dtype=_np.int32)
+        rgb = _np.zeros(cm.shape[:2] + (3,), dtype=_np.uint8)
+        fill_label_rgb(rgb, cm, cm > 0, bool(label_colors))
+        return rgb
 
     # 3. Greyscale fluorescence → apply LUT + colormap (shared single-source
     #    helper; also used by the Playground renderer).
@@ -374,6 +421,14 @@ def _row_display_opts(ctx, row_idx: int, chan=None) -> tuple[bool, bool, str]:
     show_boundaries = bool(spec.get("boundary", False))
     binary_mode = "mask" if render == "mask" else ("threshold" if render == "threshold" else "")
     return use_tophat, show_boundaries, binary_mode
+
+
+def _row_label_colors(ctx, row_idx: int, chan=None) -> bool:
+    """Whether a binary cell paints one colour per label instead of all white —
+    the channel's builder spec ``label_colors`` (``channel_opts[chan]``); no spec
+    → False, which is the plain white silhouette this has always drawn."""
+    spec = _channel_opts_for(ctx, chan)
+    return bool(spec.get("label_colors", False)) if spec is not None else False
 
 
 def _row_log_scale(ctx, row_idx: int, chan=None) -> bool:
@@ -607,9 +662,10 @@ def _load_array(ctx, cache: dict, well: str, chan_upper: str, tp: str, fov: str,
     fallback is recorded in :func:`_raw_fallbacks` so the pass can say how many
     cells it served uncorrected.
     """
-    # A "GFP (binary)" token loads the same pixels as "GFP" — the binary render is
-    # applied downstream (cell_display_rgb); here we just resolve the base channel.
-    chan_lower = _binary_base(chan_upper).strip().lower()
+    # A "GFP (binary)" / "GFP (mask)" / "GFP (raw)" token loads the same pixels as
+    # "GFP" — the render is applied downstream (cell_display_rgb); here we just
+    # resolve the base channel.
+    chan_lower = _base_channel(chan_upper).strip().lower()
     is_overlay = chan_lower == NUC_SEG_TOKEN.lower()
     fluor = _load_well_channel(ctx, cache, well, chan_lower, use_tophat=use_tophat)
     ref, kind = _match_image_ref(fluor, fov, tp) if fluor else (None, "")
@@ -864,11 +920,19 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
     fov = cell["fov"]
 
     _use_tophat, show_boundaries, binary_mode = _row_display_opts(ctx, r, chan_token)
-    # A "GFP (binary)" cell renders the base channel's threshold-binary regardless
-    # of the row's Binary box: resolve the real channel + force threshold mode.
-    if _is_binary_variant(chan):
-        chan = _binary_base(chan)
-        binary_mode = "threshold"
+    # A variant token carries its own render: "GFP (binary)" is the base channel's
+    # threshold-binary and "GFP (mask)" its cell mask, whatever the row says.
+    # Resolve the real channel and let the token settle the mode — the spec above
+    # agrees when there is one, and this is what a token with no spec (the legacy
+    # Advanced selector, an older saved state) resolves through.
+    if is_variant_token(chan):
+        if _is_binary_variant(chan):
+            binary_mode = "threshold"
+        elif _is_mask_variant(chan):
+            binary_mode = "mask"
+        else:                                   # "(raw)" — an intensity render
+            binary_mode = ""
+        chan = _base_channel(chan)
     cropped = crop_tool.apply_to_array(arr) if crop_tool is not None else arr
     lo, hi = _parse_lut(ctx, r, chan_token)
 
@@ -902,6 +966,7 @@ def cell_display_rgb(ctx, cache, cell, r: int, crop_tool, arr):
         binary_mask=binary_mask,
         show_boundaries=show_boundaries,
         log_scale=_row_log_scale(ctx, r, chan_token),
+        label_colors=_row_label_colors(ctx, r, chan_token),
     )
 
 

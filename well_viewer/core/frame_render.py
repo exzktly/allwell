@@ -66,8 +66,14 @@ def label_color_lut(max_id: int) -> np.ndarray:
     return lut
 
 
-def _fill_labels(rgb, center, keep, label_colors: bool) -> None:
-    """Paint the kept labels into *rgb* — one colour each, or all white."""
+def fill_label_rgb(rgb, center, keep, label_colors: bool) -> None:
+    """Paint the kept labels into *rgb* — one colour each, or all white.
+
+    The single place the white-or-rainbow decision is made. The Playground's
+    binary view and the Image Table's cell-mask / ≥threshold cells both call it,
+    so a nucleus is the same colour in both panes and there is one palette to
+    keep deterministic rather than two.
+    """
     if not label_colors:
         rgb[keep] = (255, 255, 255)
         return
@@ -112,11 +118,11 @@ def build_frame_rgb(fluor_arr, mask_arr, *, lo=None, hi=None,
                               count=len(above_ids))
             if ids.size:
                 keep = np.isin(center, ids)
-                _fill_labels(rgb, center, keep, label_colors)
+                fill_label_rgb(rgb, center, keep, label_colors)
         elif threshold is not None:
             rgb[arr > float(threshold)] = (255, 255, 255)
         elif center is not None:
-            _fill_labels(rgb, center, center > 0, label_colors)
+            fill_label_rgb(rgb, center, center > 0, label_colors)
         return rgb
 
     rgb = lut_colormap_to_rgb(arr, lo, hi, cmap_name)

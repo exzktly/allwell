@@ -261,6 +261,16 @@ def mark_time_rescale(*axes, factor) -> None:
     written while the factor is off, so an unrescaled figure draws exactly as it
     did before this existed.
 
+    **Called more than once per figure, it still marks exactly one panel.** The
+    Bar tab's per-cell modes (violin / beeswarm / all points) reach two callers:
+    ``redraw_bars`` marks the three-panel stack, then ``draw_violin`` marks the
+    two panels it drew — which put a second copy on the middle panel and left the
+    first on the bottom one. So each marked axes is tagged, and every call clears
+    the tags it finds on the same figure before writing to whichever candidate
+    sits lowest. The bottom is decided by axes position rather than by argument
+    order, because the caller that knows the factor is not always the one that
+    knows how many panels the figure ended up with.
+
     Without it a bar reading ``t=16`` sits under a Timepoint menu reading 4 and
     beside an exported CSV reading 4, with nothing on the figure saying why.
 
@@ -275,7 +285,27 @@ def mark_time_rescale(*axes, factor) -> None:
     present = [ax for ax in axes if ax is not None]
     if not marker or not present:
         return
-    present[-1].set_xlabel(marker, fontsize=8, labelpad=4)
+    # Candidates: the panels this call was handed, plus any this figure already
+    # carries a marker on. Clearing the old ones is what keeps a second call
+    # from leaving a stale copy on a panel that is no longer the lowest.
+    candidates = list(present)
+    fig = getattr(present[-1], "figure", None)
+    for ax in getattr(fig, "axes", ()) or ():
+        if getattr(ax, "_aw_time_marker", False):
+            ax.set_xlabel("")
+            ax._aw_time_marker = False
+            if ax not in candidates:
+                candidates.append(ax)
+
+    def _bottom(ax):
+        try:
+            return float(ax.get_position().y0)
+        except Exception:
+            return 0.0
+
+    target = min(candidates, key=_bottom)
+    target.set_xlabel(marker, fontsize=8, labelpad=4)
+    target._aw_time_marker = True
 
 
 def apply_axis_log_scale(ax, which: str, on: bool) -> None:

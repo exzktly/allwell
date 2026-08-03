@@ -28,6 +28,7 @@ from __future__ import annotations
 import math
 import random
 import string
+import textwrap
 
 import pytest
 
@@ -209,7 +210,7 @@ class TestCanonicalKeyForm:
         for hours in (0.0, 0.5, 1.0, 4.0, 23.5, 48.0):
             assert normalize_tp(hours) == normalize_tp(str(hours))
 
-    def test_the_ctx_leaf_delegates_rather_than_reimplements(self):
+    def test_the_ctx_leaf_agrees_with_the_canonical_normaliser(self):
         """``core.ui_helpers.norm_timepoint`` is the ctx-shaped wrapper. It
         carried its own copy of the rule, which is how it kept the zero bug
         after ``normalize_tp`` was fixed."""
@@ -217,3 +218,31 @@ class TestCanonicalKeyForm:
         from well_viewer.data.image_identity import normalize_tp
         for value in (0.0, 0, "0", "T01", "1h30m", "treated_arm_2", "", None):
             assert norm_timepoint(None, value) == normalize_tp(value)
+
+    def test_the_ctx_leaf_delegates_rather_than_reimplements(self):
+        """Structure, not behaviour — and the two are not the same guard.
+
+        The agreement test above passes against *any* correct copy of the rule,
+        including an inlined one, so it cannot see the thing that caused the bug:
+        a second implementation that is right today and drifts tomorrow. This
+        reads the function's own body and requires it to be a single delegating
+        return, which is what the docstring on the shipped function claims.
+        """
+        import ast
+        import inspect
+        from well_viewer.core import ui_helpers
+
+        src = inspect.getsource(ui_helpers.norm_timepoint)
+        fn = ast.parse(textwrap.dedent(src)).body[0]
+        body = [n for n in fn.body if not (isinstance(n, ast.Expr)
+                                           and isinstance(n.value, ast.Constant))]
+        assert len(body) == 1 and isinstance(body[0], ast.Return), (
+            "norm_timepoint should be one delegating return; it has grown a body "
+            "again, which is how the zero bug survived in it once already"
+        )
+        called = {n.func.id for n in ast.walk(body[0])
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+        assert "normalize_tp" in called, (
+            "norm_timepoint no longer calls image_identity.normalize_tp — the "
+            "timepoint rule has a second implementation again"
+        )

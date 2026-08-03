@@ -102,6 +102,12 @@ def test_scatter_title_composes_into_the_shipped_title_text():
 
 @pytest.mark.parametrize("path,name", [
     ("bar_panel.py", "_render_bar_group_figure"),
+    # The violin / beeswarm modes never reach the builder above: it returns into
+    # this one and stops. Its absence from this list is how it came to print raw
+    # selection keys as tick labels under a rescaled suptitle, with the marker
+    # underneath both — a list of figure builders is only a guard if it names
+    # every builder, and an early return makes one builder into two.
+    ("bar_panel.py", "_render_per_cell_panels"),
     ("scatter_panel.py", "_run_scatter_cells_job"),
     ("scatter_panel.py", "_run_scatter_agg_job"),
 ])

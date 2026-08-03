@@ -317,6 +317,30 @@ a way to lose unrelated prose from the same file.
 ARCHITECTURE.md still must not say *when* something landed, either — no
 `(vX.Y.Z)` markers, no "new in". Same test.
 
+**Another session may be in your files.** Twice in one session a PR landed on
+`main` touching the same widget being edited here. Git merged both cleanly and
+CI then went red on *semantics*, not conflicts: the other change made an
+uploaded well hold a full dial, and a test written here asserted the previous
+empty one. Fetch `main` and read `git log origin/main -- <the files you are
+about to touch>` when you start **and** again before you push. A clean automatic
+merge is not evidence that two changes agree. The version number collides the
+same way — that is what the `git diff origin/main -- version.py` check above is
+for, and it belongs immediately before the push, not at the start of the work.
+
+**Never `checkout -B` a branch whose PR is still open.** Restarting the branch
+from `main` is the right move only once its PR has *merged*. Doing it with the
+PR still open silently drops the commit under review; it survived only because
+it had already been pushed. Check the PR's state first, and while it is still
+open, stack onto the branch and update the PR description instead.
+
+**A failing test may be asserting the bug.** Two tests broke in one session
+because the behaviour they pinned *was* the defect being reported — a dial that
+reverted to "computed" the moment a download finished, and a dial shaded
+identically to a plain well. Before adjusting a tolerance or an expected value,
+read what the test was *for*: if it encodes the reported symptom, rewrite it
+around the report and say so in the commit. Loosening it would have left the
+next regression unguarded.
+
 ## 7. Diagnosing a wrong number
 
 A plot that draws the wrong value — or quietly draws nothing — is almost never a
@@ -519,7 +543,49 @@ would have frozen the display at a rounder number. The number located the bug;
 the *structure* around it (six writers, both clears inside end-of-run handling)
 was the bug. Use the number to narrow, then ask what owns the thing.
 
-## 7.4 Debugging entry points
+## 7.4 What the code computed is not what the screen shows
+
+§7.1 says run the code rather than read it. This is the gap in that: you can run
+the code, read the value it returns, and still be looking at something the user
+never saw.
+
+1. **Assert the outbound call, not the computed value.** A well downloading on
+   the run plate was reported as a pie that "filled to blue". `_well_color`
+   returns green for a transfer in flight, and I checked it — twice — and twice
+   told the user something that was not on their screen. The defect was that
+   `set_well_transfer` pushed the *fraction* to the plate and never the colour,
+   so the correct green was recomputed and discarded on every tick. Nothing
+   inside the widget was wrong; the call to the outside was missing. For
+   anything that renders, sends or writes, put the assertion at the boundary —
+   spy on `setWellColor`, on the emitted line, on the argv — not on the
+   derivation behind it. A test that reads the internal value passes happily
+   while the screen stays wrong, which is exactly what the existing dial tests
+   did: they asserted fractions, never the tones or colours drawn with them.
+2. **A text heuristic reads paths, not just prose.** `classify_log_line` painted
+   a benign note red because the *directory it named* is called `errors/`. The
+   same function's docstring already recorded the mirror-image version — a clean
+   run's summary reads "wells failed : 0", so a substring test for "failed"
+   reddened it — and that lesson had been written down without being
+   generalised. When a heuristic scans a whole line, enumerate what else lives
+   in that line: paths, well ids, filenames, hostnames, a user's own text. Then
+   let a line that states its own severity say so, and keep the guessing for the
+   lines that declare nothing.
+3. **A transform applied to both sides can erase the difference between them.**
+   The progress dial draws two tones in the same pixels. `_lighten` blends
+   toward white, which preserves the hue — the whole reason it exists — but it
+   also compresses two tones *toward each other*, so the sphere's highlight
+   quietly removed the distinction the dial is for. §7.3 says check what an API
+   does; the extension is to check what it does to a **pair** of things that
+   must stay distinguishable. Wherever one function is applied to both halves of
+   a contrast, the contrast is an output of that function too.
+4. **Prove the guard fails for the reason you claim.** §7.3 says run a new
+   regression test against a worktree of `origin/main`. Mine failed there — with
+   an `AttributeError` on a constant the fix introduces, having measured nothing
+   at all. That is a false proof of exactly the kind §7.3 opens by warning
+   about. Re-run against the old code's *own* values, and read the failure
+   message to check it says what you expected it to say.
+
+## 7.5 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

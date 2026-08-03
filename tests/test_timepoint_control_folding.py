@@ -94,7 +94,15 @@ def test_combo_based_timepoint_controls_use_labeled_combo(viewer_app, qtbot):
         assert cb is not None, f"{attr} was not registered by {fn_name}"
         assert isinstance(cb, LabeledComboBox), f"{attr} is a {type(cb)}, not LabeledComboBox"
         assert cb.label() == "Timepoint"
-        _no_sibling_label(parent, {"Timepoint", "Timepoints"})
+        forbidden = {"Timepoint", "Timepoints"}
+        if attr == "_review_image_tp_menu":
+            # The review-image band also hosts the Delete scope popover, whose
+            # three CheckableDropdowns each print their own noun. Its Wells and
+            # FOVs rows are the same shape as its Timepoints one, so they are
+            # named here too — only the Timepoints caption was ever guarded,
+            # which is how all three shipped with the word printed twice.
+            forbidden |= {"Wells", "FOVs"}
+        _no_sibling_label(parent, forbidden)
 
 
 def test_multiselect_timepoint_buttons_have_no_sibling_label(viewer_app, qtbot):

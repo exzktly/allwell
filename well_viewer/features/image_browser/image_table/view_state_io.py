@@ -13,6 +13,12 @@ from typing import Any
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.image_table.builder_view import builder_refresh
+# Module scope, like ``builder_refresh`` above: ``controller`` does not import this
+# module, so there is no cycle to work around and no reason to spend one of the
+# deferred-feature-import budget's slots (``test_deferred_imports``) on it.
+from well_viewer.features.image_browser.image_table.controller import (
+    image_table_refresh_picker,
+)
 
 _logger = logging.getLogger("well_viewer")
 
@@ -150,17 +156,9 @@ def _relight_sidebar_plate(ctx) -> None:
     short-circuits on ``new == active_wells`` and this cannot provoke a second
     layout rebuild.
     """
-    plate = getattr(ctx.runtime.image_table, "sidebar_plate", None)
-    if plate is None:
+    if getattr(ctx.runtime.image_table, "sidebar_plate", None) is None:
         return                            # sidebar not built yet (lazy tab)
     try:
-        plate.setSelectedWellIds(sorted(ctx.state.image_table.active_wells or set()))
-    except Exception:
-        swallowed()
-    try:
-        from well_viewer.features.image_browser.image_table.controller import (
-            image_table_refresh_picker,
-        )
         image_table_refresh_picker(ctx)
     except Exception:
         swallowed()

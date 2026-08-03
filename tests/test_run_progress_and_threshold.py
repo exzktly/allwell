@@ -179,3 +179,176 @@ def test_standalone_auto_threshold_is_rounded_to_integer(tmp_path):
     # the saved value is an integer-valued float (rounded, no fractional part)
     assert v == float(round(v))
     assert v == int(v)
+
+
+# ── the status line belongs to whoever is current ───────────────────────────
+
+def _progress_host(qapp):
+    """The AnalyzeProgressMixin over a real RunDashboard.
+
+    ``AnalyzeProgressMixin`` is a mixin whose host supplies ``_dashboard`` and
+    ``_log_line``; the real host is ``AnalyzeTab``. It must be a QObject —
+    ``_update_eta`` parents a QTimer to it.
+    """
+    from PySide6.QtWidgets import QWidget
+
+    from analyze_progress import AnalyzeProgressMixin
+    from widgets.run_dashboard import RunDashboard
+
+    class _Host(AnalyzeProgressMixin, QWidget):
+        def __init__(self):
+            super().__init__()
+            self._dashboard = RunDashboard()
+            self._dashboard.reset(remote=True, total=2)
+            self._well_total = 2
+            self._well_done = 0
+            self._well_repeats = 0
+            self._pipeline_started_at = None
+            self._zipper_done = 0
+
+        def _log_line(self, *_a, **_k):
+            return None
+
+    return _Host()
+
+
+@pytest.mark.parametrize("event,payload", [
+    ("well_fov", ("A01", 1, 12)),
+    ("well_total", 2),
+    ("well_done", (1, 2)),
+])
+def test_a_compute_event_ends_the_transfer_label(qapp, event, payload):
+    """The reported bug: after the upload finished and processing began, the
+    status line kept reading ``Transferring… 92%`` for the rest of the run.
+
+    Nothing in the compute phase touched the label — ``remote_xfer`` wrote it
+    and only the end of the run cleared it, so it held whatever the last rsync
+    tick happened to be. Keyed off the pipeline's own progress rather than off
+    rsync reaching exactly 100%, which it need not do.
+    """
+    host = _progress_host(qapp)
+    d = host._dashboard
+
+    d.set_transfer(0.92)
+    assert d._status.text() == "Transferring… 92%"
+
+    host._apply_progress_event(event, payload)
+    assert d._status.text() == ""
+    assert d.transfer() is None
+
+
+def test_finalizing_survives_the_transfer_clear(qapp):
+    """``Finalizing…`` is set by the same branch that clears the transfer, and
+    after it — the auto-threshold pass really is what is happening, so it must
+    not be swallowed on the way past."""
+    host = _progress_host(qapp)
+    d = host._dashboard
+    d.set_transfer(0.92)
+    host._apply_progress_event("well_done", (2, 2))
+    assert d._status.text() == "Finalizing…"
+
+
+def test_a_reset_forgets_the_transfer(qapp):
+    """A second run must not start wearing the first run's percentage."""
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    d.set_transfer(0.5)
+    d.reset(remote=True, total=1)
+    assert d.transfer() is None
+    assert d._status.text() == ""
+
+
+def test_clearing_an_absent_transfer_leaves_other_status_text_alone(qapp):
+    """A compute event arrives on local runs too, where no transfer ever ran.
+    Clearing must be a no-op there rather than wiping whatever the status is
+    legitimately showing."""
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(total=1)
+    d.set_status("Running…")
+    d.set_transfer(None)
+    assert d._status.text() == "Running…"
+
+
+# ── a scheduler wait counts up instead of reading "Transferring… 100%" ───────
+
+def test_the_wait_replaces_the_stale_transfer_label(qapp):
+    """The reported symptom. ``set_transfer(None)`` fires only on a *compute*
+    event, and during a queue wait no compute event has happened — so the last
+    thing written stayed on screen while the run sat in SLURM's queue."""
+    host = _progress_host(qapp)
+    host._dashboard.set_transfer(1.0)
+    assert host._dashboard.transfer() == 1.0
+
+    host._apply_progress_event("sched", ("waiting", "", "srun -p gpu"))
+    assert host._dashboard.transfer() is None
+    assert "Waiting for the scheduler" in host._dashboard._status.text()
+
+
+def test_the_wait_names_the_job_once_the_scheduler_does(qapp):
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("waiting", "", "srun -p gpu"))
+    assert "job" not in host._dashboard._status.text(), "no id exists yet"
+
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    assert "4812345" in host._dashboard._status.text()
+
+
+def test_the_wait_counts_up(qapp):
+    import time as _time
+
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    host._sched_since = _time.monotonic() - 245
+    host._render_scheduler()
+    assert "4m05s" in host._dashboard._status.text()
+
+
+def test_a_long_wait_repeats_itself_in_the_log(qapp):
+    """With the request in it: an unsatisfiable one is the usual reason a job
+    queues indefinitely, and it is not otherwise visible from the app."""
+    logged: list[str] = []
+    host = _progress_host(qapp)
+    host._log_line = lambda text, level="INFO": logged.append(text)
+
+    host._apply_progress_event("sched", ("waiting", "", "srun -p nonesuch"))
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    host._sched_since -= 300
+    host._sched_breadcrumb_at -= 300
+    host._render_scheduler()
+
+    assert logged, "a long wait must leave a trace in the log"
+    assert "still waiting for the scheduler" in logged[-1]
+    assert "4812345" in logged[-1] and "srun -p nonesuch" in logged[-1]
+
+
+def test_being_granted_stops_the_clock(qapp):
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    host._apply_progress_event("sched", ("granted", "4812345", ""))
+    assert host._sched_since is None
+    assert "Allocation granted" in host._dashboard._status.text()
+
+
+def test_computing_stops_the_clock_and_retracts_the_message(qapp):
+    """The backstop, for a launcher that announces nothing on the way out of
+    the queue: the pipeline is demonstrably running, so the wait is over."""
+    host = _progress_host(qapp)
+    host._apply_progress_event("sched", ("queued", "4812345", ""))
+    assert host._sched_since is not None
+
+    host._apply_progress_event("well_fov", ("A01", 1, 4))
+    assert host._sched_since is None
+    assert host._dashboard._status.text() == ""
+
+
+def test_the_status_line_is_only_retracted_when_it_is_ours(qapp):
+    """Several writers share this line. A scheduler event must not clear one
+    that somebody else put there."""
+    host = _progress_host(qapp)
+    host._dashboard.set_status("Finalizing…")
+    host._apply_progress_event("well_done", (2, 2))
+    assert host._dashboard._status.text() == "Finalizing…"

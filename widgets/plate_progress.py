@@ -41,6 +41,25 @@ def status_dot(color: str, d: int = 11) -> QLabel:
     return lbl
 
 
+def fraction_or_none(done: int, total: int) -> float | None:
+    """``done / total`` clamped to 0.0–1.0, or ``None`` when *total* is not
+    positive.
+
+    A caller that has not counted the work yet is reporting "unknown", and an
+    unknown amount of progress must not render as a definite zero-filled dial
+    — that is the same picture as a well that has genuinely done nothing.
+
+    Module-level rather than a method because both kinds of dial host need it:
+    :meth:`PlateProgress.set_well_progress`, and a controller that paints its
+    page's *own* plate instead of a dashboard's (``datasets.subset.controller``
+    — see :meth:`PlateProgress.set_well_fraction` for why it has no dashboard
+    plate to reach). One rule, one home, no second copy to drift.
+    """
+    if int(total) <= 0:
+        return None
+    return max(0.0, min(1.0, max(0, int(done)) / int(total)))
+
+
 class PlateProgress(QWidget):
     """Header/headline/overall-bar/plate+legend chrome, shared by RunDashboard
     and ConcatDashboard. A subclass builds its own left-slot content (a stage
@@ -202,8 +221,13 @@ class PlateProgress(QWidget):
     # to reach through ``self._plate`` — which does not exist at all when the
     # dashboard is built with ``show_plate=False`` (SubsetDashboard paints run
     # progress onto its page's own picker instead). All three no-op in that case
-    # rather than raising, so a controller can report progress uniformly without
-    # first asking which kind of dashboard it is talking to.
+    # rather than raising.
+    #
+    # A no-op is the right base-class behaviour, but it is not a progress
+    # report: a controller whose dashboard has no plate must paint the plate it
+    # does own rather than call these and assume something happened. Subset is
+    # that case, and it drives its picker plate's ``setWellFraction`` directly
+    # through the shared ``fraction_or_none`` above.
 
     def set_well_fraction(self, well_id: str, fraction: float | None) -> None:
         """Fill *well_id*'s dial to *fraction* (0.0–1.0), or drop it with ``None``."""
@@ -219,17 +243,9 @@ class PlateProgress(QWidget):
         plate.setWellFraction(well, max(0.0, min(1.0, float(fraction))))
 
     def set_well_progress(self, well_id: str, done: int, total: int) -> None:
-        """Fill *well_id*'s dial to ``done / total``.
-
-        A *total* of zero or less clears the dial instead of dividing by it: a
-        caller that has not yet counted the work is reporting "unknown", and an
-        unknown amount of progress must not render as a definite zero-filled
-        dial — that is the same well as one that has genuinely done nothing.
-        """
-        if int(total) <= 0:
-            self.set_well_fraction(well_id, None)
-            return
-        self.set_well_fraction(well_id, max(0, int(done)) / int(total))
+        """Fill *well_id*'s dial to ``done / total``, per :func:`fraction_or_none`
+        — a non-positive *total* clears the dial instead of dividing by it."""
+        self.set_well_fraction(well_id, fraction_or_none(done, total))
 
     def clear_well_fractions(self) -> None:
         """Drop every dial, leaving the wells' own state colours untouched."""

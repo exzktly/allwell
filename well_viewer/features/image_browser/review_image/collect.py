@@ -23,6 +23,10 @@ from well_viewer.data.image_resolver import resolve_ref_by_fov_tp as _resolve_re
 from well_viewer.core.ui_helpers import safe_int_or_none as _safe_int_or_none
 from well_viewer.core.ui_helpers import norm_timepoint
 from well_viewer.core.safe import swallowed
+# The region-delete verdict shares its geometry with the crop layer. ``crop`` is
+# an always-present support library whose ``region`` module is pure pandas and
+# imports nothing back, so this is a plain module-scope dependency, not a cycle.
+from well_viewer.features.crop.region import centroids_inside, has_centroid_columns
 
 _logger = logging.getLogger(__name__)
 
@@ -572,6 +576,108 @@ def review_effective_included(ctx, label: str, row: dict) -> str:
         except (TypeError, ValueError):
             pass
     return val
+
+
+def collect_region_delete_targets(
+    ctx, region, *, wells, fovs, tps, skip=None,
+):
+    """Resolve which cells a drawn rectangle deletes across a scope of frames.
+
+    ``region`` is a ``(row0, col0, row1, col1)`` rectangle in source-mask pixels
+    — the same normalised tuple :func:`well_viewer.features.crop.region.normalize_region`
+    produces. ``wells`` / ``fovs`` / ``tps`` are the concrete target sets (the
+    caller has already resolved "the displayed one" into a value), and ``skip``
+    is an optional ``(well, fov, tp)`` frame to leave out, used for the frame the
+    box was actually drawn on: that one is deleted from its label mask instead,
+    by any-pixel overlap rather than by centroid.
+
+    Membership here is centroid-inside, shared with the crop layer via
+    :func:`~well_viewer.features.crop.region.centroids_inside`. It is the only
+    rule available off-screen — deciding overlap for a frame that is not
+    displayed would mean decoding that frame's mask out of its ``_out.zip``,
+    which is one decode per well × FOV × timepoint. Reading the centroid columns
+    the CSV already carries makes a plate-wide apply a pandas pass instead.
+
+    Fail-closed: a cell whose centroid is missing or NaN is never a target, and a
+    well whose CSV carries no ``shape_centroid_*`` columns at all contributes
+    nothing and is named in the returned stats so the caller can say so out loud.
+
+    Returns ``(targets, stats)`` where ``targets`` is a list of canonical
+    ``(well, fov, tp, nid)`` keys — built through
+    :func:`~well_viewer.data.image_identity.cell_keys_for_dataframe`, so they
+    match the ``included_overrides`` map and ``cell_overrides.json`` exactly —
+    and ``stats`` is a dict with ``frames`` (distinct frames contributing at
+    least one target), ``wells`` (likewise for wells), ``scanned_wells``,
+    ``no_centroid_wells`` and ``unreadable_wells``.
+    """
+    from well_viewer.data.image_identity import cell_keys_for_dataframe
+
+    targets: list[Tuple[str, str, str, str]] = []
+    stats = {
+        "frames": 0,
+        "wells": 0,
+        "scanned_wells": 0,
+        "no_centroid_wells": [],
+        "unreadable_wells": [],
+        "unknown_wells": [],
+    }
+    if region is None or not wells:
+        return targets, stats
+
+    want_fovs = {str(f) for f in (fovs or ())}
+    want_tps = {str(t) for t in (tps or ())}
+    if not want_fovs or not want_tps:
+        return targets, stats
+
+    frames: set[Tuple[str, str, str]] = set()
+    hit_wells: set[str] = set()
+    for well in wells:
+        if well not in ctx.state.dataset.well_paths:
+            # An armed scope can outlive the wells it named (a scope carried
+            # from a hand-typed selection, a well removed from the folder).
+            # Record it so the caller can say so instead of quietly deleting
+            # from fewer wells than the button advertises.
+            stats["unknown_wells"].append(well)
+            continue
+        stats["scanned_wells"] += 1
+        try:
+            df = get_rows(ctx, well)
+        except Exception:
+            _logger.warning(
+                "Region delete: could not read rows for well %r", well, exc_info=True,
+            )
+            stats["unreadable_wells"].append(well)
+            continue
+        if df is None or df.empty:
+            continue
+        if not has_centroid_columns(df):
+            stats["no_centroid_wells"].append(well)
+            continue
+        # Slice to the cells inside the box *before* building keys. Key
+        # construction is the dominant cost of this whole path — a plate-wide
+        # scope over 288k rows spends ~1.6s of its 1.7s here — and the box
+        # normally holds a small fraction of the plate, so narrowing first is
+        # the difference between a stutter and a multi-second freeze.
+        inside = df.loc[centroids_inside(df, region)]
+        if inside.empty:
+            continue
+        for key in cell_keys_for_dataframe(inside, default_well=well):
+            if key.fov not in want_fovs or key.tp not in want_tps:
+                continue
+            if not (key.fov and key.tp and key.nid):
+                continue
+            # The well is the dataset's own label, uncanonicalised — see the
+            # note in ``callbacks.override_key``; every reader keys off it.
+            frame = (well, key.fov, key.tp)
+            if skip is not None and frame == tuple(skip):
+                continue
+            targets.append((well, key.fov, key.tp, key.nid))
+            frames.add(frame)
+            hit_wells.add(well)
+
+    stats["frames"] = len(frames)
+    stats["wells"] = len(hit_wells)
+    return targets, stats
 
 
 def review_norm_fov(v: object) -> str:

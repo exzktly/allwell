@@ -261,6 +261,8 @@ def test_fetch_skips_a_well_this_run_did_not_produce(tmp_path):
         fetched_wells=set(),
         local_output_dir=out,
         output_filter=OutputFilter.FULL,
+        # Nothing was asked to be reprocessed — a forced well is never skipped.
+        force=False, force_wells=frozenset(), skipped_wells={},
     )
     fetcher = object.__new__(Fetcher)
     fetcher.run = run
@@ -285,7 +287,8 @@ def test_fetch_does_not_skip_an_incomplete_local_well(tmp_path):
 
     run = types.SimpleNamespace(
         expected_wells=set(), fetched_wells=set(),
-        local_output_dir=out, output_filter=OutputFilter.FULL)
+        local_output_dir=out, output_filter=OutputFilter.FULL,
+        force=False, force_wells=frozenset(), skipped_wells={})
     fetcher = object.__new__(Fetcher)
     fetcher.run = run
     assert Fetcher._already_local(fetcher, "C08") is None      # no CSV

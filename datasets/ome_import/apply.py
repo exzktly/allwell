@@ -5,6 +5,13 @@ to :func:`pipeline.ome_explode.explode_ome_tiff`, threading the page's log,
 progress and cancellation through. All the heavy pixel work lives in
 ``pipeline.ome_explode``; this module just applies the converter's conventions
 (``dest/in`` layout, experiment token from the filename) and formats the summary.
+
+It also owns the *quantising* of per-well progress. The exploder reports one
+tick per plane written; a well of a few thousand planes would be a few thousand
+queued Qt signals and plate repaints, so each well's ticks are folded into a
+single monotonic 0 → 100 sweep by ``_common.containers.WellFraction`` — the same
+class every other Datasets tool uses for the same job, so a dial rises the same
+way whichever tool is filling it.
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from datasets._common.containers import WellFraction
 from datasets.ome_import.ome_import_compute import ConversionParams, strip_ome_suffix
 from pipeline.ome_explode import explode_ome_tiff
 
@@ -24,8 +32,13 @@ def convert(
     log: Callable[[str], None] | None = None,
     is_cancelled: Callable[[], bool] | None = None,
     progress: Callable[[int, int], None] | None = None,
+    well_progress: Callable[[str, int, int], None] | None = None,
 ) -> str:
     """De-interleave *src* into ``<dest>/in`` and return a one-line summary.
+
+    *well_progress* receives ``(well, done, total)`` for one well's share of the
+    conversion, quantised to whole percentage steps so a well holding thousands
+    of planes emits at most 101 updates rather than one per plane.
 
     Raises :class:`pipeline.ome_explode.OmeExplodeCancelled` if *is_cancelled*
     fires, and :class:`ValueError` for an inconsistent grid / FOVs / frame-order
@@ -33,6 +46,18 @@ def convert(
     """
     src, dest = Path(src), Path(dest)
     experiment = params.experiment or strip_ome_suffix(src.name)
+
+    dials: dict[str, Callable[[int, int], None]] = {}
+
+    def _well_progress(well: str, done: int, total: int) -> None:
+        # One WellFraction per well, created on that well's first plane. A
+        # single slice: unlike a copy tool there is only one pass over a well
+        # here, so nothing needs fusing — what is wanted is the dedup.
+        report = dials.get(well)
+        if report is None:
+            report = WellFraction(well_progress, well, 1).slice_progress()
+            dials[well] = report
+        report(done, total)
     result = explode_ome_tiff(
         src,
         dest / "in",
@@ -47,6 +72,7 @@ def convert(
         workers=params.workers,
         log_fn=log,
         progress_fn=progress,
+        well_progress_fn=None if well_progress is None else _well_progress,
         should_abort=is_cancelled,
     )
     channels = ", ".join(result.channels) if result.channels else "?"

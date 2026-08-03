@@ -195,9 +195,18 @@ class ImageTableState:
 # data, so the mapping is unit-testable with no Qt.
 
 _ROOT_DIMS = ("well", "timepoint", "fov")
-# Mirror of image_compose._BINARY_SUFFIX — duplicated so this module stays
+# Mirror of image_compose's variant suffixes — duplicated so this module stays
 # stdlib-only (its import contract forbids importing the Qt/numpy render layer).
+# ``corrected`` deliberately has no suffix: it is the default render, so leaving
+# its token bare keeps every previously saved view's ``channel_opts`` keys valid.
 _BINARY_SUFFIX = " (binary)"
+_MASK_SUFFIX = " (mask)"
+_RAW_SUFFIX = " (raw)"
+_RENDER_SUFFIXES = {
+    "threshold": _BINARY_SUFFIX,
+    "mask": _MASK_SUFFIX,
+    "raw": _RAW_SUFFIX,
+}
 
 
 @dataclass
@@ -217,21 +226,32 @@ class ChannelSpec:
     lut_min: float | None = None
     lut_max: float | None = None
     log: bool = False
+    # Binary renders only: give every label id its own colour instead of painting
+    # them all white, so two nuclei that touch are not one shape.
+    label_colors: bool = False
 
     def axis_token(self) -> str:
         """Token this channel contributes to an axis / ``active_channels``.
 
-        A threshold channel rides the ``"<CHAN> (binary)"`` virtual-channel token
-        (the plumbing added on main); every other render keeps the plain token and
-        resolves its render from ``channel_opts``."""
+        The render mode is part of the token, because the token is the identity
+        the whole grid is built on: ``spec_to_state_fields`` keys ``channel_opts``
+        by it and ``grid_layout._axis_dim_values`` derives the channel axis from
+        those keys. A token that ignored the render would give the same channel
+        shown two ways — its image and its cell mask — one key and therefore one
+        row, and the second chip would vanish silently.
+
+        ``corrected`` keeps the bare token so previously saved views still
+        resolve; the other three ride ``"<CHAN> (raw|mask|binary)"``.
+        """
         base = str(self.channel or "").strip().upper()
-        return f"{base}{_BINARY_SUFFIX}" if self.render == "threshold" else base
+        return f"{base}{_RENDER_SUFFIXES.get(self.render, '')}"
 
     def to_dict(self) -> dict:
         return {
             "channel": self.channel, "render": self.render,
             "boundary": bool(self.boundary), "colormap": self.colormap,
             "lut_min": self.lut_min, "lut_max": self.lut_max, "log": bool(self.log),
+            "label_colors": bool(self.label_colors),
         }
 
     @classmethod
@@ -241,6 +261,7 @@ class ChannelSpec:
             channel=d.get("channel", ""), render=d.get("render", "corrected"),
             boundary=bool(d.get("boundary", False)), colormap=d.get("colormap", "Greys"),
             lut_min=d.get("lut_min"), lut_max=d.get("lut_max"), log=bool(d.get("log", False)),
+            label_colors=bool(d.get("label_colors", False)),
         )
 
 

@@ -99,7 +99,11 @@ BARPLOT_CONTROLLER_BUDGET = 731
 # three fns gained thin ctx-adapter wrappers here that delegate to their unchanged
 # app-native bodies (the Review-CSV store/nav layer isn't ctx yet). A deliberate,
 # one-time +17 for the ctx boundary — not god-logic growth.
-REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV double-click seam (refresh_review_image_ctx + update_preview_ctx imports + ctx-seam docstring/comments)
+# 1022 -> 870: the canvas-gesture *actions* moved out — what a finished
+# rubber-band drag does (``review_image/callbacks.py``) and the jump-to-nucleus
+# view transform (``review_image/renderer.py``, next to the other zoom entry
+# points). The handlers left here decide only which gesture is in progress.
+REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # Ratcheted back to 1176: the loose-TIFs-in-``in/`` work centralized the
 # well-count + layout detection into input_resolution_service.count_expected_wells,
 # removing the duplicated counter from the tab.
@@ -120,9 +124,12 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 1022  # A8 D4: +4 for the ctx-native review-CSV
 # 964 -> 899: the segmentation hints and their validation
 # (_refresh_segmentation_hints / _segmentation_validation_errors /
 # _collapse_seg_param_stack) moved to analyze_tab_seg_params.py, beside the
-# parameter panel they drive. That paid for the two lines the Run | Preview
-# stack needs here (the _build_right_pane swap and the run-start page switch).
-ANALYZE_TAB_BUDGET = 899
+# parameter panel they drive.
+# 899 -> 895: the Analyze pane's Preview page was removed. The Playground is the
+# app's one interactive segmenter; a second, thinner preview here duplicated it
+# for the sake of not re-typing two numbers into the form, which is not a trade
+# worth a whole page. The right pane is a plain log panel again.
+ANALYZE_TAB_BUDGET = 895
 
 # analyze_tab_form.py carried no budget while analyze_tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
@@ -138,10 +145,8 @@ ANALYZE_TAB_BUDGET = 899
 # and its StarDist / watershed / Cellpose / label-free / classical pages) moved
 # to analyze_tab_seg_params.AnalyzeSegParamsMixin, which is also where the
 # StarDist detection thresholds landed rather than growing this form again.
-# Held at 1107 through the Analyze Preview page: the right pane's Run | Preview
-# stack is analyze_tab_preview.AnalyzePreviewMixin, and _build_log stayed here
-# untouched as the Run page's builder.
-ANALYZE_TAB_FORM_BUDGET = 1107
+# 1107 -> 1105: the Analyze Preview mixin was removed (see ANALYZE_TAB_BUDGET).
+ANALYZE_TAB_FORM_BUDGET = 1105
 
 
 def _line_count(rel: str) -> int:

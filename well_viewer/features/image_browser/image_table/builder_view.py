@@ -1128,9 +1128,9 @@ def _lut_inert_channels(spec) -> list[str]:
         for cs in getattr(spec, axis).channels:
             if _has_display_range(cs):
                 continue
+            # ``axis_token`` already names the render — a mask channel is
+            # "GFP (mask)" — so this reads as the grid labels it.
             tok = cs.axis_token()
-            if cs.render == "mask":
-                tok = f"{tok} (mask)"
             if tok and tok not in out:
                 out.append(tok)
     return out
@@ -1294,6 +1294,22 @@ def _fill_channel_menu(ctx, menu: QMenu, cs: ChannelSpec) -> QMenu:
         act.triggered.connect(lambda _c=False, k=key: (_set_render(cs, k), _edit(ctx)))
 
     menu.addSeparator()
+    # Only a binary render has label ids to colour — the other two draw the
+    # intensity image, where there is no per-cell distinction to make. Shown
+    # greyed rather than hidden so the option does not appear and disappear as
+    # the render is switched.
+    lc = menu.addAction("Colour cells")
+    lc.setCheckable(True)
+    lc.setChecked(bool(cs.label_colors))
+    lc.setEnabled(cs.render in ("mask", "threshold"))
+    lc.setToolTip(
+        "Give every cell its own colour instead of painting them all white — two "
+        "nuclei that touch are otherwise one white shape. The colour is a fixed "
+        "function of the label id, so it does not change between redraws."
+    )
+    lc.triggered.connect(
+        lambda c=False: (_set_attr(cs, "label_colors", bool(c)), _edit(ctx)))
+
     b = menu.addAction("Boundary outline")
     b.setCheckable(True)
     b.setChecked(bool(cs.boundary))

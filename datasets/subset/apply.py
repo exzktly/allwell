@@ -28,8 +28,7 @@ from datasets._common.containers import (
     OVERRIDES_SCHEMA_VERSION,
     WellFraction,
     clear_destination,
-    read_members,
-    write_zip,
+    copy_container_members,
 )
 from datasets.subset.subset_compute import (
     IN_PROGRESS_MARKER,
@@ -59,10 +58,12 @@ def _null_sub_progress(_well: str, _done: int, _total: int) -> None:
     return None
 
 
-# One well's copy is four passes over files — read the raw-input container,
-# write the filtered one, then the same again for the QC ``<WELL>_out.zip`` —
-# fused by :class:`WellFraction` into a single 0 → 100% dial per well.
-_SLICES_PER_WELL = 4
+# One well's copy is two passes over files — the raw-input container, then the
+# QC ``<WELL>_out.zip`` — fused by :class:`WellFraction` into a single
+# 0 → 100% dial per well. Each pass is a single filtered publish rather than a
+# read followed by a write, because ``copy_container_members`` moves each kept
+# member's bytes straight across instead of decoding them into a list first.
+_SLICES_PER_WELL = 2
 
 
 def _read_csv(path: Path) -> tuple[list[dict], list[str]]:
@@ -125,7 +126,7 @@ def _copy_filtered_overrides(plan: SubsetPlan, kept_keys: dict[str, set[tuple[st
     return len(kept_entries)
 
 
-def _verify(plan: SubsetPlan, well_row_counts: dict[str, int], in_names_by_well: dict[str, frozenset[str]]) -> None:
+def _verify(plan: SubsetPlan, well_row_counts: dict[str, int]) -> None:
     if sum(well_row_counts.values()) == 0:
         raise SubsetError(
             "Verification failed: the subset wrote zero measurement rows across "
@@ -151,10 +152,10 @@ def execute_plan(
     *progress* receives ``(well, stage)`` as each well starts and finishes;
     *sub_progress* receives ``(well, done, total)`` repeatedly *within* one
     well, so a dashboard can render that well as a filling dial rather than a
-    binary copying/done state. The four passes a well takes (read then write,
-    for the raw input and again for the QC archive) are fused into one sweep
-    from 0 to *total* by :class:`~datasets._common.containers.WellFraction` —
-    without that, each pass would fill the same dial from empty on its own.
+    binary copying/done state. The two passes a well takes (the raw input, then
+    the QC archive) are fused into one sweep from 0 to *total* by
+    :class:`~datasets._common.containers.WellFraction` — without that, each
+    pass would fill the same dial from empty on its own.
 
     Wells are copied in parallel — *workers* threads (0 = auto, see
     :func:`datasets._common.concurrency.pick_workers`), each owning one
@@ -187,7 +188,6 @@ def execute_plan(
     zip_map = out_zips(plan.src)
 
     well_row_counts: dict[str, int] = {}
-    in_names_by_well: dict[str, frozenset[str]] = {}
     kept_keys_by_well: dict[str, set[tuple[str, str]]] = {}
 
     callback_lock = threading.Lock()
@@ -201,40 +201,32 @@ def execute_plan(
 
         fraction = WellFraction(report_fraction, well, _SLICES_PER_WELL)
 
+        def _keep(_container: Path, name: str) -> str | None:
+            """Subset renames nothing — a member either keeps its own name or
+            is left out, which is what makes an unfiltered well a whole-file
+            copy rather than a re-pack."""
+            if member_matches(name, schema=plan.schema, channels=plan.channels, filt=plan.filt):
+                return name
+            return None
+
         container = in_map.get(well)
         kept_in_names: frozenset[str] = frozenset()
         if container is not None:
-            members = read_members(container, progress=fraction.slice_progress())
-            kept = [
-                (n, d) for n, d in members
-                if member_matches(n, schema=plan.schema, channels=plan.channels, filt=plan.filt)
-            ]
-            if kept:
-                kept_in_names, _dropped = write_zip(
-                    plan.dest.in_dir / f"{well}.zip", kept,
-                    progress=fraction.slice_progress(),
-                )
-            else:
-                fraction.skip()
+            kept_in_names, _dropped = copy_container_members(
+                plan.dest.in_dir / f"{well}.zip", [container], _keep,
+                progress=fraction.slice_progress(),
+            )
         else:
-            fraction.skip(2)
+            fraction.skip()
 
         out_zip = zip_map.get(well)
         if out_zip is not None:
-            members = read_members(out_zip, progress=fraction.slice_progress())
-            kept = [
-                (n, d) for n, d in members
-                if member_matches(n, schema=plan.schema, channels=plan.channels, filt=plan.filt)
-            ]
-            if kept:
-                write_zip(
-                    plan.dest.out_dir / f"{well}_out.zip", kept,
-                    progress=fraction.slice_progress(),
-                )
-            else:
-                fraction.skip()
+            copy_container_members(
+                plan.dest.out_dir / f"{well}_out.zip", [out_zip], _keep,
+                progress=fraction.slice_progress(),
+            )
         else:
-            fraction.skip(2)
+            fraction.skip()
 
         csv_path = csv_map.get(well)
         row_count = 0
@@ -262,18 +254,17 @@ def execute_plan(
         # well's dial closes here rather than lingering at whatever the last
         # container pass left it on.
         fraction.finish()
-        return well, row_count, kept_in_names, keys
+        return well, row_count, keys
 
     with ThreadPoolExecutor(max_workers=pick_workers(workers, len(plan.wells_kept))) as ex:
         futures = [ex.submit(_copy_one_well, well) for well in plan.wells_kept]
         for fut in as_completed(futures):
-            well, row_count, kept_in_names, keys = fut.result()
+            well, row_count, keys = fut.result()
             well_row_counts[well] = row_count
-            in_names_by_well[well] = kept_in_names
             kept_keys_by_well[well] = keys
             report(well, "done" if row_count else "empty")
 
-    _verify(plan, well_row_counts, in_names_by_well)
+    _verify(plan, well_row_counts)
     _copy_filtered_overrides(plan, kept_keys_by_well, emit)
 
     (plan.dest.out_dir / "pipeline_info.json").write_text(json.dumps(plan.merged_info, indent=2))

@@ -113,21 +113,24 @@ class AnalyzeFormChromeMixin:
         """A small ``ⓘ`` marker whose hover tooltip carries *info*.
 
         Keeps long explanatory notes available on demand instead of cluttering
-        the form with inline paragraphs. A non-empty WhatsThis also surfaces the
-        note via the ?-cursor; Qt wraps long tooltips on its own.
+        the form with inline paragraphs. Delegates to ``widgets.info_icon`` so
+        the Review pane's tabs raise the same marker rather than a lookalike.
         """
-        lbl = QLabel("ⓘ", parent)
-        lbl.setObjectName("InfoHint")
-        lbl.setToolTip(info)
-        lbl.setWhatsThis(info)
-        return lbl
+        from widgets.info_icon import info_icon
+        return info_icon(parent, info)
 
     #: Row label column width, narrow enough to leave room for a field at
     #: RAIL_W; word-wrap below lets an overflowing label wrap instead of clip.
     _ROW_LABEL_W = 108
 
-    def _row(self, parent: QWidget, label: str) -> QWidget:
-        """Append a two-column label+widget row to *parent*; return the right cell."""
+    def _row(self, parent: QWidget, label: str, *, tooltip: str = "") -> QWidget:
+        """Append a two-column label+widget row to *parent*; return the right cell.
+
+        *tooltip* is set on the row **and its label**, not only on whatever the
+        caller puts in the right-hand cell. The label is the word the user reads
+        and the larger target; a tooltip that answers only over a narrow entry
+        box is one most people never see.
+        """
         row = QWidget(parent)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 1, 0, 1)
@@ -137,6 +140,9 @@ class AnalyzeFormChromeMixin:
         lbl.setObjectName("Muted")
         lbl.setFixedWidth(self._ROW_LABEL_W)
         lbl.setWordWrap(True)
+        if tooltip:
+            row.setToolTip(tooltip)
+            lbl.setToolTip(tooltip)
         rl.addWidget(lbl, 0, Qt.AlignTop)
 
         right = QWidget(row)

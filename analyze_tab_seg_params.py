@@ -20,26 +20,38 @@ from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidg
 # in ``process_microscopy`` just to name two strings.
 _STARDIST_METHODS = ("stardist_nuclei", "stardist_seeded_watershed_cell")
 
-_PROB_TOOLTIP = (
-    "StarDist object-probability threshold (0-1). Candidate nuclei whose "
-    "predicted objectness falls below it are discarded before the polygon "
-    "overlap pass.\n"
-    "• LOWER detects more nuclei — dim, out-of-focus and marginal ones included. "
-    "Turn it down when a plate is missing real cells.\n"
-    "• HIGHER keeps only confident detections. Turn it up when debris is being "
-    "counted as cells.\n"
-    "Blank = use the threshold the pretrained model ships with (~0.479)."
-)
+#: What the Nucleus probability field starts with on a fresh form.
+#:
+#: The pretrained model's own threshold (~0.479) is conservative for these
+#: plates, so the form ships a more sensitive starting point rather than asking
+#: for it to be typed in every time. **This decides what an untouched run does**:
+#: a run started without touching this field detects more nuclei — dim,
+#: out-of-focus and marginal ones included — than the model's default would.
+#:
+#: Text, not a float, because the field is text and every rule about it (blank /
+#: ``auto`` / out-of-range) is applied to text by ``parse_threshold``. Clearing
+#: the field still means the model's own threshold; this is a starting value,
+#: not a floor.
+#:
+#: The CLI's ``--stardist_prob_thresh`` deliberately keeps its own default (the
+#: ``-1.0`` "use the model's" sentinel), so a script that passes no flag is
+#: unaffected by this. The GUI emits the number explicitly, so a GUI run is
+#: still fully described by its command line and its ``pipeline_info.json``.
+DEFAULT_PROB_THRESH_TEXT = "0.2"
 
-_NMS_TOOLTIP = (
-    "StarDist non-maximum-suppression overlap threshold (0-1), applied to the "
-    "predicted nucleus polygons.\n"
-    "• HIGHER lets more overlapping nuclei survive — recovers touching nuclei on "
-    "a confluent field, at the risk of counting one nucleus twice.\n"
-    "• LOWER merges overlapping polygons more aggressively — removes duplicates, "
-    "but can fuse genuine neighbours into one.\n"
-    "Blank = use the pretrained model's own value (0.3)."
-)
+
+def _threshold_help() -> tuple[str, str]:
+    """``(prob, nms)`` help text, from the pipeline's single definition.
+
+    The Playground shows the same two strings, and two panels describing the
+    same two numbers in their own words is how they drifted apart the first
+    time. Imported inside the function rather than at module scope for the same
+    reason the method names above are hardcoded: importing ``pipeline`` here
+    would pull scipy and scikit-image into the Analyze form's import cost, and
+    this runs only when the form is actually built.
+    """
+    from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
+    return PROB_THRESH_HELP, NMS_THRESH_HELP
 
 
 class AnalyzeSegParamsMixin:
@@ -137,21 +149,31 @@ class AnalyzeSegParamsMixin:
         """The two StarDist detection thresholds, shared by both StarDist pages.
 
         Blank means "use the threshold baked into the pretrained weights", which
-        is what the pipeline does with its negative sentinel — so an untouched
-        form runs exactly the segmentation it ran before these fields existed.
+        is what the pipeline does with its negative sentinel.
+
+        The two fields start differently, and the asymmetry is deliberate.
+        Overlap starts blank, so an untouched form runs the model's own NMS.
+        Probability starts at :data:`DEFAULT_PROB_THRESH_TEXT` — the model's own
+        value is conservative for these plates — so an untouched form runs a
+        **more sensitive detection** than the pretrained default. Clearing the
+        field returns to the model's.
         """
-        prob_cell = self._row(sec, "Nucleus probability")
-        self._stardist_prob_thresh_edit = self._entry(prob_cell, "", width=70)
+        prob_help, nms_help = _threshold_help()
+        # The help goes on the row too, so hovering the words "Nucleus
+        # probability" answers — not only hovering the narrow entry box.
+        prob_cell = self._row(sec, "Nucleus probability", tooltip=prob_help)
+        self._stardist_prob_thresh_edit = self._entry(
+            prob_cell, DEFAULT_PROB_THRESH_TEXT, width=70)
         self._stardist_prob_thresh_edit.setPlaceholderText("auto")
-        self._stardist_prob_thresh_edit.setToolTip(_PROB_TOOLTIP)
-        prob_cell.layout().addWidget(self._info_icon(prob_cell, _PROB_TOOLTIP))
+        self._stardist_prob_thresh_edit.setToolTip(prob_help)
+        prob_cell.layout().addWidget(self._info_icon(prob_cell, prob_help))
         prob_cell.layout().addStretch(1)
 
-        nms_cell = self._row(sec, "Overlap (NMS)")
+        nms_cell = self._row(sec, "Overlap (NMS)", tooltip=nms_help)
         self._stardist_nms_thresh_edit = self._entry(nms_cell, "", width=70)
         self._stardist_nms_thresh_edit.setPlaceholderText("auto")
-        self._stardist_nms_thresh_edit.setToolTip(_NMS_TOOLTIP)
-        nms_cell.layout().addWidget(self._info_icon(nms_cell, _NMS_TOOLTIP))
+        self._stardist_nms_thresh_edit.setToolTip(nms_help)
+        nms_cell.layout().addWidget(self._info_icon(nms_cell, nms_help))
         nms_cell.layout().addStretch(1)
 
         hint = QLabel("Both blank = the pretrained model's own thresholds. Lower "

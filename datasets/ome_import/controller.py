@@ -56,11 +56,15 @@ class OmeImportController(QObject):
             return
         self.page.clear_log()
         self.page.set_progress(0, 0)
+        # A fresh run starts on an empty plate — a second conversion must not
+        # begin wearing the first one's dials.
+        self.page.clear_well_fractions()
         self.page.set_running(True)
 
         worker = OmeImportWorker(src, dest, self.page.params())
         worker.logLine.connect(self.page.append_log)
         worker.progress.connect(self.page.set_progress)
+        worker.wellFraction.connect(self.page.set_well_fraction)
         worker.succeeded.connect(self._on_succeeded)
         worker.failed.connect(self._on_failed)
         worker.finished.connect(self._on_finished)

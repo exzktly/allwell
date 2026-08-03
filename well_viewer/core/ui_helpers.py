@@ -1161,6 +1161,7 @@ def norm_timepoint(ctx, value: object) -> str:
     the context rather than importing the data layer directly; the rule itself
     lives in one place, because a second copy of it drifted once already (this
     one kept the truthiness test that turned a numeric ``0`` into ``""`` after
-    the original had been fixed)."""
+    the original had been fixed, and had to be fixed a second time to catch
+    up)."""
     return normalize_tp(value)
 

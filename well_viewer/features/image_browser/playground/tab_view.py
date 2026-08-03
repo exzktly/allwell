@@ -21,15 +21,25 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
+from widgets.info_icon import info_icon
 from well_viewer.features.image_browser.playground.controller import (
-    playground_clear_loose_image, playground_on_change, playground_open_loose_image,
-    playground_repopulate_dropdowns, playground_segment_now,
+    correction_controls_enabled, playground_clear_loose_image, playground_on_change,
+    playground_open_loose_image, playground_repopulate_dropdowns,
+    playground_segment_now,
 )
 from well_viewer.features.image_browser.playground.renderer import render_playground_display
 
 
-def _row(parent, label_text: str) -> QWidget:
+def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
+    """A two-column label+widget row; returns the right-hand cell.
+
+    *tooltip* lands on the row **and its label**, not only on what the caller
+    puts in the cell — the label is the word being read and the bigger target,
+    and an explanation that answers only over a narrow entry box is one most
+    people never find.
+    """
     row = QWidget(parent)
     rl = QHBoxLayout(row)
     rl.setContentsMargins(0, 1, 0, 1)
@@ -37,6 +47,9 @@ def _row(parent, label_text: str) -> QWidget:
     lbl = QLabel(label_text, row)
     lbl.setObjectName("Muted")
     lbl.setFixedWidth(96)
+    if tooltip:
+        row.setToolTip(tooltip)
+        lbl.setToolTip(tooltip)
     rl.addWidget(lbl)
     cell = QWidget(row)
     QHBoxLayout(cell).setContentsMargins(0, 0, 0, 0)
@@ -153,6 +166,43 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
 
     # Correction method
     _section("Correction")
+    # This control is the master switch for everything below it: on Raw the
+    # controller returns before any correction runs, and on Flat-field only the
+    # background half is skipped. It used to live in the Display section two
+    # groups down, dressed as a view option, so the controls it silently
+    # disabled looked broken instead of inactive. It heads this section now, and
+    # _sync_method_rows greys out whatever the chosen stage does not consult.
+    #
+    # It is labelled "Correct up to", not "Stage", and carries a caption saying
+    # what it governs. "Stage" names a step of the pipeline — true, but it
+    # describes the value rather than the effect, and the effect (half this
+    # panel does nothing) is the part a reader needs before hovering anything.
+    # (Its signal is connected further down, where the per-stage LUT memory that
+    # the handler needs is defined.)
+    from widgets.segmented_control import SegmentedControl
+    stage_row = _row(controls, "Correct up to")
+    source_seg = SegmentedControl(stage_row)
+    for _lbl, _data in (("Raw", "raw"), ("Flat-field only", "flatfield"),
+                        ("Corrected", "corrected")):
+        source_seg.addSegment(_lbl, data=_data)
+    source_seg.setCurrentByData("corrected")
+    source_seg.setToolTip(
+        "Which pipeline stage is computed and shown. The controls below apply "
+        "only to the stage selected here:\n"
+        "• Raw — the unprocessed frame; no correction runs, so nothing below "
+        "has any effect.\n"
+        "• Flat-field only — the flat-field is applied; the background method "
+        "and its parameters are not used.\n"
+        "• Corrected — flat-field + background, what a pipeline run produces.")
+    stage_row.layout().addWidget(source_seg)
+    stage_row.layout().addStretch(1)
+    app._playground_source_seg = source_seg
+    stage_note = QLabel("decides which controls below run — Raw runs none",
+                        controls)
+    stage_note.setObjectName("Muted")
+    stage_note.setWordWrap(True)
+    cl.addWidget(stage_note)
+
     ff_cb = _combo(_row(controls, "Flat-field"), FLATFIELD_MODES, "_playground_ff_cb")
     bg_cb = _combo(_row(controls, "Background"), BACKGROUND_METHODS, "_playground_bg_cb")
     bg_cb.setCurrentText("sliding_disk")
@@ -171,6 +221,15 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     bgwell_edit.editingFinished.connect(on_change)
     bgwell_row.layout().addWidget(bgwell_edit)
     app._playground_bgwell_edit = bgwell_edit
+
+    # Answers "when do things get executed?" on the panel instead of leaving it
+    # to be inferred: the two halves of this tab run on completely different
+    # triggers.
+    run_note = QLabel("Correction re-runs as you change these. Segmentation runs "
+                      "only when you press Segment.", controls)
+    run_note.setObjectName("Muted")
+    run_note.setWordWrap(True)
+    cl.addWidget(run_note)
 
     # Live StarDist preview — the same segmentation a pipeline run performs,
     # against the frame on screen, so the two thresholds can be chosen by
@@ -191,28 +250,30 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cl.addWidget(seg_live_cb)
     app._playground_seg_live_cb = seg_live_cb
 
-    prob_row = _row(controls, "Probability")
+    # One help text per threshold, defined in pipeline.stardist and shown by both
+    # panels that expose these two numbers — the two used to keep private copies
+    # and had already drifted into describing the same knobs differently. Applied
+    # to the whole row, to the entry, and to an ⓘ marker, so the explanation is
+    # both findable and reachable from anywhere on the line.
+    prob_row = _row(controls, "Probability", tooltip=PROB_THRESH_HELP)
     prob_edit = _edit(prob_row, "", "_playground_seg_prob_edit")
     prob_edit.setPlaceholderText("auto")
-    prob_edit.setToolTip(
-        "Object-probability threshold (0-1). LOWER finds more nuclei, including "
-        "dim and marginal ones; HIGHER keeps only confident detections. Blank = "
-        "the pretrained model's own default (~0.479).")
-    nms_row = _row(controls, "Overlap (NMS)")
+    prob_edit.setToolTip(PROB_THRESH_HELP)
+    prob_row.layout().addWidget(info_icon(prob_row, PROB_THRESH_HELP))
+    nms_row = _row(controls, "Overlap (NMS)", tooltip=NMS_THRESH_HELP)
     nms_edit = _edit(nms_row, "", "_playground_seg_nms_edit")
     nms_edit.setPlaceholderText("auto")
-    nms_edit.setToolTip(
-        "Polygon overlap threshold (0-1). HIGHER lets more overlapping nuclei "
-        "survive, recovering touching nuclei on a confluent field; LOWER merges "
-        "them more aggressively. Blank = the model's own default (0.3).")
+    nms_edit.setToolTip(NMS_THRESH_HELP)
+    nms_row.layout().addWidget(info_icon(nms_row, NMS_THRESH_HELP))
 
     seg_btn_row = QWidget(controls)
     sbl = QHBoxLayout(seg_btn_row)
     sbl.setContentsMargins(0, 2, 0, 2)
     seg_btn = QPushButton("Segment", seg_btn_row)
     seg_btn.setToolTip("Run StarDist on the frame currently displayed.")
-    hint = QLabel("To choose the settings for a run, use Analyze → Preview: it "
-                  "draws a frame with the run's own settings.", controls)
+    hint = QLabel("Tuned here, then run the plate: type the same two values into "
+                  "Analyze → Channel Tokens → Nucleus probability / Overlap.",
+                  controls)
     hint.setObjectName("Muted")
     hint.setWordWrap(True)
 
@@ -223,23 +284,26 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     sbl.addWidget(seg_btn)
     sbl.addStretch(1)
     cl.addWidget(seg_btn_row)
+
+    # The count, directly under the controls that change it — this is the number
+    # the two thresholds are being tuned against, and reading it out of the
+    # paragraph read-out below is not the same as seeing it. Written by
+    # ``controller._count_text`` from the facts of the render that just ran, so
+    # it can never describe a different picture than the one on screen.
+    count = QLabel("Cells: —", controls)
+    count.setWordWrap(True)
+    count.setToolTip(
+        "How many labels the current render actually drew, and — in binary mode "
+        "with a usable mask — how many of them clear the threshold.\n"
+        "Reads “—” rather than 0 when there is no count to give: no mask at all, "
+        "or live labels that no longer describe this frame.")
+    cl.addWidget(count)
+    ctx.widgets.register("_playground_count", count)
+
     cl.addWidget(hint)
 
     # Display options
     _section("Display")
-    from widgets.segmented_control import SegmentedControl
-    src_row = _row(controls, "Source")
-    source_seg = SegmentedControl(src_row)
-    for _lbl, _data in (("Raw", "raw"), ("Flat-field", "flatfield"),
-                        ("Corrected", "corrected")):
-        source_seg.addSegment(_lbl, data=_data)
-    source_seg.setCurrentByData("corrected")
-    source_seg.setToolTip(
-        "Image stage shown:\n"
-        "• Raw — unprocessed frame.\n"
-        "• Flat-field — only the selected flat-field applied.\n"
-        "• Corrected — flat-field + background (the full method).")
-
     lut_row = _row(controls, "LUT min/max")
     lmin = QLineEdit("auto", lut_row)
     lmin.setFixedWidth(56)
@@ -268,10 +332,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
             st.source = new_source
             lo_txt, hi_txt = st.lut_by_source.get(new_source, ("auto", "auto"))
             _set_lut_entries(lo_txt, hi_txt)       # restore this stage's LUT
+        _sync_method_rows()                        # grey what this stage ignores
         on_change()
     source_seg.currentChanged.connect(_on_source)
-    src_row.layout().addWidget(source_seg)
-    app._playground_source_seg = source_seg
 
     def _on_lut_edit() -> None:
         _remember_lut()
@@ -329,23 +392,50 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     tl = QHBoxLayout(toggles)
     tl.setContentsMargins(0, 2, 0, 2)
     binary_cb = QCheckBox("Binary", toggles)
-    overlay_cb = QCheckBox("Mask overlay", toggles)
+    binary_cb.setToolTip(
+        "Fill the cells the mask found, on black, instead of showing the image.")
+    colors_cb = QCheckBox("Colour cells", toggles)
+    colors_cb.setToolTip(
+        "In Binary mode, give every label its own colour instead of painting "
+        "them all white — two nuclei that touch are otherwise one white shape, "
+        "and whether the segmentation split them is the thing you are looking "
+        "for.\n"
+        "The colour is a fixed function of the label id, so it does not change "
+        "between redraws. It has no effect where there is no usable mask: that "
+        "fallback thresholds pixels, and pixels have no labels to colour.")
+    colors_cb.setChecked(True)
+    overlay_cb = QCheckBox("Outlines", toggles)
+    overlay_cb.setToolTip(
+        "Draw cell outlines over the image. Which mask they come from is named "
+        "in the status line:\n"
+        "• pipeline mask — the mask a run already produced. It does NOT respond "
+        "to the Correction controls, because changing a correction does not "
+        "re-segment.\n"
+        "• live StarDist — labels this tab computed; press Segment to refresh "
+        "them after a change.")
     overlay_cb.setChecked(True)
 
     def _on_binary(v: bool) -> None:
         app._app_state.playground.binary_mask = bool(v)
         on_change()
 
+    def _on_colors(v: bool) -> None:
+        app._app_state.playground.binary_label_colors = bool(v)
+        on_change()
+
     def _on_overlay(v: bool) -> None:
         app._app_state.playground.show_overlay = bool(v)
         on_change()
     binary_cb.toggled.connect(_on_binary)
+    colors_cb.toggled.connect(_on_colors)
     overlay_cb.toggled.connect(_on_overlay)
     tl.addWidget(binary_cb)
+    tl.addWidget(colors_cb)
     tl.addWidget(overlay_cb)
     tl.addStretch(1)
     cl.addWidget(toggles)
     app._playground_binary_cb = binary_cb
+    ctx.widgets.register("_playground_binary_colors_cb", colors_cb)
     app._playground_overlay_cb = overlay_cb
 
     # Zoom buttons
@@ -373,9 +463,18 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     zl.addStretch(1)
     cl.addWidget(zoom_row)
 
+    # The read-out. Everything this tab can be ambiguous about is stated here in
+    # words, because none of it is visible in the picture: which mask the
+    # outlines came from and whether it even fits the frame, how many labels the
+    # QC filter threw away, which of binary mode's three rules drew what is on
+    # screen, and the data range (the LUT auto-scales, so a correction can move
+    # the data without moving the image). Selectable so a line can be pasted
+    # into a bug report.
+    _section("What you're looking at")
     status = QLabel("Select a frame to begin.", controls)
     status.setObjectName("Muted")
     status.setWordWrap(True)
+    status.setTextInteractionFlags(Qt.TextSelectableByMouse)
     cl.addWidget(status)
     app._playground_status = status
     cl.addStretch(1)
@@ -419,7 +518,11 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     label.mousePressEvent = _on_press
     label.mouseMoveEvent = _on_move
 
-    # Show/hide param rows by method (mirrors analyze_tab._sync_bg).
+    # Show/hide param rows by method (mirrors analyze_tab._sync_bg), and grey out
+    # whatever the selected STAGE does not consult. Visibility answers "does this
+    # method take this parameter"; enablement answers "does this stage read it at
+    # all" — without the second one, a stage that ignores a control leaves it
+    # looking live, which is what made the panel read as broken.
     def _sync_method_rows(_=None) -> None:
         bg = app._playground_bg_cb.currentText()
         ff = app._playground_ff_cb.currentText()
@@ -430,6 +533,13 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
             r.parentWidget().setVisible(bg == "robust_mesh")
         bgwell_row.parentWidget().setVisible(
             ff in ("empty_well", "basic") or bg == "empty_well")
+
+        enabled = correction_controls_enabled(app._app_state.playground.source)
+        ff_cb.setEnabled(enabled["flatfield"])
+        bg_cb.setEnabled(enabled["background"])
+        for r in (radius_row, fft_row, mesh_ratio_row, mesh_sigma_row):
+            r.parentWidget().setEnabled(enabled["background_params"])
+        bgwell_row.parentWidget().setEnabled(enabled["background_well"])
     bg_cb.currentIndexChanged.connect(_sync_method_rows)
     ff_cb.currentIndexChanged.connect(_sync_method_rows)
     _sync_method_rows()

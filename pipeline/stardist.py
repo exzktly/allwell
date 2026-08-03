@@ -84,6 +84,43 @@ class StarDistParams:
 
 DEFAULT_STARDIST_PARAMS = StarDistParams()
 
+# The user-facing explanation of the two detection thresholds, in one place.
+#
+# Both GUI panels that expose them — the Analyze form and the Review pane's
+# Playground — show this text, and both are Qt code that cannot be the source of
+# truth for the other. Defined here, beside the dataclass whose docstring
+# describes the same two knobs, because this module is the one thing both panels
+# already import (for ``parse_threshold``). They previously carried their own
+# copies and had already drifted into describing the same numbers differently.
+#
+# The probability text names the Analyze form's starting value even though the
+# Playground shows the same string. That is deliberate: the two panels start from
+# different numbers, so a Playground reader needs to know what an untouched run
+# would actually use.
+#
+# Plain strings, no markup: they are set as Qt tooltips, and Qt wraps them.
+PROB_THRESH_HELP = (
+    "StarDist object-probability threshold (0-1). Candidate nuclei whose "
+    "predicted objectness falls below it are discarded before the polygon "
+    "overlap pass.\n"
+    "• LOWER detects more nuclei — dim, out-of-focus and marginal ones included. "
+    "Turn it down when a plate is missing real cells.\n"
+    "• HIGHER keeps only confident detections. Turn it up when debris is being "
+    "counted as cells.\n"
+    "The Analyze form starts at 0.2 — more sensitive than the pretrained "
+    "model's own ~0.479. Clear the field to go back to the model's."
+)
+
+NMS_THRESH_HELP = (
+    "StarDist non-maximum-suppression overlap threshold (0-1), applied to the "
+    "predicted nucleus polygons.\n"
+    "• HIGHER lets more overlapping nuclei survive — recovers touching nuclei on "
+    "a confluent field, at the risk of counting one nucleus twice.\n"
+    "• LOWER merges overlapping polygons more aggressively — removes duplicates, "
+    "but can fuse genuine neighbours into one.\n"
+    "Blank = use the pretrained model's own value (0.3)."
+)
+
 # Peak-memory cap for large images. An untiled ``predict_instances`` on a big
 # frame (e.g. ~4K×4K) allocates the full-resolution U-Net activations plus the
 # (H×W×n_rays) distance array in one shot — several GB per worker — so a handful

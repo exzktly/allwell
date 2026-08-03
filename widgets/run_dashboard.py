@@ -81,6 +81,13 @@ class RunDashboard(PlateProgress):
         # 1.0, so membership *is* "this well is moving bytes at the moment".
         self._xfer: dict[str, tuple] = {}
         self._active_stage = ""
+        # Plate-wide transfer, as a fraction, while one is in flight — None
+        # when there is not one. State rather than a formatted string because
+        # two different objects drive this dashboard (analyze_tab handles the
+        # runner's own events, analyze_progress the pipeline's), and a label
+        # that one of them writes and neither retracts is exactly how it came
+        # to sit on "Transferring… 92%" for the whole compute phase.
+        self._transfer: float | None = None
         self._rail: dict[str, tuple] = {}        # stage -> (dot,name,bar,count)
         super().__init__("Run Progress", parent)
         self.setObjectName("RunDashboard")
@@ -96,6 +103,7 @@ class RunDashboard(PlateProgress):
         self._fov = {}
         self._xfer = {}
         self._active_stage = ""
+        self._transfer = None
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
@@ -104,6 +112,25 @@ class RunDashboard(PlateProgress):
         self._build_rail(); self._build_legend()
         self._headline.setText("Preparing…")
         self._eta.setText(""); self._status.setText("")
+
+    def set_transfer(self, pct: float | None) -> None:
+        """Show (or clear) the plate-wide transfer percentage on the status line.
+
+        ``None`` ends the transfer. Callers do not have to know whether rsync's
+        last tick happened to be 100% — whoever observes the run moving on says
+        so, and the label goes with it.
+        """
+        if pct is None:
+            if self._transfer is None:
+                return
+            self._transfer = None
+            self.set_status("")
+            return
+        self._transfer = max(0.0, min(1.0, float(pct)))
+        self.set_status(f"Transferring… {int(self._transfer * 100)}%")
+
+    def transfer(self) -> float | None:
+        return self._transfer
 
     def set_total(self, total: int) -> None:
         self._total = int(total)
@@ -138,6 +165,12 @@ class RunDashboard(PlateProgress):
         else:
             self._done.setdefault(stage, set()).add(w)
             self._active.discard(w)
+            if stage == "download":
+                # The well is fetched, so the frozen download ring has done its
+                # job. Both _well_color and _well_fraction already ignore a
+                # transfer once this stage is set; dropping it keeps the dict
+                # from carrying an entry that can no longer be read.
+                self._xfer.pop(w, None)
         self._plate.setWellColor(w, self._well_color(w))
         self.set_well_fraction(w, self._well_fraction(w))
         # Only the error mark survives. A computing well used to carry a ⚙,
@@ -159,21 +192,47 @@ class RunDashboard(PlateProgress):
                           fraction: float) -> None:
         """Per-well upload (``"up"``) or download (``"down"``) progress, 0..1.
 
-        A fraction of 1.0 ends the transfer rather than pinning the dial full:
-        the entry is dropped, and the well goes back to being described by the
-        stages it has reached. That matters most on upload, where the well is
-        marked ``upload`` as rsync *starts* sending it — leaving a completed
-        transfer in place would hold the dial at full for a well that has not
-        begun computing.
+        **Repaints the well as well as filling its dial.** A transfer changes
+        which state the well is in, and :meth:`_well_color` says so — a download
+        is painted in the colour it is travelling *toward*. Pushing only the
+        fraction left that colour computed and discarded, so a downloading well
+        kept the blue of the last stage change and filled blue-into-blue: the
+        arrival, the one thing the colour exists to show, never happened on
+        screen. Every write here goes through both calls for that reason.
+
+        An **upload** reaching 1.0 ends the transfer: the entry is dropped and
+        the well goes back to being described by the stages it has reached. A
+        well is marked ``upload`` as rsync *starts* sending it, so holding the
+        dial full afterwards would claim progress for a well that has not begun
+        computing.
+
+        A **download** reaching 1.0 does not end anything, because the well's
+        zip is only the first of two transfers — its CSVs follow, and only when
+        both have landed is the well fetched. The closing 1.0 is *ignored*: the
+        ring freezes at the last fraction actually measured, so the well stays
+        green and visibly short of full through the CSV pull, and only
+        :meth:`set_well_stage` marking it ``download`` fills it. Two rejected
+        alternatives, for the record — dropping the entry returned the well to a
+        *full ring in the computed blue*, indistinguishable from one that had
+        not started downloading (the reported bug), and storing the 1.0 fills
+        the ring green, indistinguishable from one already fetched. A frozen
+        near-full ring is the only rendering that is true of both halves.
+
+        The freeze needs a fraction to freeze *at*, so a closing 1.0 with no
+        prior tick creates nothing: a well whose size probe failed never had a
+        dial, and inventing one at the end would report progress never measured.
         """
         w = canon_well(well_id)
         if not w or direction not in (_XFER_UP, _XFER_DOWN):
             return
         frac = max(0.0, min(1.0, float(fraction)))
         if frac >= 1.0:
-            self._xfer.pop(w, None)
+            if direction == _XFER_UP:
+                self._xfer.pop(w, None)
+            # else: a finished download holds its last measured fraction.
         else:
             self._xfer[w] = (direction, frac)
+        self._plate.setWellColor(w, self._well_color(w))
         self.set_well_fraction(w, self._well_fraction(w))
 
     def _well_fraction(self, well: str) -> float | None:
@@ -229,13 +288,22 @@ class RunDashboard(PlateProgress):
         done, total = self._fov.get(well, (0, 0))
         if total > 0:
             return max(0.0, min(1.0, done / total))
-        # Started but nothing finished yet: an empty dial, not a plain disc. A
-        # well waiting its turn on the remote is in exactly that position — its
-        # zip is there and none of it has been looked at — and drawing it as a
-        # solid well made the largest block of the plate the one part that said
-        # nothing about what it was waiting for.
-        if well in self._active or self._has("upload", well):
+        # Computing, with no group finished yet: an empty dial, not a plain
+        # disc. Drawing it as a solid well made the part of the plate that is
+        # actively being worked on say nothing about how far in it was.
+        if well in self._active:
             return 0.0
+        # Uploaded and waiting its turn: a *full* dial. Its archive is on the
+        # remote in full, and the dial has just spent the whole upload filling
+        # with the bytes sent — ``set_well_transfer`` drops the transfer entry
+        # at 1.0, so returning 0.0 here emptied the well at the exact instant
+        # the upload completed, which reads as the transfer undoing itself.
+        # What the well is waiting for is its turn, not more transfer.
+        #
+        # A full dial therefore means "uploaded" or "computed" depending on the
+        # well's colour, which is the accepted cost of never running backwards.
+        if self._has("upload", well):
+            return 1.0
         return None
 
     def set_active_stage(self, name: str) -> None:

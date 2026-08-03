@@ -18,6 +18,9 @@ from well_viewer.core.ui_helpers import (
     make_action_menu_button, make_popover_button,
 )
 from widgets.control_band import ControlBand
+from well_viewer.features.preview.delete_scope_view import (
+    build_delete_scope_control,
+)
 from well_viewer.features.crop.controller import (
     clear_crop_region, reset_crop_and_overrides, toggle_crop_edit_mode,
 )
@@ -135,12 +138,18 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     delete_btn.setToolTip(
         "Enter drag-delete mode.\n"
         "• Click a cell to mark it Included=0.\n"
-        "• Drag a rectangle to bulk-delete all cells inside."
+        "• Drag a rectangle to bulk-delete all cells inside.\n"
+        "By default the delete lands on the displayed frame only; the "
+        "Delete scope control widens it to more wells / FOVs / timepoints."
     )
     delete_btn.clicked.connect(
         lambda _=False: toggle_selected_review_cell(ctx)
     )
     ctrl.add_action(delete_btn)
+
+    # Which frames the next drag-delete reaches. Sits next to the button it
+    # modifies, and carries the armed scope in its own label.
+    ctrl.add_action(build_delete_scope_control(ctx, ctrl))
 
     # Crop cells: drag a rectangle to keep only cells whose centroid is inside;
     # applies to every FOV/timepoint/channel/well. Clear crop removes just the

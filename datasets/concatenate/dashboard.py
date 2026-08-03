@@ -95,10 +95,12 @@ class ConcatDashboard(PlateProgress):
     def _well_marker(self, w: str) -> str | None:
         # Terminal states carry a marker too, not just colour (accessibility
         # — colour alone is unreadable to anyone who can't distinguish
-        # success-green from accent-lilac).
-        return {
-            "merging": "⚙", "merged": "✓", "warned": "!",
-        }.get(self._well_stage.get(w))
+        # success-green from accent-lilac). A well that is *merging* carries
+        # none: it is drawn as a progress dial, and a glyph would sit in the
+        # middle of exactly the area the dial fills, while the fill and the
+        # colour already say the well is being worked on. Every plate map in
+        # the app follows that rule.
+        return {"merged": "✓", "warned": "!"}.get(self._well_stage.get(w))
 
     def set_phase(self, phase: str) -> None:
         if phase == self._phase:

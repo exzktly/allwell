@@ -37,15 +37,18 @@ def test_no_manual_save_load_route():
 
 
 def test_editing_groups_mirrors_to_app_doc(loaded_app):
+    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+
     panel = _panel(loaded_app)
     _add_solo_group(panel, loaded_app)
     doc = loaded_app._ctx.runtime.batch_export.export_groups_doc
-    assert isinstance(doc, dict) and doc.get("bar")
-    assert len(doc["bar"]) == 1
-    assert doc["bar"][0]["name"] == "G1"
+    assert isinstance(doc, dict) and doc.get(SHARED_PERSIST_KEY)
+    assert len(doc[SHARED_PERSIST_KEY]) == 1
+    assert doc[SHARED_PERSIST_KEY][0]["name"] == "G1"
 
 
 def test_groups_round_trip_through_persistence_json(loaded_app):
+    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
     from well_viewer.persistence import _doc, export_groups
 
     panel = _panel(loaded_app)
@@ -53,15 +56,15 @@ def test_groups_round_trip_through_persistence_json(loaded_app):
 
     # Flush to persistence.json, then wipe the in-memory cache + doc.
     export_groups.save_to_data_dir(loaded_app._ctx)
-    assert _doc.get_section(loaded_app._ctx, "export_groups").get("bar")
+    assert _doc.get_section(loaded_app._ctx, "export_groups").get(SHARED_PERSIST_KEY)
     loaded_app._ctx.runtime.batch_export.export_groups_doc = {}
     loaded_app._app_state.dataset.persistence_doc = None
 
     # Reload from disk → app doc repopulated with the same group + solo well.
     export_groups.load_from_data_dir(loaded_app._ctx)
-    bar = loaded_app._ctx.runtime.batch_export.export_groups_doc["bar"]
-    assert bar[0]["name"] == "G1"
-    assert bar[0]["solo_wells"] == [well]
+    saved = loaded_app._ctx.runtime.batch_export.export_groups_doc[SHARED_PERSIST_KEY]
+    assert saved[0]["name"] == "G1"
+    assert saved[0]["solo_wells"] == [well]
 
 
 def test_new_panel_hydrates_from_app_doc(loaded_app):
@@ -74,15 +77,22 @@ def test_new_panel_hydrates_from_app_doc(loaded_app):
     assert second._groups[0].solo_wells == [well]
 
 
-def test_distinct_panels_keep_separate_slots(loaded_app):
-    # The line and bar panels persist under different keys → independent groups.
+def test_every_panel_shares_one_slot(loaded_app):
+    """Rewritten: the line and bar panels used to persist under different keys,
+    so a group built on one mode was invisible on the other and the same
+    conditions had to be rebuilt per plot type. Export groups describe the
+    dataset's conditions, not the plot they are drawn as."""
     from well_viewer.features.batch_export import BatchExportPanel
+    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+
     bar = _panel(loaded_app)
-    _add_solo_group(bar, loaded_app, name="BarGrp")
+    well = _add_solo_group(bar, loaded_app, name="BarGrp")
     line = BatchExportPanel(loaded_app._ctx, None, use_sidebar_groups=False)
-    assert line._groups == []  # the "line" slot is still empty
+    assert [g.name for g in line._groups] == ["BarGrp"]
+    assert line._groups[0].solo_wells == [well]
     doc = loaded_app._ctx.runtime.batch_export.export_groups_doc
-    assert set(doc) == {"bar"} and doc["bar"][0]["name"] == "BarGrp"
+    assert set(doc) == {SHARED_PERSIST_KEY}
+    assert doc[SHARED_PERSIST_KEY][0]["name"] == "BarGrp"
 
 
 def test_editing_does_not_write_disk_but_running_does(loaded_app, tmp_path, monkeypatch):
@@ -125,3 +135,89 @@ def test_groups_get_distinct_colors_by_index(loaded_app):
     g1 = BarGroup("G1"); g1.solo_wells.append(wells[1])
     panel._groups = [g0, g1]
     assert panel._group_color(0) != panel._group_color(1)
+
+
+# ── one set of groups for every Batch Export mode ───────────────────────────
+
+def _panel_for(app, mode: str):
+    from well_viewer.features.batch_export import (
+        BarBatchExportPanel, BatchExportPanel, ScatterBatchExportPanel,
+    )
+    if mode == "line":
+        return BatchExportPanel(app._ctx, None, use_sidebar_groups=False)
+    if mode == "bar":
+        return BarBatchExportPanel(app._ctx, None, use_sidebar_groups=False)
+    return ScatterBatchExportPanel(
+        app._ctx, None,
+        scatter_mode="aggregate" if mode == "scatter_agg" else "cells",
+        use_sidebar_groups=False,
+    )
+
+
+def test_every_mode_reads_the_same_slot(loaded_app):
+    """Line / Bar / Scatter (cells) / Scatter (aggregate) used to keep four
+    private sets, so groups built in one mode were invisible in the others and
+    anyone exporting the same conditions four ways built them four times."""
+    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+
+    keys = {m: _panel_for(loaded_app, m)._persist_key
+            for m in ("line", "bar", "scatter_cells", "scatter_agg")}
+    assert set(keys.values()) == {SHARED_PERSIST_KEY}, keys
+
+
+def test_a_group_added_on_one_mode_is_visible_on_another(loaded_app):
+    """The request, stated as a test."""
+    bar = _panel_for(loaded_app, "bar")
+    well = _add_solo_group(bar, loaded_app, name="Shared")
+
+    line = _panel_for(loaded_app, "line")
+    assert [g.name for g in line._groups] == ["Shared"]
+    assert line._groups[0].solo_wells == [well]
+
+
+def test_a_legacy_document_merges_its_four_slots(loaded_app):
+    """A document written before the modes shared a slot has up to four
+    populated per-mode keys. Merge them in a fixed order, de-duplicated by
+    name — a union, because picking one slot would silently delete three."""
+    wells = list(loaded_app._app_state.dataset.well_paths)[:2]
+    doc = {
+        "line": [{"name": "L", "members": [], "solo_wells": [wells[0]]}],
+        "bar": [{"name": "B", "members": [], "solo_wells": [wells[0]]},
+                {"name": "L", "members": [], "solo_wells": [wells[1]]}],
+        "scatter_cells": [{"name": "SC", "members": [], "solo_wells": [wells[0]]}],
+        "scatter_agg": [{"name": "SA", "members": [], "solo_wells": [wells[0]]}],
+    }
+    loaded_app._ctx.runtime.batch_export.export_groups_doc = doc
+
+    panel = _panel_for(loaded_app, "line")
+    # Fixed order, and the name repeated across two slots appears once —
+    # the first occurrence (line's "L", holding wells[0]) winning.
+    assert [g.name for g in panel._groups] == ["L", "B", "SC", "SA"]
+    assert panel._groups[0].solo_wells == [wells[0]]
+
+
+def test_the_shared_slot_wins_over_the_legacy_ones(loaded_app):
+    """Once the shared key exists it is the whole answer — otherwise deleting
+    a group would be undone by a legacy slot re-supplying it on every load."""
+    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+
+    wells = list(loaded_app._app_state.dataset.well_paths)[:1]
+    loaded_app._ctx.runtime.batch_export.export_groups_doc = {
+        SHARED_PERSIST_KEY: [{"name": "Kept", "members": [], "solo_wells": wells}],
+        "bar": [{"name": "Deleted", "members": [], "solo_wells": wells}],
+    }
+    panel = _panel_for(loaded_app, "bar")
+    assert [g.name for g in panel._groups] == ["Kept"]
+
+
+def test_an_empty_shared_slot_is_not_treated_as_missing(loaded_app):
+    """Clearing every group writes an empty list, which must stay empty rather
+    than falling through to the legacy merge and resurrecting them."""
+    from well_viewer.features.batch_export.base_panel import SHARED_PERSIST_KEY
+
+    wells = list(loaded_app._app_state.dataset.well_paths)[:1]
+    loaded_app._ctx.runtime.batch_export.export_groups_doc = {
+        SHARED_PERSIST_KEY: [],
+        "bar": [{"name": "Old", "members": [], "solo_wells": wells}],
+    }
+    assert _panel_for(loaded_app, "bar")._groups == []

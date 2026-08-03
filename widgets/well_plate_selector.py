@@ -47,10 +47,11 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 from PySide6.QtCore import (
-    Property, QEvent, QMimeData, QPoint, QRectF, QSize, Qt, Signal,
+    Property, QEvent, QMimeData, QPoint, QPointF, QRectF, QSize, Qt, Signal,
 )
 from PySide6.QtGui import (
-    QBrush, QColor, QDrag, QFont, QLinearGradient, QPainter, QPen, QRadialGradient,
+    QBrush, QColor, QDrag, QFont, QLinearGradient, QPainter, QPen, QPolygonF,
+    QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QApplication, QHBoxLayout, QPushButton, QSizePolicy, QToolTip,
@@ -113,6 +114,13 @@ class _PlateGrid(QWidget):
     wellActivated = Signal(str)            # well id, e.g. "A07" (passive mode)
     wellDropped = Signal(str, str)         # (well id under cursor, payload token)
     cornerToggled = Signal(bool)           # corner all/none in passive mode (True=all)
+    pathChanged = Signal(list)             # ordered well ids, "path" selection model
+    # "paint" selection model: the grid owns no membership of its own, it just
+    # reports the gesture. The host latches its own add/remove polarity on the
+    # press and applies both signals to whatever collection it is editing.
+    wellPaintPressed = Signal(str)         # left-press landed on this well
+    wellPaintDragged = Signal(str)         # drag entered this well (once each)
+    paintDragFinished = Signal()           # button released, gesture over
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -130,6 +138,19 @@ class _PlateGrid(QWidget):
         # Per-well degree of completion, 0..1. Empty for every plate that does
         # not opt in (see ``set_well_fraction``).
         self._fractions: dict[tuple[int, int], float] = {}
+        # Wells drawn with an extra accent ring on top of whatever else they
+        # are wearing — a third state orthogonal to colour and selection, for a
+        # host that must say "these wells belong to the thing you are editing
+        # right now" without disturbing the colour that says which group they
+        # are in. Empty for every plate that does not opt in.
+        self._rings: set[tuple[int, int]] = set()
+        # The acquisition path: an ordered list of (row, col), used only when
+        # ``_selection_model`` is "path". Element i is the well visited at
+        # stage position i. Kept separate from ``_selected`` on purpose — that
+        # dict's insertion order is destroyed by ``_recolor``/``selected_ids``,
+        # which sort so a well's rank colour is stable wherever it appears.
+        self._path: list[tuple[int, int]] = []
+        self._selection_model = "set"          # "set" | "path" | "paint"
         # Interaction config.
         self._mode = "select"                  # "select" | "passive"
         self._drag_select = True
@@ -198,6 +219,13 @@ class _PlateGrid(QWidget):
         # (replicate-set / group plotting) where it emits ``cornerToggled`` for
         # the host to show/hide all groups — so the all/none toggle stays
         # available even when per-well plate selection is disabled.
+        #
+        # Never outside the "set" model. The corner toggles the selection set,
+        # and neither of the other models has one: "select all" has no meaning
+        # for a route (in what order?), and a "paint" plate's membership lives
+        # in the host, which this control cannot reach.
+        if self._selection_model != "set":
+            return False
         return self._mode in ("select", "passive") and not self._single_select
 
     def _enabled_keys(self) -> set[tuple[int, int]]:
@@ -266,6 +294,11 @@ class _PlateGrid(QWidget):
             self._selected = {k: v for k, v in self._selected.items() if k in new}
             self._colors = {k: v for k, v in self._colors.items() if k in new}
             self._fractions = {k: v for k, v in self._fractions.items() if k in new}
+            # Rings too: a disabled well paints as an empty socket, and an
+            # accent ring around a socket says the host is marking a well that
+            # is not there.
+            self._rings = {k for k in self._rings if k in new}
+            self._path = [k for k in self._path if k in new]
             if self._hover_cell is not None and self._hover_cell not in new:
                 self._hover_cell = None
         self._recolor()
@@ -286,6 +319,10 @@ class _PlateGrid(QWidget):
             self._enabled.discard(parsed)
             self._selected.pop(parsed, None)
             self._colors.pop(parsed, None)
+            self._fractions.pop(parsed, None)
+            self._rings.discard(parsed)
+            if parsed in self._path:
+                self._path.remove(parsed)
         self._recolor()
         self.update()
 
@@ -309,6 +346,87 @@ class _PlateGrid(QWidget):
         else:
             self._fractions[key] = max(0.0, min(1.0, float(fraction)))
         self.update()
+
+    def set_well_ring(self, well_id, on: bool = True) -> None:
+        """Draw (or drop) an accent ring around one well.
+
+        A decoration layer of its own, deliberately not folded into colour or
+        selection: a host may need to mark a subset of already-coloured wells
+        as the ones it is currently editing, and both of those channels are
+        already saying something else.
+        """
+        key = _parse_well_id(well_id)
+        if key is None:
+            return
+        if on:
+            self._rings.add(key)
+        else:
+            self._rings.discard(key)
+        self.update()
+
+    def set_well_rings(self, ids) -> None:
+        """Replace the whole ring set in one repaint."""
+        new = {k for k in (_parse_well_id(w) for w in (ids or ())) if k is not None}
+        if new == self._rings:
+            return
+        self._rings = new
+        self.update()
+
+    def clear_well_rings(self) -> None:
+        if self._rings:
+            self._rings.clear()
+            self.update()
+
+    # ── ordered-path model ("path" selection model only) ─────────────────
+    def set_selection_model(self, model: str) -> None:
+        """How this plate's gesture maps to a model.
+
+        ``"set"``    the default: the grid owns an unordered selection set.
+        ``"path"``   the grid owns an ordered acquisition route; a click
+                     appends an off-path well or removes an on-path one.
+        ``"paint"``  the grid owns *nothing*. It reports the press/drag/release
+                     gesture (``wellPaintPressed`` / ``wellPaintDragged`` /
+                     ``paintDragFinished``) and the host applies it to whatever
+                     it is editing — used where plate membership is not a plain
+                     set of clicked wells (Batch Export, where dropping one
+                     well can add the replicate set it belongs to, and where
+                     several groups overlap on the same plate).
+        """
+        if model not in ("set", "path", "paint"):
+            raise ValueError(
+                f"unknown selection model {model!r}; "
+                "expected 'set', 'path' or 'paint'"
+            )
+        self._selection_model = model
+
+    def selection_model(self) -> str:
+        return self._selection_model
+
+    def path_ids(self) -> list[str]:
+        """The path as canonical well ids, in visit order."""
+        return [_well_id(r, c) for (r, c) in self._path]
+
+    def set_path_ids(self, ids, *, emit: bool = False) -> bool:
+        """Replace the path. Returns whether it actually changed.
+
+        Unparseable and duplicate tokens are dropped rather than raising — the
+        callers are file-name parsers and restored job specs, where a token
+        that means nothing must not take the widget down with it.
+        """
+        new: list[tuple[int, int]] = []
+        seen: set[tuple[int, int]] = set()
+        for w in ids or ():
+            parsed = _parse_well_id(w)
+            if parsed is not None and parsed not in seen:
+                seen.add(parsed)
+                new.append(parsed)
+        if new == self._path:
+            return False
+        self._path = new
+        self.update()
+        if emit:
+            self.pathChanged.emit(self.path_ids())
+        return True
 
     def set_well_color(self, well_id, color, *, _defer: bool = False) -> None:
         parsed = _parse_well_id(well_id)
@@ -606,6 +724,22 @@ class _PlateGrid(QWidget):
         """
         if not self._is_enabled((r, c)):
             return
+        if self._selection_model == "paint":
+            self._drag_active = True
+            self._drag_visited = {(r, c)}
+            self.wellPaintPressed.emit(_well_id(r, c))
+            return
+        if self._selection_model == "path":
+            # Clicking an off-path well appends it as the next stop; clicking
+            # one already on the path removes it, and the rest renumber for
+            # free because the numbers are positions in this list.
+            if (r, c) in self._path:
+                self._path.remove((r, c))
+            else:
+                self._path.append((r, c))
+            self.update()
+            self.pathChanged.emit(self.path_ids())
+            return
         if self._mode == "passive":
             self.wellActivated.emit(_well_id(r, c))
             return
@@ -666,6 +800,11 @@ class _PlateGrid(QWidget):
             self.update()
 
         if self._drag_active and (event.buttons() & Qt.LeftButton):
+            if self._selection_model == "paint":
+                if cell is not None and cell not in self._drag_visited:
+                    self._drag_visited.add(cell)
+                    self.wellPaintDragged.emit(_well_id(cell[0], cell[1]))
+                return
             if self._drag_mode == "rect":
                 if cell is not None and cell != self._rect_cur:
                     self._rect_cur = cell
@@ -688,13 +827,21 @@ class _PlateGrid(QWidget):
         if pending is not None:
             self._press_well(pending[0], pending[1])
         if self._drag_active:
+            painting = self._selection_model == "paint"
             self._drag_active = False
             self._drag_visited = set()
             self._rect_start = None
             self._rect_cur = None
             self._rect_base = {}
             self.update()
-            self.selectionDragFinished.emit()
+            # A paint gesture changed nothing in this widget's own selection,
+            # so ``selectionDragFinished`` would be a lie to anything listening
+            # for "the selection settled". Its own end-of-gesture signal says
+            # what actually happened.
+            if painting:
+                self.paintDragFinished.emit()
+            else:
+                self.selectionDragFinished.emit()
         super().mouseReleaseEvent(event)
 
     def _apply_rect(self) -> None:
@@ -799,9 +946,13 @@ class _PlateGrid(QWidget):
 
         The done wedge is the state's own colour, undarkened — the same orange a
         solid processing well has always been — and the remainder is a lighter
-        tint of it. A dial and a solid well of the same state therefore read as
-        the same colour, which is the point: the dial adds a proportion to the
-        state, it does not restate it in a different hue. The earlier form had
+        tint of it, via :meth:`_lighten` rather than ``QColor.lighter``. That
+        distinction is the whole point of the tone: Qt's ``lighter`` desaturates
+        once value saturates, and at these tokens' value it returns pure white,
+        so an empty dial on an uploaded well used to be a white disc with no hue
+        left to say which stage it was in. A dial and a solid well of the same
+        state read as the same colour, which is what the dial is for: it adds a
+        proportion to the state, it does not restate it in a different hue. The earlier form had
         this the other way round, filling from bright toward a darker spent
         tone, which made a mostly-finished well a muddy brown that matched
         neither the legend swatch nor an unstarted well beside it.
@@ -816,13 +967,27 @@ class _PlateGrid(QWidget):
         90° offset and the negative span.
         """
         base = QColor(base)
+        relief = self._DIAL_RELIEF
         p.setPen(Qt.NoPen)
-        p.setBrush(QBrush(self._sphere_gradient(wr, base.lighter(165))))
+        p.setBrush(QBrush(self._sphere_gradient(
+            wr, self._remaining_tone(base), relief)))
         p.drawEllipse(wr)
         span = max(0.0, min(1.0, fraction))
         if span > 0.0:
-            p.setBrush(QBrush(self._sphere_gradient(wr, base)))
-            p.drawPie(wr, 90 * 16, -int(round(span * 360.0 * 16)))
+            angle = -int(round(span * 360.0 * 16))
+            p.setBrush(QBrush(self._sphere_gradient(wr, base, relief)))
+            p.drawPie(wr, 90 * 16, angle)
+            # Stroke the wedge — its two radii and its arc — so the division
+            # reads even where the two fills are closest. Tone alone cannot
+            # carry it for every state: green's halves stay within 33 luminance
+            # of each other under the highlight even at the damped relief, and a
+            # 96-well plate draws each of these about twelve pixels across.
+            # Skipped at a full dial, where the "boundary" is the rim the well
+            # already has and stroking it again only thickens that line.
+            if span < 1.0:
+                p.setBrush(Qt.NoBrush)
+                p.setPen(QPen(base.darker(170), max(1.0, wr.width() * 0.03)))
+                p.drawPie(wr, 90 * 16, angle)
         # Exactly the rim and specular highlight a plain well gets, at the same
         # widths, so a dial is the same object as every other well and not a
         # flat disc that appeared where a sphere used to be. A well that starts
@@ -834,8 +999,50 @@ class _PlateGrid(QWidget):
         p.drawEllipse(wr)
         self._paint_specular(p, wr)
 
-    @staticmethod
-    def _sphere_gradient(wr: QRectF, tone: QColor) -> QRadialGradient:
+    #: How much of a plain well's relief a *dial* keeps.
+    #:
+    #: A dial draws two tones in the same pixels, and the sphere's highlight
+    #: blends toward white — which compresses two tones *together*, because the
+    #: nearer both are to white the smaller the gap between them. At full
+    #: relief the done and remaining halves of a green well came within 25
+    #: luminance of each other under the highlight, against 39 at the centre,
+    #: and the done wedge was itself 35% of the way to white: reported as "the
+    #: completed portion is too light, I can't see the difference".
+    #:
+    #: 0.43 puts the highlight at 15% toward white and the shadow at
+    #: ``darker(115)``, which lifts that worst case to 33. A plain well keeps
+    #: the full relief (see :meth:`_paint_lit`): it has no internal boundary for
+    #: the highlight to compress, so its shading costs nothing. Only the dial
+    #: carries a second signal in the same pixels, so only the dial pays.
+    _DIAL_RELIEF = 0.43
+
+    @classmethod
+    def _remaining_tone(cls, base: QColor) -> QColor:
+        """The unfinished half of a dial: the state's colour, paler."""
+        return cls._lighten(QColor(base), 0.55)
+
+    @classmethod
+    def _sphere_stops(cls, tone: QColor, relief: float = 1.0):
+        """The three gradient stops for *tone*, scaled by *relief*.
+
+        Separated from :meth:`_sphere_gradient` so the tones can be measured
+        without painting — the guard that the two halves of a dial stay apart
+        is arithmetic over exactly these values.
+
+        The highlight blends toward white rather than calling
+        ``tone.lighter(150)``: at these tokens' value that call desaturates to
+        pure white, so the sphere's upper-left blew out to a colourless patch on
+        every lit well. ``darker`` needs no such treatment — lowering value
+        never touches saturation.
+        """
+        relief = max(0.0, min(1.0, float(relief)))
+        return (cls._lighten(tone, 0.35 * relief),
+                QColor(tone),
+                tone.darker(int(round(100 + 35 * relief))))
+
+    @classmethod
+    def _sphere_gradient(cls, wr: QRectF, tone: QColor,
+                         relief: float = 1.0) -> QRadialGradient:
         """The shading that makes a well read as a sphere, in *tone*.
 
         Shared by the plain well and by each half of a progress dial, so a well
@@ -843,15 +1050,19 @@ class _PlateGrid(QWidget):
         itself. Two separate flat-fill and gradient-fill paths had the dial
         rendering as a flat disc beside spherical neighbours, which read as a
         different kind of object rather than the same well further along.
+
+        *relief* scales the shading. A dial passes :attr:`_DIAL_RELIEF`, for the
+        reason recorded there.
         """
         grad = QRadialGradient(
             wr.center().x() - wr.width() * 0.15,
             wr.center().y() - wr.height() * 0.20,
             wr.width() * 0.75,
         )
-        grad.setColorAt(0.0, tone.lighter(150))
-        grad.setColorAt(0.55, tone)
-        grad.setColorAt(1.0, tone.darker(135))
+        hi, mid, lo = cls._sphere_stops(tone, relief)
+        grad.setColorAt(0.0, hi)
+        grad.setColorAt(0.55, mid)
+        grad.setColorAt(1.0, lo)
         return grad
 
     @staticmethod
@@ -875,7 +1086,94 @@ class _PlateGrid(QWidget):
         self._paint_specular(p, wr)
 
     @staticmethod
-    def _mix_with_rail(tint: QColor, t: float = 0.30) -> QColor:
+    def _paint_ring(p: QPainter, wr: QRectF) -> None:
+        """An accent ring just outside the well body.
+
+        Drawn outside rather than on the rim so it reads as an annotation *of*
+        the well rather than a change to what the well itself is: the fill
+        underneath keeps saying whatever it said (group colour, dial, disabled
+        grey) and the ring adds "and this one is in the thing being edited".
+        """
+        r = QRectF(wr).adjusted(-wr.width() * 0.07, -wr.height() * 0.07,
+                                wr.width() * 0.07, wr.height() * 0.07)
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(QColor(theme.Colors.accent), max(1.5, wr.width() * 0.09)))
+        p.drawEllipse(r)
+
+    def _paint_path(self, p: QPainter, cell: float) -> None:
+        """Trace the visit order across the plate, over the wells.
+
+        A quiet alpha-blended guide rather than a bold overlay: the numbers in
+        the wells are what state the order, and this says how it travels.
+        """
+        if len(self._path) < 2:
+            return
+        accent = with_alpha(QColor(theme.Colors.accent), 0.55)
+        width = max(1.2, cell * 0.05)
+        p.setBrush(QBrush(accent))
+        inset = cell * 0.40   # stop just outside each well circle
+        for (r0, c0), (r1, c1) in zip(self._path, self._path[1:]):
+            a = self._well_rect(r0, c0).center()
+            b = self._well_rect(r1, c1).center()
+            seg = QPointF(b.x() - a.x(), b.y() - a.y())
+            length = (seg.x() ** 2 + seg.y() ** 2) ** 0.5
+            if length <= 1e-6:
+                continue
+            ux, uy = seg.x() / length, seg.y() / length
+            start = QPointF(a.x() + ux * inset, a.y() + uy * inset)
+            end = QPointF(b.x() - ux * inset, b.y() - uy * inset)
+            p.setPen(QPen(accent, width, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawLine(start, end)
+            self._draw_arrowhead(p, end, ux, uy, cell)
+
+    @staticmethod
+    def _draw_arrowhead(p: QPainter, tip: QPointF, ux: float, uy: float,
+                        cell: float) -> None:
+        head = cell * 0.16
+        # Base corners: back off along the segment, then step out perpendicular.
+        bx, by = tip.x() - ux * head, tip.y() - uy * head
+        px, py = -uy, ux
+        left = QPointF(bx + px * head * 0.6, by + py * head * 0.6)
+        right = QPointF(bx - px * head * 0.6, by - py * head * 0.6)
+        p.setPen(Qt.NoPen)
+        p.drawPolygon(QPolygonF([tip, left, right]))
+
+    @staticmethod
+    def _blend(base: QColor, toward: QColor, t: float) -> QColor:
+        """Linear RGB blend from *base* toward *toward*, ``t`` in 0..1.
+
+        The one lerp in this file. Channel-wise in RGB rather than through
+        HSV, which matters for :meth:`_lighten` — see its docstring.
+        """
+        try:
+            br, bg, bb, _ = base.getRgb()
+        except Exception:
+            return QColor(toward)
+        tr, tg, tb, _ = toward.getRgb()
+        t = max(0.0, min(1.0, float(t)))
+        return QColor(
+            int(round(br * (1 - t) + tr * t)),
+            int(round(bg * (1 - t) + tg * t)),
+            int(round(bb * (1 - t) + tb * t)),
+        )
+
+    @classmethod
+    def _lighten(cls, color: QColor, t: float) -> QColor:
+        """A paler *color* that is still recognisably that colour.
+
+        **Not** ``QColor.lighter()``. Qt's version raises the HSV *value*, and
+        once value is already at the ceiling it starts dropping *saturation* —
+        it lightens toward white rather than toward a pale version of the hue.
+        Every state colour in this app sits at value 245–253, so
+        ``accent2 #B98CF7`` came back as literally ``#ffffff``, and a well
+        wearing it lost the hue that says which stage it is in. Blending toward
+        white in RGB keeps the hue: the same token comes back ``#e0cbfb`` at
+        ``t = 0.55``, still lilac.
+        """
+        return cls._blend(QColor(color), QColor("#ffffff"), t)
+
+    @classmethod
+    def _mix_with_rail(cls, tint: QColor, t: float = 0.30) -> QColor:
         """Blend *tint* with the ``rail`` token at ``t`` (0..1).
 
         ``t = 0`` returns pure rail (= the plain depressed look),
@@ -883,19 +1181,7 @@ class _PlateGrid(QWidget):
         the recessed look stays dominant and the colour reads as a
         muted hint of the group rather than the full saturation.
         """
-        c = theme.Colors
-        rail = QColor(c.rail)
-        try:
-            tr, tg, tb, _ = tint.getRgb()
-        except Exception:
-            return rail
-        rr, rg, rb, _ = rail.getRgb()
-        t = max(0.0, min(1.0, float(t)))
-        return QColor(
-            int(round(rr * (1 - t) + tr * t)),
-            int(round(rg * (1 - t) + tg * t)),
-            int(round(rb * (1 - t) + tb * t)),
-        )
+        return cls._blend(QColor(tint), QColor(theme.Colors.rail), 1.0 - t)
 
     def _paint_depressed(self, p: QPainter, wr: QRectF, hovered: bool,
                          tint: QColor | None = None) -> None:
@@ -1002,6 +1288,9 @@ class _PlateGrid(QWidget):
             p.setPen(QColor(c.text_primary if hot else c.text_muted))
             p.drawText(rect, int(Qt.AlignCenter), _ROW_LETTERS[ri])
 
+        # Visit number of each well on the acquisition path, by position.
+        path_seq = {rc: i + 1 for i, rc in enumerate(self._path)}
+
         # Wells.
         for ri in range(_N_ROWS):
             for ci in range(_N_COLS):
@@ -1011,6 +1300,8 @@ class _PlateGrid(QWidget):
                     p.setBrush(QColor(c.panel))
                     p.setPen(QPen(QColor(c.border_subtle), max(1.0, wr.width() * 0.04)))
                     p.drawEllipse(wr)
+                    if key in self._rings:
+                        self._paint_ring(p, wr)
                     continue
                 hovered = (
                     self._hover_cell == key
@@ -1029,23 +1320,43 @@ class _PlateGrid(QWidget):
                 # well body, not something laid over one. Falls through to the
                 # marker glyph below like any other well.
                 frac = self._fractions.get(key)
-                lit = in_selection or (self._colored_wells_lit and group_color is not None)
+                # A well on the acquisition path is lit like a selected one —
+                # the path *is* this plate's selection when the model is
+                # ordered, and it carries its visit number below.
+                on_path = self._selection_model == "path" and key in path_seq
+                lit = (in_selection or on_path
+                       or (self._colored_wells_lit and group_color is not None))
                 if frac is not None:
                     self._paint_fraction(
                         p, wr,
                         group_color if group_color is not None else QColor(c.accent),
                         frac, hovered)
                 elif lit:
-                    base = group_color if group_color is not None else QColor(
-                        traces[self._selected[key] % len(traces)]
-                    )
+                    if group_color is not None:
+                        base = group_color
+                    elif on_path:
+                        # One hue for the whole path: a visit order is a route,
+                        # not eight unrelated series, so the rank-cycled trace
+                        # palette would say something the data doesn't.
+                        base = QColor(c.accent)
+                    else:
+                        base = QColor(traces[self._selected[key] % len(traces)])
                     self._paint_lit(p, wr, base, hovered)
                 else:
                     tint = group_color if group_color is not None else QColor(c.accent)
                     self._paint_depressed(p, wr, hovered, tint=tint)
 
+                if key in self._rings:
+                    self._paint_ring(p, wr)
+
                 glyph = self._markers.get(key)
-                if glyph:
+                if on_path and not glyph:
+                    # The visit number is derived from the path's own order, so
+                    # a host never has to keep a parallel marker map in sync
+                    # with it. An explicit marker still wins — a host that has
+                    # something else to say about the well said it deliberately.
+                    self._paint_visit_number(p, wr, str(path_seq[key]))
+                elif glyph:
                     f = QFont(self.font())
                     f.setPixelSize(max(7, int(wr.height() * 0.62)))
                     p.setFont(f)
@@ -1064,7 +1375,21 @@ class _PlateGrid(QWidget):
             p.setBrush(with_alpha(QColor(c.accent), 0.14))
             p.setPen(QPen(QColor(c.accent), 1.4, Qt.DashLine))
             p.drawRect(QRectF(tl, br))
+
+        # The ordering arrow, over the wells. Last, so it reads as a guide
+        # laid across the plate rather than something a well is wearing.
+        if self._selection_model == "path":
+            self._paint_path(p, cell)
         p.end()
+
+    def _paint_visit_number(self, p: QPainter, wr: QRectF, text: str) -> None:
+        f = QFont(self.font())
+        f.setBold(True)
+        f.setPixelSize(max(7, int(wr.height() * 0.52)))
+        p.setFont(f)
+        p.setPen(QColor(theme.Colors.ink_dark))
+        p.drawText(wr, int(Qt.AlignCenter), text)
+        p.setFont(self.font())
 
 
 class WellPlateSelector(QWidget):
@@ -1077,6 +1402,10 @@ class WellPlateSelector(QWidget):
     wellActivated = Signal(str)
     wellDropped = Signal(str, str)         # (well id under cursor, payload token)
     cornerToggled = Signal(bool)           # corner all/none in passive mode (True=all)
+    pathChanged = Signal(list)             # ordered well ids, "path" selection model
+    wellPaintPressed = Signal(str)         # "paint" selection model — see _PlateGrid
+    wellPaintDragged = Signal(str)
+    paintDragFinished = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1096,6 +1425,10 @@ class WellPlateSelector(QWidget):
         self._grid.wellActivated.connect(self.wellActivated)
         self._grid.wellDropped.connect(self.wellDropped)
         self._grid.cornerToggled.connect(self.cornerToggled)
+        self._grid.pathChanged.connect(self.pathChanged)
+        self._grid.wellPaintPressed.connect(self.wellPaintPressed)
+        self._grid.wellPaintDragged.connect(self.wellPaintDragged)
+        self._grid.paintDragFinished.connect(self.paintDragFinished)
         root.addWidget(self._grid, 1)
 
         self._actions = QHBoxLayout()
@@ -1166,6 +1499,35 @@ class WellPlateSelector(QWidget):
 
     def clearWellFractions(self) -> None:
         self._grid.clear_well_fractions()
+
+    def setWellRing(self, well_id, on: bool = True) -> None:
+        """Ring one well in accent, on top of whatever it already shows."""
+        self._grid.set_well_ring(well_id, on)
+
+    def setWellRings(self, ids) -> None:
+        self._grid.set_well_rings(ids)
+
+    def clearWellRings(self) -> None:
+        self._grid.clear_well_rings()
+
+    # ── ordered-path model ───────────────────────────────────────────────
+    def setSelectionModel(self, model: str) -> None:
+        """``"set"`` (default), ``"path"`` or ``"paint"`` — see ``_PlateGrid``.
+
+        An unrecognised name is rejected loudly rather than silently leaving
+        the plate in ``"set"``: a host that asked for an ordered route and
+        quietly got an unordered selection would look like it worked.
+        """
+        self._grid.set_selection_model(model)
+
+    def selectionModel(self) -> str:
+        return self._grid.selection_model()
+
+    def pathWellIds(self) -> list[str]:
+        return self._grid.path_ids()
+
+    def setPathWellIds(self, ids, *, emit: bool = False) -> bool:
+        return self._grid.set_path_ids(ids, emit=emit)
 
     def clearWellColors(self) -> None:
         self._grid.clear_well_colors()

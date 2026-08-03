@@ -17,8 +17,8 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     NUC_SEG_TOKEN,
     OVERLAY_CHAN,
     _binary_variant,
-    _is_binary_variant,
     _norm_token,
+    is_variant_token,
 )
 
 
@@ -253,10 +253,11 @@ def _axis_dim_values(ctx, dim: str, *, collapse_overlay: bool = True) -> list[st
             ordered = [c for c in copts if c in sel]
             ordered += [c for c in opts if c in sel and c not in copts]
             return ordered
-        # Default (nothing ticked) = the real channels only. Binary variants are
-        # opt-in — they only join the axis when explicitly selected, so a plain
-        # "Channels × Time" build isn't silently doubled.
-        return [c for c in opts if not _is_binary_variant(c)]
+        # Default (nothing ticked) = the real channels only. Render variants
+        # ("(binary)" / "(mask)" / "(raw)") are opt-in — they only join the axis
+        # when explicitly selected, so a plain "Channels × Time" build isn't
+        # silently multiplied.
+        return [c for c in opts if not is_variant_token(c)]
     if dim == "well":
         sel = sorted(getattr(ctx.state.image_table, "active_wells", set()) or set(),
                      key=parse_rc)

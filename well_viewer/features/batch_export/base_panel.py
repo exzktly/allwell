@@ -11,13 +11,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFileDialog,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -32,6 +30,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
+from widgets.well_plate_selector import WellPlateSelector
 from well_viewer.features.batch_export._common import (
     WELL_COLORS,
     BarGroup,
@@ -49,7 +49,6 @@ from well_viewer.features.batch_export._common import (
     _CLR_WHITE,
     get_color,
 )
-from well_viewer.features.batch_export.well_grid_button import _WellGridButton
 # Qt-free export-execution service (A14 / X3) — safe to import at module level.
 from well_viewer.features.batch_export.service import (
     commit_staged_export,
@@ -70,6 +69,17 @@ _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_l
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _get_all_profile_names = _lazy("well_viewer.features.export.style", "get_all_profile_names_ctx")
 _ensure_custom_export_profiles = _lazy("well_viewer.features.export.style", "ensure_custom_export_profiles_ctx")
+#: The one slot in ``ctx.runtime.batch_export.export_groups_doc`` that every
+#: Batch Export mode reads and writes. Export groups describe the dataset's
+#: conditions, not the plot type they happen to be drawn as.
+SHARED_PERSIST_KEY = "groups"
+
+#: The four per-mode slots written before the modes shared one. Read once, in
+#: this order, to seed the shared slot on a document that predates it; never
+#: written. They are left in the document rather than deleted, so rolling the
+#: app back finds them.
+_LEGACY_PERSIST_KEYS = ("line", "bar", "scatter_cells", "scatter_agg")
+
 # The Line-Graphs tab's shared renderer, reused by the batch line figure (proxy
 # is callable, so ``_LineAxes(...)`` constructs the dataclass) — a call, not an
 # import statement, so it stays off the deferred-import budget.
@@ -128,9 +138,11 @@ class BatchExportPanel(QWidget):
         self._ctx = ctx
         self._use_sidebar_groups = bool(use_sidebar_groups)
         # Which slot in ctx.runtime.batch_export.export_groups_doc this panel
-        # reads/writes. Resolved via a method so subclasses (bar / scatter) pick
-        # their own key; safe to call here because the subclass state it needs
-        # (e.g. _scatter_mode) is set before super().__init__.
+        # reads/writes. Every mode resolves to the same one — see
+        # _compute_persist_key. Still a method call so a future mode that
+        # genuinely needs its own slot has an obvious place to say so, and safe
+        # to call here because the subclass state it might need (e.g.
+        # _scatter_mode) is set before super().__init__.
         self._persist_key: str = self._compute_persist_key()
         # Suppress the persistence write-back while we build the UI and hydrate
         # groups from disk (otherwise the initial _refresh_group_list would echo
@@ -165,7 +177,6 @@ class BatchExportPanel(QWidget):
         self._groups: list[BarGroup] = self._groups_from_persistence()
         self._active_grp = 0 if self._groups else -1
         self._auto_named_group_ids: set[int] = set()
-        self._map_btns: dict[str, _WellGridButton] = {}
         self._drag_adding = True
         self._drag_visited: set = set()
 
@@ -175,8 +186,17 @@ class BatchExportPanel(QWidget):
         self._suppress_persist = False
 
     def _compute_persist_key(self) -> str:
-        """Slot key in ``app._export_groups_doc`` for this panel (line plot)."""
-        return "line"
+        """Slot key in ``app._export_groups_doc`` — shared by every mode.
+
+        Line, Bar, Scatter (cells) and Scatter (aggregate) used to keep four
+        private sets under ``"line"`` / ``"bar"`` / ``"scatter_cells"`` /
+        ``"scatter_agg"``, so groups built in one mode were invisible in the
+        others and anyone exporting the same conditions four ways built them
+        four times. The groups are a property of the dataset, not of the plot
+        type, so there is one slot; :data:`_LEGACY_PERSIST_KEYS` covers the
+        documents written before that.
+        """
+        return SHARED_PERSIST_KEY
 
     def _build_ui(self) -> None:
         from PySide6.QtWidgets import QBoxLayout
@@ -315,35 +335,39 @@ class BatchExportPanel(QWidget):
         hint.setContentsMargins(6, 2, 6, 2)
         layout.addWidget(hint)
 
-        map_widget = QWidget()
-        map_grid = QGridLayout(map_widget)
-        map_grid.setSpacing(2)
-        map_grid.setContentsMargins(4, 2, 4, 2)
-        for ci, col in enumerate(_PLATE_COLS):
-            lbl = QLabel(col)
-            lbl.setAlignment(Qt.AlignCenter)
-            map_grid.addWidget(lbl, 0, ci + 1)
-        for ri, row in enumerate(_PLATE_ROWS):
-            rlbl = QLabel(row)
-            rlbl.setAlignment(Qt.AlignCenter)
-            map_grid.addWidget(rlbl, ri + 1, 0)
-            for ci, col in enumerate(_PLATE_COLS):
-                tok = f"{row}{col}"
-                btn = _WellGridButton(tok)
-                self._map_btns[tok] = btn
-                map_grid.addWidget(btn, ri + 1, ci + 1)
-
-        # Per-button forwarding: enabled buttons consume mouse events, so
-        # the parent-level handlers never fire. Forward directly instead.
-        for _b in self._map_btns.values():
-            _b.setMouseTracking(True)
-            _b.mousePressEvent = self._plate_press
-            _b.mouseMoveEvent = self._plate_move
-            _b.mouseReleaseEvent = self._plate_release
-        map_widget.mousePressEvent = self._plate_press
-        map_widget.mouseMoveEvent = self._plate_move
-        map_widget.mouseReleaseEvent = self._plate_release
-        layout.addWidget(map_widget)
+        # The app's plate control, in its "paint" selection model: the plate
+        # reports the press/drag/release gesture and this panel applies it to
+        # the active group. It owns no selection of its own, because export
+        # group membership is not a set of clicked wells — dropping one well
+        # can pull in the replicate set it belongs to, and several groups
+        # overlap on the same plate with the last one winning the colour.
+        #
+        # This used to be 96 flat 28x22px QPushButtons in a QGridLayout, with
+        # each one's mousePressEvent/mouseMoveEvent/mouseReleaseEvent
+        # reassigned to this panel's methods (enabled buttons swallow mouse
+        # events, so the container's handlers never fired). Rectangles on a
+        # grid do not read as a plate, and this was the one well grid in the
+        # app that shared nothing with the others.
+        self._map_plate = WellPlateSelector()
+        # "editor", not "rail": the rail role is exempt from the size caps
+        # because Review's left-rail picker is the app's primary interaction
+        # surface and scales to whatever width the rail gives it. This plate
+        # sits in a panel above a group list, and uncapped it reserves a card
+        # as tall as heightForWidth allows — 389px against the old grid's 212,
+        # taking 164px from the group list in the side-by-side layout, with the
+        # grid floating in the middle of a mostly-empty card.
+        apply_plate_geometry(self._map_plate, role="editor")
+        self._map_plate.setSelectionModel("paint")
+        self._map_plate.setColoredWellsLit(True)
+        self._map_plate.wellPaintPressed.connect(self._plate_press)
+        self._map_plate.wellPaintDragged.connect(self._plate_dragged)
+        self._map_plate.paintDragFinished.connect(self._plate_release)
+        # Headers stay inert. The panel's only row/column action ("One group
+        # per row / column") replaces every existing group, so putting it on a
+        # header click would make a stray click on the plate's edge destroy the
+        # groups the user had built.
+        self._map_plate.setRowColumnSelectable(False)
+        layout.addWidget(self._map_plate, 0, PLATE_ALIGNMENT)
 
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.HLine)
@@ -358,15 +382,20 @@ class BatchExportPanel(QWidget):
         self._grp_scroll.setWidget(self._grp_inner)
         layout.addWidget(self._grp_scroll, 1)
 
-    def _tok_at(self, global_pos) -> str | None:
-        for tok, btn in self._map_btns.items():
-            if btn.isVisible() and btn.rect().contains(btn.mapFromGlobal(global_pos)):
-                return tok
-        return None
+    def _all_well_tokens(self) -> list[str]:
+        """Every plate position, so a colour map can clear the ones no group
+        owns as well as set the ones that do."""
+        return [f"{row}{col}" for row in _PLATE_ROWS for col in _PLATE_COLS]
 
-    def _plate_press(self, event) -> None:
-        tok = self._tok_at(event.globalPosition().toPoint())
-        if tok is None or tok not in self._ctx.state.dataset.well_paths:
+    def _plate_press(self, tok: str) -> None:
+        """Left-press on *tok*: latch the gesture's polarity and apply it.
+
+        Whether the whole drag adds or removes is decided by the well it
+        started on, so dragging across a group's own wells removes them and
+        dragging across empty ones adds — one gesture, one direction, rather
+        than each well toggling under the cursor.
+        """
+        if tok not in self._ctx.state.dataset.well_paths:
             return
         grp = self._active_group()
         if grp is None:
@@ -375,14 +404,10 @@ class BatchExportPanel(QWidget):
         self._drag_visited = set()
         self._apply_drag(tok)
 
-    def _plate_move(self, event) -> None:
-        if not (event.buttons() & Qt.LeftButton):
-            return
-        tok = self._tok_at(event.globalPosition().toPoint())
-        if tok and tok not in self._drag_visited:
-            self._apply_drag(tok)
+    def _plate_dragged(self, tok: str) -> None:
+        self._apply_drag(tok)
 
-    def _plate_release(self, _event) -> None:
+    def _plate_release(self) -> None:
         if self._drag_visited:
             self._refresh_map()
             self._refresh_group_list()
@@ -1013,12 +1038,20 @@ class BatchExportPanel(QWidget):
             return
         rset = next((r for r in _rep_sets_loaded(self._ctx) if tok in r.wells), None)
         if rset is not None:
+            # Membership is tested by *name*, not by object identity.
+            # ``rep_sets_loaded`` builds a fresh ``ReplicateSet`` on every call
+            # and the class has no ``__eq__``, so ``rset in grp.members`` was
+            # always False: dragging across two wells of one sample appended
+            # that sample twice (the group then exports the condition twice),
+            # and dragging a sample back off a group removed nothing at all.
+            # The name is already the identity key everywhere else — it is what
+            # ``_serialize_groups`` persists and what hydration matches on.
+            existing = next((m for m in grp.members if m.name == rset.name), None)
             if self._drag_adding:
-                if rset not in grp.members:
+                if existing is None:
                     grp.members.append(rset)
-            else:
-                if rset in grp.members:
-                    grp.members.remove(rset)
+            elif existing is not None:
+                grp.members.remove(existing)
         else:
             if self._drag_adding:
                 if tok not in grp.solo_wells:
@@ -1041,16 +1074,24 @@ class BatchExportPanel(QWidget):
         return WELL_COLORS[index % len(WELL_COLORS)]
 
     def _refresh_single_btn(self, tok: str) -> None:
-        btn = self._map_btns.get(tok)
-        if btn is None or tok not in self._ctx.state.dataset.well_paths:
+        """Repaint one well mid-drag, without the whole-plate pass.
+
+        A drag can cross dozens of wells, and each one only changes its own
+        colour; ``_refresh_map`` runs once at the end of the gesture.
+        """
+        if tok not in self._ctx.state.dataset.well_paths:
             return
         # Last group containing the well wins, matching _refresh_map.
         owner = next((gi for gi in range(len(self._groups) - 1, -1, -1)
                       if tok in self._groups[gi].wells), None)
-        if owner is not None:
-            btn.set_colors(self._group_color(owner), _CLR_WHITE)
-            return
-        btn.set_colors(theme.Colors.panel_elevated, theme.Colors.text_primary)
+        self._map_plate.setWellColor(
+            tok, self._group_color(owner) if owner is not None else None)
+        # The ring says "in the group being edited", so it has to move with the
+        # colour. Left to the end-of-gesture ``_refresh_map``, a well dragged
+        # out of the active group would sit ringed but uncoloured for the rest
+        # of the drag.
+        grp = self._active_group()
+        self._map_plate.setWellRing(tok, bool(grp is not None and tok in grp.wells))
 
     def _refresh_map(self) -> None:
         avail = set(self._ctx.state.dataset.well_paths.keys())
@@ -1064,13 +1105,21 @@ class BatchExportPanel(QWidget):
         if grp:
             for w in grp.wells:
                 active_wells.add(w)
-        for tok, btn in self._map_btns.items():
-            if tok not in avail:
-                btn.set_colors(theme.Colors.well_unavailable, theme.Colors.text_muted, enabled=False)
-            elif tok in tok_color:
-                btn.set_colors(tok_color[tok], _CLR_WHITE, active=(tok in active_wells))
-            else:
-                btn.set_colors(theme.Colors.panel_elevated, theme.Colors.text_primary)
+        # Wells the dataset does not have are disabled rather than tinted grey
+        # by hand — the plate already draws an absent well as an empty socket,
+        # and a disabled well ignores the paint gesture for free.
+        # ``sorted(avail)``, never ``or None`` — ``None`` means "all 96
+        # enabled", so a dataset with no wells at all would render a full plate
+        # of live-looking wells that silently reject every click, instead of 96
+        # empty sockets.
+        self._map_plate.setEnabledWells(sorted(avail))
+        self._map_plate.setWellColors(
+            {tok: tok_color.get(tok) for tok in self._all_well_tokens()})
+        # The active group's wells carry an accent ring on top of their group
+        # colour: which group you are editing is a different question from
+        # which group a well is in, so it gets its own channel rather than
+        # overloading the fill.
+        self._map_plate.setWellRings(sorted(active_wells & avail))
 
     def _clear_layout(self, layout) -> None:
         _clear_layout_helper(layout)
@@ -1324,9 +1373,34 @@ class BatchExportPanel(QWidget):
         return new_groups
 
     def _groups_from_persistence(self) -> list[BarGroup]:
-        """Hydrate this panel's groups from the batch-export groups doc."""
+        """Hydrate the shared export groups from the batch-export groups doc.
+
+        A document written before the modes shared a slot has no shared key and
+        up to four per-mode ones. Those are merged, in
+        :data:`_LEGACY_PERSIST_KEYS` order, de-duplicated by group name with the
+        first occurrence winning — the common case being the same groups
+        rebuilt in several modes, which collapses to exactly the one set the
+        user meant. A union rather than picking one slot because the uncommon
+        case is four genuinely different sets, and picking would silently
+        delete three of them.
+
+        Only when the shared key is absent. Once it exists it is the whole
+        answer, so deleting a group cannot be undone by a legacy slot
+        re-supplying it on the next load.
+        """
         doc = self._ctx.runtime.batch_export.export_groups_doc or {}
-        return self._deserialize_groups(doc.get(self._persist_key))
+        if self._persist_key in doc:
+            return self._deserialize_groups(doc.get(self._persist_key))
+        merged: list = []
+        seen: set[str] = set()
+        for key in _LEGACY_PERSIST_KEYS:
+            for item in doc.get(key) or []:
+                name = str(item.get("name", "")) if isinstance(item, dict) else ""
+                if name in seen:
+                    continue
+                seen.add(name)
+                merged.append(item)
+        return self._deserialize_groups(merged)
 
     def _persist_groups(self) -> None:
         """Mirror the editor into the in-memory batch-export groups doc.

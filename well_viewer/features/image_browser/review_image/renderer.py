@@ -986,6 +986,58 @@ def reset_review_image_colors(ctx) -> None:
 
 
 
+def zoom_review_image_to_selected_nucleus_ctx(ctx, zoom: float = 3.0) -> None:
+    """ctx-native entry point (kept for the cell-browser caller)."""
+    zoom_review_image_to_selected_nucleus(ctx, zoom)
+
+
+def zoom_review_image_to_selected_nucleus(ctx, zoom: float = 3.0) -> None:
+    # A8 E4-review: ctx-native pixmap-service leaf. The QLabel host + QScrollArea
+    # canvas + decoded RGB buffer are live objects on ``ctx.runtime.review_image``;
+    # zoom/pan/base_pil are typed state on ``ctx.state.review_image``.
+    rt = ctx.runtime.review_image
+    label = rt.label
+    canvas = rt.canvas
+    if label is None or canvas is None:
+        return
+    ri = ctx.state.review_image
+    nid = ri.selected_nucleus
+    mask_arr = getattr(label, "_mask_arr", None)
+    if nid is None or mask_arr is None:
+        return
+    ys, xs = _np.where(mask_arr == int(nid))
+    if len(xs) == 0 or len(ys) == 0:
+        return
+    cx = float(xs.mean())
+    cy = float(ys.mean())
+    ri.zoom = float(max(1.0, zoom))
+    rgb = rt.base_rgb
+    if rgb is not None:
+        ih, iw = rgb.shape[:2]
+    else:
+        img = ri.base_pil
+        if img is None:
+            return
+        iw, ih = img.size
+    vp = canvas.viewport()
+    cw = max(1, vp.width())
+    ch = max(1, vp.height())
+    fit = min(cw / max(iw, 1), ch / max(ih, 1))
+    scale = max(0.05, fit * max(0.1, float(ri.zoom)))
+    nw, nh = max(1, int(iw * scale)), max(1, int(ih * scale))
+    # The renderer derives the scrollbar value as
+    #     scroll = max(0, (max(nw, cw) - cw) // 2) - int(pan)
+    # and the QLabel host's pixmap sits at x=0 inside it when the
+    # scaled image exceeds the viewport (nw > cw), so the centring
+    # formula has to be pan = nw/2 - cx*scale (and likewise for y).
+    # The old `cw/2 - base_x - cx*scale` form mis-offset the pan by
+    # roughly (nw - cw)/2 px once you zoomed in, which is why the
+    # yellow nucleus ended up off-screen.
+    ri.pan_x = (nw / 2.0) - (cx * scale)
+    ri.pan_y = (nh / 2.0) - (cy * scale)
+    render_review_image_display(ctx)
+
+
 def review_image_zoom_step(ctx, direction: int) -> None:
     steps = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
     cur = ctx.state.review_image.zoom

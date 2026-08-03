@@ -289,11 +289,25 @@ DEFAULT_SCHEMA = PipelineSchema()
 _NUMERIC_RE = re.compile(r"^-?\d+(?:\.\d+)?$")
 
 
+def _raw_token(value: Any) -> str:
+    """Stringify *value* for normalisation, treating only ``None`` as absent.
+
+    The obvious ``str(value or "")`` is wrong here and was wrong for a long
+    time: ``0`` and ``0.0`` are falsy, so a numeric baseline timepoint of ``0``
+    — the first column of most time courses — stringified to ``""`` and every
+    normaliser below then reported the token as missing. Identity tokens arrive
+    both as combo text (``"0"``, truthy) and as pandas values off a CSV column
+    (``0.0``, falsy), so the two sides disagreed at exactly ``t=0`` and nowhere
+    else. ``None`` is the only value that genuinely means "no token".
+    """
+    return "" if value is None else str(value)
+
+
 def normalize_well(value: Any) -> str:
     """Canonical 96-well token: ``"a1"`` → ``"A01"``. Returns the
     stripped upper-cased input when the value isn't a valid 96-well
     position so opaque well labels survive."""
-    raw = str(value or "").strip()
+    raw = _raw_token(value).strip()
     if not raw:
         return ""
     canonical = canonical_well_label(raw)
@@ -307,7 +321,7 @@ def normalize_fov(value: Any) -> str:
     convention shared with :func:`load_well_csv`); purely-numeric tokens
     have leading zeros stripped (``"001"`` → ``"1"``); other tokens
     pass through stripped."""
-    raw = str(value or "").strip()
+    raw = _raw_token(value).strip()
     if raw in ("", "-1"):
         return "1"
     if _NUMERIC_RE.match(raw):
@@ -355,14 +369,8 @@ def normalize_tp(value: Any) -> str:
     """Canonical timepoint key form. Parseable forms (``T01`` / ``24h``
     / ``1.0`` / bare numeric) collapse to ``f"{hours:g}"``; opaque
     labels (``"treated_arm_2"``) pass through stripped. Used by every
-    site that compares timepoint identity.
-
-    Emptiness is decided on the *string*, never on the value's truthiness: a
-    numeric ``0`` is falsy, so testing the value itself made the baseline
-    timepoint normalise to ``""`` when it arrived as a float and to ``"0"`` when
-    it arrived as text — two keys for the same timepoint, and the empty one
-    matching nothing at all."""
-    raw = "" if value is None else str(value).strip()
+    site that compares timepoint identity."""
+    raw = _raw_token(value).strip()
     if not raw:
         return ""
     hours = parse_timepoint_hours(raw)
@@ -382,7 +390,7 @@ def normalize_nucleus_id(value: Any) -> str:
     always integers; any ``.0`` is a pandas float-string artefact, so
     ``"1.0"`` → ``"1"`` uniformly. Non-numeric IDs pass through
     stripped."""
-    raw = str(value or "").strip()
+    raw = _raw_token(value).strip()
     if not raw:
         return ""
     if _NUMERIC_RE.match(raw):
@@ -628,7 +636,7 @@ def normalize_id(value: Any) -> str:
     collapse leading zeros; non-digit tokens pass through). Prefer
     :func:`normalize_nucleus_id` or :func:`normalize_fov` /
     :func:`normalize_tp` for new code."""
-    raw = str(value or "").strip()
+    raw = _raw_token(value).strip()
     if raw.isdigit():
         return str(int(raw))
     return raw

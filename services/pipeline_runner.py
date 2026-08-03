@@ -16,6 +16,10 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
                              upload or download progress, for its dial on the
                              plate map. Parsed out of the log stream by
                              ProgressTracker; never written to the log.
+    sched         tuple      (state, job_id, launcher) — the run is queued on a
+                             remote scheduler, or has just been granted its
+                             node. ``state`` is "waiting" | "queued" | "granted";
+                             ``job_id`` is "" until the scheduler names it.
     done          str        Pipeline finished successfully.
     error         str        Pipeline failed; payload is a message.
     finished      None       Final event, always emitted in a finally.
@@ -56,6 +60,16 @@ _LEVEL_TO_TAG = {
     "ERROR": "ERROR", "CRITICAL": "ERROR",
 }
 
+# Severity a line states about itself, for the lines that carry no ``levelname``
+# — the app's own ``[warn]`` / ``[info]`` tags, and the ``note:`` marker the
+# remote runner uses for "this is context, not a verdict". Checked *before* the
+# keyword heuristics below, which read paths as well as prose and so cannot tell
+# a failure from a directory named ``errors/``.
+_RE_EXPLICIT_TAG = re.compile(r"\[(info|warn|warning|error)\]", re.IGNORECASE)
+_TAG_TO_LEVEL = {"info": "INFO", "warn": "WARNING", "warning": "WARNING",
+                 "error": "ERROR"}
+_RE_SELF_DECLARED_NOTE = re.compile(r"\bnote:", re.IGNORECASE)
+
 
 def classify_log_line(line: str) -> str:
     """Return the severity tag for a single pipeline stdout line.
@@ -68,10 +82,27 @@ def classify_log_line(line: str) -> str:
     the end-of-run summary is logged at INFO and reads "wells failed (no output)
     : 0 … FOV-groups failed : 0", so a substring test for "failed" painted a
     clean run's summary red. Those are column labels, not a verdict.
+
+    **A line that declares its own severity is believed before it is sniffed.**
+    The keyword pass reads whole lines, including *paths*, and the pipeline
+    writes its per-failure tracebacks to a directory called ``errors/``. So
+    ``[remote] note: …/errors/ not present on remote`` — which a clean run
+    always emits, because that directory is only created when something fails —
+    was painted red by the name of the folder it was reporting the absence of.
+    Good news, rendered as an alarm. The same line about ``pipeline_info.json``
+    came out INFO, which is how the mechanism gives itself away.
     """
     m = _RE_LOG_LEVEL.match(line)
     if m:
         return _LEVEL_TO_TAG[m.group(1)]
+
+    tag = _RE_EXPLICIT_TAG.search(line)
+    if tag:
+        return _TAG_TO_LEVEL[tag.group(1).lower()]
+    if _RE_SELF_DECLARED_NOTE.search(line):
+        # "note:" is the author saying this is context, not a verdict. Nothing
+        # that reports a failure introduces itself as a note.
+        return "INFO"
 
     ll = line.lower()
     # "failed" catches the per-FOV-group "FAILED <fov> …" line and the run
@@ -106,6 +137,27 @@ _RE_WELL_SKIP = re.compile(r"SKIP well (\S+)\s+\S+\s+output already exists")
 # Remote incremental: the runner emits this for wells it didn't need to upload /
 # re-fetch because their local output is already current — marks them complete.
 _RE_REMOTE_UPTODATE = re.compile(r"\[remote\] ✓ ([A-Ha-h]\d{1,2}): up to date")
+
+# A scheduler-backed host queues the pipeline rather than starting it, and a
+# queue wait is indistinguishable from a hang: the upload finishes, the log
+# stops. Four lines mark the two ends of that wait.
+#
+# The first and last are the app's own (``_scheduler_handoff_lines`` and the
+# echo from inside the allocation), so their wording is ours to keep. The two
+# ``srun:`` ones are SLURM's own stderr, merged into the run's stdout by the
+# launcher's ``stderr=subprocess.STDOUT`` — and they are the ONLY source of the
+# job id before the allocation exists, because the ``.slurm`` sidecar is written
+# from inside it. They are matched permissively and treated as a bonus: a site
+# whose scheduler words them differently still gets the wait announced and timed
+# off our own lines, and loses only the id.
+_RE_SCHED_REQUEST = re.compile(
+    r"\[remote\] scheduler: (?:batch \d+: )?requesting allocation via: (.+)")
+_RE_SCHED_GRANTED = re.compile(
+    r"\[remote\] scheduler: allocation granted — job (\S+)")
+_RE_SCHED_QUEUED = re.compile(
+    r"srun: job (\d+) queued and waiting for resources", re.IGNORECASE)
+_RE_SCHED_ALLOCATED = re.compile(
+    r"srun: job (\d+) has been allocated resources", re.IGNORECASE)
 # Remote per-well lifecycle: input zip uploaded, then the output is fetched as
 # TWO separate transfers — the well's output zip AND its per-well CSV(s). A well
 # is only "downloaded" once BOTH have landed; the ``✓ materialised`` line fires
@@ -270,6 +322,12 @@ class ProgressTracker:
         # A well is "downloaded" only once BOTH its output zip and its CSV(s)
         # have transferred — not on the first part, and not on ``✓ materialised``
         # (which fires even when the CSV pull failed and is deferred to a retry).
+        # The end-of-run retry backstop emits these same two lines (tagged
+        # "(end-of-run retry)") for a well it rescues, so a well fixed at the
+        # end completes the pair by the same route. It has to report both halves
+        # even where it only had to pull one: the in-stream fetcher returns on a
+        # failed zip pull *before* reaching the CSVs, so a well that reaches the
+        # backstop has usually registered neither.
         mz = _RE_FETCH_ZIP.search(line)
         if mz and self._mark_fetch_part(mz.group(1), "zip"):
             events.append(("well_stage", (mz.group(1), "download")))
@@ -292,6 +350,21 @@ class ProgressTracker:
         mru = _RE_REMOTE_UPTODATE.search(line)
         if mru:
             events.append(("well_stage", (mru.group(1), "download")))
+        # Scheduler hand-off. Reported as its own kind rather than folded into
+        # ``status`` because the GUI has to start and stop a clock, not just
+        # write a string — a wait that does not visibly count up is the hang it
+        # was mistaken for.
+        msr = _RE_SCHED_REQUEST.search(line)
+        if msr:
+            events.append(("sched", ("waiting", "", msr.group(1).strip())))
+        msq = _RE_SCHED_QUEUED.search(line)
+        if msq:
+            events.append(("sched", ("queued", msq.group(1), "")))
+        for _pat in (_RE_SCHED_GRANTED, _RE_SCHED_ALLOCATED):
+            msg = _pat.search(line)
+            if msg:
+                events.append(("sched", ("granted", msg.group(1), "")))
+                break
         # Finalize-phase status — replace the generic "Finalizing…" with what
         # the run is actually doing so it doesn't read as a hang.
         if _RE_TF_SCAN.search(line):

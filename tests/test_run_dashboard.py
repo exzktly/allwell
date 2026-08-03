@@ -109,14 +109,16 @@ def test_uploaded_and_computing_are_different_colours(qapp):
     assert d._well_color("A01") != d._well_color("A02")
 
 
-def test_uploaded_wears_an_empty_dial(qapp):
-    """Rewritten: per-well upload used to be treated as a single event — the
-    archive landed or it did not — so an uploaded well carried no dial at all
-    and a plate mid-run was a solid block of wells saying nothing.
+def test_an_upload_fills_the_dial_and_leaves_it_full(qapp):
+    """Per-well upload used to be a single event — the archive landed or it did
+    not — so an uploaded well carried no dial and a plate mid-run was a solid
+    block of wells saying nothing.
 
     Upload does have a fraction (rsync's own byte stream, attributed per
-    archive), and once it is finished the well is *waiting to compute*, which
-    is an empty dial rather than a plain disc.
+    archive). It fills the dial as the bytes go, and the dial *stays* full when
+    the transfer ends: the archive is on the remote in full, and what the well
+    waits for next is its turn to compute, not more transfer. Emptying it here
+    made the transfer appear to undo itself the moment it finished.
     """
     from widgets.run_dashboard import RunDashboard
 
@@ -126,6 +128,9 @@ def test_uploaded_wears_an_empty_dial(qapp):
     assert d._plate._grid._fractions[(0, 0)] == pytest.approx(0.6)
     d.set_well_stage("A01", "upload")
     d.set_well_transfer("A01", "up", 1.0)
+    assert d._plate._grid._fractions[(0, 0)] == 1.0
+    # …and only the start of compute takes it back to empty.
+    d.set_well_stage("A01", "active")
     assert d._plate._grid._fractions[(0, 0)] == 0.0
 
 
@@ -383,3 +388,127 @@ def test_local_auto_threshold_records_reach_the_line_stream():
     m = _RE_TF_PROG.search(lines[1])
     assert (m.group(1), m.group(2)) == ("7", "40")
     assert _RE_THRESH_WELL.search(lines[1]).group(1) == "C08"
+
+
+# ── a transfer repaints the well, not just its dial ──────────────────────────
+#
+# Reported as: a well "started blue, then a pie that filled to blue, then stayed
+# at blue despite the top progress bar stating that wells were actively
+# downloading". ``set_well_stage`` pushed both the colour and the fraction to the
+# plate; ``set_well_transfer`` pushed only the fraction. So the green
+# ``_well_color`` computes for a download was thrown away on every tick and the
+# well kept the blue of its last stage change — the arrival, the one thing the
+# colour exists to show, never reached the screen.
+#
+# These assert on what the PLATE was told, not on what the dashboard computes.
+# Asserting the computed value is what hid this: ``_well_color`` returned green
+# throughout while the widget painted blue.
+
+def _colour_spy(d):
+    """Record every colour actually pushed to the plate."""
+    pushed = []
+    real = d._plate.setWellColor
+
+    def _spy(well, colour):
+        pushed.append(colour)
+        return real(well, colour)
+
+    d._plate.setWellColor = _spy
+    return pushed
+
+
+def test_a_download_repaints_the_well_green_not_just_the_dial(qapp):
+    import theme
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    d.set_well_stage("A01", "process")            # computed: blue
+    pushed = _colour_spy(d)
+
+    d.set_well_transfer("A01", "down", 0.45)
+    assert pushed, "a transfer must repaint the well, not only fill its dial"
+    assert pushed[-1] == theme.Colors.success
+    assert d._plate._grid._fractions[(0, 0)] == pytest.approx(0.45)
+
+
+def test_an_upload_repaints_the_well_too(qapp):
+    import theme
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    pushed = _colour_spy(d)
+    d.set_well_transfer("A01", "up", 0.3)
+    assert pushed[-1] == theme.Colors.accent2
+
+
+def test_a_finished_zip_freezes_the_ring_instead_of_reverting_to_blue(qapp):
+    """A well's output arrives as TWO transfers — the zip, then its CSVs — and
+    only the zip has a measurable size. Ending the transfer at the zip returned
+    the well to a full ring in the computed blue for the whole CSV pull, which
+    is exactly what a well that had not started downloading looks like.
+
+    The ring freezes at the last measured fraction instead: green, and visibly
+    short of full, so "still fetching" cannot be read as either "not started" or
+    "finished".
+    """
+    import theme
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    d.set_well_stage("A01", "process")
+    d.set_well_transfer("A01", "down", 0.97)
+    d.set_well_transfer("A01", "down", 1.0)       # the heartbeat closing its window
+
+    assert d._well_color("A01") == theme.Colors.success
+    assert d._well_fraction("A01") == pytest.approx(0.97), "the ring must not fill"
+
+    d.set_well_stage("A01", "download")           # CSVs landed: now it is fetched
+    assert d._well_color("A01") == theme.Colors.success
+    assert d._well_fraction("A01") == 1.0
+    assert "A01" not in d._xfer, "the frozen ring should be dropped once fetched"
+
+
+def test_a_closing_download_with_no_prior_tick_invents_nothing(qapp):
+    """A well whose remote size probe failed never had a dial. The heartbeat
+    still closes its window on the way out, and that lone 1.0 must not conjure a
+    full ring for a transfer whose progress was never measured."""
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    d.set_well_stage("A01", "process")
+    d.set_well_transfer("A01", "down", 1.0)
+    assert "A01" not in d._xfer
+
+
+def test_a_finished_upload_still_ends_its_transfer(qapp):
+    """Only a *download* holds its entry past 1.0; an upload still drops one.
+
+    The asymmetry is the point. A download's 1.0 marks the end of the zip, with
+    the CSVs still to come, so the ring has to keep describing a fetch that is
+    not over. An upload's 1.0 is the whole transfer, so the entry goes and the
+    stages take the dial back.
+
+    What the dial then *reads* is not this test's business — an uploaded well
+    holds a full dial so the fill never rewinds at the upload → compute
+    handover, which ``test_a_finished_upload_hands_the_dial_back_to_the_stages``
+    covers. This asserts only that the transfer itself ended.
+    """
+    from widgets.run_dashboard import RunDashboard
+
+    d = RunDashboard()
+    d.reset(remote=True, total=1)
+    d.set_well_stage("A01", "upload")
+    d.set_well_transfer("A01", "up", 0.5)
+    assert d._xfer["A01"] == ("up", 0.5)
+    d.set_well_transfer("A01", "up", 1.0)
+    assert "A01" not in d._xfer, "an upload's 1.0 ends it"
+
+    # ...where a download's does not.
+    d.set_well_stage("B02", "process")
+    d.set_well_transfer("B02", "down", 0.5)
+    d.set_well_transfer("B02", "down", 1.0)
+    assert d._xfer["B02"] == ("down", 0.5), "the zip is done; the CSVs are not"

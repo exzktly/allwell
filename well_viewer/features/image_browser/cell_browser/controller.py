@@ -25,12 +25,10 @@ from well_viewer.features.image_browser.cell_browser.collect import (
     collect_cells,
 )
 from well_viewer.features.image_browser.cell_browser.state import MAX_TOTAL, THUMB_PX
-from well_viewer.features.image_browser.review_image.controller import (
-    zoom_review_image_to_selected_nucleus_ctx,
-)
 from well_viewer.features.image_browser.review_image.renderer import (
     refresh_review_image_ctx,
     update_preview_ctx,
+    zoom_review_image_to_selected_nucleus_ctx,
 )
 
 _logger = logging.getLogger("well_viewer")

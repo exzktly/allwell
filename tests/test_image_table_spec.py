@@ -36,11 +36,13 @@ def test_nested_rows_flatten_and_restore():
     # flatten
     assert st.row_dims == ["well", "channel"]
     assert st.col_dims == ["timepoint"]
-    assert st.active_channels == {"DAPI", "GFP"}
+    # The render is part of the axis token: a mask channel is its own row, so a
+    # channel shown as both its image and its cell mask cannot collapse into one.
+    assert st.active_channels == {"DAPI", "GFP (mask)"}
     assert st.composite is False
     assert st.fixed_vals == {"fov": "1"}
-    assert st.channel_opts["GFP"]["render"] == "mask"
-    assert st.channel_opts["GFP"]["boundary"] is True
+    assert st.channel_opts["GFP (mask)"]["render"] == "mask"
+    assert st.channel_opts["GFP (mask)"]["boundary"] is True
     # restore
     back = spec_from_state(st)
     assert back.rows.root == "well"

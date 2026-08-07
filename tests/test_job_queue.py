@@ -276,3 +276,186 @@ def test_load_queue_well_formed_json_but_malformed_queue_returns_empty_queue(tmp
         (d / "job_queue.json").write_text(json.dumps(payload))
         q = load_queue(d)
         assert q.jobs == [], f"case {i} ({payload!r}) should yield an empty queue, not raise"
+
+
+# ── editing a queued job (update / duplicate / retry / clear) ─────────────────
+
+def test_update_spec_replaces_the_stored_spec():
+    q = JobQueue([_job("a")])
+    assert q.update_spec("a", {"opts": {"raw": "/data/other"}}) is True
+    assert q.get("a").spec == {"opts": {"raw": "/data/other"}}
+
+
+def test_update_spec_refuses_the_running_job():
+    """Its spec has already been handed to a runner; rewriting it would
+    describe the in-flight run as something it is not."""
+    q = JobQueue([_job("a", state=JobState.RUNNING)])
+    assert q.update_spec("a", {"opts": {"raw": "/x"}}) is False
+    assert q.get("a").spec == {"opts": {"raw": "/data/a"}}
+
+
+def test_update_spec_leaves_state_alone():
+    """Editing is not re-arming.
+
+    Re-arming a succeeded job here would strand its successors: they already
+    ran, and their predecessor would no longer read SUCCEEDED. retry() is the
+    one explicit way a state moves backwards.
+    """
+    q = JobQueue([_job("a", state=JobState.SUCCEEDED)])
+    q.update_spec("a", {"opts": {"raw": "/data/edited"}})
+    assert q.get("a").state == JobState.SUCCEEDED
+
+
+def test_duplicate_lands_directly_after_its_original():
+    q = JobQueue([_job("a"), _job("b")])
+    clone = q.duplicate("a", "a2")
+    assert [j.id for j in q.jobs] == ["a", "a2", "b"]
+    assert clone.state == JobState.PENDING
+
+
+def test_duplicate_deep_copies_the_spec():
+    """The copy must not share nested structure with its original — editing
+    one would otherwise silently edit both."""
+    q = JobQueue([_job("a")])
+    clone = q.duplicate("a", "a2")
+    clone.spec["opts"]["raw"] = "/data/changed"
+    assert q.get("a").spec["opts"]["raw"] == "/data/a"
+
+
+def test_duplicate_drops_the_chain_link():
+    """A clone waiting on its twin's predecessor waits for output it has no
+    relationship to. "Run this same tool against another dataset" is the
+    reason to duplicate, and that job has no predecessor."""
+    q = JobQueue([_job("a"), _job("b", chain_from="a", chain_target="opts.raw",
+                                   chain_kind="out_dir")])
+    clone = q.duplicate("b", "b2")
+    assert clone.chain_from is None
+    assert clone.chain_target is None and clone.chain_kind is None
+
+
+def test_duplicate_refuses_an_id_already_in_use():
+    q = JobQueue([_job("a"), _job("b")])
+    assert q.duplicate("a", "b") is None
+    assert [j.id for j in q.jobs] == ["a", "b"]
+
+
+def test_retry_returns_a_failed_job_to_pending():
+    q = JobQueue([_job("a", state=JobState.FAILED)])
+    q.get("a").message = "boom"
+    assert q.retry("a") is True
+    assert q.get("a").state == JobState.PENDING
+    assert q.get("a").message == ""
+
+
+def test_retry_clears_a_succeeded_job_s_recorded_output():
+    """A retried job has not produced anything yet. Leaving the old paths on
+    it would let a chained successor materialise against the previous run's
+    output while this one is still going."""
+    q = JobQueue([_job("a", state=JobState.SUCCEEDED)])
+    q.get("a").output_dir = "/out/old"
+    q.retry("a")
+    assert q.get("a").output_dir is None
+
+
+def test_retry_unblocks_what_the_failure_stranded():
+    q = JobQueue([_job("a"), _job("b", chain_from="a"), _job("c", chain_from="b")])
+    q.mark_running("a")
+    q.mark_finished("a", ok=False, message="boom")
+    assert [j.state for j in q.jobs] == [JobState.FAILED, JobState.BLOCKED, JobState.BLOCKED]
+    q.retry("a")
+    assert [j.state for j in q.jobs] == [JobState.PENDING] * 3
+
+
+def test_retry_leaves_jobs_blocked_by_a_different_failure():
+    """Only the retried job's own successors move. A job blocked by a
+    failure that has not been retried is still blocked."""
+    q = JobQueue([_job("a"), _job("b", chain_from="a"),
+                  _job("c"), _job("d", chain_from="c")])
+    for failed in ("a", "c"):
+        q.mark_running(failed)
+        q.mark_finished(failed, ok=False, message="boom")
+    q.retry("a")
+    assert q.get("b").state == JobState.PENDING
+    assert q.get("d").state == JobState.BLOCKED
+
+
+@pytest.mark.parametrize("state", [JobState.PENDING, JobState.RUNNING])
+def test_retry_refuses_a_job_that_is_not_finished(state):
+    q = JobQueue([_job("a", state=state)])
+    assert q.retry("a") is False
+    assert q.get("a").state == state
+
+
+def test_clear_terminal_drops_only_finished_jobs():
+    q = JobQueue([_job("a", state=JobState.SUCCEEDED), _job("b"),
+                  _job("c", state=JobState.FAILED),
+                  _job("d", state=JobState.RUNNING)])
+    assert q.clear_terminal() == 2
+    assert [j.id for j in q.jobs] == ["b", "d"]
+
+
+def test_clear_terminal_unlinks_a_survivor_chained_to_a_cleared_job():
+    """Goes through remove() per id for exactly this: a surviving job left
+    pointing at an id that is gone can never become runnable."""
+    q = JobQueue([_job("a", state=JobState.SUCCEEDED),
+                  _job("b", chain_from="a", chain_target="opts.raw",
+                       chain_kind="out_dir")])
+    q.clear_terminal()
+    assert q.get("b").chain_from is None
+    assert q.next_runnable().id == "b"
+
+
+# ── move_to (drag reorder) ────────────────────────────────────────────────────
+
+def test_move_to_shifts_the_rows_it_passes_rather_than_swapping():
+    """The difference from move(): dragging picks a destination, so the jobs
+    it passes shuffle up by one instead of one of them being exchanged."""
+    q = JobQueue([_job("a"), _job("b"), _job("c"), _job("d")])
+    assert q.move_to("a", 2) is True
+    assert [j.id for j in q.jobs] == ["b", "c", "a", "d"]
+
+
+def test_move_to_refuses_placing_a_job_before_its_predecessor():
+    q = JobQueue([_job("a"), _job("b", chain_from="a")])
+    assert q.move_to("b", 0) is False
+    assert [j.id for j in q.jobs] == ["a", "b"]
+
+
+@pytest.mark.parametrize("target", [-1, 5])
+def test_move_to_refuses_an_index_off_the_end(target):
+    q = JobQueue([_job("a"), _job("b")])
+    assert q.move_to("a", target) is False
+    assert [j.id for j in q.jobs] == ["a", "b"]
+
+
+def test_move_to_is_a_no_op_on_its_own_index():
+    q = JobQueue([_job("a"), _job("b")])
+    assert q.move_to("a", 0) is False
+
+
+# ── counts and repair notes ───────────────────────────────────────────────────
+
+def test_counts_reports_every_state_including_the_empty_ones():
+    """A caller formatting the summary never has to tell "none of these"
+    apart from "no such state"."""
+    q = JobQueue([_job("a"), _job("b"), _job("c", state=JobState.FAILED)])
+    counts = q.counts()
+    assert counts[JobState.PENDING] == 2
+    assert counts[JobState.FAILED] == 1
+    assert counts[JobState.SUCCEEDED] == 0
+
+
+def test_repair_notes_survive_the_load_that_produced_them(tmp_path):
+    """The repair used to be invisible: _repair_after_load returned notes and
+    from_json dropped them, so a queue that came back interrupted said so
+    nowhere the user could see."""
+    q = JobQueue([_job("a", state=JobState.RUNNING)])
+    save_queue(q, tmp_path)
+    restored = load_queue(tmp_path)
+    assert restored.get("a").state == JobState.INTERRUPTED
+    assert any("interrupted" in note for note in restored.repair_notes)
+
+
+def test_repair_notes_are_empty_for_a_clean_queue(tmp_path):
+    save_queue(JobQueue([_job("a")]), tmp_path)
+    assert load_queue(tmp_path).repair_notes == []

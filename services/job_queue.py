@@ -140,6 +140,10 @@ class JobQueue:
         self._by_id: dict[str, JobSpec] = {j.id: j for j in self._jobs}
         # Never set true by loading from disk — see the module docstring.
         self._started = False
+        # What _repair_after_load had to fix, for whoever shows the queue to
+        # tell the user. A repair the user cannot see reads as the queue
+        # having quietly lost their jobs' state.
+        self.repair_notes: list[str] = []
 
     # -- basic access ---------------------------------------------------
 
@@ -197,6 +201,123 @@ class JobQueue:
             return False
         self._jobs = trial
         return True
+
+    def move_to(self, job_id: str, index: int) -> bool:
+        """Move ``job_id`` to absolute position ``index``.
+
+        The drag-reorder counterpart of :meth:`move`, which steps by a delta
+        and swaps. Dragging picks a destination rather than a number of steps,
+        and a swap is the wrong operation for it — dropping a job three rows
+        down should push the rows it passed up by one, not exchange it with
+        whatever happens to sit at the destination. Validated by the same
+        whole-list chain-order check, so a drag can no more strand a job
+        before its predecessor than an arrow-key move can.
+        """
+        idx = self._index(job_id)
+        if idx is None or not (0 <= index < len(self._jobs)) or index == idx:
+            return False
+        trial = list(self._jobs)
+        trial.insert(index, trial.pop(idx))
+        if not self._chain_order_valid(trial):
+            return False
+        self._jobs = trial
+        return True
+
+    def update_spec(self, job_id: str, spec: dict) -> bool:
+        """Replace ``job_id``'s stored spec. Refuses while it is running.
+
+        Deliberately leaves ``state`` alone. Re-arming a finished job on edit
+        would leave successors that already succeeded pointing at a
+        predecessor that is no longer ``SUCCEEDED`` — a half-state nothing
+        else in this class can produce. :meth:`retry` is the single explicit
+        way a state moves backwards, and editing then retrying is two clear
+        steps rather than one with a hidden second effect.
+        """
+        job = self._by_id.get(job_id)
+        if job is None or job.state == JobState.RUNNING:
+            return False
+        job.spec = spec
+        return True
+
+    def set_label(self, job_id: str, label: str) -> bool:
+        """Rename a job. Labels are derived from the spec, so this is how an
+        edited job's name catches up with what it now describes."""
+        job = self._by_id.get(job_id)
+        if job is None:
+            return False
+        job.label = label
+        return True
+
+    def duplicate(self, job_id: str, new_id: str) -> JobSpec | None:
+        """Copy ``job_id`` as a fresh pending job directly after it.
+
+        The chain link is deliberately *not* copied: a clone that inherited
+        its twin's predecessor would wait on output it has no relationship to,
+        and "run this same tool against another dataset" — the reason to
+        duplicate at all — is a job with no predecessor. The new id is passed
+        in rather than generated here so this module needs no ``uuid`` and a
+        test can name the copy.
+        """
+        job = self._by_id.get(job_id)
+        if job is None or new_id in self._by_id:
+            return None
+        clone = JobSpec(
+            id=new_id,
+            kind=job.kind,
+            label=job.label,
+            spec=json.loads(json.dumps(job.spec)),
+        )
+        self._jobs.insert(self._index(job_id) + 1, clone)
+        self._by_id[new_id] = clone
+        return clone
+
+    def retry(self, job_id: str) -> bool:
+        """Put a finished job back in the queue, and unblock what it stranded.
+
+        Only a job in a ``TERMINAL`` state can be retried — a pending one is
+        already waiting and a running one is already going. Successors that
+        cascaded to ``BLOCKED`` when this job failed are returned to
+        ``PENDING``, since the reason they were blocked is the thing being
+        retried; anything they were told about it is cleared with them.
+        """
+        job = self._by_id.get(job_id)
+        if job is None or job.state not in JobState.TERMINAL:
+            return False
+        job.state = JobState.PENDING
+        job.message = ""
+        job.output_dir = job.dataset_root = job.in_dir = None
+        self._cascade_unblock(job_id)
+        return True
+
+    def clear_terminal(self) -> int:
+        """Drop every finished job, returning how many went.
+
+        Goes through :meth:`remove` per id rather than filtering the list, so
+        a surviving job chained to one of the removed ones loses its link
+        instead of keeping a pointer to a job that no longer exists. The ids
+        are snapshotted first — ``remove`` mutates the list being read.
+        """
+        doomed = [j.id for j in self._jobs if j.state in JobState.TERMINAL]
+        for job_id in doomed:
+            self.remove(job_id)
+        return len(doomed)
+
+    def counts(self) -> dict[str, int]:
+        """How many jobs are in each state — the queue's one-line summary.
+
+        Every state is present with a zero rather than omitted, so a caller
+        formatting the summary never has to distinguish "none in this state"
+        from "this state does not exist".
+        """
+        tally = {state: 0 for state in (
+            JobState.PENDING, JobState.RUNNING, JobState.SUCCEEDED,
+            JobState.FAILED, JobState.CANCELLED, JobState.BLOCKED,
+            JobState.INTERRUPTED, JobState.SUSPENDED,
+        )}
+        for job in self._jobs:
+            if job.state in tally:
+                tally[job.state] += 1
+        return tally
 
     def set_chain(
         self,
@@ -355,6 +476,30 @@ class JobQueue:
                     blocking.add(j.id)
                     changed = True
 
+    def _cascade_unblock(self, retried_job_id: str) -> None:
+        """The mirror of :meth:`_cascade_block`, walked from a retried job.
+
+        Only ``BLOCKED`` jobs move, and only those reachable from this one:
+        a job blocked by a *different* failure further along the queue stays
+        blocked, because that failure has not been retried. ``chain_from`` is
+        a single id, so the links form a forest and there is no second parent
+        to still be failing.
+        """
+        unblocking = {retried_job_id}
+        changed = True
+        while changed:
+            changed = False
+            for j in self._jobs:
+                if (
+                    j.id not in unblocking
+                    and j.chain_from in unblocking
+                    and j.state == JobState.BLOCKED
+                ):
+                    j.state = JobState.PENDING
+                    j.message = ""
+                    unblocking.add(j.id)
+                    changed = True
+
     # -- persistence ----------------------------------------------------
 
     def to_json(self) -> dict:
@@ -364,7 +509,7 @@ class JobQueue:
     def from_json(cls, data: dict) -> JobQueue:
         jobs = [JobSpec.from_json(d) for d in (data.get("jobs") or [])]
         q = cls(jobs)
-        q._repair_after_load()
+        q.repair_notes = q._repair_after_load()
         return q
 
     def _repair_after_load(self) -> list[str]:

@@ -8,6 +8,11 @@ persist a Analyze run's configuration as a plain, JSON-round-trippable
 ``RunSpec`` and start it later, without depending on the live form having the
 same values it had at enqueue time.
 
+The queue's *edit* flow needs the opposite direction too — a spec written back
+into the form — which is :class:`analyze_job_edit.AnalyzeJobEditMixin`, mixed
+in here because it is part of the same queue-facing surface. ``show_job`` below
+stays a shallow preview; ``hydrate_job`` is the full inverse.
+
 ``start_run`` never raises and never shows a dialog — it returns an error
 string on failure so it stays callable headless (from a queue worker with no
 form on screen); the caller decides how to surface the message.
@@ -17,11 +22,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from analyze_job_edit import AnalyzeJobEditMixin
 from services.pipeline_service import find_pipeline_script
 from services.run_spec import RunSpec, RunSpecError
 
 
-class AnalyzeRunMixin:
+class AnalyzeRunMixin(AnalyzeJobEditMixin):
     """Splits run-collection (``_collect_run_spec``) from run-starting
     (``start_run``) so a :class:`RunSpec` can be persisted and started later,
     independent of the form state at collection time."""

@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from datasets._common.log_panel import LogPanelMixin
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.plate_grid import serpentine_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
@@ -60,11 +60,6 @@ _ROLE_LABELS = {
 }
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 class OmeImportPage(LogPanelMixin, QWidget):

@@ -29,18 +29,13 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from datasets._common.log_panel import LogPanelMixin
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport, wells_needing_force
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 def _is_dataset(root: Path) -> str:
@@ -176,8 +171,20 @@ class ValidatePage(LogPanelMixin, QWidget):
         self._findings_list.setVisible(False)
         outer.addWidget(self._findings_list, 1)
 
-        self.build_log_tail(outer, object_name="ValidateStatus", placeholder="Log will appear here.", log_header="Raw log")
+        self.build_log_tail(outer, object_name="ValidateStatus",
+                            placeholder="Log will appear here.", log_header="Raw log")
+        # The same trailing stretch every other Datasets page carries, and for
+        # the same reason: `QScrollArea.setWidgetResizable(True)` grows this
+        # content widget to fill the viewport, and with the findings list and
+        # the raw log both hidden nothing else in the column would absorb the
+        # leftover height — the dashboard would, turning into a growing dead
+        # zone below its own plate. A trailing stretch outranks every 0-stretch
+        # item above it, so the slack collects as blank page background at the
+        # bottom instead. The other five pages add theirs in _build_ui after
+        # this section returns; Validate's belongs here, at the end of its own.
+        outer.addStretch(1)
 
+    # ── public API used by the controller ──────────────────────────────
     def dataset_path(self) -> str:
         return self._dataset_field.path()
 

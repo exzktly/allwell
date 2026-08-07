@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from datasets._common.log_panel import LogPanelMixin
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.timepoint import sort_key as tp_sort_key
 from widgets._support import set_variant
 from widgets.flow_layout import FlowLayout
@@ -48,11 +48,6 @@ from datasets.subset.subset_compute import (
 )
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 def _is_dataset(root: Path) -> str:
@@ -223,6 +218,7 @@ class SubsetPage(LogPanelMixin, QWidget):
 
         self.build_log_tail(outer, object_name="SubsetStatus", placeholder="Status will appear here.")
 
+    # ── public API used by the controller ──────────────────────────────
     def source_path(self) -> str:
         return self._src_field.path()
 

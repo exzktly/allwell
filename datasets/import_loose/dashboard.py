@@ -26,7 +26,7 @@ class ImportLooseDashboard(PlateProgress):
         self._wells: list[str] = []
         self._well_stage: dict[str, str] = {}
         self._outcome = ""
-        super().__init__("Conversion Progress", parent)
+        super().__init__("Zip Progress", parent)
         self.setObjectName("ImportLooseDashboard")
 
     def reset(self) -> None:
@@ -111,7 +111,7 @@ class ImportLooseDashboard(PlateProgress):
         stage = self._well_stage.get(w)
         if stage is None:
             return f"{w or well_id}: not part of this conversion"
-        label = {"pending": "pending", "writing": "converting", "done": "converted"}[stage]
+        label = {"pending": "pending", "writing": "zipping", "done": "zipped"}[stage]
         return f"{w}: {label}"
 
     def _build_rail(self) -> None:
@@ -119,7 +119,7 @@ class ImportLooseDashboard(PlateProgress):
         head = QLabel("Wells", self._rail_host)
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._rail_lay.addWidget(head)
-        for state, label in (("pending", "Pending"), ("writing", "Converting"), ("done", "Converted")):
+        for state, label in (("pending", "Pending"), ("writing", "Zipping"), ("done", "Zipped")):
             n = sum(1 for s in self._well_stage.values() if s == state)
             row_w = QWidget(self._rail_host)
             row = QHBoxLayout(row_w)
@@ -148,7 +148,7 @@ class ImportLooseDashboard(PlateProgress):
         head = QLabel("Legend", self._legend_host)
         head.setStyleSheet(f"color:{theme.Colors.text_primary}; font-weight:600;")
         self._legend_lay.addWidget(head)
-        for state, label in (("pending", "pending"), ("writing", "converting"), ("done", "converted")):
+        for state, label in (("pending", "pending"), ("writing", "zipping"), ("done", "zipped")):
             row_w = QWidget(self._legend_host)
             r = QHBoxLayout(row_w)
             r.setContentsMargins(0, 0, 0, 0)

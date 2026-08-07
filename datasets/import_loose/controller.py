@@ -115,7 +115,7 @@ class ImportLooseController(QObject):
 
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
-        self.page.dashboard.set_headline(f"Converting {len(wells)} well(s)…")
+        self.page.dashboard.set_headline(f"Zipping {len(wells)} well(s)…")
 
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log(f"✓ {summary}")

@@ -42,8 +42,7 @@ _MAX_LOG_BLOCKS = 10000
 # What the checkbox does, for the five pages that never said. Only Concatenate
 # explained itself before; the wording here is deliberately tool-agnostic, and
 # a page with something more specific to say passes its own.
-_DEFAULT_TOGGLE_TIP = ("Show this tool's full line-by-line output beneath the "
-                       "progress summary.")
+_DEFAULT_TOGGLE_TIP = "Show this tool's full line-by-line output below."
 
 
 def hrule(parent: QWidget) -> QFrame:
@@ -59,7 +58,7 @@ class LogPanelMixin:
 
     def build_log_header(self, outer: QVBoxLayout, title: str, *,
                          clear: bool = True,
-                         toggle_tooltip: str = _DEFAULT_TOGGLE_TIP) -> QWidget:
+                         toggle_tooltip: str = _DEFAULT_TOGGLE_TIP) -> None:
         """The section header: *title*, a "Show raw log" toggle, and a rule.
 
         *clear* adds a Clear button beside the toggle. Validate passes
@@ -90,11 +89,10 @@ class LogPanelMixin:
 
         outer.addWidget(hdr)
         outer.addWidget(hrule(self))
-        return hdr
 
     def build_log_tail(self, outer: QVBoxLayout, *, object_name: str = "",
                        placeholder: str = "Status will appear here.",
-                       log_header: str = "") -> QPlainTextEdit:
+                       log_header: str = "") -> None:
         """The separator and the raw log itself, both hidden until revealed.
 
         *log_header*, when given, inserts a header row of its own between the
@@ -126,7 +124,6 @@ class LogPanelMixin:
         outer.addWidget(self._status, 1)
 
         self._on_toggle_raw_log(False)
-        return self._status
 
     # ── the three members that were byte-identical six times over ────────
     def append_log(self, text: str) -> None:

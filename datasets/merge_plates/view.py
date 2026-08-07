@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from datasets._common.log_panel import LogPanelMixin
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.well_token import canonical_well_label
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -44,11 +44,6 @@ from datasets.merge_plates.merge_plates_compute import (
 )
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 def _is_dataset(root: Path) -> str:
@@ -223,6 +218,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
 
         self.build_log_tail(outer, object_name="MergePlatesStatus", placeholder="Status will appear here.")
 
+    # ── public API used by the controller ──────────────────────────────
     def dataset1_path(self) -> str:
         return self._ds1_field.path()
 

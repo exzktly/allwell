@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
-from datasets._common.log_panel import LogPanelMixin
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -52,11 +52,6 @@ def _is_destination(root: Path) -> str:
     return ""
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 class ImportLoosePage(LogPanelMixin, QWidget):
@@ -187,7 +182,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.addStretch(1)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        self.build_log_header(outer, "Conversion Output")
+        self.build_log_header(outer, "Zip Output")
 
         self.dashboard = ImportLooseDashboard(self)
         # Hidden until the source folder scans to at least a real answer —
@@ -199,6 +194,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
 
         self.build_log_tail(outer, object_name="ImportLooseStatus", placeholder="Status will appear here.")
 
+    # ── public API used by the controller ──────────────────────────────
     def source_path(self) -> str:
         return self._src_field.path()
 
@@ -274,8 +270,8 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._dest_field.revalidate()
         if ok and self._dest_field.message():
             self._dest_field.show_note(
-                "This destination now holds the converted dataset from "
-                "that run — pick a new folder to convert again."
+                "This destination now holds the zipped dataset from "
+                "that run — pick a new folder to zip again."
             )
         self._refresh_run_enabled()
 
@@ -325,13 +321,13 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         if not preview.wells:
             # Nothing the current schema/separator recognises yet -- an
             # empty "Ready — 0 well(s)" plate would answer a question
-            # ("what will this convert?") with "nothing", which reads the
+            # ("what will this zip?") with "nothing", which reads the
             # same as "broken" rather than "not ready yet".
             self.dashboard.setVisible(False)
             return
         self.dashboard.reset()
         self.dashboard.set_wells(preview.wells)
-        self.dashboard.set_headline(f"Ready — {len(preview.wells)} well(s) to convert.")
+        self.dashboard.set_headline(f"Ready — {len(preview.wells)} well(s) to zip.")
         self.dashboard.setVisible(True)
 
     def _on_source_changed(self) -> None:

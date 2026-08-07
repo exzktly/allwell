@@ -24,26 +24,36 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
+def _tool_kinds() -> list[str]:
+    """Every queueable tool, from the registry the app itself builds from.
+
+    Driven off ``_FEATURES`` rather than a list written out here: a hardcoded
+    roster makes these sweeps say "all six" while meaning "the six I knew
+    about", which is exactly the drift they exist to prevent. A seventh tool
+    added to the registry is swept from the moment it exists.
+    """
+    from datasets_tab import _FEATURES
+
+    return [f.kind for f in _FEATURES if f.kind and f.kind != "job_queue"]
+
+
 def _pages():
-    from datasets.concatenate.view import ConcatenatePage
-    from datasets.import_loose.view import ImportLoosePage
-    from datasets.merge_plates.view import MergePlatesPage
-    from datasets.ome_import.view import OmeImportPage
-    from datasets.subset.view import SubsetPage
-    from datasets.validate.view import ValidatePage
+    """kind -> page class, resolved through each feature's own controller."""
+    import importlib
 
-    return {
-        "concatenate": ConcatenatePage,
-        "ome_import": OmeImportPage,
-        "validate": ValidatePage,
-        "subset": SubsetPage,
-        "import_loose": ImportLoosePage,
-        "merge_plates": MergePlatesPage,
-    }
+    out = {}
+    for kind in _tool_kinds():
+        module = importlib.import_module(f"datasets.{kind}.view")
+        page_cls = next(
+            obj for name, obj in vars(module).items()
+            if name.endswith("Page") and isinstance(obj, type)
+            and obj.__module__ == module.__name__
+        )
+        out[kind] = page_cls
+    return out
 
 
-ALL_TOOLS = ["concatenate", "ome_import", "validate", "subset",
-             "import_loose", "merge_plates"]
+ALL_TOOLS = _tool_kinds()
 
 
 @pytest.fixture(params=ALL_TOOLS)
@@ -91,6 +101,8 @@ def test_a_page_with_its_own_log_header_toggles_that_too(qapp):
     assert validate._log_hdr.isHidden()
     validate._raw_log_cb.setChecked(True)
     assert not validate._log_hdr.isHidden()
+    validate._raw_log_cb.setChecked(False)
+    assert validate._log_hdr.isHidden()
 
 
 def test_append_and_clear(page):
@@ -145,3 +157,30 @@ def test_every_page_explains_its_raw_log_toggle(qapp):
     """Concatenate was the only one of six that said what "raw log" meant."""
     for name, cls in _pages().items():
         assert cls()._raw_log_cb.toolTip(), f"{name} has no tooltip on its toggle"
+
+
+def test_the_dashboard_does_not_stretch_to_fill_a_tall_viewport(page, qapp):
+    """Every page needs a trailing stretch, and the shared refactor lost one.
+
+    `QScrollArea.setWidgetResizable(True)` grows the content widget to the
+    viewport. With the raw log hidden by default, the dashboard is the only
+    widget in the outer layout willing to absorb the leftover height, and its
+    own internal `center.addStretch(1)` turns that into a growing dead zone
+    below the height-capped plate rather than the plate itself growing.
+
+    Subset had this guard and Validate did not, which is why folding the six
+    status sections together could delete Validate's trailing stretch — and
+    its eight-line comment explaining it — with nothing going red. It measured
+    1755px against a 305px sizeHint at 1300x2000. Swept over every tool now.
+    """
+    dashboard = getattr(page, "dashboard", None)
+    if dashboard is None:
+        pytest.skip("this tool reports with a progress bar, not a dashboard")
+    dashboard.setVisible(True)
+    page.resize(1300, 2000)          # far taller than the natural content
+    page.show()
+    qapp.processEvents()
+    assert dashboard.height() <= dashboard.sizeHint().height() + 20, (
+        f"dashboard is {dashboard.height()}px against a "
+        f"{dashboard.sizeHint().height()}px sizeHint — the page is missing its "
+        "trailing outer.addStretch(1)")

@@ -353,7 +353,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 | `worker.py` | Background `QThread` worker. | `features/smfish/worker.py` |
 | `row.py` | One repeated list entry's widget, split out when it grows its own menu / drag handling beyond what the page holding it should carry. | `datasets/job_queue/row.py` |
 | `session.py` | A mode a feature can be in that outlives a single click and has rules of its own about entering, abandoning and committing it. | `datasets/job_queue/session.py` |
-| `_panel.py` | Per-plot-type panel (only inside `features/batch_export/`). | `features/batch_export/bar_panel.py`, `scatter_panel.py` |
+| `_panel.py` | A self-contained slice of a page's chrome: a per-plot-type panel, or a block of furniture several pages share. | `features/batch_export/bar_panel.py`, `datasets/_common/log_panel.py` |
 | `_` prefix | Private helper module (not part of the package's public surface). | `persistence/_doc.py`, `_io.py`, `features/batch_export/_common.py`, `_line_series_runner.py` |
 
 **Known exceptions** (legacy or single-purpose modules that don't fit the grid; do not propagate these naming choices to new files):
@@ -2869,31 +2869,41 @@ names they lifted from `_common`, so their own public API (and every existing
 test against it) is unchanged.
 
 All six tool pages share their status/log furniture through
-`datasets/_common/log_panel.py::LogPanelMixin`. Each page ends the same way — a
+`datasets/_common/log_panel.py::LogPanelMixin`. Each page ends the same way: a
 header row naming its output section with a "Show raw log" checkbox, then a
-separator and a read-only monospace log revealed by that checkbox — and that was
-copy-pasted six times: `append_log` and `clear_log` byte-identical across all
-six, `_on_toggle_raw_log` identical in four. `datasets/_common/` had held only
-logic (containers, dataset paths, member names, zip passthrough), and the
-absence of a shared *view* layer is how these pages drifted apart in the first
-place, each fix landing on one copy of six.
+separator and a read-only monospace log the checkbox reveals. The mixin owns
+those two ends. The middle — a `ConcatDashboard`, a bare `QProgressBar`, a
+`ValidateDashboard` above a findings list — differs per tool and stays on the
+page, which is why the extraction stops where it does.
 
-The mixin owns the two ends only; the middle — a `ConcatDashboard`, a bare
-`QProgressBar`, a `ValidateDashboard` above a findings list — genuinely differs
-per tool and stays on the page. **One implementation of the toggle covers all
-six with no overrides**: it checks `_status`, `_log_sep` and `_log_hdr`, and
-Validate is the only page with a log header of its own. Validate also passes
-`clear=False`, keeping its Clear in the raw-log header rather than the Findings
-one, because there it looked like it did nothing — the log it wiped was usually
-hidden. Per-page differences are parameters, not casualties: section title,
-status `objectName`, placeholder wording, and the toggle tooltip.
+**One implementation of the toggle serves all six, with no overrides.** It
+checks `_status`, `_log_sep` and `_log_hdr`; Validate is the only page holding a
+log header of its own, and the rest contribute nothing there. Validate also
+passes `clear=False`, keeping its Clear in the raw-log header rather than the
+Findings one, where it reads as belonging to the findings and wipes a log that
+is usually hidden. Per-page differences are parameters: section title, status
+`objectName`, placeholder wording, and the toggle tooltip.
 
-Two consequences of having the seam. Each tool's primary button now names a
-distinct verb — Convert OME-TIFF and Zip Loose Folder both read "▶ Convert"
-before, two pages with the same word and nothing on the run row to separate them
-— and all six explain their raw-log toggle, where only Concatenate did.
-`tests/test_datasets_log_panel.py` sweeps every page parametrically: none may
-re-define a shared member, and no two may share a primary label.
+`datasets/_common/` otherwise holds only logic (containers, dataset paths,
+member names, zip passthrough) — including `dataset_paths.split_stem_well`,
+the pane's single reader of a trailing well token on a longer stem
+(`measurements_b10` → `("measurements", "B10")`). That is not
+`util.well_token.canonical_well_label`, which judges a whole token; it is
+equally deliberately the only place the judgement is made, since the same
+regex and zero-padding in three modules is the shape §15 warns about. A shared *view* layer matters here for a
+specific reason: without one, a fix to any of this lands on one page of six,
+and the other five keep whatever they had.
+
+Two properties the seam makes enforceable, both swept parametrically over
+`datasets_tab._FEATURES` by `tests/test_datasets_log_panel.py` — driven off the
+registry rather than a roster written in the test, so a seventh tool is covered
+from the moment it exists. No page may re-define a shared member, and no two
+tools may share a primary button label: a screenshot of a run row has to say
+which tool it is. Each page also needs a trailing `outer.addStretch(1)` after
+its last real widget, since `QScrollArea.setWidgetResizable(True)` grows the
+content widget to the viewport and the dashboard is otherwise the only thing
+willing to absorb the slack — turning into a dead zone below its own
+height-capped plate.
 
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates
@@ -3851,7 +3861,7 @@ state. `ImportLoosePage._update_status_preview` reveals the dashboard as
 soon as the source folder's live scan (`scan_folder`, the same call the
 readout already makes on every schema/separator keystroke) finds at least
 one well, seeded with those wells and a "Ready — N well(s) to convert."
-headline, rather than staying hidden until "▶ Convert" is pressed; a scan
+headline, rather than staying hidden until "▶ Zip folder" is pressed; a scan
 that finds nothing yet leaves the dashboard hidden rather than showing an
 empty "Ready — 0 well(s)" plate, which would read as "broken" rather than
 "not ready yet".

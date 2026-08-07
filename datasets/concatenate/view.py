@@ -31,7 +31,7 @@ import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
-from datasets._common.log_panel import LogPanelMixin
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.concatenate.concatenate_compute import (
     DatasetPaths,
     destination_has_marker,
@@ -41,13 +41,6 @@ from datasets.concatenate.concatenate_compute import (
 from datasets.concatenate.dashboard import ConcatDashboard
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    """Full-width divider matching Analyze's section/log-header rules
-    (``QFrame#HRule`` — see analyze_tab_form._section / _build_log)."""
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 def _is_dataset(root: Path) -> str:
@@ -216,8 +209,9 @@ class ConcatenatePage(LogPanelMixin, QWidget):
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
-        self.build_log_tail(outer, object_name="ConcatStatus")
+        self.build_log_tail(outer, placeholder="Status will appear here.", object_name="ConcatStatus")
 
+    # ── public API used by the controller ──────────────────────────────
     def dataset1_path(self) -> str:
         return self._ds1_field.path()
 

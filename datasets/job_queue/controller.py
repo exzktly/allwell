@@ -22,23 +22,9 @@ from typing import Protocol
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from services.job_kinds import CHAIN_TARGET, KIND_LABEL, PRODUCED_KEY, describe
 from services.job_queue import JobQueue, JobSpec, JobState, load_queue, save_queue
-from datasets.job_queue.view import KIND_LABEL, JobQueuePage
-
-# The one bit of per-kind knowledge chaining needs: which key in a finished
-# job's "produced" dict its controller's jobFinished(ok, message, path) third
-# argument should be stored under. Every Datasets tool produces a full
-# dataset_root (an in/ + out/ pair); Analyze's useful successor input is its
-# out/ folder specifically.
-_PRODUCED_KEY = {
-    "analyze": "out_dir",
-    "concatenate": "dataset_root",
-    "ome_import": "dataset_root",
-    "validate": "dataset_root",
-    "subset": "dataset_root",
-    "import_loose": "dataset_root",
-    "merge_plates": "dataset_root",
-}
+from datasets.job_queue.view import JobQueuePage
 
 
 class QueueableController(Protocol):
@@ -115,10 +101,95 @@ class QueueBridge(QObject):
             self.queueChanged.emit()
         return moved
 
-    def show_job(self, job_id: str) -> None:
+    def move_job_to(self, job_id: str, index: int) -> bool:
+        """Absolute-position reorder, for a dragged row."""
+        moved = self._queue.move_to(job_id, index)
+        if moved:
+            self._save()
+            self.queueChanged.emit()
+        return moved
+
+    def update_job(self, job_id: str, spec: dict) -> bool:
+        """Write an edited spec back over a queued job, renaming it to match.
+
+        The label is re-derived rather than kept: it describes the spec, so an
+        edited job whose name still said what it used to run against would be
+        worse than one with no name at all.
+        """
+        job = self._queue.get(job_id)
+        if job is None or not self._queue.update_spec(job_id, spec):
+            return False
+        self._queue.set_label(job_id, describe(job.kind, spec))
+        self._save()
+        self.queueChanged.emit()
+        return True
+
+    def duplicate_job(self, job_id: str) -> bool:
+        clone = self._queue.duplicate(job_id, uuid.uuid4().hex[:10])
+        if clone is None:
+            return False
+        self._save()
+        self.queueChanged.emit()
+        self._advance()
+        return True
+
+    def retry_job(self, job_id: str) -> bool:
+        if not self._queue.retry(job_id):
+            return False
+        self._save()
+        self.queueChanged.emit()
+        self._advance()
+        return True
+
+    def clear_completed(self) -> int:
+        removed = self._queue.clear_terminal()
+        if removed:
+            self._save()
+            self.queueChanged.emit()
+        return removed
+
+    def set_chain(self, job_id: str, chain_from: str) -> bool:
+        """Link (or, with an empty *chain_from*, unlink) a job.
+
+        The two per-kind halves of the link are derived rather than asked for:
+        which of the predecessor's outputs to take comes from its kind, and
+        where to put it in this job's spec comes from this one's. A user
+        choosing "run after that one" should not also have to know that
+        Analyze receives its input at ``opts.raw`` and Validate at ``dataset``.
+        """
         job = self._queue.get(job_id)
         if job is None:
-            return
+            return False
+        if not chain_from:
+            self._queue.set_chain(job_id, None)
+            self._save()
+            self.queueChanged.emit()
+            return True
+        pred = self._queue.get(chain_from)
+        target = CHAIN_TARGET.get(job.kind)
+        if pred is None or target is None:
+            return False
+        try:
+            self._queue.set_chain(
+                job_id, chain_from, chain_target=target,
+                chain_kind=PRODUCED_KEY.get(pred.kind, "dataset_root"),
+            )
+        except ValueError:
+            return False       # self-chain or cycle; the caller reports it
+        self._save()
+        self.queueChanged.emit()
+        return True
+
+    def show_job(self, job_id: str) -> bool:
+        """Populate the job's own tool page. Returns whether it happened.
+
+        The return value matters to the edit session, which must not open on a
+        page that was never populated: saving it would write the page's
+        unrelated current contents over the job's spec.
+        """
+        job = self._queue.get(job_id)
+        if job is None:
+            return False
         runner = self._runners.get(job.kind)
         if runner is None or runner.is_busy():
             # Populating a page mid-run doesn't just show stale information —
@@ -129,7 +200,7 @@ class QueueBridge(QObject):
             # Silently ignored rather than queued/deferred: the click is a
             # "preview this job" request, not something that needs to happen
             # eventually.
-            return
+            return False
         # A deep copy, not the queue's own persisted dict — nothing here
         # should be able to mutate what's actually saved by writing through a
         # reference a show_job() implementation was only ever meant to read.
@@ -138,6 +209,37 @@ class QueueBridge(QObject):
         # deep copy rather than a shallow dict() that still shares nested
         # dicts/lists (e.g. Analyze's spec["opts"]).
         runner.show_job(json.loads(json.dumps(job.spec)))
+        return True
+
+    def runner_busy(self, kind: str) -> bool:
+        """Whether this kind's controller has a run of its own in flight."""
+        runner = self._runners.get(kind)
+        return bool(runner is not None and runner.is_busy())
+
+    def hydrate_job(self, job_id: str) -> bool:
+        """Fill the job's page fully enough that collecting it back is safe.
+
+        ``show_job`` is a preview: for Analyze it sets the input folder and
+        nothing else, deliberately. Collecting a previewed page over a stored
+        spec would replace every option the preview did not write with
+        whatever the form happened to hold, so an edit session goes through
+        the runner's ``hydrate_job`` when it has one and falls back to
+        ``show_job`` for the tools whose ``show_job`` is already a complete
+        inverse of their ``collect_spec``.
+        """
+        job = self._queue.get(job_id)
+        if job is None:
+            return False
+        runner = self._runners.get(job.kind)
+        if runner is None or runner.is_busy():
+            return False
+        spec = json.loads(json.dumps(job.spec))
+        hydrate = getattr(runner, "hydrate_job", None)
+        if callable(hydrate):
+            hydrate(spec)
+        else:
+            runner.show_job(spec)
+        return True
 
     # ── run/pause ────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -218,7 +320,7 @@ class QueueBridge(QObject):
         self._current = None
         produced = {}
         if ok and output_path:
-            produced[_PRODUCED_KEY.get(kind, "dataset_root")] = output_path
+            produced[PRODUCED_KEY.get(kind, "dataset_root")] = output_path
         if not ok and self._was_suspended(kind, job_id):
             # Suspended, not cancelled: the job keeps its place and its
             # progress, its successors keep waiting rather than blocking, and
@@ -270,42 +372,211 @@ class QueueBridge(QObject):
 
 class JobQueueController(QObject):
     """Owns the Job Queue page and its :class:`QueueBridge`, translating the
-    page's button clicks into bridge calls and the bridge's ``queueChanged``
-    back into a page refresh — the same page/worker shape every other
-    Datasets controller uses, with the bridge standing in for a ``QThread``
-    worker."""
+    page's clicks into bridge calls and the bridge's ``queueChanged`` back
+    into a page refresh — the same page/worker shape every other Datasets
+    controller uses, with the bridge standing in for a ``QThread`` worker.
+
+    It also owns the **edit session**: the state of "a tool's page is
+    currently standing in for a queued job". The controller cannot reach the
+    rail or another tool's page itself, so ``DatasetsTab`` injects
+    ``on_session`` and ``on_session_end`` callbacks — the same way it injects
+    ``on_open_in_review`` — and this class decides when a session may begin,
+    when it must be abandoned, and what saving one means.
+    """
 
     def __init__(self, *, state_dir=None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.bridge = QueueBridge(state_dir=state_dir, parent=self)
         self._analyze_collect: Callable[[], dict] | None = None
+        self._collectors: dict[str, Callable[[], dict]] = {}
+        self._on_session: Callable[[str, str], None] | None = None
+        self._on_session_end: Callable[[str], None] | None = None
+        # (kind, job_id or None) — None means "a new job of this kind".
+        self._session: tuple[str, str | None] | None = None
 
         self.page = JobQueuePage()
         self.page.startToggled.connect(self._on_start_toggled)
         self.page.stopRequested.connect(self._on_stop_requested)
-        self.page.addAnalyzeRequested.connect(self._on_add_analyze)
-        self.page.removeRequested.connect(self.bridge.remove_job)
-        self.page.moveUpRequested.connect(lambda job_id: self.bridge.move_job(job_id, -1))
-        self.page.moveDownRequested.connect(lambda job_id: self.bridge.move_job(job_id, 1))
+        self.page.clearCompletedRequested.connect(self._on_clear_completed)
+        self.page.addKindRequested.connect(self.begin_new_job)
+        self.page.editRequested.connect(self.begin_edit)
+        self.page.duplicateRequested.connect(self._on_duplicate)
+        self.page.retryRequested.connect(self._on_retry)
+        self.page.chainRequested.connect(self._on_chain)
+        self.page.removeRequested.connect(self._on_remove)
+        self.page.moveUpRequested.connect(lambda job_id: self._on_move(job_id, -1))
+        self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
+        self.page.moveByRequested.connect(self._on_move)
         self.page.showRequested.connect(self.bridge.show_job)
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()
 
     def register(self, kind: str, runner) -> None:
         self.bridge.register(kind, runner)
+        collect = getattr(runner, "collect_spec", None)
+        if callable(collect):
+            self._collectors[kind] = collect
 
     def set_analyze_provider(self, collect_spec: Callable[[], dict]) -> None:
-        """Injects ``AnalyzeTab.collect_spec`` (a bound method, supplied by
-        ``allwell.py``) so this page's own "+ Queue current Analyze run"
-        button can build a job without this package importing ``analyze_tab``
-        — Analyze's own page has no line-budget headroom for the button
-        itself (ARCHITECTURE §6b)."""
+        """Injects ``AnalyzeTab.collect_spec`` (a bound method) so this page
+        can build an Analyze job without importing ``analyze_tab``."""
         self._analyze_collect = collect_spec
+        self._collectors["analyze"] = collect_spec
+
+    def set_session_hooks(
+        self,
+        on_session: Callable[[str, str], None],
+        on_session_end: Callable[[str], None],
+    ) -> None:
+        """``DatasetsTab`` supplies "show that tool's page with this banner on
+        it" and "take the banner off again"; this class supplies everything
+        about what the session means."""
+        self._on_session = on_session
+        self._on_session_end = on_session_end
 
     def add_job(self, kind: str, spec: dict) -> None:
         """Called by each Datasets controller's ``on_add_to_queue`` callback."""
-        job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind, label=KIND_LABEL.get(kind, kind), spec=spec)
+        job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
+                      label=describe(kind, spec), spec=spec)
         self.bridge.add_job(job)
+
+    # ── edit / new-job sessions ──────────────────────────────────────────
+    def begin_edit(self, job_id: str) -> bool:
+        """Open *job_id* on its own page for editing.
+
+        Refused while that tool has a run of its own in flight. That is not
+        politeness: populating a page mid-run overwrites fields the controller
+        is actively driving as its progress display, and the page would then
+        be collected back over the job on save.
+        """
+        job = self.bridge.queue.get(job_id)
+        if job is None:
+            return False
+        if job.state == JobState.RUNNING:
+            self._notify("That job is running — stop it first to edit it.", "warn")
+            return False
+        if self.bridge.runner_busy(job.kind):
+            self._notify(f"{KIND_LABEL.get(job.kind, job.kind)} is busy with its "
+                         "own run — try again when it finishes.", "warn")
+            return False
+        if not self.bridge.hydrate_job(job_id):
+            self._notify("That job's page isn't available to edit.", "warn")
+            return False
+        self._start_session(job.kind, job_id,
+                            f"Editing queued job “{job.label}”.")
+        return True
+
+    def begin_new_job(self, kind: str) -> bool:
+        """Open *kind*'s page to set up a job that does not exist yet."""
+        if self.bridge.runner_busy(kind):
+            self._notify(f"{KIND_LABEL.get(kind, kind)} is busy with its own run.",
+                         "warn")
+            return False
+        if kind not in self._collectors:
+            self._notify(f"{KIND_LABEL.get(kind, kind)} isn't available in this build.",
+                         "warn")
+            return False
+        self._start_session(kind, None,
+                            f"Setting up a new {KIND_LABEL.get(kind, kind)} job. "
+                            "Fill the page in, then add it to the queue.")
+        return True
+
+    def _start_session(self, kind: str, job_id: str | None, message: str) -> None:
+        self._session = (kind, job_id)
+        if self._on_session is not None:
+            self._on_session(kind, message)
+
+    def session(self) -> tuple[str, str | None] | None:
+        """The live session, as ``(kind, job_id or None)``."""
+        return self._session
+
+    def save_session(self) -> bool:
+        """Collect the session's page and either update its job or add one."""
+        if self._session is None:
+            return False
+        kind, job_id = self._session
+        collect = self._collectors.get(kind)
+        if collect is None:
+            self.end_session()
+            return False
+        spec = collect()
+        if job_id is None:
+            self.add_job(kind, spec)
+        elif not self.bridge.update_job(job_id, spec):
+            # The only way here is the job having started between opening the
+            # session and saving it, which _on_queue_changed already reports.
+            self.end_session()
+            return False
+        self.end_session()
+        return True
+
+    def end_session(self) -> None:
+        self._session = None
+        if self._on_session_end is not None:
+            self._on_session_end("")
+
+    def _abandon_session_if_stale(self) -> None:
+        """Drop a session whose job started running or left the queue.
+
+        Both would make saving it meaningless — one writes over a spec already
+        handed to a runner, the other writes to a job that no longer exists —
+        and the banner would otherwise sit there offering to do it.
+        """
+        if self._session is None:
+            return
+        _kind, job_id = self._session
+        if job_id is None:
+            return
+        job = self.bridge.queue.get(job_id)
+        if job is None:
+            self._notify("The job you were editing was removed.", "warn")
+            self.end_session()
+        elif job.state == JobState.RUNNING:
+            self._notify("The job you were editing has started running.", "warn")
+            self.end_session()
+
+    # ── queue actions ────────────────────────────────────────────────────
+    def _on_remove(self, job_id: str) -> None:
+        job = self.bridge.queue.get(job_id)
+        if job is not None and job.state == JobState.RUNNING:
+            self._notify("Can't remove the running job — stop it first.", "warn")
+            return
+        self.bridge.remove_job(job_id)
+
+    def _on_move(self, job_id: str, delta: int) -> None:
+        if not self.bridge.move_job(job_id, delta):
+            self._notify_move_refusal(job_id, delta)
+
+    def _notify_move_refusal(self, job_id: str, delta: int) -> None:
+        """Say why a move did nothing. It used to just not happen.
+
+        Running off the end of the list needs no explanation — the row is
+        visibly already there — but a move refused by a chain link does, since
+        nothing on screen says the two jobs are tied together.
+        """
+        job = self.bridge.queue.get(job_id)
+        jobs = self.bridge.queue.jobs
+        index = next((i for i, j in enumerate(jobs) if j.id == job_id), None)
+        if index is None or not (0 <= index + delta < len(jobs)):
+            return
+        if job is not None and (job.chain_from or any(j.chain_from == job_id for j in jobs)):
+            self._notify("That job is chained — it can't move past the job it "
+                         "runs after, or the ones that run after it.", "warn")
+
+    def _on_duplicate(self, job_id: str) -> None:
+        self.bridge.duplicate_job(job_id)
+
+    def _on_retry(self, job_id: str) -> None:
+        self.bridge.retry_job(job_id)
+
+    def _on_chain(self, job_id: str, chain_from: str) -> None:
+        if not self.bridge.set_chain(job_id, chain_from):
+            self._notify("Those two jobs can't be chained that way.", "warn")
+
+    def _on_clear_completed(self) -> None:
+        removed = self.bridge.clear_completed()
+        if not removed:
+            self._notify("Nothing finished to clear.", "neutral")
 
     def _on_add_analyze(self) -> None:
         if self._analyze_collect is not None:
@@ -328,9 +599,25 @@ class JobQueueController(QObject):
         self.bridge.stop_current()
         self._refresh_page()
 
+    # ── plumbing ─────────────────────────────────────────────────────────
+    def _notify(self, text: str, kind: str = "warn") -> None:
+        """One seam for every "that did nothing, and here is why".
+
+        A single method rather than scattered Toast calls so a test can assert
+        that a refusal was reported without standing up a real Toast, which
+        carries a fade animation and a dismiss timer of its own.
+        """
+        from widgets.toast import Toast
+
+        Toast.show_message(self.page.window(), text, kind=kind)
+
     def _refresh_page(self) -> None:
-        self.page.set_jobs(self.bridge.queue.jobs)
-        self.page.set_started(self.bridge.queue.is_started)
+        self._abandon_session_if_stale()
+        queue = self.bridge.queue
+        self.page.set_jobs(queue.jobs)
+        self.page.set_summary(queue.counts())
+        self.page.set_repair_notes(queue.repair_notes)
+        self.page.set_started(queue.is_started)
         self.page.set_job_running(self.bridge.current_job_id() is not None)
 
     def shutdown(self) -> None:

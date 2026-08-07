@@ -22,6 +22,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtWidgets import QPushButton
+
 from analyze_job_edit import AnalyzeJobEditMixin
 from services.pipeline_service import find_pipeline_script
 from services.run_spec import RunSpec, RunSpecError
@@ -70,6 +72,37 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         return None
 
     # ── job queue (QueueableController hooks) ───────────────────────────────
+    def set_queue_sink(self, sink) -> None:
+        """Where "+ Queue" sends a run. Injected by the Datasets pane, which
+        owns the queue — so this module never imports it, exactly as the queue
+        never imports ``analyze_tab``. Left unset when the pane is not in the
+        build, and the button hides itself rather than failing on click."""
+        self._queue_sink = sink
+        btn = getattr(self, "_queue_btn", None)
+        if btn is not None:
+            btn.setVisible(sink is not None)
+
+    def _build_run_row_extras(self, layout, parent) -> None:
+        """Suspend and "+ Queue", added to the run-controls row.
+
+        Both live outside ``analyze_tab_form.py`` because that file is at its
+        line budget and the ratchet only moves down; this takes the one line
+        the suspend button already had, so the budgeted file does not grow.
+        """
+        layout.addWidget(self._build_suspend_button(parent))
+        self._queue_btn = QPushButton("+ Queue", parent)
+        self._queue_btn.setToolTip(
+            "Add this run to the Job Queue instead of running it now. It waits "
+            "its turn in Datasets → Job Queue, which runs one job at a time.")
+        self._queue_btn.clicked.connect(self._on_queue_requested)
+        self._queue_btn.setVisible(getattr(self, "_queue_sink", None) is not None)
+        layout.addWidget(self._queue_btn)
+
+    def _on_queue_requested(self) -> None:
+        sink = getattr(self, "_queue_sink", None)
+        if sink is not None:
+            sink(self.collect_spec())
+
     def collect_spec(self) -> dict:
         """The current form's run, as a job queue's JSON spec."""
         return self._collect_run_spec().to_json()

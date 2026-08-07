@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from widgets.context_banner import ContextBanner
 from widgets.rail_nav import RailNav
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.centre_view import NamedPageStack
@@ -56,6 +57,10 @@ class _Feature:
     name: str
     icon: str
     build: Callable[["DatasetsTab"], tuple[QWidget, Callable[[], None] | None]]
+    # The job-queue kind this page runs, so an edit session can find the page
+    # for a job without a second name -> kind map to keep in step. None for a
+    # page that is not a queueable tool (the Job Queue's own page).
+    kind: str | None = None
 
 
 def _build_concatenate(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | None]:
@@ -109,17 +114,29 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
     if tab._analyze_controller is not None:
         controller.register("analyze", tab._analyze_controller)
         controller.set_analyze_provider(tab._analyze_controller.collect_spec)
+        # The reverse of the injection above: Analyze's own "+ Queue" button
+        # needs somewhere to send a run, and neither module imports the other.
+        sink = getattr(tab._analyze_controller, "set_queue_sink", None)
+        if callable(sink):
+            sink(lambda spec: controller.add_job("analyze", spec))
+    controller.set_session_hooks(tab._begin_session, tab._end_session)
     tab._controllers["job_queue"] = controller
     return controller.page, controller.shutdown
 
 
 _FEATURES: tuple[_Feature, ...] = (
-    _Feature(name="Concatenate Datasets", icon="copy", build=_build_concatenate),
-    _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import),
-    _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate),
-    _Feature(name="Subset / Split", icon="boxes", build=_build_subset),
-    _Feature(name="Zip Loose Folder", icon="download", build=_build_import_loose),
-    _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates),
+    _Feature(name="Concatenate Datasets", icon="copy", build=_build_concatenate,
+             kind="concatenate"),
+    _Feature(name="Convert OME-TIFF", icon="folder-open", build=_build_ome_import,
+             kind="ome_import"),
+    _Feature(name="Validate & Repair", icon="scan-line", build=_build_validate,
+             kind="validate"),
+    _Feature(name="Subset / Split", icon="boxes", build=_build_subset,
+             kind="subset"),
+    _Feature(name="Zip Loose Folder", icon="download", build=_build_import_loose,
+             kind="import_loose"),
+    _Feature(name="Merge Plates", icon="layout-grid", build=_build_merge_plates,
+             kind="merge_plates"),
     _Feature(name="Job Queue", icon="waypoints", build=_build_job_queue),
 )
 
@@ -152,12 +169,102 @@ class DatasetsTab(QWidget):
         self._queue_state_dir = queue_state_dir
         self._controllers: dict[str, object] = {}
         self._teardowns: list[Callable[[], None]] = []
+        self._session_banner: ContextBanner | None = None
+        self._pages_by_kind: dict[str | None, QWidget] = {}
         self._build_ui()
 
     def _add_to_queue(self, kind: str, spec: dict) -> None:
         job_queue = self._controllers.get("job_queue")
         if job_queue is not None:
             job_queue.add_job(kind, spec)
+
+    # ── queue edit sessions ──────────────────────────────────────────────────
+    def _begin_session(self, kind: str, message: str) -> None:
+        """Show *kind*'s page with a banner saying it is standing in for a job.
+
+        The Job Queue controller decides when a session may start and what
+        saving one means; this only knows how to get the user to the right
+        page and put the strip on it. Without the strip the page looks exactly
+        as it always does, and the only way to finish would be to guess.
+        """
+        page_name = self._page_name_for(kind)
+        if page_name is None:
+            # Analyze lives in a different pane entirely, so there is no rail
+            # entry to switch to — the banner goes onto its form column, where
+            # the resume banner already sits, and the user is already looking
+            # at it (an Analyze session can only be started from a queue page
+            # that Analyze's own "+ Queue" button put the job on).
+            self._show_session_banner(self._analyze_form_layout(), message)
+            return
+        self._nav.setCurrentKey(page_name)
+        self._pages.setCurrentByName(page_name)
+        page = self._pages_by_kind.get(kind)
+        self._show_session_banner(page.layout() if page is not None else None, message)
+
+    def _drop_session_banner(self) -> None:
+        if self._session_banner is not None:
+            self._session_banner.setParent(None)
+            self._session_banner.deleteLater()
+            self._session_banner = None
+
+    def _cancel_session(self) -> None:
+        """The banner's Cancel. Goes through the controller rather than
+        tearing the banner down directly — the controller owns whether a
+        session exists, and dropping only the strip would leave it believing
+        one was still live and willing to save it later."""
+        job_queue = self._controllers.get("job_queue")
+        if job_queue is not None:
+            job_queue.end_session()
+        else:
+            self._end_session()
+
+    def _end_session(self, _kind: str = "") -> None:
+        """The controller reporting a session is over: take the banner down
+        wherever it is and go back to the queue page."""
+        self._drop_session_banner()
+        queue_page = self._page_name_for(None)
+        if queue_page is not None:
+            self._nav.setCurrentKey(queue_page)
+            self._pages.setCurrentByName(queue_page)
+
+    def _show_session_banner(self, layout, message: str) -> None:
+        """Insert the strip at the top of *layout*.
+
+        Index 0 for every Datasets page: each one's own layout holds a single
+        QScrollArea, so this lands above the scrolling content rather than
+        inside it and stays put while the page scrolls.
+        """
+        self._drop_session_banner()
+        if layout is None:
+            return
+        job_queue = self._controllers.get("job_queue")
+        session = job_queue.session() if job_queue is not None else None
+        confirm = "Save changes" if session and session[1] else "Add to queue"
+        banner = ContextBanner(message, confirm)
+        banner.confirmed.connect(self._save_session)
+        banner.cancelled.connect(self._cancel_session)
+        layout.insertWidget(0, banner)
+        self._session_banner = banner
+
+    def _save_session(self) -> None:
+        job_queue = self._controllers.get("job_queue")
+        if job_queue is not None:
+            job_queue.save_session()
+
+    def _page_name_for(self, kind: str | None) -> str | None:
+        for feat in _FEATURES:
+            if feat.kind == kind:
+                return feat.name
+        return None
+
+    def _analyze_form_layout(self):
+        """Where an Analyze session's banner goes.
+
+        The form column rather than the tab's own layout: that is where the
+        resume banner already sits, so the two stack in one place instead of
+        one of them straddling the splitter.
+        """
+        return getattr(self._analyze_controller, "_form_layout", None)
 
     # ── layout ───────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
@@ -180,6 +287,7 @@ class DatasetsTab(QWidget):
             self._nav.addItem(feat.name, icon=feat.icon, key=feat.name)
             page, teardown = feat.build(self)
             self._pages.addPage(feat.name, page)
+            self._pages_by_kind[feat.kind] = page
             if teardown is not None:
                 self._teardowns.append(teardown)
 

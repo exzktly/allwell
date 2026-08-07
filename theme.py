@@ -982,6 +982,35 @@ QTableView::item, QTableWidget::item {{
     padding: 4px 8px;
 }}
 
+/* ── Job Queue rows ──────────────────────────────────────────────────── */
+/* Selector-scoped on purpose. A bare `border-bottom` set on the row widget
+   itself has no selector, so Qt applies it to every child too and each label,
+   tool button and progress bar inside the row draws its own underline. */
+QWidget#JobRow {{
+    border-bottom: 1px solid {c.border_subtle};
+}}
+QWidget#JobRow:hover {{
+    background-color: {c.hover};
+}}
+QWidget#JobQueueList {{
+    background-color: {c.panel};
+    border: 1px solid {c.border_subtle};
+    border-radius: {r.sm}px;
+}}
+
+/* ── Context banner ──────────────────────────────────────────────────── */
+/* A page borrowed for something other than its own job — see
+   widgets/context_banner.py. Accent-tinted so it reads as a mode the page is
+   in, not as one more row of its chrome. */
+QWidget#ContextBanner {{
+    background-color: {c.accent_dim};
+    border: 1px solid {c.accent};
+    border-radius: {r.sm}px;
+}}
+QWidget#ContextBanner QLabel {{
+    color: {c.text_primary};
+}}
+
 /* ── Splitter ────────────────────────────────────────────────────────── */
 /* A styled ::handle with no width/height collapses the grab area to ~1px and
    overrides setHandleWidth — so give it an explicit size per orientation. */

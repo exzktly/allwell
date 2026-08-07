@@ -745,7 +745,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         self._run_btn.clicked.connect(self._run)
         bl.addWidget(self._run_btn)
 
-        bl.addWidget(self._build_suspend_button(btn_widget))
+        self._build_run_row_extras(bl, btn_widget)
 
         self._stop_btn = QPushButton("■  Stop", btn_widget)
         self._stop_btn.setProperty("variant", "danger")

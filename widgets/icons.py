@@ -205,6 +205,18 @@ def _resolve_color(color) -> str:
     return c.name() if c.isValid() else theme.Colors.text_primary
 
 
+def has_glyph(name: str) -> bool:
+    """Whether *name* is a real glyph rather than one that would fall back.
+
+    ``make_pixmap`` substitutes ``alert-triangle`` for an unknown name, which
+    renders perfectly well and is indistinguishable from a deliberate warning
+    icon — so a typo ships as a warning triangle beside an otherwise healthy
+    row. Callers that pick glyph names from a table can assert against this
+    instead of eyeballing the result.
+    """
+    return name in _GLYPHS
+
+
 def make_pixmap(name: str, color, size_px: int, dpr: float = 1.0) -> QPixmap:
     """Render glyph *name* at *size_px* logical px in *color*, dpr-aware."""
     hexc = _resolve_color(color)

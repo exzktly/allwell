@@ -40,7 +40,7 @@ class PlotState:
     # panel). Off by default — opt in via the Properties sidebar.
     show_threshold_line: bool = False
 
-    # Time-axis label multiplier (Properties → Overlays → "Rescale time").
+    # Time-axis label multiplier (Properties → Time → "Rescale time").
     # 1.0 = off. Applied by ``domain/time_rescale.py`` to what a time axis
     # *prints* and to nothing else: the plotted values, the timepoint menus, the
     # Statistics tab and every exported CSV keep the hours parsed out of the

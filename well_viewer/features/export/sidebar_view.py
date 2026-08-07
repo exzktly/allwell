@@ -597,11 +597,22 @@ class ExportStyleSidebar(QWidget):
         thr_tog.toggled.connect(_on_threshold_line_toggle)
         add_row(s_over, "", thr_tog)
 
+        # ── Time ────────────────────────────────────────────────────────────
         # Time-axis label multiplier. Drives PlotState.time_scale, read by the
-        # Line, Bar and Spatial renderers. Label-only: the plotted values, the
+        # Line, Bar and Spatial renderers. Its own section rather than a row
+        # under Overlays: it draws nothing on the figure, it renames the numbers
+        # an existing axis already prints. Label-only: the plotted values, the
         # timepoint menus, the Statistics tab and every export keep the hours
         # the pipeline parsed out of the filenames, and any axis it changes says
         # so in its label.
+        s_time = section("Time", expanded=False)
+        _time_preview = QLabel("")
+        _time_preview.setObjectName("Muted")
+        s_time.setValueWidget(_time_preview)
+
+        def _time_preview_text(factor: float) -> str:
+            return "Off" if float(factor) == 1.0 else f"×{float(factor):g}"
+
         time_scale = _Stepper(minimum=0.001, maximum=1000.0, single_step=0.5,
                               value=float(getattr(
                                   self._app._app_state.plot, "time_scale", 1.0)),
@@ -616,12 +627,15 @@ class ExportStyleSidebar(QWidget):
 
         def _on_time_scale(value: float) -> None:
             self._app._app_state.plot.time_scale = float(value)
+            _time_preview.setText(_time_preview_text(value))
             try:
                 self._redraw_active_plot()
             except Exception:
                 swallowed()
         time_scale.valueChanged.connect(_on_time_scale)
-        add_row(s_over, "Rescale time", time_scale)
+        add_row(s_time, "Rescale time", time_scale)
+        _time_preview.setText(_time_preview_text(
+            getattr(self._app._app_state.plot, "time_scale", 1.0)))
 
         # ── Lines & Markers ─────────────────────────────────────────────────
         s_lm = section("Lines & Markers", expanded=False)

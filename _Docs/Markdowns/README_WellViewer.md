@@ -880,7 +880,7 @@ row, holding four actions:
 
 #### Rescale time
 
-Under **Properties → Overlays**, **Rescale time** multiplies the numbers printed
+Under **Properties → Time**, **Rescale time** multiplies the numbers printed
 on every time axis. It is there for plates whose filenames don't encode the real
 acquisition cadence: a run numbered `T01 … T12` but imaged every four hours is
 read by the pipeline as 1, 2, 3 … hours, and setting the factor to `4` makes the

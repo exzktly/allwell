@@ -351,6 +351,7 @@ The codebase uses a suffix-based scheme so the file name tells the reader the ro
 | `service.py` | Non-Qt service entry point. | `features/export/service.py` |
 | `callbacks.py` | What a canvas interaction on a feature *does*, separated from the handler that detects it. | `features/scatter/callbacks.py`, `features/image_browser/review_image/callbacks.py` |
 | `worker.py` | Background `QThread` worker. | `features/smfish/worker.py` |
+| `row.py` | One repeated list entry's widget, split out when it grows its own menu / drag handling beyond what the page holding it should carry. | `datasets/job_queue/row.py` |
 | `_panel.py` | Per-plot-type panel (only inside `features/batch_export/`). | `features/batch_export/bar_panel.py`, `scatter_panel.py` |
 | `_` prefix | Private helper module (not part of the package's public surface). | `persistence/_doc.py`, `_io.py`, `features/batch_export/_common.py`, `_line_series_runner.py` |
 
@@ -2053,7 +2054,51 @@ string, so it stays callable with no form on screen; `_run()` itself is a
 three-line delegation (`_collect_run_spec()` → `start_run()` → show a dialog
 on failure). This split exists so the Job Queue (§6b) can persist a run's
 configuration as plain JSON and start it later, independent of whatever the
-live form happens to hold at that moment.
+live form happens to hold at that moment. The queue's own "+ Queue" entry
+point on this page is built here too (`_build_run_row_extras`, which
+`analyze_tab_form.py` calls in place of the line that used to add the Suspend
+button alone — both files are at their line budgets and those ratchets only
+move down), and it sends the collected run to a sink `DatasetsTab` injects
+via `set_queue_sink`, so this module never imports the queue. An unset sink
+hides the button, which is what a build without the Datasets pane gets.
+
+`analyze_job_edit.py`'s `AnalyzeJobEditMixin` (mixed into `AnalyzeRunMixin`,
+since it is part of the same queue-facing surface) supplies `hydrate_job`:
+the **full inverse** of `collect_spec`, used only by the queue's edit flow.
+`show_job` is not that inverse and is not meant to be — it sets the input
+folder and nothing else, because a preview only has to make the page *look*
+like the job while the queue re-derives a real `RunSpec` from the persisted
+JSON at dequeue time. Collecting a previewed page back over a stored spec
+would replace every option the preview did not write, in a spec the user
+believes they edited one field of, so the two paths stay separate.
+
+Most of the restore is `AnalyzePipelineInfoMixin._apply_pipeline_info`, whose
+`execution_options` branch already takes argparse-style keys — and a job's
+`spec["opts"]` is argparse-style, being what `build_pipeline_args` consumes.
+It is not identical, though, and every difference is a silently wrong value
+rather than a crash: `raw` here is the sidecar's `input_dir`;
+`auto_threshold` is positive here and recorded as its negative
+`no_auto_threshold` there; `auto_threshold_method` is explicit in a spec but
+*inferred* from whether both control wells are named when restoring a
+sidecar, which is wrong for an Otsu run carrying dormant control wells; the
+two StarDist thresholds are raw text where blank means "the model's own
+default", while `_restore_stardist_thresholds` skips anything it cannot read
+as a float and would leave the previous job's number in the field; and
+`remote_batch_size` has no sidecar equivalent at all. `RunSpec`'s
+`remote_name`, `cleanup_remote` and `dry_run_cleanup` live beside `opts`
+rather than inside it and no sidecar restore touches them.
+`tests/test_analyze_job_edit.py` is the guard — a `collect` → `hydrate` →
+`collect` round trip over a spec whose every value differs from the form's
+default (asserted, since a round trip over defaults restores nothing and
+passes anyway), plus a key-set comparison that fails as soon as an option is
+added to the form with no hydration counterpart. Two of the cases need shapes
+the obvious fixture does not produce: a spec whose method and control wells
+agree round-trips even when the method is never restored, and blank
+thresholds only prove anything when hydrated over a form already holding real
+numbers. Note also that `cleanup_remote`/`dry_run_cleanup` are pinned by
+`_refresh_remote_controls` for a local run and gated on each other for a
+remote one, so not every combination of them is a spec the form can collect;
+hydrating an impossible one normalises it.
 
 `AnalyzeTab.runFinished(ok: bool, message: str)` is a **positive-latch**
 completion signal: `_poll_log`'s `"done"` branch sets a per-run `_run_ok`
@@ -4006,93 +4051,142 @@ Concatenate's own precedent, not reinvented.
 **Job Queue** (`datasets/job_queue/`) lines up Analyze and Datasets-tool runs
 to work through unattended, built on a Qt-free scheduler
 (`services/job_queue.py`) so ordering/gating logic is unit-testable with no
-Qt event loop. Three layers:
+Qt event loop. Four layers:
 
 - **`services/job_queue.py`** — `JobSpec` (one persisted queue entry: `id`,
   `kind`, `label`, a JSON-shaped `spec` for that tool, optional chain
   metadata, `state`, `message`, and whichever of `output_dir`/`dataset_root`/
   `in_dir` it produced), `JobState` (plain string constants — `pending`,
-  `running`, `succeeded`, `failed`, `cancelled`, `blocked`, `interrupted` —
-  not an `Enum`, so the persisted JSON needs no encode/decode step), and
-  `JobQueue`, which only orders and gates jobs; it never runs one itself.
+  `running`, `succeeded`, `failed`, `cancelled`, `blocked`, `interrupted`,
+  `suspended` — not an `Enum`, so the persisted JSON needs no encode/decode
+  step), and `JobQueue`, which only orders and gates jobs; it never runs one
+  itself.
+
   Chaining links a job to a predecessor by **id**, never a list index (an
   index would silently re-point on reorder), a dotted path into its own
-  `spec` to set (`"opts.raw"` for Analyze, `"source"`/`"dataset"` for a
-  Datasets tool), and which of the predecessor's three possible outputs it
+  `spec` to set, and which of the predecessor's three possible outputs it
   wants (`chain_kind`). Resolution happens at **dequeue**, via
   `JobQueue.materialise(job_id)`, never at enqueue — Analyze's own output
   location is only knowable after `resolve_input_output` runs. A failed or
   cancelled predecessor cascades every transitive successor still `pending`
-  to `blocked` rather than `failed`, so a retry-failed action leaves them
-  alone (they never ran); reordering a dependent before its predecessor is
-  refused; `set_chain()` rejects a self-chain or a cycle before writing the
-  link. `JobQueue.from_json` never auto-starts a loaded queue (a relaunch
-  always comes up paused — `is_started` is never persisted), maps a stale
-  `running` state to `interrupted` **and cascades that same job to `blocked`
-  every transitive successor still `pending`** (`_repair_after_load` calls
-  `_cascade_block` exactly like `mark_finished`'s own failed/cancelled path
-  does) — an interrupted predecessor never reaches `succeeded`, so
-  `next_runnable()` would never have selected the successor either way, but
-  without the cascade it sat at `pending` forever with no visible reason,
-  instead of `blocked` with a message naming why — and topologically repairs
-  — or, on a genuine cycle, drops every chain link in — a hand-edited file
-  whose stored order violates its own links, so `next_runnable()` can never
-  deadlock on bad persisted data. Persistence goes through
-  `services.remote_config.default_state_dir()` (a tmp-file-then-`os.replace`
-  write of `job_queue.json`), deliberately **not** derived from
-  `default_config_path()` — that function honours `$ALLWELL_REMOTES`, an
-  override meaning "where my remotes live" rather than "where my app state
-  lives", and its Windows branch is conditional on whether `remotes.toml`
-  exists, which would silently relocate an already-written queue the day a
-  user first creates one. `load_queue`'s malformed-file guard wraps
-  `JobQueue.from_json`/`JobSpec.from_json` too, not just the `json.loads`
-  call — a well-formed-JSON-but-malformed-*queue* file (a job entry missing
-  `id`/`kind`, a `jobs` value that isn't a list of objects) raised
-  `KeyError`/`TypeError`/`AttributeError` uncaught, and `load_queue` runs
-  unconditionally and synchronously from `QueueBridge.__init__` at
-  `DatasetsTab` construction — so a hand-edited or truncated-but-valid-JSON
-  file didn't just break the queue page, it crashed the whole app's startup.
+  to `blocked` rather than `failed`, so those jobs are distinguishable from
+  ones that ran and failed; `set_chain()` rejects a self-chain or a cycle
+  before writing the link, and a reorder placing a dependent before its
+  predecessor is refused.
+
+  The editing half — everything that changes a job after it is queued —
+  is `update_spec`, `set_label`, `duplicate`, `retry`, `clear_terminal`,
+  `move_to` and `counts`. Two of those carry decisions worth stating.
+  `update_spec` deliberately leaves `state` alone: re-arming a finished job
+  on edit would strand successors that had already succeeded, whose
+  predecessor would no longer read `succeeded`, and that half-state is
+  reachable no other way — `retry` is the single explicit backwards move, so
+  fixing a failed job and re-running it is two clear steps. `retry` runs
+  `_cascade_unblock`, the mirror of `_cascade_block`, returning to `pending`
+  only the successors reachable from the retried job; one blocked by a
+  different, un-retried failure stays blocked, and since `chain_from` is a
+  single id the links form a forest with no second parent to still be
+  failing. `duplicate` drops the clone's chain link (a clone inheriting its
+  twin's predecessor would wait on output it has no relationship to) and
+  takes its new id as a parameter, so the module needs no `uuid` and a test
+  can name the copy. `clear_terminal` goes through `remove` per id rather
+  than filtering the list, so a survivor chained to a cleared job loses the
+  link instead of pointing at a job that no longer exists. `move_to` is the
+  drag counterpart of `move`: it shifts the rows it passes rather than
+  swapping, because dragging picks a destination, and it validates through
+  the same whole-list `_chain_order_valid`.
+
+  `JobQueue.from_json` never auto-starts a loaded queue (a relaunch always
+  comes up paused — `is_started` is never persisted) and maps a stale
+  `running` state to `interrupted`. `interrupted` is in `JobState.RESUMABLE`,
+  so the job is picked up again rather than needing re-adding, and its
+  successors stay `pending` and wait for it — they are *not* cascaded to
+  `blocked`, because the output they are waiting on is still coming.
+  `_repair_after_load` also topologically repairs — or, on a genuine cycle,
+  drops every chain link in — a hand-edited file whose stored order violates
+  its own links, so `next_runnable()` can never deadlock on bad persisted
+  data. Its human-readable notes are kept on the instance as
+  `JobQueue.repair_notes` and rendered by the page: a repair the user cannot
+  see reads as the queue quietly losing their jobs' state.
+
+  Persistence goes through `services.remote_config.default_state_dir()` (a
+  tmp-file-then-`os.replace` write of `job_queue.json`), deliberately **not**
+  derived from `default_config_path()` — that function honours
+  `$ALLWELL_REMOTES`, an override meaning "where my remotes live" rather than
+  "where my app state lives", and its Windows branch is conditional on
+  whether `remotes.toml` exists, which would silently relocate an
+  already-written queue the day a user first creates one. `load_queue`'s
+  malformed-file guard wraps `JobQueue.from_json`/`JobSpec.from_json` too,
+  not just the `json.loads` call — a well-formed-JSON-but-malformed-*queue*
+  file raised `KeyError`/`TypeError`/`AttributeError` uncaught, and
+  `load_queue` runs unconditionally and synchronously from
+  `QueueBridge.__init__` at `DatasetsTab` construction, so it crashed the
+  whole app's startup rather than just the queue page.
+
+- **`services/job_kinds.py`** — the per-kind tables, Qt-free because none of
+  it is a view concern and all of it is worth testing without an event loop.
+  `KIND_LABEL` (a tool's human name), `PRODUCED_KEY` (which of a finished
+  job's three possible outputs its controller reports — every Datasets tool
+  produces a whole dataset root, Analyze's useful successor input is its
+  `out/`), and `CHAIN_TARGET` (the dotted path into a job's *own* spec that a
+  predecessor's output fills: `opts.raw` for Analyze, `dataset` for Validate,
+  `source` for Subset / OME / Zip-loose, `dataset1` for the two-dataset
+  tools). Those two tables are the sending and receiving ends of the same
+  link, which is why the interface can derive a chain from "run after that
+  one" alone — a user should not also have to know where each tool receives
+  its input.
+
+  `describe(kind, spec)` is what a row is actually called. Without it every
+  row of a kind reads identically — eight queued subsets all saying "Subset"
+  — and picking the right one to reorder, chain or remove is guesswork. It is
+  basenames only ("Subset — plateA → plateA_sub"), since a row is an
+  identifier and not a path; `describe_detail` carries the full paths for the
+  row's second line. Analyze routes through `RunSpec.label()`, which already
+  says `(no input)` for a run missing its folder — worth preserving, since a
+  row reading plain "Analyze" is indistinguishable from a well-formed job.
+
 - **`datasets/job_queue/controller.py`** — the Qt-touching layer.
   `QueueableController` is the duck-typed protocol every runnable `kind`
-  implements: `start_from_queue(spec)`, `show_job(spec)` (populate the tool's
-  own page without running it — driven by clicking a queued row), `stop()`,
+  implements: `start_from_queue(spec)`, `show_job(spec)`, `stop()`,
   `is_busy()` (`self._worker is not None and self._worker.isRunning()` for
   every Datasets controller; `self._runner.is_running` for `AnalyzeTab` via
-  `AnalyzeRunMixin`), and a `jobFinished(ok: bool, message: str, output_path: str)`
-  signal that
-  **must** be emitted only once per run, as the true last statement of that
-  run's completion handler (mirroring `AnalyzeTab.runFinished`'s re-entrancy
-  rule, since a bridge slot may start the next job synchronously from inside
-  the emit). Each of the six Datasets controllers implements this directly
-  (a `_launch()` split out of `_on_run()` so `start_from_queue` can skip the
-  interactive restart/in-place confirmation a queued, unattended run has no
-  one to answer — the same trade-off every tool's queue path makes); so does
-  `AnalyzeTab`, via `AnalyzeRunMixin`. `QueueBridge` owns the persisted
-  `JobQueue` and a `kind -> QueueableController` registry, and is the only
-  thing that actually starts a job: strictly serial, tracking the in-flight
-  job as `(job_id, kind)` so a `jobFinished` from a controller that isn't the
-  queue's own current job — e.g. the user pressed that tool's own Run button
-  by hand while a *different* job was running — is dropped rather than
-  misattributed. The `(job_id, kind)` tuple can only actually distinguish by
-  `kind` (`jobFinished` doesn't carry a job id), so this guard's soundness
-  depends on every controller's `start_from_queue` path eventually emitting
-  `jobFinished` exactly once — a launch path that silently no-ops on invalid
-  input (a queued job whose spec has an empty/corrupted required field) would
-  otherwise leave `_current` stuck on that job forever, and a later unrelated
-  manual run of the *same kind* would then complete against the stale
-  `_current` instead. `MergePlatesController._launch`'s remap-failure branch
-  and `ValidateController._run`'s "no dataset path" branch both emit
-  `jobFinished` directly for exactly this reason, rather than returning
-  silently before a worker ever starts. On completion it looks up `was_cancelled()` on the
-  finishing controller (falling back to the Datasets convention that a
-  cancelled worker's failure message starts with `"Cancelled"`) to tell a
-  user-requested Stop apart from a genuine failure, since the queue's own
-  decision is that cancelling the running job **pauses the queue** — resuming
-  is explicit — while a genuine failure just cascades-blocks that job's own
-  successors and keeps going. `JobQueueController` is the page-level
-  controller (the usual page/worker shape, with `QueueBridge` standing in for
-  a `QThread` worker): it owns the page, turns button clicks into bridge
-  calls, and refreshes the page on `queueChanged`.
+  `AnalyzeRunMixin`), and a `jobFinished(ok, message, output_path)` signal
+  that **must** be emitted only once per run, as the true last statement of
+  that run's completion handler (mirroring `AnalyzeTab.runFinished`'s
+  re-entrancy rule, since a bridge slot may start the next job synchronously
+  from inside the emit). Each of the six Datasets controllers implements this
+  directly (a `_launch()` split out of `_on_run()` so `start_from_queue` can
+  skip the interactive restart/in-place confirmation a queued, unattended run
+  has no one to answer); so does `AnalyzeTab`.
+
+  `QueueBridge` owns the persisted `JobQueue` and a `kind -> QueueableController`
+  registry, and is the only thing that actually starts a job: strictly
+  serial, tracking the in-flight job as `(job_id, kind)` so a `jobFinished`
+  from a controller that isn't the queue's own current job — e.g. the user
+  pressed that tool's own Run button by hand while a *different* job was
+  running — is dropped rather than misattributed. That tuple can only really
+  distinguish by `kind` (`jobFinished` carries no job id), so the guard's
+  soundness depends on every `start_from_queue` path eventually emitting
+  `jobFinished` exactly once: a launch that silently no-ops on invalid input
+  would leave `_current` stuck forever, which is why
+  `MergePlatesController._launch`'s remap-failure branch and
+  `ValidateController._run`'s "no dataset path" branch emit `jobFinished`
+  directly rather than returning silently. On completion the bridge looks up
+  `was_cancelled()` on the finishing controller (falling back to the Datasets
+  convention that a cancelled worker's failure message starts with
+  `"Cancelled"`) to tell a user-requested Stop apart from a genuine failure,
+  since cancelling the running job **pauses the queue** — resuming is
+  explicit — while a genuine failure just cascade-blocks that job's own
+  successors and keeps going.
+
+  Beside `add_job`/`remove_job`/`move_job` the bridge carries the editing
+  mutators the page needs — `update_job`, `duplicate_job`, `retry_job`,
+  `clear_completed`, `move_job_to`, `set_chain`, `clear_chain` — each
+  following the same mutate → `_save()` → `queueChanged.emit()` shape and
+  returning a `bool` so the caller can report a refusal. `update_job`
+  re-derives the label from the new spec: a label describes its spec, so an
+  edited job still named after what it used to run against would be worse
+  than one with no name.
 
   `QueueBridge.show_job` (clicking a queued row to preview it) checks
   `runner.is_busy()` first and no-ops if the target controller already has a
@@ -4101,57 +4195,112 @@ Qt event loop. Three layers:
   user clicks, not this programmatic path) and, for a controller like
   `SubsetController` that paints run progress onto the same picker plate
   `show_job` would repopulate, could visibly corrupt the in-flight run's own
-  status display. It also hands the runner a deep copy of the job's spec
+  status display. It returns whether it actually populated, which is what
+  lets an edit session refuse rather than open on an untouched page. It also
+  hands the runner a deep copy of the job's spec
   (`json.loads(json.dumps(job.spec))`, matching `JobQueue.materialise`'s own
   assumption that a spec is JSON-shaped) rather than the queue's live
-  persisted dict — no `show_job` implementation mutates its argument today,
-  but nothing stopped one from silently corrupting the saved queue if it did.
-- **`datasets/job_queue/view.py`** — `JobQueuePage`: one compact row per job
-  (`_JobRow`: an ordinal, kind icon, label, a `widgets.status_dot.StatusDot`
-  state chip, an indeterminate progress strip on the currently-running row,
-  a one-line status message, a link glyph on chained rows, and ↑/↓/×
-  controls) under a header with Start/Pause and — since
-  `analyze_tab_form.py` has no line-budget headroom for its own "+ Queue"
-  button (§6.1) — a **"+ Queue current Analyze run"** button that lives on
-  this page instead, wired through `JobQueueController.set_analyze_provider`
-  (a bound `AnalyzeTab.collect_spec` method injected the same way
-  `on_open_in_review` is). "▶ Start queue" sits at the row's left edge,
-  matching the primary-action-on-the-left convention every other Datasets
-  page's own run row uses, with "+ Queue current Analyze run" second and
-  secondary. Each of the six Datasets tool pages gets its own "+ Queue"
-  button beside Run, calling the controller's `collect_spec()` and handing
-  the result up through an injected `on_add_to_queue(kind, spec)` callback
-  to `DatasetsTab._add_to_queue`, which looks up the (always-last-built)
-  `JobQueueController` in `tab._controllers`.
+  persisted dict.
 
-  `_JobRow`'s ordinal number ("1.", "2.", …) is shown only on `pending`
-  rows — a number on a row that already has a terminal outcome doesn't mean
-  "queue position" any more, so `set_jobs` counts only pending jobs into it.
-  The ↑/↓ reorder controls are hidden outright on any row in a
-  `JobState.TERMINAL` state (it already ran, or never will without an
-  explicit unchain/retry, so reordering it means nothing); a running row's
-  progress strip is indeterminate (`QProgressBar` ranged `(0, 0)`) since a
+  `QueueBridge.hydrate_job` is the edit-path counterpart. For the six
+  Datasets tools `show_job` is already a complete inverse of `collect_spec` —
+  the two read and write the same handful of keys — so hydration falls back
+  to it. Analyze's is deliberately shallow (it sets the input folder and
+  nothing else, because the queue re-derives a full `RunSpec` from the
+  persisted JSON at dequeue time regardless, so the live form only has to
+  *look* right), and collecting a previewed Analyze page back over a stored
+  spec would replace every option the preview did not write. `AnalyzeTab`
+  therefore supplies `hydrate_job`, which the bridge prefers when present —
+  see §6.1.
+
+  `JobQueueController` is the page-level controller (the usual page/worker
+  shape, with `QueueBridge` standing in for a `QThread` worker): it owns the
+  page, turns clicks into bridge calls, and refreshes the page on
+  `queueChanged`. It also owns the **session** — the state of "a tool's page
+  is currently standing in for a queued job", as `(kind, job_id or None)`,
+  where `None` means a new job of that kind. It cannot reach the rail or
+  another tool's page itself, so `DatasetsTab` injects `on_session` and
+  `on_session_end` (the same way it injects `on_open_in_review`) and this
+  class decides when a session may begin, when it must be abandoned, and what
+  saving one means. A session is refused while the job is running or its tool
+  is busy with a run of its own, and abandoned with a note if the job starts
+  running or leaves the queue while it is open — saving it then would either
+  overwrite a spec already handed to a runner or write to a job that no
+  longer exists. Every refusal in the class routes through one `_notify`
+  seam rather than scattered `Toast` calls, so a test can assert that a
+  refusal was reported without standing up a real `Toast` and its fade
+  animation and dismiss timer.
+
+- **`datasets/job_queue/view.py` + `row.py`** — `JobQueuePage` and `JobRow`,
+  split because the row grew its own menu and drag handling.
+
+  `JobRow` is two lines. The first identifies: drag handle, ordinal, kind
+  icon, derived name, an indeterminate progress strip while running (a
   controller only ever reports a free-text status message, never a
-  percentage. The message label elides with `…` via `QFontMetrics`
-  (`Qt.ElideRight`) rather than hard-clipping at its fixed pixel width, with
-  the untruncated text reachable as the label's own tooltip. The whole row
-  is a click target (`rowClicked` → open that job on its own page) and now
-  carries a pointing-hand cursor and a hover tooltip to say so — previously
-  the only way to discover the row was clickable was to click it. A thin
-  divider (`border-bottom`) separates consecutive rows, which otherwise read
-  as one undifferentiated block. `JobQueuePage._build_ui` wraps its content
-  in a `QScrollArea` (mirroring every other Datasets tool page — see
-  `PlateProgress`'s own entry in §7) — Job Queue was the one page in the
-  pane left out of that pattern, with a long job list able to run into the
-  same "crushed into whatever space is left" problem the other six pages
-  were already fixed against. The empty-queue hint ("No jobs queued yet —
-  …") is a plain caption, and the job list is **hidden while the queue is
-  empty**. The sentence is worth keeping — it is the only thing on this page
-  saying where jobs come from — but putting it *inside* the list meant showing
-  the list, and the list is a bordered panel carrying a layout stretch, so one
-  line of text rendered as a page-height empty container. A trailing
-  `outer.addStretch(1)` collects the leftover viewport height instead, the same
-  way Validate's page handles its own hidden findings list.
+  percentage), a `widgets.status_dot.StatusDot` state chip, and a `⋯` menu.
+  The second is muted and descriptive — the predecessor's *label* (not its
+  ten-hex-character id), `describe_detail`'s paths, and the latest status
+  message — elided with `QFontMetrics` against the width the label is
+  actually given, from `resizeEvent`, and hidden when empty. The `⋯` menu
+  carries *Edit…*, *Duplicate*, *Retry* (terminal states only), *Run after ▸*,
+  *Move up*/*Move down* (hidden on terminal rows, where reordering means
+  nothing) and *Remove*; it is built by `build_menu()` and `exec()`d only
+  from the click handler, so a test can inspect and `trigger()` actions
+  without opening a popup that would block under the offscreen QPA. The
+  *Run after* submenu is constructed as `QMenu(title, parent)` rather than
+  via `addMenu(str)` — the menu that call returns is not kept alive on the
+  Python side and can be collected out from under the menu that owns it.
+
+  The ordinal is shown only on `pending` rows: a number on a row that already
+  has a terminal outcome doesn't mean "queue position" any more. Rows are
+  styled from `theme.qss` keyed on the `#JobRow` object name, **not** an
+  inline stylesheet — a bare `border-bottom` set on the row widget has no
+  selector, so Qt applies it to every child and each label, tool button and
+  progress bar draws its own underline.
+
+  `JobQueuePage` holds its rows in a plain `QVBoxLayout` inside the page's
+  `QScrollArea`, not a `QListWidget`. A `QListWidgetItem`'s size hint is set
+  once from the row's `sizeHint()`, so a row that later shows or hides its
+  second line changes height while the hint does not; and the drag-handle
+  reorder is `widgets/saved_selections_list.py`'s, which hosts its own rows
+  in a box layout, so matching it is a like-for-like transfer. `set_jobs`
+  reuses the existing rows whenever the id sequence is unchanged and calls
+  `JobRow.update_from` on each — the page refreshes on every `queueChanged`,
+  which during a run includes each status-message tick, and rebuilding every
+  row for those threw away scroll position and hover state several times a
+  second. Every child of a row is therefore built once and shown/hidden;
+  nothing is conditionally constructed.
+
+  The header is `▶ Start queue` (primary, at the left edge, matching every
+  other Datasets page's own run button), `■ Stop job`, `+ Add job` — a menu
+  of all seven kinds, each opening a new-job session on that tool's page —
+  and `Clear completed` at the right. Under it sits a one-line state tally
+  (states with no jobs are omitted; "0 failed" is not news) and the load-time
+  `repair_notes`. The empty-queue hint is a plain caption, deliberately not
+  `widgets.empty_state.EmptyState`: that widget is `Expanding/Expanding`,
+  which is exactly the page-height empty container this page was already
+  fixed against — one sentence rendered as a bordered box filling the
+  viewport. A trailing `outer.addStretch(1)` collects the leftover height.
+
+  Each of the six Datasets tool pages also keeps its own "+ Queue" button
+  beside Run, calling the controller's `collect_spec()` and handing the
+  result up through an injected `on_add_to_queue(kind, spec)` callback to
+  `DatasetsTab._add_to_queue`.
+
+**`widgets/context_banner.py`** carries a session on screen. `ContextBanner`
+is a strip of glyph + sentence + confirm + cancel that says a page is being
+used for something other than its own job; without it the borrowed page looks
+exactly as it always does and the only way to finish is to guess. It is
+host-agnostic — it knows nothing about queues, jobs or datasets, and whoever
+shows it decides what confirming means — and it does not block the page
+beneath it, which is the point, since the user is editing that page.
+`DatasetsTab` inserts it at index 0 of the target page's own layout, which
+works uniformly because all six Datasets pages hold a single `QScrollArea`
+there; for Analyze it goes at index 0 of `_form_layout`, where the resume
+banner already sits. Its Cancel routes through
+`JobQueueController.end_session` rather than tearing the strip down directly:
+the controller owns whether a session exists, and dropping only the strip
+would leave it believing one was live and willing to save it later.
 
 `datasets_tab.py` wires all of this: each of the six Datasets controllers is
 constructed with `on_add_to_queue=tab._add_to_queue` and stashes itself in
@@ -4161,7 +4310,17 @@ injected `AnalyzeTab`, under kind `"analyze"`) against a single
 `JobQueueController`. `allwell.py` injects the already-built `AnalyzeTab` as
 `DatasetsTab(analyze_controller=...)` the same way it injects
 `on_open_in_review`/`on_open_in_analyze` — so neither `datasets_tab.py` nor
-anything under `datasets/job_queue/` ever imports `analyze_tab`.
+anything under `datasets/job_queue/` ever imports `analyze_tab`. The reverse
+direction goes the same way: `_build_job_queue` calls the injected tab's
+`set_queue_sink`, which is where Analyze's own "+ Queue" button sends a run,
+so `analyze_run_spec.py` never imports the queue either. An unset sink hides
+the button, which is what a profile build without the Datasets pane gets.
+
+Each `_Feature` carries the job-queue `kind` its page runs (`None` for the
+Job Queue's own page), so a session can find the page for a job without a
+second name → kind map to keep in step. `DatasetsTab._begin_session` switches
+the rail and inserts the banner; `_end_session` takes it down and returns to
+the queue page.
 
 ---
 
@@ -4280,6 +4439,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `SavedSelectionsList` | The rich saved-selection list with composition (drag-to-reorder, per-group flat well editing, recolour popovers). A group is one condition — its wells are its implicit replicate set, so there are no replicate sub-partitions / solo strips. |
 | `LutSelector`, `GradientStrip`, `ColorPickerPopover` | The colour-map picker + its preview strip + the freeform colour-picker popover. |
 | `lut_cmaps.lut_cmap` | Qt-free resolver that maps a LUT name to a matplotlib colormap: single-hue names (Reds/Greens/Blues/Purples/Oranges) become a **black→colour** `LinearSegmentedColormap` (so a dark background reads as "off"), Greys stays black→white, everything else is the builtin (`_r`-aware). Routed through `ui_helpers.make_fluor_thumb` / `lut_colormap_to_rgb` and `LutSelector._cmap_stops`, so thumbnails, the Image Table compose/composite/export paths, Playground, and the picker strip all flip together. |
+| `ContextBanner` (`widgets/context_banner.py`) | A strip of glyph + sentence + confirm + cancel saying a page is being used for something other than its own job — the Job Queue borrows a tool's page to set up or correct a queued job (§6b). Host-agnostic: it knows nothing about queues or jobs, and whoever shows it decides what confirming means. Deliberately not a dialog and it does not block the page beneath, since the point is that the user is editing that page. `EmptyState` is *not* a substitute for a one-line caption in the same situations — it is `Expanding/Expanding`, so a single sentence in one renders as a page-height bordered box. |
 | `Popover`, `Drawer`, `Toast`, `EmptyState` | Generic overlay primitives. `Drawer` slides in from `edge="right"` (default — the Help drawer) or `edge="bottom"` (a full-width panel sized by `height_hint`/`height_fraction` — the Application Log drawer, whose long lines the narrow right panel clipped). |
 | `FlowLayout` | A `QLayout` (not a widget) that reflows its children onto multiple lines instead of clipping — the standard Qt Flow Layout adapted to PySide6. Control rows that carry more widgets than fit at a narrow width (the plotting / image-review "TabCtrl" rows) use it so **Split View** halving the pane grows the row taller rather than hiding controls off the right edge. Four rules go with it. (1) A flow row skips hidden widgets when it places items, so *which* widgets are visible is an input to the layout, not merely a blanked slot — `_FlowItemVisibility` watches show/hide on every managed widget and invalidates the layout, without which a row that swaps one option group for another (the Multivariate tab's per-mode row) keeps the positions computed for the previous visible set and paints the newly-shown group on top of them. That watcher resolves the layout from its own `parent()` and keeps **no** per-instance state: its C++ object belongs to the layout, so it outlives the Python instance `__init__` ran on, and PySide builds a fresh wrapper for it once that instance is collected. Anything stashed on `self` is gone by then — a watcher that remembered its layout in an attribute raised `AttributeError` inside the Qt event loop on every subsequent show and hide, and the row stopped reflowing. (2) A label and the control it names must go in as one `flow_group` item, or the row can wrap between them. (3) A host whose row may wrap needs `sync_flow_height`, since a stacked page sizes the row from its one-line minimum and clips the second line otherwise. (4) Spacing is fixed — 14px horizontal, `theme.Spacing.xs` vertical — **not** derived from the platform style, and no call site overrides it. Deriving it asks `pixelMetric(PM_Layout*Spacing)`, which Qt documents as returning -1 on styles that implement the size-class-aware `layoutSpacing()` instead. Measured, the two styles are exact opposites: QMacStyle reports `pixelMetric = -1, layoutSpacing = 14`, Fusion reports `pixelMetric = 6, layoutSpacing = -1`. The layout clamps with `max(0, …)`, so on macOS every row that relied on the derived value packed its controls edge to edge, while CI (on Fusion) saw 6 and looked fine. The 14 is QMacStyle's own button-row spacing, adopted app-wide because it is the one number measured against a real control row — it is deliberately off the `theme.Spacing` scale. Passing `-1` still derives, but now asks both APIs and falls back to the defaults rather than to nothing. |
 | `MplToolbar` | The slim toolbar shown under every matplotlib figure (home / pan / zoom / save + coords readout). |

@@ -2275,40 +2275,73 @@ for the combinations one plate doesn't have.
 ### Job Queue
 
 Lines up Analyze runs and Datasets-tool runs to work through unattended,
-instead of babysitting each one. Every Datasets tool page has a **+ Queue**
-button beside its normal run button — press it to add the current settings
-as a queued job instead of running immediately. Analyze itself doesn't have
-room for its own button, so queuing an Analyze run happens from the Job
-Queue page instead: press **+ Queue current Analyze run** there to capture
-whatever the Analyze form currently holds.
+instead of babysitting each one.
+
+**Adding a job** — three routes, all equivalent:
+
+- **+ Add job** on the Job Queue page lists all seven tools. Pick one and
+  All-Well takes you to that tool's page with a strip across the top saying
+  you are setting up a queued job; fill the page in as usual and press **Add
+  to queue**.
+- **+ Queue** beside any Datasets tool's own run button, which queues
+  whatever that page currently holds.
+- **+ Queue** beside Analyze's **Run Pipeline** button, which captures the
+  whole Analyze form — every option, not just the input folder.
+
+**Changing a queued job** — open the row's **⋯** menu and choose **Edit…**.
+The job's tool page opens with all of its settings restored and the same
+strip across the top; change what you came to change and press **Save
+changes**, and the job is updated in place, keeping its position in the
+queue. **Cancel** leaves it exactly as it was. Editing is refused while that
+job is running, or while that tool is busy with a run of its own.
+
+The **⋯** menu also offers **Duplicate** (a copy directly below, ready to
+point at another dataset — the quickest way to queue the same operation over
+several plates), **Retry** on a job that has finished, **Run after** (below),
+**Move up** / **Move down**, and **Remove from queue**.
 
 The queue runs strictly one job at a time, in the order shown, and never
 starts on its own — press **▶ Start queue** to begin working through it, and
 **⏸ Pause queue** (the same button) to stop after the current job. Queued
 jobs persist across app restarts, but a relaunch always comes up paused —
-you always decide when unattended work resumes.
+you always decide when unattended work resumes. If a restart interrupted a
+job, the page says so above the list when it next opens.
 
-Each row shows the job's tool, a status chip (pending / running / succeeded
-/ failed / cancelled / blocked / interrupted), and a one-line message
-(truncated with "…" if it's long — hover the row for the full text). A
-pending job also shows its position in line ("1.", "2.", …); the currently
-running job shows a moving progress strip instead. The whole row is a click
-target — hover it and the pointer changes to say so — click it to open that
-job on its own tool's page (without running it) so you can double-check what
-it will do. Use ↑ / ↓ to reorder, or × to remove a job — reordering a job
-ahead of one it depends on, or removing the job currently running, is
-refused; the ↑ / ↓ controls disappear once a job has reached a final outcome
-(succeeded, failed, cancelled), since there's nothing left to reorder.
+Each row names what the job actually runs — "Subset — plateA → plateA_sub",
+"Analyze — plate7" — with a status chip (pending / running / succeeded /
+failed / cancelled / blocked / interrupted / suspended) and, underneath, the
+folders it works on, the job it waits for, and its latest message. That
+second line is shortened with "…" when it does not fit; hover it for the
+full text. A pending job also shows its position in line ("1.", "2.", …);
+the currently running job shows a moving progress strip instead.
 
-**Chaining** links one job's input to another's output: queue a Subset (or
-Merge Plates, or Analyze) run, then a Validate run chained to run against
-whatever folder the first one actually produces — the second job's input
-folder is filled in only once the first one finishes, not when you queue it.
+Drag a row by its handle at the left to reorder it, or use **Move up** /
+**Move down** from the menu. The whole row is a click target — hover it and
+the pointer changes to say so — click it to open that job on its own tool's
+page (without running it) so you can double-check what it will do.
+Reordering a job ahead of one it depends on, or removing the job currently
+running, is refused, and All-Well says why. The move actions disappear once
+a job has reached a final outcome, since there is nothing left to reorder.
+
+Above the list, a one-line summary counts what is in each state, and **Clear
+completed** removes every finished job at once — succeeded, failed,
+cancelled or blocked — leaving pending and running ones alone.
+
+**Chaining** links one job's input to another's output. Open the **⋯** menu
+on the job that should run second, choose **Run after**, and pick the job it
+should follow; **Nothing (run on its own)** in the same submenu breaks the
+link again. Only jobs above it in the queue are offered, since a job cannot
+run before the one it waits for. The second job's input folder is filled in
+only once the first one finishes, not when you queue it — so you can queue a
+Subset and a Validate of its result together, without knowing yet where that
+result will land.
+
 If a job fails, everything chained after it is marked **blocked**, not
-failed — those jobs never ran, so there's nothing to retry; fix whatever
-failed and re-queue instead. Stopping the currently-running job pauses the
-queue rather than skipping ahead to the next one, so a run you meant to
-cancel can't be silently followed by one you didn't get to review.
+failed — those jobs never ran. **Retry** on the failed job puts it back in
+the queue and returns everything it blocked to pending, so a whole chain
+recovers in one step. Stopping the currently-running job pauses the queue
+rather than skipping ahead to the next one, so a run you meant to cancel
+cannot be silently followed by one you did not get to review.
 
 A queued run proceeds without the confirmation dialog its own page would
 normally show for a destructive step (resuming into a partially-written

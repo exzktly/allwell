@@ -597,31 +597,49 @@ class ExportStyleSidebar(QWidget):
         thr_tog.toggled.connect(_on_threshold_line_toggle)
         add_row(s_over, "", thr_tog)
 
+        # ── Time ────────────────────────────────────────────────────────────
         # Time-axis label multiplier. Drives PlotState.time_scale, read by the
-        # Line, Bar and Spatial renderers. Label-only: the plotted values, the
+        # Line, Bar and Spatial renderers. Its own section rather than a row
+        # under Overlays: it draws nothing on the figure, it renames the numbers
+        # an existing axis already prints. Label-only: the plotted values, the
         # timepoint menus, the Statistics tab and every export keep the hours
         # the pipeline parsed out of the filenames, and any axis it changes says
         # so in its label.
+        s_time = section("Time", expanded=False)
+        _time_preview = QLabel("")
+        _time_preview.setObjectName("Muted")
+        s_time.setValueWidget(_time_preview)
+
+        def _time_preview_text(factor: float) -> str:
+            return "Off" if float(factor) == 1.0 else f"×{float(factor):g}"
+
         time_scale = _Stepper(minimum=0.001, maximum=1000.0, single_step=0.5,
                               value=float(getattr(
                                   self._app._app_state.plot, "time_scale", 1.0)),
                               decimals=3)
         time_scale.setToolTip(
-            "Multiply the time-axis labels by this factor. For a plate whose "
+            "How far apart the timepoints really are. For a plate whose "
             "filenames are numbered T01…T12 but which was imaged every 4 hours, "
             "set 4 and the axis reads 4, 8, 12 …\n\n"
+            "The value is a multiplier on the hours the pipeline read out of "
+            "the filenames, so it is the interval itself only while those "
+            "filenames number the timepoints 1, 2, 3 … For a plate whose names "
+            "already carry real hours, this is a correction factor. 1 = off.\n\n"
             "Labels only — the timepoint menus, the Statistics tab and every "
             "exported CSV keep the hours read from the filenames, so a rescaled "
-            "axis names the factor to say why the numbers differ. 1 = off.")
+            "axis names the factor to say why the numbers differ.")
 
         def _on_time_scale(value: float) -> None:
             self._app._app_state.plot.time_scale = float(value)
+            _time_preview.setText(_time_preview_text(value))
             try:
                 self._redraw_active_plot()
             except Exception:
                 swallowed()
         time_scale.valueChanged.connect(_on_time_scale)
-        add_row(s_over, "Rescale time", time_scale)
+        add_row(s_time, "Interval per timepoint", time_scale)
+        _time_preview.setText(_time_preview_text(
+            getattr(self._app._app_state.plot, "time_scale", 1.0)))
 
         # ── Lines & Markers ─────────────────────────────────────────────────
         s_lm = section("Lines & Markers", expanded=False)

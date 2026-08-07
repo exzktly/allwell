@@ -664,11 +664,11 @@ def redraw_line_plots(
     apply_ax_style(ax_cdf, cdf_lbl, "Cumulative fraction")
     # Every time panel carries its own timepoints + x-label (the panels are
     # well-separated by hspace, so each reads as its own graph).
-    # The three time panels share the Properties sidebar's "Rescale time"
-    # factor: their ticks print the filename's hours multiplied by it, and the
-    # label carries the factor so a rescaled axis can't be mistaken for one
-    # drawn on the hours the run actually recorded (the timepoint menus and
-    # every export still show those).
+    # The three time panels share the Properties sidebar's "Interval per
+    # timepoint" factor: their ticks print the filename's hours multiplied by
+    # it, and the label carries the factor so a rescaled axis can't be mistaken
+    # for one drawn on the hours the run actually recorded (the timepoint menus
+    # and every export still show those).
     _time_scale = ctx.state.plot.time_scale
     _time_lbl = time_axis_label("Time (hours)", _time_scale)
     for _ax_time in (ax_mean, ax_frac, ax_n):

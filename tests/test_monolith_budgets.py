@@ -146,7 +146,10 @@ ANALYZE_TAB_BUDGET = 895
 # to analyze_tab_seg_params.AnalyzeSegParamsMixin, which is also where the
 # StarDist detection thresholds landed rather than growing this form again.
 # 1107 -> 1105: the Analyze Preview mixin was removed (see ANALYZE_TAB_BUDGET).
-ANALYZE_TAB_FORM_BUDGET = 1105
+# 1105 -> 1086: the whole run-controls row (Run / Suspend / + Queue / Stop) moved
+# to analyze_run_spec.AnalyzeRunMixin._build_run_row, beside the queue hooks the
+# new button belongs to. Genuine extraction -- ratchet down to the new size.
+ANALYZE_TAB_FORM_BUDGET = 1086
 
 
 def _line_count(rel: str) -> int:

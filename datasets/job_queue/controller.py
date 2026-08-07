@@ -387,7 +387,6 @@ class JobQueueController(QObject):
     def __init__(self, *, state_dir=None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.bridge = QueueBridge(state_dir=state_dir, parent=self)
-        self._analyze_collect: Callable[[], dict] | None = None
         self._collectors: dict[str, Callable[[], dict]] = {}
         self._on_session: Callable[[str, str], None] | None = None
         self._on_session_end: Callable[[str], None] | None = None
@@ -406,7 +405,7 @@ class JobQueueController(QObject):
         self.page.removeRequested.connect(self._on_remove)
         self.page.moveUpRequested.connect(lambda job_id: self._on_move(job_id, -1))
         self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
-        self.page.moveByRequested.connect(self._on_move)
+        self.page.moveByRequested.connect(self._on_drag_move)
         self.page.showRequested.connect(self.bridge.show_job)
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()
@@ -419,8 +418,11 @@ class JobQueueController(QObject):
 
     def set_analyze_provider(self, collect_spec: Callable[[], dict]) -> None:
         """Injects ``AnalyzeTab.collect_spec`` (a bound method) so this page
-        can build an Analyze job without importing ``analyze_tab``."""
-        self._analyze_collect = collect_spec
+        can build an Analyze job without importing ``analyze_tab``.
+
+        It goes into the same collector registry every other kind uses, so
+        "+ Add job → Analyze" and an Analyze edit session both reach it by the
+        one path rather than Analyze keeping a second, special one."""
         self._collectors["analyze"] = collect_spec
 
     def set_session_hooks(
@@ -544,8 +546,29 @@ class JobQueueController(QObject):
         self.bridge.remove_job(job_id)
 
     def _on_move(self, job_id: str, delta: int) -> None:
+        """The menu's Move up / Move down: one step, a swap with the neighbour."""
         if not self.bridge.move_job(job_id, delta):
             self._notify_move_refusal(job_id, delta)
+
+    def _on_drag_move(self, job_id: str, steps: int) -> None:
+        """A dragged row, which lands at a *destination* rather than stepping.
+
+        Deliberately not `move_job`: swapping with whatever sits N rows away
+        is not what dropping a row there looks like — the rows it passed
+        should shuffle up by one, and the job three rows down should not be
+        teleported to where this one started. The index is clamped rather than
+        refused, since a drag past either end of the list plainly means "put
+        it at the end".
+        """
+        jobs = self.bridge.queue.jobs
+        index = next((i for i, j in enumerate(jobs) if j.id == job_id), None)
+        if index is None:
+            return
+        target = max(0, min(len(jobs) - 1, index + steps))
+        if target == index:
+            return
+        if not self.bridge.move_job_to(job_id, target):
+            self._notify_move_refusal(job_id, steps)
 
     def _notify_move_refusal(self, job_id: str, delta: int) -> None:
         """Say why a move did nothing. It used to just not happen.
@@ -577,10 +600,6 @@ class JobQueueController(QObject):
         removed = self.bridge.clear_completed()
         if not removed:
             self._notify("Nothing finished to clear.", "neutral")
-
-    def _on_add_analyze(self) -> None:
-        if self._analyze_collect is not None:
-            self.add_job("analyze", self._analyze_collect())
 
     def _on_start_toggled(self) -> None:
         if self.bridge.queue.is_started:

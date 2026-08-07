@@ -22,11 +22,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtWidgets import QPushButton
+from PySide6.QtWidgets import QPushButton, QWidget
 
 from analyze_job_edit import AnalyzeJobEditMixin
 from services.pipeline_service import find_pipeline_script
 from services.run_spec import RunSpec, RunSpecError
+from widgets.flow_layout import FlowLayout
 
 
 class AnalyzeRunMixin(AnalyzeJobEditMixin):
@@ -82,21 +83,48 @@ class AnalyzeRunMixin(AnalyzeJobEditMixin):
         if btn is not None:
             btn.setVisible(sink is not None)
 
-    def _build_run_row_extras(self, layout, parent) -> None:
-        """Suspend and "+ Queue", added to the run-controls row.
+    def _build_run_row(self, parent: QWidget) -> QWidget:
+        """The whole run-controls row: Run, Suspend, + Queue, Stop.
 
-        Both live outside ``analyze_tab_form.py`` because that file is at its
-        line budget and the ratchet only moves down; this takes the one line
-        the suspend button already had, so the budgeted file does not grow.
+        Built here rather than in ``analyze_tab_form.py`` because that file is
+        at its line budget and the ratchet only moves down — moving the row out
+        wholesale lowers it.
+
+        The layout is a :class:`~widgets.flow_layout.FlowLayout`, not a
+        ``QHBoxLayout``. The four buttons want 398px and the panel they sit in
+        is ``RAIL_W`` (329) wide and fixed, so a box layout — which cannot wrap
+        — would compress them until their labels were unreadable. FlowLayout
+        also watches its children for show/hide, which matters here: "+ Queue"
+        appears only once the Datasets pane injects a sink, and the row has to
+        re-wrap when it does.
         """
-        layout.addWidget(self._build_suspend_button(parent))
+        row = QWidget(parent)
+        layout = FlowLayout(row, margin=0)
+        layout.setContentsMargins(12, 10, 12, 10)
+
+        self._run_btn = QPushButton("▶  Run Pipeline", row)
+        self._run_btn.setProperty("variant", "primary")
+        self._run_btn.clicked.connect(self._run)
+        layout.addWidget(self._run_btn)
+
+        layout.addWidget(self._build_suspend_button(row))
+        layout.addWidget(self._build_queue_button(row))
+
+        self._stop_btn = QPushButton("■  Stop", row)
+        self._stop_btn.setProperty("variant", "danger")
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._stop)
+        layout.addWidget(self._stop_btn)
+        return row
+
+    def _build_queue_button(self, parent) -> QPushButton:
         self._queue_btn = QPushButton("+ Queue", parent)
         self._queue_btn.setToolTip(
             "Add this run to the Job Queue instead of running it now. It waits "
             "its turn in Datasets → Job Queue, which runs one job at a time.")
         self._queue_btn.clicked.connect(self._on_queue_requested)
         self._queue_btn.setVisible(getattr(self, "_queue_sink", None) is not None)
-        layout.addWidget(self._queue_btn)
+        return self._queue_btn
 
     def _on_queue_requested(self) -> None:
         sink = getattr(self, "_queue_sink", None)

@@ -228,3 +228,49 @@ def test_persists_across_bridge_instances(qapp, tmp_path):
     reopened = QueueBridge(state_dir=tmp_path)
     assert reopened.queue.get("a").state == JobState.SUCCEEDED
     assert reopened.queue.is_started is False  # never auto-starts
+
+
+# ── drag reorder vs menu reorder ─────────────────────────────────────────────
+
+def _controller(tmp_path, ids):
+    from datasets.job_queue.controller import JobQueueController
+    from services.job_queue import JobSpec
+
+    c = JobQueueController(state_dir=tmp_path)
+    for job_id in ids:
+        c.bridge.add_job(JobSpec(id=job_id, kind="subset", label=job_id, spec={}))
+    return c
+
+
+def test_a_dragged_row_shifts_the_rows_it_passes(qapp, tmp_path):
+    """Regression: the drag signal was wired to move_job, which *swaps*.
+
+    Dragging a row three down then exchanged it with whatever sat there,
+    teleporting that job to where this one started, instead of shuffling the
+    rows it passed up by one. move_job_to was unreachable as a result.
+    """
+    c = _controller(tmp_path, "abcd")
+    c.page.moveByRequested.emit("a", 2)
+    assert [j.id for j in c.bridge.queue.jobs] == ["b", "c", "a", "d"]
+
+
+def test_a_drag_past_the_end_clamps_rather_than_doing_nothing(qapp, tmp_path):
+    """Dropping a row below the last one plainly means "put it last"."""
+    c = _controller(tmp_path, "abcd")
+    c.page.moveByRequested.emit("a", 99)
+    assert [j.id for j in c.bridge.queue.jobs] == ["b", "c", "d", "a"]
+
+
+def test_the_menu_move_is_still_a_single_step(qapp, tmp_path):
+    """Move up / Move down stay a neighbour swap — the drag change must not
+    have quietly redefined them."""
+    c = _controller(tmp_path, "abcd")
+    c.page.moveDownRequested.emit("a")
+    assert [j.id for j in c.bridge.queue.jobs] == ["b", "a", "c", "d"]
+
+
+def test_a_drag_that_would_break_a_chain_is_refused(qapp, tmp_path):
+    c = _controller(tmp_path, "abc")
+    c.bridge.set_chain("c", "a")
+    c.page.moveByRequested.emit("c", -2)
+    assert [j.id for j in c.bridge.queue.jobs] == ["a", "b", "c"]

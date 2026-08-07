@@ -8,6 +8,11 @@ persist a Analyze run's configuration as a plain, JSON-round-trippable
 ``RunSpec`` and start it later, without depending on the live form having the
 same values it had at enqueue time.
 
+The queue's *edit* flow needs the opposite direction too — a spec written back
+into the form — which is :class:`analyze_job_edit.AnalyzeJobEditMixin`, mixed
+in here because it is part of the same queue-facing surface. ``show_job`` below
+stays a shallow preview; ``hydrate_job`` is the full inverse.
+
 ``start_run`` never raises and never shows a dialog — it returns an error
 string on failure so it stays callable headless (from a queue worker with no
 form on screen); the caller decides how to surface the message.
@@ -17,11 +22,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtWidgets import QPushButton, QWidget
+
+from analyze_job_edit import AnalyzeJobEditMixin
 from services.pipeline_service import find_pipeline_script
 from services.run_spec import RunSpec, RunSpecError
+from widgets.flow_layout import FlowLayout
 
 
-class AnalyzeRunMixin:
+class AnalyzeRunMixin(AnalyzeJobEditMixin):
     """Splits run-collection (``_collect_run_spec``) from run-starting
     (``start_run``) so a :class:`RunSpec` can be persisted and started later,
     independent of the form state at collection time."""
@@ -64,6 +73,64 @@ class AnalyzeRunMixin:
         return None
 
     # ── job queue (QueueableController hooks) ───────────────────────────────
+    def set_queue_sink(self, sink) -> None:
+        """Where "+ Queue" sends a run. Injected by the Datasets pane, which
+        owns the queue — so this module never imports it, exactly as the queue
+        never imports ``analyze_tab``. Left unset when the pane is not in the
+        build, and the button hides itself rather than failing on click."""
+        self._queue_sink = sink
+        btn = getattr(self, "_queue_btn", None)
+        if btn is not None:
+            btn.setVisible(sink is not None)
+
+    def _build_run_row(self, parent: QWidget) -> QWidget:
+        """The whole run-controls row: Run, Suspend, + Queue, Stop.
+
+        Built here rather than in ``analyze_tab_form.py`` because that file is
+        at its line budget and the ratchet only moves down — moving the row out
+        wholesale lowers it.
+
+        The layout is a :class:`~widgets.flow_layout.FlowLayout`, not a
+        ``QHBoxLayout``. The four buttons want 398px and the panel they sit in
+        is ``RAIL_W`` (329) wide and fixed, so a box layout — which cannot wrap
+        — would compress them until their labels were unreadable. FlowLayout
+        also watches its children for show/hide, which matters here: "+ Queue"
+        appears only once the Datasets pane injects a sink, and the row has to
+        re-wrap when it does.
+        """
+        row = QWidget(parent)
+        layout = FlowLayout(row, margin=0)
+        layout.setContentsMargins(12, 10, 12, 10)
+
+        self._run_btn = QPushButton("▶  Run Pipeline", row)
+        self._run_btn.setProperty("variant", "primary")
+        self._run_btn.clicked.connect(self._run)
+        layout.addWidget(self._run_btn)
+
+        layout.addWidget(self._build_suspend_button(row))
+        layout.addWidget(self._build_queue_button(row))
+
+        self._stop_btn = QPushButton("■  Stop", row)
+        self._stop_btn.setProperty("variant", "danger")
+        self._stop_btn.setEnabled(False)
+        self._stop_btn.clicked.connect(self._stop)
+        layout.addWidget(self._stop_btn)
+        return row
+
+    def _build_queue_button(self, parent) -> QPushButton:
+        self._queue_btn = QPushButton("+ Queue", parent)
+        self._queue_btn.setToolTip(
+            "Add this run to the Job Queue instead of running it now. It waits "
+            "its turn in Datasets → Job Queue, which runs one job at a time.")
+        self._queue_btn.clicked.connect(self._on_queue_requested)
+        self._queue_btn.setVisible(getattr(self, "_queue_sink", None) is not None)
+        return self._queue_btn
+
+    def _on_queue_requested(self) -> None:
+        sink = getattr(self, "_queue_sink", None)
+        if sink is not None:
+            sink(self.collect_spec())
+
     def collect_spec(self) -> dict:
         """The current form's run, as a job queue's JSON spec."""
         return self._collect_run_spec().to_json()

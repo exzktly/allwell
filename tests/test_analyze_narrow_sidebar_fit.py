@@ -100,3 +100,35 @@ def test_segmentation_and_auto_threshold_method_combos_fit_and_elide(qapp):
 
     thr_cb = tab._auto_threshold_method_cb
     assert thr_cb.width() <= 200
+
+
+def test_run_controls_fit_the_rail_with_the_queue_button_shown(qapp):
+    """The run row has to fit RAIL_W *with* "+ Queue" on it.
+
+    Regression: the button is hidden until the Datasets pane injects a queue
+    sink, so every existing check measured the row without it and passed. With
+    it shown the four buttons want 398px against a fixed 329px panel, and a
+    QHBoxLayout cannot wrap — it just compresses them until the labels are
+    unreadable. The row is a FlowLayout for that reason, and FlowLayout watches
+    its children for show/hide so the row re-wraps when the button appears.
+    """
+    from analyze_tab import AnalyzeTab
+    from well_viewer.core.app_shell_view import RAIL_W
+
+    tab = AnalyzeTab()
+    tab.resize(1640, 980)
+    tab.show()
+    try:
+        tab.set_queue_sink(lambda spec: None)
+        qapp.processEvents()
+        assert tab._queue_btn.isVisibleTo(tab), "the sink should reveal the button"
+
+        row = tab._run_btn.parentWidget()
+        assert row.minimumSizeHint().width() <= RAIL_W, (
+            f"run row needs {row.minimumSizeHint().width()}px, rail is {RAIL_W}px"
+        )
+        # And it fits by wrapping, not by squashing: at the rail's width the
+        # row is taller than a single button.
+        assert row.heightForWidth(RAIL_W) > tab._run_btn.sizeHint().height()
+    finally:
+        tab.close()

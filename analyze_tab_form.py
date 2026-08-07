@@ -735,26 +735,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         self._cleanup_remote_cb.toggled.connect(self._refresh_remote_controls)
         self._refresh_remote_controls()
 
-        btn_widget = QWidget(parent)
-        bl = QHBoxLayout(btn_widget)
-        bl.setContentsMargins(12, 10, 12, 10)
-        bl.setSpacing(8)
-
-        self._run_btn = QPushButton("▶  Run Pipeline", btn_widget)
-        self._run_btn.setProperty("variant", "primary")
-        self._run_btn.clicked.connect(self._run)
-        bl.addWidget(self._run_btn)
-
-        bl.addWidget(self._build_suspend_button(btn_widget))
-
-        self._stop_btn = QPushButton("■  Stop", btn_widget)
-        self._stop_btn.setProperty("variant", "danger")
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._stop)
-        bl.addWidget(self._stop_btn)
-        bl.addStretch(1)
-
-        parent.layout().addWidget(btn_widget)
+        parent.layout().addWidget(self._build_run_row(parent))
 
     def _refresh_last_run_summary(self) -> None:
         """Populate the idle last-run card (C4) from the most recent run's

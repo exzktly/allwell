@@ -297,3 +297,57 @@ def test_a_chained_successor_of_analyze_gets_the_dataset_root(qapp, tmp_path):
     c.bridge._on_job_finished("analyze", True, "", "/data/plateA_processed/out")
 
     assert c.bridge.queue.materialise("v") == {"dataset": "/data/plateA_processed"}
+
+
+# ── QueueSession, driven with no Qt page at all ──────────────────────────────
+#
+# The session rules moved out of JobQueueController because none of them are
+# about wiring a page to a bridge. The proof that the split is real is that the
+# class can be exercised with a stub notify and no page in sight.
+
+def _session_over(tmp_path, jobs):
+    from datasets.job_queue.session import QueueSession
+    from datasets.job_queue.controller import QueueBridge
+
+    bridge = QueueBridge(state_dir=tmp_path)
+    for job in jobs:
+        bridge.add_job(job)
+    notices, added = [], []
+    s = QueueSession(bridge,
+                     notify=lambda text, kind="warn": notices.append((kind, text)),
+                     add_job=lambda kind, spec: added.append((kind, spec)))
+    return s, bridge, notices, added
+
+
+def test_the_session_needs_no_page_to_refuse_a_running_job(qapp, tmp_path):
+    s, bridge, notices, _ = _session_over(
+        tmp_path, [JobSpec(id="a", kind="subset", label="A", spec={"source": "/a"})])
+    bridge.queue.mark_running("a")
+
+    assert s.begin_edit("a") is False
+    assert s.current() is None
+    assert any("running" in text for _kind, text in notices)
+
+
+def test_the_session_adds_a_new_job_through_its_injected_callback(qapp, tmp_path):
+    s, _bridge, _notices, added = _session_over(tmp_path, [])
+    s.register_collector("subset", lambda: {"source": "/x", "destination": "/y"})
+    assert s.begin_new_job("subset") is True
+    assert s.current() == ("subset", None)
+
+    assert s.save() is True
+    assert added == [("subset", {"source": "/x", "destination": "/y"})]
+    assert s.current() is None
+
+
+def test_blocks_preview_distinguishes_refuse_from_no_op(qapp, tmp_path):
+    """Three answers, not two: refuse another job on the busy page, treat a
+    click on the job already open as a no-op, and let anything else through."""
+    s, _bridge, _notices, _added = _session_over(tmp_path, [])
+    s.register_collector("subset", dict)
+    s.begin_new_job("subset")
+    s._session = ("subset", "a")           # as if editing job "a"
+
+    assert s.blocks_preview_of("subset", "a") is None      # the one open
+    assert s.blocks_preview_of("subset", "b") is True      # same page, other job
+    assert s.blocks_preview_of("validate", "c") is False   # a different page

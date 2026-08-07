@@ -235,6 +235,141 @@ def test_drop_zones_reject_incompatible_tokens():
     assert not B._accept_fixed("chan:rows:0") and not B._accept_fixed("newchan:GFP")
     assert B._accept_tray("chan:rows:0")
     assert not B._accept_tray("well") and not B._accept_tray("newchan:GFP")
+    # A channel pill takes channels only; a root must fall through to the zone
+    # behind it, which is the widget that knows how to place a root.
+    assert B._accept_chan("chan:rows:0") and B._accept_chan("newchan:GFP")
+    assert not B._accept_chan("well")
+
+
+# ── reordering channels within an axis ──────────────────────────────────────
+
+def _rows(spec):
+    return [c.channel for c in spec.rows.channels]
+
+
+def _four_channel_ctx():
+    ctx = _fake_ctx(wells=["A01"], channels=["gfp", "rfp", "bfp", "cy5"],
+                    timepoints=["T01"])
+    spec = B.builder_spec(ctx)
+    spec.rows.channels = [ChannelSpec(c) for c in ("GFP", "RFP", "BFP", "CY5")]
+    spec.cols = B.Axis(root="timepoint")
+    return ctx, spec
+
+
+def test_channel_dropped_on_a_pill_lands_at_that_position():
+    """The reported bug: a channel dragged within its own axis could only ever
+    reach the bottom of the list, because the axis zone was the sole drop target
+    and its handler appends. Dropping on a pill inserts at that pill instead —
+    above it or below it, depending on which half took the drop."""
+    ctx, spec = _four_channel_ctx()
+    B._move_channel(spec, "rows", 3, "rows", at=0)          # CY5 onto GFP's top half
+    assert _rows(spec) == ["CY5", "GFP", "RFP", "BFP"]
+
+    ctx, spec = _four_channel_ctx()
+    B._move_channel(spec, "rows", 0, "rows", at=2)          # GFP onto BFP's top half
+    assert _rows(spec) == ["RFP", "GFP", "BFP", "CY5"]
+
+    ctx, spec = _four_channel_ctx()
+    B._move_channel(spec, "rows", 0, "rows", at=3)          # GFP onto BFP's bottom half
+    assert _rows(spec) == ["RFP", "BFP", "GFP", "CY5"]
+
+
+def test_channel_dropped_on_itself_is_a_no_op():
+    for idx in range(4):
+        for after in (False, True):
+            _, spec = _four_channel_ctx()
+            B._move_channel(spec, "rows", idx, "rows", at=idx + (1 if after else 0))
+            assert _rows(spec) == ["GFP", "RFP", "BFP", "CY5"], (idx, after)
+
+
+def test_dropping_on_the_axis_zone_still_appends():
+    """The zone's own background has no position to speak of, so a drop there
+    keeps meaning "put it at the end"."""
+    _, spec = _four_channel_ctx()
+    B._move_channel(spec, "rows", 0, "rows")
+    assert _rows(spec) == ["RFP", "BFP", "CY5", "GFP"]
+
+
+def test_new_channel_from_the_tray_can_be_dropped_into_position():
+    ctx, spec = _four_channel_ctx()
+    B._add_channel(ctx, spec, "DAPI", "rows", at=1)
+    assert _rows(spec) == ["GFP", "DAPI", "RFP", "BFP", "CY5"]
+    B._add_channel(ctx, spec, "TXR", "rows")
+    assert _rows(spec)[-1] == "TXR"
+
+
+def test_pill_drop_handler_maps_the_hovered_half_to_an_insert_index(monkeypatch):
+    """Top half → before the pill, bottom half → after it."""
+    ctx, spec = _four_channel_ctx()
+    monkeypatch.setattr(B, "_edit", lambda _ctx: None)
+    B._on_pill_drop(ctx, "rows", 1, "chan:rows:3", after=False)
+    assert _rows(spec) == ["GFP", "CY5", "RFP", "BFP"]
+
+    ctx, spec = _four_channel_ctx()
+    monkeypatch.setattr(B, "_edit", lambda _ctx: None)
+    B._on_pill_drop(ctx, "rows", 1, "chan:rows:3", after=True)
+    assert _rows(spec) == ["GFP", "RFP", "CY5", "BFP"]
+
+
+def test_channel_pill_is_a_drop_target_that_reports_which_half(qtbot):
+    """The pill built for the tree must actually accept drops — the whole reorder
+    path exists only if it does — and must report the half it was dropped in."""
+    from PySide6.QtCore import QMimeData, QPointF, Qt
+    from PySide6.QtGui import QDragEnterEvent, QDropEvent
+
+    ctx, spec = _four_channel_ctx()
+    pill = B._chan_pill(ctx, spec, "rows", 2, spec.rows.channels[2])
+    qtbot.addWidget(pill)
+    pill.resize(200, 40)
+    assert pill.acceptDrops()
+
+    # A drag event does not own its QMimeData, so the payloads have to outlive
+    # the events themselves or Qt reads freed memory.
+    payloads = []
+
+    def _event(cls, y, token):
+        mime = QMimeData()
+        mime.setData(B._MIME, token.encode("utf-8"))
+        payloads.append(mime)
+        pos = QPointF(10, y)
+        return cls(pos if cls is QDropEvent else pos.toPoint(),
+                   Qt.MoveAction, mime, Qt.LeftButton, Qt.NoModifier)
+
+    # Hovering the top half cues an insert above, the bottom half below.
+    enter = _event(QDragEnterEvent, 5, "chan:rows:0")
+    pill.dragEnterEvent(enter)
+    assert enter.isAccepted() and pill.property("dropEdge") == "above"
+    pill.dragMoveEvent(_event(QDragEnterEvent, 35, "chan:rows:0"))
+    assert pill.property("dropEdge") == "below"
+    pill.dragLeaveEvent(None)
+    assert pill.property("dropEdge") == "none"
+
+    # A root token is left unaccepted so it propagates out to the axis zone.
+    root = _event(QDragEnterEvent, 5, "well")
+    pill.dragEnterEvent(root)
+    assert not root.isAccepted()
+
+    # And a drop on the bottom half moves the dragged channel below this pill.
+    pill.dropEvent(_event(QDropEvent, 35, "chan:rows:0"))
+    assert _rows(spec) == ["RFP", "BFP", "GFP", "CY5"]
+
+
+def test_chip_claims_the_mouse_press_that_starts_a_drag(qtbot):
+    """The chip owns the whole gesture: it accepts the press instead of letting
+    QFrame ignore it and hand the press to the parent zone, so there is no
+    platform in which the move events that start the drag could be routed
+    somewhere the chip never sees them."""
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    chip = B._Chip("newchan:GFP")
+    qtbot.addWidget(chip)
+    press = QMouseEvent(QMouseEvent.MouseButtonPress, QPointF(4, 4), QPointF(4, 4),
+                        Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    press.ignore()
+    chip.mousePressEvent(press)
+    assert press.isAccepted()
+    assert chip._press is not None
 
 
 def test_root_filter_menu_actually_filters(qtbot):

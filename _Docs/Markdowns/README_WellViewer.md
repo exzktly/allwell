@@ -1532,6 +1532,13 @@ channel for every well).
   *root → channels* for Columns). Then press **Generate** to render. Editing the
   shelf only stages the layout — **Generate** draws the images. More than two
   dimensions can vary at once (e.g. Rows = *Well › Channels*, Columns = *Timepoint*).
+- **Reorder the nested channels** — the order of the channel chips under a root is
+  the order their rows or columns appear in, and you set it by dragging a chip
+  onto another chip rather than onto the zone. An accent rule lights up on the
+  top or bottom edge of the chip you are hovering, showing the side the dragged
+  channel will land on; drop it there. Dropping onto the zone's empty background
+  still sends the channel to the end of the list, and a channel dragged from the
+  **Channels** tray can be dropped straight onto a chip to arrive in position.
 - **Fixed panel** — every root dimension **not** on an axis is listed under
   **Fixed**, pinned to a single value you choose. Drag a root out of Fixed onto an
   axis to make it vary; click the **×** on a root to drop it back to Fixed. Wells

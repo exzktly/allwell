@@ -9,34 +9,54 @@ from __future__ import annotations
 import pytest
 
 from services.job_kinds import (
+    CHAIN_KIND,
     CHAIN_TARGET,
     KIND_LABEL,
-    PRODUCED_KEY,
     describe,
     describe_detail,
+    produced_for,
 )
 
 
 # ── table coverage ────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("table,name", [(PRODUCED_KEY, "PRODUCED_KEY"),
-                                        (CHAIN_TARGET, "CHAIN_TARGET")])
-def test_every_kind_is_covered(table, name):
-    """A kind missing from either table is a job that cannot be chained.
-
-    Both ends of a chain are looked up by kind — the predecessor's
-    ``PRODUCED_KEY`` and the successor's ``CHAIN_TARGET`` — so a gap in either
-    is a link that silently cannot be made rather than one that fails loudly.
-    """
-    missing = sorted(set(KIND_LABEL) - set(table))
-    assert not missing, f"{name} has no entry for: {missing}"
+def test_every_kind_can_receive_a_chained_input():
+    """A kind missing from CHAIN_TARGET is a job that cannot be chained to."""
+    missing = sorted(set(KIND_LABEL) - set(CHAIN_TARGET))
+    assert not missing, f"CHAIN_TARGET has no entry for: {missing}"
 
 
-def test_produced_keys_are_ones_materialise_can_resolve():
-    """The three names here are the only outputs a JobSpec records."""
+def test_the_chain_kind_is_one_materialise_can_resolve():
     from services.job_queue import _CHAIN_KINDS
 
-    assert set(PRODUCED_KEY.values()) <= set(_CHAIN_KINDS)
+    assert CHAIN_KIND in _CHAIN_KINDS
+
+
+def test_a_datasets_tool_reports_the_root_it_built():
+    assert produced_for("subset", "/d/plateA_sub") == {"dataset_root": "/d/plateA_sub"}
+
+
+def test_analyze_reports_a_dataset_root_as_well_as_its_out_folder():
+    """Regression: chaining anything after Analyze handed it `out/`.
+
+    AnalyzeTab emits its output directory, and every successor — Validate,
+    Subset, Concatenate, Merge Plates, and Analyze itself — takes a *dataset
+    root*, the folder holding the `in/` + `out/` pair. Handed `out/`, Subset
+    looks for `out/in/`, finds no wells, and quietly subsets nothing.
+    `resolve_input_output` returns `<root>/out` in every layout branch, so the
+    root is the parent by construction.
+    """
+    assert produced_for("analyze", "/data/plateA_processed/out") == {
+        "out_dir": "/data/plateA_processed/out",
+        "dataset_root": "/data/plateA_processed",
+    }
+
+
+def test_nothing_is_recorded_for_a_job_that_reported_no_path():
+    """An empty path must not become a `dataset_root` of "" that materialise
+    would then hand a successor as a real answer."""
+    assert produced_for("analyze", "") == {}
+    assert produced_for("subset", "") == {}
 
 
 # ── describe ──────────────────────────────────────────────────────────────────

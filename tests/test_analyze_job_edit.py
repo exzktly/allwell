@@ -222,3 +222,43 @@ def test_hydrate_leaves_the_preview_path_alone(tab):
     assert collected["raw"] == "/data/other"
     # Everything else is still the form's own state, not the preview spec's.
     assert collected["nuclear_token"] != _OPTS["nuclear_token"]
+
+
+# ── hydrating one job over another ───────────────────────────────────────────
+#
+# The round trip above always hydrates a *fresh* form, which is the one case a
+# set-only restore cannot fail. The real edit flow hydrates over whatever the
+# last job left behind, and that is where a falsy value has to overwrite.
+
+@pytest.mark.parametrize("key,attr,populated", [
+    ("scratch_dir", "_scratch_edit", "/scratch/allwell"),
+    ("raw", "_input_edit", "/data/plate7"),
+])
+def test_a_blank_value_overwrites_the_previous_job_s(tab, key, attr, populated):
+    """Regression: `_apply_pipeline_info` is set-only for both of these
+    (`if scratch and ...`, `if in_dir:`), so hydrating a job that has no
+    scratch directory over a form that does left the previous job's path in
+    the field — and collecting it back wrote that path into this job."""
+    tab.hydrate_job(_SPEC)
+    assert getattr(tab, attr).text() == populated
+
+    tab.hydrate_job({**_SPEC, "opts": {**_OPTS, key: None}})
+    assert getattr(tab, attr).text() == ""
+    assert tab.collect_spec()["opts"][key] in (None, "", ".")
+
+
+def test_a_missing_remote_is_reported_rather_than_silently_swapped(tab):
+    """A job naming a remote this install no longer has cannot be restored.
+
+    Saving the edit anyway would rewrite the job to run on whichever machine
+    happened to be selected — a different computer, silently. hydrate_job
+    returns the problem so the caller can say so.
+    """
+    problems = tab.hydrate_job({**_SPEC, "remote_name": "gone-box"})
+    assert problems, "a vanished remote must be reported"
+    assert "gone-box" in problems[0]
+
+
+def test_a_remote_that_still_exists_reports_nothing(tab):
+    assert tab.hydrate_job(_REMOTE_SPEC) == []
+    assert tab.collect_spec()["remote_name"] == "bench-box"

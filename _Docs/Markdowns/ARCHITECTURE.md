@@ -4136,16 +4136,28 @@ Qt event loop. Four layers:
 
 - **`services/job_kinds.py`** — the per-kind tables, Qt-free because none of
   it is a view concern and all of it is worth testing without an event loop.
-  `KIND_LABEL` (a tool's human name), `PRODUCED_KEY` (which of a finished
-  job's three possible outputs its controller reports — every Datasets tool
-  produces a whole dataset root, Analyze's useful successor input is its
-  `out/`), and `CHAIN_TARGET` (the dotted path into a job's *own* spec that a
-  predecessor's output fills: `opts.raw` for Analyze, `dataset` for Validate,
-  `source` for Subset / OME / Zip-loose, `dataset1` for the two-dataset
-  tools). Those two tables are the sending and receiving ends of the same
-  link, which is why the interface can derive a chain from "run after that
-  one" alone — a user should not also have to know where each tool receives
-  its input.
+  `KIND_LABEL` (a tool's human name), `CHAIN_TARGET` (the dotted path into a
+  job's *own* spec that a predecessor's output fills: `opts.raw` for Analyze,
+  `dataset` for Validate, `source` for Subset / OME / Zip-loose, `dataset1`
+  for the two-dataset tools), and the sending end of the same link —
+  `produced_for(kind, path)` and `CHAIN_KIND`. Together they are why the
+  interface can derive a chain from "run after that one" alone; a user should
+  not also have to know where each tool receives its input.
+
+  **`CHAIN_KIND` is a constant, `"dataset_root"`, not a per-kind table**, and
+  that is the correction it exists to record. Every tool here — Analyze
+  included — consumes a *dataset root*, the folder holding the `in/` + `out/`
+  pair, and resolves its own way down from there. A per-kind table invites
+  handing over the predecessor's most specific output, and Analyze's most
+  specific output is its `out/` folder: chained that way, Validate and Subset
+  looked for `out/in/`, found no wells, and quietly did nothing.
+  `produced_for` therefore records **both** for an Analyze job — `out_dir`
+  because it is what Analyze actually built, `dataset_root` because it is what
+  a successor needs — deriving the root as the parent, which holds by
+  construction since `resolve_input_output` returns `<root>/out` in every one
+  of its layout branches. It records nothing at all for an empty path, so a
+  `dataset_root` of `""` can never be handed to `materialise` as a real
+  answer.
 
   `describe(kind, spec)` is what a row is actually called. Without it every
   row of a kind reads identically — eight queued subsets all saying "Subset"
@@ -4237,7 +4249,24 @@ Qt event loop. Four layers:
   is busy with a run of its own, and abandoned with a note if the job starts
   running or leaves the queue while it is open — saving it then would either
   overwrite a spec already handed to a runner or write to a job that no
-  longer exists. Every refusal in the class routes through one `_notify`
+  longer exists.
+
+  Three narrower hazards get their own handling, because each one silently
+  corrupted the job under edit. **Clicking another queued row** while a
+  session is open is refused: preview writes the clicked job's fields straight
+  into the same page the session has open, so the next Save collected *that*
+  job's settings into this one and turned it into a duplicate — and since
+  nothing about the queue changed, the stale-session check never fired.
+  **Starting a second session** says the first was closed without saving,
+  rather than replacing it silently while its banner vanishes from a page the
+  user has left. And `begin_edit` reports a **round-trip loss**: it collects
+  the page it has just populated and names anything that was in the spec and
+  is now gone. That is deliberately general rather than a per-tool patch —
+  Subset builds its timepoint and FOV checkboxes by reading the source
+  dataset, so a source that has moved leaves no boxes, `all_timepoints_
+  selected()` answers "yes" over an empty list, and a one-timepoint subset
+  silently widens to every timepoint on save. A value that merely changed form
+  (a well relabelled `A1` → `A01`) is not a loss and is not reported. Every refusal in the class routes through one `_notify`
   seam rather than scattered `Toast` calls, so a test can assert that a
   refusal was reported without standing up a real `Toast` and its fade
   animation and dismiss timer.

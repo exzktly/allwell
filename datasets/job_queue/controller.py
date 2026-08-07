@@ -22,7 +22,15 @@ from typing import Protocol
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from services.job_kinds import CHAIN_TARGET, KIND_LABEL, PRODUCED_KEY, describe
+from well_viewer.core.safe import swallowed
+
+from services.job_kinds import (
+    CHAIN_KIND,
+    CHAIN_TARGET,
+    KIND_LABEL,
+    describe,
+    produced_for,
+)
 from services.job_queue import JobQueue, JobSpec, JobState, load_queue, save_queue
 from datasets.job_queue.view import JobQueuePage
 
@@ -171,8 +179,7 @@ class QueueBridge(QObject):
             return False
         try:
             self._queue.set_chain(
-                job_id, chain_from, chain_target=target,
-                chain_kind=PRODUCED_KEY.get(pred.kind, "dataset_root"),
+                job_id, chain_from, chain_target=target, chain_kind=CHAIN_KIND,
             )
         except ValueError:
             return False       # self-chain or cycle; the caller reports it
@@ -216,8 +223,13 @@ class QueueBridge(QObject):
         runner = self._runners.get(kind)
         return bool(runner is not None and runner.is_busy())
 
-    def hydrate_job(self, job_id: str) -> bool:
+    def hydrate_job(self, job_id: str) -> list[str] | None:
         """Fill the job's page fully enough that collecting it back is safe.
+
+        Returns the hydrator's own list of things it could not restore
+        faithfully (empty when all was well), or ``None`` when the page could
+        not be populated at all — the two are different answers and a caller
+        deciding whether to open an edit session needs to tell them apart.
 
         ``show_job`` is a preview: for Analyze it sets the input folder and
         nothing else, deliberately. Collecting a previewed page over a stored
@@ -229,17 +241,16 @@ class QueueBridge(QObject):
         """
         job = self._queue.get(job_id)
         if job is None:
-            return False
+            return None
         runner = self._runners.get(job.kind)
         if runner is None or runner.is_busy():
-            return False
+            return None
         spec = json.loads(json.dumps(job.spec))
         hydrate = getattr(runner, "hydrate_job", None)
         if callable(hydrate):
-            hydrate(spec)
-        else:
-            runner.show_job(spec)
-        return True
+            return list(hydrate(spec) or [])
+        runner.show_job(spec)
+        return []
 
     # ── run/pause ────────────────────────────────────────────────────────
     def start(self) -> None:
@@ -318,9 +329,7 @@ class QueueBridge(QObject):
             return  # not the queue's own in-flight job
         job_id, _kind = self._current
         self._current = None
-        produced = {}
-        if ok and output_path:
-            produced[PRODUCED_KEY.get(kind, "dataset_root")] = output_path
+        produced = produced_for(kind, output_path) if ok else {}
         if not ok and self._was_suspended(kind, job_id):
             # Suspended, not cancelled: the job keeps its place and its
             # progress, its successors keep waiting rather than blocking, and
@@ -406,7 +415,7 @@ class JobQueueController(QObject):
         self.page.moveUpRequested.connect(lambda job_id: self._on_move(job_id, -1))
         self.page.moveDownRequested.connect(lambda job_id: self._on_move(job_id, 1))
         self.page.moveByRequested.connect(self._on_drag_move)
-        self.page.showRequested.connect(self.bridge.show_job)
+        self.page.showRequested.connect(self._on_show_requested)
         self.bridge.queueChanged.connect(self._refresh_page)
         self._refresh_page()
 
@@ -461,12 +470,56 @@ class JobQueueController(QObject):
             self._notify(f"{KIND_LABEL.get(job.kind, job.kind)} is busy with its "
                          "own run — try again when it finishes.", "warn")
             return False
-        if not self.bridge.hydrate_job(job_id):
+        problems = self.bridge.hydrate_job(job_id)
+        if problems is None:
             self._notify("That job's page isn't available to edit.", "warn")
             return False
-        self._start_session(job.kind, job_id,
-                            f"Editing queued job “{job.label}”.")
+        problems += self._round_trip_losses(job)
+        message = f"Editing queued job “{job.label}”."
+        if job.state in JobState.TERMINAL:
+            # update_spec deliberately leaves state alone, so saving this
+            # changes what the job says it will do without putting it back in
+            # the queue. Said here rather than discovered after pressing Save.
+            message += (" This job has already finished — saving updates it, "
+                        "but it won't run again until you choose Retry.")
+        for problem in problems:
+            self._notify(problem, "warn")
+        self._start_session(job.kind, job_id, message)
         return True
+
+    def _round_trip_losses(self, job: JobSpec) -> list[str]:
+        """Which of the job's settings the page could not take on.
+
+        A tool's ``show_job`` is only as faithful as the page can be right
+        now. Subset's, for instance, populates its timepoint and FOV filters
+        from checkboxes it builds by reading the source dataset — so if that
+        dataset has moved or not been built yet, the boxes are never created,
+        ``all_timepoints_selected()`` answers "yes" over an empty list, and
+        collecting the page back turns a one-timepoint subset into every
+        timepoint. That is a widening, and it is invisible.
+
+        Rather than special-casing each tool, the session collects the page it
+        just populated and reports any setting that was there and is now not.
+        A value that merely changed form (a well relabelled ``A1`` → ``A01``)
+        is not a loss and is not reported.
+        """
+        collect = self._collectors.get(job.kind)
+        if collect is None:
+            return []
+        try:
+            round_tripped = collect()
+        except Exception:
+            # A page too empty to collect from cannot report a loss either;
+            # begin_edit's own guards already refused the cases that matter.
+            swallowed("collecting a page to check an edit round-trip")
+            return []
+        lost = [key for key, value in (job.spec or {}).items()
+                if value and not round_tripped.get(key)]
+        if not lost:
+            return []
+        return ["This page couldn't show every setting on that job "
+                f"({', '.join(sorted(lost))}) — saving would clear "
+                "them. Check the input path first."]
 
     def begin_new_job(self, kind: str) -> bool:
         """Open *kind*'s page to set up a job that does not exist yet."""
@@ -484,6 +537,11 @@ class JobQueueController(QObject):
         return True
 
     def _start_session(self, kind: str, job_id: str | None, message: str) -> None:
+        if self._session is not None and self._session != (kind, job_id):
+            # Silently overwriting it discarded whatever the user had typed on
+            # the other page, with the banner disappearing from a page they
+            # were no longer looking at.
+            self._notify("Your previous edit was closed without saving.", "warn")
         self._session = (kind, job_id)
         if self._on_session is not None:
             self._on_session(kind, message)
@@ -499,14 +557,18 @@ class JobQueueController(QObject):
         kind, job_id = self._session
         collect = self._collectors.get(kind)
         if collect is None:
+            self._notify(f"{KIND_LABEL.get(kind, kind)} can't be saved to the "
+                         "queue in this build — nothing was changed.", "warn")
             self.end_session()
             return False
         spec = collect()
         if job_id is None:
             self.add_job(kind, spec)
         elif not self.bridge.update_job(job_id, spec):
-            # The only way here is the job having started between opening the
-            # session and saving it, which _on_queue_changed already reports.
+            # The job started running, or left the queue, between opening the
+            # session and saving it. Silence here reads as a successful save.
+            self._notify("That job changed while you were editing it — your "
+                         "changes were not saved.", "warn")
             self.end_session()
             return False
         self.end_session()
@@ -538,6 +600,27 @@ class JobQueueController(QObject):
             self.end_session()
 
     # ── queue actions ────────────────────────────────────────────────────
+    def _on_show_requested(self, job_id: str) -> None:
+        """Clicking a row to preview it on its own page.
+
+        Refused while a session has that same page open for editing: preview
+        writes the clicked job's fields straight into the page, so the next
+        Save would collect *that* job's settings into the one under edit and
+        silently turn it into a duplicate. Nothing about the queue changes, so
+        `_abandon_session_if_stale` would never have caught it.
+        """
+        job = self.bridge.queue.get(job_id)
+        if job is None:
+            return
+        if self._session is not None and self._session[0] == job.kind:
+            if self._session[1] == job_id:
+                return      # already open for editing; the click is a no-op
+            self._notify(
+                "Finish or cancel the job you're editing before opening "
+                "another one on that page.", "warn")
+            return
+        self.bridge.show_job(job_id)
+
     def _on_remove(self, job_id: str) -> None:
         job = self.bridge.queue.get(job_id)
         if job is not None and job.state == JobState.RUNNING:
@@ -568,7 +651,7 @@ class JobQueueController(QObject):
         if target == index:
             return
         if not self.bridge.move_job_to(job_id, target):
-            self._notify_move_refusal(job_id, steps)
+            self._notify_move_refusal(job_id, target - index)
 
     def _notify_move_refusal(self, job_id: str, delta: int) -> None:
         """Say why a move did nothing. It used to just not happen.
@@ -597,9 +680,28 @@ class JobQueueController(QObject):
             self._notify("Those two jobs can't be chained that way.", "warn")
 
     def _on_clear_completed(self) -> None:
+        """Clearing a finished job unlinks any pending job chained to it.
+
+        It has to — a survivor pointing at an id that is gone can never become
+        runnable — but the consequence is that the survivor falls back to
+        whatever placeholder path its own spec still holds and runs against
+        that. Silence made a tidy-up look free.
+        """
+        orphaned = self._pending_successors_of_terminal_jobs()
         removed = self.bridge.clear_completed()
         if not removed:
             self._notify("Nothing finished to clear.", "neutral")
+        elif orphaned:
+            self._notify(
+                f"{len(orphaned)} queued job(s) were waiting on a job you "
+                "cleared — check their input before starting the queue: "
+                + ", ".join(orphaned[:3]), "warn")
+
+    def _pending_successors_of_terminal_jobs(self) -> list[str]:
+        jobs = self.bridge.queue.jobs
+        terminal = {j.id for j in jobs if j.state in JobState.TERMINAL}
+        return [j.label or j.id for j in jobs
+                if j.chain_from in terminal and j.state not in JobState.TERMINAL]
 
     def _on_start_toggled(self) -> None:
         if self.bridge.queue.is_started:
@@ -635,7 +737,12 @@ class JobQueueController(QObject):
         queue = self.bridge.queue
         self.page.set_jobs(queue.jobs)
         self.page.set_summary(queue.counts())
-        self.page.set_repair_notes(queue.repair_notes)
+        # Taken, not read: a note saying a job was interrupted stops being
+        # true the moment that job resumes, and it used to sit on the page for
+        # the rest of the session regardless.
+        notes = queue.take_repair_notes()
+        if notes:
+            self.page.set_repair_notes(notes)
         self.page.set_started(queue.is_started)
         self.page.set_job_running(self.bridge.current_job_id() is not None)
 

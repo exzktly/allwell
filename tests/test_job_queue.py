@@ -459,3 +459,36 @@ def test_repair_notes_survive_the_load_that_produced_them(tmp_path):
 def test_repair_notes_are_empty_for_a_clean_queue(tmp_path):
     save_queue(JobQueue([_job("a")]), tmp_path)
     assert load_queue(tmp_path).repair_notes == []
+
+
+def test_retry_refuses_a_blocked_job():
+    """Retrying a blocked job fixes nothing and hides why it is stuck.
+
+    It never ran, and the predecessor that stopped it is still failed. Allowing
+    it moved the job to PENDING and wiped the "predecessor a did not complete"
+    message, leaving a queue that reported work waiting, did nothing when
+    started, and no longer said what the problem was. Retry the ancestor.
+    """
+    q = JobQueue([_job("a"), _job("b", chain_from="a")])
+    q.mark_running("a")
+    q.mark_finished("a", ok=False, message="boom")
+    assert q.get("b").state == JobState.BLOCKED
+
+    assert q.retry("b") is False
+    assert q.get("b").state == JobState.BLOCKED
+    assert q.get("b").message, "the reason it is blocked must survive"
+    assert q.next_runnable() is None
+
+    # Retrying the ancestor is the move that works, and it frees the chain.
+    assert q.retry("a") is True
+    assert [j.state for j in q.jobs] == [JobState.PENDING, JobState.PENDING]
+
+
+def test_repair_notes_are_taken_once_and_then_gone(tmp_path):
+    """They describe what loading the file had to fix, which stops being true
+    the moment the user acts on it — a note saying a job was interrupted must
+    not still be on the page after that job has resumed and succeeded."""
+    save_queue(JobQueue([_job("a", state=JobState.RUNNING)]), tmp_path)
+    q = load_queue(tmp_path)
+    assert q.take_repair_notes()
+    assert q.take_repair_notes() == []

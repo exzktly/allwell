@@ -2293,7 +2293,16 @@ The job's tool page opens with all of its settings restored and the same
 strip across the top; change what you came to change and press **Save
 changes**, and the job is updated in place, keeping its position in the
 queue. **Cancel** leaves it exactly as it was. Editing is refused while that
-job is running, or while that tool is busy with a run of its own.
+job is running, or while that tool is busy with a run of its own, and while
+you have a job open for editing All-Well will not let you click another row
+onto the same page underneath it.
+
+If the page cannot show everything the job holds — most often because the
+dataset it points at has moved, so Subset cannot rebuild its timepoint and
+FOV lists — All-Well says which settings are missing before you save, since
+saving would otherwise quietly widen the job to everything. Editing a job
+that has already finished is allowed, and says so: it updates what the job
+would do, but the job does not run again until you choose **Retry**.
 
 The **⋯** menu also offers **Duplicate** (a copy directly below, ready to
 point at another dataset — the quickest way to queue the same operation over
@@ -2337,9 +2346,10 @@ Subset and a Validate of its result together, without knowing yet where that
 result will land.
 
 If a job fails, everything chained after it is marked **blocked**, not
-failed — those jobs never ran. **Retry** on the failed job puts it back in
+failed — those jobs never ran. **Retry** on the *failed* job puts it back in
 the queue and returns everything it blocked to pending, so a whole chain
-recovers in one step. Stopping the currently-running job pauses the queue
+recovers in one step. Retrying a blocked job itself is refused: it never ran,
+and the job that stopped it is still there to fix. Stopping the currently-running job pauses the queue
 rather than skipping ahead to the next one, so a run you meant to cancel
 cannot be silently followed by one you did not get to review.
 

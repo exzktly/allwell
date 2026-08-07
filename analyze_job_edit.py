@@ -71,19 +71,25 @@ def _opts_as_pinfo_keys(opts: dict) -> dict:
 class AnalyzeJobEditMixin:
     """Mixed into ``AnalyzeTab``; every method binds to that instance."""
 
-    def hydrate_job(self, spec: dict) -> None:
+    def hydrate_job(self, spec: dict) -> list[str]:
         """Populate the whole form from a queued job's spec.
 
         The inverse of ``AnalyzeRunMixin.collect_spec``. Unlike ``show_job``,
         which only makes the page *look* like the job, this makes the page
         *be* the job — so collecting it straight back afterwards reproduces
         the same spec.
+
+        Returns anything it could not restore faithfully, for the caller to
+        put in front of the user. There is one such case and it matters: a
+        job naming a remote this install no longer has. Left silent, saving
+        the edit would rewrite the job to run on whichever machine happened to
+        be selected.
         """
         opts = spec.get("opts") or {}
         if opts:
             self._apply_pipeline_info({"execution_options": _opts_as_pinfo_keys(opts)})
             self._hydrate_opts_without_sidecar_equivalents(opts)
-        self._hydrate_run_spec_fields(spec)
+        return self._hydrate_run_spec_fields(spec)
 
     def _hydrate_opts_without_sidecar_equivalents(self, opts: dict) -> None:
         """The ``opts`` keys ``_apply_pipeline_info`` cannot restore correctly.
@@ -112,18 +118,39 @@ class AnalyzeJobEditMixin:
         if batch is not None and "remote_batch_size" in opts:
             batch.setText(str(opts["remote_batch_size"] or ""))
 
-    def _hydrate_run_spec_fields(self, spec: dict) -> None:
+        # Blank is a value for these two as well, and _apply_pipeline_info is
+        # set-only (`if scratch and ...`, `if in_dir:`) — so hydrating a job
+        # with no scratch dir over a form that has one left the previous job's
+        # path in the field and collected it straight back into this job.
+        for attr, key in (("_scratch_edit", "scratch_dir"), ("_input_edit", "raw")):
+            widget = getattr(self, attr, None)
+            if widget is not None and key in opts and not opts[key]:
+                widget.setText("")
+        if "scratch_dir" in opts:
+            self._scratch_user_set = bool(opts["scratch_dir"])
+
+    def _hydrate_run_spec_fields(self, spec: dict) -> list[str]:
         """The ``RunSpec`` fields that live beside ``opts``, not inside it.
 
         ``output_filter`` and ``selective_channels`` are deliberately absent:
         ``_collect_run_spec`` writes them as constants with no widget behind
         them, so there is nothing on the form to restore them into.
         """
+        problems: list[str] = []
         remote = getattr(self, "_remote_cb", None)
         if remote is not None:
-            idx = remote.findData(spec.get("remote_name"))
+            wanted = spec.get("remote_name")
+            idx = remote.findData(wanted)
             if idx >= 0:
                 remote.setCurrentIndex(idx)
+            elif wanted:
+                # The remote was deleted from remotes.toml, or renamed. Falling
+                # through silently would leave whatever was selected and save
+                # the job onto a different machine than it named.
+                problems.append(
+                    f"This job runs on “{wanted}”, which is no longer a "
+                    f"configured remote — saving will move it to "
+                    f"“{remote.currentText()}”.")
 
         cleanup = getattr(self, "_cleanup_remote_cb", None)
         if cleanup is not None:
@@ -142,3 +169,4 @@ class AnalyzeJobEditMixin:
                 refresh()
             except Exception:
                 swallowed()
+        return problems

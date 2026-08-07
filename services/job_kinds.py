@@ -1,17 +1,17 @@
 """What the Job Queue knows about each kind of job it can run.
 
-Three tables and two naming functions, all keyed by a job's ``kind``. They live
-here, Qt-free, rather than beside the queue page because none of it is a view
+Two tables, the chain plumbing, and two naming functions, all keyed by a job's
+``kind``. They live here, Qt-free, rather than beside the queue page because none of it is a view
 concern and all of it is worth testing without an event loop:
 
 * :data:`KIND_LABEL` — the tool's human name.
-* :data:`PRODUCED_KEY` — which of a finished job's three possible outputs
-  (``out_dir`` / ``dataset_root`` / ``in_dir``) its controller reports. Every
-  Datasets tool produces a whole dataset root, an ``in/`` + ``out/`` pair;
-  Analyze's useful successor input is its ``out/`` folder specifically.
+* :func:`produced_for` — which of a finished job's three possible outputs
+  (``out_dir`` / ``dataset_root`` / ``in_dir``) its controller's reported path
+  should be recorded under.
 * :data:`CHAIN_TARGET` — the dotted path *into a job's own spec* that a
   predecessor's output fills when the two are chained. This is the receiving
-  end of the same link :data:`PRODUCED_KEY` describes the sending end of.
+  end of the link :func:`produced_for` and :data:`CHAIN_KIND` describe the
+  sending end of.
 
 Icons are deliberately not here: those are a view concern and live with the
 page that draws them.
@@ -38,15 +38,33 @@ KIND_LABEL = {
     "merge_plates": "Merge plates",
 }
 
-PRODUCED_KEY = {
-    "analyze": "out_dir",
-    "concatenate": "dataset_root",
-    "ome_import": "dataset_root",
-    "validate": "dataset_root",
-    "subset": "dataset_root",
-    "import_loose": "dataset_root",
-    "merge_plates": "dataset_root",
-}
+# What a chained successor is always handed. Every tool here — Analyze
+# included — takes a *dataset root*, the folder holding the `in/` + `out/`
+# pair, and resolves its own way down from there. Nothing consumes a bare
+# `out/`, which is why this is a constant rather than a per-kind table: a
+# table invites picking the predecessor's most specific output, and handing
+# Validate or Subset an `out/` folder makes them look for `out/in/` and find
+# no wells at all.
+CHAIN_KIND = "dataset_root"
+
+
+def produced_for(kind: str, path: str) -> dict:
+    """Record a finished job's output under every key it satisfies.
+
+    A Datasets tool reports the dataset root it built. Analyze reports its
+    `out/` folder (`AnalyzeTab` emits `_last_output_dir`), and the dataset
+    root is that folder's parent — `services.input_resolution_service.
+    resolve_input_output` returns `<root>/out` in every one of its layout
+    branches, so the relationship holds by construction. Both are recorded:
+    `out_dir` because it is what Analyze actually produced and is worth
+    keeping on the job, `dataset_root` because it is what a successor needs.
+    """
+    if not path:
+        return {}
+    if kind == "analyze":
+        return {"out_dir": path, "dataset_root": str(Path(path).parent)}
+    return {"dataset_root": path}
+
 
 # Where a predecessor's output lands in this job's spec. For the two-dataset
 # tools it is the *first* dataset: chaining means "carry this result forward",

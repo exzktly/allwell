@@ -48,7 +48,7 @@ class ContextBanner(QWidget):
         confirm_text: str = "Save",
         parent: QWidget | None = None,
         *,
-        icon: str = "pencil",
+        icon: str = "info",
         cancel_text: str = "Cancel",
     ) -> None:
         super().__init__(parent)

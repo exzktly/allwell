@@ -274,3 +274,26 @@ def test_a_drag_that_would_break_a_chain_is_refused(qapp, tmp_path):
     c.bridge.set_chain("c", "a")
     c.page.moveByRequested.emit("c", -2)
     assert [j.id for j in c.bridge.queue.jobs] == ["a", "b", "c"]
+
+
+def test_a_chained_successor_of_analyze_gets_the_dataset_root(qapp, tmp_path):
+    """Regression: it used to get Analyze's `out/` folder.
+
+    AnalyzeTab reports its output directory, but every successor takes a
+    dataset root — the folder holding the `in/` + `out/` pair. Handed `out/`,
+    Subset looks for `out/in/`, finds no wells, and quietly subsets nothing.
+    """
+    from datasets.job_queue.controller import JobQueueController
+    from services.job_queue import JobSpec
+
+    c = JobQueueController(state_dir=tmp_path)
+    c.bridge.add_job(JobSpec(id="a", kind="analyze", label="A",
+                             spec={"opts": {"raw": "/data/plateA"}}))
+    c.bridge.add_job(JobSpec(id="v", kind="validate", label="V",
+                             spec={"dataset": "/PLACEHOLDER"}))
+    c.bridge.set_chain("v", "a")
+    c.bridge._current = ("a", "analyze")
+    c.bridge.queue.mark_running("a")
+    c.bridge._on_job_finished("analyze", True, "", "/data/plateA_processed/out")
+
+    assert c.bridge.queue.materialise("v") == {"dataset": "/data/plateA_processed"}

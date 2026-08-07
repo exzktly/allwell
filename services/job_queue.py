@@ -279,9 +279,19 @@ class JobQueue:
         cascaded to ``BLOCKED`` when this job failed are returned to
         ``PENDING``, since the reason they were blocked is the thing being
         retried; anything they were told about it is cleared with them.
+
+        A ``BLOCKED`` job is refused, because retrying it fixes nothing: it
+        never ran, and the predecessor that stopped it is still sitting there
+        failed. Allowing it moved the job to ``PENDING`` and wiped the message
+        saying why it was stuck, leaving a queue that reported work waiting,
+        did nothing when started, and no longer said what the problem was.
+        Retry the ancestor instead — that unblocks the whole chain in one
+        step, which is what :meth:`_cascade_unblock` is for.
         """
         job = self._by_id.get(job_id)
         if job is None or job.state not in JobState.TERMINAL:
+            return False
+        if job.state == JobState.BLOCKED:
             return False
         job.state = JobState.PENDING
         job.message = ""
@@ -301,6 +311,17 @@ class JobQueue:
         for job_id in doomed:
             self.remove(job_id)
         return len(doomed)
+
+    def take_repair_notes(self) -> list[str]:
+        """Read the load-time repair notes once, clearing them.
+
+        They describe what loading this file had to fix, which stops being
+        true the moment the user acts on it — a note saying a job was
+        interrupted must not still be on the page after that job has resumed
+        and succeeded.
+        """
+        notes, self.repair_notes = self.repair_notes, []
+        return notes
 
     def counts(self) -> dict[str, int]:
         """How many jobs are in each state — the queue's one-line summary.

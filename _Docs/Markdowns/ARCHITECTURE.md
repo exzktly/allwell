@@ -2897,13 +2897,11 @@ and the other five keep whatever they had.
 Two properties the seam makes enforceable, both swept parametrically over
 `datasets_tab._FEATURES` by `tests/test_datasets_log_panel.py` — driven off the
 registry rather than a roster written in the test, so a seventh tool is covered
-from the moment it exists. No page may re-define a shared member, and no two
-tools may share a primary button label: a screenshot of a run row has to say
-which tool it is. Each page also needs a trailing `outer.addStretch(1)` after
-its last real widget, since `QScrollArea.setWidgetResizable(True)` grows the
-content widget to the viewport and the dashboard is otherwise the only thing
-willing to absorb the slack — turning into a dead zone below its own
-height-capped plate.
+from the moment it exists. No page may re-define a shared member, and every
+page needs a trailing `outer.addStretch(1)` after its last real widget — since
+`QScrollArea.setWidgetResizable(True)` grows the content widget to the viewport
+and the dashboard is otherwise the only thing willing to absorb the slack,
+turning into a dead zone below its own height-capped plate.
 
 **Convert OME-TIFF** (`datasets/ome_import/`) is the standalone OME-TIFF
 de-interleaver described in §6.1: `ome_import_compute.plan_conversion` validates

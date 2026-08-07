@@ -2055,12 +2055,18 @@ three-line delegation (`_collect_run_spec()` → `start_run()` → show a dialog
 on failure). This split exists so the Job Queue (§6b) can persist a run's
 configuration as plain JSON and start it later, independent of whatever the
 live form happens to hold at that moment. The queue's own "+ Queue" entry
-point on this page is built here too (`_build_run_row_extras`, which
-`analyze_tab_form.py` calls in place of the line that used to add the Suspend
-button alone — both files are at their line budgets and those ratchets only
-move down), and it sends the collected run to a sink `DatasetsTab` injects
-via `set_queue_sink`, so this module never imports the queue. An unset sink
-hides the button, which is what a build without the Datasets pane gets.
+point on this page is built here too. The whole run-controls row —
+Run / Suspend / + Queue / Stop — is `_build_run_row`, called by
+`analyze_tab_form.py` in one line, both because that file is at its line
+budget (moving the row out lowered it) and because the queue button belongs
+beside the queue hooks. Its layout is a `widgets/flow_layout.FlowLayout`, not
+a `QHBoxLayout`: the four buttons want 398px and the panel is `RAIL_W` (329)
+wide and *fixed*, so a box layout cannot fit them and simply compresses the
+labels. FlowLayout also watches its children for show/hide, which this row
+needs — "+ Queue" appears only once `DatasetsTab` injects a sink via
+`set_queue_sink` (which is how the run reaches the queue without this module
+importing it), and the row has to re-wrap when it does. An unset sink hides
+the button, which is what a build without the Datasets pane gets.
 
 `analyze_job_edit.py`'s `AnalyzeJobEditMixin` (mixed into `AnalyzeRunMixin`,
 since it is part of the same queue-facing surface) supplies `hydrate_job`:
@@ -4094,7 +4100,12 @@ Qt event loop. Four layers:
   link instead of pointing at a job that no longer exists. `move_to` is the
   drag counterpart of `move`: it shifts the rows it passes rather than
   swapping, because dragging picks a destination, and it validates through
-  the same whole-list `_chain_order_valid`.
+  the same whole-list `_chain_order_valid`. The two are wired to different
+  gestures on purpose — the row menu's Move up / Move down go to `move` (a
+  neighbour swap), a dragged row to `move_to` via
+  `JobQueueController._on_drag_move`, which turns the handle's step count into
+  a destination index and *clamps* it, since a drag past either end of the
+  list means "put it at the end" rather than "do nothing".
 
   `JobQueue.from_json` never auto-starts a loaded queue (a relaunch always
   comes up paused — `is_started` is never persisted) and maps a stale

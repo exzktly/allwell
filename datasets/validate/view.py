@@ -16,15 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -32,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from datasets._common.log_panel import LogPanelMixin
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
@@ -60,7 +58,7 @@ def _is_dataset(root: Path) -> str:
 _SEVERITY_PREFIX = {"error": "✗", "warning": "⚠", "info": "ℹ"}
 
 
-class ValidatePage(QWidget):
+class ValidatePage(LogPanelMixin, QWidget):
     """The Validate & Repair Dataset feature body."""
 
     checkRequested = Signal()
@@ -154,24 +152,7 @@ class ValidatePage(QWidget):
         self._build_status_section(outer)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        # Two distinct panels below the run row, each with its own header so
-        # the "Clear" action can never be read as applying to the wrong one:
-        # "Findings" (the dashboard plate + the per-issue list a Check
-        # produces) and, only once the checkbox below reveals it, "Raw log"
-        # (the worker's own line-by-line output). The button used to sit in
-        # the Findings header while actually clearing the log underneath it
-        # — pressing "Clear" while reading findings looked like it did
-        # nothing, since the log it actually wiped was usually hidden.
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Findings", hdr))
-        hl.addStretch(1)
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        outer.addWidget(hdr)
-        outer.addWidget(_hrule(self))
+        self.build_log_header(outer, "Findings", clear=False)
 
         self.dashboard = ValidateDashboard(self)
         # Not shown until a run actually starts — an idle status strip above
@@ -195,45 +176,8 @@ class ValidatePage(QWidget):
         self._findings_list.setVisible(False)
         outer.addWidget(self._findings_list, 1)
 
-        self._log_sep = _hrule(self)
-        outer.addWidget(self._log_sep)
-        self._log_hdr = QWidget(self)
-        log_hl = QHBoxLayout(self._log_hdr)
-        log_hl.setContentsMargins(12, 6, 12, 6)
-        log_hl.addWidget(QLabel("Raw log", self._log_hdr))
-        log_hl.addStretch(1)
-        self._clear_log_btn = QPushButton("Clear log", self._log_hdr)
-        self._clear_log_btn.setProperty("variant", "secondary")
-        self._clear_log_btn.clicked.connect(self.clear_log)
-        log_hl.addWidget(self._clear_log_btn)
-        outer.addWidget(self._log_hdr)
-        self._status = QPlainTextEdit(self)
-        self._status.setObjectName("ValidateStatus")
-        self._status.setReadOnly(True)
-        self._status.document().setMaximumBlockCount(10000)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Log will appear here.")
-        outer.addWidget(self._status, 1)
-        # The same trailing stretch every other Datasets page carries, and for
-        # the same reason: `QScrollArea.setWidgetResizable(True)` grows this
-        # content widget to fill the viewport, and with the findings list and
-        # the raw log both hidden nothing else in the column would absorb the
-        # leftover height — the dashboard would, turning into a growing dead
-        # zone below its own plate. A trailing stretch outranks every 0-stretch
-        # item above it, so the slack collects as blank page background at the
-        # bottom instead.
-        outer.addStretch(1)
-        self._on_toggle_raw_log(False)
+        self.build_log_tail(outer, object_name="ValidateStatus", placeholder="Log will appear here.", log_header="Raw log")
 
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        for w in (
-            getattr(self, "_status", None), getattr(self, "_log_sep", None),
-            getattr(self, "_log_hdr", None),
-        ):
-            if w is not None:
-                w.setVisible(bool(show))
-
-    # ── public API used by the controller ────────────────────────────────────
     def dataset_path(self) -> str:
         return self._dataset_field.path()
 
@@ -248,12 +192,6 @@ class ValidatePage(QWidget):
         # interactive pick runs.
         self._dataset_field.set_path(path)
         self._on_dataset_changed()
-
-    def append_log(self, text: str) -> None:
-        self._status.appendPlainText(text)
-
-    def clear_log(self) -> None:
-        self._status.clear()
 
     def clear_findings(self) -> None:
         self._hide_findings()

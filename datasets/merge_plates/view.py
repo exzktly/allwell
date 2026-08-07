@@ -16,14 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -31,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from datasets._common.log_panel import LogPanelMixin
 from util.well_token import canonical_well_label
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -67,7 +66,7 @@ def _is_destination(root: Path) -> str:
     return ""
 
 
-class MergePlatesPage(QWidget):
+class MergePlatesPage(LogPanelMixin, QWidget):
     """The Merge Plates feature body."""
 
     runRequested = Signal()
@@ -212,20 +211,7 @@ class MergePlatesPage(QWidget):
         outer.addWidget(self._remap_hint)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Merge Output", hdr))
-        hl.addStretch(1)
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", hdr)
-        clear_btn.setProperty("variant", "secondary")
-        clear_btn.clicked.connect(self.clear_log)
-        hl.addWidget(clear_btn)
-        outer.addWidget(hdr)
-        outer.addWidget(_hrule(self))
+        self.build_log_header(outer, "Merge Output")
 
         self.dashboard = MergePlatesDashboard(self)
         # Hidden until both datasets are valid — _update_status_preview()
@@ -235,23 +221,8 @@ class MergePlatesPage(QWidget):
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
-        self._log_sep = _hrule(self)
-        outer.addWidget(self._log_sep)
-        self._status = QPlainTextEdit(self)
-        self._status.setObjectName("MergePlatesStatus")
-        self._status.setReadOnly(True)
-        self._status.document().setMaximumBlockCount(10000)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Status will appear here.")
-        outer.addWidget(self._status, 1)
-        self._on_toggle_raw_log(False)
+        self.build_log_tail(outer, object_name="MergePlatesStatus", placeholder="Status will appear here.")
 
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        for w in (getattr(self, "_status", None), getattr(self, "_log_sep", None)):
-            if w is not None:
-                w.setVisible(bool(show))
-
-    # ── public API used by the controller ────────────────────────────────────
     def dataset1_path(self) -> str:
         return self._ds1_field.path()
 
@@ -281,12 +252,6 @@ class MergePlatesPage(QWidget):
 
     def set_remap_origin(self, origin: str) -> None:
         self._remap_origin_edit.setText(origin or "")
-
-    def append_log(self, text: str) -> None:
-        self._status.appendPlainText(text)
-
-    def clear_log(self) -> None:
-        self._status.clear()
 
     def set_running(self, running: bool) -> None:
         self._running = running

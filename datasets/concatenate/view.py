@@ -17,13 +17,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -34,6 +31,7 @@ import theme
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
+from datasets._common.log_panel import LogPanelMixin
 from datasets.concatenate.concatenate_compute import (
     DatasetPaths,
     destination_has_marker,
@@ -74,7 +72,7 @@ def _is_destination(root: Path) -> str:
     return ""
 
 
-class ConcatenatePage(QWidget):
+class ConcatenatePage(LogPanelMixin, QWidget):
     """The Concatenate Datasets feature body."""
 
     runRequested = Signal()
@@ -203,24 +201,9 @@ class ConcatenatePage(QWidget):
             field.changed.connect(self._on_field_changed)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Concatenate Output", hdr))
-        hl.addStretch(1)
-        # The dashboard below IS the summary view; the verbose text log is off
-        # by default and revealed on demand, matching Analyze's own pattern
-        # (analyze_tab_form.py::_build_log / _on_toggle_raw_log).
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
-        self._raw_log_cb.setToolTip("Show the full per-file merge log beneath the progress dashboard")
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", hdr)
-        clear_btn.setProperty("variant", "secondary")
-        clear_btn.clicked.connect(self.clear_log)
-        hl.addWidget(clear_btn)
-        outer.addWidget(hdr)
-        outer.addWidget(_hrule(self))
+        self.build_log_header(
+            outer, "Concatenate Output",
+            toggle_tooltip="Show the full per-file merge log beneath the progress dashboard")
 
         self.dashboard = ConcatDashboard(self)
         # Hidden until the two source datasets are both valid — the plate
@@ -233,29 +216,8 @@ class ConcatenatePage(QWidget):
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
-        self._log_sep = _hrule(self)
-        outer.addWidget(self._log_sep)
+        self.build_log_tail(outer, object_name="ConcatStatus")
 
-        self._status = QPlainTextEdit(self)
-        self._status.setObjectName("ConcatStatus")
-        self._status.setReadOnly(True)
-        # Cap the document so a long-running merge can't grow it unbounded —
-        # matches Analyze's raw log (analyze_tab_form.py:1241).
-        self._status.document().setMaximumBlockCount(10000)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Status will appear here.")
-        outer.addWidget(self._status, 1)
-
-        self._on_toggle_raw_log(False)
-
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        """Show/hide the verbose text log. The progress dashboard stays
-        visible either way; this only toggles the raw per-file stream."""
-        for w in (getattr(self, "_status", None), getattr(self, "_log_sep", None)):
-            if w is not None:
-                w.setVisible(bool(show))
-
-    # ── public API used by the controller ────────────────────────────────────
     def dataset1_path(self) -> str:
         return self._ds1_field.path()
 
@@ -297,12 +259,6 @@ class ConcatenatePage(QWidget):
                 "run — pick a new folder to merge again."
             )
         self._revalidate_cross()
-
-    def append_log(self, text: str) -> None:
-        self._status.appendPlainText(text)
-
-    def clear_log(self) -> None:
-        self._status.clear()
 
     def set_running(self, running: bool) -> None:
         self._running = running

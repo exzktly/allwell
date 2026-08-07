@@ -18,16 +18,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QComboBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -36,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from datasets._common.log_panel import LogPanelMixin
 from util.plate_grid import serpentine_well_labels
 from widgets._support import set_variant
 from widgets.path_field import PathField
@@ -69,7 +67,7 @@ def _hrule(parent: QWidget) -> QFrame:
     return rule
 
 
-class OmeImportPage(QWidget):
+class OmeImportPage(LogPanelMixin, QWidget):
     """The Convert OME-TIFF feature body."""
 
     runRequested = Signal()
@@ -359,20 +357,7 @@ class OmeImportPage(QWidget):
         return channel_tokens_from_roles(pairs).as_pipeline_info()
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Convert Output", hdr))
-        hl.addStretch(1)
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", hdr)
-        clear_btn.setProperty("variant", "secondary")
-        clear_btn.clicked.connect(self.clear_log)
-        hl.addWidget(clear_btn)
-        outer.addWidget(hdr)
-        outer.addWidget(_hrule(self))
+        self.build_log_header(outer, "Convert Output")
 
         self._progress = QProgressBar(self)
         self._progress.setRange(0, 100)
@@ -384,22 +369,8 @@ class OmeImportPage(QWidget):
         self._progress.setVisible(False)
         outer.addWidget(self._progress)
 
-        self._log_sep = _hrule(self)
-        outer.addWidget(self._log_sep)
-        self._status = QPlainTextEdit(self)
-        self._status.setReadOnly(True)
-        self._status.document().setMaximumBlockCount(10000)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Status will appear here.")
-        outer.addWidget(self._status, 1)
-        self._on_toggle_raw_log(False)
+        self.build_log_tail(outer, placeholder="Status will appear here.")
 
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        for w in (getattr(self, "_status", None), getattr(self, "_log_sep", None)):
-            if w is not None:
-                w.setVisible(bool(show))
-
-    # ── pickers ──────────────────────────────────────────────────────────────
     def _pick_source(self, current: str, parent: QWidget | None = None) -> str:
         f, _ = QFileDialog.getOpenFileName(
             parent or self, "Select OME-TIFF file", current or "",
@@ -475,12 +446,6 @@ class OmeImportPage(QWidget):
         else:
             self._plate.clear()
         self.refresh_readout()
-
-    def append_log(self, text: str) -> None:
-        self._status.appendPlainText(text)
-
-    def clear_log(self) -> None:
-        self._status.clear()
 
     def set_well_fraction(self, well_id: str, done: int, total: int) -> None:
         """Fill *well_id*'s dial on the acquisition plate.

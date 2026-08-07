@@ -39,6 +39,12 @@ from PySide6.QtWidgets import (
 # log — a long run must not grow the document unbounded.
 _MAX_LOG_BLOCKS = 10000
 
+# What the checkbox does, for the five pages that never said. Only Concatenate
+# explained itself before; the wording here is deliberately tool-agnostic, and
+# a page with something more specific to say passes its own.
+_DEFAULT_TOGGLE_TIP = ("Show this tool's full line-by-line output beneath the "
+                       "progress summary.")
+
 
 def hrule(parent: QWidget) -> QFrame:
     """The one-pixel divider each page defined for itself."""
@@ -52,7 +58,8 @@ class LogPanelMixin:
     """Status-section header + raw-log tail, shared by the six tool pages."""
 
     def build_log_header(self, outer: QVBoxLayout, title: str, *,
-                         clear: bool = True, toggle_tooltip: str = "") -> QWidget:
+                         clear: bool = True,
+                         toggle_tooltip: str = _DEFAULT_TOGGLE_TIP) -> QWidget:
         """The section header: *title*, a "Show raw log" toggle, and a rule.
 
         *clear* adds a Clear button beside the toggle. Validate passes

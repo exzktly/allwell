@@ -119,3 +119,29 @@ def test_concatenate_keeps_its_toggle_tooltip(qapp):
     """
     page = _pages()["concatenate"]()
     assert "merge log" in page._raw_log_cb.toolTip()
+
+
+# ── the primary action names a distinct verb ─────────────────────────────────
+
+def test_no_two_tools_share_a_primary_button_label(qapp):
+    """Convert OME-TIFF and Zip Loose Folder both read "▶  Convert".
+
+    Two different pages, same verb, and nothing else on the run row to tell
+    them apart — so a screenshot, a support question or a half-remembered
+    workflow could not distinguish them.
+    """
+    labels = {}
+    for name, cls in _pages().items():
+        page = cls()
+        btn = getattr(page, "_run_btn", None)
+        assert btn is not None, f"{name} has no _run_btn — the other five do"
+        labels.setdefault(btn.text(), []).append(name)
+
+    clashes = {text: tools for text, tools in labels.items() if len(tools) > 1}
+    assert not clashes, f"these tools share a primary button label: {clashes}"
+
+
+def test_every_page_explains_its_raw_log_toggle(qapp):
+    """Concatenate was the only one of six that said what "raw log" meant."""
+    for name, cls in _pages().items():
+        assert cls()._raw_log_cb.toolTip(), f"{name} has no tooltip on its toggle"

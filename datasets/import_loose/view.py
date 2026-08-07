@@ -156,7 +156,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Convert", self)
+        self._run_btn = QPushButton("▶  Zip folder", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
@@ -232,7 +232,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())
         self._queue_btn.setEnabled(not running and self._can_run())
-        self._run_btn.setText("Converting…" if running else "▶  Convert")
+        self._run_btn.setText("Zipping…" if running else "▶  Zip folder")
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")

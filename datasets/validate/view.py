@@ -121,11 +121,11 @@ class ValidatePage(LogPanelMixin, QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._check_btn = QPushButton("▶  Check", self)
-        self._check_btn.setProperty("variant", "primary")
-        self._check_btn.setEnabled(False)
-        self._check_btn.clicked.connect(self.checkRequested)
-        bl.addWidget(self._check_btn)
+        self._run_btn = QPushButton("▶  Check", self)
+        self._run_btn.setProperty("variant", "primary")
+        self._run_btn.setEnabled(False)
+        self._run_btn.clicked.connect(self.checkRequested)
+        bl.addWidget(self._run_btn)
         # Second, right after the primary action -- matching every other
         # Datasets tool's run-row ordering (Run, then +Queue, then any
         # secondary actions specific to this tool).
@@ -247,7 +247,7 @@ class ValidatePage(LogPanelMixin, QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._check_btn.setEnabled(not running and self._inputs_ready())
+        self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if running:
             # Only force-disable while starting a run — leave it alone on
@@ -255,7 +255,7 @@ class ValidatePage(LogPanelMixin, QWidget):
             # which the QThread's own `finished` always fires after) has
             # already set the correct enabled state for the fresh report.
             self._repair_btn.setEnabled(False)
-        self._check_btn.setText("Checking…" if running else "▶  Check")
+        self._run_btn.setText("Checking…" if running else "▶  Check")
         # Locked for the run's duration — picking a new dataset mid-run would
         # let the running worker's report land against a path the user has
         # already moved on from (ValidateController._on_succeeded uses the
@@ -294,7 +294,7 @@ class ValidatePage(LogPanelMixin, QWidget):
             any(w.missing for w in report.wells) or bool(wells_needing_force(report))
         )
         self._complete_btn.setVisible(needs_completion)
-        self._check_btn.setEnabled(self._inputs_ready())
+        self._run_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())
 
     # ── internals ────────────────────────────────────────────────────────────
@@ -302,7 +302,7 @@ class ValidatePage(LogPanelMixin, QWidget):
         return self._dataset_field.is_valid()
 
     def _on_dataset_changed(self) -> None:
-        self._check_btn.setEnabled(self._inputs_ready())
+        self._run_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)

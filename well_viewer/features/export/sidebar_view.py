@@ -618,12 +618,16 @@ class ExportStyleSidebar(QWidget):
                                   self._app._app_state.plot, "time_scale", 1.0)),
                               decimals=3)
         time_scale.setToolTip(
-            "Multiply the time-axis labels by this factor. For a plate whose "
+            "How far apart the timepoints really are. For a plate whose "
             "filenames are numbered T01…T12 but which was imaged every 4 hours, "
             "set 4 and the axis reads 4, 8, 12 …\n\n"
+            "The value is a multiplier on the hours the pipeline read out of "
+            "the filenames, so it is the interval itself only while those "
+            "filenames number the timepoints 1, 2, 3 … For a plate whose names "
+            "already carry real hours, this is a correction factor. 1 = off.\n\n"
             "Labels only — the timepoint menus, the Statistics tab and every "
             "exported CSV keep the hours read from the filenames, so a rescaled "
-            "axis names the factor to say why the numbers differ. 1 = off.")
+            "axis names the factor to say why the numbers differ.")
 
         def _on_time_scale(value: float) -> None:
             self._app._app_state.plot.time_scale = float(value)
@@ -633,7 +637,7 @@ class ExportStyleSidebar(QWidget):
             except Exception:
                 swallowed()
         time_scale.valueChanged.connect(_on_time_scale)
-        add_row(s_time, "Rescale time", time_scale)
+        add_row(s_time, "Interval per timepoint", time_scale)
         _time_preview.setText(_time_preview_text(
             getattr(self._app._app_state.plot, "time_scale", 1.0)))
 

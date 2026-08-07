@@ -878,13 +878,20 @@ row, holding four actions:
   limit set on the Fraction or Events panel sticks instead of that panel
   auto-scaling. Settings persist across redraws.
 
-#### Rescale time
+#### Interval per timepoint
 
-Under **Properties → Time**, **Rescale time** multiplies the numbers printed
-on every time axis. It is there for plates whose filenames don't encode the real
-acquisition cadence: a run numbered `T01 … T12` but imaged every four hours is
-read by the pipeline as 1, 2, 3 … hours, and setting the factor to `4` makes the
-axes read 4, 8, 12 … instead. `1` — the default — turns it off.
+Under **Properties → Time**, **Interval per timepoint** states how far apart the
+timepoints really are, and multiplies the numbers printed on every time axis to
+match. It is there for plates whose filenames don't encode the real acquisition
+cadence: a run numbered `T01 … T12` but imaged every four hours is read by the
+pipeline as 1, 2, 3 … hours, and setting the interval to `4` makes the axes read
+4, 8, 12 … instead. `1` — the default — turns it off.
+
+The value is a multiplier on the hours the pipeline parsed out of the filenames,
+which is the interval itself only while those filenames number the timepoints
+1, 2, 3 …. On a plate whose names already carry real hours it acts as a
+correction factor instead — a run whose names say 4, 8, 12 with the interval set
+to `4` draws 16, 32, 48.
 
 It changes **labels only**. The plotted points, the **Timepoint** dropdowns, the
 Statistics tab and every exported CSV keep the hours read from the filenames, so

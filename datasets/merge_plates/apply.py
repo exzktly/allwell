@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import csv
 import json
-import re
 import shutil
 import threading
 from collections.abc import Callable
@@ -23,6 +22,7 @@ from pathlib import Path
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
 from datasets._common.concurrency import pick_workers
+from datasets._common.dataset_paths import split_stem_well
 from datasets._common.containers import (
     FILENAME_COLUMN,
     OVERRIDES_FILENAME,
@@ -174,18 +174,15 @@ def _write_rows(dest: Path, fieldnames: list[str], rows: list[dict]) -> None:
         writer.writerows(rows)
 
 
-_TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
-
-
 def _csv_prefix(csv_path: Path) -> str:
     """The part of a measurements-CSV stem before its trailing well token —
     derived from the actual filename (regardless of padding), never
     reconstructed from a canonical well label the way that has silently
     produced a nonexistent path elsewhere in this app."""
-    match = _TRAILING_WELL_RE.search(csv_path.stem)
-    if not match:
+    split = split_stem_well(csv_path.stem)
+    if split is None:
         return csv_path.stem
-    return csv_path.stem[: match.start()].rstrip("_-") or "measurements"
+    return split[0] or "measurements"
 
 
 def _merge_measurements(

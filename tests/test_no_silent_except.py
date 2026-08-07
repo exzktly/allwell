@@ -26,6 +26,14 @@ WELL_VIEWER = REPO_ROOT / "well_viewer"
 # recolour just looks like a widget that was never asked to.
 WIDGETS = REPO_ROOT / "widgets"
 
+# The Datasets pane. Seven tool pages, their Qt-free planners and their
+# QThread workers — several thousand lines of code that reports what it did by
+# writing to a log the user can open, which is exactly the kind that can fail
+# quietly and look idle. It was clean when this guard was added and had no
+# guard keeping it that way, which is the only interesting state for a rule
+# like this to be in.
+DATASETS = REPO_ROOT / "datasets"
+
 # Pipeline / services side (Qt-free; uses aw_safe.swallowed instead of
 # well_viewer.core.safe). Guarded so these don't silently regress either.
 PIPELINE_DIRS = [REPO_ROOT / "services"]
@@ -88,6 +96,20 @@ def test_no_silent_broad_except_in_widgets():
         "util.aw_safe.swallowed()/swallow() — widgets/ cannot import "
         "well_viewer.core.safe — or catch a specific exception type instead of "
         "a bare pass/continue:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_no_silent_broad_except_in_datasets():
+    """The Datasets pane mixes both helpers: its Qt-free halves (`_common/`,
+    the `*_compute` planners, `apply.py`, the workers) use `util.aw_safe`,
+    while the controllers and views may use `well_viewer.core.safe`. Either is
+    fine; a bare pass is not."""
+    offenders = _offenders(_walk(DATASETS))
+    assert not offenders, (
+        "Silent broad-except handler(s) found in datasets/. Use "
+        "well_viewer.core.safe.swallowed()/swallow() on the Qt side, "
+        "util.aw_safe's equivalents in the Qt-free halves, or catch a specific "
+        "exception type instead of a bare pass/continue:\n  " + "\n  ".join(offenders)
     )
 
 

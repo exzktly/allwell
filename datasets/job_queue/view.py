@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from datasets._common.log_panel import hrule as _hrule
 from services.job_kinds import KIND_LABEL
 from services.job_queue import JobSpec, JobState
 from datasets.job_queue.row import JobRow
@@ -53,11 +54,6 @@ _STATE_WORD = {
 }
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 class JobQueuePage(QWidget):

@@ -42,9 +42,16 @@ def test_reset_clears_state(qapp):
 
 def test_rail_and_legend_use_the_same_word_for_the_done_state(qapp):
     """Regression guard (UX audit P1-8): the rail counted the "done" state as
-    "Done: N" while the legend and the well tooltip both call the same state
-    "converted" -- two different words for one state, right next to each
-    other in the same status strip."""
+    "Done: N" while the legend and the well tooltip both called the same state
+    something else -- two different words for one state, right next to each
+    other in the same status strip.
+
+    Asserted as an agreement between the two rather than against a literal, so
+    the guard survives the tool's vocabulary changing. It pinned "Converted"
+    when this page still described itself as converting; the page now says zip
+    throughout, and a test of "do these two agree" should not have needed
+    editing for that.
+    """
     d = ImportLooseDashboard()
     d.set_wells(["A01"])
     d.set_well_stage("A01", "done")
@@ -52,8 +59,21 @@ def test_rail_and_legend_use_the_same_word_for_the_done_state(qapp):
     rail_text = " ".join(lbl.text() for lbl in d._rail_host.findChildren(QLabel))
     legend_text = " ".join(lbl.text() for lbl in d._legend_host.findChildren(QLabel))
     assert "Done" not in rail_text
-    assert "Converted: 1" in rail_text
-    assert "converted" in legend_text
+
+    # Every state the rail counts must be the word the legend uses for it --
+    # checked for all of them, not just the done one, since the mismatch this
+    # guards against can appear on any state.
+    import re
+
+    rail_words = {m.group(1) for m in re.finditer(r"(\w+):\s*\d+", rail_text)}
+    assert rail_words, f"no counted states found in the rail: {rail_text!r}"
+    missing = [w for w in rail_words if w.lower() not in legend_text.lower()]
+    assert not missing, (
+        f"the rail counts {missing} but the legend calls them something else "
+        f"— rail {rail_text!r}, legend {legend_text!r}")
+
+    # And the finished well is counted exactly once, under whatever that word is.
+    assert re.search(r"\w+:\s*1", rail_text)
 
 
 def test_done_wells_carry_a_marker_not_just_colour(qapp):

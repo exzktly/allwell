@@ -47,12 +47,31 @@ class DatasetPaths:
 _TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
 
 
-def well_from_stem(stem: str) -> str | None:
-    """Canonical well from a trailing token, e.g. ``measurements_a1`` -> A01."""
+def split_stem_well(stem: str) -> tuple[str, str] | None:
+    """Split a stem into ``(prefix, canonical_well)``, or ``None``.
+
+    ``measurements_b10`` -> ``("measurements", "B10")``. The prefix is taken
+    from the actual filename rather than reconstructed from the canonical
+    label, since the two differ whenever the file was written unpadded.
+
+    This is deliberately *not* ``util.well_token.canonical_well_label``, which
+    judges a whole token: here the well is a suffix on a longer name. It is
+    equally deliberately the only place that judgement is made — the same
+    regex and the same zero-padding lived in three modules, which is the shape
+    §15 warns about, where two components come to disagree about what counts
+    as a well.
+    """
     match = _TRAILING_WELL_RE.search(stem)
     if not match:
         return None
-    return f"{match.group(1).upper()}{int(match.group(2)):02d}"
+    well = f"{match.group(1).upper()}{int(match.group(2)):02d}"
+    return stem[: match.start()].rstrip("_-"), well
+
+
+def well_from_stem(stem: str) -> str | None:
+    """Canonical well from a trailing token, e.g. ``measurements_a1`` -> A01."""
+    split = split_stem_well(stem)
+    return split[1] if split else None
 
 
 # ── dataset resolution + sidecar IO ──────────────────────────────────────────

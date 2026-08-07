@@ -43,7 +43,6 @@ from __future__ import annotations
 import csv
 import json
 import math
-import re
 import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -69,9 +68,9 @@ from datasets._common.dataset_paths import (
     out_zips,
     resolve_dataset,
     schema_values_from_stems,
+    split_stem_well,
 )
 
-_TRAILING_WELL_RE = re.compile(r"([A-Ha-h])(\d{1,2})$")
 _TIMEPOINT_HOURS_COLUMN = "timepoint_hours"
 _FILENAME_COLUMN = "filename"
 _OVERRIDES_FILENAME = "cell_overrides.json"
@@ -214,13 +213,7 @@ class DatasetReport:
 def _prefix_and_well(csv_path: Path) -> tuple[str, str] | None:
     """Split a measurements-CSV stem into ``(prefix, canonical_well)``, or
     ``None`` if the stem doesn't end in a well-like token at all."""
-    stem = csv_path.stem
-    match = _TRAILING_WELL_RE.search(stem)
-    if not match:
-        return None
-    well = f"{match.group(1).upper()}{int(match.group(2)):02d}"
-    prefix = stem[: match.start()].rstrip("_-")
-    return prefix, well
+    return split_stem_well(csv_path.stem)
 
 
 def _csv_header(path: Path) -> list[str] | None:

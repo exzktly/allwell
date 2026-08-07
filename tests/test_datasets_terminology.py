@@ -47,8 +47,13 @@ def test_concatenate_and_merge_plates_dashboards_no_longer_share_merge_progress(
 
 
 def test_ome_import_and_import_loose_no_longer_share_conversion_output(qapp):
-    """"Conversion Output" used to be both OME-TIFF's and Import Loose's
-    status section header."""
+    """The two tools must not share their wording anywhere a user reads it.
+
+    They once shared a status header ("Conversion Output"), and after that was
+    split they still shared a primary button ("▶ Convert"). Zip Loose Folder
+    now says zip throughout — button, header, headline and legend — so a
+    screenshot of either page identifies which tool it is.
+    """
     from datasets.import_loose.view import ImportLoosePage
     from datasets.ome_import.view import OmeImportPage
 
@@ -57,7 +62,8 @@ def test_ome_import_and_import_loose_no_longer_share_conversion_output(qapp):
 
     assert "Convert Output" in ome_labels
     assert "Conversion Output" not in ome_labels
-    assert "Conversion Output" in loose_labels
+    assert "Zip Output" in loose_labels
+    assert not any("onversion" in lbl for lbl in loose_labels)
 
 
 def test_concatenate_heading_matches_the_rest_of_the_codebase_title_case(qapp):

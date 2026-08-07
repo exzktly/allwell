@@ -16,15 +16,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -32,17 +29,13 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport, wells_needing_force
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
 def _is_dataset(root: Path) -> str:
@@ -60,7 +53,7 @@ def _is_dataset(root: Path) -> str:
 _SEVERITY_PREFIX = {"error": "✗", "warning": "⚠", "info": "ℹ"}
 
 
-class ValidatePage(QWidget):
+class ValidatePage(LogPanelMixin, QWidget):
     """The Validate & Repair Dataset feature body."""
 
     checkRequested = Signal()
@@ -123,11 +116,11 @@ class ValidatePage(QWidget):
         bl = QHBoxLayout(btn_row)
         bl.setContentsMargins(0, 0, 0, 0)
         bl.setSpacing(theme.Spacing.sm)
-        self._check_btn = QPushButton("▶  Check", self)
-        self._check_btn.setProperty("variant", "primary")
-        self._check_btn.setEnabled(False)
-        self._check_btn.clicked.connect(self.checkRequested)
-        bl.addWidget(self._check_btn)
+        self._run_btn = QPushButton("▶  Check", self)
+        self._run_btn.setProperty("variant", "primary")
+        self._run_btn.setEnabled(False)
+        self._run_btn.clicked.connect(self.checkRequested)
+        bl.addWidget(self._run_btn)
         # Second, right after the primary action -- matching every other
         # Datasets tool's run-row ordering (Run, then +Queue, then any
         # secondary actions specific to this tool).
@@ -154,24 +147,7 @@ class ValidatePage(QWidget):
         self._build_status_section(outer)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        # Two distinct panels below the run row, each with its own header so
-        # the "Clear" action can never be read as applying to the wrong one:
-        # "Findings" (the dashboard plate + the per-issue list a Check
-        # produces) and, only once the checkbox below reveals it, "Raw log"
-        # (the worker's own line-by-line output). The button used to sit in
-        # the Findings header while actually clearing the log underneath it
-        # — pressing "Clear" while reading findings looked like it did
-        # nothing, since the log it actually wiped was usually hidden.
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Findings", hdr))
-        hl.addStretch(1)
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        outer.addWidget(hdr)
-        outer.addWidget(_hrule(self))
+        self.build_log_header(outer, "Findings", clear=False)
 
         self.dashboard = ValidateDashboard(self)
         # Not shown until a run actually starts — an idle status strip above
@@ -195,25 +171,8 @@ class ValidatePage(QWidget):
         self._findings_list.setVisible(False)
         outer.addWidget(self._findings_list, 1)
 
-        self._log_sep = _hrule(self)
-        outer.addWidget(self._log_sep)
-        self._log_hdr = QWidget(self)
-        log_hl = QHBoxLayout(self._log_hdr)
-        log_hl.setContentsMargins(12, 6, 12, 6)
-        log_hl.addWidget(QLabel("Raw log", self._log_hdr))
-        log_hl.addStretch(1)
-        self._clear_log_btn = QPushButton("Clear log", self._log_hdr)
-        self._clear_log_btn.setProperty("variant", "secondary")
-        self._clear_log_btn.clicked.connect(self.clear_log)
-        log_hl.addWidget(self._clear_log_btn)
-        outer.addWidget(self._log_hdr)
-        self._status = QPlainTextEdit(self)
-        self._status.setObjectName("ValidateStatus")
-        self._status.setReadOnly(True)
-        self._status.document().setMaximumBlockCount(10000)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Log will appear here.")
-        outer.addWidget(self._status, 1)
+        self.build_log_tail(outer, object_name="ValidateStatus",
+                            placeholder="Log will appear here.", log_header="Raw log")
         # The same trailing stretch every other Datasets page carries, and for
         # the same reason: `QScrollArea.setWidgetResizable(True)` grows this
         # content widget to fill the viewport, and with the findings list and
@@ -221,19 +180,11 @@ class ValidatePage(QWidget):
         # leftover height — the dashboard would, turning into a growing dead
         # zone below its own plate. A trailing stretch outranks every 0-stretch
         # item above it, so the slack collects as blank page background at the
-        # bottom instead.
+        # bottom instead. The other five pages add theirs in _build_ui after
+        # this section returns; Validate's belongs here, at the end of its own.
         outer.addStretch(1)
-        self._on_toggle_raw_log(False)
 
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        for w in (
-            getattr(self, "_status", None), getattr(self, "_log_sep", None),
-            getattr(self, "_log_hdr", None),
-        ):
-            if w is not None:
-                w.setVisible(bool(show))
-
-    # ── public API used by the controller ────────────────────────────────────
+    # ── public API used by the controller ──────────────────────────────
     def dataset_path(self) -> str:
         return self._dataset_field.path()
 
@@ -248,12 +199,6 @@ class ValidatePage(QWidget):
         # interactive pick runs.
         self._dataset_field.set_path(path)
         self._on_dataset_changed()
-
-    def append_log(self, text: str) -> None:
-        self._status.appendPlainText(text)
-
-    def clear_log(self) -> None:
-        self._status.clear()
 
     def clear_findings(self) -> None:
         self._hide_findings()
@@ -309,7 +254,7 @@ class ValidatePage(QWidget):
 
     def set_running(self, running: bool) -> None:
         self._running = running
-        self._check_btn.setEnabled(not running and self._inputs_ready())
+        self._run_btn.setEnabled(not running and self._inputs_ready())
         self._queue_btn.setEnabled(not running and self._inputs_ready())
         if running:
             # Only force-disable while starting a run — leave it alone on
@@ -317,7 +262,7 @@ class ValidatePage(QWidget):
             # which the QThread's own `finished` always fires after) has
             # already set the correct enabled state for the fresh report.
             self._repair_btn.setEnabled(False)
-        self._check_btn.setText("Checking…" if running else "▶  Check")
+        self._run_btn.setText("Checking…" if running else "▶  Check")
         # Locked for the run's duration — picking a new dataset mid-run would
         # let the running worker's report land against a path the user has
         # already moved on from (ValidateController._on_succeeded uses the
@@ -356,7 +301,7 @@ class ValidatePage(QWidget):
             any(w.missing for w in report.wells) or bool(wells_needing_force(report))
         )
         self._complete_btn.setVisible(needs_completion)
-        self._check_btn.setEnabled(self._inputs_ready())
+        self._run_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())
 
     # ── internals ────────────────────────────────────────────────────────────
@@ -364,7 +309,7 @@ class ValidatePage(QWidget):
         return self._dataset_field.is_valid()
 
     def _on_dataset_changed(self) -> None:
-        self._check_btn.setEnabled(self._inputs_ready())
+        self._run_btn.setEnabled(self._inputs_ready())
         self._queue_btn.setEnabled(self._inputs_ready())
         self._repair_btn.setEnabled(False)
         self._complete_btn.setVisible(False)

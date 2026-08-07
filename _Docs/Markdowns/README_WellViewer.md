@@ -2236,8 +2236,8 @@ structure yet) into the layout Analyze reads directly.
    field (unused in this mode) stays visible but greyed out rather than
    disappearing; you're still asked to confirm before anything is deleted.
 3. As soon as the scan finds any wells, a status panel appears below showing
-   a "Ready — N well(s) to convert" plate preview. Press **Convert** and that
-   same plate fills in as each well actually converts, the same graphical
+   a "Ready — N well(s) to convert" plate preview. Press **Zip folder** and
+   that same plate fills in as each well is zipped, the same graphical
    progress view Analyze itself uses. On success, **Open dataset in Analyze**
    sends the resulting folder there.
 

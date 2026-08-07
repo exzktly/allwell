@@ -101,7 +101,7 @@ def test_a_report_reveals_the_findings_list(qapp, tmp_path):
     ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
     page = ctrl.page
     page.set_dataset_path(str(tmp_path))
-    page._check_btn.click()
+    page._run_btn.click()
     _run_worker_to_completion(ctrl)
 
     assert not page._findings_list.isHidden()
@@ -120,11 +120,11 @@ def test_queue_button_is_second_in_the_run_row(qapp):
 
     ctrl = ValidateController()
     page = ctrl.page
-    btn_row = page._check_btn.parentWidget()
+    btn_row = page._run_btn.parentWidget()
     widgets = [btn_row.layout().itemAt(i).widget() for i in range(btn_row.layout().count())]
     widgets = [w for w in widgets if w is not None]
     assert widgets.index(page._queue_btn) == 1
-    assert widgets.index(page._check_btn) == 0
+    assert widgets.index(page._run_btn) == 0
     assert widgets.index(page._repair_btn) > widgets.index(page._queue_btn)
 
 
@@ -143,7 +143,7 @@ def test_dataset_field_flags_a_folder_missing_in_and_out(qapp, tmp_path):
 
     page._dataset_field.set_path(str(not_a_dataset))
     page._on_dataset_changed()
-    assert not page._check_btn.isEnabled()
+    assert not page._run_btn.isEnabled()
     assert page._dataset_field.message() == "Needs an 'in' and an 'out' folder."
     ctrl.shutdown()
 
@@ -154,11 +154,11 @@ def test_check_gate_requires_a_path(qapp, tmp_path):
     build_dataset(tmp_path, wells=["A01"], timepoints=["0h", "24h"])
     ctrl = ValidateController(on_open_in_analyze=lambda _p: None)
     page = ctrl.page
-    assert not page._check_btn.isEnabled()
+    assert not page._run_btn.isEnabled()
 
     page._dataset_field.set_path(str(tmp_path))
     page._on_dataset_changed()
-    assert page._check_btn.isEnabled()
+    assert page._run_btn.isEnabled()
     ctrl.shutdown()
 
 
@@ -495,7 +495,7 @@ def test_show_job_populates_the_page_instead_of_leaving_it_inert(qapp, tmp_path)
 
     ctrl.show_job({"dataset": str(tmp_path)})
 
-    assert page._check_btn.isEnabled()
+    assert page._run_btn.isEnabled()
     assert page._queue_btn.isEnabled()
     # isVisibleTo, not isVisible: the page itself is never shown in an
     # offscreen test, which would make every child read as hidden.
@@ -542,7 +542,7 @@ def test_check_streams_per_well_progress_and_logs_its_result(qapp, tmp_path):
     page = ctrl.page
     page.set_dataset_path(str(tmp_path))
 
-    page._check_btn.click()
+    page._run_btn.click()
     _run_worker_to_completion(ctrl)
 
     log = page._status.toPlainText()
@@ -603,14 +603,14 @@ def test_failed_check_shows_why_and_withdraws_the_completion_offer(qapp, tmp_pat
     ctrl = ValidateController(on_open_in_analyze=lambda *a, **k: None)
     page = ctrl.page
     page.set_dataset_path(str(tmp_path))
-    page._check_btn.click()
+    page._run_btn.click()
     _run_worker_to_completion(ctrl)
     assert page._complete_btn.isVisibleTo(page)
     assert page._findings_list.count() >= 1
 
     # Now make the sidecar unreadable and re-check on the same page.
     (tmp_path / "out" / "pipeline_info.json").write_text("{ not json")
-    page._check_btn.click()
+    page._run_btn.click()
     _run_worker_to_completion(ctrl)
 
     shown = [page._findings_list.item(i).text()

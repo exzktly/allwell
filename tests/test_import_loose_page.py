@@ -222,7 +222,7 @@ def test_successful_run_shows_a_neutral_note_not_the_raw_already_has_files_warni
     assert ctrl._last_result[0] is True
     assert page._dest_field._hint.objectName() == "Muted"
     assert "already has files" not in page._dest_field._hint.text().lower()
-    assert "now holds the converted dataset" in page._dest_field._hint.text()
+    assert "now holds the zipped dataset" in page._dest_field._hint.text()
     assert not page._dest_field.is_valid()
     assert not page._run_btn.isEnabled()  # the run gate itself is unaffected
     ctrl.shutdown()

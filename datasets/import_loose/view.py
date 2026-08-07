@@ -19,14 +19,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -34,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
@@ -53,14 +52,9 @@ def _is_destination(root: Path) -> str:
     return ""
 
 
-def _hrule(parent: QWidget) -> QFrame:
-    rule = QFrame(parent)
-    rule.setFrameShape(QFrame.HLine)
-    rule.setObjectName("HRule")
-    return rule
 
 
-class ImportLoosePage(QWidget):
+class ImportLoosePage(LogPanelMixin, QWidget):
     """The Import Loose Folder feature body."""
 
     runRequested = Signal()
@@ -157,7 +151,7 @@ class ImportLoosePage(QWidget):
         run_row_l = QHBoxLayout(run_row)
         run_row_l.setContentsMargins(0, 0, 0, 0)
         run_row_l.setSpacing(theme.Spacing.sm)
-        self._run_btn = QPushButton("▶  Convert", self)
+        self._run_btn = QPushButton("▶  Zip folder", self)
         self._run_btn.setProperty("variant", "primary")
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self.runRequested)
@@ -188,20 +182,7 @@ class ImportLoosePage(QWidget):
         outer.addStretch(1)
 
     def _build_status_section(self, outer: QVBoxLayout) -> None:
-        hdr = QWidget(self)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Conversion Output", hdr))
-        hl.addStretch(1)
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", hdr)
-        clear_btn.setProperty("variant", "secondary")
-        clear_btn.clicked.connect(self.clear_log)
-        hl.addWidget(clear_btn)
-        outer.addWidget(hdr)
-        outer.addWidget(_hrule(self))
+        self.build_log_header(outer, "Zip Output")
 
         self.dashboard = ImportLooseDashboard(self)
         # Hidden until the source folder scans to at least a real answer —
@@ -211,23 +192,9 @@ class ImportLoosePage(QWidget):
         self.dashboard.setVisible(False)
         outer.addWidget(self.dashboard)
 
-        self._log_sep = _hrule(self)
-        outer.addWidget(self._log_sep)
-        self._status = QPlainTextEdit(self)
-        self._status.setObjectName("ImportLooseStatus")
-        self._status.setReadOnly(True)
-        self._status.document().setMaximumBlockCount(10000)
-        self._status.setFont(QFont("monospace"))
-        self._status.setPlaceholderText("Status will appear here.")
-        outer.addWidget(self._status, 1)
-        self._on_toggle_raw_log(False)
+        self.build_log_tail(outer, object_name="ImportLooseStatus", placeholder="Status will appear here.")
 
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        for w in (getattr(self, "_status", None), getattr(self, "_log_sep", None)):
-            if w is not None:
-                w.setVisible(bool(show))
-
-    # ── public API used by the controller ────────────────────────────────────
+    # ── public API used by the controller ──────────────────────────────
     def source_path(self) -> str:
         return self._src_field.path()
 
@@ -258,16 +225,10 @@ class ImportLoosePage(QWidget):
     def set_filename_sep(self, sep: str) -> None:
         self._sep_edit.setText(sep or DEFAULT_SEP)
 
-    def append_log(self, text: str) -> None:
-        self._status.appendPlainText(text)
-
-    def clear_log(self) -> None:
-        self._status.clear()
-
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())
         self._queue_btn.setEnabled(not running and self._can_run())
-        self._run_btn.setText("Converting…" if running else "▶  Convert")
+        self._run_btn.setText("Zipping…" if running else "▶  Zip folder")
         if running:
             self._open_btn.setVisible(False)
             set_variant(self._run_btn, "primary")
@@ -309,8 +270,8 @@ class ImportLoosePage(QWidget):
         self._dest_field.revalidate()
         if ok and self._dest_field.message():
             self._dest_field.show_note(
-                "This destination now holds the converted dataset from "
-                "that run — pick a new folder to convert again."
+                "This destination now holds the zipped dataset from "
+                "that run — pick a new folder to zip again."
             )
         self._refresh_run_enabled()
 
@@ -360,13 +321,13 @@ class ImportLoosePage(QWidget):
         if not preview.wells:
             # Nothing the current schema/separator recognises yet -- an
             # empty "Ready — 0 well(s)" plate would answer a question
-            # ("what will this convert?") with "nothing", which reads the
+            # ("what will this zip?") with "nothing", which reads the
             # same as "broken" rather than "not ready yet".
             self.dashboard.setVisible(False)
             return
         self.dashboard.reset()
         self.dashboard.set_wells(preview.wells)
-        self.dashboard.set_headline(f"Ready — {len(preview.wells)} well(s) to convert.")
+        self.dashboard.set_headline(f"Ready — {len(preview.wells)} well(s) to zip.")
         self.dashboard.setVisible(True)
 
     def _on_source_changed(self) -> None:

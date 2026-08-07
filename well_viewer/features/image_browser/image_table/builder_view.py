@@ -116,6 +116,12 @@ QFrame#ITBChan, QFrame#ITBChip {
     background: $panel_elevated; border: 1px solid $border; border-radius: 7px;
 }
 QFrame#ITBChan:hover, QFrame#ITBChip:hover { border-color: $accent; }
+/* Reorder cue: the edge a dragged channel would be inserted at. The rule is
+   drawn 2px against the pill's 1px resting border, which nudges the pill's
+   contents by a pixel while the drag hovers — cheap, and unmistakable about
+   which side the drop lands on. */
+QFrame#ITBChan[dropEdge="above"] { border-top: 2px solid $accent; }
+QFrame#ITBChan[dropEdge="below"] { border-bottom: 2px solid $accent; }
 QLabel#ITBChanLbl { color: $text_primary; font-size: 12px; font-weight: 560; }
 QLabel#ITBVar { color: $text_secondary; font-size: 10.5px; }
 QLabel#ITBGrip { color: $text_muted; font-size: 11px; }
@@ -266,18 +272,34 @@ def _move_facet(ctx, spec, dim: str, target: str) -> None:
     spec.fixed.setdefault(dim, _default_value(ctx, dim))
 
 
-def _add_channel(ctx, spec, name: str, target: str) -> None:
+def _add_channel(ctx, spec, name: str, target: str, at: int | None = None) -> None:
+    """Nest a fresh channel *name* under the *target* axis. *at* is the position
+    it lands in, counted against the axis's channel list as it stands on entry;
+    None appends."""
     ax = getattr(spec, target)
     other = spec.cols if target == "rows" else spec.rows
     if other.channels:                      # channels cohere on one axis
         ax.channels.extend(other.channels)
         other.channels = []
         other.overlay = False
-    ax.channels.append(ChannelSpec(channel=name, render="corrected",
-                                   colormap=_default_colormap_for(ctx, name)))
+    cs = ChannelSpec(channel=name, render="corrected",
+                     colormap=_default_colormap_for(ctx, name))
+    if at is None:
+        ax.channels.append(cs)
+    else:
+        ax.channels.insert(max(0, min(int(at), len(ax.channels))), cs)
 
 
-def _move_channel(spec, src_axis: str, idx: int, target: str) -> None:
+def _move_channel(spec, src_axis: str, idx: int, target: str,
+                  at: int | None = None) -> None:
+    """Move the channel at *idx* on *src_axis* onto the *target* axis, landing at
+    position *at* — counted against the target axis's channel list as it stands
+    on entry, i.e. the index of the pill it was dropped in front of. None appends,
+    which is what a drop on the axis zone's own background means.
+
+    Passing *at* is what makes an in-place reorder possible: with only the append
+    behaviour, dragging a channel anywhere within its own axis sent it to the
+    bottom of the list, and dragging the bottom one did nothing at all."""
     src = getattr(spec, src_axis)
     if not (0 <= idx < len(src.channels)):
         return
@@ -288,7 +310,13 @@ def _move_channel(spec, src_axis: str, idx: int, target: str) -> None:
         tgt.channels.extend(other.channels)
         other.channels = []
         other.overlay = False
-    tgt.channels.append(cs)
+    if at is None:
+        tgt.channels.append(cs)
+        return
+    pos = int(at)
+    if src is tgt and idx < pos:
+        pos -= 1        # the pop above shifted every later item down by one
+    tgt.channels.insert(max(0, min(pos, len(tgt.channels))), cs)
 
 
 def _remove_channel(spec, axis: str, idx: int) -> None:
@@ -441,19 +469,103 @@ class _Chip(QFrame):
     def mousePressEvent(self, e) -> None:
         if e.button() == Qt.LeftButton:
             self._press = e.position().toPoint()
+            # Accept the press rather than chaining up to QFrame, whose default
+            # implementation *ignores* it and so re-delivers the press to the
+            # parent zone. Measured on Linux/Qt 6.7.3, the implicit mouse grab
+            # stays on this chip either way and the drag still starts; accepting
+            # is defensive — it matches Qt's own drag-and-drop example and leaves
+            # no room for a platform to route the gesture's move events to the
+            # zone instead, which would leave the chip unable to move at all.
+            e.accept()
+            return
         super().mousePressEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:
+        self._press = None
+        super().mouseReleaseEvent(e)
 
     def mouseMoveEvent(self, e) -> None:
         if self._press is None:
             return
         if (e.position().toPoint() - self._press).manhattanLength() < QApplication.startDragDistance():
             return
+        # Clear the press *before* exec(): the drop rebuilds the shelf, which
+        # reparents and deletes this chip, so nothing may touch self afterwards.
+        hotspot = self._press
+        self._press = None
         drag = QDrag(self)
         mime = QMimeData()
         mime.setData(_MIME, self._token.encode("utf-8"))
         drag.setMimeData(mime)
+        # Carry the chip itself as the drag image, so the gesture reads as moving
+        # this chip rather than as an anonymous cursor change.
+        with swallow("image table builder: drag pixmap"):
+            drag.setPixmap(self.grab())
+            drag.setHotSpot(hotspot)
         drag.exec(Qt.MoveAction)
-        self._press = None
+
+
+def _token_of(e) -> str:
+    return bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
+
+
+def _drop_ok(e, accepts) -> bool:
+    """True when *e* carries one of this shelf's tokens and *accepts* (which may
+    be None, meaning anything) admits it."""
+    if not e.mimeData().hasFormat(_MIME):
+        return False
+    return True if accepts is None else bool(accepts(_token_of(e)))
+
+
+class _ChanPill(_Chip):
+    """A nested-channel chip that is itself a drop target, so a channel dropped
+    onto it lands *at that position* instead of being appended to the end of the
+    axis. The half of the pill under the cursor picks the side — top half inserts
+    above, bottom half below — and that side is drawn as an accent rule while the
+    drag hovers. Without this the only drop target was the axis zone as a whole,
+    whose handler can only append."""
+
+    def __init__(self, token: str, accepts, on_drop, parent=None) -> None:
+        super().__init__(token, parent)
+        self._on_drop = on_drop           # (token, after: bool) -> None
+        self._accepts = accepts
+        self.setProperty("dropEdge", "none")
+        self.setAcceptDrops(True)
+
+    def _ok(self, e) -> bool:
+        return _drop_ok(e, self._accepts)
+
+    def _after(self, e) -> bool:
+        return e.position().toPoint().y() >= self.height() / 2
+
+    def _set_edge(self, edge: str) -> None:
+        if self.property("dropEdge") == edge:
+            return
+        self.setProperty("dropEdge", edge)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def dragEnterEvent(self, e) -> None:
+        if self._ok(e):
+            self._set_edge("below" if self._after(e) else "above")
+            e.acceptProposedAction()
+
+    def dragMoveEvent(self, e) -> None:
+        if self._ok(e):
+            self._set_edge("below" if self._after(e) else "above")
+            e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e) -> None:
+        self._set_edge("none")
+
+    def dropEvent(self, e) -> None:
+        after = self._after(e)
+        self._set_edge("none")
+        if self._ok(e):
+            tok = _token_of(e)
+            with swallow("image table builder: reorder drop"):
+                self._on_drop(tok, after)
+            e.acceptProposedAction()
 
 
 class _DropZone(QFrame):
@@ -474,12 +586,7 @@ class _DropZone(QFrame):
         self.style().polish(self)
 
     def _ok(self, e) -> bool:
-        if not e.mimeData().hasFormat(_MIME):
-            return False
-        if self._accepts is None:
-            return True
-        tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
-        return bool(self._accepts(tok))
+        return _drop_ok(e, self._accepts)
 
     def dragEnterEvent(self, e) -> None:
         if self._ok(e):
@@ -496,7 +603,7 @@ class _DropZone(QFrame):
     def dropEvent(self, e) -> None:
         self._set_active(False)
         if self._ok(e):
-            tok = bytes(e.mimeData().data(_MIME).data()).decode("utf-8")
+            tok = _token_of(e)
             with swallow("image table builder: drop"):
                 self._on_drop(tok)
             e.acceptProposedAction()
@@ -588,6 +695,12 @@ def _accept_fixed(tok: str) -> bool:
 
 def _accept_tray(tok: str) -> bool:
     return tok.startswith("chan:")    # only an on-axis channel drops back to remove
+
+
+def _accept_chan(tok: str) -> bool:
+    # A channel pill takes channels only. A root dropped on one is left
+    # unaccepted so the event propagates out to the axis zone behind it.
+    return tok.startswith(("chan:", "newchan:"))
 
 
 # ── shelf construction ──────────────────────────────────────────────────────
@@ -785,6 +898,25 @@ def _on_zone_drop(ctx, zone: str, tok: str) -> None:
     _edit(ctx)
 
 
+def _on_pill_drop(ctx, axis: str, idx: int, tok: str, after: bool) -> None:
+    """A channel was dropped onto the nested pill at *idx* on *axis*: put it there,
+    before or after that pill, rather than at the end of the list. This is the
+    reorder path — dropping a channel back onto its own axis anywhere else can
+    only append."""
+    spec = builder_spec(ctx)
+    at = idx + 1 if after else idx
+    if tok.startswith("newchan:"):
+        _add_channel(ctx, spec, tok[len("newchan:"):], axis, at=at)
+    elif tok.startswith("chan:"):
+        _, src_axis, src_idx = tok.split(":", 2)
+        _move_channel(spec, src_axis, int(src_idx), axis, at=at)
+    else:
+        return
+    if getattr(spec, "plate", False):
+        spec.plate = False      # same manual-layout exit as _on_zone_drop
+    _edit(ctx)
+
+
 def _on_tray_drop(ctx, tok: str) -> None:
     if tok.startswith("chan:"):
         _, axis, idx = tok.split(":", 2)
@@ -913,7 +1045,8 @@ def _root_pill(ctx, spec, axis: str, dim: str) -> QFrame:
 
 
 def _chan_pill(ctx, spec, axis: str, idx: int, cs: ChannelSpec) -> QFrame:
-    pill = _Chip(f"chan:{axis}:{idx}")
+    pill = _ChanPill(f"chan:{axis}:{idx}", _accept_chan,
+                     lambda tok, after, a=axis, i=idx: _on_pill_drop(ctx, a, i, tok, after))
     pill.setObjectName("ITBChan")
     h = QHBoxLayout(pill)
     h.setContentsMargins(8, 3, 5, 3)

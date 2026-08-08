@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from well_viewer.data.crop_tool import CropTool
-from well_viewer.core.ui_helpers import btn_primary
+from well_viewer.core.ui_helpers import btn_primary, build_hline_separator
 from widgets.flow_layout import FlowLayout
 from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import (
@@ -313,11 +313,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     build_shelf(ctx, shelf_host)
     il.addWidget(shelf_host)
 
-    sep_shelf = QFrame(inner)
-    sep_shelf.setObjectName("Separator")
-    sep_shelf.setFrameShape(QFrame.HLine)
-    sep_shelf.setFixedHeight(2)
-    il.addWidget(sep_shelf)
+    il.addWidget(build_hline_separator(inner, thickness=2))
 
 
     # ── Action strip — Generate · Crop▾ · crop status … Export▾ · Zoom ──

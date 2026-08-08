@@ -59,6 +59,7 @@ from well_viewer.features.batch_export.service import (
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 # Foundational-layer (core/domain/data) ctx forms — safe at module scope.
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     get_thresh_frac_on as _get_thresh_frac_on,
@@ -118,6 +119,29 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
         parts.append("t0")
     row["fold_change_mode"] = "+".join(parts) or "off"
     row["fold_change_control"] = control_label if vs_control else ""
+
+
+def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
+    """Point *sep* along the split's current axis, name and shape together.
+
+    The Batch Export output panel folds from side-by-side to stacked when the
+    viewport narrows, and its divider turns with it. That makes it the one
+    divider in the app whose orientation is not fixed at build time, so it
+    cannot take a fixed object name: ``theme.qss`` pins ``QFrame#HRule`` to
+    ``max-height: 1px`` and ``QFrame#VRule`` to ``max-width: 1px``, and either
+    name applied to the other orientation renders a hairline stretched along
+    the wrong axis. Leaving it unnamed is worse still — an ``HLine`` / ``VLine``
+    frame with no sanctioned name keeps Qt's default etched border, 3 px of
+    near-white on this app's dark surfaces.
+
+    An object-name change does not repaint on its own: Qt's stylesheet cache
+    only re-evaluates a selector on an explicit repolish, the same reason
+    ``widgets/_support.set_variant`` exists for dynamic properties.
+    """
+    sep.setFrameShape(QFrame.HLine if stacked else QFrame.VLine)
+    sep.setObjectName("HRule" if stacked else "VRule")
+    sep.style().unpolish(sep)
+    sep.style().polish(sep)
 
 
 class BatchExportPanel(QWidget):
@@ -221,8 +245,8 @@ class BatchExportPanel(QWidget):
         outer.addWidget(left)
 
         sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
         sep.setFrameShadow(QFrame.Plain)
+        _apply_split_sep_orientation(sep, stacked=False)
         outer.addWidget(sep)
 
         right = QWidget()
@@ -254,7 +278,7 @@ class BatchExportPanel(QWidget):
         width never reflects the narrow window and the flip would never fire. The
         flip point is the panels' real side-by-side minimum, with hysteresis so a
         scrollbar toggling near it doesn't oscillate the orientation."""
-        from PySide6.QtWidgets import QBoxLayout, QFrame
+        from PySide6.QtWidgets import QBoxLayout
         if self._use_sidebar_groups or not hasattr(self, "_split_outer"):
             return
         if avail is None:
@@ -272,7 +296,7 @@ class BatchExportPanel(QWidget):
         self._split_outer.setDirection(
             QBoxLayout.Direction.TopToBottom if stack
             else QBoxLayout.Direction.LeftToRight)
-        self._split_sep.setFrameShape(QFrame.HLine if stack else QFrame.VLine)
+        _apply_split_sep_orientation(self._split_sep, stacked=stack)
         # Stacked: the plate map takes the full width; side-by-side: keep it capped.
         self._split_left.setMaximumWidth(16777215 if stack else 560)  # QWIDGETSIZE_MAX
         # Right panel fills leftover horizontal space when side-by-side; when
@@ -326,9 +350,7 @@ class BatchExportPanel(QWidget):
         hdr2.addWidget(btn_secondary(None, "Clear All", self._grp_clear_all))
         layout.addLayout(hdr2)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep)
+        layout.addWidget(build_hline_separator(None))
 
         hint = QLabel("Left-drag wells onto the plate map to add them to the selected group.")
         hint.setWordWrap(True)
@@ -369,9 +391,7 @@ class BatchExportPanel(QWidget):
         self._map_plate.setRowColumnSelectable(False)
         layout.addWidget(self._map_plate, 0, PLATE_ALIGNMENT)
 
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep2)
+        layout.addWidget(build_hline_separator(None))
 
         self._grp_scroll = QScrollArea()
         self._grp_scroll.setWidgetResizable(True)
@@ -417,8 +437,7 @@ class BatchExportPanel(QWidget):
         self._build_output_header_and_io(layout)
         self._build_channel_row(layout, attr="_line_channel_cb")
 
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep)
+        layout.addWidget(build_hline_separator(None))
 
         info = QLabel(
             "Each export group produces:\n"

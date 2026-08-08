@@ -4635,13 +4635,36 @@ Analyze's form sections, the vertical rules inside the run dashboard — is a
 (the Analyze pane's and `widgets/run_dashboard.py`'s), and the
 `hline`/`vline` dynamic properties. They all paint `Colors.border_subtle` with
 `border: none`, and `#HRule` / `#VRule` are pinned to one pixel in the QSS so a
-caller need not also call `setFixedHeight(1)`.
+caller need not also call `setFixedHeight(1)`. `widgets/mpl_toolbar.py` carries
+a fifth, `#MplToolbarSep`, because that widget styles itself with a
+per-instance stylesheet rather than reading the application QSS — it restates
+the same fill and `border: none` there.
 
 The `border: none` is the load-bearing part. A `QFrame` whose shape is
 `HLine`/`VLine` otherwise paints Qt's default etched line, which is derived
-from the widget palette rather than the theme and reads as a near-white bar on
-the dark surfaces. Give a new divider one of the four names; never leave a bare
-`setFrameShape(QFrame.HLine)` unnamed.
+from the widget palette rather than the theme. Measured against the default
+theme, an unnamed `HLine` comes out three pixels of `#e6e9ef` where a named one
+is a single pixel of `border_subtle` — so an unnamed divider is not merely
+off-token, it is a pale bar at three times the intended weight.
+
+**Build one with `ui_helpers.build_hline_separator(parent)` or
+`build_vline_separator(parent)`** rather than by hand; both name the frame,
+set its shape, and pin it to `theme.Metrics.hairline`. `build_hline_separator`
+takes a `thickness` keyword for the one divider that is deliberately heavier
+(the Image Table's shelf rule, at 2 px). `datasets/_common/log_panel.hrule` is
+the Datasets-side twin, since `datasets/` reaches `#HRule` without importing
+`well_viewer`. `tests/test_divider_naming.py` fails on any
+`setFrameShape(QFrame.HLine|VLine)` whose frame is never given a sanctioned
+name.
+
+One divider chooses its orientation at run time: Batch Export's output panel
+folds from side-by-side to stacked as the viewport narrows, and its rule turns
+with it. It therefore cannot take a fixed name — `#HRule` pins `max-height`
+and `#VRule` pins `max-width`, so either name applied to the other orientation
+draws a hairline stretched along the wrong axis. `base_panel._apply_split_sep_orientation`
+sets the shape and the name together and repolishes, because Qt's stylesheet
+cache only re-evaluates a selector on an explicit `unpolish`/`polish` pair —
+the same reason `widgets/_support.set_variant` exists for dynamic properties.
 
 The sidebar│centre divider is the `QSplitter` handle, styled by
 `QSplitter::handle` (also `border_subtle`, 6 px). Leave the width to the

@@ -274,6 +274,10 @@ class Metrics:
     # Review pane, so the Properties sidebar and the Playground's controls do
     # not open to different widths and read as two different kinds of panel.
     dock_w       = 360
+    # Thickness of a divider hairline. One pixel is the design intent
+    # everywhere; the token exists so the number is stated once rather than
+    # written out at each of the dozen frames and QSS pins that use it.
+    hairline     = 1
 
 
 def _icon_path(name: str) -> str:

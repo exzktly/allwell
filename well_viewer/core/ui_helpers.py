@@ -334,12 +334,32 @@ def plotting_band_slot(ctx, title: str, mode: str | None = None):
     return band.slot(plotting_slot_name(title, mode))
 
 
-def build_hline_separator(parent: QWidget) -> QFrame:
-    """Return the project's standard 1-px horizontal separator frame."""
+def build_hline_separator(parent: QWidget, *, thickness: int = theme.Metrics.hairline) -> QFrame:
+    """Return the project's standard horizontal separator frame.
+
+    The ``Separator`` object name is what makes it paint: ``theme.qss`` gives
+    that name ``background-color: border_subtle`` and — the load-bearing half —
+    ``border: none``. An ``HLine`` frame without one of the sanctioned names
+    keeps Qt's default etched border instead, which is derived from the widget
+    palette rather than the theme and measures 3 px of near-white
+    (``#e6e9ef``) on this app's dark surfaces.
+
+    *thickness* exists for the one divider that is deliberately heavier than a
+    hairline (the Image Table's shelf rule); everything else takes the default.
+    """
     sep = QFrame(parent)
     sep.setObjectName("Separator")
     sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
+    sep.setFixedHeight(thickness)
+    return sep
+
+
+def build_vline_separator(parent: QWidget, *, thickness: int = theme.Metrics.hairline) -> QFrame:
+    """The vertical twin of :func:`build_hline_separator`."""
+    sep = QFrame(parent)
+    sep.setObjectName("Separator")
+    sep.setFrameShape(QFrame.VLine)
+    sep.setFixedWidth(thickness)
     return sep
 
 

@@ -40,6 +40,7 @@ from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
 from well_viewer.core.safe import swallowed
+from well_viewer.core.ui_helpers import build_hline_separator
 
 # Global tab-scoped debug toggles.
 REVIEW_TAB_DEBUG = False
@@ -333,10 +334,7 @@ class AllWellApp(QMainWindow):
 
         rl.addWidget(header)
 
-        sep = QFrame()
-        sep.setObjectName("Separator")
-        sep.setFixedHeight(1)
-        rl.addWidget(sep)
+        rl.addWidget(build_hline_separator(None))
 
         # Phase 11: the outer Review/Analyze QStackedWidget is gone — Analyze
         # now lives inside WellViewerApp's central pane stack so that the

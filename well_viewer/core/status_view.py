@@ -8,9 +8,10 @@ import theme
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton, QTextEdit,
     QVBoxLayout, QWidget,
 )
+from well_viewer.core.ui_helpers import build_hline_separator
 
 #: How many lines the log drawer keeps before dropping the oldest.
 _LOG_MAX_BLOCKS = 5000
@@ -91,10 +92,7 @@ def build_bottom(win) -> None:
     # its own footer visible.
     win._status_footer = bottom
 
-    top_sep = QFrame(bottom)
-    top_sep.setFrameShape(QFrame.HLine)
-    top_sep.setFixedHeight(1)
-    outer.addWidget(top_sep)
+    outer.addWidget(build_hline_separator(bottom))
 
     # Status row
     status_row = QWidget(bottom)

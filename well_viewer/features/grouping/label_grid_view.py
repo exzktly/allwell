@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 
 import theme
+from well_viewer.core.ui_helpers import build_hline_separator
 
 
 _ROW_LETTERS = "ABCDEFGH"
@@ -407,11 +408,7 @@ def build_label_grid(ctx, parent: QWidget) -> None:
     hl.addWidget(suffix_btn)
     layout.addWidget(head)
 
-    sep = QFrame(parent)
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    layout.addWidget(sep)
+    layout.addWidget(build_hline_separator(parent))
 
     # ── the grid itself ──────────────────────────────────────────────
     grid = LabelGrid(app, parent)

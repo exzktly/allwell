@@ -46,6 +46,7 @@ from well_viewer.core.safe import swallowed
 
 SIDEBAR_LAYOUT_NAME = "Sidebar"
 from well_viewer.core.dnd import WELL_MIME  # shared drag/drop token
+from well_viewer.core.ui_helpers import build_hline_separator
 
 
 # ── Drag-aware widgets ───────────────────────────────────────────────────────
@@ -194,10 +195,7 @@ def build_heatmap_layout_sidebar(ctx, parent: QWidget) -> QWidget:
     outer_layout.setSpacing(0)
     outer.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
 
-    sep = QFrame(outer)
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    outer_layout.addWidget(sep)
+    outer_layout.addWidget(build_hline_separator(outer))
 
     scroll = QScrollArea(outer)
     scroll.setWidgetResizable(True)

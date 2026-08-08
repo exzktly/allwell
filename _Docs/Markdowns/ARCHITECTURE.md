@@ -2014,9 +2014,10 @@ announces completion twice is reported rather than folded into the count.
 Picking an input folder through the browse dialog also **auto-fills the schema
 and channel fields** from what the folder's filenames look like:
 `_browse_input` → `analyze_input.AnalyzeInputMixin._autofill_from_input_scan`
-briefly samples the names (loose
-TIFs, a zip, or the per-well-zip layout) via `util.schema_infer.infer_from_dir`,
-which guesses the separator, slot layout, channel tokens and their roles (roles
+briefly samples the names via `util.schema_infer.infer_from_dir`, which reads all
+three grouped layouts — loose TIFs, the members of per-well zips, and the files
+inside per-well `<WELL>/` folders — looking in both the selected folder and its
+`in/`; it guesses the separator, slot layout, channel tokens and their roles (roles
 via `util.channel_roles`, the same heuristic the OME converter uses), and applies
 the guess through the existing `_apply_pipeline_info` path. It is best-effort and
 editable — a folder whose names don't parse leaves the form as the user set it —
@@ -2069,6 +2070,41 @@ pipeline from that `in/`, not the parent (see `resolve_input_output`). The
 grouped-layout lookup therefore searches both the selected dir and its `in/`, so
 a well packaged as `in/<WELL>.zip` / `in/<WELL>/` is not reported missing when it
 lives one level down.
+
+**One layout decision, rendered twice.** Analyze asks "what will this folder do?"
+under the input field the moment a folder is picked, and again when Run is
+pressed. `services.input_resolution_service.plan_input_layout` is that decision,
+and it is pure: it reads the filesystem and returns an `InputPlan` naming the
+action, the `(input_dir, output_dir)` pair the pipeline will be handed, and the
+one-line message the user sees. `AnalyzeTab._refresh_output` displays the plan;
+`resolve_input_output` executes it. The GUI holds no layout rules of its own,
+which `tests/test_layout_readout_single_source.py` enforces by requiring the
+readout label to be written from a value rather than from a hand-composed
+sentence.
+
+The actions are the layouts. A folder **named** `in` is the input directly
+(output `../out`); a folder that **contains** `in/` feeds the pipeline from that
+subfolder (output `<selected>/out`). Either way the same classification runs on
+the grouped folder: loose TIFs beside well zips are folded into those zips
+(`fold_loose`), loose TIFs on their own are grouped into per-well folders in
+place (`group_loose`), per-well zips or per-well folders are used as they stand
+(`grouped`), and a folder holding something else entirely is still handed to the
+pipeline (`unrecognised`) with the readout saying what was not recognised —
+`in/Plate1_A1.zip`, or a timepoint level between `in/` and the wells, is input
+this module cannot name wells for but the pipeline is what reads it. More than
+three loose TIFs at the *selected* root outrank an `in/` with nothing usable in
+it (`zip_root`), because that is a fresh drop beside a folder an interrupted run
+left behind, and it still has to reach `WellPlateZipper`. What remains is
+unrunnable and says which: an `in/` that exists and is empty (`empty_in`), a
+packed OME-TIFF (`packed_ome`, redirected to the Datasets converter), a path
+that is not a directory, or nothing usable at all.
+
+Both selections reaching the same verdict is the point of classifying them
+together. `count_expected_wells` takes its grouped root from the same plan, so
+the dashboard's denominator counts the folder the run will actually read; it
+stays best-effort by design, falling back to the loose-TIF count and then to 1,
+because a progress denominator cannot be zero — saying there is no input is
+`resolve_input_output`'s job, not the dial's.
 
 The Run path:
 
@@ -2181,9 +2217,11 @@ input. Keeping the two apart is deliberate — when the explode ran *inside* an
 Analyze run the wells only existed mid-run, so pre-run checks that look for a
 well (an `empty_well` background, control-well auto-threshold, both via
 `well_present_in_input`) failed against the raw `.ome.tif`. Analyze now only ever
-processes **folders**; `analyze_input.AnalyzeInputMixin._ome_input_hint` spots a
-raw OME-TIFF selected as input and redirects the user to the converter instead of
-trying to run it.
+processes **folders**; `plan_input_layout` classifies a raw OME-TIFF as
+`packed_ome` and carries `PACKED_OME_MESSAGE`, so the readout under the input
+field and the run-time refusal (`analyze_input.AnalyzeInputMixin._ome_input_hint`,
+which the pre-run validation reads) redirect the user to the converter in the
+same words instead of trying to run it.
 
 The conversion itself is `pipeline.ome_explode.explode_ome_tiff`. It reads the
 OME-XML for dimension order and channel names, **max-projects Z**, maps each
@@ -2567,7 +2605,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch against a shared remote input directory: a well whose input zip outlives its batch is announced a second time by the next batch, and counting markers drove the headline to "N / N wells (100%)" with wells still outstanding. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
 | `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `scripts/_bootstrap_lib.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). **A queue wait is announced, timed, and named**, because it is otherwise indistinguishable from a hang: the upload finishes and the log stops. `_scheduler_handoff_lines` writes the hand-off and is called from **every** launch path — the batched one composed the same launcher but announced nothing, so a batched run fell silent at the exact moment it began waiting. `ProgressTracker` turns those lines, plus the scheduler's own `srun: job N queued and waiting for resources` / `has been allocated resources`, into a `sched` event, and `AnalyzeProgressMixin._on_scheduler` runs a 1-Hz clock reading *Waiting for the scheduler — 4m12s (job 4812345)* with a log breadcrumb every two minutes repeating the elapsed time, the job id and the **request** (an unsatisfiable one — a partition that does not exist, a `--gres` the cluster cannot honour — is the usual cause of an indefinite queue). The job id comes from the scheduler's stderr rather than the `.slurm` sidecar because the sidecar is written from *inside* the allocation and so does not exist while the job is pending; a site whose scheduler words those lines differently still gets the wait announced and timed off the app's own lines, and loses only the id. The wait is what finally retracts the plate-wide `Transferring… N%` label: `set_transfer(None)` otherwise fires only on a *compute* event, which by definition has not happened while the job is queued, which is why the status sat on `Transferring… 100%` for the whole wait. The `remotes.toml` schema is the live contract in `services/remote_config.py`. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. Each batch is its own pipeline launch and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
-| `input_resolution_service.py` | Validates the input folder shape (zip set vs flat) and drives the loose-TIF **grouping (zipper) phase** — `run_zipper` shells out to `WellPlateZipper.py`, which discovers every TIF with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This matches the rest of the pipeline's discovery, which already treats a broken link as absent (`process_microscopy.organize_loose_tifs_into_well_folders` and `find_image_groups` both gate on `Path.is_file()` / an existence check). `WellPlateZipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping phase looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
+| `input_resolution_service.py` | `plan_input_layout` is the one answer to "what will this folder do?" — pure, returning an `InputPlan` that Analyze's readout displays and `resolve_input_output` executes (§6.1). Around it, the module validates the input folder shape (zip set vs flat) and drives the loose-TIF **grouping (zipper) phase** — `run_zipper` shells out to `WellPlateZipper.py`, which discovers every TIF with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This matches the rest of the pipeline's discovery, which already treats a broken link as absent (`process_microscopy.organize_loose_tifs_into_well_folders` and `find_image_groups` both gate on `Path.is_file()` / an existence check). `WellPlateZipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping phase looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
 | `ssh_key_setup.py` | Ed25519 keypair generation at `~/.ssh/allwell_<alias>` + the `ssh-copy-id` walkthrough behind the remote-host wizard. |
 | `subprocess_kill.py` | Kills a spawned pipeline's whole process group / session (what Stop uses). |
@@ -5874,6 +5912,7 @@ The map (each rule links to the test that holds it):
 | Every Datasets dashboard ends a run through the shared outcome setters rather than its own copies (§6b) | `tests/test_datasets_dashboard_outcomes.py` |
 | Every Datasets tool controller owns its worker through `DatasetToolController`, and the one tool whose worker cannot be interrupted still reaches its own stop method (§6b) | `tests/test_datasets_controller_lifecycle.py` |
 | The plot-card roster is written once — the shell reads `plot_card_actions.PLOT_CARD_ATTRS` rather than restating the names (§5.3) | `tests/test_plot_card_roster.py` |
+| The Analyze layout readout renders `plan_input_layout`'s message rather than composing its own sentence about the folder, so the preview and the run cannot disagree (§6.1) | `tests/test_layout_readout_single_source.py` |
 
 What is **not** statically enforced (and so relies on review + behavioural
 tests): "never block the UI thread", route redraws through the `WellViewerApp`

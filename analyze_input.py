@@ -26,17 +26,13 @@ import queue
 from pathlib import Path
 
 from services.input_resolution_service import (
+    PACKED_OME_MESSAGE,
     detect_ome_input,
     resolve_input_output,
     select_incremental_scope,
 )
 from util.schema_infer import infer_from_dir
 from well_viewer.core.safe import swallowed
-
-_CONVERT_HINT = (
-    "This is a packed OME-TIFF. Convert it to a dataset folder first in the "
-    "Datasets tab → “Convert OME-TIFF”, then open that folder here to process it."
-)
 
 
 class AnalyzeInputMixin:
@@ -55,7 +51,7 @@ class AnalyzeInputMixin:
             detected = detect_ome_input(Path(raw_str))
         except Exception:  # pragma: no cover — defensive
             return None
-        return _CONVERT_HINT if detected is not None else None
+        return PACKED_OME_MESSAGE if detected is not None else None
 
     def _resolve_run_dirs_for_runner(self, opts: dict, log_q: queue.Queue,
                                      *, proc_hook=None):

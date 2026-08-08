@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 
 import theme
 from widgets.context_banner import ContextBanner
+from widgets.page_body import build_page_body
 from widgets.rail_nav import RailNav
 from well_viewer.core.app_shell_view import RAIL_W
 from well_viewer.core.centre_view import NamedPageStack
@@ -278,8 +279,16 @@ class DatasetsTab(QWidget):
         splitter.addWidget(self._build_sidebar())
         splitter.setStretchFactor(0, 0)
 
-        self._pages = NamedPageStack(self)
-        splitter.addWidget(self._pages)
+        # The tool pages carry their own Run controls down inside each page, so
+        # this band holds nothing — but every main page in the app starts with
+        # one, and adding it here is what keeps this pane's content level with
+        # Review's and Analyze's instead of starting a band's height higher
+        # (widgets/page_body.py).
+        page_host = QWidget(self)
+        _band, page_body = build_page_body(page_host)
+        self._pages = NamedPageStack(page_host)
+        page_body.layout().addWidget(self._pages, 1)
+        splitter.addWidget(page_host)
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([260, 900])
 

@@ -764,26 +764,27 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         card.setVisible(True)
 
     def _build_log(self, parent: QWidget) -> None:
-        rl = QVBoxLayout(parent)
-        rl.setContentsMargins(0, 0, 0, 0)
+        # The same control band every Review page carries, so the Analyze pane's
+        # first row is drawn level with theirs when the user switches modes: the
+        # pane's title is scope, the raw-log toggle and Clear are actions. It
+        # replaces a hand-built header row that was 6px shorter than the band.
+        from widgets.page_body import build_page_body
+        band, body = build_page_body(parent)
+        rl = body.layout()
         rl.setSpacing(0)
 
-        hdr = QWidget(parent)
-        hl = QHBoxLayout(hdr)
-        hl.setContentsMargins(12, 6, 12, 6)
-        hl.addWidget(QLabel("Pipeline Output", hdr))
-        hl.addStretch(1)
+        title = QLabel("Pipeline Output", band)
+        band.add_scope("", title)
         # F4: the dashboard above IS the summary view; the verbose text log is
         # off by default and revealed on demand, so progress reads cleanly.
-        self._raw_log_cb = QCheckBox("Show raw log", hdr)
+        self._raw_log_cb = QCheckBox("Show raw log", band)
         self._raw_log_cb.setToolTip("Show the full per-image pipeline log beneath the progress dashboard")
         self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        hl.addWidget(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", hdr)
+        band.add_action(self._raw_log_cb)
+        clear_btn = QPushButton("Clear", band)
         clear_btn.setProperty("variant", "secondary")
         clear_btn.clicked.connect(self._clear_log)
-        hl.addWidget(clear_btn)
-        rl.addWidget(hdr)
+        band.add_action(clear_btn)
 
         r1 = QFrame(parent); r1.setFrameShape(QFrame.HLine); r1.setObjectName("HRule")
         rl.addWidget(r1)

@@ -307,8 +307,14 @@ def mirror_tab_widget(win, name: str, tab_widget):
     Converting them to a bar plus a page stack would break every one of those.
     Hiding their own bar and mirroring it instead keeps the widget and its API
     exactly as they are, and costs one signal each way.
+
+    Document mode goes with the hidden bar. ``QTabWidget::pane`` draws a border
+    to close the frame the tabs sit on; with the bar gone that border is a
+    hairline box around the page, and its top edge pushed every body nested in
+    one of these widgets a pixel below where an un-nested page starts.
     """
     from PySide6.QtWidgets import QTabBar
+    tab_widget.setDocumentMode(True)
     bar = QTabBar()
     # Carry the source widget's name so theme.qss's one nested-sub-tab rule
     # styles the mirror exactly as it styled the bar it replaces.

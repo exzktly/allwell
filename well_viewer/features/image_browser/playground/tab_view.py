@@ -24,6 +24,7 @@ import theme
 from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from widgets.info_icon import info_icon
+from widgets.page_body import build_page_body
 from well_viewer.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
     playground_open_loose_image, playground_repopulate_dropdowns,
@@ -71,8 +72,12 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     # app instance through the ``window`` handle (the QMainWindow *is* the app)
     # until it gets its own ctx migration; the generic app escape hatch is gone.
     app = ctx.window
-    if parent.layout() is None:
-        QHBoxLayout(parent).setContentsMargins(0, 0, 0, 0)
+    # The band is empty on this tab — every Playground control lives in the
+    # right-hand dock — but it is added anyway so this page's top edge is drawn
+    # level with every other page's (widgets/page_body.py). The body is a row:
+    # the canvas, then the dock.
+    _band, body = build_page_body(parent, content_margins=(12, 12, 12),
+                                  horizontal=True)
     on_change = partial(playground_on_change, ctx)
 
     # ── The controls dock (mounted on the right, below) ──────────────────────
@@ -487,15 +492,15 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     cl.addStretch(1)
 
     # ── The canvas, then the dock — the dock is on the right ─────────────────
-    canvas = QScrollArea(parent)
+    canvas = QScrollArea(body)
     canvas.setWidgetResizable(False)
     canvas.setAlignment(Qt.AlignCenter)
     label = QLabel(canvas)
     label.setAlignment(Qt.AlignCenter)
     label.setMouseTracking(True)
     canvas.setWidget(label)
-    parent.layout().addWidget(canvas, 1)
-    parent.layout().addWidget(controls)
+    body.layout().addWidget(canvas, 1)
+    body.layout().addWidget(controls)
     app._playground_image_canvas = canvas
     app._playground_image_label = label
 

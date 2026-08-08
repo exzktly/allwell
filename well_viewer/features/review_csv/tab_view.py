@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QHeaderView, QLabel, QPushButton, QTableWidget,
-    QVBoxLayout, QWidget,
+    QHeaderView, QLabel, QPushButton, QTableWidget, QWidget,
 )
 from well_viewer.core.lazy import lazy as _lazy
 # Lazy so Review CSV imports without Image Browser present (keeps it deletable).
@@ -15,8 +14,8 @@ refresh_review_csv = _lazy(_RCSV, "refresh_review_csv")
 refresh_review_csv_rows = _lazy(_RCSV, "refresh_review_csv_rows")
 
 
-from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
+from widgets.page_body import build_page_body
 
 def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``)
@@ -27,13 +26,8 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     # later layer.
     reg = ctx.widgets
 
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
-    layout.setContentsMargins(12, 12, 12, 12)
-
-    ctrl = ControlBand(parent)
+    ctrl, body = build_page_body(parent, content_margins=(12, 12, 12))
+    layout = body.layout()
 
     well_lbl = reg.register("_review_well_lbl", QLabel("(select one well)"))
     well_lbl.setObjectName("Muted")
@@ -59,7 +53,6 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     refresh_btn.setProperty("variant", "secondary")
     refresh_btn.clicked.connect(lambda _=False: refresh_review_csv(ctx))
     ctrl.add_action(refresh_btn)
-    layout.addWidget(ctrl)
 
     table = reg.register("_review_csv_table", QTableWidget(0, 0, parent))
     table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)

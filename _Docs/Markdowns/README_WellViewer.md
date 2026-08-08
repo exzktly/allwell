@@ -1120,6 +1120,22 @@ count) — plus a CDF.
   exhaust a full internal one. Free space (or point the Analyze tab's **Scratch
   disk** field at the roomy volume) and re-run with **incremental**, which
   reprocesses only the missing groups and merges them in.
+- **"No space left on device" when there is clearly space free** — the yardstick
+  is misleading rather than the disk. Your `in/` archives are compressed, and
+  nothing else in a run is: while a well is being processed its staging holds
+  the extracted frames plus about six intermediate images per field of view, all
+  uncompressed, for as many wells as are running at once — and every finished
+  `<well>_out.zip` stays on the output volume for the rest of the plate. A run
+  can therefore need many times the size of its own input folder, and it can
+  start with room and run out at the fortieth well. Three things say so rather
+  than leaving you to find out: before it reads an image the run sizes
+  itself against the volumes it will write to and warns (or, if there is not
+  room for even one well, stops); as wells complete it measures what they
+  actually wrote and warns once if the rest of the plate will not fit; and if a
+  volume does fill, the error names *which* volume and how much is left on it
+  instead of the bare system message. Free space, or point **Scratch disk** at a
+  roomier volume, and re-run with **incremental** — the wells already written are
+  complete and are not redone.
 - **"Unusable FOV labels" at load** — a warning naming specific wells means those
   wells' rows carry no usable field-of-view label, so all their fields pooled
   into one and nothing per field can be computed for them: no error bars, and

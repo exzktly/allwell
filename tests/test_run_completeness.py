@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline.io import estimate_group_scratch_bytes, preflight_scratch_space
+from pipeline.capacity import estimate_group_scratch_bytes, preflight_scratch_space
 from pipeline.run_report import (
     clear_run_report,
     collect_run_report,
@@ -102,10 +102,10 @@ def test_group_estimate_counts_inputs_and_intermediates():
 
 
 def test_preflight_refuses_a_volume_too_small_for_one_well(tmp_path, monkeypatch):
-    import pipeline.io as io
+    import pipeline.capacity as cap
 
-    monkeypatch.setattr(io, "_free_bytes", lambda p: 100 * (1 << 20))   # 100 MiB
-    ok, msg = io.preflight_scratch_space(
+    monkeypatch.setattr(cap, "free_bytes", lambda p: 100 * (1 << 20))   # 100 MiB
+    ok, msg = cap.preflight_scratch_space(
         tmp_path, sample_image_bytes=5_000_000, n_channels=2,
         groups_per_well=138, concurrent_wells=4,
     )
@@ -117,11 +117,11 @@ def test_preflight_refuses_a_volume_too_small_for_one_well(tmp_path, monkeypatch
 def test_preflight_warns_but_proceeds_when_merely_tight(tmp_path, monkeypatch):
     """The estimate is rough, so a tight volume warns — refusing to start on a
     heuristic would be worse than the risk it guards against."""
-    import pipeline.io as io
+    import pipeline.capacity as cap
 
     per_group = estimate_group_scratch_bytes(1_000_000, 2)
-    monkeypatch.setattr(io, "_free_bytes", lambda p: per_group * 12)
-    ok, msg = io.preflight_scratch_space(
+    monkeypatch.setattr(cap, "free_bytes", lambda p: per_group * 12)
+    ok, msg = cap.preflight_scratch_space(
         tmp_path, sample_image_bytes=1_000_000, n_channels=2,
         groups_per_well=10, concurrent_wells=4,
     )
@@ -129,10 +129,10 @@ def test_preflight_warns_but_proceeds_when_merely_tight(tmp_path, monkeypatch):
 
 
 def test_preflight_is_silent_when_there_is_room(tmp_path, monkeypatch):
-    import pipeline.io as io
+    import pipeline.capacity as cap
 
-    monkeypatch.setattr(io, "_free_bytes", lambda p: 500 * (1 << 30))
-    ok, msg = io.preflight_scratch_space(
+    monkeypatch.setattr(cap, "free_bytes", lambda p: 500 * (1 << 30))
+    ok, msg = cap.preflight_scratch_space(
         tmp_path, sample_image_bytes=5_000_000, n_channels=2,
         groups_per_well=138, concurrent_wells=4,
     )
@@ -140,9 +140,9 @@ def test_preflight_is_silent_when_there_is_room(tmp_path, monkeypatch):
 
 
 def test_preflight_says_nothing_when_free_space_is_unknowable(tmp_path, monkeypatch):
-    import pipeline.io as io
+    import pipeline.capacity as cap
 
-    monkeypatch.setattr(io, "_free_bytes", lambda p: None)
+    monkeypatch.setattr(cap, "free_bytes", lambda p: None)
     assert preflight_scratch_space(
         tmp_path, sample_image_bytes=5_000_000, n_channels=2,
         groups_per_well=138, concurrent_wells=4,

@@ -1994,6 +1994,9 @@ def test_required_files_list_is_what_we_promised():
         "util/schema_infer.py",
         "util/timepoint.py",
         "util/well_token.py",
+        # Free-space primitives + the ENOSPC wording the retry shield rewrites
+        # through (util.disk_space).
+        "util/disk_space.py",
         # Atomic + verified per-well archive publication (util.zip_write),
         # imported by process_microscopy and pipeline.io.
         "util/zip_write.py",
@@ -2002,6 +2005,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/__init__.py",
         "pipeline/auto_threshold.py",
         "pipeline/background.py",
+        "pipeline/capacity.py",
         "pipeline/cellpose.py",
         "pipeline/flatfield.py",
         "pipeline/incremental_keys.py",

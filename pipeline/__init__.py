@@ -8,6 +8,8 @@ contract enforced by ``tests/test_architecture_contracts.py``. The ML runtimes
 relevant functions, so importing this package pulls in neither.
 
 * :mod:`pipeline.background` — illumination / background-correction math.
+* :mod:`pipeline.capacity`   — disk-space accounting: what a run will need on
+  the scratch and output volumes, and what is left on them.
 * :mod:`pipeline.cellpose`   — Cellpose segmenters (Torch lazy).
 * :mod:`pipeline.stardist`   — StarDist segmenters + per-worker model state (TF lazy).
 * :mod:`pipeline.io`         — atomic image / CSV / overlay writers.

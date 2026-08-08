@@ -83,7 +83,7 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
 
     # Fold-change normalization collapses into a popover button (C1) so it no
     # longer needs its own row.
-    from well_viewer.domain.fold_change_controls import install_fold_change_controls
+    from well_viewer.core.fold_change_controls_view import install_fold_change_controls
     from well_viewer.core.ui_helpers import make_popover_button
     _fc_btn, _fc_panel, _fc_lay = make_popover_button("Fold change ▾", line_ctrl)
     _fc_btn.setToolTip("Fold-change normalization (vs a control well/set or a baseline timepoint)")

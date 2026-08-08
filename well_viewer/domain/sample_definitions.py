@@ -35,6 +35,7 @@ from typing import Any
 from collections.abc import Iterable
 
 from well_viewer.domain import selections_model as _sel_model
+from well_viewer.domain.viewer_state import resolve_pipeline_info_path
 
 
 _logger = logging.getLogger("well_viewer.domain.sample_definitions")
@@ -44,19 +45,9 @@ SAMPLE_DEFINITIONS_KEY = "sample_definitions"
 PRE_V2_BACKUP_SUFFIX = ".pre-v2-backup"
 
 
-def _resolve_pipeline_info_path(out_dir: Path) -> Path:
-    """Return the pipeline_info.json path, falling back to parent dir.
-
-    Mirrors ``viewer_state.read_pipeline_info`` so save and load look in
-    the same place.
-    """
-    primary = out_dir / PIPELINE_INFO_FILENAME
-    if primary.exists():
-        return primary
-    parent = out_dir.parent / PIPELINE_INFO_FILENAME
-    if parent.exists():
-        return parent
-    return primary  # may not exist; caller decides
+# The sidecar lives at the dataset root even when the data dir is its
+# ``out/`` child, so save and load have to agree on the fallback.
+_resolve_pipeline_info_path = resolve_pipeline_info_path
 
 
 def build_sample_definitions_v2(

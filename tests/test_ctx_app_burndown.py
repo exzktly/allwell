@@ -712,7 +712,7 @@ _CTX_APP = re.compile(r"\bctx\.app\b")
 #              the custom-profile scratch to the new ctx.runtime.export namespace;
 #              two ctx-form helpers were added in export.style. tab_view was this
 #              feature's sole ctx.app, so it retires cleanly to zero.
-#   11 -> 10   fold-change controls → ctx: -1   the whole domain/fold_change_controls
+#   11 -> 10   fold-change controls → ctx: -1   the whole core/fold_change_controls_view
 #              cluster (install_fold_change_controls + _ControlCombo + the 4
 #              _repopulate_* combos + _sync_widgets_to_state + set_fold_change_state
 #              + _reset_bar_ylim_edits) only ever touched app._app_state / _event_bus

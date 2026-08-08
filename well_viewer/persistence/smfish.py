@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any  # Any used in save_threshold
 
 from well_viewer.persistence._io import atomic_write_json
+from well_viewer.domain.viewer_state import resolve_pipeline_info_path
 
 _logger = logging.getLogger("well_viewer")
 
@@ -28,14 +29,9 @@ _PIPELINE_INFO_FILENAME = "pipeline_info.json"
 _SMFISH_THRESHOLDS_KEY = "smfish_thresholds"
 
 
-def _resolve_pipeline_info_path(out_dir: Path) -> Path:
-    primary = out_dir / _PIPELINE_INFO_FILENAME
-    if primary.exists():
-        return primary
-    parent = out_dir.parent / _PIPELINE_INFO_FILENAME
-    if parent.exists():
-        return parent
-    return primary
+# The sidecar lives at the dataset root even when the data dir is its
+# ``out/`` child, so save and load have to agree on the fallback.
+_resolve_pipeline_info_path = resolve_pipeline_info_path
 
 
 def _read_block(out_dir: Path) -> dict[str, float]:

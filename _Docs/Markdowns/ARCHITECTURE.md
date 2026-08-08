@@ -491,7 +491,7 @@ layers:
 │           ── cross-cutting typed state: channel_state,               │
 │              dataset_state, plot_state, selection_state              │
 ├──────────────────────────────────────────────────────────────────────┤
-│  data/    ← IO + decode (Qt-free where practical)                    │
+│  data/    ← IO + decode; Qt-free but for one allowlisted module     │
 │           ── data_loading, image_discovery, image_resolver,          │
 │              zipfile_cache, auto_threshold, crop_tool, metric_labels │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -1244,7 +1244,7 @@ the same profile to `scripts/derive_profile.py --apply`, which deletes the
 excluded features' `paths`/`tests` per `profiles/full.toml`.
 
 One module sits in `domain/` rather than under a feature package:
-`domain/fold_change_controls.py` exposes
+`core/fold_change_controls_view.py` exposes
 `install_fold_change_controls(app, parent, layout, scope=…)` — the
 Control + Baseline dropdown pair installed on both the Bar Plots and
 Line Graphs control rows. It lives in `domain/` because it's shared
@@ -4945,7 +4945,7 @@ User → Control combo  ─→    app._fc_control_label   ─┼─→ fold_chan
                             app._fc_vs_t0_on        ─┘
 User → Baseline combo ─→ (sets _fc_vs_t0_on)
 
-domain/fold_change_controls.set_fold_change_state(app, *, …, initiating_scope)
+core/fold_change_controls_view.set_fold_change_state(app, *, …, initiating_scope)
         │   mirrors the shape of channel_state_controller.set_active_channel:
         │   updates state → _sync_widgets_to_state →
         │     redraw_scopes_or_defer(app) (scope coalescer: visible scope's
@@ -5040,7 +5040,7 @@ CSV output (additive in both line and bar paths):
 
 Cross-tab widget sync:
    Each tab installs its own QComboBox instances via
-   domain/fold_change_controls.install_fold_change_controls(scope=…).
+   core/fold_change_controls_view.install_fold_change_controls(scope=…).
    The combo handlers funnel every state mutation through
    set_fold_change_state, which calls _sync_widgets_to_state to
    mirror the new state into the other tab's widget set (with
@@ -5804,6 +5804,9 @@ The map (each rule links to the test that holds it):
 | Never hardcode a colour or a pixel size (§3, §8) — allowlisted for colormap/palette data and the `__main__` demo blocks; `datasets/` is out of scope while its tool pages consolidate | `tests/test_hardcoded_tokens.py` |
 | Every divider frame carries a name the QSS styles, so it paints a 1 px `border_subtle` hairline rather than Qt's 3 px etched default (§8) | `tests/test_divider_naming.py` |
 | A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
+| `pipeline/`, `util/`, `services/` and `domain/` import no Qt and no `widgets` at any nesting; `data/` too, but for one allowlisted module (§5, §13) | `tests/test_qt_free_layers.py` |
+| No Datasets tool imports another Datasets tool, so each stays independently deletable (§6b) | `tests/test_datasets_tool_isolation.py` |
+| Every Datasets dashboard ends a run through the shared outcome setters rather than its own copies (§6b) | `tests/test_datasets_dashboard_outcomes.py` |
 | The plot-card roster is written once — the shell reads `plot_card_actions.PLOT_CARD_ATTRS` rather than restating the names (§5.3) | `tests/test_plot_card_roster.py` |
 
 What is **not** statically enforced (and so relies on review + behavioural

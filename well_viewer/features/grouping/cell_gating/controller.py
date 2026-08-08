@@ -1222,7 +1222,7 @@ def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
     Selections are preserved across refreshes; this state is local to the
     optimizer and never touches ``ctx.state.plot.fc_*``.
     """
-    from well_viewer.domain.fold_change_controls import _all_member_labels
+    from well_viewer.core.fold_change_controls_view import _all_member_labels
 
     ctrl = ctx.runtime.cell_gating.opt_fc_control_combo
     base = ctx.runtime.cell_gating.opt_fc_baseline_combo

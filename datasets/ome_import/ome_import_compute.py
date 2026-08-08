@@ -141,11 +141,6 @@ def selection_target(layout: OmeLayout, params: ConversionParams) -> SelectionTa
     return SelectionTarget(positions, noun, params.fovs_per_well)
 
 
-def is_ome_tiff(path: Path | str) -> bool:
-    """True iff *path* names an ``.ome.tif`` / ``.ome.tiff`` file."""
-    return str(path).lower().endswith(_OME_SUFFIXES)
-
-
 def strip_ome_suffix(name: str) -> str:
     """Return *name* without a trailing ``.ome.tif`` / ``.ome.tiff`` extension."""
     low = name.lower()

@@ -28,6 +28,14 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
+# Phase-name column in the rail, so every row's bar starts at one x.
+_PHASE_LABEL_W = 74
+# Per-phase mini progress bar.
+_PHASE_BAR_W = 86
+_PHASE_BAR_H = 6
+# The `n/total` readout beside each phase bar.
+_PHASE_COUNT_W = 40
+
 _PHASES = (("validate", "Validate"), ("merge", "Merge"),
            ("verify", "Verify"), ("finalize", "Finalize"))
 _PHASE_KEYS = tuple(key for key, _ in _PHASES)
@@ -41,7 +49,6 @@ class ConcatDashboard(PlateProgress):
         self._wells: list[str] = []
         self._well_stage: dict[str, str] = {}
         self._phase = ""
-        self._outcome = ""            # "" | "done" | "failed" | "cancelled"
         self._rail: dict[str, tuple] = {}
         super().__init__("Concatenate Progress", parent)
         self.setObjectName("ConcatDashboard")
@@ -51,7 +58,7 @@ class ConcatDashboard(PlateProgress):
         self._wells = []
         self._well_stage = {}
         self._phase = ""
-        self._outcome = ""
+        self.clear_outcome()
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
@@ -108,26 +115,11 @@ class ConcatDashboard(PlateProgress):
         self._phase = phase
         self._refresh_rail()
 
-    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
-        self._outcome = "done"
-        self._headline.setText(summary or "Done")
-        # The full text (often a full destination path baked into the
-        # summary string) survives as a tooltip even when the caller has
-        # shortened the displayed headline to a basename.
-        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
-        self._headline.setStyleSheet(f"color:{theme.Colors.success};")
-        self._refresh_rail()
-
-    def set_failed(self, message: str) -> None:
-        self._outcome = "failed"
-        self._headline.setText(f"Failed — {message}" if message else "Failed")
-        self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
-        self._refresh_rail()
-
-    def set_cancelled(self, message: str = "") -> None:
-        self._outcome = "cancelled"
-        self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
-        self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
+    def _on_outcome_changed(self) -> None:
+        """Concatenate's rail names the phase it reached, so a terminal state
+        changes what it says. The other dashboards' rails carry per-well counts
+        that a finished run has already settled, which is why this hook exists
+        rather than the base refreshing every rail unconditionally."""
         self._refresh_rail()
 
     # ── internals ───────────────────────────────────────────────────────────
@@ -167,16 +159,16 @@ class ConcatDashboard(PlateProgress):
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(7)
             dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
-            nm = QLabel(label, row_w); nm.setFixedWidth(74)
+            nm = QLabel(label, row_w); nm.setFixedWidth(_PHASE_LABEL_W)
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = cnt = None
             if key == "merge":
                 bar = QProgressBar(row_w)
                 bar.setRange(0, max(1, len(self._wells))); bar.setValue(0)
-                bar.setTextVisible(False); bar.setFixedSize(86, 6)
+                bar.setTextVisible(False); bar.setFixedSize(_PHASE_BAR_W, _PHASE_BAR_H)
                 row.addWidget(bar)
-                cnt = QLabel("0/0", row_w); cnt.setFixedWidth(40)
+                cnt = QLabel("0/0", row_w); cnt.setFixedWidth(_PHASE_COUNT_W)
                 cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
                 row.addWidget(cnt)
             row.addStretch(1)

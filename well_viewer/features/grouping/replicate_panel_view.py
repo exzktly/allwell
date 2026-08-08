@@ -16,12 +16,12 @@ Sample Definitions tab is split between three places:
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QPlainTextEdit, QSpinBox,
+    QComboBox, QHBoxLayout, QLabel, QPlainTextEdit, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
 from well_viewer.domain.plate_layout import PLATE_COLS
-from well_viewer.core.ui_helpers import btn_primary, btn_secondary
+from well_viewer.core.ui_helpers import btn_primary, btn_secondary, build_hline_separator
 from well_viewer.features.grouping.label_grid_view import build_label_grid
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.selection_controller import update_active_group_label
@@ -182,11 +182,7 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hdr2r_l.addWidget(btn_primary(hdr2r, "Apply Quick Replicates",
                                   lambda: rep_quick_pairs_from_dropdowns(ctx)))
 
-    sep = QFrame(parent)
-    sep.setObjectName("Separator")
-    sep.setFrameShape(QFrame.HLine)
-    sep.setFixedHeight(1)
-    layout.addWidget(sep)
+    layout.addWidget(build_hline_separator(parent))
 
     # Active-group banner — until the user clicks a group below, plate
     # clicks have no effect. Make that state legible so the user isn't
@@ -250,7 +246,6 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     """
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import (
-        QFrame as _QFrame,
         QTabWidget as _QTabWidget,
         QVBoxLayout as _QVBoxLayout,
         QWidget as _QWidget,
@@ -297,11 +292,7 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     tl.addStretch(1)
     outer_layout.addWidget(toolbar)
 
-    sep_top = _QFrame(parent)
-    sep_top.setObjectName("Separator")
-    sep_top.setFrameShape(_QFrame.HLine)
-    sep_top.setFixedHeight(1)
-    outer_layout.addWidget(sep_top)
+    outer_layout.addWidget(build_hline_separator(parent))
 
     # ── Sub-tabs ────────────────────────────────────────────────────────
     sub_tabs = _QTabWidget(parent)

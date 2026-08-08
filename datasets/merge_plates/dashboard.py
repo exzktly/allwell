@@ -22,7 +22,6 @@ class MergePlatesDashboard(PlateProgress):
         self._wells: list[str] = []
         self._well_stage: dict[str, str] = {}
         self._well_origin: dict[str, str] = {}   # "ds1" | "ds2"
-        self._outcome = ""
         super().__init__("Merge Progress", parent)
         self.setObjectName("MergePlatesDashboard")
 
@@ -30,7 +29,7 @@ class MergePlatesDashboard(PlateProgress):
         self._wells = []
         self._well_stage = {}
         self._well_origin = {}
-        self._outcome = ""
+        self.clear_outcome()
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._plate.clearWellColors()
@@ -89,25 +88,6 @@ class MergePlatesDashboard(PlateProgress):
         if self._well_stage.get(w) == "merged":
             return "✓"
         return None
-
-    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
-        self._outcome = "done"
-        self._headline.setText(summary or "Done")
-        # The full text (often a full destination path baked into the
-        # summary string) survives as a tooltip even when the caller has
-        # shortened the displayed headline to a basename.
-        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
-        self._headline.setStyleSheet(f"color:{theme.Colors.success};")
-
-    def set_failed(self, message: str) -> None:
-        self._outcome = "failed"
-        self._headline.setText(f"Failed — {message}" if message else "Failed")
-        self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
-
-    def set_cancelled(self, message: str = "") -> None:
-        self._outcome = "cancelled"
-        self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
-        self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
 
     def _well_color(self, w: str) -> str | None:
         stage = self._well_stage.get(w)

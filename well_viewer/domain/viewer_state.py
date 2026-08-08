@@ -41,6 +41,28 @@ def parse_rc(label: str) -> tuple[str | None, str | None]:
     return m.group(1).upper(), f"{int(m.group(2)):02d}"
 
 
+PIPELINE_INFO_FILENAME = "pipeline_info.json"
+
+
+def resolve_pipeline_info_path(out_dir: Path) -> Path:
+    """Where a dataset's ``pipeline_info.json`` is, or where it would go.
+
+    The Analyze layout loads the sibling ``out/`` folder as the data dir while
+    the sidecar sits at the dataset root, so a reader has to look one level up
+    before giving in. Returns the primary path when neither exists — the caller
+    decides whether a missing file means "nothing to load" or "write it here".
+
+    This is the same fallback :func:`read_pipeline_info` applies; it is a
+    function so that the three writers which have to *save* into the same place
+    a load came from cannot look somewhere else.
+    """
+    primary = out_dir / PIPELINE_INFO_FILENAME
+    if primary.exists():
+        return primary
+    parent = out_dir.parent / PIPELINE_INFO_FILENAME
+    return parent if parent.exists() else primary
+
+
 def read_pipeline_info(
     out_dir: Path,
     *,
@@ -50,11 +72,8 @@ def read_pipeline_info(
     if logger is None:
         logger = logging.getLogger("well_viewer")
 
-    info_path = out_dir / "pipeline_info.json"
-    if not info_path.exists() and check_parent:
-        parent_path = out_dir.parent / "pipeline_info.json"
-        if parent_path.exists():
-            info_path = parent_path
+    info_path = (resolve_pipeline_info_path(out_dir) if check_parent
+                 else out_dir / PIPELINE_INFO_FILENAME)
 
     if not info_path.exists():
         return None, [], set(), {}

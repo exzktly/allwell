@@ -40,6 +40,9 @@ from datasets._common.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import scan_folder
 
+# One-character separator field.
+_SEPARATOR_EDIT_W = 40
+
 
 def _is_destination(root: Path) -> str:
     """Return "" if *root* is usable as a new-destination target, else a
@@ -117,7 +120,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         sl.addWidget(self._schema_edit, 1)
         sl.addWidget(QLabel("Separator:", schema_row))
         self._sep_edit = QLineEdit(DEFAULT_SEP, schema_row)
-        self._sep_edit.setFixedWidth(40)
+        self._sep_edit.setFixedWidth(_SEPARATOR_EDIT_W)
         self._sep_edit.textChanged.connect(self._on_readout_input_changed)
         sl.addWidget(self._sep_edit)
         outer.addWidget(schema_row)

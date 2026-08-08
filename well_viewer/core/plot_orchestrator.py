@@ -143,53 +143,6 @@ def save_bar_figure(ctx, *, plot_bg: str) -> None:
     _launch_editor_or_save(ctx, app._bar_fig, f"bar_t{tp}.png", plot_bg=plot_bg, canvas=getattr(app, "_bar_canvas", None))
 
 
-def save_scatter_figure(ctx, *, plot_bg: str) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    ch_x = app._scatter_ch_x_cb.currentText()
-    ch_y = app._scatter_ch_y_cb.currentText()
-    tp = app._scatter_tp_cb.currentText().replace(".", "_")
-    _launch_editor_or_save(
-        ctx,
-        app._scatter_fig,
-        f"scatter_{ch_x}_vs_{ch_y}_t{tp}.png",
-        plot_bg=plot_bg,
-        canvas=getattr(app, "_scatter_canvas", None),
-    )
-
-
-def save_scatter_agg_figure(ctx, *, plot_bg: str) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    stat_x = app._scatter_agg_stat_x_cb.currentText()
-    stat_y = app._scatter_agg_stat_y_cb.currentText()
-
-    selected_timepoints: list[float] = []
-    tp_checks = app._ctx.runtime.scatter.agg_tp_checks
-    if tp_checks:
-        for tp_str, widget in tp_checks.items():
-            try:
-                if widget.isChecked():
-                    selected_timepoints.append(float(tp_str))
-            except Exception:
-                swallowed()  # was: pass (silent except)
-        selected_timepoints.sort()
-
-    if selected_timepoints:
-        tp_range = f"t{min(selected_timepoints):.1f}-{max(selected_timepoints):.1f}".replace(".", "_")
-    else:
-        tp_range = "no_tp"
-
-    stat_x_safe = stat_x.replace(" ", "_").lower()
-    stat_y_safe = stat_y.replace(" ", "_").lower()
-
-    _launch_editor_or_save(
-        ctx,
-        app._scatter_agg_fig,
-        f"scatter_agg_{stat_x_safe}_vs_{stat_y_safe}_{tp_range}.png",
-        plot_bg=plot_bg,
-        canvas=getattr(app, "_scatter_agg_canvas", None),
-    )
-
-
 def redraw_app(ctx) -> None:
     # A8 (D-core): fully ctx-native — the old god-object unwrap bridge is gone.
     # The empty-state flip is a widget-tree walk (``ctx.window``), the render

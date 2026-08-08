@@ -1,0 +1,264 @@
+"""Every AST guard is shown catching a violation, and clearing a clean file.
+
+`scripts/prove_guard.sh` proves a guard the day it is written, by watching it
+fail on a base branch that still violates the rule. That proof cannot live in
+CI: once the fix merges, the rule *holds* on the base and the script correctly
+reports "passed on the base" forever after. So the authoring-time proof expires,
+and nothing afterwards ever demonstrates that these guards still bite.
+
+This is the durable half. Each case hands a guard a synthetic file containing
+the violation it exists to prevent and asserts it fires, then hands it a clean
+one and asserts it does not. Both directions matter: a guard that fails on
+everything would pass a test that only checks the first half, and a guard whose
+scan silently walks past its input would pass one that only checks the second.
+
+The violations are not invented. Every one is a shape that either shipped in
+this repository or was demonstrated to slip past an earlier version of the
+guard — the conditional `setFrameShape`, the aliased `QFrame`, the wrapped pixel
+literal, the `[0-9]` spelling of `\\d`, the roster with a non-card string mixed
+in. Reproducing them here is what stops a future simplification of a guard from
+quietly reopening the hole.
+"""
+
+from __future__ import annotations
+
+import importlib
+from pathlib import Path
+
+import pytest
+
+
+def _write(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    return path
+
+
+def _run_scan(monkeypatch, module_name: str, test_name: str, files: list[Path]):
+    """Point *module*'s scan at *files* and run one of its tests.
+
+    Returns the `AssertionError` it raised, or `None` if it passed. The guards
+    reach the tree through `tests._repo_scan.python_sources`, imported into
+    their own namespace, so replacing that one attribute redirects the scan
+    without touching the rule itself. `rel` goes with it: it renders a path
+    relative to the repo root, and a temp file is not under it.
+    """
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(module, "python_sources", lambda **kw: list(files), raising=False)
+    for attr in ("rel", "_rel"):
+        if hasattr(module, attr):
+            monkeypatch.setattr(module, attr, lambda p: str(p), raising=False)
+    try:
+        getattr(module, test_name)()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+def _run_rooted_scan(monkeypatch, module_name: str, test_name: str, root: Path,
+                     extra: dict | None = None):
+    """The same, for the two guards that walk from `REPO_ROOT` themselves."""
+    module = importlib.import_module(module_name)
+    monkeypatch.setattr(module, "REPO_ROOT", root, raising=False)
+    for name, value in (extra or {}).items():
+        monkeypatch.setattr(module, name, value, raising=False)
+    try:
+        getattr(module, test_name)()
+    except AssertionError as exc:
+        return exc
+    return None
+
+
+# ── dividers ────────────────────────────────────────────────────────────────
+
+DIVIDER_VIOLATIONS = {
+    "plain": "def build(p):\n    f = QFrame(p)\n    f.setFrameShape(QFrame.HLine)\n",
+    # Batch Export's split rule picks its shape at run time; the first version
+    # of the scan only understood a plain attribute argument.
+    "conditional": ("def build(p, stack):\n    f = QFrame(p)\n"
+                    "    f.setFrameShape(QFrame.HLine if stack else QFrame.VLine)\n"),
+    # `QFrame` is imported under an alias in replicate_panel_view.
+    "aliased": "def build(p):\n    f = _QFrame(p)\n    f.setFrameShape(_QFrame.HLine)\n",
+    # The shape and the shadow OR'd into setFrameStyle is the same act.
+    "frame_style": "def build(p):\n    f = QFrame(p)\n    f.setFrameStyle(QFrame.HLine | QFrame.Plain)\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(DIVIDER_VIOLATIONS))
+def test_divider_guard_catches_an_unnamed_frame(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_divider.py", DIVIDER_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_divider_naming",
+                    "test_no_unnamed_divider_frames", [bad])
+    assert exc is not None, f"the {shape} divider violation went uncaught"
+    assert "bad_divider.py" in str(exc)
+
+
+def test_divider_guard_clears_a_named_frame(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_divider.py",
+                  'def build(p):\n    f = QFrame(p)\n'
+                  '    f.setObjectName("Separator")\n'
+                  '    f.setFrameShape(QFrame.HLine)\n')
+    assert _run_scan(monkeypatch, "tests.test_divider_naming",
+                     "test_no_unnamed_divider_frames", [good]) is None
+
+
+# ── colours and pixel sizes ─────────────────────────────────────────────────
+
+def test_colour_guard_catches_an_inline_hex(tmp_path, monkeypatch):
+    bad = _write(tmp_path, "bad_colour.py", 'ACCENT = "#FF6B35"\n')
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_hex_colours", [bad])
+    assert exc is not None and "bad_colour.py" in str(exc)
+
+
+def test_colour_guard_clears_a_token_read(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_colour.py", "ACCENT = theme.Colors.accent\n")
+    assert _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                     "test_no_inline_hex_colours", [good]) is None
+
+
+PIXEL_VIOLATIONS = {
+    "bare": "def build(w):\n    w.setFixedWidth(137)\n",
+    # The evasion an earlier version walked past ten times: the literal is a
+    # floor inside a `max()`, which is still a size written at the call site.
+    "wrapped": "def build(w, fm):\n    w.setMinimumWidth(max(137, fm.height()))\n",
+    "arithmetic": "def build(w, n):\n    w.setFixedHeight(137 * n)\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(PIXEL_VIOLATIONS))
+def test_pixel_guard_catches_a_literal(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_pixels.py", PIXEL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                    "test_no_inline_pixel_sizes", [bad])
+    assert exc is not None, f"the {shape} pixel violation went uncaught"
+    assert "bad_pixels.py" in str(exc)
+
+
+def test_pixel_guard_clears_a_named_size(tmp_path, monkeypatch):
+    good = _write(tmp_path, "good_pixels.py",
+                  "_FIELD_W = 137\n\n\ndef build(w):\n    w.setFixedWidth(_FIELD_W)\n")
+    assert _run_scan(monkeypatch, "tests.test_hardcoded_tokens",
+                     "test_no_inline_pixel_sizes", [good]) is None
+
+
+# ── well tokens ─────────────────────────────────────────────────────────────
+
+WELL_VIOLATIONS = {
+    "canonical_spelling": 'import re\n_RE = re.compile(r"^([A-Ha-h])(\\d{1,2})$")\n',
+    # The spelling an earlier version did not know.
+    "digit_class": 'import re\n_RE = re.compile(r"^([A-H])([0-9]{1,2})$")\n',
+    "unanchored_fullmatch": 'import re\n\n\ndef ok(n):\n    return re.fullmatch(r"[A-H]\\d{1,2}", n)\n',
+    # `re.match` anchors the start itself, so a tail-anchored pattern is a
+    # whole-token judge here — not the sanctioned trailing extractor.
+    "match_tail_anchored": 'import re\n\n\ndef ok(t):\n    return re.match(r"([A-Ha-h])(\\d{1,2})$", t)\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(WELL_VIOLATIONS))
+def test_well_token_guard_catches_a_local_parser(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_well.py", WELL_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_well_token_single_parser",
+                    "test_no_module_keeps_its_own_whole_token_well_regex", [bad])
+    assert exc is not None, f"the {shape} well parser went uncaught"
+    assert "bad_well.py" in str(exc)
+
+
+WELL_SANCTIONED = {
+    # A trailing token on a longer stem, read with `re.search` — §15 names this
+    # as a separate operation and it must stay allowed.
+    "trailing_extractor": 'import re\n\n\ndef well(s):\n    return re.search(r"([A-Ha-h])(\\d{1,2})$", s)\n',
+    "filename_shape": 'import re\n_RE = re.compile(r"^([A-Ha-h])(\\d{1,2})_out\\.zip$")\n',
+    "log_scraper": 'import re\n_RE = re.compile(r"\\[remote\\] . ([A-Ha-h]\\d{1,2}): up to date")\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(WELL_SANCTIONED))
+def test_well_token_guard_clears_the_sanctioned_shapes(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_well.py", WELL_SANCTIONED[shape])
+    assert _run_scan(monkeypatch, "tests.test_well_token_single_parser",
+                     "test_no_module_keeps_its_own_whole_token_well_regex", [good]) is None
+
+
+# ── the plot-card roster ────────────────────────────────────────────────────
+
+def test_roster_guard_catches_a_restated_list(tmp_path, monkeypatch):
+    bad = _write(tmp_path, "bad_roster.py",
+                 'def f(win):\n    for attr in ("_line_card", "_bar_card", "_heatmap_card"):\n'
+                 "        pass\n")
+    exc = _run_scan(monkeypatch, "tests.test_plot_card_roster",
+                    "test_the_shell_imports_the_roster_rather_than_restating_it", [bad])
+    assert exc is not None and "bad_roster.py" in str(exc)
+
+
+def test_roster_guard_catches_a_list_with_a_stray_string(tmp_path, monkeypatch):
+    """The shape an `all()` check short-circuited past."""
+    bad = _write(tmp_path, "bad_roster_mixed.py",
+                 'ITEMS = ("_line_card", "_bar_card", "something_else")\n')
+    exc = _run_scan(monkeypatch, "tests.test_plot_card_roster",
+                    "test_the_shell_imports_the_roster_rather_than_restating_it", [bad])
+    assert exc is not None and "bad_roster_mixed.py" in str(exc)
+
+
+def test_roster_guard_clears_an_unrelated_name_list(tmp_path, monkeypatch):
+    """`btn_card` in an `__all__` is not a roster — it has no leading underscore."""
+    good = _write(tmp_path, "good_roster.py", '__all__ = ["btn_card", "btn_primary"]\n')
+    assert _run_scan(monkeypatch, "tests.test_plot_card_roster",
+                     "test_the_shell_imports_the_roster_rather_than_restating_it",
+                     [good]) is None
+
+
+# ── the Qt-free layers ──────────────────────────────────────────────────────
+
+QT_FREE_VIOLATIONS = {
+    "direct_qt": "from PySide6.QtWidgets import QComboBox\n",
+    # A widget import pulls Qt transitively — the hole the services contract
+    # already plugs, and the reason `widgets` is forbidden alongside Qt itself.
+    "via_widgets": "from widgets.stepper import Stepper\n",
+    "function_local": "def build():\n    from PySide6.QtCore import Qt\n    return Qt\n",
+}
+
+
+@pytest.mark.parametrize("shape", sorted(QT_FREE_VIOLATIONS))
+def test_qt_free_guard_catches_qt_in_domain(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "well_viewer/domain/bad_qt.py", QT_FREE_VIOLATIONS[shape])
+    module = importlib.import_module("tests.test_qt_free_layers")
+    exc = _run_rooted_scan(
+        monkeypatch, "tests.test_qt_free_layers", "test_qt_free_layers_import_no_qt",
+        tmp_path, {"QT_FREE_ROOTS": {"well_viewer/domain": module.QT_FREE_ROOTS["well_viewer/domain"]},
+                   "ALLOWLIST": set()})
+    assert exc is not None, f"the {shape} Qt import went uncaught"
+    assert "bad_qt.py" in str(exc)
+
+
+def test_qt_free_guard_clears_pure_logic(tmp_path, monkeypatch):
+    _write(tmp_path, "well_viewer/domain/good.py", "import math\n\n\ndef f(x):\n    return math.sqrt(x)\n")
+    module = importlib.import_module("tests.test_qt_free_layers")
+    assert _run_rooted_scan(
+        monkeypatch, "tests.test_qt_free_layers", "test_qt_free_layers_import_no_qt",
+        tmp_path, {"QT_FREE_ROOTS": {"well_viewer/domain": module.QT_FREE_ROOTS["well_viewer/domain"]},
+                   "ALLOWLIST": set()}) is None
+
+
+# ── Datasets tool isolation ─────────────────────────────────────────────────
+
+def test_tool_isolation_guard_catches_a_cross_tool_import(tmp_path, monkeypatch):
+    _write(tmp_path, "datasets/subset/subset_compute.py",
+           "from datasets.concatenate.concatenate_compute import known_channel_tokens\n")
+    module = importlib.import_module("tests.test_datasets_tool_isolation")
+    monkeypatch.setattr(module, "_tool_packages", lambda: ["subset", "concatenate"])
+    exc = _run_rooted_scan(monkeypatch, "tests.test_datasets_tool_isolation",
+                           "test_no_tool_imports_another_tool", tmp_path,
+                           {"DATASETS": tmp_path / "datasets"})
+    assert exc is not None and "subset_compute.py" in str(exc)
+
+
+def test_tool_isolation_guard_clears_a_common_import(tmp_path, monkeypatch):
+    _write(tmp_path, "datasets/subset/subset_compute.py",
+           "from datasets._common.dataset_paths import known_channel_tokens\n")
+    module = importlib.import_module("tests.test_datasets_tool_isolation")
+    monkeypatch.setattr(module, "_tool_packages", lambda: ["subset", "concatenate"])
+    assert _run_rooted_scan(monkeypatch, "tests.test_datasets_tool_isolation",
+                            "test_no_tool_imports_another_tool", tmp_path,
+                            {"DATASETS": tmp_path / "datasets"}) is None

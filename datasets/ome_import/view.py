@@ -51,6 +51,10 @@ from datasets.ome_import.ome_import_compute import (
     read_layout,
     selection_target,
 )
+from datasets._common.dataset_fields import promote_open_button
+
+# Channel-name column in the per-channel role picker.
+_ROLE_LABEL_MIN_W = 120
 
 _ROLE_LABELS = {
     "nuclear": "Nuclear / segmentation",
@@ -333,7 +337,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             hl.setContentsMargins(0, 0, 0, 0)
             hl.setSpacing(theme.Spacing.sm)
             lbl = QLabel(name, row)
-            lbl.setMinimumWidth(120)
+            lbl.setMinimumWidth(_ROLE_LABEL_MIN_W)
             hl.addWidget(lbl)
             cb = QComboBox(row)
             for role in CHANNEL_ROLES:
@@ -478,11 +482,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
 
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root
-        self._open_btn.setVisible(True)
-        # Promoted to the primary action on success, demoting Convert — see
-        # ConcatenatePage.show_open_in_review for the reasoning.
-        set_variant(self._open_btn, "primary")
-        set_variant(self._run_btn, "secondary")
+        promote_open_button(self._open_btn, self._run_btn)
 
     def refresh_readout(self) -> None:
         """Recompute the split readout and the frame-order visibility / Run gate."""

@@ -709,13 +709,6 @@ class WellViewerApp(QWidget):
         "tint": (255, 255, 255),
     }
 
-    # ── Binary mask toggle ────────────────────────────────────────────────
-
-    def _render_review_image_display(self, *, pan_only: bool = False) -> None:
-        render_review_image_display(self._ctx, pan_only=pan_only)
-
-    def _set_review_image_include_mode(self, enabled: bool) -> None: return set_review_image_include_mode(self._ctx, enabled)
-
     # ── Plotting ──────────────────────────────────────────────────────────────
 
     def _redraw(self) -> None: return redraw_app(self._ctx)
@@ -814,8 +807,6 @@ class WellViewerApp(QWidget):
 
     def _compose_scatter_agg_stat(self, channel_entry: str, metric_label: str) -> str:
         return compose_scatter_agg_stat(self._ctx, channel_entry, metric_label)
-
-    def _update_tp_selection_display(self) -> None: return update_tp_selection_display(self._ctx)
 
     def _open_scatter_cell_viewer(self, well_label: str, filename: str, nuclear_id: str, row_idx: int) -> None:
         # App-native shim: still exercised by tests/test_scatter_cell_viewer_dock.py.

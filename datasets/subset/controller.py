@@ -19,10 +19,8 @@ on the plate this page actually shows.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QObject
 
 from util.aw_safe import swallowed
 from util.well_token import canonical_well_label
@@ -30,19 +28,20 @@ from widgets.plate_progress import canon_well, fraction_or_none
 from datasets._common.dataset_paths import shorten_headline
 from datasets.subset.dashboard import well_color, well_tooltip_label
 from datasets.subset.subset_compute import (
-    DatasetPaths,
     SubsetFilter,
     destination_has_marker,
 )
 from datasets.subset.view import SubsetPage
 from datasets.subset.worker import SubsetWorker
+from datasets._common.tool_controller import DestinationToolController
 
 
-class SubsetController(QObject):
+class SubsetController(DestinationToolController):
     """Behaviour for the Subset / Split Dataset feature."""
 
-    # QueueableController hook: (ok, message, dest_root — "" for none).
-    jobFinished = Signal(bool, str, str)
+    _shutdown_label = "subset"
+    _destination_has_marker = staticmethod(destination_has_marker)
+
 
     def __init__(
         self,
@@ -65,12 +64,6 @@ class SubsetController(QObject):
         self.page.queueRequested.connect(self._on_queue_requested)
         self.page.openInReviewRequested.connect(self._on_open_in_review_requested)
         self.page.sourceChanged.connect(self._on_source_changed)
-
-    def _on_run(self) -> None:
-        dest_path = self.page.destination_path()
-        if dest_path and self._destination_is_restart(dest_path) and not self._confirm_restart(dest_path):
-            return
-        self._launch()
 
     def _launch(self) -> None:
         if self._worker is not None and self._worker.isRunning():
@@ -133,19 +126,6 @@ class SubsetController(QObject):
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)
         self._launch()
-
-    def stop(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-
-    def is_busy(self) -> bool:
-        """QueueableController hook: whether a run is already in flight —
-        checked by QueueBridge.show_job before it repopulates this page from
-        a clicked queued row, since show_job() writes fields directly
-        (bypassing set_running's field locks, which only block user clicks)
-        and this controller is actively painting run progress onto the
-        picker plate those fields feed."""
-        return self._worker is not None and self._worker.isRunning()
 
     def _on_source_changed(self) -> None:
         self._well_stage = {}
@@ -228,34 +208,3 @@ class SubsetController(QObject):
         except Exception:
             swallowed()
 
-    def _on_open_in_review_requested(self, dest_root: str) -> None:
-        if self._on_open_in_review is not None:
-            self._on_open_in_review(dest_root)
-
-    @staticmethod
-    def _destination_is_restart(dest_path: str) -> bool:
-        root = Path(dest_path)
-        return destination_has_marker(DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out"))
-
-    def _confirm_restart(self, dest_path: str) -> bool:
-        answer = QMessageBox.question(
-            self.page,
-            "Resume interrupted run?",
-            "The destination already has partial output from an earlier "
-            f"attempt that didn't finish:\n\n{dest_path}\n\n"
-            "Continuing will delete that partial content and rebuild it from "
-            "scratch. Continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        return answer == QMessageBox.Yes
-
-    def shutdown(self) -> None:
-        worker = self._worker
-        if worker is None or not worker.isRunning():
-            return
-        try:
-            worker.requestInterruption()
-            worker.wait(2000)
-        except RuntimeError:
-            swallowed("subset worker shutdown")

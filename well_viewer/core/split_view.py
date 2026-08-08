@@ -36,6 +36,10 @@ from well_viewer.core.safe import swallowed
 from well_viewer.core import tab_controller
 from well_viewer.core.tab_controller import on_tab_change
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+
 _logger = logging.getLogger("well_viewer.split_view")
 
 #: Master switch. Setting this False (or commenting out the ``install_split_view``

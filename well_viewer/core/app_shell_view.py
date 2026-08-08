@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 import theme
 from well_viewer.core.sidebar_view import build_sidebar
 from well_viewer.core.status_view import build_bottom
+from well_viewer.core.ui_helpers import build_hline_separator
 
 
 #: The left panel's width, shared by all three modes — Review's own rail,
@@ -381,13 +382,8 @@ def build_ui(win) -> None:
     # window and a caption at the other.
     outer.addWidget(top)
 
-    # 1px separator under the topbar. objectName "Separator" so it fills with
-    # ``theme.Colors.border_subtle`` (matching the app-header separator) — a bare
-    # QFrame.HLine would instead paint Qt's default light etched line, ignoring
-    # the theme (it read too light on the grey theme's dark surfaces).
-    win._top_sep = QFrame()
-    win._top_sep.setObjectName("Separator")
-    win._top_sep.setFixedHeight(1)
+    # Hairline under the topbar, matching the app-header separator above it.
+    win._top_sep = build_hline_separator(None)
     outer.addWidget(win._top_sep)
 
     # ── Horizontal splitter: sidebar | plots ───────────────────────────
@@ -427,7 +423,6 @@ def build_ui(win) -> None:
     # Replaces the horizontal QTabWidget tab bar in centre_view.py; the
     # QTabWidget itself stays as page host (tab bar hidden) so existing
     # callers using tabText / setCurrentIndex / currentChanged still work.
-    import theme as _theme_v2
     from widgets.rail_nav import RailNav as _RailNav
 
     # Mode-seg moved to the titlebar (the dataset chip slot — redundant
@@ -444,13 +439,7 @@ def build_ui(win) -> None:
     win._dataset_btn = _dataset_button(win, sidebar)
     sidebar_layout.addWidget(win._dataset_btn)
     sidebar_layout.addWidget(win._section_nav)
-    sep_nav = QFrame()
-    sep_nav.setObjectName("Separator")
-    sep_nav.setFixedHeight(1)
-    sep_nav.setStyleSheet(
-        f"background-color: {_theme_v2.Colors.border_subtle};"
-    )
-    sidebar_layout.addWidget(sep_nav)
+    sidebar_layout.addWidget(build_hline_separator(None))
 
     win._sidebar_main_frame = win._ctx.widgets.register("_sidebar_main_frame", QWidget())
     QVBoxLayout(win._sidebar_main_frame).setContentsMargins(0, 0, 0, 0)

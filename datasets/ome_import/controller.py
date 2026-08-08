@@ -12,19 +12,20 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import asdict
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
 
 from well_viewer.core.safe import swallowed
 from datasets.ome_import.ome_import_compute import ConversionParams
 from datasets.ome_import.view import OmeImportPage
 from datasets.ome_import.worker import OmeImportWorker
+from datasets._common.tool_controller import DatasetToolController
 
 
-class OmeImportController(QObject):
+class OmeImportController(DatasetToolController):
     """Behaviour for the Convert OME-TIFF feature."""
 
-    # QueueableController hook: (ok, message, dest_root — "" for none).
-    jobFinished = Signal(bool, str, str)
+    _shutdown_label = "ome-import"
+
 
     def __init__(
         self,
@@ -98,14 +99,6 @@ class OmeImportController(QObject):
         self.show_job(spec)
         self._launch()
 
-    def stop(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-
-    def is_busy(self) -> bool:
-        """QueueableController hook — see SubsetController.is_busy."""
-        return self._worker is not None and self._worker.isRunning()
-
     def _on_succeeded(self, dest_root: str, summary: str) -> None:
         self.page.append_log("")
         self.page.append_log(f"✓ {summary}")
@@ -133,13 +126,3 @@ class OmeImportController(QObject):
             self._on_open_in_analyze(dest_root, self.page.channel_tokens_dict())
 
     # ── lifecycle ────────────────────────────────────────────────────────────
-    def shutdown(self) -> None:
-        """Stop a running worker before teardown (called on app close)."""
-        worker = self._worker
-        if worker is None or not worker.isRunning():
-            return
-        try:
-            worker.requestInterruption()
-            worker.wait(2000)
-        except RuntimeError:
-            swallowed("ome-import worker shutdown")

@@ -32,6 +32,11 @@ from PySide6.QtWidgets import (
 import theme
 from widgets.icons import make_icon
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_FIELD_MIN_W = 180
+
 # The picker callable's shape: given the field's current path and the widget
 # to parent a dialog to, return the newly chosen path ("" for "cancelled").
 Picker = Callable[[str, "QWidget | None"], str]
@@ -71,7 +76,7 @@ class PathField(QWidget):
         self._pick = pick
         self._validator = validator
         self._path = ""
-        self.setMinimumWidth(180)
+        self.setMinimumWidth(_FIELD_MIN_W)
 
         col = QVBoxLayout(self)
         col.setContentsMargins(0, 0, 0, 0)

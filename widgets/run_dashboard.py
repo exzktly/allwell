@@ -29,6 +29,14 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_BAR_W = 86
+_BAR_H = 6
+_CNT_W = 40
+_NM_W = 74
+
 # Per-well transfer directions, as they arrive on a ``well_xfer`` event.
 _XFER_UP = "up"
 _XFER_DOWN = "down"
@@ -94,6 +102,10 @@ class RunDashboard(PlateProgress):
 
     # ── host-facing API ─────────────────────────────────────────────────────
     def reset(self, *, remote: bool = False, total: int = 0) -> None:
+        # Inherited from PlateProgress along with the outcome setters:
+        # without this a finished run's terminal state would survive into
+        # the next one.
+        self.clear_outcome()
         self._remote = remote
         self._total = total
         self._stage_totals = {}
@@ -388,14 +400,14 @@ class RunDashboard(PlateProgress):
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(7)
             dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
-            nm = QLabel(label, row_w); nm.setFixedWidth(74)
+            nm = QLabel(label, row_w); nm.setFixedWidth(_NM_W)
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = QProgressBar(row_w)
             bar.setRange(0, max(1, self._total)); bar.setValue(0)
-            bar.setTextVisible(False); bar.setFixedSize(86, 6)
+            bar.setTextVisible(False); bar.setFixedSize(_BAR_W, _BAR_H)
             row.addWidget(bar)
-            cnt = QLabel("0/0", row_w); cnt.setFixedWidth(40)
+            cnt = QLabel("0/0", row_w); cnt.setFixedWidth(_CNT_W)
             cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
             row.addWidget(cnt)
             row.addStretch(1)

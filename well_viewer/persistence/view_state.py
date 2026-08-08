@@ -454,7 +454,7 @@ def restore(ctx, state: dict) -> None:
         # read app._fc_* directly — so this only matters for combos that
         # exist at restore time (e.g. Line, built eagerly).
         try:
-            from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
+            from well_viewer.core.fold_change_controls_view import _sync_widgets_to_state
             _sync_widgets_to_state(ctx)
         except Exception:
             _logger.debug("view_state: fold-change combo sync failed", exc_info=True)
@@ -879,7 +879,7 @@ def reset(ctx) -> None:
     app._app_state.plot.fc_op_t0 = "ratio"
     app._app_state.plot.fc_order = "ctrl_first"
     try:
-        from well_viewer.domain.fold_change_controls import _sync_widgets_to_state
+        from well_viewer.core.fold_change_controls_view import _sync_widgets_to_state
         _sync_widgets_to_state(ctx)
     except Exception:
         _logger.debug("reset: fold-change sync failed", exc_info=True)

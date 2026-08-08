@@ -42,6 +42,12 @@ from widgets.gradient_strip import GradientStrip
 from widgets.popover import Popover
 from widgets.search_input import SearchInput
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_STRIP_MIN_W = 60
+_TRIGGER_STRIP_MIN_W = 16
+
 _CATEGORIES: dict[str, list[str]] = {
     "Perceptual": ["viridis", "plasma", "inferno", "magma", "cividis",
                    "mako", "rocket", "turbo"],
@@ -113,7 +119,7 @@ class _LutRow(QWidget):
         lay.setSpacing(theme.Spacing.sm)
         strip = GradientStrip(_cmap_stops(name))
         strip.setFixedHeight(max(12, round(self.fontMetrics().height() * 0.85)))
-        strip.setMinimumWidth(60)
+        strip.setMinimumWidth(_STRIP_MIN_W)
         strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         lbl = QLabel(name, self)
         lbl.setObjectName("Mono")
@@ -161,7 +167,7 @@ class LutSelector(QWidget):
         self._trigger_strip.setFixedHeight(max(12, round(self.fontMetrics().height() * 0.85)))
         # The strip yields space first so the name label is never squeezed to zero
         # (which let the gradient cover the name at narrow widths).
-        self._trigger_strip.setMinimumWidth(16)
+        self._trigger_strip.setMinimumWidth(_TRIGGER_STRIP_MIN_W)
         self._trigger_strip.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self._trigger_name = QLabel(self._lut, self._trigger)
         self._trigger_name.setObjectName("Mono")

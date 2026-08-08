@@ -27,6 +27,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
+from types import SimpleNamespace
 
 
 class DatasetPathsError(Exception):
@@ -64,7 +65,17 @@ def split_stem_well(stem: str) -> tuple[str, str] | None:
     match = _TRAILING_WELL_RE.search(stem)
     if not match:
         return None
-    well = f"{match.group(1).upper()}{int(match.group(2)):02d}"
+    # The regex finds *where* the token starts; `canonical_well_label` decides
+    # whether what it found is a well and what to call it. Padding here instead
+    # made this a second definition of the rule inside the module whose
+    # docstring claims to be the only one: `measurements_a13` came back as
+    # "A13" and `measurements_a0` as "A00", neither of which is a plate
+    # position, while `in_containers` / `out_zips` / `out_folders` a few lines
+    # below rejected both. `dataset_wells` unions all four, so the two
+    # definitions met.
+    well = canonical_well_label(match.group(0))
+    if well is None:
+        return None
     return stem[: match.start()].rstrip("_-"), well
 
 
@@ -374,3 +385,109 @@ def schema_values_from_stems(
             if tok:
                 values.add(tok)
     return sorted(values, key=sort_key)
+
+
+# ── sidecar comparison, shared by more than one tool ─────────────────────────
+# These read a dataset's ``pipeline_info.json`` rather than its folders, but
+# they live here because this module is already the one that produces those
+# dicts (:func:`read_info`) and because ARCHITECTURE §6b requires anything more
+# than one tool needs to sit in ``_common`` — Concatenate owned both of these,
+# and Subset and Merge Plates reached across into it, which is precisely the
+# import that stops a feature being independently deletable.
+
+#: Sidecar fields that must agree before two datasets can be combined. A
+#: difference in any of them means the two plates were not analysed the same
+#: way, so their measurements are not comparable.
+COMPAT_KEYS = (
+    "schema",
+    "separator",
+    "schema_fields",
+    "well_index",
+    "channel_index",
+    "fov_index",
+    "tp_index",
+    "nuclear_token",
+    "segmentation_method",
+)
+
+
+def check_compatible(info1: dict, info2: dict, *, error_cls: type[Exception]) -> None:
+    """Raise *error_cls* if the two sidecars were not produced the same way.
+
+    The exception type is the caller's, the same way the destination-state
+    predicates above take the caller's own marker filename: each tool raises one
+    error class so a caller can catch its whole surface, and that class is the
+    tool's to name.
+    """
+    diffs = [
+        f"  • {key}: dataset 1 = {info1.get(key)!r}, dataset 2 = {info2.get(key)!r}"
+        for key in COMPAT_KEYS
+        if info1.get(key) != info2.get(key)
+    ]
+    if diffs:
+        raise error_cls(
+            "The two datasets were not analysed the same way, so their "
+            "measurements can't be concatenated:\n" + "\n".join(diffs)
+        )
+
+
+def known_channel_tokens(*infos: dict) -> tuple[str, ...]:
+    """Every channel-scoped-role discriminator token the given sidecars declare.
+
+    Used to disambiguate a channel-scoped role suffix (``_tophat_gfp``,
+    ``_smfish_nir``) when rewriting a zip member's field — the role catalog
+    cannot strip that suffix without knowing which tokens are valid channels for
+    *these* datasets. Variadic because a tool comparing two datasets passes both
+    and a tool working on one passes one; the result is order-preserving and
+    de-duplicated either way.
+    """
+    tokens: list[str] = []
+    for info in infos:
+        for key in ("fluor_tokens", "smfish_tokens"):
+            for tok in info.get(key, []) or []:
+                tok = str(tok).strip().lower()
+                if tok and tok not in tokens:
+                    tokens.append(tok)
+        phase = str(info.get("phase_token", "") or "").strip().lower()
+        if phase and phase not in tokens:
+            tokens.append(phase)
+    return tuple(tokens)
+
+
+# ── the per-tool wrapper set ─────────────────────────────────────────────────
+def make_dataset_api(error_cls: type[Exception], marker_name: str):
+    """Return this module's dataset entry points bound to one tool's choices.
+
+    Three tools wrapped the same five functions identically, differing only in
+    which exception they raise and which in-progress marker filename they own.
+    The wrappers exist for a real reason — every raise inside a tool's compute
+    module should carry that tool's error type, so a caller can catch its whole
+    surface with one ``except`` — but writing them out per tool is how the five
+    drift apart.
+
+    Returns a namespace with ``resolve_dataset``, ``read_info``,
+    ``destination_has_marker``, ``destination_is_failed_run`` and
+    ``destination_has_unrecognized_content``; a tool binds them to module-level
+    names so its own public API is unchanged.
+    """
+    def resolve(root: Path | str, *, label: str) -> DatasetPaths:
+        try:
+            return resolve_dataset(root, label=label)
+        except DatasetPathsError as exc:
+            raise error_cls(str(exc)) from exc
+
+    def info(paths: DatasetPaths, *, label: str) -> dict:
+        try:
+            return read_info(paths, label=label)
+        except DatasetPathsError as exc:
+            raise error_cls(str(exc)) from exc
+
+    return SimpleNamespace(
+        resolve_dataset=resolve,
+        read_info=info,
+        destination_has_marker=lambda dest: destination_has_marker(dest, marker_name),
+        destination_is_failed_run=lambda dest: destination_is_failed_run(dest, marker_name),
+        destination_has_unrecognized_content=(
+            lambda dest: destination_has_unrecognized_content(dest, marker_name)
+        ),
+    )

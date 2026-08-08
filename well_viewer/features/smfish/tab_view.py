@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 
 import numpy as np
 from PySide6.QtCore import QObject, Signal
@@ -73,6 +72,12 @@ _NO_SMFISH_MESSAGE = (
 
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
+from util.well_token import canonical_well_label
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_THRESHOLD_EDIT_W = 90
 
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
@@ -155,17 +160,17 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("", tp_cb)
 
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
-    threshold_edit.setFixedWidth(90)
+    threshold_edit.setFixedWidth(_THRESHOLD_EDIT_W)
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("Threshold", threshold_edit, trailing=True)
 
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
-    lut_min_edit.setFixedWidth(70)
+    lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("LUT Min", lut_min_edit)
 
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit(""))
-    lut_max_edit.setFixedWidth(70)
+    lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("LUT Max", lut_max_edit)
 
@@ -308,12 +313,24 @@ def smfish_sync_from_app(ctx) -> None:
 
     zips = sorted(out_dir.glob("*_out.zip"))
     ctx.runtime.smfish.well_to_zip = {}
+    skipped: list[str] = []
     for z in zips:
-        m = re.match(r"([A-Ha-h])(\d{1,2})_out\.zip$", z.name)
-        if m:
-            ctx.runtime.smfish.well_to_zip[
-                f"{m.group(1).upper()}{int(m.group(2)):02d}"
-            ] = z
+        # The filename shape is this module's own (``<WELL>_out.zip``); the
+        # token inside it is judged by the shared canonicaliser, so a well is
+        # the same thing here as it is to the pipeline that wrote the archive.
+        well = canonical_well_label(z.name[: -len("_out.zip")])
+        if well is None:
+            skipped.append(z.name)
+            continue
+        ctx.runtime.smfish.well_to_zip[well] = z
+    if skipped:
+        # A pipeline-written archive always carries a canonical token, so this
+        # is a hand-made or hand-renamed file. Name it rather than leaving the
+        # well silently absent from the picker.
+        logger.warning(
+            "smFISH: ignoring %d output archive(s) whose name is not a 96-well "
+            "position: %s", len(skipped), ", ".join(sorted(skipped)),
+        )
 
     channels = ctx.runtime.smfish.tokens
     ctx.runtime.smfish.channel_cb.blockSignals(True)
@@ -565,10 +582,7 @@ def _smfish_selected_well_token(ctx) -> str | None:
     if len(sels) != 1:
         return None
     tok = extract_well_token(sels[0]) or sels[0]
-    m = re.match(r"([A-Ha-h])(\d{1,2})$", tok.strip())
-    if not m:
-        return None
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}"
+    return canonical_well_label(tok)
 
 
 def _smfish_scan_selected_zip(ctx):

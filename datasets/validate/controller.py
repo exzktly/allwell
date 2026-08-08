@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
 
 from util.aw_safe import swallowed
 from datasets._common.dataset_paths import preview_wells
@@ -22,13 +22,13 @@ from datasets.validate.validate_compute import (
 )
 from datasets.validate.view import ValidatePage
 from datasets.validate.worker import ValidateWorker
+from datasets._common.tool_controller import DatasetToolController
 
 
-class ValidateController(QObject):
+class ValidateController(DatasetToolController):
     """Behaviour for the Validate & Repair Dataset feature."""
 
-    # QueueableController hook: (ok, message, dataset_root — "" for none).
-    jobFinished = Signal(bool, str, str)
+    _shutdown_label = "validate"
 
     def __init__(
         self,
@@ -116,14 +116,6 @@ class ValidateController(QObject):
     def start_from_queue(self, spec: dict) -> None:
         self.show_job(spec)
         self._run(apply_repair=bool(spec.get("apply_repair", False)))
-
-    def stop(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-
-    def is_busy(self) -> bool:
-        """QueueableController hook — see SubsetController.is_busy."""
-        return self._worker is not None and self._worker.isRunning()
 
     # ── live scan progress ───────────────────────────────────────────────────
     def _on_wells_discovered(self, wells) -> None:
@@ -226,12 +218,3 @@ class ValidateController(QObject):
             dataset_root, info, incremental=True, force_wells=list(self._force_wells))
 
     # ── lifecycle ────────────────────────────────────────────────────────────
-    def shutdown(self) -> None:
-        worker = self._worker
-        if worker is None or not worker.isRunning():
-            return
-        try:
-            worker.requestInterruption()
-            worker.wait(2000)
-        except RuntimeError:
-            swallowed("validate worker shutdown")

@@ -33,6 +33,8 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.core.safe import swallowed
+import theme
+from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
 
 
 _logger = logging.getLogger("well_viewer.centre_view")
@@ -393,7 +395,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_thresh_frac_stepper = win._ctx.widgets.register(
             "_plotting_thresh_frac_stepper",
             _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
-        win._plotting_thresh_frac_stepper.setFixedWidth(96)
+        win._plotting_thresh_frac_stepper.setFixedWidth(theme.Metrics.stepper_w)
         # Don't let the threshold box grab keyboard focus when the window first
         # shows (it auto-focused on load) — only take focus on click.
         win._plotting_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)
@@ -570,8 +572,7 @@ def build_centre(win, parent: QWidget) -> None:
         # as helpers for tab toolbars and the per-plot Export Style sidebar's
         # footer matplotlib helpers).
         def _config_subplots() -> None:
-            for attr in ("_line_card", "_bar_card", "_scatter_card",
-                         "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
+            for attr in PLOT_CARD_ATTRS:
                 card = getattr(win, attr, None)
                 if card is None or not card.isVisible():
                     continue
@@ -584,8 +585,7 @@ def build_centre(win, parent: QWidget) -> None:
                 return
 
         def _edit_axes() -> None:
-            for attr in ("_line_card", "_bar_card", "_scatter_card",
-                         "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
+            for attr in PLOT_CARD_ATTRS:
                 card = getattr(win, attr, None)
                 if card is None or not card.isVisible():
                     continue

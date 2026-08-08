@@ -89,6 +89,55 @@ if [[ -n "$modified" ]]; then
     echo "$modified" | sort -u | sed 's/^/     /'
 fi
 
+step "version bump"
+# CLAUDE.md §6: one bump per pull request, not one per commit. The failure this
+# catches is not forgetting the rule — it is holding a mental model of two
+# pull requests while the branch carries one, which is what happens when a
+# second body of planned work stacks onto a branch whose PR is still open.
+base_ref="origin/main"
+if ! git rev-parse --verify --quiet "$base_ref^{commit}" >/dev/null; then
+    echo "   skipped ($base_ref not fetched)"
+else
+    bump_commits=$(git rev-list --count "$base_ref..HEAD" -- version.py 2>/dev/null || echo 0)
+    base_version=$(git show "$base_ref:version.py" 2>/dev/null \
+                   | sed -n 's/^__version__ = "\(.*\)"/\1/p')
+    head_version=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' version.py)
+    # The *net* delta is the rule, not how many commits touched the file: a
+    # branch that bumps, over-bumps and then corrects is fine, and that is
+    # exactly the history this check was written from.
+    verdict=$(python - "$base_version" "$head_version" <<'PY_VER'
+import sys
+
+def parse(v):
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except ValueError:
+        return None
+
+base, head = parse(sys.argv[1]), parse(sys.argv[2])
+if base is None or head is None or len(base) != 3 or len(head) != 3:
+    print("UNREADABLE"); raise SystemExit
+if head == base:
+    print("SAME"); raise SystemExit
+ok = (
+    head == (base[0], base[1], base[2] + 1)
+    or head == (base[0], base[1] + 1, 0)
+    or head == (base[0] + 1, 0, 0)
+)
+print("ONE" if ok else "MANY")
+PY_VER
+)
+    case "$verdict" in
+        SAME)  echo "   unchanged from $base_ref ($base_version)" ;;
+        ONE)   echo "   $base_version → $head_version, one increment (in $bump_commits commit(s))" ;;
+        UNREADABLE) echo "   could not read a version on one side; skipped" ;;
+        *)     git log --oneline "$base_ref..HEAD" -- version.py | sed 's/^/     /'
+               fail "version.py moved $base_version → $head_version, which is more \
+than one increment. A branch is one pull request and takes one bump — edit the \
+number the branch already carries instead of adding another (CLAUDE.md §6)" ;;
+    esac
+fi
+
 printf '\n'
 if (( failed == 0 )); then
     printf '\033[32mpreflight: all checks passed\033[0m\n'

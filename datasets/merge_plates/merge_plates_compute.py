@@ -34,21 +34,16 @@ from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.well_token import canonical_well_label
 from well_viewer.data.image_identity import PipelineSchema, load_schema
 from datasets._common.dataset_paths import (
+    make_dataset_api,
     DatasetPaths,
-    DatasetPathsError,
     dataset_wells,
-    destination_has_marker as _destination_has_marker,
-    destination_has_unrecognized_content as _destination_has_unrecognized_content,
     destination_is_complete_dataset,
-    destination_is_failed_run as _destination_is_failed_run,
     has_folder_mode_output,
     in_containers,
     out_csvs,
     out_zips,
-    read_info as _read_info,
-    resolve_dataset as _resolve_dataset,
 )
-from datasets.concatenate.concatenate_compute import ConcatError, check_compatible, known_channel_tokens
+from datasets._common.dataset_paths import check_compatible, known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
 
@@ -57,31 +52,16 @@ class MergePlatesError(Exception):
     """A plate merge can't proceed. The message is user-facing."""
 
 
-def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
-    try:
-        return _resolve_dataset(root, label=label)
-    except DatasetPathsError as exc:
-        raise MergePlatesError(str(exc)) from exc
-
-
-def read_info(paths: DatasetPaths, *, label: str) -> dict:
-    try:
-        return _read_info(paths, label=label)
-    except DatasetPathsError as exc:
-        raise MergePlatesError(str(exc)) from exc
-
-
-def destination_has_marker(dest: DatasetPaths) -> bool:
-    return _destination_has_marker(dest, IN_PROGRESS_MARKER)
-
-
-def destination_is_failed_run(dest: DatasetPaths) -> bool:
-    return _destination_is_failed_run(dest, IN_PROGRESS_MARKER)
-
-
-def destination_has_unrecognized_content(dest: DatasetPaths) -> bool:
-    return _destination_has_unrecognized_content(dest, IN_PROGRESS_MARKER)
-
+# The five dataset entry points, bound to this tool's error class and its
+# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# for why they are generated rather than written out: three tools carried
+# the same five wrappers, differing only in these two choices.
+_api = make_dataset_api(MergePlatesError, IN_PROGRESS_MARKER)
+resolve_dataset = _api.resolve_dataset
+read_info = _api.read_info
+destination_has_marker = _api.destination_has_marker
+destination_is_failed_run = _api.destination_is_failed_run
+destination_has_unrecognized_content = _api.destination_has_unrecognized_content
 
 _PLATE_ROWS = "ABCDEFGH"
 _PLATE_MAX_COL = 12
@@ -237,10 +217,7 @@ def build_plate_merge_plan(
 
     info1 = read_info(ds1, label="dataset 1")
     info2 = read_info(ds2, label="dataset 2")
-    try:
-        check_compatible(info1, info2)
-    except ConcatError as exc:
-        raise MergePlatesError(str(exc)) from exc
+    check_compatible(info1, info2, error_cls=MergePlatesError)
 
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

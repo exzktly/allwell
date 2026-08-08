@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
+from util.well_token import canonical_well_label
 
 
 OUTPUT_SUFFIXES: dict[str, tuple[str, ...]] = {
@@ -74,7 +75,6 @@ KIND_ALIASES: dict[str, str] = {
     "fluor_processed": "tophat",
 }
 
-_WELL_TOKEN_RE = re.compile(r"^([A-Ha-h])(\d{1,2})$")
 _WELL_TOKEN_IN_TEXT_RE = re.compile(
     r"(?<![A-Za-z0-9])([A-Ha-h](?:0?[1-9]|1[0-2]))(?![A-Za-z0-9])"
 )
@@ -147,10 +147,7 @@ def normalize_well_token(value: object) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
-    m = _WELL_TOKEN_RE.match(raw)
-    if not m:
-        return raw.upper()
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}"
+    return canonical_well_label(raw) or raw.upper()
 
 
 def find_well_subfolder_path(parent_dir: Path, well_token: object) -> Path | None:

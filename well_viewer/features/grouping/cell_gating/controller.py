@@ -69,6 +69,13 @@ from well_viewer.features.grouping.cell_gating.opt_curve_view import (
 )
 from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_CH_LBL_W = 160
+_GATE_EDIT_W = 90
+_THRESH_EDIT_W = 90
+
 # Lazy so Cell Gating imports without Image Browser present (keeps both
 # deletable); resolves on first call.
 apply_review_overrides_to_cache = _lazy(
@@ -1102,7 +1109,7 @@ def _cell_gating_build_channel_controls(ctx) -> None:
         rl.setContentsMargins(0, 0, 0, 0)
 
         ch_lbl = QLabel(row_label, ch_row)
-        ch_lbl.setFixedWidth(160)
+        ch_lbl.setFixedWidth(_CH_LBL_W)
         rl.addWidget(ch_lbl)
 
         # R6: the typed slice is the source of truth — seed the slice with the
@@ -1113,7 +1120,7 @@ def _cell_gating_build_channel_controls(ctx) -> None:
         rl.addWidget(QLabel("FluorGating:", ch_row))
         if channel not in ctx.runtime.cell_gating.fluor_gate_edits:
             gate_edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), ch_row)
-            gate_edit.setFixedWidth(90)
+            gate_edit.setFixedWidth(_GATE_EDIT_W)
             gate_edit.editingFinished.connect(
                 lambda _c=ctx: cell_gating_on_gating_change(_c)
             )
@@ -1128,7 +1135,7 @@ def _cell_gating_build_channel_controls(ctx) -> None:
             seeded = gate_state.thresh_frac_on.setdefault(
                 channel, default_thresh_frac_on(channel, seg_tok))
             thresh_edit = QLineEdit(str(seeded), ch_row)
-            thresh_edit.setFixedWidth(90)
+            thresh_edit.setFixedWidth(_THRESH_EDIT_W)
             thresh_edit.editingFinished.connect(
                 lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c)
             )
@@ -1210,12 +1217,12 @@ def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
 
     Control candidates mirror the plot tabs' Control combo (well tokens +
     replicate-set names, with the ``" (well)"`` collision suffix) via
-    ``fold_change_controls._all_member_labels``. Baseline offers "—",
+    ``core.fold_change_controls_view._all_member_labels``. Baseline offers "—",
     "t0 (first timepoint)", and the explicit timepoints shared by wells A/B.
     Selections are preserved across refreshes; this state is local to the
     optimizer and never touches ``ctx.state.plot.fc_*``.
     """
-    from well_viewer.domain.fold_change_controls import _all_member_labels
+    from well_viewer.core.fold_change_controls_view import _all_member_labels
 
     ctrl = ctx.runtime.cell_gating.opt_fc_control_combo
     base = ctx.runtime.cell_gating.opt_fc_baseline_combo

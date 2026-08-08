@@ -106,10 +106,6 @@ def _is_mask_variant(chan: str) -> bool:
     return _has_suffix(chan, _MASK_SUFFIX)
 
 
-def _is_raw_variant(chan: str) -> bool:
-    return _has_suffix(chan, _RAW_SUFFIX)
-
-
 def is_variant_token(chan: str) -> bool:
     """Whether *chan* is any render variant rather than a plain channel token."""
     return any(_has_suffix(chan, sfx) for sfx in _VARIANT_SUFFIXES)

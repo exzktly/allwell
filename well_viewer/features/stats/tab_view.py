@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QLabel, QTextEdit,
+    QComboBox, QLabel, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -113,11 +113,7 @@ def build_stats_group_editor(ctx, parent: QWidget) -> None:
     # selectionDragFinished fires once per click *and* once at the end of a drag.
     plate.selectionDragFinished.connect(_commit_plate_to_group)
 
-    sep2 = QFrame(parent)
-    sep2.setObjectName("Separator")
-    sep2.setFrameShape(QFrame.HLine)
-    sep2.setFixedHeight(1)
-    layout.addWidget(sep2)
+    layout.addWidget(build_hline_separator(parent))
 
     sa, inner = make_scrollable_canvas(parent)
     layout.addWidget(sa, 1)

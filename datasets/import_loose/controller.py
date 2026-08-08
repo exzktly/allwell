@@ -7,20 +7,27 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject
 from PySide6.QtWidgets import QMessageBox
 
 from util.aw_safe import swallowed
 from datasets._common.dataset_paths import shorten_headline
 from datasets.import_loose.view import ImportLoosePage
 from datasets.import_loose.worker import ImportLooseWorker
+from datasets._common.tool_controller import DatasetToolController
 
 
-class ImportLooseController(QObject):
+class ImportLooseController(DatasetToolController):
     """Behaviour for the Import Loose Folder feature."""
 
-    # QueueableController hook: (ok, message, dataset_root — "" for none).
-    jobFinished = Signal(bool, str, str)
+    _shutdown_label = "import-loose"
+
+    def _request_worker_stop(self, worker) -> None:
+        """This worker blocks inside the zipper subprocess's stdout read
+        loop and never polls the interruption flag, so Qt's cooperative
+        request is a no-op here; ``request_stop`` also signals the tracked
+        child, which would otherwise outlive the app."""
+        worker.request_stop()
 
     def __init__(
         self,
@@ -105,14 +112,6 @@ class ImportLooseController(QObject):
         self.show_job(spec)
         self._launch()
 
-    def stop(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.request_stop()
-
-    def is_busy(self) -> bool:
-        """QueueableController hook — see SubsetController.is_busy."""
-        return self._worker is not None and self._worker.isRunning()
-
     def _on_wells_planned(self, wells: list) -> None:
         self.page.dashboard.set_wells(wells)
         self.page.dashboard.set_headline(f"Zipping {len(wells)} well(s)…")
@@ -166,12 +165,3 @@ class ImportLooseController(QObject):
         )
         return answer == QMessageBox.Yes
 
-    def shutdown(self) -> None:
-        worker = self._worker
-        if worker is None or not worker.isRunning():
-            return
-        try:
-            worker.request_stop()
-            worker.wait(2000)
-        except RuntimeError:
-            swallowed("import-loose worker shutdown")

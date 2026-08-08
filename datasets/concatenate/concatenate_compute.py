@@ -40,19 +40,16 @@ from util.aw_safe import swallow
 from util.timepoint import parse_hours, sort_key
 from well_viewer.data.image_identity import PipelineSchema, load_schema
 from datasets._common.dataset_paths import (
+    make_dataset_api,
     DatasetPaths,
-    DatasetPathsError,
     dataset_wells,
-    destination_has_marker as _destination_has_marker,
-    destination_has_unrecognized_content as _destination_has_unrecognized_content,
     destination_is_complete_dataset,
-    destination_is_failed_run as _destination_is_failed_run,
     has_folder_mode_output,
     in_containers,  # noqa: F401 — re-exported for datasets.concatenate.apply
     out_csvs,
     out_zips,  # noqa: F401 — re-exported for datasets.concatenate.apply
-    resolve_dataset as _resolve_dataset,
-    read_info as _read_info,
+    check_compatible as _check_compatible,
+    known_channel_tokens as _known_channel_tokens,
 )
 from datasets._common.member_names import rewrite_member_field
 
@@ -68,18 +65,6 @@ IN_PROGRESS_MARKER = ".aw_concat_in_progress"
 # laid out. Channel token lists (fluor_tokens/…) are allowed to differ and get
 # unioned — the CSV column set already tolerates that — but if these disagree the
 # two datasets aren't the same experiment and stitching them is meaningless.
-_COMPAT_KEYS = (
-    "schema",
-    "separator",
-    "schema_fields",
-    "well_index",
-    "channel_index",
-    "fov_index",
-    "tp_index",
-    "nuclear_token",
-    "segmentation_method",
-)
-
 # Sidecar list fields that are unioned (order-preserving) when merging.
 _UNION_LIST_KEYS = ("fluor_tokens", "smfish_tokens", "shape_features")
 
@@ -89,35 +74,16 @@ class ConcatError(Exception):
     status window), so it must read as a plain-English explanation."""
 
 
-def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
-    """:func:`datasets._common.dataset_paths.resolve_dataset`, translated to
-    :class:`ConcatError` so every raise in this module carries the same type."""
-    try:
-        return _resolve_dataset(root, label=label)
-    except DatasetPathsError as exc:
-        raise ConcatError(str(exc)) from exc
-
-
-def read_info(paths: DatasetPaths, *, label: str) -> dict:
-    """:func:`datasets._common.dataset_paths.read_info`, translated to
-    :class:`ConcatError`."""
-    try:
-        return _read_info(paths, label=label)
-    except DatasetPathsError as exc:
-        raise ConcatError(str(exc)) from exc
-
-
-def destination_has_marker(dest: DatasetPaths) -> bool:
-    return _destination_has_marker(dest, IN_PROGRESS_MARKER)
-
-
-def destination_is_failed_run(dest: DatasetPaths) -> bool:
-    return _destination_is_failed_run(dest, IN_PROGRESS_MARKER)
-
-
-def destination_has_unrecognized_content(dest: DatasetPaths) -> bool:
-    return _destination_has_unrecognized_content(dest, IN_PROGRESS_MARKER)
-
+# The five dataset entry points, bound to this tool's error class and its
+# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# for why they are generated rather than written out: three tools carried
+# the same five wrappers, differing only in these two choices.
+_api = make_dataset_api(ConcatError, IN_PROGRESS_MARKER)
+resolve_dataset = _api.resolve_dataset
+read_info = _api.read_info
+destination_has_marker = _api.destination_has_marker
+destination_is_failed_run = _api.destination_is_failed_run
+destination_has_unrecognized_content = _api.destination_has_unrecognized_content
 
 @dataclass(frozen=True)
 class TimepointFormat:
@@ -232,17 +198,13 @@ def remap_timepoint_label(old_label: str, offset_hours: float, fmt: TimepointFor
 
 # ── compatibility + timepoint remap ──────────────────────────────────────────
 def check_compatible(info1: dict, info2: dict) -> None:
-    """Raise :class:`ConcatError` if the two sidecars aren't concatenatable."""
-    diffs = [
-        f"  • {key}: dataset 1 = {info1.get(key)!r}, dataset 2 = {info2.get(key)!r}"
-        for key in _COMPAT_KEYS
-        if info1.get(key) != info2.get(key)
-    ]
-    if diffs:
-        raise ConcatError(
-            "The two datasets were not analysed the same way, so their "
-            "measurements can't be concatenated:\n" + "\n".join(diffs)
-        )
+    """Raise :class:`ConcatError` if the two sidecars aren't concatenatable.
+
+    The comparison itself is :func:`datasets._common.dataset_paths.check_compatible`,
+    which Merge Plates needs too; this wrapper only names the error class, the
+    same shape as :func:`resolve_dataset` above.
+    """
+    _check_compatible(info1, info2, error_cls=ConcatError)
 
 
 def _timepoint_hours(info: dict, *, label: str) -> list[tuple[str, float]]:
@@ -330,24 +292,10 @@ def merge_info(info1: dict, info2: dict, *, offset_hours: float, tp_format: Time
 
 
 def known_channel_tokens(info1: dict, info2: dict) -> tuple[str, ...]:
-    """Every channel-scoped-role discriminator token either dataset declares.
-
-    Used to disambiguate a channel-scoped role suffix (``_tophat_gfp``,
-    ``_smfish_nir``) when rewriting a zip member's timepoint field — the role
-    catalog can't strip that suffix without knowing which tokens are valid
-    channels for *this* dataset (see :func:`rewrite_member_name`).
-    """
-    tokens: list[str] = []
-    for info in (info1, info2):
-        for key in ("fluor_tokens", "smfish_tokens"):
-            for tok in info.get(key, []) or []:
-                tok = str(tok).strip().lower()
-                if tok and tok not in tokens:
-                    tokens.append(tok)
-        phase = str(info.get("phase_token", "") or "").strip().lower()
-        if phase and phase not in tokens:
-            tokens.append(phase)
-    return tuple(tokens)
+    """Re-export of :func:`datasets._common.dataset_paths.known_channel_tokens`,
+    pinned to this module's two-dataset signature so existing callers and tests
+    are unchanged."""
+    return _known_channel_tokens(info1, info2)
 
 
 def _csv_header(path: Path) -> list[str]:

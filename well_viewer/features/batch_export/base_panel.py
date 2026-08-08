@@ -59,10 +59,23 @@ from well_viewer.features.batch_export.service import (
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 # Foundational-layer (core/domain/data) ctx forms — safe at module scope.
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     get_thresh_frac_on as _get_thresh_frac_on,
 )
+from util.well_token import canonical_well_label
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_FC_BASELINE_COMBO_MIN_W = 160
+_FC_CTRL_COMBO_MIN_W = 160
+_LEFT_MAX_W = 560
+_LEFT_MIN_W = 420
+_OUT_DIR_EDIT_MIN_W = 240
+_PROG_BAR_W = 180
+_TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_loaded")
@@ -92,10 +105,13 @@ _FIELD_LABEL_W = 108
 
 
 def _norm_well_token(tok: str) -> str:
-    """Canonicalise a well token (``a1`` → ``A01``) for membership tests."""
-    tok = tok.strip().upper()
-    m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
+    """Canonicalise a well token (``a1`` → ``A01``) for membership tests.
+
+    Anything that is not a 96-well position comes back upper-cased but
+    otherwise untouched, so it simply fails the membership test it is being
+    prepared for rather than being coerced into a plausible-looking key.
+    """
+    return canonical_well_label(tok) or tok.strip().upper()
 
 
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
@@ -118,6 +134,29 @@ def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,
         parts.append("t0")
     row["fold_change_mode"] = "+".join(parts) or "off"
     row["fold_change_control"] = control_label if vs_control else ""
+
+
+def _apply_split_sep_orientation(sep: QFrame, *, stacked: bool) -> None:
+    """Point *sep* along the split's current axis, name and shape together.
+
+    The Batch Export output panel folds from side-by-side to stacked when the
+    viewport narrows, and its divider turns with it. That makes it the one
+    divider in the app whose orientation is not fixed at build time, so it
+    cannot take a fixed object name: ``theme.qss`` pins ``QFrame#HRule`` to
+    ``max-height: 1px`` and ``QFrame#VRule`` to ``max-width: 1px``, and either
+    name applied to the other orientation renders a hairline stretched along
+    the wrong axis. Leaving it unnamed is worse still — an ``HLine`` / ``VLine``
+    frame with no sanctioned name keeps Qt's default etched border, 3 px of
+    near-white on this app's dark surfaces.
+
+    An object-name change does not repaint on its own: Qt's stylesheet cache
+    only re-evaluates a selector on an explicit repolish, the same reason
+    ``widgets/_support.set_variant`` exists for dynamic properties.
+    """
+    sep.setFrameShape(QFrame.HLine if stacked else QFrame.VLine)
+    sep.setObjectName("HRule" if stacked else "VRule")
+    sep.style().unpolish(sep)
+    sep.style().polish(sep)
 
 
 class BatchExportPanel(QWidget):
@@ -213,16 +252,16 @@ class BatchExportPanel(QWidget):
             return
 
         left = QWidget()
-        left.setMinimumWidth(420)
-        left.setMaximumWidth(560)
+        left.setMinimumWidth(_LEFT_MIN_W)
+        left.setMaximumWidth(_LEFT_MAX_W)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         self._build_group_editor(left_layout)
         outer.addWidget(left)
 
         sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
         sep.setFrameShadow(QFrame.Plain)
+        _apply_split_sep_orientation(sep, stacked=False)
         outer.addWidget(sep)
 
         right = QWidget()
@@ -254,7 +293,7 @@ class BatchExportPanel(QWidget):
         width never reflects the narrow window and the flip would never fire. The
         flip point is the panels' real side-by-side minimum, with hysteresis so a
         scrollbar toggling near it doesn't oscillate the orientation."""
-        from PySide6.QtWidgets import QBoxLayout, QFrame
+        from PySide6.QtWidgets import QBoxLayout
         if self._use_sidebar_groups or not hasattr(self, "_split_outer"):
             return
         if avail is None:
@@ -272,7 +311,7 @@ class BatchExportPanel(QWidget):
         self._split_outer.setDirection(
             QBoxLayout.Direction.TopToBottom if stack
             else QBoxLayout.Direction.LeftToRight)
-        self._split_sep.setFrameShape(QFrame.HLine if stack else QFrame.VLine)
+        _apply_split_sep_orientation(self._split_sep, stacked=stack)
         # Stacked: the plate map takes the full width; side-by-side: keep it capped.
         self._split_left.setMaximumWidth(16777215 if stack else 560)  # QWIDGETSIZE_MAX
         # Right panel fills leftover horizontal space when side-by-side; when
@@ -326,9 +365,7 @@ class BatchExportPanel(QWidget):
         hdr2.addWidget(btn_secondary(None, "Clear All", self._grp_clear_all))
         layout.addLayout(hdr2)
 
-        sep = QFrame()
-        sep.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep)
+        layout.addWidget(build_hline_separator(None))
 
         hint = QLabel("Left-drag wells onto the plate map to add them to the selected group.")
         hint.setWordWrap(True)
@@ -369,9 +406,7 @@ class BatchExportPanel(QWidget):
         self._map_plate.setRowColumnSelectable(False)
         layout.addWidget(self._map_plate, 0, PLATE_ALIGNMENT)
 
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep2)
+        layout.addWidget(build_hline_separator(None))
 
         self._grp_scroll = QScrollArea()
         self._grp_scroll.setWidgetResizable(True)
@@ -417,8 +452,7 @@ class BatchExportPanel(QWidget):
         self._build_output_header_and_io(layout)
         self._build_channel_row(layout, attr="_line_channel_cb")
 
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep)
+        layout.addWidget(build_hline_separator(None))
 
         info = QLabel(
             "Each export group produces:\n"
@@ -465,7 +499,7 @@ class BatchExportPanel(QWidget):
             cb.setCurrentText(default)
         else:
             cb.setCurrentIndex(0)
-        cb.setMinimumWidth(140)
+        cb.setMinimumWidth(theme.Metrics.combo_min_w)
         setattr(self, attr, cb)
         row.addWidget(cb)
 
@@ -473,7 +507,7 @@ class BatchExportPanel(QWidget):
         pf = prop_lbl.font(); pf.setBold(True); prop_lbl.setFont(pf)
         row.addWidget(prop_lbl)
         prop_cb = QComboBox()
-        prop_cb.setMinimumWidth(140)
+        prop_cb.setMinimumWidth(theme.Metrics.combo_min_w)
         prop_attr = f"{attr}_metric"
         setattr(self, prop_attr, prop_cb)
         row.addWidget(prop_cb)
@@ -800,7 +834,7 @@ class BatchExportPanel(QWidget):
         out_row.setContentsMargins(12, 6, 12, 6)
         self._add_bold_label(out_row, "Folder:", min_width=_FIELD_LABEL_W)
         self._out_dir_edit = QLineEdit(self._out_dir_value)
-        self._out_dir_edit.setMinimumWidth(240)
+        self._out_dir_edit.setMinimumWidth(_OUT_DIR_EDIT_MIN_W)
         out_row.addWidget(self._out_dir_edit, 1)
         out_row.addWidget(btn_secondary(None, "Browse\u2026", self._browse_out_dir))
         layout.addLayout(out_row)
@@ -883,7 +917,7 @@ class BatchExportPanel(QWidget):
         self._prog_lbl = QLabel("")
         run_row.addWidget(self._prog_lbl)
         self._prog_bar = QProgressBar()
-        self._prog_bar.setFixedWidth(180)
+        self._prog_bar.setFixedWidth(_PROG_BAR_W)
         self._prog_bar.setVisible(False)
         run_row.addWidget(self._prog_bar)
         run_row.addStretch(1)
@@ -916,7 +950,7 @@ class BatchExportPanel(QWidget):
 
         row.addWidget(QLabel("Control"))
         self._fc_ctrl_combo = QComboBox()
-        self._fc_ctrl_combo.setMinimumWidth(160)
+        self._fc_ctrl_combo.setMinimumWidth(_FC_CTRL_COMBO_MIN_W)
         self._fc_ctrl_combo.setToolTip(
             "Divide each bar / curve by the picked well or replicate "
             "set's mean at the same timepoint. — disables this axis."
@@ -926,7 +960,7 @@ class BatchExportPanel(QWidget):
 
         row.addWidget(QLabel("Baseline"))
         self._fc_baseline_combo = QComboBox()
-        self._fc_baseline_combo.setMinimumWidth(160)
+        self._fc_baseline_combo.setMinimumWidth(_FC_BASELINE_COMBO_MIN_W)
         self._fc_baseline_combo.setToolTip(
             "Divide each bar / curve by its own value at the reference "
             "timepoint. — disables this axis."
@@ -1008,7 +1042,7 @@ class BatchExportPanel(QWidget):
 
         self._tp_lb = QListWidget()
         self._tp_lb.setSelectionMode(QAbstractItemView.MultiSelection)
-        self._tp_lb.setMinimumHeight(120)
+        self._tp_lb.setMinimumHeight(_TP_LB_MIN_H)
         layout.addWidget(self._tp_lb, 1)
 
     def _active_group(self) -> BarGroup | None:

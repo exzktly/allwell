@@ -26,6 +26,14 @@ from well_viewer.features.image_browser.cell_browser.sort_view import (
     build_cell_browser_sort_section,
     cell_browser_sort_refresh,
 )
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_HI_W = 56
+_LO_W = 56
+_RM_W = 24
 
 
 def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
@@ -85,7 +93,7 @@ def build_cell_browser_sidebar(ctx, parent: QWidget) -> None:
     rows_scroll = QScrollArea(parent)
     rows_scroll.setWidgetResizable(True)
     rows_scroll.setFrameShape(QScrollArea.NoFrame)
-    rows_scroll.setMaximumHeight(200)
+    rows_scroll.setMaximumHeight(theme.Metrics.scroll_max_h)
     rows_host = QWidget()
     rows_lay = QVBoxLayout(rows_host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
@@ -280,11 +288,11 @@ def _add_row(ctx, column: str = "") -> None:
         idx = combo.findData(column)
         if idx >= 0:
             combo.setCurrentIndex(idx)
-    combo.setMinimumWidth(120)
-    lo = QLineEdit(row); lo.setPlaceholderText("min"); lo.setFixedWidth(56)
-    hi = QLineEdit(row); hi.setPlaceholderText("max"); hi.setFixedWidth(56)
+    combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
+    lo = QLineEdit(row); lo.setPlaceholderText("min"); lo.setFixedWidth(_LO_W)
+    hi = QLineEdit(row); hi.setPlaceholderText("max"); hi.setFixedWidth(_HI_W)
     rm = QPushButton("✕", row)
-    rm.setFixedWidth(24)
+    rm.setFixedWidth(_RM_W)
     rm.setObjectName("Ghost")
     rl.addWidget(combo, 1)
     rl.addWidget(lo)

@@ -14,20 +14,18 @@ from well_viewer.persistence import _doc
 
 
 def save_to_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return
-    st = app._app_state.feature_slice("multivariate")
+    st = ctx.state.feature_slice("multivariate")
     if st is None:
         return
     _doc.set_section(ctx, "multivariate", st.to_config())
 
 
 def load_from_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return
-    st = app._app_state.feature_slice("multivariate")
+    st = ctx.state.feature_slice("multivariate")
     if st is None:
         return
     data = _doc.get_section(ctx, "multivariate")

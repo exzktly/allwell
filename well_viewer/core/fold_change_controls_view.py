@@ -37,6 +37,14 @@ from well_viewer.domain.fold_change_scopes import (
     registered_scopes,
 )
 from well_viewer.core.safe import swallowed
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_OP_CTRL_COMBO_MIN_W = 110
+_OP_T0_COMBO_MIN_W = 110
+_ORDER_COMBO_MIN_W = 130
 
 # Disambiguation suffix appended to a well-token combo entry when there is
 # a replicate set with the same name. Without this, picking the entry
@@ -369,7 +377,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
 
     layout.addWidget(QLabel("Control", parent))
     ctrl_combo = _ControlCombo(ctx, parent)
-    ctrl_combo.setMinimumWidth(140)
+    ctrl_combo.setMinimumWidth(theme.Metrics.combo_min_w)
     ctrl_combo.setToolTip(
         "Divide each bar / curve by the picked well or replicate set's "
         "mean at the same timepoint. — disables this axis."
@@ -379,7 +387,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
 
     # Per-axis operator selector for the control axis.
     op_ctrl_combo = QComboBox(parent)
-    op_ctrl_combo.setMinimumWidth(110)
+    op_ctrl_combo.setMinimumWidth(_OP_CTRL_COMBO_MIN_W)
     op_ctrl_combo.setToolTip(
         "How the control denominator is applied. 'Ratio' divides each "
         "value by the control; 'Subtract' subtracts it. Independent of "
@@ -391,7 +399,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
 
     layout.addWidget(QLabel("Baseline", parent))
     baseline_combo = _BaselineCombo(ctx, parent)
-    baseline_combo.setMinimumWidth(140)
+    baseline_combo.setMinimumWidth(theme.Metrics.combo_min_w)
     baseline_combo.setToolTip(
         "Normalise each bar / curve against its own value at the "
         "reference timepoint. — disables this axis."
@@ -401,7 +409,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
 
     # Per-axis operator selector for the baseline-tp axis.
     op_t0_combo = QComboBox(parent)
-    op_t0_combo.setMinimumWidth(110)
+    op_t0_combo.setMinimumWidth(_OP_T0_COMBO_MIN_W)
     op_t0_combo.setToolTip(
         "How the baseline-tp denominator is applied. 'Ratio' divides "
         "each value by its own baseline; 'Subtract' subtracts it. "
@@ -414,7 +422,7 @@ def install_fold_change_controls(ctx, parent: QWidget, layout, *, scope: str) ->
     # ops (same-op cases commute mathematically).
     layout.addWidget(QLabel("Order", parent))
     order_combo = QComboBox(parent)
-    order_combo.setMinimumWidth(130)
+    order_combo.setMinimumWidth(_ORDER_COMBO_MIN_W)
     order_combo.setToolTip(
         "Which fold-change axis applies first. ‘Control first’ "
         "(ΔΔCt-style): control is applied, then baseline normalises the "

@@ -31,6 +31,7 @@ from collections.abc import Callable, Iterable, Sequence
 
 from util.well_token import canonical_well_label
 from well_viewer.core.safe import swallowed
+import theme
 
 _logger = logging.getLogger("well_viewer.domain.selections_model")
 
@@ -38,7 +39,7 @@ SCHEMA_VERSION = 2
 
 _PLATE_ROWS = "ABCDEFGH"
 _N_COLS = 12
-_DEFAULT_COLOR = "#888888"
+_DEFAULT_COLOR = theme.Colors.selection_default
 _FALLBACK_PALETTE = [
     "#5B9BF8", "#F26B6B", "#4ADE80", "#F5A524", "#A78BFA",
     "#22D3EE", "#FB7185", "#84CC16", "#E879F9", "#FACC15",

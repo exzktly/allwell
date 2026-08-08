@@ -24,22 +24,17 @@ from well_viewer.data.image_identity import (
 )
 from well_viewer.domain.tp_match import tp_close
 from datasets._common.dataset_paths import (
+    make_dataset_api,
     DatasetPaths,
-    DatasetPathsError,
     dataset_wells,
-    destination_has_marker as _destination_has_marker,
-    destination_has_unrecognized_content as _destination_has_unrecognized_content,
     destination_is_complete_dataset,
-    destination_is_failed_run as _destination_is_failed_run,
     has_folder_mode_output,
     in_containers,
     out_csvs,
     out_zips,
-    read_info as _read_info,
-    resolve_dataset as _resolve_dataset,
 )
 from datasets._common.member_names import discover_parsed_member
-from datasets.concatenate.concatenate_compute import known_channel_tokens
+from datasets._common.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 
@@ -48,31 +43,16 @@ class SubsetError(Exception):
     """A subset can't proceed. The message is user-facing."""
 
 
-def resolve_dataset(root: Path | str, *, label: str) -> DatasetPaths:
-    try:
-        return _resolve_dataset(root, label=label)
-    except DatasetPathsError as exc:
-        raise SubsetError(str(exc)) from exc
-
-
-def read_info(paths: DatasetPaths, *, label: str) -> dict:
-    try:
-        return _read_info(paths, label=label)
-    except DatasetPathsError as exc:
-        raise SubsetError(str(exc)) from exc
-
-
-def destination_has_marker(dest: DatasetPaths) -> bool:
-    return _destination_has_marker(dest, IN_PROGRESS_MARKER)
-
-
-def destination_is_failed_run(dest: DatasetPaths) -> bool:
-    return _destination_is_failed_run(dest, IN_PROGRESS_MARKER)
-
-
-def destination_has_unrecognized_content(dest: DatasetPaths) -> bool:
-    return _destination_has_unrecognized_content(dest, IN_PROGRESS_MARKER)
-
+# The five dataset entry points, bound to this tool's error class and its
+# own in-progress marker. See ``_common.dataset_paths.make_dataset_api``
+# for why they are generated rather than written out: three tools carried
+# the same five wrappers, differing only in these two choices.
+_api = make_dataset_api(SubsetError, IN_PROGRESS_MARKER)
+resolve_dataset = _api.resolve_dataset
+read_info = _api.read_info
+destination_has_marker = _api.destination_has_marker
+destination_is_failed_run = _api.destination_is_failed_run
+destination_has_unrecognized_content = _api.destination_has_unrecognized_content
 
 @dataclass(frozen=True)
 class SubsetFilter:
@@ -172,7 +152,7 @@ def build_subset_plan(
 
     info = read_info(src, label="source dataset")
     schema = load_schema(info)
-    channels = known_channel_tokens(info, info)
+    channels = known_channel_tokens(info)
 
     all_wells = dataset_wells(src)
     wells_kept = tuple(sorted(all_wells if filt.wells is None else (all_wells & filt.wells)))

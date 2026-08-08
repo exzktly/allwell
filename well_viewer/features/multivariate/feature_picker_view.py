@@ -22,13 +22,19 @@ from well_viewer.features.multivariate.collect import (
 )
 from well_viewer.features.multivariate.controller import mv_set_features
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_LISTW_MIN_W = 240
+_LISTW_MIN_H = 260
+
 
 def build_feature_picker(ctx, panel_layout) -> None:
     """Build the checkable feature list into *panel_layout* (a popover body)."""
     panel_layout.addWidget(QLabel("Feature columns:"))
     listw = QListWidget()
     listw.setObjectName("MvFeatureList")
-    listw.setMinimumSize(240, 260)
+    listw.setMinimumSize(_LISTW_MIN_W, _LISTW_MIN_H)
     listw.setUniformItemSizes(False)
     panel_layout.addWidget(listw)
     # A8 burn-down: widget handle via the WidgetRegistry (stamps app._mv_feature_list).

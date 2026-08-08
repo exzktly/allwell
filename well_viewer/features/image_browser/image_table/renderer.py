@@ -19,6 +19,7 @@ hierarchy — muted per-value labels, emphasised group bands — in dark-on-ligh
 """
 
 from __future__ import annotations
+import theme
 
 #: ``gid`` stamped on every label axes, so callers that count image cells can tell
 #: chrome from content. matplotlib also writes it as the ``id`` attribute in SVG.
@@ -27,10 +28,10 @@ FACET_GID = "image-table-facet-label"
 _PX_PER_IN = 96.0     # Qt / QSS logical pixels
 _PT_PER_IN = 72.0     # matplotlib points
 
-_INNER_COLOR = "#333333"
-_GROUP_COLOR = "#111111"
-_CORNER_COLOR = "#666666"
-_GROUP_BAND_FACE = "#DFE5EC"
+_INNER_COLOR = theme.CPub.label_inner
+_GROUP_COLOR = theme.CPub.label_group
+_CORNER_COLOR = theme.CPub.label_corner
+_GROUP_BAND_FACE = theme.CPub.band_face
 
 _LABEL_ROW_EM = 1.9   # per-value label row height, in multiples of the font size
 _BAND_EM = 2.4        # group band height / rotated strip width, same units

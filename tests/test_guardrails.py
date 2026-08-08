@@ -66,7 +66,10 @@ _HARD_FAIL = True
 # controller functions directly, so the shim survived with nothing pointing at
 # it. 199 methods → 113, and the imports they were the sole users of went with
 # them.
-RUNTIME_APP_LINE_BUDGET = 876
+# The architecture-review sweep deleted three more delegators whose last call
+# site had already been rewired (_render_review_image_display,
+# _set_review_image_include_mode, _update_tp_selection_display): 876 → 862.
+RUNTIME_APP_LINE_BUDGET = 862
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,
@@ -105,8 +108,10 @@ APP_FIRST_FUNC_SLACK = 15               # A3: playground 135→120, stats 120→
 # interleaved post-load / redraw / event dispatch that needs an ordered-hook
 # design to invert (roadmap phase B1b, a deferred epic). This ratchet meters that
 # residual so it can only shrink. Seeded at today's count; WELL_MIME moved to
-# ``core/dnd`` took it 34→33.
-CORE_FEATURE_IMPORT_BUDGET = 33
+# ``core/dnd`` took it 34→33; deleting the dead ``ui_helpers.on_theme_change``
+# (which held the last function-local imports of ``features.grouping.tab_view``
+# and ``features.stats.controller``) took it 33→31.
+CORE_FEATURE_IMPORT_BUDGET = 31
 CORE_FEATURE_IMPORT_SLACK = 0
 
 

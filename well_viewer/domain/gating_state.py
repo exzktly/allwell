@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from well_viewer.persistence._io import atomic_write_json
+from well_viewer.domain.viewer_state import resolve_pipeline_info_path
 
 
 _logger = logging.getLogger("well_viewer.domain.gating_state")
@@ -77,15 +78,9 @@ def default_thresh_frac_on(channel: str, seg_channel_token: str = "") -> float:
     return DEFAULT_THRESH_FRAC_ON
 
 
-def _resolve_pipeline_info_path(out_dir: Path) -> Path:
-    """Return the pipeline_info.json path, falling back to parent dir."""
-    primary = out_dir / PIPELINE_INFO_FILENAME
-    if primary.exists():
-        return primary
-    parent = out_dir.parent / PIPELINE_INFO_FILENAME
-    if parent.exists():
-        return parent
-    return primary  # may not exist; caller decides
+# The sidecar lives at the dataset root even when the data dir is its
+# ``out/`` child, so save and load have to agree on the fallback.
+_resolve_pipeline_info_path = resolve_pipeline_info_path
 
 
 def _is_default(value: float, default: float) -> bool:

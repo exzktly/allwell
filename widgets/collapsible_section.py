@@ -34,6 +34,10 @@ from PySide6.QtWidgets import (
 
 import theme
 
+# Height of the colour swatch chip beside a control (its width is the
+# shared theme.Metrics.swatch_w).
+_SWATCH_H = 14
+
 _QWIDGETSIZE_MAX = 16_777_215  # Qt's QWIDGETSIZE_MAX
 
 
@@ -259,7 +263,7 @@ if __name__ == "__main__":
     chk.setChecked(True)
     s1.addWidget(chk)
     swatch = QLabel("  ")
-    swatch.setFixedSize(28, 14)
+    swatch.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
     swatch.setStyleSheet(f"background-color: {theme.Colors.trace[0]}; "
                          f"border-radius: {theme.Radii.xs}px;")
     s1.setValueWidget(swatch)

@@ -29,6 +29,11 @@ from widgets.labeled_combo import LabeledComboBox
 from functools import partial
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
+import theme
+
+# Height of the colour swatch chip beside a control (its width is the
+# shared theme.Metrics.swatch_w).
+_SWATCH_H = 18
 # This panel builds the Image Browser review-image canvas, so it is only ever
 # imported by image_browser/controller; bind its review_image delegates lazily
 # so importing this module never imports image_browser (keeps it deletable).
@@ -266,12 +271,12 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         f"{ctx.state.channel.active_image_channel.upper()} LUT min:", lut_range_row,
     )))
     lmin_entry = reg.register("_review_lmin_entry", QLineEdit("auto", lut_range_row))
-    lmin_entry.setFixedWidth(80)
+    lmin_entry.setFixedWidth(theme.Metrics.num_field_w_lg)
     lmin_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
     lut_range_lay.addWidget(lmin_entry)
     lut_range_lay.addWidget(QLabel("max:", lut_range_row))
     lmax_entry = reg.register("_review_lmax_entry", QLineEdit("auto", lut_range_row))
-    lmax_entry.setFixedWidth(80)
+    lmax_entry.setFixedWidth(theme.Metrics.num_field_w_lg)
     lmax_entry.editingFinished.connect(lambda: review_image_commit_lut(ctx))
     lut_range_lay.addWidget(lmax_entry)
     lut_range_lay.addWidget(btn_secondary(lut_range_row, "Auto LUT",
@@ -295,7 +300,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     thresh_stepper = reg.register(
         "_review_thresh_frac_stepper",
         Stepper(thr_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
-    thresh_stepper.setFixedWidth(96)
+    thresh_stepper.setFixedWidth(theme.Metrics.stepper_w)
     thresh_stepper.setFocusPolicy(Qt.ClickFocus)
     _rt_edit = getattr(thresh_stepper, "_edit", None)
     if _rt_edit is not None:
@@ -324,7 +329,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         rl.setSpacing(6)
         rl.addWidget(QLabel(label_text, row))
         sw = _QPushButton("", row)
-        sw.setFixedSize(28, 18)
+        sw.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
         sw.setToolTip(tooltip)
         sw.clicked.connect(
             lambda _=False, k=key: pick_review_image_color(ctx, k)

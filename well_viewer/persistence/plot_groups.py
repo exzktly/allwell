@@ -18,14 +18,12 @@ SECTION = "plot_groups"
 
 
 def save_to_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
     """Persist Plot Groups to the dataset's consolidated persistence document."""
-    groups = validate_repair_plot_groups(app._app_state.selection.plot_groups or [])
+    groups = validate_repair_plot_groups(ctx.state.selection.plot_groups or [])
     _doc.set_section(ctx, SECTION, groups)
 
 
 def load_from_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
     """Load persisted Plot Groups and refresh the sidebar list if it exists.
 
     Plot Groups have a second home: the ``sample_definitions`` block in
@@ -38,11 +36,11 @@ def load_from_data_dir(ctx) -> None:
     """
     raw = _doc.get_section(ctx, SECTION)
     if raw is None:
-        raw = app._app_state.selection.plot_groups or []
-    loaded = app._app_state.dataset.well_paths.keys()
+        raw = ctx.state.selection.plot_groups or []
+    loaded = ctx.state.dataset.well_paths.keys()
     groups = filter_loaded_wells(validate_repair_plot_groups(raw), loaded)
-    app._app_state.selection.plot_groups = groups
-    refresh = getattr(app, "_plot_groups_refresh", None)
+    ctx.state.selection.plot_groups = groups
+    refresh = getattr(ctx.window, "_plot_groups_refresh", None)
     if callable(refresh):
         try:
             refresh()

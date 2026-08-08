@@ -25,6 +25,7 @@ from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
 from well_viewer.core.safe import swallowed
 from widgets.flow_layout import FlowLayout, flow_group
+import theme
 
 
 def _num(text: str) -> float:
@@ -92,7 +93,7 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)
     for w in _edits:
-        w.setFixedWidth(70)
+        w.setFixedWidth(theme.Metrics.num_field_w)
         w.setPlaceholderText("none")
 
     status = QLabel("", row)

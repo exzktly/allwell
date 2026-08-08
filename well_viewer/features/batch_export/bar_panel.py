@@ -13,7 +13,6 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidgetItem,
@@ -37,6 +36,7 @@ from well_viewer.features.batch_export._common import (
 from well_viewer.features.batch_export.base_panel import BatchExportPanel
 # ── ctx-native god-method forms (A8 / Epic-A14 panel conversion) ─────────────
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.plot_style import mark_time_rescale
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
@@ -46,6 +46,11 @@ from well_viewer.domain.selections_model import (
     well_display_label as _well_display_label,
     replicate_display_label as _replicate_display_label,
 )
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_VIOLIN_SMOOTH_SLIDER_W = 120
 _update_bar_tp_menu = _lazy("well_viewer.features.barplot.controller", "update_bar_tp_menu")
 
 
@@ -65,8 +70,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self._build_output_header_and_io(layout)
         self._build_channel_row(layout, attr="_bar_channel_cb")
 
-        sep = QFrame(); sep.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep)
+        layout.addWidget(build_hline_separator(None))
 
         self._build_timepoints_section(layout)
 
@@ -78,8 +82,7 @@ class BarBatchExportPanel(BatchExportPanel):
                 self._tp_lb.addItem(QListWidgetItem(tp))
         self._tp_select_all()
 
-        sep2 = QFrame(); sep2.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep2)
+        layout.addWidget(build_hline_separator(None))
 
         # \u2500\u2500 Layout options (multi-tp figure + group-by + pool-replicates) \u2500\u2500
         # These mirror the on-tab toggles; defaults preserve the legacy
@@ -132,7 +135,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self._violin_smooth_slider = QSlider(Qt.Horizontal)
         self._violin_smooth_slider.setRange(5, 200)
         self._violin_smooth_slider.setValue(100)
-        self._violin_smooth_slider.setFixedWidth(120)
+        self._violin_smooth_slider.setFixedWidth(_VIOLIN_SMOOTH_SLIDER_W)
         smooth_row.addWidget(self._violin_smooth_slider)
         self._violin_smooth_label = QLabel("1.00")
         smooth_row.addWidget(self._violin_smooth_label)
@@ -154,8 +157,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self._display_mode_grp.buttonToggled.connect(lambda *_: _refresh_layout_widgets())
         _refresh_layout_widgets()
 
-        sep3 = QFrame(); sep3.setFrameShape(QFrame.HLine)
-        layout.addWidget(sep3)
+        layout.addWidget(build_hline_separator(None))
 
         info = QLabel(
             "Each group produces:\n"

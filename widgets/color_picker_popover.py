@@ -46,6 +46,12 @@ import theme
 from widgets.color_swatch_row import ColorSwatchRow
 from widgets.popover import Popover
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_SWATCH_W = 120
+_SWATCH_H = 28
+
 
 def _clamp01(v: float) -> float:
     return 0.0 if v < 0.0 else 1.0 if v > 1.0 else v
@@ -440,7 +446,7 @@ if __name__ == "__main__":
     lay.addWidget(title)
 
     swatch = QLabel("        ")
-    swatch.setFixedSize(120, 28)
+    swatch.setFixedSize(_SWATCH_W, _SWATCH_H)
     def _show(c):
         swatch.setStyleSheet(f"background-color: {c.name(QColor.HexArgb)}; "
                              f"border: 1px solid {theme.Colors.border}; border-radius: 4px;")

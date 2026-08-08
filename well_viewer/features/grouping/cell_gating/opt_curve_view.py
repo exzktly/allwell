@@ -99,9 +99,9 @@ def _cell_gating_show_opt_curve_popup(
         spine.set_color(txt_mut)
     ax.tick_params(colors=txt_mut)
 
-    ax.plot(thresholds, frac_a, color="#4FC3F7", lw=1.4,
+    ax.plot(thresholds, frac_a, color=theme.Colors.gate_curve_a, lw=1.4,
             label=f"fraction-on({well_a})")
-    ax.plot(thresholds, frac_b, color="#FF8A65", lw=1.4,
+    ax.plot(thresholds, frac_b, color=theme.Colors.gate_curve_b, lw=1.4,
             label=f"fraction-on({well_b})")
     ax.plot(thresholds, diffs, color=accent, lw=1.8,
             label="|Δ| / max(|fa|, |fb|)")

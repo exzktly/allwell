@@ -17,7 +17,6 @@ populate" order :class:`RunDashboard` used before this extraction.
 
 from __future__ import annotations
 
-import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -26,12 +25,25 @@ from PySide6.QtWidgets import (
 
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
+from util.well_token import canonical_well_label
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_LEGEND_HOST_W = 190
+_RAIL_HOST_W = 238
 
 
 def canon_well(well_id: str) -> str:
-    """Normalise a well token to ``A01`` form; '' if it isn't a well."""
-    m = re.match(r"^([A-Ha-h])(\d{1,2})$", str(well_id).strip())
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else ""
+    """Normalise a well token to ``A01`` form; '' if it isn't a well.
+
+    The column bound comes from the shared canonicaliser rather than from a
+    pattern here, so a dashboard and the plate it colours agree on which
+    positions exist — this widget draws an 8x12 grid, and a token outside it
+    has nowhere to land.
+    """
+    return canonical_well_label(well_id) or ""
 
 
 def status_dot(color: str, d: int = 11) -> QLabel:
@@ -75,6 +87,10 @@ class PlateProgress(QWidget):
         self.setObjectName("PlateProgress")
         self._show_plate = show_plate
         self._show_legend = show_legend
+        # Which terminal state the run reached, or "" while it is still running
+        # (or before it started). Subclass rails read it to decide whether to
+        # draw a live count or a finished one.
+        self._outcome = ""
 
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 8, 12, 8)
@@ -119,7 +135,7 @@ class PlateProgress(QWidget):
         self._rail_host = QWidget(self._body)
         self._rail_lay = QVBoxLayout(self._rail_host)
         self._rail_lay.setContentsMargins(0, 0, 0, 0); self._rail_lay.setSpacing(8)
-        self._rail_host.setFixedWidth(238)
+        self._rail_host.setFixedWidth(_RAIL_HOST_W)
         body.addWidget(self._rail_host)
 
         if show_plate or show_legend:
@@ -172,7 +188,7 @@ class PlateProgress(QWidget):
             # legend labels also carry setWordWrap(True) as a second line of
             # defence, so a future longer label wraps to two lines instead of
             # being silently clipped the way a fixed-but-too-narrow column did.
-            self._legend_host.setFixedWidth(190)
+            self._legend_host.setFixedWidth(_LEGEND_HOST_W)
             body.addWidget(self._legend_host)
         if not show_plate:
             # With the centre column skipped there is no widget carrying a
@@ -192,6 +208,43 @@ class PlateProgress(QWidget):
             self._build_legend()
 
     # ── shared host-facing API ──────────────────────────────────────────────
+    # ── terminal states ─────────────────────────────────────────────────────
+    # Every dashboard ends a run in one of three ways and painted the headline
+    # itself to say so, in byte-identical copies. The wording, the tone and the
+    # tooltip rule are the same decision for all of them, so they live here; a
+    # dashboard with something extra to do on a state change overrides
+    # :meth:`_on_outcome_changed` rather than the setter, which is what keeps
+    # ``tests/test_datasets_dashboard_outcomes.py``'s no-override rule true.
+
+    def clear_outcome(self) -> None:
+        """Forget the previous run's terminal state. Call from ``reset``."""
+        self._outcome = ""
+
+    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
+        self._outcome = "done"
+        self._headline.setText(summary or "Done")
+        # The full text (often a whole destination path baked into the summary)
+        # survives as a tooltip even when the caller has shortened the displayed
+        # headline to a basename.
+        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
+        self._headline.setStyleSheet(f"color:{theme.Colors.success};")
+        self._on_outcome_changed()
+
+    def set_failed(self, message: str) -> None:
+        self._outcome = "failed"
+        self._headline.setText(f"Failed — {message}" if message else "Failed")
+        self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
+        self._on_outcome_changed()
+
+    def set_cancelled(self, message: str = "") -> None:
+        self._outcome = "cancelled"
+        self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
+        self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
+        self._on_outcome_changed()
+
+    def _on_outcome_changed(self) -> None:
+        """Hook for a dashboard whose rail shows the outcome. Default no-op."""
+
     def set_headline(self, text: str) -> None:
         self._headline.setText(text or "")
 

@@ -31,6 +31,13 @@ from well_viewer.features.image_browser.playground.controller import (
 )
 from well_viewer.features.image_browser.playground.renderer import render_playground_display
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_LMAX_W = 56
+_LMIN_W = 56
+_LUT_AUTO_W = 54
+
 
 def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     """A two-column label+widget row; returns the right-hand cell.
@@ -46,7 +53,7 @@ def _row(parent, label_text: str, *, tooltip: str = "") -> QWidget:
     rl.setSpacing(6)
     lbl = QLabel(label_text, row)
     lbl.setObjectName("Muted")
-    lbl.setFixedWidth(96)
+    lbl.setFixedWidth(theme.Metrics.stepper_w)
     if tooltip:
         row.setToolTip(tooltip)
         lbl.setToolTip(tooltip)
@@ -306,9 +313,9 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     _section("Display")
     lut_row = _row(controls, "LUT min/max")
     lmin = QLineEdit("auto", lut_row)
-    lmin.setFixedWidth(56)
+    lmin.setFixedWidth(_LMIN_W)
     lmax = QLineEdit("auto", lut_row)
-    lmax.setFixedWidth(56)
+    lmax.setFixedWidth(_LMAX_W)
     app._playground_lmin_entry = lmin
     app._playground_lmax_entry = lmax
 
@@ -342,7 +349,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
     lmin.editingFinished.connect(_on_lut_edit)
     lmax.editingFinished.connect(_on_lut_edit)
     lut_auto = QPushButton("Auto", lut_row)
-    lut_auto.setFixedWidth(54)   # 46 clipped "Auto" to "Autc" under the button padding
+    lut_auto.setFixedWidth(_LUT_AUTO_W)   # 46 clipped "Auto" to "Autc" under the button padding
     lut_auto.setToolTip("Reset the LUT min/max to the displayed frame's range.")
 
     def _on_lut_auto() -> None:
@@ -449,10 +456,10 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         st.zoom = max(0.1, min(8.0, st.zoom * delta))
         render_playground_display(app)
     zout = QPushButton("−", zoom_row)
-    zout.setFixedWidth(28)
+    zout.setFixedWidth(theme.Metrics.icon_btn_w)
     zout.clicked.connect(lambda _=False: _zoom(1 / 1.25))
     zin = QPushButton("+", zoom_row)
-    zin.setFixedWidth(28)
+    zin.setFixedWidth(theme.Metrics.icon_btn_w)
     zin.clicked.connect(lambda _=False: _zoom(1.25))
     zfit = QPushButton("Fit", zoom_row)
     zfit.clicked.connect(lambda _=False: (setattr(app._app_state.playground, "zoom", 1.0),

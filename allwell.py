@@ -40,6 +40,13 @@ from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
 from widgets.icon_button import IconButton
 from well_viewer.core.safe import swallowed
+from well_viewer.core.ui_helpers import build_hline_separator
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_WINDOW_MIN_W = 1100
+_WINDOW_MIN_H = 800
 
 # Global tab-scoped debug toggles.
 REVIEW_TAB_DEBUG = False
@@ -164,7 +171,7 @@ class AllWellApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("All-Well")
         self.resize(1640, 980)
-        self.setMinimumSize(1100, 800)
+        self.setMinimumSize(_WINDOW_MIN_W, _WINDOW_MIN_H)
 
         self._review: QWidget | None = None
         self._analyze: QWidget | None = None
@@ -333,10 +340,7 @@ class AllWellApp(QMainWindow):
 
         rl.addWidget(header)
 
-        sep = QFrame()
-        sep.setObjectName("Separator")
-        sep.setFixedHeight(1)
-        rl.addWidget(sep)
+        rl.addWidget(build_hline_separator(None))
 
         # Phase 11: the outer Review/Analyze QStackedWidget is gone — Analyze
         # now lives inside WellViewerApp's central pane stack so that the
@@ -508,8 +512,8 @@ class AllWellApp(QMainWindow):
         review = getattr(self, "_review", None)
         if review is None:
             return
-        for attr in ("_line_card", "_bar_card", "_scatter_card",
-                     "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
+        from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+        for attr in PLOT_CARD_ATTRS:
             card = getattr(review, attr, None)
             if card is None or not card.isVisible():
                 continue
@@ -690,12 +694,8 @@ class AllWellApp(QMainWindow):
         )
         if self._review is None:
             return
-        card_attrs = (
-            "_line_card", "_bar_card", "_scatter_card",
-            "_scatter_agg_card", "_distribution_card", "_heatmap_card",
-            "_sp_card", "_mv_card",
-        )
-        for attr in card_attrs:
+        from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+        for attr in PLOT_CARD_ATTRS:
             card = getattr(self._review, attr, None)
             if card is None or not hasattr(card, "setPlotTheme"):
                 continue

@@ -31,13 +31,13 @@ _logger = logging.getLogger("well_viewer")
 _SCHEMA_VERSION = 2
 
 
-def path_for(app) -> Path | None:
-    if app._app_state.dataset.data_dir:
-        return app._app_state.dataset.data_dir / "cell_overrides.json"
+def path_for(ctx) -> Path | None:
+    if ctx.state.dataset.data_dir:
+        return ctx.state.dataset.data_dir / "cell_overrides.json"
     return None
 
 
-def _well_zip_fingerprints(app) -> dict[str, str]:
+def _well_zip_fingerprints(ctx) -> dict[str, str]:
     """Snapshot the ``<well>_out.zip`` mtimes for every loaded well.
 
     Used both at save time (stored alongside each override) and at load
@@ -51,7 +51,7 @@ def _well_zip_fingerprints(app) -> dict[str, str]:
     loudly — stale overrides were kept rather than dropped.
     """
     out: dict[str, str] = {}
-    data_dir = app._app_state.dataset.data_dir
+    data_dir = ctx.state.dataset.data_dir
     if not data_dir:
         return out
     for zip_path in Path(data_dir).glob("*_out.zip"):
@@ -67,11 +67,10 @@ def _well_zip_fingerprints(app) -> dict[str, str]:
 
 
 def save_to_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    path = path_for(app)
+    path = path_for(ctx)
     if path is None:
         return
-    fingerprints = _well_zip_fingerprints(app)
+    fingerprints = _well_zip_fingerprints(ctx)
     overrides = []
     for (well, fov, tp, nid), val in ctx.runtime.review.included_overrides.items():
         overrides.append({
@@ -99,7 +98,7 @@ def save_to_data_dir(ctx) -> None:
 def _fingerprints_for_data_dir(data_dir: Path) -> dict[str, str]:
     """Qt-free twin of ``_well_zip_fingerprints`` taking a plain path — lets
     :func:`load_overrides` (and its tests) work from a data dir alone rather
-    than a live app object."""
+    than from a context."""
     out: dict[str, str] = {}
     for zip_path in Path(data_dir).glob("*_out.zip"):
         stem = zip_path.stem
@@ -195,8 +194,7 @@ def load_overrides(data_dir: Path) -> dict[tuple[str, str, str, str], str]:
 
 
 def load_from_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    data_dir = app._app_state.dataset.data_dir
+    data_dir = ctx.state.dataset.data_dir
     if not data_dir:
         return
     new_map = load_overrides(data_dir)
@@ -207,6 +205,6 @@ def load_from_data_dir(ctx) -> None:
     ctx.runtime.review.included_overrides.update(new_map)
     # Bump the include-map version so Review Image recomputes; skipped when
     # Image Browser is disabled (no review_image slice).
-    _review_image = app._app_state.feature_slice("review_image")
+    _review_image = ctx.state.feature_slice("review_image")
     if _review_image is not None:
         _review_image.override_version += 1

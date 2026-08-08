@@ -9,9 +9,9 @@ backward compatibility (``well_viewer.features.barplot.controller``).
 
 from __future__ import annotations
 
-import re
 
 from well_viewer.domain.batch_models import BarGroup, ReplicateSet
+from util.well_token import canonical_well_label
 
 
 def bar_groups_to_dict(
@@ -36,9 +36,7 @@ def bar_groups_to_dict(
 
 def bar_groups_from_data(data, *, tok_to_label: dict[str, str]) -> tuple[list[ReplicateSet], list[BarGroup]]:
     def _norm(tok: str) -> str:
-        tok = tok.strip().upper()
-        m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
-        return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
+        return canonical_well_label(tok) or tok.strip().upper()
 
     def _valid_tok(raw: str) -> str | None:
         n = _norm(raw)

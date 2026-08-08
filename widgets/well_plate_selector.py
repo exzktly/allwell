@@ -1170,7 +1170,7 @@ class _PlateGrid(QWidget):
         white in RGB keeps the hue: the same token comes back ``#e0cbfb`` at
         ``t = 0.55``, still lilac.
         """
-        return cls._blend(QColor(color), QColor("#ffffff"), t)
+        return cls._blend(QColor(color), QColor(theme.Colors.ink_light), t)
 
     @classmethod
     def _mix_with_rail(cls, tint: QColor, t: float = 0.30) -> QColor:

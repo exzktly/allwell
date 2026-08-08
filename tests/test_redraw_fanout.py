@@ -23,7 +23,7 @@ from dataclasses import replace
 import pytest
 
 from well_viewer.core.channel_state_controller import set_active_channel
-from well_viewer.domain.fold_change_controls import set_fold_change_state
+from well_viewer.core.fold_change_controls_view import set_fold_change_state
 from well_viewer.domain.fold_change_scopes import (
     get_scope, register_fold_change_scope,
 )

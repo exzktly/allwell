@@ -31,6 +31,15 @@ from well_viewer.features.image_browser.cell_browser.worker import (
     resolve_channel_tint,
 )
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_SWATCH_H = 18
+_HI_E_W = 60
+_LO_E_W = 60
+_PAGESIZE_EDIT_W = 48
+_RESET_C_W = 22
+
 __all__ = [
     "build_cell_browser_tab",
     "cell_browser_refresh",
@@ -119,7 +128,7 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_browser_source_seg", source_seg)
 
     pagesize_edit = QLineEdit("50")
-    pagesize_edit.setFixedWidth(48)
+    pagesize_edit.setFixedWidth(_PAGESIZE_EDIT_W)
     ctrl.add_scope("Per page", pagesize_edit)
     reg.register("_cell_browser_pagesize_edit", pagesize_edit)
 
@@ -321,17 +330,17 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(4)
         name = QLabel(tok.upper(), row)
-        name.setFixedWidth(64)
+        name.setFixedWidth(theme.Metrics.short_field_w)
         rl.addWidget(name)
         lut = iv.get_lut(tok) if iv is not None else None
         rl.addWidget(QLabel("min", row))
         lo_e = QLineEdit(_cb_fmt(None if lut is None else lut[0]), row)
-        lo_e.setFixedWidth(60)
+        lo_e.setFixedWidth(_LO_E_W)
         lo_e.setPlaceholderText("auto")
         rl.addWidget(lo_e)
         rl.addWidget(QLabel("max", row))
         hi_e = QLineEdit(_cb_fmt(None if lut is None else lut[1]), row)
-        hi_e.setFixedWidth(60)
+        hi_e.setFixedWidth(_HI_E_W)
         hi_e.setPlaceholderText("auto")
         rl.addWidget(hi_e)
         auto_btn = QPushButton("Auto", row)
@@ -342,12 +351,12 @@ def cell_browser_refresh_lut_rows(ctx) -> None:
         # back to the default palette colour. Staged → applied on Generate.
         rl.addWidget(QLabel("color", row))
         swatch = QPushButton("", row)
-        swatch.setFixedSize(28, 18)
+        swatch.setFixedSize(theme.Metrics.swatch_w, _SWATCH_H)
         swatch.setToolTip("Display colour for this channel. Applied on Generate.")
         _paint_cb_swatch(swatch, _cb_effective_tint(iv, tok, i))
         rl.addWidget(swatch)
         reset_c = QPushButton("✕", row)
-        reset_c.setFixedWidth(22)
+        reset_c.setFixedWidth(_RESET_C_W)
         reset_c.setObjectName("Ghost")
         reset_c.setToolTip("Reset this channel's colour to the default.")
         rl.addWidget(reset_c)

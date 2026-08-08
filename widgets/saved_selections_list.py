@@ -60,6 +60,11 @@ from util.well_token import canonical_well_label
 from util.aw_safe import swallowed
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_LST_MIN_H = 300
+
 _HANDLE = "⠇"   # ⠇-ish drag dots
 _EYE_ON = "◉"
 _EYE_OFF = "○"
@@ -1027,7 +1032,7 @@ if __name__ == "__main__":
          "wells": ["E01", "E02"], "replicates": None, "source": "import"},
     ])
     lst.setCurrentId("bbbb2222")
-    lst.setMinimumHeight(300)
+    lst.setMinimumHeight(_LST_MIN_H)
     lay.addWidget(lst, 1)
 
     row = _HB()

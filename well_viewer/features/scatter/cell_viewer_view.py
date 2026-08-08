@@ -30,6 +30,14 @@ from well_viewer.data.image_resolver import (
     resolve_filename_candidates,
 )
 from well_viewer.core.safe import swallowed
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_DEBUG_TEXT_MIN_H = 140
+_IMG_LABEL_MIN_W = 300
+_IMG_LABEL_MIN_H = 300
 
 
 class ScatterCellViewer(QWidget):
@@ -88,7 +96,7 @@ class ScatterCellViewer(QWidget):
         head_row.addWidget(self._title_label, 1)
         close_btn = QPushButton("✕")
         close_btn.setObjectName("Ghost")
-        close_btn.setFixedWidth(28)
+        close_btn.setFixedWidth(theme.Metrics.icon_btn_w)
         close_btn.setToolTip("Close the cell viewer")
         close_btn.clicked.connect(self._close_dock)
         head_row.addWidget(close_btn, 0)
@@ -119,19 +127,19 @@ class ScatterCellViewer(QWidget):
 
         self._img_label = QLabel("Loading...")
         self._img_label.setAlignment(Qt.AlignCenter)
-        self._img_label.setMinimumSize(300, 300)
+        self._img_label.setMinimumSize(_IMG_LABEL_MIN_W, _IMG_LABEL_MIN_H)
         layout.addWidget(self._img_label, 1)
 
         lut_row = QHBoxLayout()
         lut_row.addWidget(QLabel("LUT min:"))
         self._lut_min_edit = QLineEdit("0")
-        self._lut_min_edit.setFixedWidth(70)
+        self._lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_min_edit.editingFinished.connect(self._on_lut_change)
         lut_row.addWidget(self._lut_min_edit)
         lut_row.addSpacing(10)
         lut_row.addWidget(QLabel("max:"))
         self._lut_max_edit = QLineEdit("100")
-        self._lut_max_edit.setFixedWidth(70)
+        self._lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
         self._lut_max_edit.editingFinished.connect(self._on_lut_change)
         lut_row.addWidget(self._lut_max_edit)
         auto_btn = QPushButton("Auto")
@@ -144,7 +152,7 @@ class ScatterCellViewer(QWidget):
         diag_layout = QVBoxLayout(diag_group)
         self._debug_text = QTextEdit()
         self._debug_text.setReadOnly(True)
-        self._debug_text.setMinimumHeight(140)
+        self._debug_text.setMinimumHeight(_DEBUG_TEXT_MIN_H)
         diag_layout.addWidget(self._debug_text)
         layout.addWidget(diag_group)
 

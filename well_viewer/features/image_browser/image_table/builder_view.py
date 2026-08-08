@@ -56,6 +56,14 @@ from well_viewer.features.image_browser.image_table.image_compose import (
     LUT_COLOR_NAMES, LUT_COLORS, _is_binary_variant, _is_nuc_seg,
 )
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_SW_W = 11
+_SW_H = 11
+_WRAP_W = 84
+_Z_MIN_H = 96
+
 _MIME = "application/x-aw-imgtable-token"
 _ROOT_DIMS = ("well", "timepoint", "fov")
 _ROOT_LABEL = {"well": "Well", "timepoint": "Timepoint", "fov": "FOV"}
@@ -613,7 +621,7 @@ class _DropZone(QFrame):
 
 def _swatch(color: str) -> QLabel:
     sw = QLabel()
-    sw.setFixedSize(11, 11)
+    sw.setFixedSize(_SW_W, _SW_H)
     sw.setStyleSheet(
         f"background:{color}; border-radius:3px; border:1px solid rgba(255,255,255,0.16);")
     sw.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -758,7 +766,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
     header.addWidget(wrap_lbl)
     wrap = Stepper(parent, value=float(getattr(builder_spec(ctx), "wrap", 0) or 0),
                    minimum=0.0, maximum=50.0, single_step=1.0, decimals=0)
-    wrap.setFixedWidth(84)
+    wrap.setFixedWidth(_WRAP_W)
     wrap.setToolTip("Wrap the columns into vertically-stacked bands of this many "
                     "columns (e.g. the first N wells across all channels, then the "
                     "next N below). 0 = off. Applies when each axis has one dimension.")
@@ -806,7 +814,7 @@ def build_shelf(ctx, parent: QWidget) -> None:
         z.setObjectName("ITBZone")
         z.setProperty("dropActive", "false")
         z.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        z.setMinimumHeight(96)
+        z.setMinimumHeight(_Z_MIN_H)
         zl = QVBoxLayout(z)
         zl.setContentsMargins(11, 9, 11, 11)
         zl.setSpacing(7)

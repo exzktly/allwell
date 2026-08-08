@@ -15,7 +15,6 @@ from util.zip_write import atomic_zip
 HERE = Path(__file__).resolve().parent.parent
 ZIPPER_SCRIPT = HERE / "WellPlateZipper.py"
 TIF_GLOB = ("*.tif", "*.tiff", "*.TIF", "*.TIFF")
-_WELL_NAME_RE = re.compile(r"^([A-Ha-h])(\d{1,2})$")
 
 # Consolidation reads and writes on whatever volume the user pointed at as the
 # input folder, and it moves the whole plate: every loose TIF into a per-well
@@ -166,13 +165,16 @@ def _has_well_content(folder: Path) -> bool:
     A stray ``archive.zip`` used to be enough to short-circuit the zipper
     even though the pipeline would then warn on every non-well zip — the
     user saw a flood of skipped-file warnings and concluded the pipeline
-    was broken. Match the well-token regex on the basename to avoid that.
+    was broken. Judge the basename with the shared canonicaliser to avoid
+    that, so this module and the pipeline that then reads the folder agree
+    on what counts as a well (ARCHITECTURE §15).
     """
+    from util.well_token import is_valid_well_name
     try:
         for p in folder.glob("*.zip"):
             if _is_well_named(p):
                 return True
-        return any(_WELL_NAME_RE.match(p.name) for p in folder.iterdir() if p.is_dir())
+        return any(is_valid_well_name(p.name) for p in folder.iterdir() if p.is_dir())
     except OSError:
         return False
 

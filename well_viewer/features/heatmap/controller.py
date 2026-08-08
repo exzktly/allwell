@@ -54,7 +54,7 @@ METRIC_OPTIONS = [METRIC_MEAN, METRIC_MEAN_ALL, METRIC_FRACTION, METRIC_COUNT]
 # drop-target label in this same axes (see the label-drag block below), and
 # reusing it here would make a selected well indistinguishable from a drop
 # target while dragging over it.
-_SELECTION_OUTLINE_COLOR = "#FF6B35"
+_SELECTION_OUTLINE_COLOR = theme.Colors.heatmap_selection
 
 
 def _contrast_ink(rgba: tuple[float, float, float, float]) -> str:

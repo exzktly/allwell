@@ -37,6 +37,11 @@ from PySide6.QtWidgets import QSizePolicy, QWidget
 
 import theme
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_DEMO_STRIP_H = 18
+
 
 def _normalize_stops(stops) -> list[tuple[float, QColor]]:
     if stops is None:
@@ -169,16 +174,16 @@ if __name__ == "__main__":
     form.setSpacing(theme.Spacing.md)
 
     g_pairs = GradientStrip([(0.0, "#0B0F17"), (0.5, "#6B8AFD"), (1.0, "#F0F4FF")])
-    g_pairs.setMinimumHeight(18)
+    g_pairs.setMinimumHeight(_DEMO_STRIP_H)
     g_flat = GradientStrip(["#1F4FB0", "#2E8C50", "#B5781A", "#B02C2C"])  # evenly spaced
-    g_flat.setMinimumHeight(18)
+    g_flat.setMinimumHeight(_DEMO_STRIP_H)
     g_func = GradientStrip(reversed=False)
-    g_func.setMinimumHeight(18)
+    g_func.setMinimumHeight(_DEMO_STRIP_H)
     # a viridis-ish ramp via a callable (no matplotlib needed for the demo)
     g_func.setSamples(lambda t: QColor.fromHsvF(0.75 - 0.75 * t, 0.55 + 0.25 * math.sin(t * math.pi),
                                                 0.35 + 0.55 * t))
     g_empty = GradientStrip(None)
-    g_empty.setMinimumHeight(18)
+    g_empty.setMinimumHeight(_DEMO_STRIP_H)
 
     form.addRow("(pos, colour) stops:", g_pairs)
     form.addRow("flat colour list:", g_flat)

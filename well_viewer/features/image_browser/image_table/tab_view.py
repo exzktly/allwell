@@ -58,6 +58,18 @@ from well_viewer.features.image_browser.image_table.export import (
     gallery_quality_px,
     set_gallery_quality,
 )
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_CB_MIN_W = 132
+_DOCK_W = 288
+_EMPTY_STATE_MIN_H = 180
+_THRESH_CHAN_CB_MIN_W = 96
+_ZOOM_IN_W = 32
+_ZOOM_LBL_W = 60
+_ZOOM_OUT_W = 32
 
 
 def _menu_button(parent, text, *, tooltip="") -> QToolButton:
@@ -92,7 +104,7 @@ def _build_properties_dock(ctx, dock) -> None:
     # Wide enough that the two-column rows fit a label + a full-text dropdown
     # ("Bottom-right") without truncating, even with the scrollbar shown. Still far
     # narrower than the plotting Export panel, so it's a modest footprint.
-    dock.setFixedWidth(288)
+    dock.setFixedWidth(_DOCK_W)
     panel = QFrame(dock)
     panel.setObjectName("Panel")
     pl = QVBoxLayout(panel)
@@ -159,7 +171,7 @@ def _build_properties_dock(ctx, dock) -> None:
         cb.setToolTip(tip)
         # Fit the longest option ("Bottom-right") plus the dropdown arrow without
         # truncating the current text.
-        cb.setMinimumWidth(132)
+        cb.setMinimumWidth(_CB_MIN_W)
         for disp, val in choices:
             cb.addItem(disp, val)
         ix = cb.findData(getattr(its, key, None))
@@ -389,11 +401,11 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     tr.addWidget(_on_thr_lbl)
     thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
     thresh_chan_cb.setToolTip("Which channel the ON threshold applies to.")
-    thresh_chan_cb.setMinimumWidth(96)
+    thresh_chan_cb.setMinimumWidth(_THRESH_CHAN_CB_MIN_W)
     tr.addWidget(thresh_chan_cb)
     thresh_stepper = reg.register("_image_table_thresh_frac_stepper", Stepper(
         action_row, value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
-    thresh_stepper.setFixedWidth(96)
+    thresh_stepper.setFixedWidth(theme.Metrics.stepper_w)
     thresh_stepper.setFocusPolicy(Qt.ClickFocus)
     _it_edit = getattr(thresh_stepper, "_edit", None)
     if _it_edit is not None:
@@ -472,7 +484,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # buttons either side of it do.
     zoom_out = QPushButton("−", action_row)
     zoom_out.setProperty("variant", "secondary")
-    zoom_out.setFixedWidth(32)
+    zoom_out.setFixedWidth(_ZOOM_OUT_W)
     zoom_out.setToolTip("Zoom out")
     zoom_out.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1 / 1.25, relative=True))
     tr.addWidget(zoom_out)
@@ -480,7 +492,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     zoom_lbl = QPushButton(f"{ctx.state.image_table.zoom * 100:.0f}%", action_row)
     zoom_lbl.setFlat(True)
     # Wide enough for the max "400%" without clipping the trailing % (52 was tight).
-    zoom_lbl.setFixedWidth(60)
+    zoom_lbl.setFixedWidth(_ZOOM_LBL_W)
     zoom_lbl.setToolTip("Click to reset zoom to 100%")
     zoom_lbl.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.0))
     reg.register("_image_table_zoom_lbl", zoom_lbl)
@@ -488,7 +500,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
 
     zoom_in = QPushButton("+", action_row)
     zoom_in.setProperty("variant", "secondary")
-    zoom_in.setFixedWidth(32)
+    zoom_in.setFixedWidth(_ZOOM_IN_W)
     zoom_in.setToolTip("Zoom in")
     zoom_in.clicked.connect(lambda _=False: image_table_set_zoom(ctx, 1.25, relative=True))
     tr.addWidget(zoom_in)
@@ -517,7 +529,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     ))
     # Give the placeholder enough vertical room so the wrapped hint never
     # gets clipped by tight sibling rows.
-    empty_state.setMinimumHeight(180)
+    empty_state.setMinimumHeight(_EMPTY_STATE_MIN_H)
     il.addWidget(empty_state)
 
     render_host = QWidget(inner)

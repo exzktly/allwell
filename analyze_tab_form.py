@@ -94,7 +94,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
             cb = QComboBox(row)
             cb.addItems(list(_SCHEMA_LABELS))
             cb.setCurrentText(_FIELD_TO_LABEL.get(default_fields[pos_idx], "— ignore —"))
-            cb.setFixedWidth(160)
+            cb.setFixedWidth(self._CB_W)
             row.layout().addWidget(cb)
             row.layout().addStretch(1)
             self._schema_cbs.append(cb)
@@ -105,7 +105,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         # Expand to fill the row. The string never fits unscrolled at any width
         # this sidebar offers — a scrollable single-line edit (cursor pinned to
         # the start below), so the minimum just keeps a legible chunk on screen.
-        self._schema_str_edit.setMinimumWidth(165)
+        self._schema_str_edit.setMinimumWidth(self._SCHEMA_STR_EDIT_MIN_W)
         self._schema_str_edit.setCursorPosition(0)  # show the start, not the tail
         schema_str_row.layout().addWidget(self._schema_str_edit, 1)
         self._schema_str_edit.editingFinished.connect(self._sync_dropdowns_from_string)
@@ -138,7 +138,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
             self._seg_method_cb.addItem(_label, userData=_value)
         # Narrower than the longest item ("Label-free (Cellpose, brightfield)")
         # — Qt elides the closed box's text; the tooltip carries the full label.
-        self._seg_method_cb.setFixedWidth(165)
+        self._seg_method_cb.setFixedWidth(self._SEG_METHOD_CB_W)
         self._seg_method_cb.currentIndexChanged.connect(
             lambda _i: self._seg_method_cb.setToolTip(self._seg_method_cb.currentText()))
         self._seg_method_cb.setToolTip(self._seg_method_cb.currentText())
@@ -177,7 +177,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
 
         add_btn = QPushButton("+ Add channel", sec)
         add_btn.setProperty("variant", "secondary")
-        add_btn.setFixedWidth(130)
+        add_btn.setFixedWidth(self._ADD_BTN_W)
         add_btn.clicked.connect(lambda _=False: self._fluor_add_row())
         sec.layout().addWidget(add_btn)
         self._fluor_add_btn = add_btn  # hidden for OME input (role picker drives it)
@@ -278,7 +278,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         # combo's 230 px). Added directly to the section's QVBoxLayout the dropdown
         # button's Preferred policy stretched it to the full ~414 px sidebar, which
         # looked oversized; cap it and left-align with a trailing stretch.
-        self._shape_chips.setMaximumWidth(230)
+        self._shape_chips.setMaximumWidth(self._SHAPE_CHIPS_MAX_W)
         chip_row = QWidget(sec)
         crl = QHBoxLayout(chip_row)
         crl.setContentsMargins(0, 0, 0, 0)
@@ -878,7 +878,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
                                                "controls")
         # Narrower than "Positive / negative controls" — Qt elides the closed
         # box's text; the tooltip below spells out both options regardless.
-        self._auto_threshold_method_cb.setFixedWidth(165)
+        self._auto_threshold_method_cb.setFixedWidth(self._AUTO_THRESHOLD_METHOD_CB_W)
         self._auto_threshold_method_cb.setToolTip(
             "Otsu: split each channel's per-cell signal from image background, "
             "pooled across the dataset — no controls needed, but it cannot tell "

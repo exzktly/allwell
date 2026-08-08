@@ -27,6 +27,12 @@ from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 from util.well_token import canonical_well_label
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_LEGEND_HOST_W = 190
+_RAIL_HOST_W = 238
+
 
 def canon_well(well_id: str) -> str:
     """Normalise a well token to ``A01`` form; '' if it isn't a well.
@@ -124,7 +130,7 @@ class PlateProgress(QWidget):
         self._rail_host = QWidget(self._body)
         self._rail_lay = QVBoxLayout(self._rail_host)
         self._rail_lay.setContentsMargins(0, 0, 0, 0); self._rail_lay.setSpacing(8)
-        self._rail_host.setFixedWidth(238)
+        self._rail_host.setFixedWidth(_RAIL_HOST_W)
         body.addWidget(self._rail_host)
 
         if show_plate or show_legend:
@@ -177,7 +183,7 @@ class PlateProgress(QWidget):
             # legend labels also carry setWordWrap(True) as a second line of
             # defence, so a future longer label wraps to two lines instead of
             # being silently clipped the way a fixed-but-too-narrow column did.
-            self._legend_host.setFixedWidth(190)
+            self._legend_host.setFixedWidth(_LEGEND_HOST_W)
             body.addWidget(self._legend_host)
         if not show_plate:
             # With the centre column skipped there is no widget carrying a

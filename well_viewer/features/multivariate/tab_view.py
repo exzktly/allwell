@@ -43,6 +43,12 @@ _AGGS = ("mean", "median", "count", "std")
 
 from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_KSPIN_MIN_W = 64
 
 def _muted(text: str, parent) -> QLabel:
     """A control label in the band's own idiom — muted, no trailing colon.
@@ -194,7 +200,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     # Reserve room for two digits + the up/down arrows; without a minimum the
     # crowded horizontal row squeezes this (width-less) spinbox until the value
     # clips.
-    kspin.setMinimumWidth(64)
+    kspin.setMinimumWidth(_KSPIN_MIN_W)
     kspin.setValue(int(st.cluster_count))
     kspin.valueChanged.connect(lambda v: mv_ctrl.mv_set_cluster_count(ctx, v))
     reg.register("_mv_kspin", kspin)
@@ -216,7 +222,7 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     fcf.setContentsMargins(0, 0, 0, 0)
     fcf.addWidget(_muted("Value", fc_frame))
     fvalue_cb = QComboBox(fc_frame)
-    fvalue_cb.setMinimumWidth(140)
+    fvalue_cb.setMinimumWidth(theme.Metrics.combo_min_w)
     fvalue_cb.currentIndexChanged.connect(
         lambda _i: mv_ctrl.mv_set_facet_value(ctx, fvalue_cb.currentData() or ""))
     reg.register("_mv_facet_value_cb", fvalue_cb)

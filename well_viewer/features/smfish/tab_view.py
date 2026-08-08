@@ -74,6 +74,11 @@ from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
 from util.well_token import canonical_well_label
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_THRESHOLD_EDIT_W = 90
+
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
 
@@ -155,17 +160,17 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctrl.add_scope("", tp_cb)
 
     threshold_edit = reg.register("_smfish_threshold_edit", QLineEdit("1500"))
-    threshold_edit.setFixedWidth(90)
+    threshold_edit.setFixedWidth(_THRESHOLD_EDIT_W)
     threshold_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("Threshold", threshold_edit, trailing=True)
 
     lut_min_edit = reg.register("_smfish_lut_min_edit", QLineEdit(""))
-    lut_min_edit.setFixedWidth(70)
+    lut_min_edit.setFixedWidth(theme.Metrics.num_field_w)
     lut_min_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("LUT Min", lut_min_edit)
 
     lut_max_edit = reg.register("_smfish_lut_max_edit", QLineEdit(""))
-    lut_max_edit.setFixedWidth(70)
+    lut_max_edit.setFixedWidth(theme.Metrics.num_field_w)
     lut_max_edit.editingFinished.connect(lambda: _smfish_redraw(ctx))
     ctrl.add_scope("LUT Max", lut_max_edit)
 

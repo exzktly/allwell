@@ -5784,14 +5784,16 @@ The map (each rule links to the test that holds it):
 | Split View is one-line removable — uninstalled, the resolvers collapse to single-tab (§5.10) | `tests/test_split_view.py::test_not_installed_is_single_tab` |
 | Build profiles: a subset boots + loads, the strip plan matches the runtime filter, and the binary drops the excluded features' deps (§5.3 *Build profiles*) | `tests/test_feature_profile.py`, `tests/test_derive_profile.py`, `tests/test_profile_build.py` |
 | CSV / batch export produces the expected values, and the single-plot and batch paths agree byte-for-byte | `tests/test_csv_batch_export_eval.py` (drives a real headless `WellViewerApp`) |
+| Never hardcode a colour or a pixel size (§3, §8) — allowlisted for colormap/palette data and the `__main__` demo blocks; `datasets/` is out of scope while its tool pages consolidate | `tests/test_hardcoded_tokens.py` |
+| Every divider frame carries a name the QSS styles, so it paints a 1 px `border_subtle` hairline rather than Qt's 3 px etched default (§8) | `tests/test_divider_naming.py` |
+| A well token is judged by `util.well_token`, never a local whole-token regex (§15) | `tests/test_well_token_single_parser.py` |
+| The plot-card roster is written once — the shell reads `plot_card_actions.PLOT_CARD_ATTRS` rather than restating the names (§5.3) | `tests/test_plot_card_roster.py` |
 
 What is **not** statically enforced (and so relies on review + behavioural
 tests): "never block the UI thread", route redraws through the `WellViewerApp`
 shim, lazy-tab-build `hasattr` guards, app-wide-selection discipline, the
 bar-math / fold-change invariants, and the Playground↔pipeline parity (which has
-its own dedicated parity test). "Never hardcode colours/pixels" is also
-review-only for now — there are pre-existing inline hex literals that would need
-an allowlist before a guard could be clean.
+its own dedicated parity test).
 
 ---
 

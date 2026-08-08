@@ -137,6 +137,17 @@ class Colors:
     plot_grid       = "#1F2733"   # --plot-grid  : gridlines inside the figure
     plot_spine      = "#3A4658"   # --plot-spine : axis spines
 
+    # Plot accents with a specific job, kept here rather than inline at the
+    # renderer so a palette change is one edit and a reader can see them
+    # beside the rest of the plot surface.
+    heatmap_selection = "#FF6B35"   # outline around selected heat-map cells
+    spatial_observed  = "#4AA3FF"   # observed curve on the Spatial tab
+    spatial_reference = "#FF9C4A"   # its random-reference curve
+    gate_curve_a      = "#4FC3F7"   # Cell Gating optimizer, control well A
+    gate_curve_b      = "#FF8A65"   # …and control well B
+    hist_fill         = "#4C78A8"   # Multivariate per-feature histograms
+    selection_default = "#888888"   # a saved selection with no colour of its own
+
     # ── Contrast inks for "always opaque against any background" use ─────
     # Widgets that paint white-on-dark or black-on-light edges should use
     # these instead of hardcoded ``#FFFFFF`` / ``#000000``. They remain
@@ -173,6 +184,19 @@ class CPub:
     text_faint  = "#999999"   # --pub-text-faint: placeholder/unavailable-content text
     grid        = "#E5E7EB"   # --pub-grid      : gridlines
     spine       = "#4C5360"   # --pub-spine     : axis spines
+
+    # Ink levels for the chrome an exported figure draws around its content.
+    # A saved figure is transparent and lands on a white page, so this side of
+    # the palette runs dark-on-light — the app's own chrome colours are
+    # unreadable there. Named for what each one draws rather than by shade, so
+    # a caller picks a role and not a grey.
+    label_group = "#111111"   # faceted group-band label (the strongest)
+    label_inner = "#333333"   # inner (per-cell) axis label
+    label_corner = "#666666"  # the corner label where the two axes meet
+    band_face   = "#DFE5EC"   # fill behind a rotated group band
+    err_bar     = "#333333"   # error bars on an exported bar/scatter figure
+    well_disabled = "#404040" # a well the export deliberately greys out
+    placeholder = "#9AA0A6"   # "no data here" text inside an exported cell
 
     # Publication-mode trace cycle. Uses the same ``WELL_COLORS_TUPLE`` as
     # ``Colors.trace`` (screen mode) so a well's colour is consistent
@@ -278,6 +302,20 @@ class Metrics:
     # everywhere; the token exists so the number is stated once rather than
     # written out at each of the dozen frames and QSS pins that use it.
     hairline     = 1
+
+    # Control geometry shared across panes. Each is one *role*, not a size on a
+    # scale: two roles that happen to share a number today stay separate tokens
+    # so either can move without dragging the other with it. Values are the
+    # ones the call sites already carried.
+    combo_min_w    = 140  # channel / property combos
+    combo_min_w_sm = 120  # the narrower combos in the Cell Browser panels
+    num_field_w    = 70   # a numeric entry (LUT min/max, vmin/vmax)
+    num_field_w_lg = 80   # …where the value can run longer
+    short_field_w  = 64   # a short control beside a longer one (steps, sort dir)
+    stepper_w      = 96   # a Stepper and any label pinned to match it
+    icon_btn_w     = 28   # a square glyph-only button (zoom, close, delete)
+    swatch_w       = 28   # a colour swatch chip (its height varies by host)
+    scroll_max_h   = 200  # a scroll area capped so it cannot eat its page
 
 
 def _icon_path(name: str) -> str:

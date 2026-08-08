@@ -126,7 +126,7 @@ def rep_add(ctx) -> None:
     dlg = QDialog(ctx.window)
     dlg.setWindowTitle("New Replicate Set")
     dlg.setModal(True)
-    dlg.setMinimumSize(420, 480)
+    dlg.setMinimumSize(_DLG_MIN_W, _DLG_MIN_H)
     v = QVBoxLayout(dlg)
     v.addWidget(QLabel("Name:"))
     name_edit = QLineEdit(f"Rep {len(sel_state.selections)+1}")
@@ -183,6 +183,12 @@ from well_viewer.domain.selections_model import (  # noqa: F401
     replicate_display_label,
     well_display_label,
 )
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_DLG_MIN_W = 420
+_DLG_MIN_H = 480
 
 
 

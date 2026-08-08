@@ -65,6 +65,17 @@ from well_viewer.core.channel_state_controller import (
     get_thresh_frac_on as _get_thresh_frac_on,
 )
 from util.well_token import canonical_well_label
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_FC_BASELINE_COMBO_MIN_W = 160
+_FC_CTRL_COMBO_MIN_W = 160
+_LEFT_MAX_W = 560
+_LEFT_MIN_W = 420
+_OUT_DIR_EDIT_MIN_W = 240
+_PROG_BAR_W = 180
+_TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_loaded")
@@ -241,8 +252,8 @@ class BatchExportPanel(QWidget):
             return
 
         left = QWidget()
-        left.setMinimumWidth(420)
-        left.setMaximumWidth(560)
+        left.setMinimumWidth(_LEFT_MIN_W)
+        left.setMaximumWidth(_LEFT_MAX_W)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         self._build_group_editor(left_layout)
@@ -488,7 +499,7 @@ class BatchExportPanel(QWidget):
             cb.setCurrentText(default)
         else:
             cb.setCurrentIndex(0)
-        cb.setMinimumWidth(140)
+        cb.setMinimumWidth(theme.Metrics.combo_min_w)
         setattr(self, attr, cb)
         row.addWidget(cb)
 
@@ -496,7 +507,7 @@ class BatchExportPanel(QWidget):
         pf = prop_lbl.font(); pf.setBold(True); prop_lbl.setFont(pf)
         row.addWidget(prop_lbl)
         prop_cb = QComboBox()
-        prop_cb.setMinimumWidth(140)
+        prop_cb.setMinimumWidth(theme.Metrics.combo_min_w)
         prop_attr = f"{attr}_metric"
         setattr(self, prop_attr, prop_cb)
         row.addWidget(prop_cb)
@@ -823,7 +834,7 @@ class BatchExportPanel(QWidget):
         out_row.setContentsMargins(12, 6, 12, 6)
         self._add_bold_label(out_row, "Folder:", min_width=_FIELD_LABEL_W)
         self._out_dir_edit = QLineEdit(self._out_dir_value)
-        self._out_dir_edit.setMinimumWidth(240)
+        self._out_dir_edit.setMinimumWidth(_OUT_DIR_EDIT_MIN_W)
         out_row.addWidget(self._out_dir_edit, 1)
         out_row.addWidget(btn_secondary(None, "Browse\u2026", self._browse_out_dir))
         layout.addLayout(out_row)
@@ -906,7 +917,7 @@ class BatchExportPanel(QWidget):
         self._prog_lbl = QLabel("")
         run_row.addWidget(self._prog_lbl)
         self._prog_bar = QProgressBar()
-        self._prog_bar.setFixedWidth(180)
+        self._prog_bar.setFixedWidth(_PROG_BAR_W)
         self._prog_bar.setVisible(False)
         run_row.addWidget(self._prog_bar)
         run_row.addStretch(1)
@@ -939,7 +950,7 @@ class BatchExportPanel(QWidget):
 
         row.addWidget(QLabel("Control"))
         self._fc_ctrl_combo = QComboBox()
-        self._fc_ctrl_combo.setMinimumWidth(160)
+        self._fc_ctrl_combo.setMinimumWidth(_FC_CTRL_COMBO_MIN_W)
         self._fc_ctrl_combo.setToolTip(
             "Divide each bar / curve by the picked well or replicate "
             "set's mean at the same timepoint. — disables this axis."
@@ -949,7 +960,7 @@ class BatchExportPanel(QWidget):
 
         row.addWidget(QLabel("Baseline"))
         self._fc_baseline_combo = QComboBox()
-        self._fc_baseline_combo.setMinimumWidth(160)
+        self._fc_baseline_combo.setMinimumWidth(_FC_BASELINE_COMBO_MIN_W)
         self._fc_baseline_combo.setToolTip(
             "Divide each bar / curve by its own value at the reference "
             "timepoint. — disables this axis."
@@ -1031,7 +1042,7 @@ class BatchExportPanel(QWidget):
 
         self._tp_lb = QListWidget()
         self._tp_lb.setSelectionMode(QAbstractItemView.MultiSelection)
-        self._tp_lb.setMinimumHeight(120)
+        self._tp_lb.setMinimumHeight(_TP_LB_MIN_H)
         layout.addWidget(self._tp_lb, 1)
 
     def _active_group(self) -> BarGroup | None:

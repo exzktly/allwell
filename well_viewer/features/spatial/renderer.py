@@ -33,8 +33,8 @@ _COLONY_CMAP = "tab20"
 # hex at ~8 call sites. Deliberately not sourced from theme.Colors: these are
 # plot-data series, not chrome, and this renderer also renders in Publication
 # mode via _tokens(ax), where a screen-only chrome token would look wrong.
-_OBSERVED_COLOR = "#4aa3ff"
-_REFERENCE_COLOR = "#ff9c4a"
+_OBSERVED_COLOR = theme.Colors.spatial_observed
+_REFERENCE_COLOR = theme.Colors.spatial_reference
 
 
 def render_spatial(ctx) -> None:

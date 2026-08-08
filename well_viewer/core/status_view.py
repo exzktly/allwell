@@ -13,6 +13,12 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.ui_helpers import build_hline_separator
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_LOG_FRAME_H = 160
+_PROGRESS_BAR_W = 220
+
 #: How many lines the log drawer keeps before dropping the oldest.
 _LOG_MAX_BLOCKS = 5000
 
@@ -114,7 +120,7 @@ def build_bottom(win) -> None:
     # (ui_helpers.show_progress / step_progress) keep resolving unchanged.
     win._widget_registry.register("_progress_bar", QProgressBar(status_row))
     win._progress_bar.setOrientation(Qt.Horizontal)
-    win._progress_bar.setFixedWidth(220)
+    win._progress_bar.setFixedWidth(_PROGRESS_BAR_W)
     win._progress_bar.setRange(0, 100)
     win._progress_bar.setValue(0)
     win._progress_bar.hide()
@@ -127,7 +133,7 @@ def build_bottom(win) -> None:
 
     # Log frame (hidden initially)
     win._log_frame = QWidget(bottom)
-    win._log_frame.setFixedHeight(160)
+    win._log_frame.setFixedHeight(_LOG_FRAME_H)
     lf_l = QVBoxLayout(win._log_frame)
     lf_l.setContentsMargins(6, 4, 6, 2)
     outer.addWidget(win._log_frame)

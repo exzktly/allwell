@@ -122,6 +122,19 @@ class AnalyzeFormChromeMixin:
     #: Row label column width, narrow enough to leave room for a field at
     #: RAIL_W; word-wrap below lets an overflowing label wrap instead of clip.
     _ROW_LABEL_W = 108
+    # Control widths for the Analyze form, alongside the label column above.
+    # The whole set is one decision: ARCHITECTURE's rail-head section explains
+    # that the form was narrowed to fit ``RAIL_W`` by shrinking this label
+    # column and capping the two widest combos, so a later change to that fit
+    # has to be able to see all of them at once.
+    _ADD_BTN_W = 130
+    _AUTO_THRESHOLD_METHOD_CB_W = 165
+    _CB_W = 160
+    _REMOVE_BTN_W = 36
+    _RIGHT_MIN_W = 300
+    _SCHEMA_STR_EDIT_MIN_W = 165
+    _SEG_METHOD_CB_W = 165
+    _SHAPE_CHIPS_MAX_W = 230
 
     def _row(self, parent: QWidget, label: str, *, tooltip: str = "") -> QWidget:
         """Append a two-column label+widget row to *parent*; return the right cell.

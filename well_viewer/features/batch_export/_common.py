@@ -28,6 +28,7 @@ from well_viewer.core.ui_helpers import (
     clear_layout as _clear_layout_helper,
 )
 from well_viewer.domain.viewer_state import groups_with_loaded_wells as _groups_with_loaded_wells
+import theme
 
 _logger = logging.getLogger("well_viewer")
 
@@ -48,10 +49,10 @@ def unique_export_stem(stem: str, used: set) -> str:
     used.add(candidate)
     return candidate
 
-_CLR_PLACEHOLDER = "#9aa0a6"
-_CLR_DISABLED_WELL = "#404040"
-_CLR_ERR_BAR = "#333333"
-_CLR_WHITE = "#ffffff"
+_CLR_PLACEHOLDER = theme.CPub.placeholder
+_CLR_DISABLED_WELL = theme.CPub.well_disabled
+_CLR_ERR_BAR = theme.CPub.err_bar
+_CLR_WHITE = theme.Colors.ink_light
 
 
 __all__ = [

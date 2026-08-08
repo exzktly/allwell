@@ -30,6 +30,13 @@ from well_viewer.core.channel_state_controller import refresh_metric_combo_for_c
 from well_viewer.features.export.service import export_heatmap_data
 from well_viewer.core.channel_state_controller import refresh_heatmap_aggregation_options
 from well_viewer.core.safe import swallowed
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_CHAN_CB_MIN_W = 220
+_CMAP_CB_MAX_W = 220
 
 
 _CMAP_OPTIONS = ["viridis", "magma", "coolwarm", "RdYlBu_r", "Greys"]
@@ -73,7 +80,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # visible channel control. See line_graphs_tab_view.py for rationale.
     chan_cb = reg.register("_chan_cb_heatmap", QComboBox())
     chan_cb.addItems(["GFP"])
-    chan_cb.setMinimumWidth(220)
+    chan_cb.setMinimumWidth(_CHAN_CB_MIN_W)
     chan_cb.currentIndexChanged.connect(
         lambda _i, _src=chan_cb: on_plot_channel_selected(ctx, _src)
     )
@@ -119,7 +126,7 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     _initial_rev = _initial_cmap.endswith("_r")
     cmap_cb.setLut(_initial_cmap[:-2] if _initial_rev else _initial_cmap,
                    reversed=_initial_rev)
-    cmap_cb.setMaximumWidth(220)
+    cmap_cb.setMaximumWidth(_CMAP_CB_MAX_W)
     cmap_cb.lutChanged.connect(lambda *_a: _on_cmap_changed(ctx))
     disp_l.addWidget(cmap_cb)
 
@@ -131,13 +138,13 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
 
     disp_l.addWidget(QLabel("vmin:", disp))
     vmin_edit = reg.register("_heatmap_vmin_edit", QLineEdit(disp))
-    vmin_edit.setFixedWidth(70)
+    vmin_edit.setFixedWidth(theme.Metrics.num_field_w)
     vmin_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmin_edit)
 
     disp_l.addWidget(QLabel("vmax:", disp))
     vmax_edit = reg.register("_heatmap_vmax_edit", QLineEdit(disp))
-    vmax_edit.setFixedWidth(70)
+    vmax_edit.setFixedWidth(theme.Metrics.num_field_w)
     vmax_edit.editingFinished.connect(lambda: _on_vminmax_changed(ctx))
     disp_l.addWidget(vmax_edit)
 

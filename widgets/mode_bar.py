@@ -27,6 +27,10 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QTabBar, QWidget
 import theme
 from widgets import icons as _icons
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+
 _ICON_PX = 14
 
 

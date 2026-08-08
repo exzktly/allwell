@@ -49,6 +49,19 @@ from well_viewer.features.grouping.cell_gating.controller import (
     logger,
 )
 from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_GATING_SCROLL_H = 120
+_GATING_PLOT_MIN_H = 420
+_FC_BASELINE_MIN_W = 110
+_GATING_BTN_MIN_W = 150
+_OPT_TP_MIN_W = 110
+_OPT_WELL_A_MIN_W = 90
+_OPT_WELL_B_MIN_W = 90
+_THRESH_BTN_MIN_W = 150
 
 
 # ── builder ───────────────────────────────────────────────────────────────
@@ -175,7 +188,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     sg_layout.addSpacing(8)
     sg_layout.addWidget(QLabel("Gates:", sg_row))
     gating_btn = _QPushButton("All gates", sg_row)
-    gating_btn.setMinimumWidth(150)
+    gating_btn.setMinimumWidth(_GATING_BTN_MIN_W)
     gating_btn.setToolTip(
         "Which scatter gates define the Included population (union of the "
         "checked gates). Independent of the fraction-on selection below."
@@ -212,7 +225,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     th_layout.addSpacing(8)
     th_layout.addWidget(QLabel("Gates:", th_row))
     thresh_btn = _QPushButton("All gates", th_row)
-    thresh_btn.setMinimumWidth(150)
+    thresh_btn.setMinimumWidth(_THRESH_BTN_MIN_W)
     thresh_btn.setToolTip(
         "Which scatter gates define the fraction-on 'on' population (union of "
         "the checked gates). Independent of the inclusion selection above."
@@ -296,7 +309,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     reg.register("_cell_gating_scroll", QScrollArea(control_frame))
     ctx.widgets.get("_cell_gating_scroll").setWidgetResizable(True)
     ctx.widgets.get("_cell_gating_scroll").setFrameShape(QFrame.NoFrame)
-    ctx.widgets.get("_cell_gating_scroll").setFixedHeight(120)
+    ctx.widgets.get("_cell_gating_scroll").setFixedHeight(_GATING_SCROLL_H)
     reg.register("_cell_gating_inner", QWidget())
     QVBoxLayout(ctx.widgets.get("_cell_gating_inner"))
     ctx.widgets.get("_cell_gating_scroll").setWidget(ctx.widgets.get("_cell_gating_inner"))
@@ -313,7 +326,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     ctx.widgets.get("_cell_gating_plot_scroll").setWidget(ctx.widgets.get("_cell_gating_canvas"))
     # Floor the plot height so the gating controls above can never squeeze the
     # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
-    ctx.widgets.get("_cell_gating_plot_scroll").setMinimumHeight(420)
+    ctx.widgets.get("_cell_gating_plot_scroll").setMinimumHeight(_GATING_PLOT_MIN_H)
     install_canvas_wheel_scroll(ctx.widgets.get("_cell_gating_canvas"), ctx.widgets.get("_cell_gating_plot_scroll"))
 
     from widgets.mpl_toolbar import MplToolbar
@@ -336,16 +349,16 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     opt_row_layout = FlowLayout(opt_row)
     opt_row_layout.setContentsMargins(0, 0, 0, 0)
     opt_channel = reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
-    opt_channel.setMinimumWidth(140)
+    opt_channel.setMinimumWidth(theme.Metrics.combo_min_w)
     opt_row_layout.addWidget(flow_group(opt_row, "Channel:", opt_channel))
     opt_well_a = reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
-    opt_well_a.setMinimumWidth(90)
+    opt_well_a.setMinimumWidth(_OPT_WELL_A_MIN_W)
     opt_row_layout.addWidget(flow_group(opt_row, "Well A:", opt_well_a))
     opt_well_b = reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
-    opt_well_b.setMinimumWidth(90)
+    opt_well_b.setMinimumWidth(_OPT_WELL_B_MIN_W)
     opt_row_layout.addWidget(flow_group(opt_row, "Well B:", opt_well_b))
     opt_tp = reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
-    opt_tp.setMinimumWidth(110)
+    opt_tp.setMinimumWidth(_OPT_TP_MIN_W)
     opt_tp.setToolTip(
         "Restrict the fraction-on comparison to one timepoint, or pool all "
         "timepoints. Pooling across timepoints where the wells are both 'off' "
@@ -354,13 +367,13 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     )
     opt_row_layout.addWidget(flow_group(opt_row, "Timepoint:", opt_tp))
     opt_min = reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
-    opt_min.setFixedWidth(80)
+    opt_min.setFixedWidth(theme.Metrics.num_field_w_lg)
     opt_row_layout.addWidget(flow_group(opt_row, "Min:", opt_min))
     opt_max = reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
-    opt_max.setFixedWidth(80)
+    opt_max.setFixedWidth(theme.Metrics.num_field_w_lg)
     opt_row_layout.addWidget(flow_group(opt_row, "Max:", opt_max))
     opt_steps = reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
-    opt_steps.setFixedWidth(64)
+    opt_steps.setFixedWidth(theme.Metrics.short_field_w)
     opt_steps.setToolTip(
         "Number of thresholds scanned across the Min–Max range, evenly "
         "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
@@ -393,7 +406,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     fc_row_layout = FlowLayout(fc_row)
     fc_row_layout.setContentsMargins(0, 0, 0, 0)
     fc_control = reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
-    fc_control.setMinimumWidth(120)
+    fc_control.setMinimumWidth(theme.Metrics.combo_min_w_sm)
     fc_control.setToolTip(
         "Divide (or subtract) each well's fraction-on by a control well / "
         "replicate set's fraction-on at the same scanned threshold. \"—\" "
@@ -408,7 +421,7 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     fc_ctrl_op.addItem("Subtract", "subtract")
     fc_row_layout.addWidget(flow_group(fc_row, "Fold change —  Control:", fc_control, fc_ctrl_op))
     fc_baseline = reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
-    fc_baseline.setMinimumWidth(110)
+    fc_baseline.setMinimumWidth(_FC_BASELINE_MIN_W)
     fc_baseline.setToolTip(
         "Divide (or subtract) each well's fraction-on by its own fraction-on at "
         "a baseline timepoint. \"t0\" uses each well's earliest timepoint."

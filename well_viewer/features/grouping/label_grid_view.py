@@ -37,6 +37,15 @@ from PySide6.QtWidgets import (
 import theme
 from well_viewer.core.ui_helpers import build_hline_separator
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_CORNER_W = 40
+_CORNER_H = 26
+_H_H = 26
+_RH_W = 40
+_CELL_H = 26
+
 
 _ROW_LETTERS = "ABCDEFGH"
 _N_ROWS = 8
@@ -59,7 +68,7 @@ class _LabelCell(QLineEdit):
         self._token = token
         self.setPlaceholderText(token.lower())
         self.setAlignment(Qt.AlignCenter)
-        self.setFixedHeight(26)
+        self.setFixedHeight(_CELL_H)
         # Click on the cell BORDER toggles selection; clicks inside the
         # text area still focus the line edit for editing.
         self.installEventFilter(self)
@@ -137,13 +146,13 @@ class LabelGrid(QWidget):
 
         # Empty corner (0,0).
         corner = QLabel("", grid_host)
-        corner.setFixedSize(40, 26)
+        corner.setFixedSize(_CORNER_W, _CORNER_H)
         g.addWidget(corner, 0, 0)
 
         # Column headers 1..12 in row 0.
         for c in range(_N_COLS):
             h = _HeaderLabel(str(c + 1), grid_host)
-            h.setFixedHeight(26)
+            h.setFixedHeight(_H_H)
             h.clicked.connect(lambda c=c: self._toggle_column(c))
             self._col_hdrs.append(h)
             g.addWidget(h, 0, c + 1)
@@ -151,7 +160,7 @@ class LabelGrid(QWidget):
         # Row headers + cells.
         for r in range(_N_ROWS):
             rh = _HeaderLabel(_ROW_LETTERS[r], grid_host)
-            rh.setFixedWidth(40)
+            rh.setFixedWidth(_RH_W)
             rh.clicked.connect(lambda r=r: self._toggle_row(r))
             rh.setEnabled(False)
             self._row_hdrs.append(rh)

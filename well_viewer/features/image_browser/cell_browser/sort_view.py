@@ -15,6 +15,12 @@ from PySide6.QtWidgets import (
 
 from well_viewer.core.safe import swallowed
 from well_viewer.features.image_browser.cell_browser.collect import sort_field_options
+import theme
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_RM_W = 24
 
 
 def build_cell_browser_sort_section(ctx, parent_layout) -> None:
@@ -27,7 +33,7 @@ def build_cell_browser_sort_section(ctx, parent_layout) -> None:
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.NoFrame)
-    scroll.setMaximumHeight(200)
+    scroll.setMaximumHeight(theme.Metrics.scroll_max_h)
     host = QWidget()
     rows_lay = QVBoxLayout(host)
     rows_lay.setContentsMargins(0, 0, 0, 0)
@@ -60,12 +66,12 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
         idx = combo.findData(field)
         if idx >= 0:
             combo.setCurrentIndex(idx)
-    combo.setMinimumWidth(120)
+    combo.setMinimumWidth(theme.Metrics.combo_min_w_sm)
 
     # Direction toggle: checked = descending (▼), unchecked = ascending (▲).
     dir_btn = QPushButton("▲ Asc", row)
     dir_btn.setCheckable(True)
-    dir_btn.setFixedWidth(64)
+    dir_btn.setFixedWidth(theme.Metrics.short_field_w)
     dir_btn.setToolTip("Toggle ascending / descending")
 
     def _sync_dir(_checked=None) -> None:
@@ -75,7 +81,7 @@ def add_sort_row(ctx, field: str = "", ascending: bool = True) -> None:
     dir_btn.toggled.connect(_sync_dir)
 
     rm = QPushButton("✕", row)
-    rm.setFixedWidth(24)
+    rm.setFixedWidth(_RM_W)
     rm.setObjectName("Ghost")
 
     rl.addWidget(combo, 1)

@@ -49,6 +49,13 @@ set_gate_draw_mode = _lazy("well_viewer.features.scatter.gating", "set_gate_draw
 from well_viewer.data.metric_labels import gate_axes_label
 from well_viewer.core.safe import swallowed
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_HI_EDIT_MAX_W = 76
+_LIST_WIDGET_MAX_H = 140
+_LO_EDIT_MAX_W = 76
+
 
 #: Single source of truth for the style-panel width — read by both the
 #: sidebar itself and ``figure_export_editor.launch_export_editor`` when
@@ -734,9 +741,9 @@ class ExportStyleSidebar(QWidget):
         s_lim = section("Limits & Scale", expanded=False)
         for lim_key, label in [("x_lim", "X limits"), ("y_lim", "Y limits")]:
             lo_edit = QLineEdit(str(self._prefs[f"{lim_key}_min"]))
-            lo_edit.setMaximumWidth(76)
+            lo_edit.setMaximumWidth(_LO_EDIT_MAX_W)
             hi_edit = QLineEdit(str(self._prefs[f"{lim_key}_max"]))
-            hi_edit.setMaximumWidth(76)
+            hi_edit.setMaximumWidth(_HI_EDIT_MAX_W)
             self._bind_getter_setter(f"{lim_key}_min", lo_edit)
             self._bind_getter_setter(f"{lim_key}_max", hi_edit)
             add_row(s_lim, label, hrow(lo_edit, QLabel("…"), hi_edit, spacing=sp.xs))
@@ -808,7 +815,7 @@ class ExportStyleSidebar(QWidget):
                 bl.setSpacing(sp.xs)
                 bl.addWidget(QLabel(heading))
                 list_widget.setSelectionMode(QAbstractItemView.SingleSelection)
-                list_widget.setMaximumHeight(140)
+                list_widget.setMaximumHeight(_LIST_WIDGET_MAX_H)
                 bl.addWidget(list_widget)
                 btns = QWidget(block)
                 bbl = QHBoxLayout(btns)

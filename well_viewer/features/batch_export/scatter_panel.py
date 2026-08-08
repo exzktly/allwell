@@ -189,12 +189,12 @@ class ScatterBatchExportPanel(BatchExportPanel):
         row.addWidget(lbl)
 
         ch_cb = QComboBox()
-        ch_cb.setMinimumWidth(140)
+        ch_cb.setMinimumWidth(theme.Metrics.combo_min_w)
         row.addWidget(QLabel("Channel:"))
         row.addWidget(ch_cb)
 
         prop_cb = QComboBox()
-        prop_cb.setMinimumWidth(140)
+        prop_cb.setMinimumWidth(theme.Metrics.combo_min_w)
         row.addWidget(QLabel("Property:"))
         row.addWidget(prop_cb)
         row.addStretch(1)

@@ -209,7 +209,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
 
         # Right — log panel
         right = QWidget()
-        right.setMinimumWidth(300)
+        right.setMinimumWidth(self._RIGHT_MIN_W)
         splitter.addWidget(right)
         splitter.setStretchFactor(1, 1)
         self._build_log(right)
@@ -326,12 +326,12 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         rl.setSpacing(8)
 
         edit = QLineEdit(default_token, row)
-        edit.setFixedWidth(80)
+        edit.setFixedWidth(theme.Metrics.num_field_w_lg)
         edit.textChanged.connect(lambda _: self._refresh_schema_preview())
         rl.addWidget(edit)
 
         remove_btn = QPushButton("✕", row)
-        remove_btn.setFixedWidth(36)   # wide enough that the button padding doesn't clip ✕
+        remove_btn.setFixedWidth(self._REMOVE_BTN_W)   # wide enough that the button padding doesn't clip ✕
         remove_btn.setProperty("variant", "secondary")
         rl.addWidget(remove_btn)
 

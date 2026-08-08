@@ -22,6 +22,7 @@ import logging
 from well_viewer.core.safe import swallowed
 from well_viewer.domain.plot_groups import make_plot_group
 from well_viewer.domain.viewer_state import parse_rc
+import theme
 
 _logger = logging.getLogger("well_viewer")
 
@@ -220,7 +221,7 @@ def build_plot_groups_drawer(ctx, parent, *, include_add_controls: bool = True,
     scroll.setFrameShape(QScrollArea.NoFrame)
     # Cap the list height so a long set of saved groups scrolls inside the
     # drawer instead of growing it tall enough to cover whatever sits above.
-    scroll.setMaximumHeight(200)
+    scroll.setMaximumHeight(theme.Metrics.scroll_max_h)
     list_widget = QWidget(scroll)
     list_layout = QVBoxLayout(list_widget)
     list_layout.setContentsMargins(0, 0, 0, 0)
@@ -510,7 +511,7 @@ def refresh_plot_groups_sidebar(ctx) -> None:
             )
             rl.addWidget(load_btn, 1)
             del_btn = QPushButton("×", row)
-            del_btn.setFixedWidth(28)
+            del_btn.setFixedWidth(theme.Metrics.icon_btn_w)
             del_btn.setToolTip("Delete this Plot Group")
             del_btn.clicked.connect(
                 lambda _=False, gid=group.get("id", ""): _plot_groups_delete(ctx, gid)

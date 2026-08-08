@@ -206,7 +206,7 @@ def _render_splom(fig, res) -> None:
             for sp in ax.spines.values():
                 sp.set_color(_s)
             if i == j:
-                ax.hist(X[:, i], bins=30, color="#4C78A8", alpha=0.8)
+                ax.hist(X[:, i], bins=30, color=theme.Colors.hist_fill, alpha=0.8)
             else:
                 ax.scatter(X[:, j], X[:, i], s=3, c=colors, alpha=0.4,
                            edgecolors="none", rasterized=True)

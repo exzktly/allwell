@@ -183,7 +183,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     violin_slider = reg.register("_violin_slider", _StyledSlider(Qt.Horizontal, bar_ctrl))
     violin_slider.setRange(5, 200)
     violin_slider.setValue(100)
-    violin_slider.setFixedWidth(80)
+    violin_slider.setFixedWidth(theme.Metrics.num_field_w_lg)
     violin_slider.setToolTip(
         "Violin kernel bandwidth — higher is smoother. "
         "Active only when Violin is on.")

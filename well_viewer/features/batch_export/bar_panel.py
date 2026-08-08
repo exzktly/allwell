@@ -46,6 +46,11 @@ from well_viewer.domain.selections_model import (
     well_display_label as _well_display_label,
     replicate_display_label as _replicate_display_label,
 )
+
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_VIOLIN_SMOOTH_SLIDER_W = 120
 _update_bar_tp_menu = _lazy("well_viewer.features.barplot.controller", "update_bar_tp_menu")
 
 
@@ -130,7 +135,7 @@ class BarBatchExportPanel(BatchExportPanel):
         self._violin_smooth_slider = QSlider(Qt.Horizontal)
         self._violin_smooth_slider.setRange(5, 200)
         self._violin_smooth_slider.setValue(100)
-        self._violin_smooth_slider.setFixedWidth(120)
+        self._violin_smooth_slider.setFixedWidth(_VIOLIN_SMOOTH_SLIDER_W)
         smooth_row.addWidget(self._violin_smooth_slider)
         self._violin_smooth_label = QLabel("1.00")
         smooth_row.addWidget(self._violin_smooth_label)

@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.core.safe import swallowed
+import theme
 
 
 _logger = logging.getLogger("well_viewer.centre_view")
@@ -393,7 +394,7 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_thresh_frac_stepper = win._ctx.widgets.register(
             "_plotting_thresh_frac_stepper",
             _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
-        win._plotting_thresh_frac_stepper.setFixedWidth(96)
+        win._plotting_thresh_frac_stepper.setFixedWidth(theme.Metrics.stepper_w)
         # Don't let the threshold box grab keyboard focus when the window first
         # shows (it auto-focused on load) — only take focus on click.
         win._plotting_thresh_frac_stepper.setFocusPolicy(Qt.ClickFocus)

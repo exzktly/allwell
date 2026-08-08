@@ -30,6 +30,11 @@ from PySide6.QtWidgets import (
 
 from well_viewer.domain.ratio_models import RatioMetric
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_TABLE_MIN_H = 140
+
 
 _METRIC_CHOICES: list[str] = ["mean_intensity", "total_intensity", "max_intensity", "smfish_count"]
 
@@ -88,7 +93,7 @@ class RatioMetricsPanel(QWidget):
         # global QSS padding, which overflows the default ~30px row and clipped
         # the text descenders ("gfp" → "qfp"). Give rows headroom to fit them.
         self._table.verticalHeader().setDefaultSectionSize(36)
-        self._table.setMinimumHeight(140)
+        self._table.setMinimumHeight(_TABLE_MIN_H)
         layout.addWidget(self._table)
 
         btn_row = QHBoxLayout()

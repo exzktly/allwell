@@ -43,6 +43,11 @@ import theme
 from widgets.icon_button import IconButton
 from util.aw_safe import swallowed
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_F_W = 1
+
 try:  # matplotlib is a project dependency; degrade gracefully if absent.
     import matplotlib
     matplotlib.use("QtAgg", force=False)
@@ -282,7 +287,7 @@ if _HAVE_MPL:
             f = QFrame(self)
             f.setObjectName("MplToolbarSep")
             f.setFrameShape(QFrame.VLine)
-            f.setFixedWidth(1)
+            f.setFixedWidth(_F_W)
             return f
 
         def _qss(self) -> str:

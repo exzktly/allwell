@@ -27,6 +27,13 @@ from well_viewer.features.spatial import state as sp_state
 from well_viewer.features.spatial import controller as sp_ctrl
 from well_viewer.features.spatial.collect import available_metric_columns
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_METRIC_CB_MIN_W = 160
+_SUMMARY_METRIC_CB_MIN_W = 180
+_VIZ_CB_MIN_W = 180
+
 _FIG_W, _FIG_H = 7.6, 6.6
 
 _LEVEL_ORDER = (
@@ -162,7 +169,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     band.add_scope("Level", level_seg)
 
     viz_cb = QComboBox()
-    viz_cb.setMinimumWidth(180)
+    viz_cb.setMinimumWidth(_VIZ_CB_MIN_W)
     viz_cb.setToolTip(
         "Visualisation of the current level. Hover any option in the "
         "dropdown for the specific interpretation."
@@ -173,7 +180,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     band.add_scope("Viz", viz_cb)
 
     metric_cb = QComboBox()
-    metric_cb.setMinimumWidth(160)
+    metric_cb.setMinimumWidth(_METRIC_CB_MIN_W)
     metric_cb.setToolTip(_METRIC_PICKER_TOOLTIP)
     metric_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_metric(ctx, metric_cb.currentData() or ""))
@@ -303,7 +310,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     # line-plot toggle. Shown only at Summary level, alongside the colony
     # detection params (which still matter — one DBSCAN per frame).
     summary_metric_cb = QComboBox()
-    summary_metric_cb.setMinimumWidth(180)
+    summary_metric_cb.setMinimumWidth(_SUMMARY_METRIC_CB_MIN_W)
     for key, label, units in _summary_metric_catalog():
         summary_metric_cb.addItem(
             f"{label} ({units})" if units else label, key)

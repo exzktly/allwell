@@ -30,6 +30,13 @@ from well_viewer.core.ui_helpers import clear_layout
 from well_viewer.features.saved_plots import controller as C
 from well_viewer.features.saved_plots.state import get_store
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_DOWN_BTN_W = 32
+_CARD_MIN_W = 1
+_UP_BTN_W = 32
+
 
 class _AspectImage(QLabel):
     """A QLabel that scales its source pixmap to fill the available width while
@@ -41,7 +48,7 @@ class _AspectImage(QLabel):
         self.setAlignment(Qt.AlignCenter)
         # Expand horizontally; height is driven by the scaled pixmap.
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
-        self.setMinimumWidth(1)
+        self.setMinimumWidth(_CARD_MIN_W)
         self._apply()
 
     def resizeEvent(self, event) -> None:  # Qt override
@@ -209,14 +216,14 @@ def _build_saved_card(ctx, store, rec, *, is_first: bool = True,
     up_btn = QPushButton("▲", card)
     up_btn.setProperty("variant", "secondary")
     up_btn.setToolTip("Move up")
-    up_btn.setFixedWidth(32)
+    up_btn.setFixedWidth(_UP_BTN_W)
     up_btn.setEnabled(not is_first)
     up_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(ctx, _id, True))
     actions.addWidget(up_btn)
     down_btn = QPushButton("▼", card)
     down_btn.setProperty("variant", "secondary")
     down_btn.setToolTip("Move down")
-    down_btn.setFixedWidth(32)
+    down_btn.setFixedWidth(_DOWN_BTN_W)
     down_btn.setEnabled(not is_last)
     down_btn.clicked.connect(lambda _=False, _id=rec.id: C.move_saved_plot(ctx, _id, False))
     actions.addWidget(down_btn)

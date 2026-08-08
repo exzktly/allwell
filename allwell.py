@@ -42,6 +42,12 @@ from widgets.icon_button import IconButton
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import build_hline_separator
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_WINDOW_MIN_W = 1100
+_WINDOW_MIN_H = 800
+
 # Global tab-scoped debug toggles.
 REVIEW_TAB_DEBUG = False
 ANALYZE_TAB_DEBUG = False
@@ -165,7 +171,7 @@ class AllWellApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("All-Well")
         self.resize(1640, 980)
-        self.setMinimumSize(1100, 800)
+        self.setMinimumSize(_WINDOW_MIN_W, _WINDOW_MIN_H)
 
         self._review: QWidget | None = None
         self._analyze: QWidget | None = None

@@ -48,6 +48,11 @@ SIDEBAR_LAYOUT_NAME = "Sidebar"
 from well_viewer.core.dnd import WELL_MIME  # shared drag/drop token
 from well_viewer.core.ui_helpers import build_hline_separator
 
+# Pixel geometry for this module's controls. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_TABLE_MIN_H = 240
+
 
 # ── Drag-aware widgets ───────────────────────────────────────────────────────
 
@@ -262,7 +267,7 @@ def build_heatmap_layout_sidebar(ctx, parent: QWidget) -> QWidget:
     )
     # Tall enough that 8 rows (the default) are fully visible without
     # scroll, with the table's own scrollbar taking over past that.
-    table.setMinimumHeight(240)
+    table.setMinimumHeight(_TABLE_MIN_H)
     table.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.MinimumExpanding)
     body_layout.addWidget(table, 1)
 

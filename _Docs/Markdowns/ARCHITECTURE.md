@@ -116,7 +116,8 @@ allwell/
 ├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
 ├── analyze_tab_chrome.py        ← Analyze mixin: form chrome (sections, rows, entries, ⓘ markers)
 ├── analyze_tab_seg_params.py    ← Analyze mixin: per-method segmentation params + StarDist thresholds
-├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
+├── analyze_input.py             ← Analyze input mixin: run-dir resolver, OME-TIFF
+│                                   redirect, channel rows, browse-time folder scan
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
 ├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
@@ -163,7 +164,10 @@ allwell/
 │   │                              prefixed token ("f10") orders numerically, not
 │   │                              lexicographically (pipeline, services, viewer)
 │   ├── channel_roles.py        ← channel-name → role heuristic (nuclear/fluor/
-│   │                              phase), shared by the OME converter + Analyze
+│   │                              phase), shared by the OME converter + Analyze;
+│   │                              also the quantified-channel list order and the
+│   │                              phase/segmentation exclusivity rule, shared with
+│   │                              the pipeline and the remote runner
 │   ├── schema_infer.py         ← guess a filename schema + channels by scanning an
 │   │                              input folder (loose TIFs / zips); Analyze pre-fill
 │   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
@@ -2009,16 +2013,34 @@ announces completion twice is reported rather than folded into the count.
 
 Picking an input folder through the browse dialog also **auto-fills the schema
 and channel fields** from what the folder's filenames look like:
-`_browse_input` → `_autofill_from_input_scan` briefly samples the names via
-`util.schema_infer.infer_from_dir`, which reads all three grouped layouts —
-loose TIFs, the members of per-well zips, and the files inside per-well
-`<WELL>/` folders — looking in both the selected folder and its `in/`;
-it guesses the separator, slot layout, channel tokens and their roles (roles
+`_browse_input` → `analyze_input.AnalyzeInputMixin._autofill_from_input_scan`
+briefly samples the names via `util.schema_infer.infer_from_dir`, which reads all
+three grouped layouts — loose TIFs, the members of per-well zips, and the files
+inside per-well `<WELL>/` folders — looking in both the selected folder and its
+`in/`; it guesses the separator, slot layout, channel tokens and their roles (roles
 via `util.channel_roles`, the same heuristic the OME converter uses), and applies
 the guess through the existing `_apply_pipeline_info` path. It is best-effort and
 editable — a folder whose names don't parse leaves the form as the user set it —
 and only the interactive picker triggers it, so the converter's "Open in Analyze"
 handoff keeps supplying its own channel roles instead of being re-guessed.
+
+**A guess must be visible and must not destroy.** The fields it writes look no
+different from hand-entered ones, so `_report_scan_guess` names the channels it
+found and which of them took the segmentation and phase roles in the run
+dashboard's status line; otherwise a wrong guess first surfaces in a sidecar
+after a run. A scan that recognised no channel slot contributes no channel keys
+at all, and `_apply_pipeline_info` treats an absent `fluor_tokens` key as "leave
+the rows alone" — the same rule its scalar setters follow. An empty list reaching
+`_set_fluor_rows` reads as "no channels" and collapses the rows to the single
+default one, which would wipe a hand-typed list.
+
+The sample the guess is built from is **strided, not a leading slice**
+(`schema_infer._spread`). Plates are routinely written with one slot varying
+slowest — channel-first filenames, or a per-well archive holding all of one
+channel's fields before the next — so the first few hundred names of a sorted
+listing can hold a single channel token. A slot with one distinct value is not
+recognised as the channel slot at all, so a prefix sample reports *no* channels
+on exactly the largest plates.
 
 The optional sections fold by default; **Auto-threshold** is one of them, and it
 owns every threshold-related control: a checkbox driving the pipeline's
@@ -2456,12 +2478,34 @@ noted:
   `_phase`) recorded as `phase_token` in `pipeline_info.json`.
 
 **Phase-channel correction passthrough.** A channel designated **Phase**
-now skips *all* background correction (flat-field + subtraction) for every
+skips *all* background correction (flat-field + subtraction) for every
 well/method — brightfield/phase has no fluorescence background to remove, and
-running the correction on it only injected artefacts. The token flows to the
-workers as a new `--phase_token` arg threaded through `shared_kwargs`;
+running the correction on it only injects artefacts. The token flows to the
+workers as a `--phase_token` arg threaded through `shared_kwargs`;
 `_correct_image_group` takes a `phase_token` param and short-circuits that
-channel.
+channel. The Phase channel is still *quantified* like any other: it is a member
+of `fluor_tokens`, and that membership is what gives Analyze a channel row on
+which to carry the Phase checkbox.
+
+**Phase and segmentation are mutually exclusive outside label-free.** Because
+the Phase channel skips correction entirely, naming it as the segmentation (or
+cytoplasm) input under a fluorescence routine runs that routine over an
+uncorrected brightfield frame — a run that completes and writes a
+complete-looking set of CSVs measured on the wrong image. Both entry points
+refuse the pairing: `analyze_tab_seg_params._phase_collision_errors` in the form,
+and a `parser.error` in `process_microscopy.main()` for anything arriving as
+argv (the CLI and remote runs). `cellpose_labelfree` is exempt — segmenting the
+phase image is its purpose.
+
+Where the roles come from when nobody types them: `util/channel_roles` guesses a
+role per channel name for both the OME converter and the Analyze folder scan. A
+strong nuclear stain (`DAPI`/`Hoechst`/…) takes the segmentation role, else a
+secondary `NIR`/`RFP` channel, else the first channel that does *not* read as
+phase/brightfield (`_PHASE_HINT_RE` — `phase`, `brightfield`, `trans`, `dic`,
+`bf`). That last exclusion matters because the channel list arrives in
+sorted-filename order rather than acquisition order, so a `DIC` channel leads it
+routinely; only when every channel reads as phase does one of them take the
+segmentation role, since segmentation still needs an input.
 
 **Worker-pool memory + failure accounting.** Two properties of how the
 parent process supervises the per-well worker pool:
@@ -2981,9 +3025,11 @@ Analyze pane (`on_open_in_analyze`) — the output is an Analyze *input*, not a
 Review dataset. The page also carries a per-channel **role picker** (one row
 per OME channel name, seeded by `ome_import_compute.default_channel_roles`'s
 name heuristic — a strong nuclear stain (`DAPI`/`Hoechst`/…) wins the
-segmentation role, else a secondary `NIR`/`RFP` channel, else the first
-channel); `channel_tokens_from_roles` aggregates the picks into a minimal
-`pipeline_info`-shaped dict (`nuclear_token` / `fluor_tokens` / `phase_token`)
+segmentation role, else a secondary `NIR`/`RFP` channel, else the first channel
+that does not read as phase/brightfield); `channel_tokens_from_roles` aggregates
+the picks into a minimal `pipeline_info`-shaped dict (`nuclear_token` /
+`fluor_tokens` / `phase_token`, with the phase channel remaining a member of
+`fluor_tokens` so Analyze has a row to carry its Phase checkbox)
 that the open-in-Analyze callback (`AllWellApp._open_dataset_in_analyze`) feeds
 to `AnalyzeTab._apply_pipeline_info`, so Analyze's Channel Tokens arrive
 pre-filled. The channel names are written into the output filenames regardless

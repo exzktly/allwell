@@ -90,14 +90,31 @@ def _is_fov(tok: str) -> bool:
 
 
 # ── sampling ─────────────────────────────────────────────────────────────────
+def _spread(names: list[str], take: int) -> list[str]:
+    """Up to *take* entries drawn evenly across *names*, keeping their order.
+
+    A leading slice is the wrong sample here. Names arrive sorted, and a plate is
+    routinely written so that one slot varies slowest — channel-first filenames,
+    or a per-well archive holding all of one channel's fields before the next.
+    The first N names of such a listing can hold a single channel token, and a
+    slot with one distinct value is not recognised as the channel slot at all, so
+    the scan reports no channels rather than the wrong ones. Striding the listing
+    reaches every value of the slowest-varying slot whatever it happens to be.
+    """
+    if take <= 0 or not names:
+        return []
+    if len(names) <= take:
+        return list(names)
+    step = len(names) / take
+    return [names[int(i * step)] for i in range(take)]
+
+
 def _tif_stems_in(root: Path, limit: int) -> list[str]:
-    stems: list[str] = []
-    for f in sorted(root.iterdir()) if root.is_dir() else []:
-        if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES:
-            stems.append(f.stem)
-            if len(stems) >= limit:
-                break
-    return stems
+    if not root.is_dir():
+        return []
+    stems = [f.stem for f in sorted(root.iterdir())
+             if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES]
+    return _spread(stems, limit)
 
 
 def _zip_stems_in(root: Path, limit: int) -> list[str]:
@@ -110,15 +127,11 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
     for z in zips:
         try:
             with zipfile.ZipFile(z) as zf:
-                taken = 0
-                for m in zf.namelist():
-                    if m.lower().endswith(_TIF_SUFFIXES):
-                        stems.append(Path(m).stem)
-                        taken += 1
-                        if taken >= per_zip or len(stems) >= limit:
-                            break
+                members = [Path(m).stem for m in zf.namelist()
+                           if m.lower().endswith(_TIF_SUFFIXES)]
         except (zipfile.BadZipFile, OSError):
             continue
+        stems.extend(_spread(members, min(per_zip, limit - len(stems))))
         if len(stems) >= limit:
             break
     return stems
@@ -131,9 +144,14 @@ def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
     used to yield nothing: a dataset laid out as ``in/<WELL>/*.tif`` has no
     loose TIFs and no zips at either level, so the schema and channel fields
     stayed blank and the run then failed on a schema the user was never
-    prompted to fill in. Takes a few names from each well the way
-    :func:`_zip_stems_in` takes a few members from each zip, so the sample spans
-    wells and channels rather than exhausting itself on the first well.
+    prompted to fill in.
+
+    Takes a few names from each well the way :func:`_zip_stems_in` takes a few
+    members from each zip, and strides each well's listing through
+    :func:`_spread` for the same reason it does — a well folder is written with
+    one slot varying slowest, so its leading names can hold a single channel
+    token and a slot with one distinct value is not recognised as the channel
+    slot at all.
     """
     try:
         wells = sorted(
@@ -145,17 +163,12 @@ def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
     stems: list[str] = []
     per_well = max(4, (limit // max(1, len(wells))) if wells else limit)
     for well in wells:
-        taken = 0
         try:
-            entries = sorted(well.iterdir())
+            names = [f.stem for f in sorted(well.iterdir())
+                     if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES]
         except OSError:
             continue
-        for f in entries:
-            if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES:
-                stems.append(f.stem)
-                taken += 1
-                if taken >= per_well or len(stems) >= limit:
-                    break
+        stems.extend(_spread(names, min(per_well, limit - len(stems))))
         if len(stems) >= limit:
             break
     return stems

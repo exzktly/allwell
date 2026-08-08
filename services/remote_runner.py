@@ -64,6 +64,7 @@ from services.remote_config import (
 # Stdlib-only (fov, tp) done-key helpers — shared with pipeline.io (audit A2).
 # This module import must stay imaging-stack-free; incremental_keys is csv/
 # zipfile/pathlib only, so it never drags numpy/tifffile into the remote client.
+from util.channel_roles import LABELFREE_METHODS, quantified_channel_tokens
 from util.fov import sort_key as fov_sort_key
 from util.timepoint import sort_key as tp_sort_key
 from pipeline.run_report import (
@@ -3406,6 +3407,13 @@ def _auto_threshold_args_from_argv(argv):
     ``no_auto_threshold`` is forced False: the flag in *argv* is the batching
     suppression, not the user's choice, so honouring it would mean a batched run
     never got thresholds at all.
+
+    *argv* is what the GUI built, so it is **pre-remap**: for a label-free method
+    ``process_microscopy.main`` moves ``--phase_token`` onto the nuclear slot, and
+    the threshold pass asks ``_segmentation_tokens`` which channel was segmented.
+    Applying the same remap here keeps that answer right — without it the pass
+    zeroes the channel the form happened to name and leaves the channel actually
+    segmented with a threshold derived from a brightfield image.
     """
     from types import SimpleNamespace
 
@@ -3415,13 +3423,18 @@ def _auto_threshold_args_from_argv(argv):
         single={
             "--nuclear_token", "--cytoplasm_token", "--segmentation_method",
             "--csv_prefix", "--filename_schema", "--filename_sep",
-            "--pos_control_well", "--neg_control_well",
+            "--pos_control_well", "--neg_control_well", "--phase_token",
         },
     )
+    nuclear_token = flags.get("--nuclear_token", "")
+    phase_token = str(flags.get("--phase_token", "") or "").strip()
+    if phase_token and flags.get("--segmentation_method", "") in LABELFREE_METHODS:
+        nuclear_token = phase_token
     return SimpleNamespace(
         no_auto_threshold=False,
         fluor_tokens=flags.get("--fluor_tokens", []),
-        nuclear_token=flags.get("--nuclear_token", ""),
+        nuclear_token=nuclear_token,
+        phase_token=phase_token,
         cytoplasm_token=flags.get("--cytoplasm_token", ""),
         segmentation_method=flags.get("--segmentation_method", ""),
         csv_prefix=flags.get("--csv_prefix", "measurements"),
@@ -3935,8 +3948,12 @@ class _BatchedRemoteProcess:
                 written = run_auto_threshold_pass(
                     args,
                     self._local_output_dir,
-                    [args.nuclear_token, *args.fluor_tokens] if args.nuclear_token
-                    else list(args.fluor_tokens),
+                    quantified_channel_tokens(
+                        args.fluor_tokens,
+                        nuclear_token=args.nuclear_token,
+                        segmentation_method=args.segmentation_method,
+                        cytoplasm_token=args.cytoplasm_token,
+                    ),
                     log_pylog,
                 )
             finally:

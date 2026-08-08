@@ -68,6 +68,7 @@ import numpy as np
 from scipy import ndimage as ndi
 from skimage.filters import threshold_otsu
 from skimage.segmentation import watershed
+from util.channel_roles import phase_role_conflicts, quantified_channel_tokens
 from util.fov import sort_key as _fov_sort_key
 from util.timepoint import parse_hours as _tp_parse_hours, sort_key as _tp_sort_key
 from util.well_token import (
@@ -3460,21 +3461,6 @@ def process_well_folder_task(
 # Skip-detection helpers
 # ---------------------------------------------------------------------------
 
-def _unique_tokens_preserve_order(tokens: list[str]) -> list[str]:
-    """Stable de-dupe for channel tokens, ignoring case and surrounding whitespace."""
-    seen: set[str] = set()
-    out: list[str] = []
-    for tok in tokens:
-        cleaned = str(tok or "").strip()
-        if not cleaned:
-            continue
-        key = cleaned.lower()
-        if key not in seen:
-            out.append(cleaned)
-            seen.add(key)
-    return out
-
-
 # ---------------------------------------------------------------------------
 # Zip-aware orchestration
 # ---------------------------------------------------------------------------
@@ -3765,30 +3751,6 @@ def _pipeline_info_jsonable(value):
     return value
 
 
-def _effective_fluor_tokens_for_sidecar(
-    fluor_tokens: list[str],
-    *,
-    nuclear_token: str,
-    segmentation_method: str,
-    cytoplasm_token: str,
-) -> list[str]:
-    """Channels that end up with quantified intensity columns in the CSVs."""
-    ordered = [str(nuclear_token or "").strip(), *[str(tok or "").strip() for tok in fluor_tokens]]
-    if segmentation_method == "stardist_seeded_watershed_cell":
-        ordered.append(str(cytoplasm_token or "").strip())
-    out: list[str] = []
-    seen: set[str] = set()
-    for tok in ordered:
-        if not tok:
-            continue
-        key = tok.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(tok)
-    return out
-
-
 
 
 def _collect_image_stems(input_dir: Path) -> set[str]:
@@ -3906,7 +3868,7 @@ def write_pipeline_info(
         "channel_index": fields.index("channel") if "channel" in fields else -1,
         "fov_index": fields.index("fov") if "fov" in fields else -1,
         "tp_index": fields.index("timepoint") if "timepoint" in fields else -1,
-        "fluor_tokens": _effective_fluor_tokens_for_sidecar(
+        "fluor_tokens": quantified_channel_tokens(
             fluor_tokens,
             nuclear_token=nuclear_token,
             segmentation_method=segmentation_method,
@@ -4025,8 +3987,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--phase_token",
         default="",
         help=(
-            "Channel token of the phase / brightfield image segmented by the "
-            "'cellpose_labelfree' preset. Ignored by the other methods."
+            "Channel token of the phase / brightfield image. Under every method "
+            "this channel skips flat-field and background correction and is "
+            "resaved from the original; the 'cellpose_labelfree' preset also "
+            "segments it. It may not equal --nuclear_token (or --cytoplasm_token) "
+            "under any other method."
         ),
     )
     p.add_argument(
@@ -4381,6 +4346,20 @@ def main() -> None:
         args.cellpose_model = "cyto3"
         log.info("Label-free segmentation (%s): Cellpose cyto3 on phase channel "
                  "%r as the segmentation input.", args.segmentation_method, phase_token)
+    else:
+        # Refuse a phase channel that is also a segmentation input. Checked here
+        # and not only in the GUI: this is a self-sufficient entry point, and
+        # remote runs arrive as argv.
+        for slot in phase_role_conflicts(
+                args.segmentation_method, phase_token=phase_token,
+                nuclear_token=args.nuclear_token, cytoplasm_token=args.cytoplasm_token):
+            parser.error(
+                f"--phase_token {phase_token!r} is also --{slot}_token: the "
+                f"phase/brightfield channel skips background correction and "
+                f"cannot be segmented by --segmentation_method="
+                f"{args.segmentation_method}. Name a different {slot} channel, "
+                f"or use --segmentation_method=cellpose_labelfree."
+            )
     log.info("Schema   : %s  (sep=%r)", args.filename_schema, sep)
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -4501,13 +4480,12 @@ def main() -> None:
     if workers_override:
         log.info("Workers override : --workers=%d", args.workers)
 
-    fluor_tokens_for_quant = [args.nuclear_token, *list(args.fluor_tokens)]
-    if (
-        args.segmentation_method == "stardist_seeded_watershed_cell"
-        and args.cytoplasm_token
-    ):
-        fluor_tokens_for_quant.append(args.cytoplasm_token)
-    fluor_tokens_for_quant = _unique_tokens_preserve_order(fluor_tokens_for_quant)
+    fluor_tokens_for_quant = quantified_channel_tokens(
+        args.fluor_tokens,
+        nuclear_token=args.nuclear_token,
+        segmentation_method=args.segmentation_method,
+        cytoplasm_token=args.cytoplasm_token,
+    )
 
     # Per-channel top-hat flags and radii: one entry per fluor token.
     n_fluor            = len(fluor_tokens_for_quant)

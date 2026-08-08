@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QComboBox, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from util.channel_roles import phase_role_conflicts
+
 # The two routines that run StarDist, and therefore take its thresholds. Kept
 # next to the controls that depend on it rather than imported from the pipeline:
 # this is a GUI-side view of the method vocabulary, and the module must not pull
@@ -223,7 +225,30 @@ class AnalyzeSegParamsMixin:
                 errors.append(
                     "Label-free segmentation requires exactly one channel marked "
                     "'Phase' (the brightfield image to segment).")
+        errors.extend(self._phase_collision_errors(method))
         return errors
+
+    def _phase_collision_errors(self, method: str) -> list[str]:
+        """Reject a Phase channel that is also a segmentation input.
+
+        The rule itself lives in :func:`util.channel_roles.phase_role_conflicts`,
+        shared with ``process_microscopy``'s argument validation — the CLI and
+        remote runs never pass through this form.
+        """
+        phase = self._phase_token()
+        slots = phase_role_conflicts(
+            method, phase_token=phase,
+            nuclear_token=self._nuclear_token_edit.text(),
+            cytoplasm_token=self._cytoplasm_edit.text(),
+        )
+        label = {"nuclear": "segmentation channel", "cytoplasm": "cytoplasm channel"}
+        return [
+            f"Channel '{phase}' is marked 'Phase' and is also the {label[slot]}. "
+            "Phase/brightfield images skip background correction, so this routine "
+            "would segment an uncorrected image — pick a different "
+            f"{label[slot]}, or switch to the Label-free method."
+            for slot in slots
+        ]
 
     def _collapse_seg_param_stack(self) -> None:
         """Size the per-method parameter stack to its *current* page only.

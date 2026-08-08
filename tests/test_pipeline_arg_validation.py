@@ -93,6 +93,86 @@ def test_phase_token_absent_when_unset():
     assert "--phase_token" not in args
 
 
+#: A fragment of the phase/segmentation rejection message. Asserted instead of
+#: the flag names alone: argparse prints the whole usage block — which lists
+#: ``[--phase_token PHASE_TOKEN]`` — on *every* ``parser.error``, so a test that
+#: only looks for the flag name passes for any rejection at all, including the
+#: unrelated ``--input_dir`` one that runs earlier.
+_COLLISION_MSG = "cannot be segmented by --segmentation_method"
+
+
+def _argv(tmp_path, **over):
+    a = {"--input_dir": str(tmp_path), "--output_dir": str(tmp_path / "out"),
+         "--nuclear_token": "DIC", "--phase_token": "DIC",
+         "--segmentation_method": "stardist_nuclei"}
+    a.update(over)
+    out = []
+    for k, v in a.items():
+        out += [k, v]
+    return out
+
+
+def _run_main(monkeypatch, argv):
+    """Invoke ``process_microscopy.main`` with *argv*, returning its ``SystemExit``.
+
+    The validation under test runs before any image work. ``write_pipeline_info``
+    is the first thing past it, so it is stubbed to exit 99 — an argv that
+    reaches it was accepted, and one rejected earlier exits 2 instead.
+    """
+    import sys
+    import process_microscopy as pm
+
+    monkeypatch.setattr(
+        pm, "write_pipeline_info",
+        lambda *a, **kw: (_ for _ in ()).throw(SystemExit(99)))
+    monkeypatch.setattr(sys, "argv", ["process_microscopy.py", *argv])
+    with pytest.raises(SystemExit) as excinfo:
+        pm.main()
+    return excinfo.value
+
+
+def test_phase_token_equal_to_nuclear_token_is_rejected(monkeypatch, capsys, tmp_path):
+    # Every routine but the label-free one segments a fluorescent stain. The
+    # phase channel skips flat-field and background correction outright, so
+    # segmenting it produces a complete-looking CSV of nothing.
+    exc = _run_main(monkeypatch, _argv(tmp_path))
+    assert exc.code == 2
+    assert _COLLISION_MSG in capsys.readouterr().err
+
+
+def test_phase_token_equal_to_nuclear_token_rejected_case_insensitively(
+        monkeypatch, capsys, tmp_path):
+    exc = _run_main(monkeypatch, _argv(tmp_path, **{"--nuclear_token": "dic"}))
+    assert exc.code == 2
+    assert _COLLISION_MSG in capsys.readouterr().err
+
+
+def test_phase_token_equal_to_cytoplasm_token_is_rejected(monkeypatch, capsys, tmp_path):
+    exc = _run_main(monkeypatch, _argv(tmp_path, **{
+        "--segmentation_method": "stardist_seeded_watershed_cell",
+        "--nuclear_token": "DAPI", "--cytoplasm_token": "BF",
+        "--phase_token": "BF"}))
+    assert exc.code == 2
+    # "--cytoplasm_token" alone would match argparse's usage dump; the phrase
+    # naming the slot appears only in the rejection message.
+    assert "Name a different cytoplasm channel" in capsys.readouterr().err
+
+
+def test_phase_token_on_a_different_channel_is_accepted(monkeypatch, tmp_path):
+    exc = _run_main(monkeypatch, _argv(tmp_path, **{
+        "--nuclear_token": "RFP", "--phase_token": "DIC"}))
+    assert exc.code == 99
+
+
+def test_labelfree_still_remaps_phase_onto_the_segmentation_slot(monkeypatch, tmp_path):
+    # The one method for which phase IS the segmentation channel: the pairing is
+    # not a collision there, so main() must get past validation and remap.
+    exc = _run_main(monkeypatch, _argv(tmp_path, **{
+        "--segmentation_method": "cellpose_labelfree",
+        "--nuclear_token": "BF", "--phase_token": "BF"}))
+    assert exc.code == 99
+
+
 def test_stardist_tile_px_emitted_when_set():
     args = build_pipeline_args(_P, _IN, _OUT, _opts(stardist_tile_px="2048"))
     assert _flag_value(args, "--stardist_tile_px") == "2048"

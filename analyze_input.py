@@ -13,6 +13,9 @@ belong in the tab's run/log core:
   and points the user at that converter instead of trying to process it.
 * ``_set_fluor_rows`` — repopulates the fluorescent-channel rows, shared with the
   form's "load previous run" restore.
+* ``_autofill_from_input_scan`` / ``_report_scan_guess`` — the browse-time guess
+  at the folder's filename schema and channel roles, and the status line that
+  says what it guessed.
 
 They bind to ``self`` exactly as before — a behaviour-preserving relocation.
 """
@@ -28,6 +31,8 @@ from services.input_resolution_service import (
     resolve_input_output,
     select_incremental_scope,
 )
+from util.schema_infer import infer_from_dir
+from well_viewer.core.safe import swallowed
 
 
 class AnalyzeInputMixin:
@@ -99,8 +104,18 @@ class AnalyzeInputMixin:
 
         Shared with the form's "load previous run" restore; both reach it via
         ``self``.
+
+        The Phase designation lives on a channel row, so a *phase* token naming a
+        channel that is not among *tokens* would have nowhere to go. Rather than
+        drop it — which silently disables the phase passthrough and loses the
+        channel — the token is appended as its own row. Matching is
+        case-insensitive because the sidecar records ``phase_token`` lower-cased
+        while the channel list keeps whatever case the filenames use.
         """
         tokens = [str(t).strip() for t in tokens if str(t).strip()] or ["GFP"]
+        ph = (phase or "").strip()
+        if ph and ph.lower() not in {t.lower() for t in tokens}:
+            tokens = [*tokens, ph]
         # Collapse to a single row, then grow to match the loaded tokens.
         while len(self._fluor_rows) > 1:
             _e, _s, _p, b = self._fluor_rows[-1]
@@ -108,8 +123,61 @@ class AnalyzeInputMixin:
         self._fluor_rows[0][0].setText(tokens[0])
         for tok in tokens[1:]:
             self._fluor_add_row(tok)
-        sm, ph = set(smfish or []), (phase or "").strip()
+        sm = {str(t).strip().lower() for t in (smfish or [])}
         for e, s_cb, p_cb, _b in self._fluor_rows:
-            tok = e.text().strip()
+            tok = e.text().strip().lower()
             s_cb.setChecked(tok in sm)
-            p_cb.setChecked(bool(ph) and tok == ph)
+            p_cb.setChecked(bool(ph) and tok == ph.lower())
+
+    def _autofill_from_input_scan(self, folder: str) -> None:
+        """Pre-fill the schema + channel fields by briefly scanning *folder*.
+
+        Samples the filenames on disk (loose TIFs, a zip, or the per-well-zip
+        layout) and guesses the separator, slot layout, channel tokens and their
+        roles, applying them like a loaded ``pipeline_info``. Best-effort: a
+        folder whose names don't parse (or an unreadable one) leaves the form as
+        the user set it. Only the interactive picker calls this — the converter's
+        "Open in Analyze" handoff supplies its own channel roles.
+
+        A scan that identified no channel slot contributes no channel keys at
+        all. An empty ``fluor_tokens`` list would otherwise reach
+        ``_set_fluor_rows``, which reads it as "no channels" and resets the rows
+        to the single default one — wiping a list the user typed by hand. The
+        channels it *did* find, and which of them it handed the segmentation
+        role, are named in the dashboard status line: the guess overwrites two
+        fields whose new values look no different from hand-entered ones, so
+        without saying so it is invisible until it turns up in a sidecar after a
+        run.
+        """
+        try:
+            guess = infer_from_dir(folder)
+        except Exception:
+            swallowed()  # a scan must never break folder selection
+            return
+        if guess is None:
+            return
+        info = {"filename_sep": guess.separator, "filename_schema": guess.schema_str}
+        tokens = guess.channel_tokens() if guess.channels else None
+        if tokens is not None:
+            info.update(tokens.as_pipeline_info())
+        self._apply_pipeline_info(info)
+        self._report_scan_guess(tokens)
+
+    def _report_scan_guess(self, tokens) -> None:
+        """State what the folder scan filled in, on the run dashboard."""
+        if tokens is None:
+            msg = ("Scanned folder: schema guessed, channel tokens not "
+                   "recognised — check the Channel Tokens rows")
+        else:
+            named = ", ".join(tokens.fluor_tokens) or "none"
+            msg = f"Scanned folder: channels {named}"
+            if tokens.nuclear_token:
+                msg += f"; segmentation channel {tokens.nuclear_token}"
+            if tokens.phase_token:
+                msg += f"; phase {tokens.phase_token}"
+            msg += " — check before running"
+        try:
+            self._dashboard.set_status(msg)
+        except Exception:
+            swallowed()
+

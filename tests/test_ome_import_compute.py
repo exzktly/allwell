@@ -199,6 +199,28 @@ def test_default_channel_roles_falls_back_to_first_channel():
     assert roles["YFP"] == "fluor"
 
 
+def test_default_channel_roles_fallback_skips_a_phase_channel():
+    # The positional fallback must not take a brightfield channel: segmenting an
+    # uncorrected phase image with a fluorescence routine measures nothing. The
+    # channel list arrives in sorted-filename order, so DIC leads it often.
+    roles = default_channel_roles(["DIC", "GFP", "mCherry"])
+    assert roles == {"DIC": "phase", "GFP": "nuclear", "mCherry": "fluor"}
+    assert default_channel_roles(["BF", "YFP"]) == {"BF": "phase", "YFP": "nuclear"}
+
+
+def test_default_channel_roles_uses_a_phase_channel_only_as_a_last_resort():
+    # Every channel reads as phase → one still has to take the segmentation role,
+    # because segmentation needs an input.
+    roles = default_channel_roles(["BF", "DIC"])
+    assert roles["BF"] == "nuclear"
+    assert roles["DIC"] == "phase"
+
+
+def test_default_channel_roles_stain_still_beats_a_leading_phase_channel():
+    roles = default_channel_roles(["DIC", "GFP", "DAPI"])
+    assert roles == {"DIC": "phase", "GFP": "fluor", "DAPI": "nuclear"}
+
+
 def test_default_channel_roles_keeps_only_first_nuclear():
     roles = default_channel_roles(["DAPI", "Hoechst", "GFP"])
     assert roles["DAPI"] == "nuclear"
@@ -206,16 +228,32 @@ def test_default_channel_roles_keeps_only_first_nuclear():
 
 
 def test_channel_tokens_from_roles_aggregates():
+    # The phase channel is named as such AND stays in the fluor list: the
+    # pipeline quantifies it (it only skips its background correction), and the
+    # Analyze form carries the Phase designation as a checkbox on a channel row,
+    # so a phase token outside fluor_tokens has no row to be ticked on.
     tokens = channel_tokens_from_roles([
         ("DAPI", "nuclear"), ("GFP", "fluor"), ("RFP", "fluor"),
         ("Phase", "phase"), ("Junk", "skip"),
     ])
     assert tokens.nuclear_token == "DAPI"
-    assert tokens.fluor_tokens == ["GFP", "RFP"]
+    assert tokens.fluor_tokens == ["GFP", "RFP", "Phase"]
     assert tokens.phase_token == "Phase"
     info = tokens.as_pipeline_info()
-    assert info == {"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"],
+    assert info == {"nuclear_token": "DAPI",
+                    "fluor_tokens": ["GFP", "RFP", "Phase"],
                     "phase_token": "Phase"}
+
+
+def test_channel_tokens_from_roles_keeps_the_phase_channel_in_place():
+    # Order follows the input pairs, so the phase channel keeps its position
+    # rather than being appended or dropped.
+    tokens = channel_tokens_from_roles([
+        ("DIC", "phase"), ("GFP", "fluor"), ("RFP", "nuclear"),
+    ])
+    assert tokens.fluor_tokens == ["DIC", "GFP"]
+    assert tokens.phase_token == "DIC"
+    assert tokens.nuclear_token == "RFP"
 
 
 def test_convert_writes_dataset_folder(tmp_path):

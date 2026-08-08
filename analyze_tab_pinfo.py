@@ -92,6 +92,26 @@ class AnalyzePipelineInfoMixin:
         }
         return {k: v for k, v in flat.items() if v is not None}
 
+    def _restore_channel_rows(self, d: dict) -> None:
+        """Apply the channel-token keys of a flattened sidecar to the form's rows.
+
+        An absent key means "leave this alone", the same rule the scalar setters
+        follow. That has to be spelled out here because the list is not restored
+        field by field: an empty ``fluor_tokens`` reaching ``_set_fluor_rows`` is
+        read as "no channels" and collapses the rows to the single default one,
+        so a caller that knows nothing about channels — the folder scan that
+        recognised no channel slot, say — would wipe a hand-typed list. A caller
+        naming only the flags applies them to the rows already on the form.
+        """
+        if not any(k in d for k in ("fluor_tokens", "smfish_tokens", "phase_token")):
+            return
+        tokens = d.get("fluor_tokens")
+        self._set_fluor_rows(
+            list(tokens) if tokens else self._fluor_tokens_list(),
+            smfish=list(d.get("smfish_tokens") or []),
+            phase=str(d.get("phase_token") or "").strip(),
+        )
+
     def _apply_pipeline_info(self, info: dict, *, source: Path | None = None) -> None:
         d = self._pinfo_flat(info)
 
@@ -128,11 +148,7 @@ class AnalyzePipelineInfoMixin:
 
         # Channel tokens.
         s("_nuclear_token_edit", d.get("nuclear_token"))
-        self._set_fluor_rows(
-            list(d.get("fluor_tokens") or []),
-            smfish=list(d.get("smfish_tokens") or []),
-            phase=str(d.get("phase_token") or "").strip(),
-        )
+        self._restore_channel_rows(d)
 
         # Cellpose / watershed params.
         combo("_cellpose_model_cb", d.get("cellpose_model"))

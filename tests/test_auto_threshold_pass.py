@@ -201,3 +201,62 @@ def test_argv_parse_reads_every_fluor_token():
 def test_argv_parse_defaults(argv, expected):
     from services.remote_runner import _auto_threshold_args_from_argv
     assert _auto_threshold_args_from_argv(argv).csv_prefix == expected
+
+
+def test_argv_parse_applies_the_labelfree_phase_remap():
+    """The argv is what the GUI built, so it is pre-remap.
+
+    ``process_microscopy.main`` moves ``--phase_token`` onto the nuclear slot for
+    a label-free run, and ``_segmentation_tokens`` asks which channel that was.
+    Reading the raw ``--nuclear_token`` here named a channel that was never
+    segmented, so the pass zeroed the wrong channel's threshold and derived a
+    real one from the brightfield image.
+    """
+    from process_microscopy import _segmentation_tokens
+    from services.remote_runner import _auto_threshold_args_from_argv
+
+    argv = [
+        "process_microscopy.py",
+        "--fluor_tokens", "BF", "GFP",
+        "--nuclear_token", "NIR",
+        "--phase_token", "BF",
+        "--segmentation_method", "cellpose_labelfree",
+    ]
+    args = _auto_threshold_args_from_argv(argv)
+    # This assertion first, and phrased through ``_segmentation_tokens``: it is
+    # the question the pass actually asks, and it reads the args object through
+    # ``getattr`` defaults, so it measures the old behaviour rather than dying on
+    # an attribute the old code never set.
+    assert _segmentation_tokens(args) == {"bf"}
+    assert args.nuclear_token == "BF"
+    assert args.phase_token == "BF"
+
+
+def test_argv_parse_leaves_the_nuclear_token_alone_for_other_methods():
+    from process_microscopy import _segmentation_tokens
+    from services.remote_runner import _auto_threshold_args_from_argv
+
+    args = _auto_threshold_args_from_argv([
+        "process_microscopy.py",
+        "--fluor_tokens", "BF", "GFP",
+        "--nuclear_token", "NIR",
+        "--phase_token", "BF",
+        "--segmentation_method", "stardist_nuclei",
+    ])
+    assert args.nuclear_token == "NIR"
+    assert _segmentation_tokens(args) == {"nir"}
+
+
+def test_quantified_tokens_lead_with_segmentation_and_do_not_repeat_it():
+    """After the label-free remap the segmentation channel is also a member of
+    ``--fluor_tokens``; nothing downstream may measure it twice."""
+    from util.channel_roles import quantified_channel_tokens as q
+
+    assert q(["BF", "GFP"], nuclear_token="BF") == ["BF", "GFP"]
+    assert q(["GFP", "nir"], nuclear_token="NIR") == ["NIR", "GFP"]
+    assert q(["GFP", "RFP"], nuclear_token="") == ["GFP", "RFP"]
+    # The cytoplasm channel joins the list only under seeded watershed.
+    assert q(["GFP"], nuclear_token="DAPI", cytoplasm_token="CY") == ["DAPI", "GFP"]
+    assert q(["GFP"], nuclear_token="DAPI", cytoplasm_token="CY",
+             segmentation_method="stardist_seeded_watershed_cell") == \
+        ["DAPI", "GFP", "CY"]

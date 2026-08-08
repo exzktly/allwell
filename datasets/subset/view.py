@@ -41,35 +41,26 @@ from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
 from datasets.subset.dashboard import SubsetDashboard
 from datasets.subset.subset_compute import (
-    DatasetPaths,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
+from datasets._common.dataset_fields import is_dataset, is_free_destination
+from datasets._common.dataset_fields import promote_open_button
 
 
 
 
-def _is_dataset(root: Path) -> str:
-    if not (root / "in").is_dir() or not (root / "out").is_dir():
-        return "Needs an 'in' and an 'out' folder."
-    return ""
+_is_dataset = is_dataset
 
 
 def _is_destination(root: Path) -> str:
-    """Return "" if *root* is usable as a subset destination, else a short
-    reason — mirrors ``datasets/concatenate/view.py``'s own ``_is_destination``.
-    Subset's destination field was the only one in the pane with no
-    validator: a folder that already held a finished dataset just left the
-    Subset button silently disabled with no inline reason, and
-    ``build_subset_plan`` (``subset_compute.py``) already refuses exactly
-    this at plan time — the field should say so before the user presses Run,
-    not after."""
-    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
-    if destination_is_complete_dataset(dest):
-        return "Already holds a finished dataset — choose an empty folder."
-    if destination_has_unrecognized_content(dest):
-        return "Already has unrelated files — choose an empty folder."
-    return ""
+    """This page's destination rule: the shared one, bound to this tool's
+    own in-progress marker through its compute module's predicates."""
+    return is_free_destination(
+        root,
+        is_complete=destination_is_complete_dataset,
+        has_unrecognized=destination_has_unrecognized_content,
+    )
 
 
 class SubsetPage(LogPanelMixin, QWidget):
@@ -291,11 +282,7 @@ class SubsetPage(LogPanelMixin, QWidget):
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
-        self._open_btn.setVisible(True)
-        # Promoted to the primary action on success, demoting Subset — see
-        # ConcatenatePage.show_open_in_review for the reasoning.
-        set_variant(self._open_btn, "primary")
-        set_variant(self._run_btn, "secondary")
+        promote_open_button(self._open_btn, self._run_btn)
 
     def revalidate_fields(self) -> None:
         self._src_field.revalidate()

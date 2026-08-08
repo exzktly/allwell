@@ -51,6 +51,7 @@ from datasets.ome_import.ome_import_compute import (
     read_layout,
     selection_target,
 )
+from datasets._common.dataset_fields import promote_open_button
 
 _ROLE_LABELS = {
     "nuclear": "Nuclear / segmentation",
@@ -478,11 +479,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
 
     def show_open_in_analyze(self, dest_root: str) -> None:
         self._dest_root = dest_root
-        self._open_btn.setVisible(True)
-        # Promoted to the primary action on success, demoting Convert — see
-        # ConcatenatePage.show_open_in_review for the reasoning.
-        set_variant(self._open_btn, "primary")
-        set_variant(self._run_btn, "secondary")
+        promote_open_button(self._open_btn, self._run_btn)
 
     def refresh_readout(self) -> None:
         """Recompute the split readout and the frame-order visibility / Run gate."""

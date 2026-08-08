@@ -33,35 +33,27 @@ from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from datasets.concatenate.concatenate_compute import (
-    DatasetPaths,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
 from datasets.concatenate.dashboard import ConcatDashboard
+from datasets._common.dataset_fields import is_dataset, is_free_destination
+from datasets._common.dataset_fields import promote_open_button
 
 
 
 
-def _is_dataset(root: Path) -> str:
-    """Return "" if *root* looks like a dataset, else a short reason."""
-    if not (root / "in").is_dir() or not (root / "out").is_dir():
-        return "Needs an 'in' and an 'out' folder."
-    return ""
+_is_dataset = is_dataset
 
 
 def _is_destination(root: Path) -> str:
-    """Return "" if *root* is usable as a destination, else a short reason.
-
-    Only the checks that don't need the other two fields — the "must differ
-    from both datasets" rule is cross-field and handled separately by
-    :meth:`ConcatenatePage._revalidate_cross`.
-    """
-    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
-    if destination_is_complete_dataset(dest):
-        return "Already holds a finished dataset — choose an empty folder."
-    if destination_has_unrecognized_content(dest):
-        return "Already has unrelated files — choose an empty folder."
-    return ""
+    """This page's destination rule: the shared one, bound to this tool's
+    own in-progress marker through its compute module's predicates."""
+    return is_free_destination(
+        root,
+        is_complete=destination_is_complete_dataset,
+        has_unrecognized=destination_has_unrecognized_content,
+    )
 
 
 class ConcatenatePage(LogPanelMixin, QWidget):
@@ -273,15 +265,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
-        self._open_btn.setVisible(True)
-        # Promoted to the primary action on success, demoting Concatenate --
-        # the natural next step once a run finishes is opening the result,
-        # not running the same merge again, but the plain "secondary"
-        # Open button used to sit visually subordinate to a Concatenate
-        # button that no longer has anything useful left to do until the
-        # inputs change.
-        set_variant(self._open_btn, "primary")
-        set_variant(self._run_btn, "secondary")
+        promote_open_button(self._open_btn, self._run_btn)
 
     # ── internals ────────────────────────────────────────────────────────────
     def _inputs_ready(self) -> bool:

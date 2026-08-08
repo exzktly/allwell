@@ -27,6 +27,7 @@ from pathlib import Path
 
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
+from types import SimpleNamespace
 
 
 class DatasetPathsError(Exception):
@@ -441,3 +442,42 @@ def known_channel_tokens(*infos: dict) -> tuple[str, ...]:
         if phase and phase not in tokens:
             tokens.append(phase)
     return tuple(tokens)
+
+
+# ── the per-tool wrapper set ─────────────────────────────────────────────────
+def make_dataset_api(error_cls: type[Exception], marker_name: str):
+    """Return this module's dataset entry points bound to one tool's choices.
+
+    Three tools wrapped the same five functions identically, differing only in
+    which exception they raise and which in-progress marker filename they own.
+    The wrappers exist for a real reason — every raise inside a tool's compute
+    module should carry that tool's error type, so a caller can catch its whole
+    surface with one ``except`` — but writing them out per tool is how the five
+    drift apart.
+
+    Returns a namespace with ``resolve_dataset``, ``read_info``,
+    ``destination_has_marker``, ``destination_is_failed_run`` and
+    ``destination_has_unrecognized_content``; a tool binds them to module-level
+    names so its own public API is unchanged.
+    """
+    def resolve(root: Path | str, *, label: str) -> DatasetPaths:
+        try:
+            return resolve_dataset(root, label=label)
+        except DatasetPathsError as exc:
+            raise error_cls(str(exc)) from exc
+
+    def info(paths: DatasetPaths, *, label: str) -> dict:
+        try:
+            return read_info(paths, label=label)
+        except DatasetPathsError as exc:
+            raise error_cls(str(exc)) from exc
+
+    return SimpleNamespace(
+        resolve_dataset=resolve,
+        read_info=info,
+        destination_has_marker=lambda dest: destination_has_marker(dest, marker_name),
+        destination_is_failed_run=lambda dest: destination_is_failed_run(dest, marker_name),
+        destination_has_unrecognized_content=(
+            lambda dest: destination_has_unrecognized_content(dest, marker_name)
+        ),
+    )

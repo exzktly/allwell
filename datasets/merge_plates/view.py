@@ -36,29 +36,28 @@ from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.merge_plates.dashboard import MergePlatesDashboard
 from datasets.merge_plates.merge_plates_compute import (
-    DatasetPaths,
     MergePlatesError,
     block_shift_well_map,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
+from datasets._common.dataset_fields import is_dataset, is_free_destination
+from datasets._common.dataset_fields import promote_open_button
 
 
 
 
-def _is_dataset(root: Path) -> str:
-    if not (root / "in").is_dir() or not (root / "out").is_dir():
-        return "Needs an 'in' and an 'out' folder."
-    return ""
+_is_dataset = is_dataset
 
 
 def _is_destination(root: Path) -> str:
-    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
-    if destination_is_complete_dataset(dest):
-        return "Already holds a finished dataset — choose an empty folder."
-    if destination_has_unrecognized_content(dest):
-        return "Already has unrelated files — choose an empty folder."
-    return ""
+    """This page's destination rule: the shared one, bound to this tool's
+    own in-progress marker through its compute module's predicates."""
+    return is_free_destination(
+        root,
+        is_complete=destination_is_complete_dataset,
+        has_unrecognized=destination_has_unrecognized_content,
+    )
 
 
 class MergePlatesPage(LogPanelMixin, QWidget):
@@ -270,11 +269,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
 
     def show_open_in_review(self, dest_root: str) -> None:
         self._dest_root = dest_root
-        self._open_btn.setVisible(True)
-        # Promoted to the primary action on success, demoting Merge — see
-        # ConcatenatePage.show_open_in_review for the reasoning.
-        set_variant(self._open_btn, "primary")
-        set_variant(self._run_btn, "secondary")
+        promote_open_button(self._open_btn, self._run_btn)
 
     def revalidate_fields(self, *, ok: bool = False) -> None:
         """*ok*: after a successful run, the destination's validator message

@@ -95,3 +95,59 @@ def test_sample_stems_from_per_well_zips(tmp_path):
 def test_infer_from_dir_empty(tmp_path):
     (tmp_path / "empty").mkdir()
     assert infer_from_dir(tmp_path / "empty") is None
+
+
+_PLATE96 = [f"{r}{c:02d}" for r in "ABCDEFGH" for c in range(1, 13)]
+_FOVS9 = [f"f{i}" for i in range(9)]
+
+
+def test_full_plate_loose_tifs_named_channel_first_sees_every_channel(tmp_path):
+    # A leading slice of this sorted listing is all DIC — 864 names before the
+    # first GFP. A channel slot holding one distinct value is not recognised as
+    # the channel slot, so the scan used to report no channels at all and the
+    # Analyze auto-fill had nothing to offer.
+    d = tmp_path / "ds" / "in"
+    d.mkdir(parents=True)
+    for c in ("DIC", "GFP", "RFP"):
+        for w in _PLATE96:
+            for f in _FOVS9:
+                (d / f"{c}_{w}_{f}_t0.tif").write_bytes(b"")
+    guess = infer_from_dir(tmp_path / "ds")
+    assert guess is not None
+    assert sorted(guess.channels) == ["DIC", "GFP", "RFP"]
+
+
+def test_full_plate_channel_major_zips_sees_every_channel(tmp_path):
+    # Same shape in the per-well-zip layout: each archive holds all of one
+    # channel's fields before the next channel starts, and only a few members
+    # per archive are sampled.
+    in_dir = tmp_path / "ds" / "in"
+    in_dir.mkdir(parents=True)
+    for w in _PLATE96:
+        with zipfile.ZipFile(in_dir / f"{w}.zip", "w") as zf:
+            for c in ("DIC", "GFP", "RFP"):
+                for f in _FOVS9:
+                    zf.writestr(f"exp_{c}_{w}_{f}_t0.tif", b"")
+    guess = infer_from_dir(tmp_path / "ds")
+    assert guess is not None
+    assert sorted(guess.channels) == ["DIC", "GFP", "RFP"]
+
+
+def test_phase_channel_does_not_take_the_segmentation_role(tmp_path):
+    # End of the reported chain: the scan reports channels in sorted-filename
+    # order, so DIC leads whatever order the images were acquired in. It must
+    # still come back as the phase channel, not the segmentation one, and it must
+    # stay in the channel list.
+    d = tmp_path / "ds" / "in"
+    d.mkdir(parents=True)
+    for c in ("mCherry", "GFP", "DIC"):
+        for w in ("A01", "A02", "B01"):
+            for f in ("f0", "f1"):
+                (d / f"exp_{c}_{w}_{f}_t0.tif").write_bytes(b"")
+    guess = infer_from_dir(tmp_path / "ds")
+    assert guess is not None
+    assert guess.channels == ["DIC", "GFP", "mCherry"]
+    tokens = guess.channel_tokens()
+    assert tokens.phase_token == "DIC"
+    assert tokens.nuclear_token != "DIC"
+    assert "DIC" in tokens.fluor_tokens

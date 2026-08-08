@@ -182,3 +182,74 @@ def test_analyze_phase_checkbox(qapp):
     _set_method(tab, "cellpose_labelfree")
     p0.setChecked(True)
     assert tab._segmentation_validation_errors() == []
+
+
+def test_phase_channel_cannot_also_be_the_segmentation_channel(qapp):
+    """A Phase channel named as the segmentation input is refused by every
+    routine but the label-free one.
+
+    The reported failure: the folder-scan auto-fill put a DIC channel in the
+    Segmentation channel field, the operator marked that channel Phase in the
+    rows, and ``stardist_nuclei`` then ran StarDist over an uncorrected
+    brightfield image. The run completed and wrote a full-looking set of CSVs,
+    so nothing about the output said the segmentation input was wrong.
+    """
+    from analyze_tab import AnalyzeTab
+    tab = AnalyzeTab()
+    while len(tab._fluor_rows) < 2:
+        tab._fluor_add_row("GFP")
+    (e0, _s0, p0, _b0) = tab._fluor_rows[0]
+    (e1, _s1, _p1, _b1) = tab._fluor_rows[1]
+    e0.setText("DIC")
+    e1.setText("GFP")
+    p0.setChecked(True)
+
+    _set_method(tab, "stardist_nuclei")
+    tab._nuclear_token_edit.setText("RFP")
+    assert tab._segmentation_validation_errors() == []
+
+    # The collision, including a case-only difference.
+    tab._nuclear_token_edit.setText("DIC")
+    assert any("Phase" in e and "segmentation channel" in e
+               for e in tab._segmentation_validation_errors())
+    tab._nuclear_token_edit.setText("dic")
+    assert tab._segmentation_validation_errors() != []
+
+    # The label-free preset segments the phase channel by design; the field is
+    # hidden there and its value must not be read as a collision.
+    _set_method(tab, "cellpose_labelfree")
+    assert tab._segmentation_validation_errors() == []
+
+
+def test_phase_channel_cannot_also_be_the_cytoplasm_channel(qapp):
+    from analyze_tab import AnalyzeTab
+    tab = AnalyzeTab()
+    while len(tab._fluor_rows) < 2:
+        tab._fluor_add_row("GFP")
+    (e0, _s0, p0, _b0) = tab._fluor_rows[0]
+    tab._fluor_rows[1][0].setText("GFP")
+    e0.setText("BF")
+    p0.setChecked(True)
+    _set_method(tab, "stardist_seeded_watershed_cell")
+    tab._nuclear_token_edit.setText("DAPI")
+    tab._cytoplasm_edit.setText("BF")
+    assert any("cytoplasm channel" in e for e in tab._segmentation_validation_errors())
+    tab._cytoplasm_edit.setText("GFP")
+    assert tab._segmentation_validation_errors() == []
+
+
+def test_set_fluor_rows_restores_a_lowercased_phase_token(qapp):
+    """The sidecar records ``phase_token`` lower-cased while the channel list
+    keeps the filenames' casing, and a phase token can arrive naming a channel
+    that is not in the list at all. Neither may lose the designation."""
+    from analyze_tab import AnalyzeTab
+    tab = AnalyzeTab()
+
+    tab._set_fluor_rows(["GFP", "DIC"], smfish=[], phase="dic")
+    assert tab._fluor_tokens_list() == ["GFP", "DIC"]
+    assert tab._phase_token() == "DIC"
+
+    # Not in the list → it gets a row of its own rather than being dropped.
+    tab._set_fluor_rows(["GFP", "RFP"], smfish=[], phase="BF")
+    assert tab._fluor_tokens_list() == ["GFP", "RFP", "BF"]
+    assert tab._phase_token() == "BF"

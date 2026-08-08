@@ -73,7 +73,7 @@ FREE_VALUES = frozenset({0, 16777215})
 # work rather than a reason to weaken the scan. Shrink-only: name one, delete
 # its line.
 EXPRESSION_ALLOWLIST = {
-    "analyze_tab.py:346",
+    "analyze_tab.py:345",
     "well_viewer/core/plot_toggles.py:59",
     "widgets/color_picker_popover.py:237",
     "widgets/color_picker_popover.py:242",

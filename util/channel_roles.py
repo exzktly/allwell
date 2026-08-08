@@ -8,6 +8,11 @@ the OME-TIFF converter (from the file's channel metadata) and the Analyze page
 (from filenames scanned off the input folder). Both call this module so the guess
 is identical either way.
 
+The nuclear and phase roles are mutually exclusive: a channel whose name reads as
+phase/brightfield is never handed the segmentation role while another channel is
+available, and the phase channel remains a member of ``fluor_tokens`` so that
+Analyze has a row on which to carry its Phase checkbox.
+
 Stdlib-only, so it stays importable from ``util`` without pulling in Qt or the
 feature packages (the same reason ``util.well_token`` / ``util.timepoint`` live
 here). Listed in ``services.remote_runner._REQUIRED_REMOTE_FILES`` so the manifest
@@ -20,6 +25,10 @@ import re
 from dataclasses import dataclass, field
 
 CHANNEL_ROLES = ("nuclear", "fluor", "phase", "skip")
+
+#: The segmentation routines whose input *is* the phase channel. Every other
+#: routine segments a fluorescent stain.
+LABELFREE_METHODS = ("cellpose_labelfree",)
 
 # Names that read as the nuclear/segmentation channel. Two tiers: a *strong*
 # nuclear stain (DAPI/Hoechst/…) always wins as the segmentation channel, and a
@@ -69,6 +78,14 @@ def _pick_nuclear(names: list[str]) -> str | None:
 
     A strong nuclear stain wins over a secondary (NIR/RFP) channel regardless of
     order; with neither, the first channel is used so segmentation always has one.
+
+    A phase/brightfield-looking name (``DIC``, ``BF``, ``Phase``…) is never taken
+    by that positional fallback while any other channel exists. Segmenting a
+    brightfield frame with a fluorescence routine measures nothing, and the
+    channel order this runs on comes from a sorted filename listing, so ``DIC``
+    lands first often enough that the fallback would keep choosing it. Only when
+    *every* channel reads as phase does one of them take the role, because
+    segmentation still needs an input.
     """
     strong = [n for n in names if _NUCLEAR_STRONG_RE.search(n or "")]
     if strong:
@@ -76,6 +93,9 @@ def _pick_nuclear(names: list[str]) -> str | None:
     secondary = [n for n in names if _NUCLEAR_SECONDARY_RE.search(n or "")]
     if secondary:
         return secondary[0]
+    non_phase = [n for n in names if not _PHASE_HINT_RE.search(n or "")]
+    if non_phase:
+        return non_phase[0]
     return names[0] if names else None
 
 
@@ -98,18 +118,90 @@ def default_channel_roles(names) -> dict[str, str]:
     return roles
 
 
+def unique_tokens_preserve_order(tokens) -> list[str]:
+    """Stable de-dupe for channel tokens, ignoring case and surrounding whitespace."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for tok in tokens:
+        cleaned = str(tok or "").strip()
+        if cleaned and cleaned.lower() not in seen:
+            seen.add(cleaned.lower())
+            out.append(cleaned)
+    return out
+
+
+def quantified_channel_tokens(
+    fluor_tokens,
+    *,
+    nuclear_token: str,
+    segmentation_method: str = "",
+    cytoplasm_token: str = "",
+) -> list[str]:
+    """The channels that end up with quantified intensity columns in the CSVs.
+
+    The segmentation channel is quantified like any other and leads the list;
+    the cytoplasm channel joins it under seeded watershed. Either may already be
+    a member of *fluor_tokens* — always so after the label-free phase remap — so
+    the result is de-duplicated case-insensitively, first occurrence winning.
+
+    One definition for three call sites that have to agree: the run's own channel
+    list, the ``pipeline_info.json`` sidecar it writes, and the auto-threshold
+    pass a batched remote run re-runs locally.
+    """
+    ordered = [nuclear_token, *fluor_tokens]
+    if segmentation_method == "stardist_seeded_watershed_cell":
+        ordered.append(cytoplasm_token)
+    return unique_tokens_preserve_order(ordered)
+
+
+def phase_role_conflicts(
+    segmentation_method: str,
+    *,
+    phase_token: str,
+    nuclear_token: str,
+    cytoplasm_token: str = "",
+) -> list[str]:
+    """The segmentation slots *phase_token* illegally occupies: ``nuclear``/``cytoplasm``.
+
+    The phase channel skips flat-field and background correction outright, so
+    handing it to a fluorescence routine as a segmentation input means running
+    that routine over an uncorrected brightfield frame. The run completes and
+    writes a full-looking set of CSVs measured on the wrong image, which is why
+    this is refused rather than warned about. The label-free routines are exempt:
+    segmenting the phase image is what they are for.
+
+    Shared by the Analyze form and ``process_microscopy``'s argument validation
+    so the rule has one definition — the CLI and remote runs never reach the
+    form's copy.
+    """
+    phase = str(phase_token or "").strip().lower()
+    if not phase or segmentation_method in LABELFREE_METHODS:
+        return []
+    slots = {"nuclear": nuclear_token}
+    if segmentation_method == "stardist_seeded_watershed_cell":
+        slots["cytoplasm"] = cytoplasm_token
+    return [slot for slot, tok in slots.items()
+            if phase == str(tok or "").strip().lower()]
+
+
 def channel_tokens_from_roles(role_pairs) -> ChannelTokens:
     """Aggregate an ordered ``[(name, role), …]`` list into a :class:`ChannelTokens`.
 
     Takes the first ``nuclear`` and first ``phase`` (extra picks fall to
     fluorescent); ``skip`` channels are dropped from every role.
+
+    A phase channel **stays in** ``fluor_tokens``, unlike the nuclear one. Both
+    consumers require that: the pipeline quantifies the phase channel like any
+    other (it only skips its background correction), and Analyze carries the
+    Phase designation as a checkbox *on* a fluorescent-channel row, so a
+    ``phase_token`` naming a channel outside ``fluor_tokens`` has nowhere to be
+    ticked and the designation is lost along with the channel.
     """
     pairs = list(role_pairs)
     nuclear = next((n for n, r in pairs if r == "nuclear"), "")
     phase = next((n for n, r in pairs if r == "phase"), "")
-    used_singletons = {nuclear, phase} - {""}
     fluor = [
         n for n, r in pairs
-        if n not in used_singletons and r in ("fluor", "nuclear", "phase")
+        if n != nuclear and r in ("fluor", "nuclear", "phase")
     ]
     return ChannelTokens(nuclear_token=nuclear, fluor_tokens=fluor, phase_token=phase)

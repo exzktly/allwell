@@ -106,11 +106,13 @@ def test_channel_roles_seed_from_names_and_export_tokens(qapp, tmp_path):
     assert page.channel_tokens_dict() == {
         "nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"]}
 
-    # Override: mark RFP as phase → it leaves the fluor list.
+    # Override: mark RFP as phase → it is named as the phase channel but stays a
+    # member of the fluor list, because Analyze carries the Phase designation as
+    # a checkbox on a channel row and the pipeline quantifies it like any other.
     _, rfp_cb = next((n, cb) for n, cb in page._channel_rows if n == "RFP")
     _select(rfp_cb, "phase")
     assert page.channel_tokens_dict() == {
-        "nuclear_token": "DAPI", "fluor_tokens": ["GFP"], "phase_token": "RFP"}
+        "nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"], "phase_token": "RFP"}
 
 
 def test_channel_roles_prefill_analyze_on_open(qapp, tmp_path):
@@ -122,6 +124,20 @@ def test_channel_roles_prefill_analyze_on_open(qapp, tmp_path):
     tab._apply_pipeline_info({"nuclear_token": "DAPI", "fluor_tokens": ["GFP", "RFP"]})
     assert tab._nuclear_token_edit.text() == "DAPI"
     assert tab._fluor_tokens_list() == ["GFP", "RFP"]
+
+
+def test_phase_role_handoff_keeps_the_channel_and_ticks_phase(qapp, tmp_path):
+    # A channel given the phase role survives the handoff as a row with its Phase
+    # box ticked. It used to be dropped from fluor_tokens, which left the Analyze
+    # form with no row to carry the flag: the channel vanished and _phase_token()
+    # came back empty, silently disabling the phase passthrough.
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    tab._apply_pipeline_info({
+        "nuclear_token": "DAPI", "fluor_tokens": ["GFP", "DIC"], "phase_token": "DIC"})
+    assert tab._fluor_tokens_list() == ["GFP", "DIC"]
+    assert tab._phase_token() == "DIC"
 
 
 def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):

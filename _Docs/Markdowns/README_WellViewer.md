@@ -272,8 +272,12 @@ A common end-to-end run, from raw images to plots, takes five clicks:
 2. **Open input folder** — point at the folder of raw TIFs (or a folder of
    per-well ZIPs). All-Well briefly scans the filenames and **auto-fills the
    filename schema and channel tokens** it detects (including a best-guess
-   nuclear/fluorescent/phase role per channel); check them and adjust if the
-   guess is off.
+   nuclear/fluorescent/phase role per channel). The status line under the run
+   controls names what it found and which channel it gave the segmentation role,
+   because the filled-in fields otherwise look exactly like ones you typed —
+   check them and adjust if the guess is off. Note that channels are listed in
+   filename order, which is usually alphabetical rather than the order they were
+   acquired in.
 3. Confirm the schema and channel tokens. Click **Run**.
 4. When the log prints "Processing complete" the app auto-switches to
    **Review** and loads the output folder.
@@ -337,6 +341,20 @@ Any string  preserved as-is and sorted lexicographically
 - **smFISH channels** (optional). Channels processed for spot detection.
   Each smFISH channel appears with both a regular intensity column set and
   a `_smfish_count` column.
+- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
+  holding your brightfield / DIC image. That channel skips flat-field and
+  background correction entirely — those corrections have nothing to remove from
+  a brightfield frame and only add artefacts — and is saved from the original.
+  It is still quantified like any other channel. At most one channel can be
+  Phase, and it cannot also be smFISH.
+
+  **The Phase channel cannot also be the segmentation channel**, except under the
+  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
+  correction, segmenting it with a fluorescence routine means running that
+  routine over an uncorrected brightfield image; the run would finish and write a
+  complete-looking set of CSVs measured on the wrong picture. Setting both to the
+  same channel is refused before the run starts, with a message naming the
+  channel.
 
 ### 3. Folders
 
@@ -2014,7 +2032,9 @@ the layout Analyze processes. Do this first, then open the result in Analyze.
    **Skip**. The roles are seeded from the channel names: a `DAPI` / `Hoechst`-type
    stain is guessed as the nuclear/segmentation channel, or failing that a
    `NIR` / `RFP` channel (the usual far-red segmentation markers), with the rest
-   fluorescent; change any of them. This is only a convenience: the channel names are always written into the
+   fluorescent; change any of them. A channel whose name reads as brightfield
+   (`DIC`, `BF`, `Phase`, `Trans`) is never guessed as the segmentation channel
+   unless there is nothing else to segment. This is only a convenience: the channel names are always written into the
    output filenames regardless, but the roles you set here **pre-fill Analyze's
    channel-token fields** when you open the dataset there, so you don't retype them.
 

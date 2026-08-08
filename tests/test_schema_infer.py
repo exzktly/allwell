@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import zipfile
 
+import pytest
+
 from util.schema_infer import infer_from_dir, infer_schema, sample_stems
 
 
@@ -90,6 +92,44 @@ def test_sample_stems_from_per_well_zips(tmp_path):
     # Well variety came from across zips → the well slot was found.
     assert guess.fields == ["experiment", "channel", "well", "fov", "timepoint"]
     assert guess.channels == ["DAPI", "GFP"]
+
+
+@pytest.mark.parametrize("select", ["root", "in"])
+def test_sample_stems_from_per_well_folders(tmp_path, select):
+    """The third grouped layout, which used to yield nothing at all.
+
+    ``in/<WELL>/*.tif`` has no loose TIFs and no zips at either level, so the
+    sampler returned an empty list, ``infer_from_dir`` returned ``None``, and
+    the Analyze form kept whatever separator and schema the user last had —
+    then the run failed on a schema it had never prompted them to fill in. It
+    failed identically whether the dataset root or its ``in/`` was selected.
+    """
+    in_dir = tmp_path / "ds" / "in"
+    for well in ("A01", "A02", "B01"):
+        (in_dir / well).mkdir(parents=True)
+        for c in ("DAPI", "GFP"):
+            (in_dir / well / f"exp_{c}_{well}_f0_t0.tif").write_bytes(b"")
+
+    target = tmp_path / "ds" if select == "root" else in_dir
+    assert sample_stems(target)
+    guess = infer_from_dir(target)
+    assert guess is not None and guess.confident
+    # Well variety came from across the folders → the well slot was found.
+    assert guess.fields == ["experiment", "channel", "well", "fov", "timepoint"]
+    assert guess.channels == ["DAPI", "GFP"]
+
+
+def test_a_folder_that_is_not_a_well_is_not_sampled(tmp_path):
+    """Only ``<WELL>/`` children count — a nesting level is not a well.
+
+    ``in/t0/A01.zip`` is a shape the resolver accepts and this cannot name
+    wells for; sampling ``t0/`` as though it were one would seed the form with
+    a schema inferred from the wrong level.
+    """
+    in_dir = tmp_path / "ds" / "in" / "t0"
+    in_dir.mkdir(parents=True)
+    (in_dir / "exp_DAPI_A01_f0_t0.tif").write_bytes(b"")
+    assert sample_stems(tmp_path / "ds") == []
 
 
 def test_infer_from_dir_empty(tmp_path):

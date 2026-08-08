@@ -194,6 +194,64 @@ def test_already_grouped_in_folder_is_not_regrouped(tmp_path):
     assert on_success is None
 
 
+# ── selecting the dataset folder rather than its in/ ─────────────────────────
+# The two paths used to apply different tests to the same folder: one named
+# ``in`` was accepted whatever was inside it, while one that merely *contained*
+# ``in/`` had to hold a well-named zip or a well-named folder. Anything else —
+# ``Plate1_A1.zip``, a timepoint level between ``in/`` and the wells, an empty
+# ``in/`` — therefore ran when the user picked ``plate/in`` and raised "Cannot
+# determine input layout" when they picked ``plate``.
+
+
+def _make_zip(path: Path) -> None:
+    import zipfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("exp_NIR_A01_1_T01.tif", b"x")
+
+
+@pytest.mark.parametrize("select", ["parent", "in"])
+def test_an_in_folder_of_unrecognised_zips_resolves_rather_than_raising(
+        tmp_path, select):
+    """The reported failure, at the surface the user actually hits.
+
+    A folder whose ``in/`` holds ``Plate1_A1.zip`` is not something this module
+    can name wells for, but the pipeline is what reads it — and it has always
+    been accepted when ``in/`` was selected directly. Selecting the parent now
+    reaches the same place.
+    """
+    root = tmp_path / "plate"
+    _make_zip(root / "in" / "Plate1_A1.zip")
+    _make_zip(root / "in" / "Plate1_A2.zip")
+
+    input_dir, output_dir, on_success = resolve_input_output(
+        root if select == "parent" else root / "in",
+        filename_schema=SCHEMA, filename_sep=SEP)
+
+    assert input_dir == root / "in"
+    assert output_dir == root / "out"
+    assert on_success is None
+
+
+@pytest.mark.parametrize("select", ["parent", "in"])
+def test_an_empty_in_folder_says_it_is_empty(tmp_path, select):
+    """Not "no in/ folder found" — it is right there, and it has nothing in it.
+
+    Three messages used to describe this state and none of them said the true
+    thing: the readout claimed no ``in/`` was found, and the run raised a
+    layout error listing "Selected folder contains a sub-folder named in" as a
+    requirement the user had already met.
+    """
+    root = tmp_path / "plate"
+    (root / "in").mkdir(parents=True)
+
+    with pytest.raises(ValueError) as exc:
+        resolve_input_output(root if select == "parent" else root / "in",
+                             filename_schema=SCHEMA, filename_sep=SEP)
+    assert "empty" in str(exc.value).lower()
+    assert "Cannot determine input layout" not in str(exc.value)
+
+
 # ── AnalyzeTab counter + preview (offscreen Qt) ───────────────────────────────
 
 @pytest.fixture(scope="module")

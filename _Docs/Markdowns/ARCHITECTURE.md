@@ -970,10 +970,23 @@ loaded (the `.../out` path in the split case), not the climbed display name.
 
 #### Empty states and build failures
 
-`ui_helpers.wrap_with_empty_state` now wraps Statistics, Spatial, Review CSV and
-Batch Export too, so a tab opened before a dataset is loaded shows the same
-placeholder every plot tab shows rather than an empty table or a blank panel
-that reads as a failure.
+`ui_helpers.wrap_with_empty_state` wraps every centre tab whose body needs a
+dataset — the plots, Statistics, Spatial, Review CSV, Batch Export and smFISH —
+so a tab opened before one is loaded shows the same placeholder rather than an
+empty table, a blank panel, or a bare matplotlib canvas that reads as a failure.
+The wrap registers a `QStackedWidget` on `win._plot_empty_stacks` and
+`refresh_plot_empty_states` flips all of them together, which is what keeps the
+wording and the moment of the swap identical across tabs.
+
+**The placeholder is for "no dataset"; the axes are for everything else.** A tab
+with a dataset loaded and nothing to draw — no well selected, no timepoints, a
+channel the run never produced — paints its own message on the axes, because the
+message is about the selection rather than about the app having nothing to work
+with. Mixing the two is what made smFISH look unlike its neighbours: it painted
+*both* kinds on the canvas, so the one state every other tab renders as a glyph,
+a sentence and an "Open…" hint appeared there as a muted line of matplotlib
+text. The wrap decides that split; a tab that skips it has no way to show the
+shared placeholder at all.
 
 An actual failure says so. A deferred tab builder that raises used to log a
 traceback and leave an empty page — indistinguishable from a tab with nothing to

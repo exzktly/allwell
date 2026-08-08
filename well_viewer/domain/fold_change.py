@@ -880,7 +880,16 @@ def member_n_series(
             _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
                 rset, t, threshold, use_sem,
             )
-            return (float(n_mean), _finite_spread(n_spread))
+            # Deliberately NOT `_finite_spread`: that helper also requires
+            # `isinstance(value, (int, float))`, which this site never did. The
+            # difference is unreachable today only because
+            # `stats_compute._reduce_reps` coerces with `float()` three call
+            # levels away — and if that ever returned a `numpy.float32`, the
+            # stricter guard would silently turn a real spread into "no error
+            # bar", which is the computed-as-zero-versus-not-computed
+            # conflation §7 of CLAUDE.md names.
+            return (float(n_mean),
+                    float(n_spread) if math.isfinite(n_spread) else 0.0)
         return (float(compute_rep_n_above(ctx, rset, t)), 0.0)
 
     return _member_series(ctx, label,

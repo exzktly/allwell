@@ -15,7 +15,7 @@ Subset and Merge Plates should not be told the same thing two different ways.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from widgets._support import set_variant
 
@@ -37,10 +37,12 @@ def is_free_destination(
 ) -> str:
     """``""`` if *root* is usable as a destination, else a short reason.
 
-    The two predicates come from the caller because each tool binds them to its
+    *has_unrecognized* comes from the caller because each tool binds it to its
     own in-progress marker (see ``_common.dataset_paths.make_dataset_api``): a
     folder holding *this* tool's interrupted attempt is a resume, while the same
-    folder holding another tool's leftovers is not.
+    folder holding another tool's leftovers is not. *is_complete* is not
+    marker-scoped — it only asks whether ``out/pipeline_info.json`` is there —
+    and is passed in for symmetry rather than because it varies.
 
     Cross-field rules — "the destination must differ from both sources" — stay
     on the page, since they need fields this function cannot see.

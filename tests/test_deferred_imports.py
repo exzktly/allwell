@@ -103,7 +103,9 @@ FEATURE_PREFIX = "well_viewer.features"
 # ``controller`` (the re-export point noted above), so the reverse edge —
 # ``export`` needing one function out of ``controller`` — must stay a deferred
 # import to avoid a real init-order cycle, not just a style choice.
-MAX_DEFERRED_FEATURE_IMPORTS = 112
+# 112 -> 110: `ui_helpers.on_theme_change` was deleted as dead code, taking
+# its function-local imports of grouping/tab_view and stats/controller.
+MAX_DEFERRED_FEATURE_IMPORTS = 110
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

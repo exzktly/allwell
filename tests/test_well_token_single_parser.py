@@ -90,29 +90,55 @@ def test_no_module_keeps_its_own_whole_token_well_regex():
     anchored pattern whose entire body is a well token."""
     import ast
     import re
-    from pathlib import Path
 
-    root = Path(__file__).resolve().parent.parent
-    # A well-token body, optionally group-wrapped: ``[A-H]``/``[A-Ha-h]``
-    # followed by one or two digits, and nothing else.
-    body = r"\(?\[A-H(?:a-h)?\]\)?\(?\\d\{1,2\}\)?"
+    from tests._repo_scan import python_sources, rel
+
+    # A well-token body, optionally group-wrapped. The row class covers the
+    # spellings that actually appear — ``[A-H]``, ``[A-Ha-h]``, ``[a-hA-H]`` —
+    # and the column covers ``\d{1,2}``, ``\d\d?`` and ``[0-9]{1,2}``. A guard
+    # that only knew the one spelling it had just deleted would pass on the
+    # next author's ``[0-9]``.
+    row = r"\[(?:A-Ha-h|A-H|a-hA-H|a-h)\]"
+    col = r"(?:\\d|\[0-9\])(?:\{1,2\}|\\d\?|\?)?"
+    body = rf"\(?{row}\)?\(?{col}\)?"
     # Either anchored at BOTH ends (``^...$``, matched against a whole token) or
     # at neither (used with ``fullmatch``). A pattern anchored only at the end
     # is the sanctioned *trailing*-token extractor — ``measurements_b10`` →
     # ``B10`` — which judges a suffix of a longer stem, not a whole token, and
     # ARCHITECTURE §15 names it as a separate operation.
     whole_token = re.compile(rf"^(?:\^{body}\$|{body})$")
+    # The same body anchored only at the end — sanctioned under `re.search`,
+    # a whole-token judge under `re.match`.
+    tail_anchored = re.compile(rf"^{body}\$$")
     offenders = []
-    for sub in ("well_viewer", "services", "datasets", "util", "widgets"):
-        for path in sorted((root / sub).rglob("*.py")):
-            if "__pycache__" in path.parts or path.name == "well_token.py":
+    # The full application surface, including `pipeline/` and the repo-root
+    # modules. Those are not incidental: `util/well_token.py`'s own docstring
+    # names `process_microscopy._canonical_well_label` and
+    # `WellPlateZipper._extract_well_from_filename` as the copies it unified,
+    # and §15's story is a folder that was a well to one of them and not to the
+    # other — so a guard blind to the pipeline could not see half the bug it
+    # exists to prevent.
+    for path in python_sources():
+        if path.name == "well_token.py":
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        # `re.match` anchors the start itself, so a pattern anchored only at the
+        # END is a whole-token judge there — not the sanctioned trailing
+        # extractor, which is what `re.search(r"…$")` is. Collect those calls
+        # first so the literal inside them is judged by how it is used.
+        match_anchored = set()
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("match", "fullmatch") and node.args
+                    and isinstance(node.args[0], ast.Constant)
+                    and isinstance(node.args[0].value, str)
+                    and tail_anchored.match(node.args[0].value)):
+                match_anchored.add((node.args[0].lineno, node.args[0].value))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
                 continue
-            tree = ast.parse(path.read_text(), filename=str(path))
-            for node in ast.walk(tree):
-                if (isinstance(node, ast.Constant) and isinstance(node.value, str)
-                        and whole_token.match(node.value)):
-                    offenders.append(
-                        f"{path.relative_to(root).as_posix()}:{node.lineno} — {node.value!r}")
+            if whole_token.match(node.value) or (node.lineno, node.value) in match_anchored:
+                offenders.append(f"{rel(path)}:{node.lineno} — {node.value!r}")
     assert not offenders, (
         "Whole-token well regex outside util/well_token.py (ARCHITECTURE §15). "
         "Use `canonical_well_label` / `is_valid_well_name` so this module and "

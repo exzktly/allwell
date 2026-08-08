@@ -28,6 +28,14 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QWidget
 import theme
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
 
+# Phase-name column in the rail, so every row's bar starts at one x.
+_PHASE_LABEL_W = 74
+# Per-phase mini progress bar.
+_PHASE_BAR_W = 86
+_PHASE_BAR_H = 6
+# The `n/total` readout beside each phase bar.
+_PHASE_COUNT_W = 40
+
 _PHASES = (("validate", "Validate"), ("merge", "Merge"),
            ("verify", "Verify"), ("finalize", "Finalize"))
 _PHASE_KEYS = tuple(key for key, _ in _PHASES)
@@ -151,16 +159,16 @@ class ConcatDashboard(PlateProgress):
             row = QHBoxLayout(row_w); row.setContentsMargins(0, 0, 0, 0); row.setSpacing(7)
             dot = status_dot(theme.Colors.text_muted)
             row.addWidget(dot)
-            nm = QLabel(label, row_w); nm.setFixedWidth(74)
+            nm = QLabel(label, row_w); nm.setFixedWidth(_PHASE_LABEL_W)
             nm.setStyleSheet(f"color:{theme.Colors.text_primary};")
             row.addWidget(nm)
             bar = cnt = None
             if key == "merge":
                 bar = QProgressBar(row_w)
                 bar.setRange(0, max(1, len(self._wells))); bar.setValue(0)
-                bar.setTextVisible(False); bar.setFixedSize(86, 6)
+                bar.setTextVisible(False); bar.setFixedSize(_PHASE_BAR_W, _PHASE_BAR_H)
                 row.addWidget(bar)
-                cnt = QLabel("0/0", row_w); cnt.setFixedWidth(40)
+                cnt = QLabel("0/0", row_w); cnt.setFixedWidth(_PHASE_COUNT_W)
                 cnt.setStyleSheet(f"color:{theme.Colors.text_muted};")
                 row.addWidget(cnt)
             row.addStretch(1)

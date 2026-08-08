@@ -34,11 +34,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Tokens that mean "no field of view was recorded", as opposed to a real label.
-# ``""`` is what ``parse_filename`` writes for a slot it could not fill; the rest
-# are what the various extractors emit for the same situation.
-UNRECORDED_FOV_TOKENS = frozenset({"", "-1", "nan", "none", "null", "unknown"})
-
 
 @dataclass(frozen=True)
 class FovIntegrity:

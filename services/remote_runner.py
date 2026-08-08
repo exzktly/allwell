@@ -128,6 +128,19 @@ _BREADCRUMB_INTERVAL_S = 60.0
 _WELL_XFER_INTERVAL_S = 1.0
 from util.zip_write import atomic_zip
 from util.well_token import is_valid_well_name
+def _well_zips_in(input_dir: Path):
+    """Every ``<WELL>.zip`` directly under *input_dir*.
+
+    A filesystem glob cannot judge a well. ``[A-H][0-9]*.zip`` — what this
+    replaced — accepted ``A13.zip`` and ``A1_out.zip`` while rejecting a
+    lower-case ``a1.zip``, which is the opposite of what the folder-side scan a
+    few lines away decides with ``is_valid_well_name``. Two rules for "is this a
+    well" inside one function is the §15 defect in miniature: staging would take
+    ``a1/`` but not ``a1.zip``, and ``A13.zip`` but not ``A13/``.
+    """
+    return (p for p in input_dir.glob("*.zip") if is_valid_well_name(p.stem))
+
+
 
 
 def _scratch_dir() -> Path:
@@ -519,7 +532,7 @@ def stage_local_zips(
         log_fn(f"[remote] input layout: {mode.value}\n")
 
     if mode is LocalInputMode.ZIP:
-        well_zips = tuple(sorted(input_dir.glob("[A-H][0-9]*.zip")))
+        well_zips = tuple(sorted(_well_zips_in(input_dir)))
         if not well_zips:
             raise RuntimeError(
                 f"Input dir reports zip-mode but contains no A01.zip-style files: {input_dir}"
@@ -654,7 +667,7 @@ def stage_local_zips(
     # Capture zips that existed BEFORE this stage runs — we must NOT
     # delete those on a partial-zipper failure (they could be user
     # data from a prior run).
-    pre_existing_zips = {p for p in input_dir.glob("[A-H][0-9]*.zip")}
+    pre_existing_zips = {p for p in _well_zips_in(input_dir)}
 
     # Step 0 (v5.x.x): decide whether the zipper actually needs to
     # run. The framework gets here for FLAT mode (loose TIFs at top
@@ -711,7 +724,7 @@ def stage_local_zips(
         except Exception:
             # Roll back ONLY the zips we created in this aborted run.
             # Source TIFs / folders stay intact so the user can re-run.
-            for p in input_dir.glob("[A-H][0-9]*.zip"):
+            for p in _well_zips_in(input_dir):
                 if p not in pre_existing_zips:
                     try:
                         p.unlink()
@@ -762,7 +775,7 @@ def stage_local_zips(
     # succeeded. A part-zipped plate is the correct resume state anyway: the
     # next run reads the finished wells as ZIP mode and picks up the rest.
 
-    well_zips = tuple(sorted(input_dir.glob("[A-H][0-9]*.zip")))
+    well_zips = tuple(sorted(_well_zips_in(input_dir)))
     if not well_zips:
         raise RuntimeError(
             "WellPlateZipper produced no per-well zips; check filename_schema and separator."
@@ -836,7 +849,7 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
     unzipped wells.
     """
     zip_wells: set[str] = set()
-    for p in input_dir.glob("[A-H][0-9]*.zip"):
+    for p in _well_zips_in(input_dir):
         label = _canonical_well_from_path(p.stem)
         if label is not None:
             zip_wells.add(label)
@@ -1068,7 +1081,7 @@ def _stage_mixed_mode(
     originals in ``input_dir`` — including the just-written ones —
     are never mutated by the filter.
     """
-    existing_zip_paths = sorted(input_dir.glob("[A-H][0-9]*.zip"))
+    existing_zip_paths = sorted(_well_zips_in(input_dir))
     existing_wells: dict[str, Path] = {}
     for p in existing_zip_paths:
         label = _canonical_well_from_path(p.stem)

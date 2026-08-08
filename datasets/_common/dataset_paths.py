@@ -65,7 +65,17 @@ def split_stem_well(stem: str) -> tuple[str, str] | None:
     match = _TRAILING_WELL_RE.search(stem)
     if not match:
         return None
-    well = f"{match.group(1).upper()}{int(match.group(2)):02d}"
+    # The regex finds *where* the token starts; `canonical_well_label` decides
+    # whether what it found is a well and what to call it. Padding here instead
+    # made this a second definition of the rule inside the module whose
+    # docstring claims to be the only one: `measurements_a13` came back as
+    # "A13" and `measurements_a0` as "A00", neither of which is a plate
+    # position, while `in_containers` / `out_zips` / `out_folders` a few lines
+    # below rejected both. `dataset_wells` unions all four, so the two
+    # definitions met.
+    well = canonical_well_label(match.group(0))
+    if well is None:
+        return None
     return stem[: match.start()].rstrip("_-"), well
 
 

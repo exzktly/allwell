@@ -40,6 +40,9 @@ from datasets.concatenate.dashboard import ConcatDashboard
 from datasets._common.dataset_fields import is_dataset, is_free_destination
 from datasets._common.dataset_fields import promote_open_button
 
+# The `+` / `=` glyph column in the equation row.
+_EQUATION_OP_W = 20
+
 
 
 
@@ -165,7 +168,7 @@ class ConcatenatePage(LogPanelMixin, QWidget):
             lbl.setObjectName("Heading")
             lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
             lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
-            lbl.setFixedWidth(20)
+            lbl.setFixedWidth(_EQUATION_OP_W)
             return lbl
 
         hl.addWidget(self._ds1_field, 1)

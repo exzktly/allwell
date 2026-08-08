@@ -122,7 +122,8 @@ allwell/
 ├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
 │   ├── _common/                ← what more than one tool needs: dataset_paths,
 │   │                              containers, zip_passthrough, member_names,
-│   │                              concurrency, log_panel
+│   │                              concurrency, log_panel, tool_controller,
+│   │                              dataset_fields
 │   ├── concatenate/            ← Concatenate datasets (compute/apply/worker/view/controller/dashboard)
 │   ├── merge_plates/           ← Merge two plates into one, remapping wells
 │   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
@@ -255,6 +256,8 @@ well_viewer/
 │   │   scope_registry.py, projector_registry.py
 │   ├── load_controller.py, tab_controller.py, selection_controller.py,
 │   │   channel_state_controller.py
+│   ├── fold_change_controls_view.py    ← the Control + Baseline dropdown pair,
+│   │                                    shared by Bar Plots and Line Graphs
 │   ├── plot_orchestrator.py, plot_style.py, plot_toggles.py,
 │   │   plot_card_actions.py, figure_saver.py
 │   ├── timepoint_sync.py             ← shared "focus timepoint" across plotting tabs
@@ -267,7 +270,7 @@ well_viewer/
 │   ├── image_identity.py             ← single source of truth for filenames + CellKey
 ├── domain/                        ← Qt-free models + pure logic
 │   ├── batch_models.py, ratio_models.py, selections_model.py, plate_layout.py
-│   ├── fold_change.py, fold_change_scopes.py, fold_change_controls.py
+│   ├── fold_change.py, fold_change_scopes.py
 │   ├── gating_state.py, sample_definitions.py, viewer_state.py, stats_compute.py
 │   ├── bar_groups.py, plot_groups.py, metric_registry.py, qc_params.py, tp_match.py
 │   ├── multivariate_compute.py       ← PCA/correlation/clustering/faceting math (Qt-free)
@@ -499,7 +502,7 @@ layers:
 │           ── batch_models, ratio_models, selections_model,           │
 │              plate_layout, gating_state, sample_definitions,         │
 │              viewer_state, stats_compute, fold_change,               │
-│              fold_change_scopes, fold_change_controls                │
+│              fold_change_scopes                                     │
 ├──────────────────────────────────────────────────────────────────────┤
 │  persistence/  ← JSON read/write + debounced save registry           │
 │                  (one module per on-disk file)                       │
@@ -1243,15 +1246,18 @@ For a physically stripped source tree (not just a runtime/binary filter), feed
 the same profile to `scripts/derive_profile.py --apply`, which deletes the
 excluded features' `paths`/`tests` per `profiles/full.toml`.
 
-One module sits in `domain/` rather than under a feature package:
+One Qt builder sits in `core/` rather than under a feature package:
 `core/fold_change_controls_view.py` exposes
 `install_fold_change_controls(app, parent, layout, scope=…)` — the
 Control + Baseline dropdown pair installed on both the Bar Plots and
-Line Graphs control rows. It lives in `domain/` because it's shared
-between two features and owns the cross-tab widget sync
+Line Graphs control rows. It is in `core/` because both of its consumers
+are features, and because it owns the cross-tab widget sync
 (`_sync_widgets_to_state`) that mirrors each state change into the
 other tab's widget instances, so the shared `app._fc_*` state stays
-visually in lockstep across tab switches.
+visually in lockstep across tab switches. Its pure-logic half — the
+scope registry and dirty-flag helpers it re-exports — stays in
+`domain/fold_change_scopes.py`, which is what lets the unit tests reach
+that logic without importing Qt.
 
 ### 5.4 The left sidebar
 
@@ -4662,9 +4668,19 @@ the same fill and `border: none` there.
 The `border: none` is the load-bearing part. A `QFrame` whose shape is
 `HLine`/`VLine` otherwise paints Qt's default etched line, which is derived
 from the widget palette rather than the theme. Measured against the default
-theme, an unnamed `HLine` comes out three pixels of `#e6e9ef` where a named one
-is a single pixel of `border_subtle` — so an unnamed divider is not merely
-off-token, it is a pale bar at three times the intended weight.
+theme:
+
+```
+    HLine + #Separator, pinned to 1 px   1 px tall, ink #1b2331 (border_subtle)
+    HLine + #HRule                       1 px tall, ink #1b2331
+    HLine, unnamed, pinned to 1 px       1 px tall, ink #e6e9ef
+    HLine, unnamed, unpinned             3 px tall: #e6e9ef between two rows of background
+```
+
+So the ink is the wrong colour in every unnamed case — a pale `#e6e9ef` line
+where the theme wants `border_subtle` — and a frame nobody pinned also reserves
+three pixels of height for it. Several of the sites this rule displaced already
+called `setFixedHeight(1)`, so for those only the colour was wrong.
 
 **Build one with `ui_helpers.build_hline_separator(parent)` or
 `build_vline_separator(parent)`** rather than by hand; both name the frame,

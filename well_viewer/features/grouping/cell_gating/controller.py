@@ -1217,7 +1217,7 @@ def _cell_gating_refresh_opt_fc_controls(ctx) -> None:
 
     Control candidates mirror the plot tabs' Control combo (well tokens +
     replicate-set names, with the ``" (well)"`` collision suffix) via
-    ``fold_change_controls._all_member_labels``. Baseline offers "—",
+    ``core.fold_change_controls_view._all_member_labels``. Baseline offers "—",
     "t0 (first timepoint)", and the explicit timepoints shared by wells A/B.
     Selections are preserved across refreshes; this state is local to the
     optimizer and never touches ``ctx.state.plot.fc_*``.

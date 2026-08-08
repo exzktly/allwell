@@ -13,7 +13,6 @@ in :mod:`~datasets.validate.controller`.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
@@ -34,20 +33,12 @@ from widgets.path_field import PathField, folder_picker
 from datasets._common.dataset_paths import preview_wells
 from datasets.validate.dashboard import ValidateDashboard
 from datasets.validate.validate_compute import DatasetReport, wells_needing_force
+from datasets._common.dataset_fields import is_dataset
 
 
 
 
-def _is_dataset(root: Path) -> str:
-    """Return "" if *root* looks like a dataset, else a short reason --
-    mirrors ``datasets/concatenate/view.py``'s own ``_is_dataset``. Validate's
-    field was the one dataset-folder ``PathField`` in the whole pane with no
-    validator at all: every other tool's dataset picker says up front when a
-    folder is missing ``in``/``out``, while this one's Check button just
-    stayed silently disabled with no inline reason."""
-    if not (root / "in").is_dir() or not (root / "out").is_dir():
-        return "Needs an 'in' and an 'out' folder."
-    return ""
+_is_dataset = is_dataset
 
 
 _SEVERITY_PREFIX = {"error": "✗", "warning": "⚠", "info": "ℹ"}

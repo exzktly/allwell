@@ -44,6 +44,11 @@ from datasets.merge_plates.merge_plates_compute import (
 from datasets._common.dataset_fields import is_dataset, is_free_destination
 from datasets._common.dataset_fields import promote_open_button
 
+# The `+` / `=` glyph column in the equation row.
+_EQUATION_OP_W = 20
+# Well-token field for the remap origin (e.g. `A01`).
+_ORIGIN_EDIT_W = 60
+
 
 
 
@@ -162,7 +167,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
             lbl.setObjectName("Heading")
             lbl.setContentsMargins(0, theme.Spacing.lg, 0, 0)
             lbl.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
-            lbl.setFixedWidth(20)
+            lbl.setFixedWidth(_EQUATION_OP_W)
             return lbl
 
         hl.addWidget(self._ds1_field, 1)
@@ -190,7 +195,7 @@ class MergePlatesPage(LogPanelMixin, QWidget):
         self._remap_cb.toggled.connect(self._on_input_changed)
         hl.addWidget(self._remap_cb)
         self._remap_origin_edit = QLineEdit("E01", row)
-        self._remap_origin_edit.setFixedWidth(60)
+        self._remap_origin_edit.setFixedWidth(_ORIGIN_EDIT_W)
         self._remap_origin_edit.setEnabled(False)
         self._remap_cb.toggled.connect(self._remap_origin_edit.setEnabled)
         self._remap_origin_edit.textChanged.connect(self._on_input_changed)

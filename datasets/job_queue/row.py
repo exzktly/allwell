@@ -40,6 +40,12 @@ from widgets.status_dot import StatusDot
 from services.job_kinds import KIND_LABEL, describe, describe_detail
 from services.job_queue import JobSpec, JobState
 
+# Queue position number at the row's left edge.
+_ORDINAL_W = 20
+# Inline per-job progress bar.
+_ROW_BAR_W = 60
+_ROW_BAR_H = 8
+
 KIND_ICON = {
     "analyze": "sliders-horizontal",
     "concatenate": "copy",
@@ -114,7 +120,7 @@ class JobRow(QWidget):
         # row with a final outcome no longer means "queue position".
         self._ordinal = QLabel(self)
         self._ordinal.setObjectName("Muted")
-        self._ordinal.setFixedWidth(20)
+        self._ordinal.setFixedWidth(_ORDINAL_W)
         self._ordinal.setAlignment(Qt.AlignRight | Qt.AlignTop)
         outer.addWidget(self._ordinal, 0, Qt.AlignTop)
 
@@ -144,7 +150,7 @@ class JobRow(QWidget):
         self._progress = QProgressBar(self)
         self._progress.setRange(0, 0)
         self._progress.setTextVisible(False)
-        self._progress.setFixedSize(60, 8)
+        self._progress.setFixedSize(_ROW_BAR_W, _ROW_BAR_H)
         top.addWidget(self._progress)
 
         self._dot = StatusDot("neutral", self)

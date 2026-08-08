@@ -102,6 +102,10 @@ class RunDashboard(PlateProgress):
 
     # ── host-facing API ─────────────────────────────────────────────────────
     def reset(self, *, remote: bool = False, total: int = 0) -> None:
+        # Inherited from PlateProgress along with the outcome setters:
+        # without this a finished run's terminal state would survive into
+        # the next one.
+        self.clear_outcome()
         self._remote = remote
         self._total = total
         self._stage_totals = {}

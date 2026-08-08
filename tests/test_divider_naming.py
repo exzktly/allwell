@@ -7,15 +7,17 @@ only for frames carrying one of the sanctioned object names or the
 ``hline``/``vline`` dynamic properties. An unnamed one keeps Qt's default, which
 is derived from the widget palette rather than the theme.
 
-That is not a subtle difference. Measured against this app's dark surfaces, on
-the default theme:
+Measured against this app's dark surfaces, on the default theme:
 
-    HLine + ``#Separator``   1 px   #1b2331   (Colors.border_subtle)
-    HLine + ``#HRule``       1 px   #1b2331
-    HLine, unnamed           3 px   #e6e9ef   (near-white, three times as thick)
+    HLine + #Separator, pinned to 1 px   1 px tall, ink #1b2331 (border_subtle)
+    HLine + #HRule                       1 px tall, ink #1b2331
+    HLine, unnamed, pinned to 1 px       1 px tall, ink #e6e9ef
+    HLine, unnamed, unpinned             3 px tall: #e6e9ef between two rows of background
 
-So an unnamed divider is not merely off-token: it is a pale bar three times the
-intended weight. Ten of them were live when this guard was written.
+So an unnamed divider paints the wrong colour in every case, and one nobody
+pinned also reserves three pixels of height for a one-pixel line. Ten were live
+when this guard was written; several of them already pinned a height, so for
+those only the colour was wrong.
 
 Two shapes of call site the naive version of this scan misses, both of which
 exist in the tree:
@@ -34,14 +36,13 @@ exist in the tree:
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from tests._repo_scan import REPO_ROOT, python_sources
 
-# Roots that hold Qt widget code. ``tests/`` is excluded: a test may build a
-# throwaway frame to measure exactly the behaviour documented above.
-SCAN_ROOTS = ("well_viewer", "widgets", "datasets", "ui")
-SCAN_FILES = ("allwell.py", "analyze_tab.py", "datasets_tab.py")
+# Every application source file, from the one shared definition — this guard
+# originally named three root modules and could not see `analyze_tab_chrome.py`
+# or `analyze_tab_form.py`, both of which build dividers. `tests/` is excluded
+# there: a test may build a throwaway frame to measure the behaviour above.
 
 # The names ``theme.qss`` styles. ``Separator`` is the Review shell's,
 # ``HRule`` / ``VRule`` are the Analyze pane's and the run dashboard's.
@@ -55,15 +56,6 @@ SANCTIONED_PROPS = frozenset({"hline", "vline"})
 ALLOWLIST = frozenset({"widgets/mpl_toolbar.py"})
 
 
-def _py_files():
-    for root in SCAN_ROOTS:
-        for path in sorted((REPO_ROOT / root).rglob("*.py")):
-            if "__pycache__" not in path.parts:
-                yield path
-    for name in SCAN_FILES:
-        path = REPO_ROOT / name
-        if path.exists():
-            yield path
 
 
 def _is_line_shape(node: ast.AST) -> bool:
@@ -73,6 +65,11 @@ def _is_line_shape(node: ast.AST) -> bool:
         return node.attr in {"HLine", "VLine"}
     if isinstance(node, ast.IfExp):
         return _is_line_shape(node.body) or _is_line_shape(node.orelse)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        # ``setFrameStyle(QFrame.HLine | QFrame.Plain)`` — the shape and the
+        # shadow OR'd into one argument, which is the same act as
+        # ``setFrameShape`` and was invisible to the first version of this scan.
+        return _is_line_shape(node.left) or _is_line_shape(node.right)
     return False
 
 
@@ -118,7 +115,7 @@ def _named_receivers(scope: ast.AST) -> set[str]:
 
 def test_no_unnamed_divider_frames():
     offenders: list[str] = []
-    for path in _py_files():
+    for path in python_sources():
         rel = path.relative_to(REPO_ROOT).as_posix()
         if rel in ALLOWLIST:
             continue
@@ -134,7 +131,7 @@ def test_no_unnamed_divider_frames():
             for node in ast.walk(scope):
                 if (not isinstance(node, ast.Call)
                         or not isinstance(node.func, ast.Attribute)
-                        or node.func.attr != "setFrameShape"
+                        or node.func.attr not in ("setFrameShape", "setFrameStyle")
                         or not node.args
                         or not _is_line_shape(node.args[0])):
                     continue
@@ -145,8 +142,8 @@ def test_no_unnamed_divider_frames():
     offenders = sorted(set(offenders))
     assert not offenders, (
         "Divider frame(s) with no sanctioned object name (ARCHITECTURE §8). "
-        "Each paints Qt's default etched border — 3 px of near-white on this "
-        "app's surfaces — instead of a 1 px border_subtle hairline. Build it "
+        "Each paints Qt's default etched border — a near-white #e6e9ef line on "
+        "this app's surfaces — instead of a border_subtle hairline. Build it "
         "with `ui_helpers.build_hline_separator` / `build_vline_separator`, or "
         "give it one of "
         f"{sorted(SANCTIONED_NAMES)}:\n  " + "\n  ".join(offenders)

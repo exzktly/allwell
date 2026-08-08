@@ -53,6 +53,9 @@ from datasets.ome_import.ome_import_compute import (
 )
 from datasets._common.dataset_fields import promote_open_button
 
+# Channel-name column in the per-channel role picker.
+_ROLE_LABEL_MIN_W = 120
+
 _ROLE_LABELS = {
     "nuclear": "Nuclear / segmentation",
     "fluor": "Fluorescent",
@@ -334,7 +337,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
             hl.setContentsMargins(0, 0, 0, 0)
             hl.setSpacing(theme.Spacing.sm)
             lbl = QLabel(name, row)
-            lbl.setMinimumWidth(120)
+            lbl.setMinimumWidth(_ROLE_LABEL_MIN_W)
             hl.addWidget(lbl)
             cb = QComboBox(row)
             for role in CHANNEL_ROLES:

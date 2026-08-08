@@ -34,6 +34,8 @@ import time
 from collections.abc import Callable
 from typing import Any, TypeVar
 
+from util.disk_space import space_message
+
 __all__ = [
     "DEFAULT_ATTEMPTS",
     "DEFAULT_BASE_DELAY_S",
@@ -131,6 +133,7 @@ def retry_io(
     base_delay: float | None = None,
     advice: str = VOLUME_ADVICE,
     log_fn: Callable[[str], None] | None = None,
+    path: Any = None,
 ) -> T:
     """Run *fn*, retrying an ``OSError`` with an exponential backoff.
 
@@ -149,8 +152,14 @@ def retry_io(
     test can patch the module constant to 0 rather than sit through the backoff.
 
     An error retrying cannot fix — a missing path, wrong permissions, a full
-    volume (:data:`_PERMANENT_ERRNOS`) — is re-raised unchanged on the first
-    attempt, after *cleanup* runs.
+    volume (:data:`_PERMANENT_ERRNOS`) — is re-raised on the first attempt,
+    after *cleanup* runs. ``ENOSPC`` is the one that gets rewritten on the way
+    out: pass *path* (the file being written) and the failure names the volume
+    that filled and how much is left on it. Without that the caller sees
+    ``[Errno 28] No space left on device`` and no indication of *which* volume
+    — which, given that the scratch staging defaults to the home volume and the
+    inputs are compressed, is the difference between a fixable message and a
+    misleading one. The errno is preserved, so callers matching on it still do.
     """
     attempts = max(1, attempts)
     if base_delay is None:
@@ -161,7 +170,10 @@ def retry_io(
         except OSError as exc:
             if cleanup is not None:
                 cleanup()
-            if getattr(exc, "errno", None) in _PERMANENT_ERRNOS:
+            code = getattr(exc, "errno", None)
+            if code == errno.ENOSPC:
+                raise OSError(errno.ENOSPC, space_message(what, path)) from exc
+            if code in _PERMANENT_ERRNOS:
                 raise
             if attempt + 1 >= attempts:
                 hint = volume_hint(exc)

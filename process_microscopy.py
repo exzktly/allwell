@@ -169,6 +169,7 @@ from pipeline.io import (  # noqa: F401
     _verify_files_complete,
     _write_single_csv,
     incremental_done_fov_keys,
+    OutputCapacityMonitor,
     preflight_scratch_for_run,
     merge_images_into_zip,
     merge_records_into_csv,
@@ -615,7 +616,7 @@ def compress_images_to_zip(image_dir: Path, out_zip: Path) -> int:
     # image writer has always had — a transient fault here used to fail the
     # whole well with a bare errno. Safe to re-run: staged to __aw_tmp_ and
     # committed with os.replace.
-    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp)
+    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp, path=out_zip)
 
     log.info(
         "Compressed %d image(s)  ->  %s", len(image_files), out_zip.name
@@ -3213,6 +3214,14 @@ def process_well_zip_task(
             records, failed = _process_groups_in_worker(
                 groups, kwargs, well_label, errors_dir=output_dir)
 
+            # The extracted inputs are dead weight from here on, and what
+            # follows — building <well>_out.zip beside a staging dir that still
+            # holds every intermediate — is this well's peak disk footprint.
+            # Reclaiming now is the difference between fitting and not on the
+            # usual single-volume setup. The finally block still removes it (it
+            # has to cover the failure paths) and is a no-op once this has run.
+            remove_directory(tmp_extract)
+
             if incremental:
                 if records:
                     added = merge_records_into_csv(csv_path, records)
@@ -3542,6 +3551,10 @@ def _run_well_worker_pool(
     # "12 well(s)/pair(s) failed" while those wells looked done.
     wells_failed_entirely: list[str] = []
     partial_wells: dict[str, list[str]] = {}
+    # Per-well results accumulate on the output volume for the whole plate, so
+    # the run can start with room and end without it. Measured per completed
+    # well and projected forward, which warns while there is still space to act.
+    capacity = OutputCapacityMonitor(output_dir, len(to_process), log=log)
 
     ctx = mp.get_context("spawn")
     with ProcessPoolExecutor(
@@ -3570,6 +3583,7 @@ def _run_well_worker_pool(
             except Exception as exc:
                 _report_worker_failure(well_label, output_dir, exc)
                 wells_failed_entirely.append(well_label)
+            capacity.well_done()
             if _suspend.is_suspended():
                 # Wells not yet started are dropped rather than each spinning up
                 # a worker only to find the flag set. They are simply absent from
@@ -4608,6 +4622,7 @@ def main() -> None:
         n_channels=1 + len(fluor_tokens_for_quant),
         workers=workers,
         image_exts=_GROUP_IMAGE_EXTS,
+        output_dir=output_dir,
         count_groups=lambda: (
             len(_collect_available_fovs(
                 input_dir, filename_schema=":".join(schema), filename_sep=sep)) or 1

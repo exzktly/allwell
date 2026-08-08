@@ -34,6 +34,19 @@ from skimage.segmentation import find_boundaries
 from util.retry_io import retry_io
 from util.zip_write import atomic_zip, fsync_path, staging_path
 
+# Disk-capacity accounting (what the run needs, what is left, and how to say so
+# when a volume fills anyway) lives in its own Qt-free module. The preflight
+# names are re-exported because ``process_microscopy`` and the tests reach for
+# them through this module's public surface.
+from pipeline.capacity import (  # noqa: F401
+    OutputCapacityMonitor,
+    enospc_message,
+    estimate_group_scratch_bytes,
+    free_bytes as _free_bytes,
+    preflight_scratch_for_run,
+    preflight_scratch_space,
+)
+
 # Log under the pipeline logger name so worker-log output is unchanged.
 log = logging.getLogger("process_microscopy")
 
@@ -292,136 +305,7 @@ _PIPELINE_WRITE_ADVICE = (
 )
 
 
-def _free_bytes(path: Path) -> int | None:
-    """Free bytes on *path*'s volume, or ``None`` if it can't be determined."""
-    try:
-        return shutil.disk_usage(path.parent).free
-    except OSError:
-        return None
-
-
-# ── Scratch-space preflight ─────────────────────────────────────────────────
-# Per FOV-group the pipeline stages the extracted inputs plus roughly six
-# intermediate images, each written as float32 — so the transient footprint is
-# several times the compressed input, on the *scratch* volume, which by default
-# is the home volume rather than the one holding the dataset. A run whose data
-# sits on a roomy external disk can therefore exhaust a nearly-full internal
-# disk, and it discovers that one failed write at a time: each failure drops its
-# FOV-group, the well still writes a complete-looking CSV from the survivors,
-# and the shortfall only surfaces much later as missing per-field statistics.
-# Checking up front costs one stat call and turns that into a sentence.
-
-# Intermediates written per FOV-group (corrected + top-hat per channel, the
-# label image, the overlay). Deliberately conservative — under-estimating the
-# need is the failure this exists to prevent.
-_INTERMEDIATES_PER_GROUP = 6
-# float32 intermediates against 16-bit inputs.
-_INTERMEDIATE_WIDENING = 2.0
-
-
-def estimate_group_scratch_bytes(sample_image_bytes: int, n_channels: int) -> int:
-    """Transient scratch one FOV-group needs: its inputs plus its intermediates."""
-    sample = max(0, int(sample_image_bytes))
-    inputs = sample * max(1, int(n_channels))
-    intermediates = int(sample * _INTERMEDIATE_WIDENING * _INTERMEDIATES_PER_GROUP)
-    return inputs + intermediates
-
-
-def preflight_scratch_space(
-    scratch_base: Path,
-    *,
-    sample_image_bytes: int,
-    n_channels: int,
-    groups_per_well: int,
-    concurrent_wells: int,
-) -> tuple[bool, str]:
-    """Is there room for the run's transient working set? ``(ok, message)``.
-
-    ``ok`` is False only when the volume cannot hold even a single well's
-    staging — a run that starts there cannot finish, and saying so now beats
-    thousands of dropped FOV-groups. A merely tight volume returns True with a
-    warning message, because the estimate is deliberately rough and refusing to
-    start on a heuristic would be worse than the risk it guards.
-    """
-    free = _free_bytes(scratch_base / "probe")
-    if free is None:
-        return True, ""
-    per_group = estimate_group_scratch_bytes(sample_image_bytes, n_channels)
-    per_well = per_group * max(1, int(groups_per_well))
-    need = per_well * max(1, int(concurrent_wells))
-    gib = float(1 << 30)
-    where = (
-        f"{free / gib:.1f} GiB free on {scratch_base} — the run needs about "
-        f"{need / gib:.1f} GiB there ({concurrent_wells} well(s) at once, "
-        f"{groups_per_well} FOV-group(s) each). Scratch is not the dataset "
-        f"volume: set ALLWELL_SCRATCH_DIR (or the Analyze tab's Scratch disk "
-        f"field) to move it."
-    )
-    if free < per_well:
-        return False, (
-            f"Not enough scratch space to process even one well: {where}"
-        )
-    if free < need:
-        return True, (
-            f"Scratch space is tight and FOV-groups may fail part-way: {where}"
-        )
-    return True, ""
-
-
-def preflight_scratch_for_run(
-    scratch_base: Path,
-    input_dir: Path,
-    *,
-    n_wells: int,
-    n_channels: int,
-    workers: int,
-    image_exts,
-    count_groups,
-    log,
-) -> None:
-    """Warn — or refuse to start — when the scratch volume cannot hold the run.
-
-    Sized from this dataset rather than a constant: one input image gives the
-    per-image byte size, *count_groups* (the run's own field × timepoint
-    enumeration) gives the FOV-groups per well, and *workers* gives how many
-    wells stage at once. Exits only when there is not room for a single well,
-    which cannot succeed; a merely tight volume warns, because the estimate is
-    deliberately rough and refusing to start on a heuristic would be worse than
-    the risk it guards.
-    """
-    log.info("Scratch  : %s", scratch_base)
-    if n_wells <= 0:
-        return
-    sample = 0
-    for f in sorted(Path(input_dir).rglob("*")):
-        if f.is_file() and f.suffix.lower() in image_exts:
-            try:
-                sample = f.stat().st_size
-            except OSError:
-                sample = 0
-            break
-    if sample <= 0:
-        return                       # zipped input: nothing to measure cheaply
-    try:
-        groups_per_well = int(count_groups())
-    except Exception:
-        groups_per_well = 1
-    ok, message = preflight_scratch_space(
-        scratch_base,
-        sample_image_bytes=sample,
-        n_channels=n_channels,
-        groups_per_well=max(1, groups_per_well),
-        concurrent_wells=max(1, min(workers, n_wells)),
-    )
-    if not ok:
-        import sys as _sys
-        log.error("%s Exiting before processing anything.", message)
-        _sys.exit(2)
-    if message:
-        log.warning("%s", message)
-
-
-def retry_write(fn, *, what: str, cleanup=None):
+def retry_write(fn, *, what: str, cleanup=None, path: Path | None = None):
     """Run *fn*, retrying on ``OSError`` with the ``_safe_imwrite`` backoff.
 
     The image writer has been retry-shielded for a while; the per-well CSV and
@@ -448,6 +332,11 @@ def retry_write(fn, *, what: str, cleanup=None):
     free of the imaging stack). The budget and the pipeline's own wording stay
     here: ``_WRITE_MAX_ATTEMPTS`` / ``_RETRY_BASE_DELAY_S`` are read at call time
     so a test can patch them on this module.
+
+    *path* is the file being written. It buys nothing on the retry path — it is
+    what lets a genuine ``ENOSPC`` name the volume that filled and how much is
+    left on it, instead of the bare ``[Errno 28] No space left on device`` that
+    sends the user off to check the volume holding their inputs.
     """
     return retry_io(
         fn,
@@ -456,6 +345,7 @@ def retry_write(fn, *, what: str, cleanup=None):
         attempts=_WRITE_MAX_ATTEMPTS,
         base_delay=_RETRY_BASE_DELAY_S,
         advice=_PIPELINE_WRITE_ADVICE,
+        path=path,
     )
 
 
@@ -515,13 +405,14 @@ def _safe_imwrite(out_path: Path | str, data: np.ndarray) -> None:
             _cleanup_tmp()
             free = _free_bytes(out_path)
             # Genuinely out of room → retrying cannot help; say so plainly.
-            if free is not None and free < need:
+            # Either the codec said so outright (ENOSPC) or the volume cannot
+            # hold this image; the second case catches codecs that report a
+            # short write instead of the errno.
+            if getattr(exc, "errno", None) == errno.ENOSPC or (
+                    free is not None and free < need):
                 raise OSError(
-                    f"No space left on device while writing {out_path.name}: "
-                    f"{free:,} byte(s) free on {out_path.parent}, need "
-                    f"{need:,} for this image. Free up space (or point "
-                    f"ALLWELL_SCRATCH_DIR at a roomier volume) and re-run with "
-                    f"--incremental to resume."
+                    errno.ENOSPC,
+                    enospc_message(out_path.name, out_path, need=need),
                 ) from exc
             if attempt + 1 >= _WRITE_MAX_ATTEMPTS:
                 free_str = (f"{free:,} byte(s) free" if free is not None
@@ -662,7 +553,7 @@ def _write_single_csv(records: list[dict], out_path: Path) -> None:
             writer.writeheader()
             writer.writerows(records)
 
-    retry_write(_write, what=Path(out_path).name)
+    retry_write(_write, what=Path(out_path).name, path=Path(out_path))
 
 
 def write_csvs_per_well(
@@ -782,7 +673,7 @@ def merge_records_into_csv(
             writer.writerows(existing_rows)
             writer.writerows(to_add)
 
-    retry_write(_write, what=path.name)
+    retry_write(_write, what=path.name, path=path)
     return len(to_add)
 
 
@@ -852,7 +743,7 @@ def merge_images_into_zip(out_zip: Path | str, image_dir: Path | str) -> int:
 
     # Retried for the same reason as the per-well CSV: this lands on the output
     # volume, and staging to __aw_tmp_ + os.replace makes it safe to re-run.
-    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp)
+    retry_write(_build, what=out_zip.name, cleanup=_cleanup_tmp, path=out_zip)
     return len(to_add)
 
 

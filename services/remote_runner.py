@@ -312,6 +312,10 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "util/schema_infer.py",
     "util/timepoint.py",
     "util/well_token.py",
+    # Free-space primitives + the single wording for a volume that filled. The
+    # retry shield below rewrites an ENOSPC through it, so a remote run that
+    # runs its output volume dry says which volume and how much is left.
+    "util/disk_space.py",
     # Atomic + verified publication of the per-well archives, imported by
     # process_microscopy and pipeline.io — without it the remote run aborts
     # before it compresses its first well.
@@ -324,6 +328,7 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/__init__.py",
     "pipeline/auto_threshold.py",
     "pipeline/background.py",
+    "pipeline/capacity.py",
     "pipeline/cellpose.py",
     "pipeline/flatfield.py",
     "pipeline/incremental_keys.py",
@@ -1047,7 +1052,7 @@ def _zip_well_folder(folder: Path, out_zip: Path) -> int:
             for t in tifs:
                 zf.write(t, arcname=t.name)
 
-    retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE)
+    retry_io(_pack, what=out_zip.name, advice=_TRANSFER_ADVICE, path=out_zip)
     return len(tifs)
 
 
@@ -1432,6 +1437,7 @@ def _materialize_staging(
             cleanup=lambda d=dest: d.unlink(missing_ok=True),
             advice=_TRANSFER_ADVICE,
             log_fn=log_fn,
+            path=dest,
         )
         kept_members += len(plan.keep)
         if log_fn:
@@ -1810,7 +1816,7 @@ def refresh_pipeline_info_available_from_outputs(
         # Review's timepoint/FOV dropdowns short of the data that is on disk.
         retry_io(
             _publish, what=p.name, cleanup=_cleanup_tmp,
-            advice=_TRANSFER_ADVICE, log_fn=log,
+            advice=_TRANSFER_ADVICE, log_fn=log, path=p,
         )
         log(
             f"[remote] refreshed pipeline_info from merged outputs: "
@@ -4700,6 +4706,7 @@ class Fetcher:
                 cleanup=_cleanup_tmp,
                 advice=_TRANSFER_ADVICE,
                 log_fn=self._log,
+                path=final,
             )
         except OSError as exc:
             self._log(f"[remote] warn: copying {well}_out.zip failed: {exc}\n")

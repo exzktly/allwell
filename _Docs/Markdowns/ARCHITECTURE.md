@@ -147,6 +147,8 @@ allwell/
 │   ├── well_skip.py            ← per-well skip decisions for a resumed run
 │   ├── suspend.py              ← suspend / resume a run in flight
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read
+│   ├── capacity.py             ← disk-space accounting: what a run needs on the
+│   │                              scratch and output volumes, what is left there
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
@@ -172,6 +174,9 @@ allwell/
 │   │                              input folder (loose TIFs / zips); Analyze pre-fill
 │   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
 │   ├── retry_io.py             ← bounded retry with backoff for transient IO failures
+│   ├── disk_space.py           ← free-space primitives + the one wording for a
+│   │                              volume that filled (shared by the retry shield
+│   │                              and pipeline.capacity)
 │   ├── frozen_io.py            ← reading bundled data from a PyInstaller bundle
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote)
@@ -191,8 +196,9 @@ allwell/
 The `pipeline/` package (the Qt-free analysis-pipeline modules:
 `pipeline.auto_threshold`, `pipeline.background`, `pipeline.flatfield`,
 `pipeline.shape_features`, `pipeline.cellpose`, `pipeline.stardist`,
-`pipeline.io`) and the `util/` package (`util.well_token`, `util.aw_safe`,
-`util.zip_write`, `util.retry_io`)
+`pipeline.io`, `pipeline.capacity`) and the `util/` package
+(`util.well_token`, `util.aw_safe`, `util.zip_write`, `util.retry_io`,
+`util.disk_space`)
 are *deliberately at repo root* (not under `well_viewer/`): the pipeline
 contract forbids `well_viewer` / `widgets` / Qt imports, so anything both the
 pipeline and the GUI need to agree on has to live in a Qt-free module the
@@ -2503,26 +2509,67 @@ parent process supervises the per-well worker pool:
   third group in a row the volume has had fifteen chances. Non-`OSError`
   failures do not trip it: a segmentation bug throwing on every frame is not a
   storage problem, and aborting would hide how widespread it is.
-- **The scratch volume is checked before the run starts.** `main._preflight_scratch`
-  sizes the need from the dataset itself — one input image for the per-image
-  byte size, the run's own field/timepoint enumeration for FOV-groups per well,
-  `--workers` for how many wells stage at once — and compares it against free
-  space on the *resolved* scratch base (`pipeline.io.preflight_scratch_space`).
-  Below one well's worth it exits before reading an image, because a run that
-  starts there cannot finish; merely tight only warns, since the estimate is
-  deliberately rough and refusing to start on a heuristic would be worse than
-  the risk. The resolved base is logged on the `Scratch  :` line either way.
-- **Scratch exhaustion is the common cause of a partial run.** The scratch base
-  defaults to `~/.allwell/scratch` (§6.5) — the *home* volume — while the dataset
-  usually lives on an external or network disk, so a run with terabytes free
-  beside its inputs can still fill the volume it actually writes to. Each
-  FOV-group stages ~6 intermediate images there, so a 6-field × 23-timepoint well
-  is several GB and a plate of them is far more. `pipeline.io._safe_imwrite`
+- **Disk capacity is accounted for in one place: `pipeline/capacity.py`.** It is
+  Qt-free and stdlib-only (its free-space primitives and the single wording for
+  a full volume live one layer down again, in `util/disk_space.py`, because the
+  shared retry shield and the `services/` remote client need them without the
+  imaging stack). Four jobs:
+  - **Sizing the dataset.** `sample_image_bytes` returns one input image's
+    *uncompressed* size — stat'ed from a loose TIF, or read from a well
+    archive's central directory, which costs one open and extracts nothing. The
+    zip path is not an optimisation but the main one: `in/<WELL>.zip` is the
+    layout the pipeline segments from, and sizing a run from the archive's
+    compressed size on disk under-states everything downstream.
+  - **The up-front preflight.** `preflight_scratch_space` sizes the transient
+    working set (per-image bytes × channels + ~6 float32 intermediates per
+    FOV-group, times the run's own field/timepoint enumeration, times how many
+    wells `--workers` stages at once) and the plate's durable output, and
+    compares them against the *resolved* scratch base and the output directory.
+    Below one well's worth of scratch it exits before reading an image, because
+    a run that starts there cannot finish; everything else warns, since the
+    estimates are deliberately rough. When scratch and output share a volume —
+    the default, `~/.allwell/scratch` beside an output dir on the home volume —
+    the two needs are summed against one free figure, because checking either
+    alone reports that the run fits when it does not. The resolved base is
+    logged on the `Scratch  :` line either way.
+  - **The mid-run projection.** `OutputCapacityMonitor`, fed one call per
+    completed well by `_run_well_worker_pool`, measures the output actually
+    written and projects the wells still to come. It warns once, naming the
+    measured per-well size — a real number, carrying the real compression ratio
+    and FOV count, unlike anything the preflight can estimate — while there is
+    still room to act. The estimate of durable output in `estimate_well_output_bytes`
+    takes no credit for deflate for the same reason: an assumed ratio would be
+    invented rather than measured, which is why that half of the preflight only
+    ever warns.
+  - **Saying so when a volume fills anyway.** `util.disk_space.space_message` is
+    the only wording for `ENOSPC`, and `util.retry_io.retry_io` rewrites the
+    exception through it (preserving errno 28) for every caller that passes the
+    target `path`. A bare `OSError: [Errno 28] No space left on device` names no
+    volume, and the volume it happened on is routinely not the one the user
+    would check.
+- **Exhaustion is the common cause of a partial run, and "there is room next to
+  my data" does not rule it out.** The scratch base defaults to
+  `~/.allwell/scratch` (§6.5) — the *home* volume — while the dataset usually
+  lives on an external or network disk. Each FOV-group stages ~6 float32
+  intermediates there, so a 6-field × 23-timepoint well is several GB and a
+  plate of them is far more; the input archives, meanwhile, are the only
+  compressed copy in the run, so a volume with ten times their size free is not
+  close to enough. The durable results compound it from the other side: every
+  `<well>_out.zip` stays on the output volume for the rest of the plate, so a
+  run can start with room and end without it. `pipeline.io._safe_imwrite`
   retries with backoff and triages disk-full versus transient, but once space is
   genuinely gone every remaining group fails the same way: the run continues,
-  logging a failure per group, and produces a full complement of complete-looking
-  per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the Analyze tab's *Scratch
-  disk* field) at the same volume as the data when the home volume is tight.
+  logging a failure per group, and produces a full complement of
+  complete-looking per-well outputs. Point `$ALLWELL_SCRATCH_DIR` (or the
+  Analyze tab's *Scratch disk* field) at a roomier volume when the home volume
+  is tight.
+- **A well's extracted inputs are reclaimed before its zip-up.** Building
+  `<well>_out.zip` while the staging directory still holds every intermediate is
+  the well's peak footprint, and on a single-volume setup the extracted TIFs are
+  competing for the same bytes at exactly that moment. `process_well_zip_task`
+  removes `_tmp_extract_<well>` as soon as the groups are processed; the
+  `finally` block still removes it (it has to cover the failure paths) and is a
+  no-op by then.
 - **Per-FOV failure traces.** A failed FOV-group persists its full traceback to
   `<output_dir>/errors/<well>_<fov>_pid<N>.txt` (`_dump_fov_failure_trace`,
   mirroring `_dump_well_failure_trace`), and `classify_log_line` treats
@@ -2777,13 +2824,17 @@ because both halves of All-Well need it and neither can import the other's —
 `pipeline.io` wraps it as `retry_write` (keeping the pipeline's own wording,
 which names `--workers` and `--incremental`), and the `services/` remote client
 calls it directly, where importing `pipeline.io` would drag numpy/tifffile into
-a module that must stay imaging-stack-free. Two behaviours are worth knowing:
+a module that must stay imaging-stack-free. Three behaviours are worth knowing:
 
-- **An error retrying cannot fix is re-raised unchanged, immediately.** A
-  missing path, wrong permissions, a full volume (`_PERMANENT_ERRNOS`) fail on
-  the first attempt, so a caller that treats a missing source as an ordinary
-  `OSError` stays responsive and the real cause isn't buried under a retry
-  story.
+- **An error retrying cannot fix fails on the first attempt.** A missing path,
+  wrong permissions, a full volume (`_PERMANENT_ERRNOS`) are re-raised straight
+  away, so a caller that treats a missing source as an ordinary `OSError` stays
+  responsive and the real cause isn't buried under a retry story.
+- **`ENOSPC` is the one that gets rewritten on the way out.** Callers pass the
+  target `path`, and the failure comes back as `util.disk_space.space_message` —
+  the volume that filled, how much is left on it, and that the scratch staging
+  may be sharing it — with errno 28 preserved so callers matching on it still
+  work. Everything else in `_PERMANENT_ERRNOS` passes through untouched.
 - **The exhausted-budget message names the storage.** `volume_hint` maps the
   errno to the protocol behind it — `EBADF` to macOS SMB, `ESTALE` to NFS,
   `EIO`/`ECONNRESET`/`ETIMEDOUT` to a link that dropped — and the caller adds

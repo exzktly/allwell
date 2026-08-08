@@ -207,6 +207,7 @@ class AnalyzePipelineInfoMixin:
         s("_workers_edit", d.get("workers"))
         s("_stardist_tile_px_edit", d.get("stardist_tile_px"))
         chk("_cpu_only_cb", d.get("cpu_only"))
+        chk("_allow_low_disk_cb", d.get("allow_low_disk"))
         chk("_force_cb", d.get("force"))
         chk("_incremental_cb", d.get("incremental"))
         forced = d.get("force_wells")

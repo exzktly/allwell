@@ -619,6 +619,32 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         except Exception:
             swallowed()
 
+    def _surface_run_failure(self, message: str) -> None:
+        """Put a failed run where the user is already looking.
+
+        The reason a run failed used to reach exactly one place: a red line in
+        ``self._log``, a QTextEdit hidden behind the "Show raw log" toggle and
+        off by default. So a pipeline that refused to start — the disk preflight
+        exiting before the first well, say — looked identical to a run that had
+        never been clicked: progress stopped at Grouped, the Run button came
+        back, and nothing said why.
+
+        Two surfaces fix that, both already in the app. ``set_failed`` is the
+        dashboard's own failure state, which every Datasets tool calls and
+        Analyze alone never did. And the raw log is revealed, because the line
+        that explains the failure is in it and the user has no reason to know
+        that toggle exists at the moment they need it.
+        """
+        try:
+            self._dashboard.set_failed(str(message).strip())
+        except Exception:
+            swallowed()
+        try:
+            if hasattr(self, "_raw_log_cb") and not self._raw_log_cb.isChecked():
+                self._raw_log_cb.setChecked(True)
+        except Exception:
+            swallowed()
+
     # ------------------------------------------------------------------
     # Log helpers
     # ------------------------------------------------------------------
@@ -780,6 +806,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                     self._log_line(payload, "ERROR")
                     if self._run_error is None:  # keep the first message only
                         self._run_error = str(payload)
+                    self._surface_run_failure(str(payload))
                 elif kind == "finished":
                     self._running = False
                     self._run_btn.setEnabled(True)
@@ -789,7 +816,13 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
-                    self._refresh_last_run_summary()  # C4: show the just-finished run
+                    # C4: show the just-finished run — but only when there IS
+                    # one. The card's only test is that pipeline_info.json
+                    # exists, and the pipeline writes that before any image
+                    # work, so a run that died seconds in rendered a summary
+                    # indistinguishable from a successful plate.
+                    if self._run_ok:
+                        self._refresh_last_run_summary()
                                 # A directly-connected slot on either signal below may
                     # start the next queued run re-entrantly, so nothing after
                     # jobFinished's emit may touch run state.

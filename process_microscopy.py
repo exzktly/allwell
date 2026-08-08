@@ -159,6 +159,7 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
 from pipeline.io import (  # noqa: F401
+    ALLOW_LOW_DISK_HELP,
     _AtomicTextHandle, _fsync_path,
     _commit_staging_dir,
     _safe_atomic_text_write,
@@ -4109,6 +4110,9 @@ def build_parser() -> argparse.ArgumentParser:
                        "a GPU with other jobs."
                    ))
 
+    p.add_argument("--allow_low_disk", action="store_true",
+                   help=ALLOW_LOW_DISK_HELP.replace("\n\n", " "))
+
     p.add_argument("--no_auto_threshold", action="store_true",
                    help=(
                        "Skip the post-pipeline auto-threshold estimation. "
@@ -4457,8 +4461,13 @@ def main() -> None:
     preflight_scratch_for_run(
         scratch_base_for(output_dir), input_dir,
         n_wells=len(well_zips) + len(well_folders),
-        n_channels=1 + len(fluor_tokens_for_quant),
+        # ``fluor_tokens_for_quant`` already leads with the segmentation
+        # channel (see ``quantified_channel_tokens``), so adding one for it
+        # counted that channel twice and inflated every per-group estimate by
+        # a whole frame.
+        n_channels=len(fluor_tokens_for_quant),
         workers=workers,
+        allow_low_disk=bool(getattr(args, "allow_low_disk", False)),
         image_exts=_GROUP_IMAGE_EXTS,
         output_dir=output_dir,
         count_groups=lambda: (

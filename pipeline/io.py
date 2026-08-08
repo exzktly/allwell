@@ -39,6 +39,7 @@ from util.zip_write import atomic_zip, fsync_path, staging_path
 # names are re-exported because ``process_microscopy`` and the tests reach for
 # them through this module's public surface.
 from pipeline.capacity import (  # noqa: F401
+    ALLOW_LOW_DISK_HELP,
     OutputCapacityMonitor,
     enospc_message,
     estimate_group_scratch_bytes,

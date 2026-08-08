@@ -113,6 +113,8 @@ allwell/
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
+├── analyze_tab_log.py           ← Analyze mixin: the output pane — log view, raw-log
+│                                   toggle, "Last run ·" card
 ├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
 ├── analyze_tab_chrome.py        ← Analyze mixin: form chrome (sections, rows, entries, ⓘ markers)
 ├── analyze_tab_seg_params.py    ← Analyze mixin: per-method segmentation params + StarDist thresholds
@@ -2044,6 +2046,27 @@ section on demand: the fold-by-default rule is right for a user filling the form
 in and wrong for a control something else just changed on their behalf, which
 otherwise leaves no visible trace at all (see `_open_dataset_in_analyze`).
 
+The pane's output half is `analyze_tab_log.AnalyzeLogPaneMixin` — the log view,
+the raw-log toggle, and the idle "Last run ·" card. It is not form-building: the
+form gathers what a run is launched with, this shows what the run then said.
+
+**A failed run has to say so where the user is looking.** The runner turns a
+non-zero exit into one `("error", …)` event, and Analyze's handler used to put
+it in exactly one place — the log view, which is hidden at build. So a pipeline
+that refused to start looked identical to a run that had never been clicked:
+progress stopped, the Run button came back, nothing said why. Three things close
+that, and none of them is new machinery. `_surface_run_failure` calls the
+dashboard's `set_failed`, which every Datasets tool already calls and Analyze
+alone never did, and ticks the raw-log toggle, because the explanation is in
+that pane and the user has no reason to know it exists at the moment they need
+it. The `finished` branch gates `_refresh_last_run_summary` on the run having
+succeeded — the card's only test is that `pipeline_info.json` exists, and the
+pipeline writes that *before* any image work, so on failure it described a plate
+that was never produced. And `pipeline_runner.exit_message` quotes the
+pipeline's own last `ERROR` line beside the exit code, since "Pipeline exited
+with code 2" names nothing and, for a run refused before any work, was the whole
+of what the user got.
+
 The per-method segmentation parameters are their own mixin,
 `analyze_tab_seg_params.AnalyzeSegParamsMixin`: the `NamedPageStack` of
 per-routine pages (StarDist / watershed / Cellpose / label-free / classical) plus
@@ -2688,10 +2711,28 @@ parent process supervises the per-well worker pool:
     working set (per-image bytes × channels + ~6 float32 intermediates per
     FOV-group, times the run's own field/timepoint enumeration, times how many
     wells `--workers` stages at once) and the plate's durable output, and
+    — the channel count being `fluor_tokens_for_quant`'s own length, since that
+    list already leads with the segmentation channel and adding one for it
+    charged every FOV-group a frame that does not exist —
     compares them against the *resolved* scratch base and the output directory.
     Below one well's worth of scratch it exits before reading an image, because
     a run that starts there cannot finish; everything else warns, since the
-    estimates are deliberately rough. When scratch and output share a volume —
+    estimates are deliberately rough. **That exit is the only hard stop in the
+    app driven by an estimate, so it states the figure it tested and it can be
+    overruled.** It fires on the one-well need and must quote that, not the
+    whole-run figure beside it — the two differ by `--workers`, and reporting
+    the larger one under the words "not enough for even one well" describes a
+    shortfall the test never measured. `--allow_low_disk` (Analyze → Compute
+    Options) downgrades it to the warning path. Both sides of the comparison
+    lean the same way and a hard exit between them can refuse a run that would
+    have finished: the estimate takes the *largest* member and gives no deflate
+    credit, while the free figure is `statvfs`-available, which on APFS excludes
+    purgeable space and reads well under what the machine will hand over — a Mac
+    showing 14.3 GB in Finder reports 6.0 GiB here. Any free figure quoted to a
+    user says so, because it will not match their file manager and a check whose
+    numbers cannot be reconciled reads as broken. The wording of the override
+    lives once, in `capacity.ALLOW_LOW_DISK_HELP`, shared by the CLI flag's help
+    and the checkbox's tooltip. When scratch and output share a volume —
     the default, `~/.allwell/scratch` beside an output dir on the home volume —
     the two needs are summed against one free figure, because checking either
     alone reports that the run fits when it does not. The resolved base is

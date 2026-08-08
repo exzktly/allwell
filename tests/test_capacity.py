@@ -281,3 +281,156 @@ def test_imwrite_reports_enospc_from_the_codec(tmp_path, monkeypatch):
         pio._safe_imwrite(tmp_path / "img.tif", np.zeros((4, 4), np.uint16))
     assert excinfo.value.errno == errno.ENOSPC
     assert str(tmp_path) in str(excinfo.value)
+
+
+# ── the refusal that stopped a real run, and the two defects behind it ───────
+#
+# Reported: clicking Run showed progress reach Grouped and then drop straight
+# back to an idle button, with pipeline_info.json written and nothing said. The
+# pipeline had refused to start:
+#
+#   ERROR  Not enough scratch space to process even one well: 4.9 GiB free on
+#          /Users/…/.allwell/scratch — the run needs about 20.8 GiB there
+#          (4 well(s) at once, 10 FOV-group(s) each). Exiting before …
+#
+# On a machine whose Finder reported 14.3 GB free.
+
+_SAMPLE = 29 * 1024 ** 2          # largest member of the reported plate
+_FREE = int(4.9 * 1024 ** 3)      # what statvfs reported on that Mac
+
+
+def _preflight(monkeypatch, *, n_channels, free=_FREE, **over):
+    from pipeline import capacity
+
+    monkeypatch.setattr(capacity, "free_bytes", lambda _p: free)
+    kwargs = dict(sample_image_bytes=_SAMPLE, n_channels=n_channels,
+                  groups_per_well=10, concurrent_wells=4,
+                  output_dir=None, n_wells=4)
+    kwargs.update(over)
+    return capacity.preflight_scratch_space(Path("/scratch"), **kwargs)
+
+
+def test_the_reported_run_is_no_longer_refused(monkeypatch):
+    """Five channels is what that plate has — w1594, DIC, w2Turq, w3Cit, w4Cy5.
+
+    ``main()`` passed ``1 + len(fluor_tokens_for_quant)``, but that list already
+    leads with the segmentation channel, so every per-group estimate carried one
+    extra frame. Removing the phantom channel is the whole difference between
+    refusing this run and letting it start.
+    """
+    refused, _ = _preflight(monkeypatch, n_channels=6)     # the old count
+    allowed, message = _preflight(monkeypatch, n_channels=5)
+    assert refused is False
+    assert allowed is True
+    assert "tight" in message      # still warns; it is a small volume
+
+
+def test_main_passes_the_real_channel_count(monkeypatch, tmp_path):
+    """The off-by-one is invisible inside capacity.py — only the call site has
+    both numbers — so the guard has to watch what ``main()`` hands over."""
+    import sys
+
+    import process_microscopy as pm
+
+    seen = {}
+
+    def _spy(*_a, **kw):
+        seen.update(kw)
+        raise SystemExit(99)
+
+    monkeypatch.setattr(pm, "preflight_scratch_for_run", _spy)
+    (tmp_path / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    monkeypatch.setattr(sys, "argv", [
+        "process_microscopy.py",
+        "--input_dir", str(tmp_path), "--output_dir", str(tmp_path / "out"),
+        "--nuclear_token", "w1594",
+        "--fluor_tokens", "DIC", "w2Turq", "w3Cit", "w4Cy5",
+        "--filename_schema", "well:channel:timepoint:ignore:ignore",
+    ])
+    with pytest.raises(SystemExit):
+        pm.main()
+    # w1594 + the four fluor tokens. Not six.
+    assert seen["n_channels"] == 5
+
+
+def test_the_refusal_quotes_the_figure_it_tested(monkeypatch):
+    """It fires on ``free < per_well`` and used to print ``scratch_need`` — the
+    whole-run figure for every well staging at once. The user was told the run
+    wanted 20.8 GiB when what failed the comparison was the 5.1 GiB one well
+    needs, and the number they could have acted on never appeared."""
+    ok, message = _preflight(monkeypatch, n_channels=6)
+    assert ok is False
+    assert "one well needs about 5.1 GiB" in message
+    assert "20.4 GiB" in message and "4 well(s) staging at once" in message
+    # And it says what the free figure means, because it will not match Finder.
+    assert "purgeable" in message
+    assert "--allow_low_disk" in message
+
+
+def test_allow_low_disk_downgrades_the_refusal(monkeypatch, tmp_path):
+    """A conservative estimate must never be able to lock someone out of their
+    own data with no way past it."""
+    from pipeline import capacity
+
+    monkeypatch.setattr(capacity, "free_bytes", lambda _p: 1)
+    log = logging.getLogger("test_allow_low_disk")
+    (tmp_path / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+
+    def _run(allow):
+        return capacity.preflight_scratch_for_run(
+            tmp_path, tmp_path, n_wells=1, n_channels=2, workers=1,
+            image_exts=(".tif",), count_groups=lambda: 1, log=log,
+            allow_low_disk=allow,
+        )
+
+    monkeypatch.setattr(capacity, "sample_image_bytes", lambda *_a, **_k: 10 ** 9)
+    with pytest.raises(SystemExit) as exc:
+        _run(False)
+    assert exc.value.code == 2
+    assert _run(True) is None          # returns instead of exiting
+
+
+# ── the exit had to reach the user, not just happen ─────────────────────────
+
+def test_the_exit_message_carries_the_pipelines_own_reason():
+    """"Pipeline exited with code 2." names nothing, and for a run refused
+    before any work it was the *only* thing shown. The pipeline always explains
+    itself on stdout one line earlier."""
+    from services.pipeline_runner import exit_message
+
+    tail = [
+        "2026-08-08 19:10:32  INFO      Found 4 well zip file(s) in /x/in",
+        "2026-08-08 19:10:32  INFO      Scratch  : /Users/z/.allwell/scratch",
+        "2026-08-08 19:10:32  ERROR     Not enough scratch space to process "
+        "even one well: 4.9 GiB free. Exiting before processing anything.",
+    ]
+    msg = exit_message(2, tail)
+    assert "code 2" in msg
+    assert "Not enough scratch space" in msg
+
+
+def test_the_exit_message_falls_back_to_the_last_line():
+    from services.pipeline_runner import exit_message
+
+    assert "boom" in exit_message(1, ["something", "boom"])
+    # Nothing to quote is still a usable sentence, not a crash.
+    assert exit_message(1, []).strip() == "Pipeline exited with code 1."
+    assert exit_message(1, None).strip() == "Pipeline exited with code 1."
+
+
+def test_allow_low_disk_reaches_the_argv_only_when_asked():
+    from services.pipeline_service import build_pipeline_args
+
+    base = dict(
+        nuclear_token="NIR", fluor_tokens=["GFP"], csv_prefix="m",
+        filename_schema="experiment:channel:well:fov:timepoint",
+        filename_sep="_", segmentation_method="stardist_nuclei",
+        min_nucleus_area_px=50, smfish_tokens=[], shape_features=[],
+        tf_threads="0", workers="0", flatfield="none", background_well="",
+        qc_remove_debris=False, qc_min_area=0.0, qc_max_area=0.0,
+        qc_min_solidity=0.0,
+    )
+    P, IN, OUT = Path("/pipe.py"), Path("/in"), Path("/out")
+    assert "--allow_low_disk" not in build_pipeline_args(P, IN, OUT, dict(base))
+    assert "--allow_low_disk" in build_pipeline_args(
+        P, IN, OUT, dict(base, allow_low_disk=True))

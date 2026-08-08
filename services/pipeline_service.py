@@ -196,6 +196,7 @@ def build_pipeline_args(
         "force",
         "incremental",
         "cpu_only",
+        "allow_low_disk",
     ):
         if opts.get(flag):
             args.append(f"--{flag}")

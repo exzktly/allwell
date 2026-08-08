@@ -111,6 +111,35 @@ def sample_image_bytes(input_dir: Path, image_exts) -> int:
 # Intermediates written per FOV-group (corrected + top-hat per channel, the
 # label image, the overlay). Deliberately conservative — under-estimating the
 # need is the failure this exists to prevent.
+#: Said whenever a free-space figure is quoted back to a user, because the
+#: number will not match the one their file manager shows. ``statvfs`` reports
+#: what is claimable *now*; macOS counts caches and local snapshots as
+#: purgeable and includes them in Finder's "available", so the gap is routinely
+#: several GB. Without this the check looks broken to anyone who cross-checks it.
+_FREE_IS_CLAIMABLE_NOW = (
+    "The free figure is what the filesystem reports as immediately available, "
+    "which on macOS reads lower than Finder's — Finder counts purgeable caches "
+    "and snapshots that are not claimable until something asks for the space."
+)
+
+#: Why the override exists, worded once. Both the CLI flag's ``--help`` and the
+#: Analyze checkbox's tooltip read from here, so the explanation of when it is
+#: safe to overrule the check cannot say two different things.
+ALLOW_LOW_DISK_HELP = (
+    "Start the run even when the disk check estimates it will not fit.\n\n"
+    "That estimate is deliberately pessimistic — it sizes from the largest "
+    "image in the plate and gives no credit for compression — and the "
+    "free-space figure it is compared against is what the filesystem reports "
+    "as claimable right now, which on macOS reads lower than Finder's (Finder "
+    "counts purgeable caches and snapshots). So the check can refuse a run "
+    "that would have finished.\n\n"
+    "It exists because a run that fills its volume part-way dies with an "
+    "unexplained 'No space left on device' after hours of work, so leave this "
+    "off unless a refusal looks wrong. Moving the scratch directory or "
+    "lowering the worker count is the better fix when the volume really is "
+    "tight."
+)
+
 _INTERMEDIATES_PER_GROUP = 6
 # float32 intermediates against 16-bit inputs.
 _INTERMEDIATE_WIDENING = 2.0
@@ -186,7 +215,23 @@ def preflight_scratch_space(
         f"{groups_per_well} FOV-group(s) each). {move_it}"
     )
     if free < per_well:
-        return False, f"Not enough scratch space to process even one well: {where}"
+        # Quote the figure this test actually used. The sentence above
+        # describes ``scratch_need`` — every well staging at once — so pairing
+        # it with "even one well" told the user the run wanted 20.8 GiB when
+        # what failed the comparison was the 5.2 GiB one well needs, and left
+        # the one remedy that would have fixed it (fewer workers is irrelevant
+        # here; a bigger volume is not) unstated.
+        return False, (
+            f"Not enough scratch space to process even one well: "
+            f"{_gib(free)} free on {scratch_base}, and one well needs about "
+            f"{_gib(per_well)} of transient staging ({groups_per_well} "
+            f"FOV-group(s) at {_gib(per_group)} each). The whole run would "
+            f"want about {_gib(scratch_need)} with {concurrent_wells} well(s) "
+            f"staging at once. {move_it} "
+            f"{_FREE_IS_CLAIMABLE_NOW} "
+            f"To start anyway, use --allow_low_disk (Analyze → Compute "
+            f"Options → “Start even if the disk looks too small”)."
+        )
 
     output_need = 0
     shared = False
@@ -230,6 +275,7 @@ def preflight_scratch_for_run(
     count_groups,
     log,
     output_dir: Path | None = None,
+    allow_low_disk: bool = False,
 ) -> None:
     """Warn — or refuse to start — when the run cannot fit on its volumes.
 
@@ -239,6 +285,15 @@ def preflight_scratch_for_run(
     enumeration) gives the FOV-groups per well, and *workers* gives how many
     wells stage at once. Exits only when there is not room for a single well,
     which cannot succeed; everything else warns.
+
+    *allow_low_disk* downgrades that refusal to a warning. Both sides of the
+    comparison lean the same way: the estimate takes the *largest* member and
+    gives no credit for deflate, while the free figure is ``statvfs``-available,
+    which on APFS excludes purgeable space and so reads well under what the
+    machine will actually hand over — a Mac showing 14.3 GB in Finder reports
+    6.0 GiB here. Two conservative numbers meeting at a hard exit can refuse a
+    run that would have finished, and no heuristic should be able to lock
+    someone out of their own data with no way past it.
     """
     log.info("Scratch  : %s", scratch_base)
     if n_wells <= 0:
@@ -259,6 +314,9 @@ def preflight_scratch_for_run(
         output_dir=output_dir,
         n_wells=n_wells,
     )
+    if not ok and allow_low_disk:
+        log.warning("%s Continuing anyway (--allow_low_disk).", message)
+        return
     if not ok:
         import sys as _sys
         log.error("%s Exiting before processing anything.", message)

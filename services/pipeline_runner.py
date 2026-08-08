@@ -27,6 +27,7 @@ Event protocol (queue payloads are ``(kind, payload)`` tuples):
 
 from __future__ import annotations
 
+import collections
 import os
 import queue
 import re
@@ -46,6 +47,41 @@ from services.remote_runner import (
 )
 from services.subprocess_kill import signal_subprocess
 from util.aw_safe import swallowed
+
+#: How many of the pipeline's own trailing output lines ride along with a
+#: non-zero exit. Enough to carry a refusal sentence or a traceback's last
+#: frame; short enough that the dashboard headline stays readable.
+_ERROR_TAIL_LINES = 6
+
+#: ``process_microscopy`` logs as "%(asctime)s  %(levelname)-8s  %(message)s";
+#: strip that prefix when quoting one of its lines back as a failure reason.
+_RE_LOG_PREFIX = re.compile(
+    r"^\S+\s+\S+\s+(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+")
+
+
+def exit_message(rc: int, tail) -> str:
+    """The failure text for a pipeline that exited *rc*, quoting what it said.
+
+    ``Pipeline exited with code 2.`` names nothing, and for a run refused
+    before any work — the disk preflight, an input with no wells the pipeline
+    recognises — the exit code is the *only* thing the user was shown. The
+    pipeline always explains itself on stdout first; this carries that
+    explanation to where the failure is reported.
+    """
+    lines = [ln.strip() for ln in (tail or []) if ln and ln.strip()]
+    head = f"Pipeline exited with code {rc}."
+    if not lines:
+        return head + "\n"
+    # Prefer the pipeline's own last ERROR line when there is one: on a refusal
+    # it is the sentence that names the cause, and the lines after it are
+    # usually routine.
+    errs = [ln for ln in lines if " ERROR " in ln or ln.startswith("ERROR")]
+    reason = errs[-1] if errs else lines[-1]
+    # Drop the log's own "<date> <time>  LEVEL" prefix. It is redundant beside a
+    # line already presented as the failure, and it is what pushes the sentence
+    # that matters off the end of a dashboard headline.
+    return f"{head} {_RE_LOG_PREFIX.sub('', reason).strip()}\n"
+
 
 
 # ``process_microscopy`` logs as "%(asctime)s  %(levelname)-8s  %(message)s"
@@ -772,8 +808,16 @@ class PipelineRunner:
                 self._enqueue(("line", "[info] Run cancelled before launch.\n"))
                 return
             assert proc.stdout is not None
+            # The pipeline says why it is stopping on its own stream, one line
+            # before it exits — "Not enough scratch space…", "No per-well zips
+            # … found", a traceback's last frame. The exit code alone reaches
+            # the user as "Pipeline exited with code 2", which names nothing, so
+            # keep the tail and attach it to the failure.
+            tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
             for line in proc.stdout:
                 self._enqueue(("line", line))
+                if line.strip():
+                    tail.append(line.rstrip("\n"))
             proc.wait()
             rc = proc.returncode
             if rc == 0:
@@ -791,7 +835,7 @@ class PipelineRunner:
                         ))
                 self._enqueue(("done", "Pipeline completed successfully.\n"))
             else:
-                self._enqueue(("error", f"Pipeline exited with code {rc}.\n"))
+                self._enqueue(("error", exit_message(rc, tail)))
         except Exception as exc:  # surface any failure to the GUI
             self._enqueue(("error", f"Failed to start pipeline: {exc}\n"))
 

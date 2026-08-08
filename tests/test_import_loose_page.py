@@ -10,7 +10,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication
+
+from tests._datasets_worker import run_worker_to_completion  # noqa: E402
 
 SCHEMA = "experiment:channel:well:fov:timepoint"
 
@@ -27,12 +29,9 @@ def _write_loose(folder, wells, timepoints=("0h",)):
             (folder / f"exp_GFP_{well}_F001_{tp}.tif").write_bytes(b"img")
 
 
-def _run_worker_to_completion(ctrl) -> None:
-    worker = ctrl._worker
-    assert worker is not None
-    worker.wait(5000)
-    for _ in range(10):
-        QApplication.processEvents()
+# One shared implementation — the six copies of this helper all failed
+# open the same two ways. See tests/_datasets_worker.py.
+_run_worker_to_completion = run_worker_to_completion
 
 
 def test_dashboard_reveals_on_a_scanned_source_and_hides_without_one(qapp, tmp_path):

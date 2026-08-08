@@ -10,7 +10,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication, QScrollArea  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea
+
+from tests._datasets_worker import run_worker_to_completion  # noqa: E402
 
 from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
 
@@ -20,13 +22,9 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def _run_worker_to_completion(ctrl) -> None:
-    """See tests/test_validate_page.py for why isRunning() polling is unsafe."""
-    worker = ctrl._worker
-    assert worker is not None
-    worker.wait(5000)
-    for _ in range(10):
-        QApplication.processEvents()
+# One shared implementation — the six copies of this helper all failed
+# open the same two ways. See tests/_datasets_worker.py.
+_run_worker_to_completion = run_worker_to_completion
 
 
 def test_readout_seeds_wells_timepoints_fovs(qapp, tmp_path):

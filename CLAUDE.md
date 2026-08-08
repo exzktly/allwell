@@ -303,7 +303,11 @@ features; minor for a new tab or a workflow change users must relearn; major is
 a human's call, never yours. Bump once per PR, not once per commit: if the
 branch already carries a bump that isn't on the default branch yet, edit that
 number instead of adding another. Check with
-`git diff origin/main -- version.py` before bumping.
+`git diff origin/main -- version.py` before bumping. A second body of planned
+work that stacks onto a branch whose PR is still open shares that PR, and
+therefore that one bump — the failure mode is holding a two-PR model in your
+head while the branch carries one. `scripts/preflight.sh` fails when the net
+delta against `origin/main` is more than a single increment.
 
 Bumping means **one line** — `version.py::__version__`, which the title-bar pill
 and the PyInstaller spec read. The docs state no version at all; they write
@@ -518,7 +522,10 @@ worse than no check because it is reported as evidence.
    choice sat a few hundred lines from a new ARCHITECTURE.md row explaining that
    the rail exemption exists *because* the rail picker is Review's primary
    interaction surface. When a change adds a rule, re-read the rule against the
-   rest of the change.
+   rest of the change. This one recurred: a module move updated a path inside a
+   paragraph and left "It lives in `domain/`" four lines below it, because a
+   string substitution feels like it cannot have semantic consequences.
+   `scripts/rename_sweep_check.sh` runs the query that finds it (§7.5 #6).
 7. **Search the history before building a remembered feature.** A report that
    Batch Export's Quick Setup "used to take an N for serial rows" turned out to
    be Sample Definitions' *Quick Replicates* (`Group along` / `Replicates per
@@ -585,7 +592,96 @@ never saw.
    about. Re-run against the old code's *own* values, and read the failure
    message to check it says what you expected it to say.
 
-## 7.5 Debugging entry points
+## 7.5 Sweeping, and the guards that hold a sweep
+
+§7 through §7.4 are about one defect. This is the other job: changing the same
+thing in a hundred places and writing the test that holds it. The test failing
+quietly is the worse half, because it gets reported as proof.
+
+Everything here came from one branch, all of it found by reviewers after the work
+had been called verified — and four of the mistakes were rules already in this
+file, broken in the session's second half on the Nth repeat of an operation.
+§7.4 #4 was not forgotten: every guard *was* run against `origin/main`, but
+somewhere around the sixth one "1 failed" started being accepted as proof
+without reading the failure type. A rule you have to remember decays exactly
+when you need it, and the decayed version looks identical from the outside.
+Three of these are commands now. Run them instead of recalling them.
+
+1. **Prove a guard with `scripts/prove_guard.sh <test_file>`, not by eye.** It
+   builds a worktree of the base ref, carries across any `tests/` support module
+   the guard imports, and fails unless the result was an `AssertionError` naming
+   sites — reporting how many. Two of eight hand-made proofs were an
+   `ImportError` and a `NameError` raised while formatting the guard's own
+   failure message; both look like "it failed on main" in a terminal and both
+   measured nothing. It also reports *passed on the base*, which means the rule
+   already held and the test is a hypothesis rather than a guard.
+2. **A hardened guard that passes on the first run has probably not been
+   hardened.** A helper added to make the pixel guard see wrapped literals left
+   the suite green, and green was read as success; the replacement string had
+   not matched, so the helper was dead code and the guard still measured what it
+   always had. Make it red on the case it used to miss, *then* fix the sites,
+   *then* watch it go green.
+3. **The scan surface is half the rule.** Three AST guards landed in one branch
+   with three different ideas of which files to read, each blind exactly where
+   another could see: the divider guard could not see `analyze_tab_chrome.py`,
+   which builds dividers, and the well-token guard could not see `pipeline/` or
+   `process_microscopy.py` — the call sites `util/well_token.py`'s own docstring
+   names as the reason the rule exists. Roots come from `tests/_repo_scan.py`;
+   a guard that needs its own says why in the file.
+4. **Report the count the guard produces, not the count your grep produced.**
+   "Three copies of the plot-card roster" became five once the guard could see
+   every module, and two of the missed ones carried the same six-of-eight
+   staleness the commit claimed to be fixing. A headline number that came from
+   your own search describes your search, not the codebase.
+5. **Convert every sibling that answers the same question, including the ones
+   spelled differently.** Five "is this directory a well?" predicates in
+   `services/remote_runner.py` were converted and the six
+   `glob("[A-H][0-9]*.zip")` calls beside them — several in the same function —
+   were not. A glob is a predicate. The two then disagreed in both directions,
+   so FOLDER-mode staging zipped `a1/` into `a1.zip` and could not find it
+   again: source folder deleted, plate uploaded one well short, and the error
+   blamed the filename schema. **Half-swept is worse than unswept**, because one
+   function now holds two definitions of the same word and neither looks wrong.
+6. **After a move, run `scripts/rename_sweep_check.sh <old> <new> [<old-dir>]`.**
+   A path substitution leaves the bare basename in directory trees and layer
+   diagrams, and leaves the sentence that now contradicts itself — §7.3 #6,
+   broken again by exactly the mechanism it describes. The script runs both
+   queries: the basename alone, and the old directory name within a few lines of
+   the new symbol.
+7. **Measure the thing you are about to name.** An unnamed divider was reported
+   as "3 px of near-white, three times the intended weight" and that went into
+   ARCHITECTURE. It is a **1 px** line inside a frame that reserves 3 px for it —
+   widget geometry described as ink — and several converted sites already pinned
+   a height, so for those only the colour was ever wrong. Keep the method beside
+   the number, especially before promoting it into the canonical map.
+8. **Your own differential is the weakest evidence you can offer.** For the
+   `fold_change` extraction the harness was mine, the fixtures were mine, the
+   result was zero differences, and that was reported as equivalence. A reviewer
+   with different fixtures found a real divergence: a shared helper had added an
+   `isinstance` check the original site never had, which turns a `numpy.float32`
+   spread into "no error bar" — §7's computed-as-zero-versus-not-computed, in
+   the most numerically sensitive module in the app. Say what the fixtures were
+   when you report it, and for numeric code get them from somewhere other than
+   your own imagination. **No command fixes this one.**
+9. **Measure member identity before planning a consolidation.** "These six
+   controllers look alike" became a plan to share seven methods. Hashing each
+   method's normalised AST across the six showed `_on_queue_requested` had six
+   distinct bodies, `shutdown` six, `_on_finished` five, and one `_on_succeeded`
+   a different signature — and `shutdown` was the one a naive base would have
+   regressed silently, because the tool whose worker blocks in a subprocess read
+   needs a different stop call. Estimating a consolidation by eye is the
+   reading-not-running mistake wearing a planning hat. **No command for this one
+   either.**
+10. **Allowlist the site, not the file**, and pair every allowlist with a
+    liveness test that fails when an entry stops describing a real violation. A
+    colour allowlist justified by one file's icon-painter palette exempted every
+    literal in that whole file.
+11. **Ruff here does not flag unbound names.** Stripping an `app = ctx.window`
+    bridge left `app` undefined in three functions and lint passed. After
+    deleting a binding, AST-scan the touched files for names loaded but never
+    bound in scope.
+
+## 7.6 Debugging entry points
 
 - Widget you can't find: `grep -rn '_line_fig\b' well_viewer/ widgets/` — every
   Review widget is stored as `_<noun>`. Rail pages → `core/centre_view.py`;

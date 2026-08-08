@@ -42,7 +42,6 @@ from widgets.well_plate_selector import WellPlateSelector
 from datasets.subset.dashboard import SubsetDashboard
 from datasets.subset.subset_compute import (
     DatasetPaths,
-    destination_has_marker,
     destination_has_unrecognized_content,
     destination_is_complete_dataset,
 )
@@ -68,7 +67,7 @@ def _is_destination(root: Path) -> str:
     dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
     if destination_is_complete_dataset(dest):
         return "Already holds a finished dataset — choose an empty folder."
-    if destination_has_unrecognized_content(dest) and not destination_has_marker(dest):
+    if destination_has_unrecognized_content(dest):
         return "Already has unrelated files — choose an empty folder."
     return ""
 

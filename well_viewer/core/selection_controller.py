@@ -996,20 +996,6 @@ def sel_set_composition(ctx, sid, wells=None, replicates=None) -> None:
 
 
 
-def select_invert(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Phase 13 (B7): flip the current selection — every loaded well that
-    was selected becomes unselected, and vice versa. Only wells with data
-    (``_well_paths``) participate."""
-    cur = set(app._app_state.selection.selected_wells)
-    new = {w for w in app._app_state.dataset.well_paths.keys() if w not in cur}
-    app._app_state.selection.selected_wells = new
-    # Re-use the standard refresh path the click handlers go through.
-    app._refresh_sidebar_map()
-    on_plate_sel_change(ctx)
-
-
-
 def invalidate_stats_cache(ctx) -> None:
     """Discard cached group statistics. Call whenever group definitions change."""
     ctx.state.stats_cache.invalidate()
@@ -1160,11 +1146,4 @@ def labels_clear_all(ctx) -> None:
         _schedule_sample_def_autosave(ctx)
 
 
-
-def rep_select(ctx, idx: int) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    # Legacy bridge: select the idx-th rep_set-source selection.
-    sels = [s for s in app._app_state.selection.selections if s.get("source") == "rep_set"]
-    if 0 <= idx < len(sels):
-        app._sel_select(sels[idx].get("id"))
 

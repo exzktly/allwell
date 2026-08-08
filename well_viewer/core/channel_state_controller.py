@@ -33,7 +33,7 @@ from well_viewer.data.data_loading import (
     normalize_channel_tokens,
 )
 from well_viewer.domain.metric_registry import channel_supports_smfish
-from well_viewer.domain.ratio_models import build_ratio_index, is_ratio_key, ratio_name_from_key
+from well_viewer.domain.ratio_models import is_ratio_key, ratio_name_from_key
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
 from well_viewer.core.safe import swallowed
@@ -839,24 +839,6 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
 
 
 
-def on_preview_channel_selected(ctx, _e=None) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Channel-switch handler for the Movie Montage tab."""
-    selected_ui_value = ""
-    if hasattr(app, "_chan_cb_preview"):
-        selected_ui_value = str(app._chan_cb_preview.currentText() or "").strip()
-    if not selected_ui_value and hasattr(app, "_montage_chan_var"):
-        selected_ui_value = app._montage_chan_var.currentText()
-    if _debug_flags.movie_montage_debug_enabled():
-        _logger.debug(
-            "preview_channel_selected ui_value=%r active_before=%r",
-            selected_ui_value,
-            app._app_state.channel.active_image_channel,
-        )
-    set_active_image_channel(ctx, selected_ui_value.lower())
-
-
-
 def on_metric_selected_global(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Handle the global Property combo (Plotting's band) change."""
@@ -898,26 +880,6 @@ def channel_key_for_label(ctx, label: str) -> str:
             return r.key()
     # Otherwise assume a real channel and lowercase the label.
     return str(label or "").lower()
-
-
-
-def rebuild_ratio_index(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Refresh the resolver-friendly ratio index and any dependent UI."""
-    app._app_state.channel.ratio_index = build_ratio_index(app._app_state.channel.ratio_metrics)
-    # If the active val_col references a deleted ratio, fall back to the
-    # first real fluorescence channel so plots stay valid.
-    if is_ratio_key(app._app_state.channel.active_val_col) and app._app_state.channel.active_val_col not in app._app_state.channel.ratio_index:
-        fallback = (app._app_state.channel.fluor_channels or ["gfp"])[0]
-        app._app_state.channel.active_channel = fallback
-        app._app_state.channel.active_val_col = f"{fallback}_{app._app_state.channel.active_metric}"
-    update_channel_selector(ctx)
-    app._invalidate_stats_cache()
-    if hasattr(app, "_redraw"):
-        try:
-            app._redraw()
-        except Exception:
-            swallowed()  # was: pass (silent except)
 
 
 
@@ -1126,12 +1088,4 @@ def on_metric_selected(ctx) -> None:
     set_active_metric(ctx, metric)
 
 
-
-def open_ratio_panel(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Bring the Sample Definitions tab forward — the ratio editor lives there now."""
-    nb = getattr(app, "_notebook", None)
-    if nb is None:
-        return
-    nb.setCurrentByName("Sample Definitions")
 

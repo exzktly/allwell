@@ -223,14 +223,6 @@ _TRANSFER_ADVICE = (
 )
 
 
-def _staging_free_bytes(path: Path) -> int | None:
-    """Free bytes on the staging volume, or None when it can't be determined."""
-    try:
-        return shutil.disk_usage(path).free
-    except OSError:
-        return None
-
-
 # Markers the pipeline's stdout emits; reused here so the Fetcher can
 # trigger on the same lines the GUI's ProgressTracker already parses.
 #

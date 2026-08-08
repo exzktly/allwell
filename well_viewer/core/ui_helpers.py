@@ -36,28 +36,6 @@ def well_plate_tooltip_provider(ctx) -> Callable[[str], str]:
         return well_id
     return _tooltip
 
-def apply_sidebar_plate_geometry(plate) -> None:
-    """Review-side alias for the app-wide plate geometry in the ``"rail"`` role.
-
-    The sizing rule is not specific to Review's sidebar: the run dashboards and
-    the Datasets tools show the same plate control and must render it at the same
-    cell scale, so the rule lives in ``widgets/plate_geometry.py`` where the
-    ``widgets/`` and ``datasets/`` sides can reach it too (``widgets/`` must not
-    import ``well_viewer`` — ``test_architecture_contracts.py::
-    test_widgets_do_not_import_the_app``). This wrapper stays so Review-side
-    callers that already know this name keep working; new code should call
-    ``widgets.plate_geometry.apply_plate_geometry`` directly and pick its role.
-
-    One rule the helper cannot enforce for the caller: the plate's container must
-    add **no horizontal inset**, because the grid paints from the widget's own
-    ``width()``. A left/right gutter on one tab's plate layout makes only that
-    tab's plate render narrower, and — aspect-locked — it shrinks in both
-    dimensions. That was the Image Table "shrinking plate" bug.
-    """
-    from widgets.plate_geometry import apply_plate_geometry
-    apply_plate_geometry(plate, role="rail")
-
-
 def parse_float_edit(edit, fallback=None, *, allow_auto: bool = False):
     """Parse a ``QLineEdit``'s text as ``float``; return *fallback* on blank,
     non-numeric, or (when *allow_auto*) the literal ``"auto"``.
@@ -1044,30 +1022,6 @@ def mute_color(hex_color: str, factor: float = 0.5) -> str:
     mg = int(g + (grey[1] - g) * factor)
     mb = int(b + (grey[2] - b) * factor)
     return f"#{mr:02X}{mg:02X}{mb:02X}"
-
-
-
-def on_theme_change(ctx, theme_name: str = None) -> None:
-    app = ctx.window  # transitional bridge (A3)
-    """Re-apply QSS stylesheet when theme switches."""
-    new_theme = theme_name or app._theme_name
-    app._theme_name = new_theme
-    app._apply_theme()
-
-    if hasattr(app, '_rep_cards_frame') and app._rep_cards_frame:
-        from well_viewer.features.grouping.tab_view import rep_panel_refresh
-        rep_panel_refresh(app._ctx)
-    if hasattr(app, '_stats_fig') and app._stats_fig:
-        from well_viewer.features.stats.controller import stats_refresh_colors
-        stats_refresh_colors(app._ctx)
-    if hasattr(app, "_sidebar_btns"):
-        app._sidebar_map_refresh_pending = False
-        app._refresh_sidebar_map_now()
-    try:
-        from well_viewer.core.ui_helpers import refresh_plot_toolbar_icons
-        refresh_plot_toolbar_icons(app)
-    except Exception:
-        swallowed()  # was: pass (silent except)
 
 
 

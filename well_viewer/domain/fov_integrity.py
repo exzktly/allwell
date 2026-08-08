@@ -126,14 +126,3 @@ def check_fov_labels(df) -> FovIntegrity:
     return FovIntegrity(trusted=True, n_labels=n_labels)
 
 
-def unrecorded_fov_tokens(df) -> bool:
-    """True when the well's ``fov`` column carries no real label at all.
-
-    A narrower observation than :func:`check_fov_labels` — it says the tokens
-    are placeholders, not that the grouping is provably wrong — and it is what
-    a fresh single-field dataset also looks like. Reported, never acted on.
-    """
-    if df is None or len(df) == 0 or "fov" not in getattr(df, "columns", ()):
-        return False
-    fov = df["fov"].fillna("").astype(str).str.strip().str.lower()
-    return bool(fov.isin(UNRECORDED_FOV_TOKENS).all())

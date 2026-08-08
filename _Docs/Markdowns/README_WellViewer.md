@@ -848,10 +848,11 @@ the next.
 The window's top row is one band: **Review / Analyze / Datasets** on the left,
 spanning the width of the panel below it, and the current page's tabs — *Bar
 Plots · Line Graphs · Scatter Plot · …*, or *Image Table · Segmentation · Cell
-Browser · Playground* — immediately to their right on the same line. Pages
-without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Batch Export, Saved
-Plots) leave that side empty; the band keeps its height so nothing below it
-shifts when you switch pages.
+Browser · Playground* — immediately to their right on the same line. Batch Export's four
+modes — *Line · Bar · Scatter (cells) · Scatter (aggregate)* — sit there too.
+Pages without sub-tabs (Statistics, Spatial, smFISH, Review CSV, Saved Plots)
+leave that side empty; the band keeps its height so nothing below it shifts when
+you switch pages.
 
 The mode selector stays the width of whatever panel sits under it, so the two
 read as one column: Review's well-picker rail, the Analyze form (which you can
@@ -877,6 +878,12 @@ One row means one row. The five Plotting tabs share it: the controls common to
 all of them — channel, property, threshold — stay put as you move between Bar
 Plots, Line Graphs, Scatter, Distribution and Heat Map, and only the part that
 belongs to the tab you are on changes beside them.
+
+That row is also where every page starts. It is drawn at the same height on
+every page, in all three modes, and a page with no controls of its own keeps the
+row empty rather than starting its content higher — so moving between pages
+never shifts the top of what you are looking at. It grows only when it has to:
+on a narrow window, where the left side wraps onto a second line.
 
 #### Figure actions — the Export dropdown · Properties
 
@@ -1884,7 +1891,12 @@ per-nucleus rows behind every plot.
 ### Sample Definitions
 
 **Sample Definitions** is where you tell the app what your wells *mean*. Its
-sub-tabs are led by **Cell Gating**:
+sub-tabs are led by **Cell Gating**. Two buttons sit at the right end of the
+page's controls row and act on everything the page defines: **+** imports
+definitions from a JSON file (merging them into what is already there), and
+**×** clears the lot — well labels, replicate sets, bar groups, ratio metrics
+and cell-gating thresholds. Everything here autosaves to the dataset folder as
+you edit, so there is no Save button to look for.
 
 #### Cell Gating
 
@@ -1979,9 +1991,11 @@ points. The bar and line batch panels also expose the same
 panel-local state so a batch run isn't tied to whatever the on-screen
 plot has set.
 
-The groups you build are **shared by all four Batch Export modes** — define
-them once and they are there whether you export Line, Bar, Scatter (cells) or
-Scatter (aggregate). They describe your plate's conditions, not the shape of
+Pick the mode from the tab strip in the window's top band — *Line · Bar ·
+Scatter (cells) · Scatter (aggregate)*, beside the Review / Analyze / Datasets
+selector, where every other page's tabs are. The groups you build are **shared
+by all four modes** — define them once and they are there whether you export
+Line, Bar, Scatter (cells) or Scatter (aggregate). They describe your plate's conditions, not the shape of
 the plot. (Datasets analysed before this carried a separate set per mode; those
 are merged on first open, with a group appearing in more than one of them kept
 just once.)

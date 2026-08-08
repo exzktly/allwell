@@ -764,10 +764,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         card.setVisible(True)
 
     def _build_log(self, parent: QWidget) -> None:
-        # The same control band every Review page carries, so the Analyze pane's
-        # first row is drawn level with theirs when the user switches modes: the
-        # pane's title is scope, the raw-log toggle and Clear are actions. It
-        # replaces a hand-built header row that was 6px shorter than the band.
+        # The same control band every Review page carries, so switching modes
+        # never moves the first row: the pane's title is scope, the raw-log
+        # toggle and Clear are actions.
         from widgets.page_body import build_page_body
         band, body = build_page_body(parent)
         rl = body.layout()
@@ -785,9 +784,8 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         clear_btn.setProperty("variant", "secondary")
         clear_btn.clicked.connect(self._clear_log)
         band.add_action(clear_btn)
-
-        r1 = QFrame(parent); r1.setFrameShape(QFrame.HLine); r1.setObjectName("HRule")
-        rl.addWidget(r1)
+        # No separator under the band — ``#ControlBand`` paints its own
+        # border-bottom hairline, so the rule that sat here was a second one.
 
         # Idle last-run summary (C4): a compact readout of the most recent run
         # so the pane isn't blank when nothing's running. Hidden during a run

@@ -103,6 +103,62 @@ def test_band_with_no_scope_controls_still_fits_its_actions(styled_app):
     )
 
 
+def test_one_row_is_the_same_height_whatever_the_row_holds(styled_app):
+    """The band is chrome shared by every page, so a single row is a constant.
+
+    Qt sizes each control from its own font and padding — a QPushButton at 24px,
+    a LabeledComboBox at 25, a QToolButton at 27, a QComboBox at 28 — which made
+    an unwrapped band 41, 43, 44 or 49px tall purely from which control a page
+    happened to put in it, and started the content under it at four different
+    heights. A page with no controls at all reserves the same row, which is what
+    lets ``widgets.page_body`` keep a band-less page level with its neighbours.
+    """
+    from PySide6.QtWidgets import (
+        QComboBox, QPushButton, QToolButton, QVBoxLayout, QWidget,
+    )
+    from widgets.control_band import ControlBand
+
+    def _tool_button(parent):
+        # With a label, as every tool button in the app's bands has one. Bare,
+        # Qt gives it a taller default than any real control in a band.
+        btn = QToolButton(parent)
+        btn.setText("Display ▾")
+        return btn
+
+    host = QWidget()
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(0)
+
+    cases = {}
+    for name, make in (
+        ("empty", None),
+        ("button", lambda b: b.add_action(QPushButton("Clear", b))),
+        ("combo", lambda b: b.add_scope("Channel", QComboBox(b))),
+        ("toolbutton", lambda b: b.add_action(_tool_button(b))),
+    ):
+        band = ControlBand(host)
+        if make is not None:
+            make(band)
+        layout.addWidget(band)
+        cases[name] = band
+    layout.addWidget(QWidget(), 1)
+    host.resize(1200, 600)
+    host.show()
+    styled_app.processEvents()
+
+    heights = {name: band.height() for name, band in cases.items()}
+    # Sameness first, and stated without ``band_height()`` — the claim is that
+    # four bands holding four different controls agree, which is measurable on
+    # any version of this widget. (A guard whose only assertion names a constant
+    # the pre-fix code lacks raises AttributeError there and measures nothing.)
+    assert len(set(heights.values())) == 1, f"single-row bands differ: {heights}"
+    assert set(heights.values()) == {ControlBand.band_height()}, (
+        f"a single row is {heights}, not the declared "
+        f"{ControlBand.band_height()}px"
+    )
+
+
 # ── labels stay with their controls ──────────────────────────────────────────
 def test_label_and_control_are_one_flow_item(styled_app):
     """A label added as its own flow item can wrap away from the widget it

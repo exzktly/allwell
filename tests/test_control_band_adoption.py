@@ -24,13 +24,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: Modules that build their tab's controls through the shared band. Add a module
 #: here in the same commit that adopts the band in it; never remove one.
-#: The two ways a module gets its control row. A page that owns the row builds a
-#: ``ControlBand``; a leaf sharing a page's row claims a slot in it. Either is
-#: adoption — building both, or building two of either, is the stacking of
-#: control rows the band exists to remove.
-_BAND_CALLS = ("ControlBand", "plotting_band_slot")
+#: The three ways a module gets its control row. A page that owns the row builds
+#: it — directly as a ``ControlBand``, or through ``build_page_body``, which lays
+#: the page out as band-then-content and returns the band it made; a leaf sharing
+#: a page's row claims a slot in it. Each is adoption — building two of them, in
+#: any combination, is the stacking of control rows the band exists to remove.
+_BAND_CALLS = ("ControlBand", "build_page_body", "plotting_band_slot")
 
 ADOPTED = (
+    "analyze_tab_form.py",                      # Analyze — the output pane
+    "datasets_tab.py",                          # Datasets — the tool pages
     "well_viewer/core/centre_view.py",          # Plotting — all five sub-tabs
     "well_viewer/features/barplot/tab_view.py",
     "well_viewer/features/distribution/tab_view.py",
@@ -39,9 +42,13 @@ ADOPTED = (
     "well_viewer/features/multivariate/tab_view.py",
     "well_viewer/features/scatter/agg_tab_view.py",
     "well_viewer/features/scatter/cells_tab_view.py",
+    "well_viewer/features/batch_export/tab_view.py",
+    "well_viewer/features/grouping/replicate_panel_view.py",  # Sample Definitions
     "well_viewer/features/image_browser/cell_browser/tab_view.py",
+    "well_viewer/features/image_browser/playground/tab_view.py",
     "well_viewer/features/preview/panel_view.py",          # Segmentation
     "well_viewer/features/review_csv/tab_view.py",
+    "well_viewer/features/saved_plots/tab_view.py",
     "well_viewer/features/smfish/tab_view.py",
     "well_viewer/features/spatial/tab_view.py",
     "well_viewer/features/stats/tab_view.py",
@@ -172,6 +179,7 @@ PAGE_TAB_OWNERS = (
     "well_viewer/core/centre_view.py",                       # Plotting
     "well_viewer/features/image_browser/tab_view.py",        # Image Browser
     "well_viewer/features/grouping/replicate_panel_view.py",  # Sample Definitions
+    "well_viewer/features/batch_export/tab_view.py",          # Batch Export
 )
 
 _HOIST_CALLS = ("register_page_tabs", "mirror_tab_widget")

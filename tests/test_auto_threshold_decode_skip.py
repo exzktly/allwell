@@ -1,7 +1,8 @@
 """Audit E9 — a biased auto-threshold must report itself.
 
-``_estimate_thresholds_standalone`` reads per-cell label + tophat image
-pairs out of each ``*_out.zip`` and computes an Otsu threshold. A decode
+``pipeline.auto_threshold.estimate_thresholds_from_outputs`` reads per-cell
+label + tophat image pairs out of each ``*_out.zip`` and computes an Otsu
+threshold. A decode
 failure on a pair was only logged at DEBUG (invisible at the default level),
 so a channel whose tophat images are largely corrupt would silently estimate
 its threshold from a small, biased subset. The fix counts decode failures per
@@ -16,7 +17,7 @@ import zipfile
 import numpy as np
 import tifffile
 
-import process_microscopy
+from pipeline.auto_threshold import estimate_thresholds_from_outputs
 
 
 def _valid_tif_bytes(arr: np.ndarray) -> bytes:
@@ -46,7 +47,7 @@ def _run(tmp_path, caplog, *, n_pairs, n_corrupt):
     _make_out_zip(tmp_path / "a1_out.zip", n_pairs=n_pairs, n_corrupt=n_corrupt)
     log = logging.getLogger("test_auto_threshold_e9")
     with caplog.at_level(logging.WARNING, logger=log.name):
-        process_microscopy._estimate_thresholds_standalone(
+        estimate_thresholds_from_outputs(
             tmp_path,
             fluor_channels=["cy5"],
             filename_schema="well:fov:timepoint:channel",

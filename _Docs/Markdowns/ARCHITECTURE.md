@@ -135,7 +135,8 @@ allwell/
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
-│   ├── auto_threshold.py       ← Otsu / threshold helpers (GUI Cell-Gating reads these too)
+│   ├── auto_threshold.py       ← Otsu / threshold helpers (GUI Cell-Gating reads these
+│   │                              too) + the run's own estimator over *_out.zip
 │   ├── threshold_optimize.py    ← two-population threshold sweep (shared with Cell Gating)
 │   ├── flatfield.py            ← flat-field illumination estimators (GUI validation view too)
 │   ├── shape_features.py       ← per-cell shape-feature catalog (pipeline emits, GUI labels)
@@ -149,6 +150,9 @@ allwell/
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read
 │   ├── capacity.py             ← disk-space accounting: what a run needs on the
 │   │                              scratch and output volumes, what is left there
+│   ├── sidecar.py              ← the pipeline_info.json blocks the user owns
+│   │                              (cell_gating / sample_definitions / ratios /
+│   │                              notes), preserved across any wholesale rewrite
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
@@ -976,10 +980,23 @@ loaded (the `.../out` path in the split case), not the climbed display name.
 
 #### Empty states and build failures
 
-`ui_helpers.wrap_with_empty_state` now wraps Statistics, Spatial, Review CSV and
-Batch Export too, so a tab opened before a dataset is loaded shows the same
-placeholder every plot tab shows rather than an empty table or a blank panel
-that reads as a failure.
+`ui_helpers.wrap_with_empty_state` wraps every centre tab whose body needs a
+dataset — the plots, Statistics, Spatial, Review CSV, Batch Export and smFISH —
+so a tab opened before one is loaded shows the same placeholder rather than an
+empty table, a blank panel, or a bare matplotlib canvas that reads as a failure.
+The wrap registers a `QStackedWidget` on `win._plot_empty_stacks` and
+`refresh_plot_empty_states` flips all of them together, which is what keeps the
+wording and the moment of the swap identical across tabs.
+
+**The placeholder is for "no dataset"; the axes are for everything else.** A tab
+with a dataset loaded and nothing to draw — no well selected, no timepoints, a
+channel the run never produced — paints its own message on the axes, because the
+message is about the selection rather than about the app having nothing to work
+with. Mixing the two is what made smFISH look unlike its neighbours: it painted
+*both* kinds on the canvas, so the one state every other tab renders as a glyph,
+a sentence and an "Open…" hint appeared there as a muted line of matplotlib
+text. The wrap decides that split; a tab that skips it has no way to show the
+shared placeholder at all.
 
 An actual failure says so. A deferred tab builder that raises used to log a
 traceback and leave an empty page — indistinguishable from a tab with nothing to
@@ -2365,10 +2382,10 @@ Torch** — they load only when a worker actually segments. Each `pipeline`
 module is in the remote manifest (`test_remote_manifest.py`) and the file sizes
 are ratcheted by `test_monolith_budgets.py`.
 
-That is also why the auto-threshold estimator was inlined into
-`process_microscopy.py` (`_estimate_thresholds_standalone`,
-`_apply_thresholds_to_pipeline_info`, `_sample_cell_and_bg`,
-`_pick_endpoint_timepoints`) — earlier versions imported the equivalent from
+That is also why the auto-threshold estimator lives in `pipeline/auto_threshold.py`
+(`estimate_thresholds_from_outputs`, `sample_cell_and_bg`,
+`pick_endpoint_timepoints`) beside `process_microscopy`'s
+`_apply_thresholds_to_pipeline_info` — earlier versions imported the equivalent from
 `well_viewer.auto_threshold`, which crashed the pass on hosts without the
 viewer. The viewer's copy is still used by the GUI's "Auto-threshold"
 button on the Cell Gating tab; the pipeline's copy is now the standalone
@@ -2380,8 +2397,39 @@ tail of `main()`, with three modes:
 | condition | what it writes |
 |---|---|
 | `--no_auto_threshold` | nothing |
-| no control wells | Otsu on a pooled per-cell / background-pixel distribution, per channel (`_estimate_thresholds_standalone`) |
+| no control wells | Otsu on a pooled per-cell / background-pixel distribution, per channel (`pipeline.auto_threshold.estimate_thresholds_from_outputs`) |
 | `--pos_control_well` **and** `--neg_control_well` | per channel, the threshold maximising the relative fraction-on gap between those two wells (`pipeline.threshold_optimize.estimate_thresholds_from_controls`) |
+
+**The Otsu mode reads its samples out of the output archives, and pairs them by
+name.** `estimate_thresholds_from_outputs` walks `<output_dir>/*_out.zip` and
+matches each channel's `_tophat` member to the `_labels` member of the same
+FOV-group, which means parsing member stems — output names are the input stem
+plus a role suffix — against the run's own `--filename_schema`. All of that is
+keyed on `(fov, timepoint)`, computed for both member roles by the single
+`_SchemaReader.group_key` so a label and its tophat cannot disagree about either
+coordinate; `_index_members`, `_sample_one_well` and `_otsu_per_channel` are the
+three steps around it.
+
+A schema need not name every slot, and an unnamed slot is not a parse failure.
+`well:channel:timepoint` (files like `A01_w2Turq_T04.tif`) has no fov token to
+find, and two images of the same well/channel/timepoint cannot exist under it —
+they would be the same filename — so an unnamed fov collapses to a constant that
+merges nothing distinct. A slot the schema *does* name but a given stem does not
+fill is the opposite case: that member is malformed, and a constant there would
+merge genuinely different fields, so it stays rejected. The timepoint slot takes
+the constant whenever it comes out empty either way, because a single-timepoint
+dataset writes filenames with fewer tokens than the schema has fields.
+
+The failure this guards against is a silent one: an archive whose members the
+schema cannot place looks exactly like a well that held no images, and every
+channel then reports `only 0 sample(s)` — a line that reads as "no data" and
+names neither the schema nor a filename. A well that yields nothing while holding
+role-suffixed members now warns, naming the schema, the separator and an example
+stem. The dispatcher separates the two outcomes it used to report as one, as
+well: "no new defaults" (every channel already had a stored value) is routine,
+while estimating nothing at all for every readout channel is a warning — and it
+cannot hide behind the segmentation channel's unconditional zero, which is itself
+a successful write and made such a run read as a partial success.
 
 In both non-skip modes the segmentation channel — `--nuclear_token`, already
 remapped onto `--phase_token` for the label-free methods by the time the pass
@@ -2410,7 +2458,28 @@ Batched remote runs suppress the per-batch pass (partial-plate data would write
 misleading defaults) and re-run it once locally over the full downloaded output
 — `services/remote_runner._run_local_auto_threshold`, which rebuilds an args
 object from the pipeline argv and calls the same `run_auto_threshold_pass` so
-the two paths cannot drift.
+the two paths cannot drift. That rebuild forces `no_auto_threshold=False` on
+purpose: when the pass is wanted it must ignore the batcher's copy of the flag.
+
+Which makes `--no_auto_threshold` ambiguous on that argv — it arrives there for
+two unrelated reasons, the operator unchecking the box and the batcher
+suppressing the per-batch pass, and once appended the two are indistinguishable.
+So the *decision to call* the local pass is what carries the operator's answer:
+`_BatchedRemoteProcess._auto_threshold_off_by_user` reads the flag off
+`self._pipeline_argv`, the argv as handed in, which `_run_batches` copies rather
+than mutates. Reading it any later answers the wrong question.
+
+**A remote fetch must not take the user's blocks with it.** `verify_and_cleanup`
+rsyncs the remote `pipeline_info.json` over the local one, and a remote output
+dir starts empty — so the fetched file carries none of the cell-gating
+thresholds, sample definitions, ratios or notes the Review side wrote locally,
+including the ones `_run_local_auto_threshold` produced moments earlier.
+`pipeline/sidecar.py` holds the list of those user-owned keys and the
+capture/restore pair around the fetch; `process_microscopy.write_pipeline_info`
+preserves the same list when a re-run rewrites the sidecar in place, so the two
+paths share one definition of whose data it is. `run_report` keeps its own
+merge (`pipeline/run_report.py`) because its records merge per well rather than
+being restored wholesale.
 
 Inputs / outputs / contract:
 
@@ -5323,7 +5392,7 @@ process_microscopy.main()
         │     ├── write per-well CSV + image outputs
         │     └── compress to <well>_out.zip
         ├── write pipeline_info.json
-        └── _estimate_thresholds_standalone(output_dir, …)
+        └── estimate_thresholds_from_outputs(output_dir, …)
               └── _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
                     ↳ pipeline_info.json["cell_gating"]["thresh_frac_on"]
         │

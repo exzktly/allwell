@@ -462,6 +462,29 @@ symmetrically, so entering them the wrong way round still produces a threshold.
 The run log warns when the positive control ends up with the *lower* fraction of
 on cells, which is the tell.
 
+**If the Cell Gating tab opens with no thresholds, read the end of the run log.**
+The Otsu pass takes its samples from the per-well output archives, pairing each
+channel's corrected image with the segmentation mask of the same field and
+timepoint — which means reading those coordinates out of the filenames using the
+filename schema you set. It does not require the schema to name every slot: a
+layout with no field token, or no timepoint token, works exactly as well. What it
+cannot do is work with a schema that does not describe the filenames at all, and
+in that case it says so, naming the schema and an example filename. The lines to
+look for, in order of what they mean:
+
+| line | meaning |
+|---|---|
+| `Auto-threshold defaults written for N channel(s): …` | worked; those values are now the Cell Gating defaults |
+| `no threshold could be estimated for any of …` | nothing was computed — the lines above it say why |
+| `none of its N image member(s) could be placed by the run's filename schema …` | the schema does not match the filenames |
+| `produced no new defaults (every channel already has a stored value)` | nothing to do; the dataset already had thresholds |
+| *(no `Auto-threshold` line at all)* | the run ended before the pass — check for an earlier failure |
+
+The last routine case is worth knowing: thresholds already stored for a channel
+are never overwritten, so re-running a plate into an output folder that already
+has them changes nothing. Clear the values on the Cell Gating tab first if you
+want a re-run to recompute them.
+
 ### 6. Quality control — field flatness & background correction
 
 The **Quality Control** section bundles optional, pre-measurement clean-up that

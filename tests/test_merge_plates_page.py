@@ -10,7 +10,9 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PySide6.QtWidgets import QApplication  # noqa: E402
+from PySide6.QtWidgets import QApplication
+
+from tests._datasets_worker import run_worker_to_completion  # noqa: E402
 
 from tests.fixtures.dataset_builder import build_dataset  # noqa: E402
 
@@ -20,12 +22,9 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def _run_worker_to_completion(ctrl) -> None:
-    worker = ctrl._worker
-    assert worker is not None
-    worker.wait(5000)
-    for _ in range(10):
-        QApplication.processEvents()
+# One shared implementation — the six copies of this helper all failed
+# open the same two ways. See tests/_datasets_worker.py.
+_run_worker_to_completion = run_worker_to_completion
 
 
 def test_run_gate_requires_three_distinct_paths(qapp, tmp_path):

@@ -200,14 +200,35 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     fig_img = reg.register("_smfish_fig_img", Figure(figsize=(6, 5), dpi=100))
     reg.register("_smfish_ax_img", fig_img.add_subplot(111))
     canvas_img = reg.register("_smfish_canvas_img", FigureCanvas(fig_img))
-    root.addWidget(canvas_img, 1)
     # Theme the canvas immediately so it's never a bare white figure before the
     # first refresh paints data or an empty-state message.
     _smfish_paint_empty(ctx, "Select a well to view smFISH images.")
 
     from widgets.mpl_toolbar import MplToolbar
     toolbar = reg.register("_smfish_toolbar", MplToolbar(canvas_img, parent))
-    root.addWidget(toolbar)
+
+    # The canvas and its toolbar swap out together for the no-dataset
+    # placeholder: every other plot tab wraps a PlotCard, which carries its own
+    # toolbar, so wrapping the canvas alone would leave a live-looking toolbar
+    # floating under the placeholder.
+    plot_host = QWidget(parent)
+    plot_host_l = QVBoxLayout(plot_host)
+    plot_host_l.setContentsMargins(0, 0, 0, 0)
+    plot_host_l.setSpacing(0)
+    plot_host_l.addWidget(canvas_img, 1)
+    plot_host_l.addWidget(toolbar)
+
+    # Until a dataset is loaded this tab used to paint its warning as
+    # matplotlib text on the axes — a bare muted string, no glyph and no
+    # "Open… is at the top of the left rail" hint, so it read as a different
+    # kind of message from the placeholder every other tab shows. The shared
+    # EmptyState is that placeholder; the stack registers itself and
+    # ``refresh_plot_empty_states`` flips it on load. The on-canvas messages
+    # below stay as they are: they describe states *within* a loaded dataset
+    # (no well selected, no smFISH channel, an image that failed to load),
+    # which is exactly where the other tabs paint on the axes too.
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    root.addWidget(wrap_with_empty_state(ctx.window, plot_host, icon="image"), 1)
 
     canvas_img.mpl_connect(
         "motion_notify_event", lambda ev: _smfish_on_img_hover(ctx, ev)
@@ -528,9 +549,12 @@ def _smfish_set_controls_enabled(ctx, enabled: bool) -> None:
 def _smfish_paint_empty(ctx, message: str) -> None:
     """Paint *message* centred on the image axes over the theme background.
 
-    Matches every other plot's empty/no-selection warning so the smFISH tab
-    never shows a bare white matplotlib canvas (the default figure colour) when
-    there's no dataset, no smFISH channel, or no image for the selection.
+    For states *within* a loaded dataset — no well selected, no smFISH channel,
+    an image that failed to load — matching where the other plot tabs put the
+    same kind of message, and keeping the canvas from showing as a bare white
+    matplotlib figure. The no-dataset case is not one of these: it belongs to
+    the shared ``EmptyState`` placeholder this tab is wrapped in (see
+    ``build_smfish_tab``), which is what every other tab shows there.
     """
     if ctx.runtime.smfish.ax_img is None:
         return

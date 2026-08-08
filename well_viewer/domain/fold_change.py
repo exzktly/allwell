@@ -777,6 +777,93 @@ def baseline_n_from_points_resolved(
     return None, None, 0.0
 
 
+# ── the member-series skeleton ───────────────────────────────────────────────
+# Six public ``member_*_series`` functions ask the same question of a member —
+# "what is this quantity, per timepoint?" — and shared 25 lines of identical
+# prologue, replicate-set-vs-solo-well dispatch and timepoint-union loop to do
+# it. What actually differs between them is one line on each branch: which field
+# of ``compute_rep_stats`` / ``compute_rep_per_fov_stats`` a rep-set reads, and
+# which field of an ``AggPoint`` a bare well reads.
+#
+# So the shape lives here once and each public function supplies those two
+# extractors. They stay *callables written next to their own docstring* rather
+# than flags on a merged function, for two reasons. The index choices carry
+# load-bearing explanations — ``member_frac_stats_series`` documents why
+# front-indexing ``res[2]``/``res[3]`` is correct for both the 4-tuple and the
+# 6-tuple, where a tail-unpack would silently read the per-FOV count fields —
+# and a flag-parameterised merge would concentrate every branch in one function
+# body, which ``tests/test_complexity_ratchet.py`` bounds at 40.
+#
+# An extractor returns ``None`` for "no value at this timepoint"; the skeleton
+# drops those, which is what every one of the six did with its own ``if``.
+
+
+def _rset_timepoints(
+    ctx, rset, *, threshold: float, val_col: str, per_fov_spread: bool, fluor_gates,
+) -> set[float]:
+    """The union of timepoints across a replicate set's wells.
+
+    Deliberately ``use_sem=False``: this call only enumerates the time axis, and
+    the spread it would compute is thrown away. Every one of the six did it this
+    way, whatever ``use_sem`` their own caller passed.
+    """
+    tps: set[float] = set()
+    for w in rset.wells:
+        pts = aggregate_well(ctx,
+            w, threshold=threshold, use_sem=False,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        for pt in pts:
+            tps.add(float(pt[0]))
+    return tps
+
+
+def _member_series(
+    ctx, label: str, *,
+    threshold: float, val_col: str, use_sem: bool,
+    per_fov_spread: bool, fluor_gates,
+    rset_stat, well_stat,
+) -> dict:
+    """``{t: value}`` for *label*, whichever kind of member it names.
+
+    *rset_stat* is called as ``rset_stat(rset, t)`` and *well_stat* as
+    ``well_stat(pt)``; either returns ``None`` to omit that timepoint.
+    """
+    label = (label or "").strip()
+    if not label:
+        return {}
+    rset = _label_to_replicate_set(ctx, label)
+    if rset is not None:
+        out: dict = {}
+        for t in _rset_timepoints(ctx, rset, threshold=threshold, val_col=val_col,
+                                  per_fov_spread=per_fov_spread, fluor_gates=fluor_gates):
+            value = rset_stat(rset, t)
+            if value is not None:
+                out[t] = value
+        return out
+    if label in (ctx.state.dataset.well_paths or {}):
+        pts = aggregate_well(ctx,
+            label, threshold=threshold, use_sem=use_sem,
+            val_col=val_col, fluor_gates=fluor_gates,
+            per_fov_spread=per_fov_spread,
+        )
+        out = {}
+        for pt in pts:
+            value = well_stat(pt)
+            if value is not None:
+                out[float(pt[0])] = value
+        return out
+    return {}
+
+
+def _finite_spread(value) -> float:
+    """A spread field as a float, or 0.0 when it is missing or not finite."""
+    return float(value) if (
+        isinstance(value, (int, float)) and math.isfinite(value)
+    ) else 0.0
+
+
 def member_n_series(
     ctx, label: str, *,
     threshold: float, val_col: str, use_sem: bool,
@@ -788,42 +875,20 @@ def member_n_series(
     N-events counterpart of :func:`member_frac_series`. Same rset /
     solo-well dispatch.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
-        tps: set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(ctx,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
+    def rset_stat(rset, t):
+        if per_fov_spread:
+            _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
+                rset, t, threshold, use_sem,
             )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: dict[float, tuple[float, float]] = {}
-        for t in tps:
-            if per_fov_spread:
-                _, _, _, _, n_mean, n_spread = compute_rep_per_fov_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-                out[t] = (float(n_mean),
-                          float(n_spread) if math.isfinite(n_spread) else 0.0)
-            else:
-                n_total = compute_rep_n_above(ctx, rset, t)
-                out[t] = (float(n_total), 0.0)
-        return out
-    if label in (ctx.state.dataset.well_paths or {}):
-        pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        return {float(pt[0]): _pt_n_above(pt, per_fov_spread) for pt in pts}
-    return {}
+            return (float(n_mean), _finite_spread(n_spread))
+        return (float(compute_rep_n_above(ctx, rset, t)), 0.0)
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat,
+        well_stat=lambda pt: _pt_n_above(pt, per_fov_spread),
+    )
 
 
 def control_n_at_for_bar(
@@ -1052,49 +1117,22 @@ def member_mean_series(
     via ``_aggregate_group`` — two different statistics, so the ratio
     wasn't a clean fold-change. Both sides now use the same stat.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
-        # Collect the union of timepoints across the rep-set's wells.
-        # We use the per-well agg (use_sem=False; spread isn't used here)
-        # only to enumerate the timepoint axis.
-        tps: set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(ctx,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: dict[float, float] = {}
-        for t in tps:
-            if per_fov_spread:
-                gm, *_ = compute_rep_per_fov_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-            else:
-                gm, *_ = compute_rep_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-            if math.isfinite(gm):
-                out[t] = float(gm)
-        return out
-    # Bare well token.
-    if label in (ctx.state.dataset.well_paths or {}):
-        pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        return {float(pt[0]): float(pt[1])
-                for pt in pts
-                if isinstance(pt[1], (int, float)) and math.isfinite(pt[1])}
-    return {}
+    def rset_stat(rset, t):
+        compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
+        gm, *_ = compute(ctx, rset, t, threshold, use_sem)
+        return float(gm) if math.isfinite(gm) else None
+
+    def well_stat(pt):
+        m = pt[1]
+        if isinstance(m, (int, float)) and math.isfinite(m):
+            return float(m)
+        return None
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
 
 
 def control_mean_at_for_bar(
@@ -1322,55 +1360,24 @@ def member_stats_series(
     ``_compute_rep_stats[_per_fov]`` for rep-set members, the
     ``_aggregate_well`` AggPoint's spread field for solo wells.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
-        tps: set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(ctx,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: dict[float, tuple[float, float]] = {}
-        for t in tps:
-            if per_fov_spread:
-                gm, gerr, *_ = compute_rep_per_fov_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-            else:
-                gm, gerr, *_ = compute_rep_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-            if math.isfinite(gm):
-                spread = float(gerr) if (
-                    isinstance(gerr, (int, float)) and math.isfinite(gerr)
-                ) else 0.0
-                out[t] = (float(gm), spread)
-        return out
-    if label in (ctx.state.dataset.well_paths or {}):
-        pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        out = {}
-        for pt in pts:
-            m = pt[1]
-            if isinstance(m, (int, float)) and math.isfinite(m):
-                s = pt[2] if len(pt) > 2 else 0.0
-                spread = float(s) if (
-                    isinstance(s, (int, float)) and math.isfinite(s)
-                ) else 0.0
-                out[float(pt[0])] = (float(m), spread)
-        return out
-    return {}
+    def rset_stat(rset, t):
+        compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
+        gm, gerr, *_ = compute(ctx, rset, t, threshold, use_sem)
+        if not math.isfinite(gm):
+            return None
+        return (float(gm), _finite_spread(gerr))
+
+    def well_stat(pt):
+        m = pt[1]
+        if not (isinstance(m, (int, float)) and math.isfinite(m)):
+            return None
+        return (float(m), _finite_spread(pt[2] if len(pt) > 2 else 0.0))
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
 
 
 def member_frac_stats_series(
@@ -1388,50 +1395,25 @@ def member_frac_stats_series(
     ferr`` tail-unpack would wrongly grab the per-FOV count fields from the
     6-tuple. Used by line-plot FC to scale the OnFraction panel.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
-        tps: set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(ctx,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col, fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: dict[float, tuple[float, float]] = {}
-        for t in tps:
-            if per_fov_spread:
-                res = compute_rep_per_fov_stats(ctx, rset, t, threshold, use_sem)
-            else:
-                res = compute_rep_stats(ctx, rset, t, threshold, use_sem)
-            gf, ferr = res[2], res[3]
-            if isinstance(gf, (int, float)) and math.isfinite(gf):
-                spread = float(ferr) if (
-                    isinstance(ferr, (int, float)) and math.isfinite(ferr)
-                ) else 0.0
-                out[t] = (float(gf), spread)
-        return out
-    if label in (ctx.state.dataset.well_paths or {}):
-        pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
-            val_col=val_col, fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        out = {}
-        for pt in pts:
-            f = pt[3] if len(pt) > 3 else None
-            if isinstance(f, (int, float)) and math.isfinite(f):
-                s = pt[6] if len(pt) > 6 else 0.0
-                spread = float(s) if (
-                    isinstance(s, (int, float)) and math.isfinite(s)
-                ) else 0.0
-                out[float(pt[0])] = (float(f), spread)
-        return out
-    return {}
+    def rset_stat(rset, t):
+        compute = compute_rep_per_fov_stats if per_fov_spread else compute_rep_stats
+        res = compute(ctx, rset, t, threshold, use_sem)
+        gf, ferr = res[2], res[3]
+        if not (isinstance(gf, (int, float)) and math.isfinite(gf)):
+            return None
+        return (float(gf), _finite_spread(ferr))
+
+    def well_stat(pt):
+        f = pt[3] if len(pt) > 3 else None
+        if not (isinstance(f, (int, float)) and math.isfinite(f)):
+            return None
+        return (float(f), _finite_spread(pt[6] if len(pt) > 6 else 0.0))
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
 
 
 def member_n_stats_series(
@@ -1447,57 +1429,38 @@ def member_n_stats_series(
     is on, else the total events-above-threshold (spread 0, counts have none).
     Used by line-plot FC to scale the N panel; the caller passes ``n_per_fov``
     to :func:`normalize_pts` so the scaled field matches this denominator.
+
+    Unlike its siblings this takes no ``use_sem``: a count has no standard
+    error, so every call underneath it passes ``False``.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
-        out: dict[float, tuple[float, float]] = {}
-        tps: set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(ctx,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col, fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
-            )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        for t in tps:
-            if per_fov_spread:
-                res = compute_rep_per_fov_stats(ctx, rset, t, threshold, False)
-                n_mean, n_spread = res[4], res[5]
-                if isinstance(n_mean, (int, float)) and math.isfinite(n_mean):
-                    spread = float(n_spread) if (
-                        isinstance(n_spread, (int, float)) and math.isfinite(n_spread)
-                    ) else 0.0
-                    out[t] = (float(n_mean), spread)
-            else:
-                n_above = compute_rep_n_above(ctx, rset, t)
-                if isinstance(n_above, int) and n_above >= 0:
-                    out[t] = (float(n_above), 0.0)
-        return out
-    if label in (ctx.state.dataset.well_paths or {}):
-        pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=False,
-            val_col=val_col, fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        out = {}
-        for pt in pts:
-            if per_fov_spread:
-                n = pt[7] if len(pt) > 7 else None
-                s = pt[8] if len(pt) > 8 else 0.0
-            else:
-                n = pt[4] if len(pt) > 4 else None
-                s = 0.0
-            if isinstance(n, (int, float)) and math.isfinite(n):
-                spread = float(s) if (
-                    isinstance(s, (int, float)) and math.isfinite(s)
-                ) else 0.0
-                out[float(pt[0])] = (float(n), spread)
-        return out
-    return {}
+    def rset_stat(rset, t):
+        if per_fov_spread:
+            res = compute_rep_per_fov_stats(ctx, rset, t, threshold, False)
+            n_mean, n_spread = res[4], res[5]
+            if not (isinstance(n_mean, (int, float)) and math.isfinite(n_mean)):
+                return None
+            return (float(n_mean), _finite_spread(n_spread))
+        n_above = compute_rep_n_above(ctx, rset, t)
+        if not (isinstance(n_above, int) and n_above >= 0):
+            return None
+        return (float(n_above), 0.0)
+
+    def well_stat(pt):
+        if per_fov_spread:
+            n = pt[7] if len(pt) > 7 else None
+            s = pt[8] if len(pt) > 8 else 0.0
+        else:
+            n = pt[4] if len(pt) > 4 else None
+            s = 0.0
+        if not (isinstance(n, (int, float)) and math.isfinite(n)):
+            return None
+        return (float(n), _finite_spread(s))
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=False,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
 
 
 def control_stats_at_for_bar(
@@ -1603,51 +1566,26 @@ def member_frac_series(
     Fraction-on counterpart of :func:`member_stats_series`. Same rset /
     solo-well dispatch.
     """
-    label = (label or "").strip()
-    if not label:
-        return {}
-    rset = _label_to_replicate_set(ctx, label)
-    if rset is not None:
-        tps: set[float] = set()
-        for w in rset.wells:
-            pts = aggregate_well(ctx,
-                w, threshold=threshold, use_sem=False,
-                val_col=val_col,
-                fluor_gates=fluor_gates,
-                per_fov_spread=per_fov_spread,
+    def rset_stat(rset, t):
+        if per_fov_spread:
+            _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
+                rset, t, threshold, use_sem,
             )
-            for pt in pts:
-                tps.add(float(pt[0]))
-        out: dict[float, tuple[float, float]] = {}
-        for t in tps:
-            if per_fov_spread:
-                _, _, gf, gerr_f, *_ = compute_rep_per_fov_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-            else:
-                _, _, gf, gerr_f = compute_rep_stats(ctx,
-                    rset, t, threshold, use_sem,
-                )
-            if isinstance(gf, (int, float)) and math.isfinite(gf):
-                fs = float(gerr_f) if (
-                    isinstance(gerr_f, (int, float)) and math.isfinite(gerr_f)
-                ) else 0.0
-                out[t] = (float(gf), fs)
-        return out
-    if label in (ctx.state.dataset.well_paths or {}):
-        pts = aggregate_well(ctx,
-            label, threshold=threshold, use_sem=use_sem,
-            val_col=val_col,
-            fluor_gates=fluor_gates,
-            per_fov_spread=per_fov_spread,
-        )
-        out = {}
-        for pt in pts:
-            f, fs = _pt_frac(pt)
-            if f is not None:
-                out[float(pt[0])] = (f, fs)
-        return out
-    return {}
+        else:
+            _, _, gf, gerr_f = compute_rep_stats(ctx, rset, t, threshold, use_sem)
+        if not (isinstance(gf, (int, float)) and math.isfinite(gf)):
+            return None
+        return (float(gf), _finite_spread(gerr_f))
+
+    def well_stat(pt):
+        f, fs = _pt_frac(pt)
+        return None if f is None else (f, fs)
+
+    return _member_series(ctx, label,
+        threshold=threshold, val_col=val_col, use_sem=use_sem,
+        per_fov_spread=per_fov_spread, fluor_gates=fluor_gates,
+        rset_stat=rset_stat, well_stat=well_stat,
+    )
 
 
 def control_frac_at_for_bar(

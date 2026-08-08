@@ -6,15 +6,12 @@ Same shape as ``datasets.concatenate.controller.ConcatenateController``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtCore import QObject
 
 from util.aw_safe import swallowed
 from datasets._common.dataset_paths import shorten_headline
 from datasets.merge_plates.merge_plates_compute import (
-    DatasetPaths,
     MergePlatesError,
     block_shift_well_map,
     dataset_wells,
@@ -23,13 +20,15 @@ from datasets.merge_plates.merge_plates_compute import (
 )
 from datasets.merge_plates.view import MergePlatesPage
 from datasets.merge_plates.worker import MergePlatesWorker
+from datasets._common.tool_controller import DestinationToolController
 
 
-class MergePlatesController(QObject):
+class MergePlatesController(DestinationToolController):
     """Behaviour for the Merge Plates feature."""
 
-    # QueueableController hook: (ok, message, dest_root — "" for none).
-    jobFinished = Signal(bool, str, str)
+    _shutdown_label = "merge plates"
+    _destination_has_marker = staticmethod(destination_has_marker)
+
 
     def __init__(
         self,
@@ -51,12 +50,6 @@ class MergePlatesController(QObject):
         self.page.runRequested.connect(self._on_run)
         self.page.queueRequested.connect(self._on_queue_requested)
         self.page.openInReviewRequested.connect(self._on_open_in_review_requested)
-
-    def _on_run(self) -> None:
-        dest_path = self.page.destination_path()
-        if dest_path and self._destination_is_restart(dest_path) and not self._confirm_restart(dest_path):
-            return
-        self._launch()
 
     def _launch(self) -> None:
         if self._worker is not None and self._worker.isRunning():
@@ -138,14 +131,6 @@ class MergePlatesController(QObject):
         self.show_job(spec)
         self._launch()
 
-    def stop(self) -> None:
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-
-    def is_busy(self) -> bool:
-        """QueueableController hook — see SubsetController.is_busy."""
-        return self._worker is not None and self._worker.isRunning()
-
     def _on_wells_planned(self, wells: list) -> None:
         # Distinguish origin using the well map applied for this run: any
         # well that is a remap *target* came from dataset 2, as did any
@@ -186,34 +171,3 @@ class MergePlatesController(QObject):
         except Exception:
             swallowed()
 
-    def _on_open_in_review_requested(self, dest_root: str) -> None:
-        if self._on_open_in_review is not None:
-            self._on_open_in_review(dest_root)
-
-    @staticmethod
-    def _destination_is_restart(dest_path: str) -> bool:
-        root = Path(dest_path)
-        return destination_has_marker(DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out"))
-
-    def _confirm_restart(self, dest_path: str) -> bool:
-        answer = QMessageBox.question(
-            self.page,
-            "Resume interrupted run?",
-            "The destination already has partial output from an earlier "
-            f"attempt that didn't finish:\n\n{dest_path}\n\n"
-            "Continuing will delete that partial content and rebuild it from "
-            "scratch. Continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        return answer == QMessageBox.Yes
-
-    def shutdown(self) -> None:
-        worker = self._worker
-        if worker is None or not worker.isRunning():
-            return
-        try:
-            worker.requestInterruption()
-            worker.wait(2000)
-        except RuntimeError:
-            swallowed("merge plates worker shutdown")

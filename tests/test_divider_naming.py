@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import ast
 
-from tests._repo_scan import REPO_ROOT, python_sources
+from tests._repo_scan import python_sources, rel
 
 # Every application source file, from the one shared definition — this guard
 # originally named three root modules and could not see `analyze_tab_chrome.py`
@@ -116,8 +116,8 @@ def _named_receivers(scope: ast.AST) -> set[str]:
 def test_no_unnamed_divider_frames():
     offenders: list[str] = []
     for path in python_sources():
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        if rel in ALLOWLIST:
+        rel_path = rel(path)
+        if rel_path in ALLOWLIST:
             continue
         tree = ast.parse(path.read_text(), filename=str(path))
 
@@ -137,7 +137,7 @@ def test_no_unnamed_divider_frames():
                     continue
                 recv = _receiver(node)
                 if recv is not None and recv not in named:
-                    offenders.append(f"{rel}:{node.lineno} — {recv}.setFrameShape(...)")
+                    offenders.append(f"{rel_path}:{node.lineno} — {recv}.setFrameShape(...)")
 
     offenders = sorted(set(offenders))
     assert not offenders, (

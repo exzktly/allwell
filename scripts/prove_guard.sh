@@ -96,36 +96,10 @@ LOG="$SCRATCH.log"
 STATUS=$?
 
 # What kind of failure was it? An assertion is the guard speaking; anything else
-# is the guard falling over before it measured anything.
-VERDICT=$(python - "$LOG" <<'PY'
-import re, sys
-from pathlib import Path
-
-text = Path(sys.argv[1]).read_text(errors="replace")
-# pytest's summary line is padded with "=", so it does not start with the
-# count: match the count anywhere on the line instead of anchoring to it.
-passed = re.search(r"\b(\d+) passed\b", text)
-failed = re.search(r"\b(\d+) (?:failed|error(?:s)?)\b", text)
-if passed and not failed:
-    print("PASSED"); raise SystemExit
-
-# Exception types pytest printed on an `E   ` line, e.g. "E   NameError: ..."
-exc_types = re.findall(r"^E\s+([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):", text, re.M)
-collect_error = bool(re.search(r"ERROR (collecting|tests/)", text) or "errors during collection" in text)
-non_assert = [t for t in exc_types if t != "AssertionError"]
-
-if collect_error or (non_assert and "AssertionError" not in exc_types):
-    print("ERRORED " + (non_assert[0] if non_assert else "collection error")); raise SystemExit
-if "AssertionError" not in exc_types and not re.search(r"^E\s+assert", text, re.M):
-    print("UNCLEAR"); raise SystemExit
-
-# Offenders: the `file.py:123 — …` lines guards emit inside their assert message.
-offenders = re.findall(r"^E\s+(\S+\.py:\d+)", text, re.M)
-uniq = sorted(set(offenders))
-print(f"ASSERTED {len(uniq)}")
-print("\n".join(uniq[:10]))
-PY
-)
+# is the guard falling over before it measured anything. The classifier lives in
+# its own module so it can be tested — it decides whether a proof counts, and it
+# has already been wrong once (see scripts/prove_guard_verdict.py).
+VERDICT=$(python "$REPO_ROOT/scripts/prove_guard_verdict.py" "$LOG")
 
 KIND=$(head -1 <<<"$VERDICT")
 case "$KIND" in

@@ -615,6 +615,17 @@ Three of these are commands now. Run them instead of recalling them.
    failure message; both look like "it failed on main" in a terminal and both
    measured nothing. It also reports *passed on the base*, which means the rule
    already held and the test is a hypothesis rather than a guard.
+
+   **That proof expires, so it cannot be a CI check.** Once the fix merges, the
+   rule holds on the base and the script correctly reports "passed on the base"
+   for ever after — a CI step doing this would go red the day it merged. The
+   durable half is `tests/test_guards_bite.py`: every guard is handed a
+   synthetic file containing the violation it exists to prevent and must fire,
+   then a clean one and must not. Add a case there when you add a guard, and add
+   one for each evasion you find; the shapes already in it are the ones that
+   really slipped past — the conditional `setFrameShape`, the aliased `QFrame`,
+   the pixel literal wrapped in a `max()`, the `[0-9]` spelling of `\d`, the
+   roster with a stray string in it.
 2. **A hardened guard that passes on the first run has probably not been
    hardened.** A helper added to make the pixel guard see wrapped literals left
    the suite green, and green was read as success; the replacement string had

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import pytest
 
+from tests._repo_scan import python_sources, rel
 from util.well_token import canonical_well_label, is_valid_well_name
 
 
@@ -90,8 +91,6 @@ def test_no_module_keeps_its_own_whole_token_well_regex():
     anchored pattern whose entire body is a well token."""
     import ast
     import re
-
-    from tests._repo_scan import python_sources, rel
 
     # A well-token body, optionally group-wrapped. The row class covers the
     # spellings that actually appear — ``[A-H]``, ``[A-Ha-h]``, ``[a-hA-H]`` —

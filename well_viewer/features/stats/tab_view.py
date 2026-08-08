@@ -11,8 +11,8 @@ from PySide6.QtWidgets import (
 from well_viewer.core.ui_helpers import (
     btn_primary, btn_secondary, build_hline_separator, build_section_header,
 )
-from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
+from widgets.page_body import build_page_body
 from well_viewer.features.stats.controller import stats_active_group
 from well_viewer.features.stats.controller import stats_apply_drag
 from well_viewer.features.stats.controller import stats_on_test_change
@@ -142,12 +142,6 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     ``ctx.runtime.stats`` namespace so the builder names no god-object.
     """
     reg = ctx.widgets
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(0)
 
     # ── The control band ────────────────────────────────────────────────────
     # This tab used to state its parameters as a five-row label/field grid with
@@ -155,7 +149,10 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     # other tab in the pane has a control row. The same five selectors fit one
     # band: they are all scope (which cells the test runs on and what it
     # measures), and Run is the action.
-    stats_ctrl = reg.register("_stats_ctrl", ControlBand(parent))
+    band, body = build_page_body(parent, content_margins=(12, 12, 12))
+    layout = body.layout()
+    layout.setSpacing(0)
+    stats_ctrl = reg.register("_stats_ctrl", band)
 
     channel_cb = reg.register("_stats_channel_cb", QComboBox())
     channel_cb.addItems(["—"])
@@ -218,7 +215,6 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
 
     stats_ctrl.add_action(btn_primary(stats_ctrl, "Run test", ctx.runtime.stats.run))
     stats_refresh_fov_indicator(ctx)
-    layout.addWidget(stats_ctrl)
 
     fig_frame = reg.register("_stats_fig_frame", QWidget(parent))
     ff_l = QVBoxLayout(fig_frame)

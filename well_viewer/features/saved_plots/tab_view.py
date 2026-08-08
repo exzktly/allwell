@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from widgets.page_body import build_page_body
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import clear_layout
 from well_viewer.features.saved_plots import controller as C
@@ -71,25 +72,23 @@ def build_saved_plots_tab(ctx, parent: QWidget) -> None:
     # callback stays on the app.
     reg = ctx.widgets
 
-    layout = parent.layout() or QVBoxLayout(parent)
-    layout.setContentsMargins(0, 0, 0, 0)
+    # The gallery's count is scope (how much is in here) and the two buttons act
+    # on it — the standard band, rather than the hand-rolled row this tab used
+    # to build, which was 8px shorter than every other page's and so started the
+    # gallery under it higher than its neighbours.
+    band, body = build_page_body(parent)
+    layout = body.layout()
 
-    # Controls row
-    ctrl = QWidget(parent)
-    cl = QHBoxLayout(ctrl)
-    cl.setContentsMargins(10, 6, 10, 6)
-    count_lbl = reg.register("_saved_plots_count_lbl", QLabel("", ctrl))
-    cl.addWidget(count_lbl)
-    cl.addStretch(1)
-    report_btn = QPushButton("Export report…", ctrl)
+    count_lbl = reg.register("_saved_plots_count_lbl", QLabel("", band))
+    band.add_scope("", count_lbl)
+    report_btn = QPushButton("Export report…", band)
     report_btn.setToolTip("Export all saved plots as a multi-page PDF report.")
     report_btn.clicked.connect(lambda: C.export_report_pdf(ctx))
-    cl.addWidget(report_btn)
-    clear_btn = QPushButton("Clear all", ctrl)
+    band.add_action(report_btn)
+    clear_btn = QPushButton("Clear all", band)
     clear_btn.setProperty("variant", "secondary")
     clear_btn.clicked.connect(lambda: _confirm_clear(ctx))
-    cl.addWidget(clear_btn)
-    layout.addWidget(ctrl)
+    band.add_action(clear_btn)
 
     # Empty-state ↔ gallery stack, toggled by the saved-plot count (NOT by
     # dataset presence) so a just-saved plot appears on first open.

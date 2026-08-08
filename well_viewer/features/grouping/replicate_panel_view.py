@@ -52,7 +52,7 @@ class _NotesEdit(QPlainTextEdit):
             swallowed()  # was: pass (silent except)
 
 
-from widgets.flow_layout import FlowLayout as _FlowLayout
+from widgets.page_body import build_page_body
 
 def build_replicate_panel(ctx, parent: QWidget) -> None:
     """Sample-Definitions LEFT sidebar: the plate map only.
@@ -240,7 +240,8 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     """Centre panel for the Sample Definitions tab.
 
     Layout:
-      - top toolbar: Save / Load / Clear All for everything on the tab
+      - the page's control band, carrying Import / Clear All for everything
+        on the tab
       - sub-tabs: Groups / Well Labels / Ratios / Cell Gating (lazy-built
         on first open) / Notes
     """
@@ -257,42 +258,33 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     from well_viewer.persistence import sample_definitions as _sd
     from widgets.icon_button import IconButton as _IconButton
 
-    outer_layout = parent.layout()
-    if outer_layout is None:
-        outer_layout = _QVBoxLayout(parent)
-        parent.setLayout(outer_layout)
-    outer_layout.setContentsMargins(0, 0, 0, 0)
-
-    # ── Top toolbar: Import / Clear All ─────────────────────────────────
+    # ── Import / Clear All, in the page's own control band ───────────────
+    # They used to sit in a bespoke toolbar row of their own, with a separator
+    # under it — a whole strip of chrome carrying two icon buttons, which pushed
+    # this page's sub-tab bodies below where every other page's content starts.
+    # They are actions on the page, so they go in the band every page has.
+    #
     # Every definition on this tab (well labels, replicate sets, bar groups,
     # ratios, and cell gating) AUTOSAVES to the data folder on edit —
     # selections/labels/notes/plot-groups + ratios via the persistence registry,
     # cell gating via _cell_gating_persist_params. So there is no manual
     # Save/Reload button: Import merges an external JSON, Clear All wipes the
     # definitions.
-    toolbar = _QWidget(parent)
-    toolbar.setObjectName("TabCtrl")
-    tl = _FlowLayout(toolbar)
-    tl.setContentsMargins(8, 6, 8, 6)
-    tl.setSpacing(6)
+    band, body = build_page_body(parent)
+    outer_layout = body.layout()
 
-    import_ib = _IconButton("plus", toolbar)
+    import_ib = _IconButton("plus", band)
     import_ib.setToolTip("Import selections from a JSON file (merges into the current set).")
     import_ib.clicked.connect(lambda _=False: import_selections_from_json(ctx))
-    tl.addWidget(import_ib)
+    band.add_action(import_ib)
 
-    clear_ib = _IconButton("x", toolbar)
+    clear_ib = _IconButton("x", band)
     clear_ib.setToolTip(
         "Clear every definition on this tab — well labels, replicate "
         "sets, bar groups, ratio metrics, and cell-gating thresholds."
     )
     clear_ib.clicked.connect(lambda _=False: _sd.clear_all(ctx))
-    tl.addWidget(clear_ib)
-
-    tl.addStretch(1)
-    outer_layout.addWidget(toolbar)
-
-    outer_layout.addWidget(build_hline_separator(parent))
+    band.add_action(clear_ib)
 
     # ── Sub-tabs ────────────────────────────────────────────────────────
     sub_tabs = _QTabWidget(parent)

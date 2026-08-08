@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from widgets.page_body import build_page_body
 from well_viewer.features.batch_export import (
     BatchExportPanel,
     BarBatchExportPanel,
@@ -32,19 +34,33 @@ class _ResponsiveScroll(QScrollArea):
                 panel.apply_split_orientation(avail)
 
 
+#: The page's four modes, in bar order, paired with the key each one dispatches
+#: on. The bar carries no user data of its own — a ``QTabBar`` indexes by
+#: position — so the order here IS the mapping.
+_MODES = (
+    ("Line", "line"),
+    ("Bar", "bar"),
+    ("Scatter (cells)", "scatter_cells"),
+    ("Scatter (aggregate)", "scatter_agg"),
+)
+
+
 def _refresh_mode_buttons(ctx, mode: str) -> None:
-    """Sync the SegmentedControl's selected segment with the active builder."""
+    """Sync the mode bar's selected tab with the active builder."""
     state = ctx.runtime.batch_export.inline_state
     if not state:
         return
-    sc = state.get("mode_segmented")
-    if sc is None or sc.currentData() == mode:
+    bar = state.get("mode_bar")
+    if bar is None:
         return
-    blocked = sc.blockSignals(True)
+    idx = next((i for i, (_lbl, key) in enumerate(_MODES) if key == mode), -1)
+    if idx < 0 or bar.currentIndex() == idx:
+        return
+    blocked = bar.blockSignals(True)
     try:
-        sc.setCurrentByData(mode)
+        bar.setCurrentIndex(idx)
     finally:
-        sc.blockSignals(blocked)
+        bar.blockSignals(blocked)
 
 
 def _show_batch_mode(ctx, mode: str) -> None:
@@ -101,22 +117,27 @@ def _show_batch_mode(ctx, mode: str) -> None:
 
 
 def build_batch_export_tab(ctx, parent: QWidget) -> None:
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
-    layout.setContentsMargins(12, 12, 12, 12)
+    band, body = build_page_body(parent, content_margins=(12, 12, 12))
+    layout = body.layout()
 
-    # v2: pick-one mode via SegmentedControl instead of a row of toggle
-    # QPushButtons. Each segment carries the mode key in data; currentChanged
-    # routes to the appropriate _open_*_batch_export entrypoint. The Error-band /
-    # per-FOV spread controls now live in each line/bar panel's OUTPUT SETTINGS.
-    from widgets.segmented_control import SegmentedControl as _SegmentedControl
-    switch_row = _SegmentedControl(parent)
-    switch_row.addSegment("Line", data="line")
-    switch_row.addSegment("Bar", data="bar")
-    switch_row.addSegment("Scatter (cells)", data="scatter_cells")
-    switch_row.addSegment("Scatter (aggregate)", data="scatter_agg")
+    # The four modes are a page selector, so the bar carrying them lives in the
+    # shell's mode band beside the Review / Analyze / Datasets segments, exactly
+    # like Plotting's and Image Browser's sub-tab bars — not as a fifth strip of
+    # chrome inside the page. ``PlottingSubTabs`` is the object name theme.qss
+    # styles every nested page bar with, so the three cannot drift apart. The
+    # Error-band / per-FOV spread controls live in each line/bar panel's OUTPUT
+    # SETTINGS.
+    from PySide6.QtWidgets import QTabBar
+    mode_bar = QTabBar()
+    mode_bar.setObjectName("PlottingSubTabs")
+    mode_bar.setExpanding(False)
+    mode_bar.setElideMode(Qt.ElideNone)
+    mode_bar.setUsesScrollButtons(True)
+    mode_bar.setDrawBase(False)
+    for label, _key in _MODES:
+        mode_bar.addTab(label)
+    from well_viewer.core.app_shell_view import register_page_tabs
+    register_page_tabs(ctx.window, "Batch Export", mode_bar)
 
     from well_viewer.core.plot_orchestrator import (
         open_batch_export_shim,
@@ -132,13 +153,12 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "scatter_agg": open_scatter_agg_batch_export_shim,
     }
 
-    def _on_mode_changed(_idx: int) -> None:
-        mode = switch_row.currentData() or "line"
+    def _on_mode_changed(idx: int) -> None:
+        mode = _MODES[idx][1] if 0 <= idx < len(_MODES) else "line"
         fn = _mode_dispatch.get(mode)
         if fn is not None:
             fn(ctx)
-    switch_row.currentChanged.connect(_on_mode_changed)
-    layout.addWidget(switch_row)
+    mode_bar.currentChanged.connect(_on_mode_changed)
 
     # The Error-band (SEM/SD) + per-FOV-points toggles used to sit in a separate
     # row here; they now live inside each line/bar panel's OUTPUT SETTINGS (see
@@ -153,7 +173,6 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     # h-scroll off a panel is pinned to its own (wide) min and can't measure the
     # narrow window itself.
     from PySide6.QtWidgets import QFrame
-    from PySide6.QtCore import Qt
     host = QWidget()
     QVBoxLayout(host)
     scroll = _ResponsiveScroll(parent)
@@ -171,7 +190,8 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
         "host": host,
         "panels": {},
         "mode": "line",
-        "mode_segmented": switch_row,
+        "mode_bar": mode_bar,
+        "band": band,
     }
     ctx.runtime.batch_export.set_mode = lambda mode="line": _show_batch_mode(ctx, mode)
     ctx.runtime.batch_export.set_mode("line")

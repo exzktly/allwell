@@ -920,6 +920,15 @@ QTabWidget::pane {{
     border: 1px solid {c.border_subtle};
     border-radius: {r.md}px;
 }}
+/* The two nested page widgets show no bar of their own — theirs is mirrored
+   into the mode band (app_shell_view.mirror_tab_widget) — so the pane's border
+   closes a frame that is not drawn, and its top edge would start the body
+   inside a pixel below where an un-nested page's body starts. */
+QTabWidget#ImageBrowserSubTabs::pane,
+QTabWidget#SampleDefinitionsSubTabs::pane {{
+    border: none;
+    border-radius: 0;
+}}
 QTabBar {{
     background: transparent;
 }}

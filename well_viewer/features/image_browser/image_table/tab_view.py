@@ -30,6 +30,7 @@ from PySide6.QtCore import Qt
 from well_viewer.data.crop_tool import CropTool
 from well_viewer.core.ui_helpers import btn_primary, build_hline_separator
 from widgets.flow_layout import FlowLayout
+from widgets.page_body import build_page_body
 from widgets.stepper import Stepper
 from well_viewer.features.image_browser.image_table.controller import (
     image_table_copy_png,
@@ -274,12 +275,13 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # readers resolve. State lists/dicts + the crop tool stay on app.
     reg = ctx.widgets
     """Construct the Image Table tab inside *parent*."""
-    layout = parent.layout()
-    if layout is None:
-        layout = QVBoxLayout(parent)
-        parent.setLayout(layout)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(0)
+    # The band is empty here — this tab authors its grid through the builder
+    # shelf and acts on it through the action strip below, neither of which is a
+    # scope control — but it is still added, so the top of this page is drawn at
+    # the same height as every other page's (widgets/page_body.py).
+    band, body = build_page_body(parent)
+    body.layout().setSpacing(0)
+    reg.register("_image_table_band", band)
 
     # State defaults — controller methods read these.
     # Image Table data/options/caches live on the typed ImageTableState
@@ -302,7 +304,7 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # Host the tab body with a right-side dock that slides out the Properties
     # inspector — matching every other tab's figure-properties panel.
     from well_viewer.core.ui_helpers import make_plot_with_right_dock
-    body_area, body_layout, props_dock = make_plot_with_right_dock(parent)
+    body_area, body_layout, props_dock = make_plot_with_right_dock(body)
     ctx.runtime.image_table.props_dock = props_dock
     reg.register("_image_table_props_dock", props_dock)
 

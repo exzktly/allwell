@@ -111,6 +111,26 @@ class ControlBandSlot(QWidget):
 class ControlBand(QWidget):
     """One row: scope controls left (flowing), actions right (flush)."""
 
+    #: Height reserved for one row of controls, whatever that row happens to
+    #: hold. Qt sizes each control from its own font and padding, so a row of
+    #: ``QPushButton``s measures 24px, of ``LabeledComboBox``es 25, of
+    #: ``QToolButton``s 27 and of ``QComboBox``es 28 — which made an unwrapped
+    #: band 41, 43, 44 or 49px tall purely from which control a page happened to
+    #: put in it, and moved the content under it by the same amount. The band is
+    #: chrome shared by every page, so its single-row height is a constant here
+    #: rather than an accident of the tallest child.
+    ROW_H = 28
+
+    @classmethod
+    def band_height(cls) -> int:
+        """The height of a band showing one row — the same on every page.
+
+        Pages with no controls at all reserve this by adding an empty band, so
+        the content below starts at the same y as it does on a page that has
+        controls (:mod:`widgets.page_body`).
+        """
+        return cls.ROW_H + 2 * theme.Spacing.sm
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._slots: dict[str, ControlBandSlot] = {}
@@ -148,6 +168,15 @@ class ControlBand(QWidget):
         self._trailing: list[QWidget] = []
         root.addWidget(self._scope_host, 1, Qt.AlignTop)
         root.addLayout(self._actions)
+
+        # A real minimum, not just a floor inside ``heightForWidth``. A parent
+        # layout holding this band asks its ``QWidgetItem`` for the height, and
+        # ``QWidgetItem`` asks the *inner* layout — ``wid->layout()->heightForWidth()``
+        # — whenever the widget has one, so an override on this class is never
+        # consulted and the band would still be sized by its tallest child.
+        # ``setMinimumHeight`` is enforced by the widget itself, which every
+        # layout respects.
+        self.setMinimumHeight(self.band_height())
 
     # ── building ────────────────────────────────────────────────────────────
     def add_scope(self, label: str, *widgets: QWidget,
@@ -275,17 +304,21 @@ class ControlBand(QWidget):
 
     def heightForWidth(self, width: int) -> int:  # Qt naming
         scope = self._scope.heightForWidth(self._scope_width_for(width))
-        return max(scope, self._action_height()) + self._chrome_height()
+        return max(scope, self._action_height(), self.ROW_H) + self._chrome_height()
 
     def minimumSizeHint(self):  # Qt naming
         """One row of controls — never shorter than the action zone.
 
         ``FlowLayout.heightForWidth`` returns ~0 for an empty scope zone, which
-        would let the band collapse behind its own buttons.
+        would let the band collapse behind its own buttons. ``ROW_H`` floors it
+        further, so a band of short controls (and a band with nothing in it at
+        all) still measures :meth:`band_height`.
         """
         hint = super().minimumSizeHint()
         row = self._scope.heightForWidth(1_000_000)   # unwrapped: a single row
-        hint.setHeight(max(row, self._action_height()) + self._chrome_height())
+        hint.setHeight(
+            max(row, self._action_height(), self.ROW_H) + self._chrome_height()
+        )
         return hint
 
     def sizeHint(self):  # Qt naming

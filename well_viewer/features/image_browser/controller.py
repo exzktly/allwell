@@ -15,8 +15,6 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtWidgets import QHBoxLayout
-
 # Sub-tab body/sidebar builders are imported *inside* each branch of
 # ``build_image_browser_subtab`` (not at module scope) so that a build profile
 # which drops a sub-tab — physically excluding its module from the binary —
@@ -63,8 +61,10 @@ def build_image_browser_subtab(ctx, idx: int) -> None:
             build_cell_browser_sidebar(ctx, ctx.widgets.get("_sidebar_cell_browser_frame"))
         elif name == "Playground":
             from well_viewer.features.image_browser.playground.tab_view import build_playground_tab
-            if frame.layout() is None:
-                QHBoxLayout(frame).setContentsMargins(12, 12, 12, 12)
+            # No layout pre-set here: the builder lays the frame out through
+            # ``widgets.page_body.build_page_body``, which owns the page's top
+            # edge (an inset applied here is what used to push this sub-tab's
+            # content 12px below every other page's).
             build_playground_tab(ctx, frame)
         else:
             return

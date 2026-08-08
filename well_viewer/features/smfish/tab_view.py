@@ -70,8 +70,8 @@ _NO_SMFISH_MESSAGE = (
 )
 
 
-from widgets.control_band import ControlBand
 from widgets.labeled_combo import LabeledComboBox
+from widgets.page_body import build_page_body
 from util.well_token import canonical_well_label
 
 # Pixel geometry for this module's controls. Named rather than written
@@ -129,17 +129,12 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     ctx.runtime.smfish.bridge = bridge
 
     # ── layout ────────────────────────────────────────────────────────────
-    root = parent.layout()
-    if root is None:
-        root = QVBoxLayout(parent)
-        parent.setLayout(root)
-    root.setContentsMargins(12, 12, 12, 12)
-
     # One control band: the frame selectors and the two LUT bounds are scope,
     # the four buttons are actions. This used to be two rows — selectors on the
     # first, buttons on the second — which is the split the band makes anyway,
     # only sideways instead of stacked.
-    ctrl = ControlBand(parent)
+    ctrl, body = build_page_body(parent, content_margins=(12, 12, 12))
+    root = body.layout()
 
     channel_cb = reg.register("_smfish_channel_cb", QComboBox())
     channel_cb.currentIndexChanged.connect(
@@ -193,7 +188,6 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cdf_btn.setProperty("variant", "secondary")
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     ctrl.add_action(cdf_btn)
-    root.addWidget(ctrl)
 
     # Status row
     status_label = reg.register("_smfish_status_label", QLabel(

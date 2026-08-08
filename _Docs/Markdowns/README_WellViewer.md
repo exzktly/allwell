@@ -1127,8 +1127,8 @@ count) — plus a CDF.
   uncompressed, for as many wells as are running at once — and every finished
   `<well>_out.zip` stays on the output volume for the rest of the plate. A run
   can therefore need many times the size of its own input folder, and it can
-  start with room and run out at the fortieth well. Three things now say so
-  rather than leaving you to find out: before it reads an image the run sizes
+  start with room and run out at the fortieth well. Three things say so rather
+  than leaving you to find out: before it reads an image the run sizes
   itself against the volumes it will write to and warns (or, if there is not
   room for even one well, stops); as wells complete it measures what they
   actually wrote and warns once if the rest of the plate will not fit; and if a

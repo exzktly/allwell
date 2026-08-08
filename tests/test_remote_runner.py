@@ -2015,6 +2015,7 @@ def test_required_files_list_is_what_we_promised():
         # completeness (mirrors every ``pipeline/`` file).
         "pipeline/ome_explode.py",
         "pipeline/run_report.py",
+        "pipeline/sidecar.py",
         "pipeline/shape_features.py",
         "pipeline/stardist.py",
         "pipeline/suspend.py",

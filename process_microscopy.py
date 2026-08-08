@@ -190,6 +190,7 @@ from pipeline.run_report import (
     finalize_run_report,
     record_well_completeness,
 )
+from pipeline.sidecar import USER_SIDE_BLOCKS
 
 
 def _report_worker_failure(well_label: str, output_dir: Path | None, exc: BaseException) -> None:
@@ -1310,189 +1311,13 @@ def _segment_classical(image: np.ndarray) -> np.ndarray:
 # story is preserved.
 
 from pipeline.auto_threshold import (
-    DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,
-    pick_endpoint_timepoints as _pick_endpoint_timepoints,
-    sample_cell_and_bg as _sample_cell_and_bg,
+    DEFAULT_CELLS_PER_IMAGE_CAP as _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,  # noqa: F401
+    estimate_thresholds_from_outputs,
+    pick_endpoint_timepoints as _pick_endpoint_timepoints,  # noqa: F401
+    sample_cell_and_bg as _sample_cell_and_bg,  # noqa: F401
 )
 from pipeline.threshold_optimize import estimate_thresholds_from_controls
 from util.aw_safe import swallowed
-
-
-def _estimate_thresholds_standalone(
-    output_dir: Path,
-    *,
-    fluor_channels: list[str],
-    filename_schema: str,
-    filename_sep: str,
-    log: logging.Logger,
-    cells_per_image_cap: int = _AUTO_THRESHOLD_CELLS_PER_IMAGE_CAP,
-    rng_seed: int | None = None,
-) -> dict[str, float]:
-    """Otsu-based per-channel threshold estimator that depends only on
-    modules already imported by this file. Returns ``{channel: threshold}``.
-    """
-    import io as _io
-    import random as _random
-
-    channels = [str(c).strip().lower() for c in fluor_channels if str(c).strip()]
-    if not channels:
-        return {}
-    output_dir = Path(output_dir)
-    if not output_dir.exists():
-        log.warning("Auto-threshold: output dir not found (%r)", str(output_dir))
-        return {}
-
-    schema_fields = [f.strip().lower() for f in str(filename_schema or "").split(":")
-                     if f.strip()]
-    sep = filename_sep or "_"
-
-    def _parse_fields(stem: str) -> dict[str, str]:
-        parts = stem.split(sep)
-        return {f: (parts[i] if i < len(parts) else "")
-                for i, f in enumerate(schema_fields)}
-
-    rng = _random.Random(rng_seed)
-    per_channel: dict[str, list[float]] = {c: [] for c in channels}
-    # Track how many candidate (label, fluor) image pairs we attempted to
-    # decode per channel and how many failed (audit E9). A decode failure was
-    # only logged at DEBUG — invisible at the default level — so a channel
-    # whose tophat images are mostly corrupt would silently compute its Otsu
-    # threshold from a small, biased subset. We surface a WARN in the summary
-    # when a meaningful fraction was dropped.
-    per_channel_attempted: dict[str, int] = {c: 0 for c in channels}
-    per_channel_decode_failed: dict[str, int] = {c: 0 for c in channels}
-
-    well_zips = sorted(p for p in output_dir.glob("*_out.zip") if not p.name.startswith("."))
-    if not well_zips:
-        log.info("Auto-threshold: no processed *_out.zip wells in %s", output_dir)
-        return {}
-
-    log.info("Auto-threshold: scanning %d well(s) for channels: %s",
-             len(well_zips), ", ".join(channels))
-
-    for w_idx, zpath in enumerate(well_zips, start=1):
-        try:
-            zf = zipfile.ZipFile(zpath, "r")
-        except (OSError, zipfile.BadZipFile) as exc:
-            log.warning("Auto-threshold: cannot open %s: %s", zpath.name, exc)
-            continue
-        with zf:
-            label_members: dict[tuple[str, str], str] = {}     # (fov, tp) -> name
-            tophat_members: dict[tuple[str, str, str], str] = {}  # (ch, fov, tp) -> name
-            for name in zf.namelist():
-                if "/" in name or name.startswith("."):
-                    continue
-                base, _, ext = name.rpartition(".")
-                if not base or ext.lower() not in ("tif", "tiff"):
-                    continue
-                if base.endswith("_labels"):
-                    stem = base[: -len("_labels")]
-                    fields = _parse_fields(stem)
-                    fov = (fields.get("fov") or "").strip()
-                    # Accept either canonical "timepoint" or the legacy
-                    # "tp" alias. ``args.filename_schema`` is passed in
-                    # *raw* (not via parse_schema), so a user who typed
-                    # "experiment:channel:well:fov:tp" lands here with
-                    # schema_fields == [..., "tp"]; dropping the
-                    # fallback (PR #247 C2 fix) silently produced zero
-                    # samples for every channel on those datasets.
-                    tp = (fields.get("timepoint") or fields.get("tp") or "").strip()
-                    # Single-timepoint datasets: when the filename has
-                    # fewer tokens than the schema has fields, the
-                    # timepoint slot parses as "" and `if fov and tp`
-                    # below would drop every label silently. Use a
-                    # synthetic "0" sentinel so the auto-threshold
-                    # still aggregates per-fov samples.
-                    if fov and not tp:
-                        tp = "0"
-                    if fov and tp:
-                        label_members[(fov, tp)] = name
-                elif base.endswith("_tophat"):
-                    stem = base[: -len("_tophat")]
-                    fields = _parse_fields(stem)
-                    fov = (fields.get("fov") or "").strip()
-                    tp = (fields.get("timepoint") or fields.get("tp") or "").strip()
-                    if fov and not tp:
-                        tp = "0"
-                    ch = (fields.get("channel") or "").strip().lower()
-                    if fov and tp and ch in per_channel:
-                        tophat_members[(ch, fov, tp)] = name
-
-            if not label_members:
-                continue
-            tps_seen = {tp for (_fov, tp) in label_members.keys()}
-            picked_tps = set(_pick_endpoint_timepoints(tps_seen))
-            if not picked_tps:
-                continue
-            log.info("Auto-threshold: %s → timepoints %s",
-                     zpath.name, ", ".join(sorted(picked_tps)))
-
-            for (fov, tp), label_name in label_members.items():
-                if tp not in picked_tps:
-                    continue
-                for ch in channels:
-                    fluor_name = tophat_members.get((ch, fov, tp))
-                    if fluor_name is None:
-                        continue
-                    per_channel_attempted[ch] += 1
-                    try:
-                        labels_arr = imread(_io.BytesIO(zf.read(label_name)))
-                        fluor_arr = imread(_io.BytesIO(zf.read(fluor_name)))
-                    except Exception as exc:
-                        per_channel_decode_failed[ch] += 1
-                        log.debug("Auto-threshold: skipping %s / %s: %s",
-                                  label_name, fluor_name, exc)
-                        continue
-                    if labels_arr.ndim == 3:
-                        labels_arr = labels_arr[..., 0]
-                    if fluor_arr.ndim == 3:
-                        fluor_arr = fluor_arr[..., 0]
-                    means, bg_values = _sample_cell_and_bg(
-                        labels_arr, fluor_arr,
-                        cap=cells_per_image_cap, rng=rng,
-                    )
-                    if not means:
-                        continue
-                    per_channel[ch].extend(means)
-                    per_channel[ch].extend(bg_values)
-        log.info("Auto-threshold: completed well %d/%d (%s)",
-                 w_idx, len(well_zips), zpath.name)
-
-    thresholds: dict[str, float] = {}
-    for ch in channels:
-        # A biased threshold reports itself: if a large fraction of this
-        # channel's tophat/label pairs failed to decode, the Otsu estimate is
-        # computed from a non-representative subset (audit E9).
-        attempted = per_channel_attempted.get(ch, 0)
-        failed = per_channel_decode_failed.get(ch, 0)
-        if attempted and failed / attempted >= 0.25:
-            log.warning(
-                "Auto-threshold: %s — %d/%d image pair(s) failed to decode "
-                "(%.0f%%); the threshold is estimated from the remaining "
-                "subset and may be biased. Check for corrupt *_out.zip members.",
-                ch.upper(), failed, attempted, 100.0 * failed / attempted,
-            )
-        values = per_channel.get(ch) or []
-        if len(values) < 2:
-            log.info("Auto-threshold: skipping %s — only %d sample(s)",
-                     ch.upper(), len(values))
-            continue
-        arr = np.asarray(values, dtype=np.float64)
-        if arr.max() <= arr.min():
-            log.info("Auto-threshold: skipping %s — constant distribution (min == max == %.3g)",
-                     ch.upper(), float(arr.min()))
-            continue
-        try:
-            # Round the calculated threshold to the nearest integer before it is
-            # saved — the gating cut is an intensity value, and a clean integer
-            # default reads better and matches what the user can type back in.
-            thr = float(round(float(threshold_otsu(arr))))
-        except Exception as exc:
-            log.warning("Auto-threshold: Otsu failed for %s: %s", ch.upper(), exc)
-            continue
-        thresholds[ch] = thr
-        log.info("Auto-threshold: %s → %.4g (n=%d)", ch.upper(), thr, int(arr.size))
-    return thresholds
 
 
 def _apply_thresholds_to_pipeline_info(
@@ -1561,7 +1386,7 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
 
     * ``--no_auto_threshold`` — skip entirely.
     * no control wells — Otsu on a pooled cell-mean / background-pixel
-      distribution (:func:`_estimate_thresholds_standalone`).
+      distribution (:func:`pipeline.auto_threshold.estimate_thresholds_from_outputs`).
     * both control wells — the threshold maximising the relative fraction-on gap
       between them, read from the per-well CSVs this run just wrote.
 
@@ -1595,24 +1420,42 @@ def run_auto_threshold_pass(args, output_dir: Path, fluor_tokens_for_quant: list
                 log=log,
             )
         else:
-            thresholds = _estimate_thresholds_standalone(
+            thresholds = estimate_thresholds_from_outputs(
                 output_dir,
                 fluor_channels=non_seg,
                 filename_schema=args.filename_schema,
                 filename_sep=args.filename_sep,
                 log=log,
             )
+        # Which readout channels the estimate actually produced, before the
+        # segmentation channel's unconditional zero joins them — the two say
+        # very different things about the run and used to be reported as one.
+        estimated = sorted(thresholds)
         for tok in seg_tokens:
             thresholds[tok] = 0.0
         written = _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
+        # Estimating nothing for every readout channel is a failure, and it has
+        # to be reported on its own terms rather than as part of the
+        # what-got-written summary: the segmentation channel's unconditional
+        # zero *is* a write, so it makes `written` truthy and the run reads as a
+        # success that happened to produce one value. That is exactly how the
+        # reported run looked.
+        if non_seg and not estimated:
+            log.warning(
+                "Auto-threshold: no threshold could be estimated for any of %s. "
+                "The per-well output archives yielded no usable image pairs — "
+                "see the per-well lines above for why.",
+                ", ".join(c.upper() for c in non_seg),
+            )
         if written:
             log.info(
                 "Auto-threshold defaults written for %d channel(s): %s",
                 len(written),
                 ", ".join(f"{ch.upper()}={v:.4g}" for ch, v in written.items()),
             )
-        else:
-            log.info("Auto-threshold pass produced no new defaults.")
+        elif estimated or not non_seg:
+            log.info("Auto-threshold pass produced no new defaults "
+                     "(every channel already has a stored value).")
         return written
     except Exception as exc:
         log.warning("Auto-threshold pass failed: %s", exc)
@@ -3925,12 +3768,7 @@ def write_pipeline_info(
                       p.name, exc, backup if backup is not None else "(backup failed)")
             existing = None
         if isinstance(existing, dict):
-            for preserved_key in (
-                "cell_gating",
-                "sample_definitions",
-                "ratios",
-                "notes",
-            ):
+            for preserved_key in USER_SIDE_BLOCKS:
                 if preserved_key in existing and preserved_key not in info:
                     info[preserved_key] = existing[preserved_key]
     tmp = p.with_suffix(p.suffix + ".tmp")

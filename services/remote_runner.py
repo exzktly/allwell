@@ -71,6 +71,7 @@ from pipeline.run_report import (
     merge_fetched_run_report,
     read_run_report_block,
 )
+from pipeline.sidecar import read_user_blocks, restore_user_blocks
 from pipeline.well_skip import _canonical_force_wells
 from util.well_token import canonical_well_label as _canonical_well_label
 from pipeline.incremental_keys import (
@@ -339,6 +340,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     # complete mirror of ``pipeline/`` per test_remote_manifest.
     "pipeline/ome_explode.py",
     "pipeline/run_report.py",
+    # The sidecar blocks the user owns (cell_gating / sample_definitions /
+    # ratios / notes), shared by write_pipeline_info and the end-of-run fetch.
+    "pipeline/sidecar.py",
     "pipeline/shape_features.py",
     "pipeline/stardist.py",
     # Cooperative wind-down: the remote pipeline catches SIGTERM and finishes
@@ -3819,6 +3823,13 @@ class _BatchedRemoteProcess:
                 # single auto-threshold pass locally after every
                 # batch drains (see ``_run_local_auto_threshold``
                 # below).
+                # Whether the flag was already there is the *user's* choice
+                # (the Analyze checkbox, off); appending it here is the
+                # batcher's own suppression, for the unrelated reason above.
+                # Once appended the two are indistinguishable, which is why
+                # __init__ reads the answer off the incoming argv before this
+                # runs — otherwise the local re-run below writes thresholds for
+                # someone who asked for none.
                 if "--no_auto_threshold" not in remote_argv:
                     remote_argv = list(remote_argv) + ["--no_auto_threshold"]
                 # Each batch is its own pipeline launch, so on a
@@ -3911,10 +3922,24 @@ class _BatchedRemoteProcess:
                 # derived from a sliver of the plate. Fires only when the whole
                 # run succeeded — a mid-run abort leaves the previous run's
                 # pipeline_info.json (if any) untouched.
-                if self._returncode == 0:
+                if self._returncode == 0 and not self._auto_threshold_off_by_user():
                     self._run_local_auto_threshold()
             finally:
                 self._line_q.put(None)
+
+    def _auto_threshold_off_by_user(self) -> bool:
+        """True when the operator unchecked "Calculate cell-gating thresholds".
+
+        ``--no_auto_threshold`` reaches the remote argv for two unrelated
+        reasons: the user's choice, and this class appending it per batch so a
+        batch cannot write thresholds derived from a sliver of the plate. Once
+        appended the two are indistinguishable — which is why the local re-run
+        used to write thresholds for someone who had asked for none. Read from
+        ``self._pipeline_argv``, the argv as handed in: ``_run_batches`` builds
+        each batch's ``remote_argv`` from a copy and never mutates this one, so
+        it still answers only the first question.
+        """
+        return "--no_auto_threshold" in list(self._pipeline_argv or [])
 
     def _run_local_auto_threshold(self) -> None:
         """Re-run the pipeline's auto-threshold pass locally against
@@ -5282,8 +5307,17 @@ class RemoteRunner:
         # alone, that replaces a whole plate's completeness records with a
         # handful, and every skipped well loses the record that said whether its
         # empty output was a measurement or a gap. Capture before, merge after.
+        #
+        # The user-side blocks have the same problem and a simpler answer. A
+        # remote output dir starts empty, so its sidecar never carries the
+        # cell-gating thresholds, sample definitions, ratios or notes the user
+        # set locally — and a batched run's thresholds are written *locally*, by
+        # _run_local_auto_threshold, moments before this fetch overwrites them.
+        # Capture before, restore after, for exactly the keys the pipeline's own
+        # re-run path preserves.
         info_path = run.local_output_dir / "pipeline_info.json"
         prior_run_report = read_run_report_block(info_path)
+        prior_user_blocks = read_user_blocks(info_path)
         for top in ("pipeline_info.json",):
             self._rsync_optional(
                 f"{self.host.ssh_alias}:{run.remote_output_dir}/{top}",
@@ -5293,6 +5327,10 @@ class RemoteRunner:
         if merge_fetched_run_report(info_path, prior_run_report):
             log("[remote] merged this run's completeness records into the "
                 "existing pipeline_info run_report.\n")
+        restored = restore_user_blocks(info_path, prior_user_blocks)
+        if restored:
+            log(f"[remote] restored local pipeline_info block(s) the fetched "
+                f"sidecar did not carry: {', '.join(restored)}\n")
 
         # Per-failure tracebacks. The pipeline writes them remotely and nothing
         # pulled them back, so on a remote run they stayed on the remote host —

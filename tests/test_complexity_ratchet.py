@@ -120,7 +120,11 @@ ALLOWLIST = {
     "services/remote_runner.py::stage_local_zips",
     "well_viewer/features/heatmap/controller.py::redraw_heatmap",
     "well_viewer/features/image_browser/cell_browser/collect.py::collect_cells",
-    "process_microscopy.py::_estimate_thresholds_standalone",
+    # DONE: the pipeline's Otsu estimator (was CC 55) moved to
+    # pipeline/auto_threshold.py as estimate_thresholds_from_outputs and was
+    # decomposed on the way — _SchemaReader (member-name → FOV-group),
+    # _index_members, _sample_one_well and _otsu_per_channel are each separately
+    # testable. Removed from the allowlist.
     "well_viewer/features/image_browser/image_table/export.py::_build_export_figure",
     "well_viewer/core/channel_state_controller.py::update_channel_selector",
     "well_viewer/core/selection_controller.py::refresh_sidebar_map_now",
@@ -139,9 +143,9 @@ ALLOWLIST = {
     "well_viewer/domain/fold_change.py::normalize_pts",
     "process_microscopy.py::sample_empty_well_images",
     # Was CC 40 (right at the line); the audit-E9 decode-failure counting +
-    # bias WARN (mandatory correctness surfacing, mirrors the pipeline-side
-    # _estimate_thresholds_standalone already listed above) nudged it to 42.
-    # A proper decompose belongs with the auto-threshold refactor, not E9.
+    # bias WARN (mandatory correctness surfacing, mirroring the pipeline-side
+    # estimator) nudged it to 42. The Review-side twin of the decompose noted
+    # above is still owed.
     "well_viewer/data/auto_threshold.py::compute_auto_thresholds",
 }
 

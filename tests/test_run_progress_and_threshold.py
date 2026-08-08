@@ -163,10 +163,10 @@ def test_per_well_markers_tolerate_mangled_separator():
 def test_standalone_auto_threshold_is_rounded_to_integer(tmp_path):
     pytest.importorskip("skimage")
     import logging
-    from process_microscopy import _estimate_thresholds_standalone
+    from pipeline.auto_threshold import estimate_thresholds_from_outputs
 
     _make_out_zip(tmp_path / "A01_out.zip")
-    thr = _estimate_thresholds_standalone(
+    thr = estimate_thresholds_from_outputs(
         tmp_path,
         fluor_channels=["GFP"],
         filename_schema="experiment:channel:well:fov:timepoint",

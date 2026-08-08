@@ -19,6 +19,15 @@ from well_viewer.core.safe import swallowed
 
 # (widget-registry name, default Save-As filename) for each plot card, in
 # visible-priority order — the first *visible* card wins.
+#
+# This is the single roster of plot cards in the pane. It is a hand-written
+# allowlist rather than something derived from the feature registry, and
+# ARCHITECTURE §5.3 records what that costs: a new plot tab missing from it
+# silently loses the global Copy / Save actions, which is exactly what shipped
+# for Spatial and Multivariate. It used to be written out twice — the shell's
+# Screen/Publication toggle carried its own copy of the same eight names — so
+# the roster now has one home and `allwell.py` imports `PLOT_CARD_ATTRS` from
+# here.
 _CARDS = (
     ("_line_card", "lines.png"),
     ("_bar_card", "bars.png"),
@@ -29,6 +38,10 @@ _CARDS = (
     ("_sp_card", "spatial.png"),
     ("_mv_card", "multivariate.png"),
 )
+
+#: Widget-registry names of every plot card, for callers that act on all of
+#: them rather than on the active one (the shell's Screen/Publication toggle).
+PLOT_CARD_ATTRS: tuple[str, ...] = tuple(attr for attr, _ in _CARDS)
 
 
 def _active_card(ctx):

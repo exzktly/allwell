@@ -506,8 +506,8 @@ class AllWellApp(QMainWindow):
         review = getattr(self, "_review", None)
         if review is None:
             return
-        for attr in ("_line_card", "_bar_card", "_scatter_card",
-                     "_scatter_agg_card", "_distribution_card", "_heatmap_card"):
+        from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+        for attr in PLOT_CARD_ATTRS:
             card = getattr(review, attr, None)
             if card is None or not card.isVisible():
                 continue
@@ -688,12 +688,8 @@ class AllWellApp(QMainWindow):
         )
         if self._review is None:
             return
-        card_attrs = (
-            "_line_card", "_bar_card", "_scatter_card",
-            "_scatter_agg_card", "_distribution_card", "_heatmap_card",
-            "_sp_card", "_mv_card",
-        )
-        for attr in card_attrs:
+        from well_viewer.core.plot_card_actions import PLOT_CARD_ATTRS
+        for attr in PLOT_CARD_ATTRS:
             card = getattr(self._review, attr, None)
             if card is None or not hasattr(card, "setPlotTheme"):
                 continue

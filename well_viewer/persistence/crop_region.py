@@ -22,22 +22,20 @@ _SECTION = "crop_region"
 
 
 def save_to_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return
-    region = app._app_state.dataset.crop_region
+    region = ctx.state.dataset.crop_region
     _doc.set_section(ctx, _SECTION, list(region) if region else None)
 
 
 def load_from_data_dir(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    if not app._app_state.dataset.data_dir:
+    if not ctx.state.dataset.data_dir:
         return
     data = _doc.get_section(ctx, _SECTION)
     if isinstance(data, (list, tuple)) and len(data) == 4:
         try:
-            app._app_state.dataset.crop_region = tuple(int(v) for v in data)
+            ctx.state.dataset.crop_region = tuple(int(v) for v in data)
             return
         except (TypeError, ValueError):
             _logger.warning("Ignoring malformed crop_region section: %r", data)
-    app._app_state.dataset.crop_region = None
+    ctx.state.dataset.crop_region = None

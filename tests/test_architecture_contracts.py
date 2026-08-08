@@ -37,34 +37,38 @@ def _walk_py(root: Path):
 
 # ── §6.2 — the pipeline is self-sufficient: no well_viewer/widgets/Qt ─────────
 
+# Whole directories, not a hand-written file list. The list this replaced named
+# twelve files and had fallen five `pipeline/` modules and nine `util/` modules
+# behind the tree — every one of them covered by the same §3 Qt-free claim as
+# the three `util/` modules that were listed. A directory walk cannot drift the
+# same way, which is why `test_services_have_no_qt_imports` (below) never did.
+PIPELINE_ROOTS = ["pipeline", "util"]
+# Entry points that live in no package of their own.
 PIPELINE_FILES = [
     "process_microscopy.py",
-    "pipeline/auto_threshold.py",
-    "pipeline/background.py",
-    "pipeline/cellpose.py",
-    "pipeline/flatfield.py",
-    "pipeline/io.py",
-    "pipeline/shape_features.py",
-    "pipeline/stardist.py",
-    "pipeline/threshold_optimize.py",
-    "util/well_token.py",
-    "util/timepoint.py",
-    "util/aw_safe.py",
+    "WellPlateZipper.py",
 ]
 
 
-def test_pipeline_is_self_sufficient():
-    """§6.2: the pipeline (`process_microscopy` + its Qt-free repo-root modules)
-    must run on a headless worker with no GUI installed — so it must never import
-    `well_viewer`, `widgets`, or Qt, at ANY level (module *or* function-local,
-    since a function-local import still crashes when the path runs on the
-    worker)."""
-    forbidden = {"well_viewer", "widgets"} | QT_ROOTS
-    offenders = []
+def _pipeline_paths():
+    for root in PIPELINE_ROOTS:
+        yield from _walk_py(REPO_ROOT / root)
     for name in PIPELINE_FILES:
         path = REPO_ROOT / name
-        if not path.exists():
-            continue
+        if path.exists():
+            yield path
+
+
+def test_pipeline_is_self_sufficient():
+    """§6.2: the pipeline (`process_microscopy` + the Qt-free `pipeline/` and
+    `util/` packages) must run on a headless worker with no GUI installed — so it
+    must never import `well_viewer`, `widgets`, or Qt, at ANY level (module *or*
+    function-local, since a function-local import still crashes when the path
+    runs on the worker)."""
+    forbidden = {"well_viewer", "widgets"} | QT_ROOTS
+    offenders = []
+    for path in _pipeline_paths():
+        name = path.relative_to(REPO_ROOT).as_posix()
         for node, top in _all_imports(_parse(path)):
             if top in forbidden:
                 offenders.append(f"{name}:{node.lineno} imports {top}")

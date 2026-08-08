@@ -119,9 +119,17 @@ allwell/
 ├── analyze_input.py             ← Analyze input mixin: run-dir resolver + OME-TIFF redirect
 ├── analyze_progress.py          ← Analyze run-progress rendering mixin (ETA + progress events → dashboard)
 ├── datasets_tab.py              ← Datasets pane (page-rail shell; see §6b)
-├── datasets/                    ← Qt-free dataset operations + their feature views
-│   ├── concatenate/            ← Concatenate datasets feature (compute/apply/worker/view/controller/dashboard)
-│   └── ome_import/             ← Convert OME-TIFF feature (de-interleave a packed OME-TIFF → dataset folder)
+├── datasets/                    ← dataset tools: Qt-free compute/apply + their feature views (§6b)
+│   ├── _common/                ← what more than one tool needs: dataset_paths,
+│   │                              containers, zip_passthrough, member_names,
+│   │                              concurrency, log_panel
+│   ├── concatenate/            ← Concatenate datasets (compute/apply/worker/view/controller/dashboard)
+│   ├── merge_plates/           ← Merge two plates into one, remapping wells
+│   ├── subset/                 ← Subset / Split a dataset by well, FOV or timepoint
+│   ├── import_loose/           ← Zip a loose image folder into per-well archives
+│   ├── validate/               ← Validate & Repair an existing dataset
+│   ├── job_queue/              ← the queue the six tools (and Analyze) submit runs to
+│   └── ome_import/             ← Convert OME-TIFF (de-interleave a packed OME-TIFF → dataset folder)
 ├── process_microscopy.py        ← analysis pipeline orchestrator + CLI (decomposed; see §6.2)
 ├── pipeline/                    ← Qt-free analysis-pipeline modules (re-exported by pm)
 │   ├── background.py            ← background/illumination-correction math
@@ -133,6 +141,10 @@ allwell/
 │   ├── stardist.py             ← StarDist segmenters + StarDistParams + per-worker model state (TF lazy)
 │   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into per-well .zip
 │   │                              archives (Z max-projected; positions → wells via §OME)
+│   ├── incremental_keys.py     ← what an incremental run considers already done
+│   ├── well_skip.py            ← per-well skip decisions for a resumed run
+│   ├── suspend.py              ← suspend / resume a run in flight
+│   ├── run_report.py           ← the end-of-run summary the log and Review both read
 │   └── io.py                   ← atomic output writers (images / CSVs / overlay)
 │                                 + the scratch base & staging-dir lifecycle (§6.5)
 ├── util/                        ← general Qt-free utilities (no pipeline/GUI specificity)
@@ -154,6 +166,8 @@ allwell/
 │   ├── schema_infer.py         ← guess a filename schema + channels by scanning an
 │   │                              input folder (loose TIFs / zips); Analyze pre-fill
 │   ├── aw_safe.py              ← swallow()/swallowed() (logged exception suppression)
+│   ├── retry_io.py             ← bounded retry with backoff for transient IO failures
+│   ├── frozen_io.py            ← reading bundled data from a PyInstaller bundle
 │   └── zip_write.py            ← atomic_zip(): the one verified writer for the
 │                                  per-well archives (pipeline, services, remote)
 ├── WellPlateZipper.py           ← input-folder packing utility (96-well .zip set)
@@ -524,8 +538,11 @@ What lives on `WellViewerApp`:
   A delegator exists only for as long as some call site still goes through
   `app`; once the `ctx` migration rewires the callers to the controller
   function directly, the proxy is dead weight and is deleted rather than left
-  standing. `tests/test_guardrails.py` meters the class at 113 methods and 876
-  lines, and both ratchets only move down. Pattern:
+  standing. `tests/test_guardrails.py` meters the class's *file* at
+  `RUNTIME_APP_LINE_BUDGET` lines and its loose `self._*` attributes at
+  `RUNTIME_APP_ATTR_BUDGET`; there is no method-count budget, so the method
+  count is a number to watch rather than one that is enforced. Every one of
+  those ratchets only moves down. Pattern:
 
   ```python
   def _set_active_channel(self, channel: str) -> None: return set_active_channel(self, channel)
@@ -5766,7 +5783,7 @@ The map (each rule links to the test that holds it):
 
 | Contract (§) | Enforced by |
 |---|---|
-| Pipeline self-sufficiency — no `well_viewer`/`widgets`/Qt in the pipeline (§6.2) | `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
+| Pipeline self-sufficiency — no `well_viewer`/`widgets`/Qt anywhere under `pipeline/` or `util/`, nor in `process_microscopy.py` / `WellPlateZipper.py`, at any nesting (§6.2). Scoped by directory walk rather than a file list, so a new module in either package is covered from the moment it exists | `tests/test_architecture_contracts.py::test_pipeline_is_self_sufficient` |
 | Every repo-root module the pipeline imports is uploaded to the remote (§6.2) | `tests/test_remote_manifest.py` + `test_remote_runner.py::test_required_files_list_is_what_we_promised` |
 | `services/` stay Qt-free (CLI-reusable, §13) | `test_architecture_contracts.py::test_services_have_no_qt_imports` |
 | `widgets/` carry no app coupling (§13) | `test_architecture_contracts.py::test_widgets_do_not_import_the_app` |

@@ -127,6 +127,7 @@ _BREADCRUMB_INTERVAL_S = 60.0
 # touches the log.
 _WELL_XFER_INTERVAL_S = 1.0
 from util.zip_write import atomic_zip
+from util.well_token import is_valid_well_name
 
 
 def _scratch_dir() -> Path:
@@ -629,7 +630,7 @@ def stage_local_zips(
     elif mode is LocalInputMode.FOLDER:
         source_well_folders = tuple(sorted(
             p for p in input_dir.iterdir()
-            if p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
+            if p.is_dir() and is_valid_well_name(p.name)
         ))
         # v5.x.x resume support: a prior ``--move-source-tifs`` run
         # may have crashed mid-way, leaving SOME TIFs in well
@@ -668,7 +669,7 @@ def stage_local_zips(
     def _basenames_inside_well_folders() -> set[str]:
         names: set[str] = set()
         for p in input_dir.iterdir():
-            if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+            if not (p.is_dir() and is_valid_well_name(p.name)):
                 continue
             for child in p.iterdir():
                 if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
@@ -727,7 +728,7 @@ def stage_local_zips(
     # produces folders.
     folders_after_zipper = sorted(
         p for p in input_dir.iterdir()
-        if p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)
+        if p.is_dir() and is_valid_well_name(p.name)
     )
     # Each folder is deleted the moment its own zip is published, rather than
     # at the end of the run. ``_zip_well_folder`` goes through ``atomic_zip``,
@@ -844,7 +845,7 @@ def _detect_local_input_mode(input_dir: Path) -> LocalInputMode:
     # A raised OSError from iterdir() (e.g. the drive was yanked) propagates
     # naturally to the caller — no wrapping handler needed.
     for p in input_dir.iterdir():
-        if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+        if not (p.is_dir() and is_valid_well_name(p.name)):
             continue
         label = _canonical_well_from_path(p.name)
         if label is None:
@@ -1076,7 +1077,7 @@ def _stage_mixed_mode(
 
     folder_wells: dict[str, Path] = {}
     for p in input_dir.iterdir():
-        if not (p.is_dir() and re.fullmatch(r"[A-H]\d{1,2}", p.name)):
+        if not (p.is_dir() and is_valid_well_name(p.name)):
             continue
         label = _canonical_well_from_path(p.name)
         if label is None or label in existing_wells:

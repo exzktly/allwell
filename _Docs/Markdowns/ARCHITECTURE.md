@@ -5686,7 +5686,20 @@ control row, so only a per-mode pass exercises the one that makes the row wrap.
   validating and then re-matching — `canonical_well_label` is both the test and
   the conversion. A second parser is not a style problem: when the pipeline
   carried its own, a folder named `"A1 "` was a well to the Analyze-side input
-  resolver and not a well to the pipeline that then processed it.
+  resolver and not a well to the pipeline that then processed it. A local copy
+  drifts in both directions at once — the ones this rule displaced rejected a
+  trailing space and a lower-case `a1/` directory that the canonicaliser
+  accepts, while accepting an `A0` or `A13` that it rejects.
+  `tests/test_well_token_single_parser.py` fails on any *whole-token* well
+  pattern outside `util/well_token.py`. Two neighbouring shapes are deliberately
+  not caught by it, because they are different operations: a **trailing**-token
+  extractor reading a well off the end of a longer stem
+  (`domain/viewer_state.extract_well_token`, `datasets/_common/dataset_paths.split_stem_well`),
+  and a **filename-shape** matcher (`<WELL>_out.zip` in
+  `data/image_discovery.py`) — which still hands the token it captures to the
+  canonicaliser rather than padding it itself. Log-line scrapers in `services/`
+  are the third: they recover a well from a message the pipeline already
+  formatted.
 - **Normalise FOV / timepoint tokens with
   `data.image_resolver.normalize_numeric_token`.** These arrive from filenames,
   CSV columns and combo text, so `1`, `01` and `1.0` must collapse to one key

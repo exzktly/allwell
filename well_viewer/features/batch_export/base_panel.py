@@ -64,6 +64,7 @@ from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
     get_thresh_frac_on as _get_thresh_frac_on,
 )
+from util.well_token import canonical_well_label
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
 _rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_loaded")
@@ -93,10 +94,13 @@ _FIELD_LABEL_W = 108
 
 
 def _norm_well_token(tok: str) -> str:
-    """Canonicalise a well token (``a1`` → ``A01``) for membership tests."""
-    tok = tok.strip().upper()
-    m = re.match(r"^([A-H])(\d{1,2})$", tok, re.I)
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else tok
+    """Canonicalise a well token (``a1`` → ``A01``) for membership tests.
+
+    Anything that is not a 96-well position comes back upper-cased but
+    otherwise untouched, so it simply fails the membership test it is being
+    prepared for rather than being coerced into a plausible-looking key.
+    """
+    return canonical_well_label(tok) or tok.strip().upper()
 
 
 def _attach_fc_row(row: dict, npt: tuple, band_lbl: str,

@@ -17,7 +17,6 @@ populate" order :class:`RunDashboard` used before this extraction.
 
 from __future__ import annotations
 
-import re
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -26,12 +25,18 @@ from PySide6.QtWidgets import (
 
 from widgets.plate_geometry import PLATE_ALIGNMENT, apply_plate_geometry
 from widgets.well_plate_selector import WellPlateSelector
+from util.well_token import canonical_well_label
 
 
 def canon_well(well_id: str) -> str:
-    """Normalise a well token to ``A01`` form; '' if it isn't a well."""
-    m = re.match(r"^([A-Ha-h])(\d{1,2})$", str(well_id).strip())
-    return f"{m.group(1).upper()}{int(m.group(2)):02d}" if m else ""
+    """Normalise a well token to ``A01`` form; '' if it isn't a well.
+
+    The column bound comes from the shared canonicaliser rather than from a
+    pattern here, so a dashboard and the plate it colours agree on which
+    positions exist — this widget draws an 8x12 grid, and a token outside it
+    has nowhere to land.
+    """
+    return canonical_well_label(well_id) or ""
 
 
 def status_dot(color: str, d: int = 11) -> QLabel:

@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Callable
 from util.aw_safe import swallowed
@@ -98,7 +99,7 @@ def _is_well_named(p: Path) -> bool:
     return is_valid_well_name(p.stem)
 
 
-def _has_well_zip(folder: Path) -> bool:
+def has_well_zip(folder: Path) -> bool:
     """True iff *folder* contains at least one well-named ``<WELL>.zip``."""
     try:
         return any(_is_well_named(p) for p in folder.glob("*.zip"))
@@ -158,7 +159,7 @@ def _zip_timepoints(zip_path: Path, *, schema: str, sep: str) -> set[str]:
     return out
 
 
-def _has_well_content(folder: Path) -> bool:
+def has_well_content(folder: Path) -> bool:
     """Return True iff *folder* contains *well-named* zip files OR
     well-named subdirectories.
 
@@ -177,6 +178,197 @@ def _has_well_content(folder: Path) -> bool:
         return any(is_valid_well_name(p.name) for p in folder.iterdir() if p.is_dir())
     except OSError:
         return False
+
+
+def dir_has_entries(folder: Path) -> bool:
+    """True iff *folder* holds at least one entry of any kind.
+
+    The weakest useful statement about a directory: it exists and is not empty.
+    Used to tell an ``in/`` whose contents this module does not recognise as
+    wells (which is still usable input — the pipeline reads it) apart from an
+    ``in/`` that is genuinely empty (which is not, and must say so).
+    """
+    try:
+        return any(folder.iterdir())
+    except OSError:
+        return False
+
+
+# ── the one layout decision ──────────────────────────────────────────────────
+# Analyze asks this question twice: once under the input field, to tell the user
+# what pressing Run will do, and once at Run, to actually do it. Those were two
+# separate implementations, and they disagreed — the readout accepted any zip in
+# ``in/`` while the resolver required a well-named one, so a folder holding
+# ``Plate1_A1.zip`` displayed "using as input" and then failed the run with
+# "Cannot determine input layout". One planner, two consumers, no drift.
+
+#: The selected path is a packed OME-TIFF, which Analyze cannot read.
+PACKED_OME = "packed_ome"
+#: The selected path is not a directory at all.
+NOT_A_DIR = "not_a_dir"
+#: The grouped root already holds per-well zips / folders; nothing to prepare.
+GROUPED = "grouped"
+#: The grouped root holds loose TIFs and no well zips — group them in place.
+GROUP_LOOSE = "group_loose"
+#: The grouped root holds loose TIFs *alongside* well zips — fold them in.
+FOLD_LOOSE = "fold_loose"
+#: The selected root holds enough loose TIFs to run WellPlateZipper into ``in/``.
+ZIP_ROOT = "zip_root"
+#: An ``in/`` that holds something, none of which parses as a well.
+UNRECOGNISED = "unrecognised"
+#: An ``in/`` that exists and is empty.
+EMPTY_IN = "empty_in"
+#: Nothing usable anywhere.
+NO_INPUT = "no_input"
+
+#: Shown when the user points Analyze at a packed OME-TIFF. Analyze processes
+#: folders of per-well images; the Datasets converter is what de-interleaves a
+#: packed file into one.
+PACKED_OME_MESSAGE = (
+    "⚠ This is a packed OME-TIFF. Convert it to a dataset folder first in the "
+    "Datasets tab → “Convert OME-TIFF”, then open that folder here "
+    "to process it."
+)
+
+
+#: Actions that describe input the run can proceed with.
+RUNNABLE_ACTIONS = frozenset(
+    {GROUPED, GROUP_LOOSE, FOLD_LOOSE, ZIP_ROOT, UNRECOGNISED}
+)
+
+
+@dataclass(frozen=True)
+class InputPlan:
+    """What Analyze will do with the folder the user selected.
+
+    *input_dir* and *output_dir* are the pair the pipeline will be handed, and
+    are ``None`` for the actions that cannot run. *loose_count* is the number of
+    loose TIFs the action is about (0 where the action is not about loose TIFs),
+    and *message* is the one-line readout, phrased for the user.
+    """
+
+    action: str
+    input_dir: Path | None
+    output_dir: Path | None
+    loose_count: int
+    message: str
+
+    @property
+    def runnable(self) -> bool:
+        return self.action in RUNNABLE_ACTIONS
+
+
+def _plan_grouped_root(root: Path, output_dir: Path, *, named_in: bool) -> InputPlan:
+    """Classify a folder that is being used as the pipeline's input directly."""
+    loose = len(tif_files_in(root))
+    if loose > 0:
+        if has_well_zip(root):
+            return InputPlan(
+                FOLD_LOOSE, root, output_dir, loose,
+                f"✓ Will fold {loose} loose TIF(s) into the existing well "
+                f"zips in {root.name}/",
+            )
+        return InputPlan(
+            GROUP_LOOSE, root, output_dir, loose,
+            f"✓ Will group {loose} loose TIF(s) into per-well folders "
+            f"in {root.name}/",
+        )
+    if has_well_content(root):
+        return InputPlan(
+            GROUPED, root, output_dir, 0,
+            "✓ Using selected folder as input" if named_in
+            else f"✓ Found {root.name}/ subfolder — using as input",
+        )
+    if dir_has_entries(root):
+        # Usable, but say what was not recognised: a run that then processes
+        # nothing has at least told the user why before it started.
+        return InputPlan(
+            UNRECOGNISED, root, output_dir, 0,
+            f"✓ Using {root.name}/ as input — no well-named zips or "
+            f"folders recognised in it",
+        )
+    return InputPlan(
+        EMPTY_IN, None, None, 0,
+        f"The {root.name}/ folder is empty — nothing to process.",
+    )
+
+
+def plan_input_layout(raw: Path) -> InputPlan:
+    """Decide how *raw* — the folder the user selected — becomes pipeline input.
+
+    Pure: reads the filesystem, changes nothing. :func:`resolve_input_output`
+    executes the plan and ``AnalyzeTab._refresh_output`` displays it, so the
+    readout under the input field cannot disagree with what Run then does.
+
+    A folder *named* ``in`` is the input; a folder that *contains* ``in/`` feeds
+    the pipeline from that subfolder. The two are classified by the same
+    function, which is the point — the contains-``in/`` path used to demand
+    recognisable well content that the named-``in`` path never asked for, so an
+    ``in/`` full of, say, ``Plate1_A1.zip`` worked when selected directly and
+    failed when its parent was selected.
+
+    Loose TIFs sitting at the selected root still win over an ``in/`` that has
+    nothing recognisable in it: that is a fresh drop next to a folder a previous
+    interrupted run created, and it must still reach WellPlateZipper.
+    """
+    if detect_ome_input(raw) is not None:
+        return InputPlan(PACKED_OME, None, None, 0, PACKED_OME_MESSAGE)
+    if not raw.is_dir():
+        return InputPlan(NOT_A_DIR, None, None, 0, "Not a directory.")
+
+    if raw.name.lower() == "in":
+        return _plan_grouped_root(raw, raw.parent / "out", named_in=True)
+
+    in_sub = raw / "in"
+    out_dir = raw / "out"
+    if in_sub.is_dir():
+        nested = _plan_grouped_root(in_sub, out_dir, named_in=False)
+        if nested.action not in (UNRECOGNISED, EMPTY_IN):
+            return nested
+    else:
+        nested = None
+
+    tifs = len(tif_files_in(raw))
+    if tifs > 3:
+        return InputPlan(
+            ZIP_ROOT, in_sub, out_dir, tifs,
+            f"✓ Will run WellPlateZipper on {tifs} TIF file(s) → in/",
+        )
+    if nested is not None:
+        return nested
+    return InputPlan(
+        NO_INPUT, None, None, tifs,
+        "No TIF files or in/ folder found in selected directory.",
+    )
+
+
+def _layout_error(plan: InputPlan, raw: Path) -> str:
+    """The long-form version of an unrunnable plan, for the run-time exception.
+
+    The readout has room for one line; a failed run has room to explain. Both
+    describe the same verdict, so they are built from the same plan.
+    """
+    if plan.action == PACKED_OME:
+        return plan.message
+    if plan.action == NOT_A_DIR:
+        return f"Not a directory:\n{raw}"
+    if plan.action == EMPTY_IN:
+        return (
+            f"{plan.message}\n\n"
+            "The folder that holds the images is there, but there is nothing "
+            "in it — no per-well zips, no per-well folders, no TIF files.\n\n"
+            f"Folder selected: {raw}"
+        )
+    return (
+        "Cannot determine input layout.\n\n"
+        "Expected one of:\n"
+        '  \u2022 Selected folder is named "in"\n'
+        '  \u2022 Selected folder contains a sub-folder named "in"\n'
+        "  \u2022 Selected folder contains more than 3 TIF files\n"
+        "    (will be grouped by well using WellPlateZipper)\n\n"
+        f"Folder selected: {raw}\n"
+        f"TIF files found: {plan.loose_count}"
+    )
 
 
 def _well_in_grouped_root(root: Path, target: str) -> bool:
@@ -278,15 +470,19 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
     """Best-effort count of distinct wells the run will produce, for the Analyze
     progress denominator.
 
-    Mirrors :func:`resolve_input_output`'s layout detection so the dashboard's
-    "x / N wells" matches what actually gets processed. Counts the UNION of
-    already-grouped wells (per-well zips / folders) and distinct well tokens
+    Takes the layout from :func:`plan_input_layout`, so the dashboard's
+    "x / N wells" counts the folder the run will actually read. Counts the UNION
+    of already-grouped wells (per-well zips / folders) and distinct well tokens
     parsed from loose TIFs — so a partially-grouped ``in/`` (some well folders
     plus leftover loose TIFs) reports the full plate, not just the grouped few.
+
+    Deliberately best-effort: a layout nothing can be counted in falls back to
+    the loose-TIF count and then to 1, because this is a progress denominator
+    and a zero would leave the dashboard dividing by nothing. When there is
+    genuinely no input, :func:`resolve_input_output` is what says so.
     """
     from util.well_token import canonical_well_label
 
-    in_sub = raw / "in"
     fields = [f.strip().lower() for f in str(filename_schema or "").split(":")]
     well_idx = fields.index("well") if "well" in fields else -1
 
@@ -302,11 +498,11 @@ def count_expected_wells(raw: Path, *, filename_schema: str, filename_sep: str) 
         return toks
 
     toks: set[str] = set()
-    if raw.name.lower() == "in":
-        toks |= set(iter_well_tokens(raw)) | _loose_toks(raw)
-    else:
-        toks |= set(iter_well_tokens(in_sub)) | _loose_toks(in_sub)
-        toks |= _loose_toks(raw)  # loose TIFs at the selected root
+    grouped = plan_input_layout(raw).input_dir
+    if grouped is not None:
+        toks |= set(iter_well_tokens(grouped)) | _loose_toks(grouped)
+        if grouped != raw:
+            toks |= _loose_toks(raw)  # loose TIFs at the selected root
     if toks:
         return len(toks)
     return len(tif_files_in(raw)) or 1
@@ -323,7 +519,7 @@ def append_loose_images_to_zips(
 
     When a directory already holds per-well ``<WELL>.zip`` archives and the user
     drops additional loose TIFFs alongside them, those files would otherwise be
-    ignored (``_has_well_content`` short-circuits the zipper). This parses each
+    ignored (``has_well_content`` short-circuits the zipper). This parses each
     loose file's well token, appends it into the matching ``<WELL>.zip`` (or
     creates a new ``<WELL>.zip`` for a well that doesn't have one yet), and
     deletes the loose source once it is durably in the zip.
@@ -347,11 +543,7 @@ def append_loose_images_to_zips(
     wells_touched: set[str] = set()
 
     # Gate: only a zip-grouped layout qualifies.
-    try:
-        has_well_zip = any(_is_well_named(p) for p in grouped_dir.glob("*.zip"))
-    except OSError:
-        return 0, wells_touched
-    if not has_well_zip:
+    if not has_well_zip(grouped_dir):
         return 0, wells_touched
 
     fields = [str(f).strip().lower() for f in str(filename_schema or "").split(":")]
@@ -714,7 +906,7 @@ def _group_loose_tifs_in_place(
         proc_hook=proc_hook,
         move_source_tifs=move_source_tifs,
     )
-    if not _has_well_content(folder):
+    if not has_well_content(folder):
         raise ValueError(
             "WellPlateZipper ran but produced no well folders.\n\n"
             "Common causes:\n"
@@ -814,68 +1006,40 @@ def resolve_input_output(
     exit, user cancel), skip it — the loose TIFs stay intact so
     the user can retry from scratch.
     """
-    if not raw.is_dir():
-        raise ValueError(f"Not a directory:\n{raw}")
+    plan = plan_input_layout(raw)
+    if not plan.runnable:
+        raise ValueError(_layout_error(plan, raw))
 
-    if raw.name.lower() == "in":
-        # A folder named "in" is normally already-grouped input — but if it
-        # holds loose, ungrouped TIFs (a fresh drop, OR the leftovers of an
-        # interrupted grouping run that already made some well folders), group
-        # them in place rather than mis-treating them as fully grouped.
-        if len(tif_files_in(raw)) > 0:
-            if _has_well_zip(raw):
-                # Loose TIFs dropped next to existing well zips — e.g. a new
-                # timepoint/FOV added to an already-grouped dataset. Do NOT
-                # group these into per-well folders: a folder for a well that
-                # already has a <WELL>.zip is silently ignored by the
-                # zip-preferring pipeline (see _consolidate_mixed_to_zips), so
-                # the new images would never be processed. Leave them for
-                # append_loose_images_to_zips (run by select_incremental_scope)
-                # to fold into the matching zips / create new ones and drive
-                # FOV-level incremental reprocessing.
-                if log_fn:
-                    log_fn(
-                        f"[zipper] Found {len(tif_files_in(raw))} loose TIF(s) "
-                        f"alongside existing well zip(s) — folding them into the "
-                        f"matching zips for incremental reprocessing.\n"
-                    )
-                _consolidate_mixed_to_zips(raw, log_fn=log_fn)
-                return raw, raw.parent / "out", None
-            return _group_loose_tifs_in_place(
-                raw,
-                raw.parent / "out",
-                log_fn=log_fn,
-                progress_fn=progress_fn,
-                filename_schema=filename_schema,
-                filename_sep=filename_sep,
-                proc_hook=proc_hook,
-                move_source_tifs=move_source_tifs,
+    grouped = plan.input_dir
+    out_dir = plan.output_dir
+    assert grouped is not None and out_dir is not None  # guaranteed by `runnable`
+
+    if plan.action == FOLD_LOOSE:
+        # Loose TIFs dropped next to existing well zips — e.g. a new
+        # timepoint/FOV added to an already-grouped dataset. Do NOT group these
+        # into per-well folders: a folder for a well that already has a
+        # <WELL>.zip is silently ignored by the zip-preferring pipeline (see
+        # _consolidate_mixed_to_zips), so the new images would never be
+        # processed. Leave them for append_loose_images_to_zips (run by
+        # select_incremental_scope) to fold into the matching zips / create new
+        # ones and drive FOV-level incremental reprocessing.
+        if log_fn:
+            log_fn(
+                f"[zipper] Found {plan.loose_count} loose TIF(s) alongside "
+                f"existing well zip(s) in {grouped.name}/ — folding them into "
+                f"the matching zips for incremental reprocessing.\n"
             )
-        _consolidate_mixed_to_zips(raw, log_fn=log_fn)
-        return raw, raw.parent / "out", None
+        _consolidate_mixed_to_zips(grouped, log_fn=log_fn)
+        return grouped, out_dir, None
 
-    in_sub = raw / "in"
-    # A pre-existing ``in/`` subfolder that still holds loose, ungrouped TIFs —
-    # whether brand-new or the leftovers of a partial prior run (some
-    # ``in/<well>/`` folders already present) — is grouped in place so every
-    # well gets consumed, not just the ones a prior run reached.
-    if in_sub.is_dir() and len(tif_files_in(in_sub)) > 0:
-        if _has_well_zip(in_sub):
-            # Loose TIFs dropped into raw/in/ next to existing well zips (a new
-            # timepoint/FOV added to an already-grouped dataset). Don't group
-            # them into folders — they'd be dropped by the zip-preferring
-            # pipeline. Hand off to append_loose_images_to_zips (incremental).
-            if log_fn:
-                log_fn(
-                    f"[zipper] Found {len(tif_files_in(in_sub))} loose TIF(s) "
-                    f"alongside existing well zip(s) in {in_sub.name}/ — folding "
-                    f"them into the matching zips for incremental reprocessing.\n"
-                )
-            _consolidate_mixed_to_zips(in_sub, log_fn=log_fn)
-            return in_sub, raw / "out", None
+    if plan.action == GROUP_LOOSE:
+        # A pre-existing grouped root that still holds loose, ungrouped TIFs —
+        # whether a brand-new drop or the leftovers of a partial prior run (some
+        # <well>/ folders already present) — is grouped in place so every well
+        # gets consumed, not just the ones a prior run reached.
         return _group_loose_tifs_in_place(
-            in_sub,
-            raw / "out",
+            grouped,
+            out_dir,
             log_fn=log_fn,
             progress_fn=progress_fn,
             filename_schema=filename_schema,
@@ -883,112 +1047,35 @@ def resolve_input_output(
             proc_hook=proc_hook,
             move_source_tifs=move_source_tifs,
         )
-    if in_sub.is_dir() and _has_well_content(in_sub):
-        # Normalise a mixed (zips + bare folders) in/ left by a hard-killed run
-        # to all-zips, so no folder-only well is dropped by the zip-preferring
-        # pipeline.
-        _consolidate_mixed_to_zips(in_sub, log_fn=log_fn)
-        # v5.x.x resume support: ``raw/in/`` already has well content,
-        # but a prior ``--move-source-tifs`` run may have crashed
-        # mid-way and left some TIFs at ``raw/`` (only some were
-        # moved). Detect that state and re-run the zipper to consume
-        # ONLY the truly-unconsumed ones — for copy-mode reruns where
-        # every loose TIF already has a same-named copy under
-        # ``raw/in/<well>/``, the zipper is a no-op and skipping it
-        # avoids re-copying the same files (which would show up as
-        # noisy "zipping" log lines against files already in place
-        # from a prior successful copy).
-        loose_at_top = tif_files_in(raw)
-        if loose_at_top:
-            existing_basenames: set[str] = set()
-            try:
-                for well_dir in in_sub.iterdir():
-                    if not well_dir.is_dir():
-                        continue
-                    for child in well_dir.iterdir():
-                        if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
-                            existing_basenames.add(child.name)
-            except OSError:
-                pass
-            leftover_tifs = [
-                p for p in loose_at_top if p.name not in existing_basenames
-            ]
-        else:
-            leftover_tifs = []
 
-        if leftover_tifs:
-            if log_fn:
-                log_fn(
-                    f"[zipper] Resume: found {len(leftover_tifs)} unconsumed "
-                    f"loose TIF(s) at top level after partial run; consuming "
-                    f"into existing raw/in/ well folders.\n"
-                )
-            source_tifs = tuple(leftover_tifs)
-            run_zipper(
-                raw,
-                in_sub,
-                log_fn=log_fn,
-                progress_fn=progress_fn,
-                filename_schema=filename_schema,
-                filename_sep=filename_sep,
-                proc_hook=proc_hook,
-                move_source_tifs=move_source_tifs,
-            )
-            if move_source_tifs:
-                return in_sub, raw / "out", None
-
-            def _on_success_resume() -> None:
-                """Delete the leftover loose TIFs from raw/ once the
-                pipeline completes cleanly. Mirror the fresh-run
-                callback."""
-                for tif in source_tifs:
-                    try:
-                        tif.unlink()
-                    except OSError:
-                        pass
-
-            return in_sub, raw / "out", _on_success_resume
-
-        # All loose TIFs at top level (if any) are already represented
-        # under raw/in/. If the prior run was copy-mode they're
-        # redundant and the on_success cleanup will tidy them up;
-        # otherwise (move-mode prior run, or no loose TIFs at all) the
-        # state is already fully consumed and there's nothing to do.
-        if loose_at_top and log_fn:
+    if plan.action == UNRECOGNISED:
+        # Nothing in here parses as a well, but the pipeline is still the thing
+        # that reads it — the same acceptance a folder named "in" has always
+        # had. Say what was not recognised rather than failing the run with a
+        # message listing a condition the user has already met.
+        if log_fn:
             log_fn(
-                f"[zipper] Resume: all {len(loose_at_top)} loose TIF(s) at "
-                f"top level already have a copy under raw/in/. Skipping "
-                f"zipper re-run; will clean up the loose copies on "
-                f"successful pipeline completion.\n"
+                f"[zipper] Using {grouped}/ as input — no well-named zips or "
+                f"folders were recognised in it, so the pipeline will report "
+                f"what it can read.\n"
             )
-        if loose_at_top:
-            already_copied = tuple(loose_at_top)
+        _consolidate_mixed_to_zips(grouped, log_fn=log_fn)
+        return grouped, out_dir, None
 
-            def _on_success_post_copy() -> None:
-                for tif in already_copied:
-                    try:
-                        tif.unlink()
-                    except OSError:
-                        pass
-
-            return in_sub, raw / "out", _on_success_post_copy
-        return in_sub, raw / "out", None
-
-    tifs = tif_files_in(raw)
-    if len(tifs) > 3:
+    if plan.action == ZIP_ROOT:
         # Snapshot the loose TIFs BEFORE the zipper runs so the
         # post-success cleanup deletes exactly the inputs the user
         # had at start-of-run — not any incidental .tif files that
         # might land in raw/ later (the zipper's own output goes to
         # raw/in/, not raw/, so this is mostly defensive).
-        source_tifs = tuple(tifs)
+        source_tifs = tuple(tif_files_in(raw))
         if log_fn:
             log_fn(
-                f"[zipper] Found {len(tifs)} TIF files — running WellPlateZipper to create per-well folders in in/\n"
+                f"[zipper] Found {len(source_tifs)} TIF files — running WellPlateZipper to create per-well folders in in/\n"
             )
         run_zipper(
             raw,
-            in_sub,
+            grouped,
             log_fn=log_fn,
             progress_fn=progress_fn,
             filename_schema=filename_schema,
@@ -996,13 +1083,13 @@ def resolve_input_output(
             proc_hook=proc_hook,
             move_source_tifs=move_source_tifs,
         )
-        if not in_sub.is_dir() or not _has_well_content(in_sub):
+        if not grouped.is_dir() or not has_well_content(grouped):
             raise ValueError(
                 "WellPlateZipper ran but produced no well folders or zip files.\n\n"
                 "Common causes:\n"
-                "  • The 'well' position in the Filename Schema does not match the actual well token in your filenames.\n"
-                "  • The separator character does not match your filenames.\n"
-                "  • The well token is not a valid 96-well plate position (A01–H12).\n\n"
+                "  \u2022 The 'well' position in the Filename Schema does not match the actual well token in your filenames.\n"
+                "  \u2022 The separator character does not match your filenames.\n"
+                "  \u2022 The well token is not a valid 96-well plate position (A01\u2013H12).\n\n"
                 f"Schema used: {filename_schema}  |  Separator: '{filename_sep}'"
             )
 
@@ -1011,7 +1098,7 @@ def resolve_input_output(
             # cleanup needed and nothing safe to undo on failure either
             # (the source files are gone in their old location regardless
             # of pipeline outcome).
-            return in_sub, raw / "out", None
+            return grouped, out_dir, None
 
         def _on_success() -> None:
             """Delete loose TIFs from raw/ once the pipeline completes
@@ -1023,15 +1110,99 @@ def resolve_input_output(
                 except OSError:
                     pass
 
-        return in_sub, raw / "out", _on_success
+        return grouped, out_dir, _on_success
 
-    raise ValueError(
-        "Cannot determine input layout.\n\n"
-        "Expected one of:\n"
-        "  • Selected folder is named \"in\"\n"
-        "  • Selected folder contains a sub-folder named \"in\"\n"
-        "  • Selected folder contains more than 3 TIF files\n"
-        "    (will be grouped by well using WellPlateZipper)\n\n"
-        f"Folder selected: {raw}\n"
-        f"TIF files found: {len(tifs)}"
-    )
+    # GROUPED. Normalise a mixed (zips + bare folders) input dir left by a
+    # hard-killed run to all-zips, so no folder-only well is dropped by the
+    # zip-preferring pipeline.
+    _consolidate_mixed_to_zips(grouped, log_fn=log_fn)
+    if grouped == raw:
+        # The user selected the grouped folder itself; there is no enclosing
+        # dataset folder to hold leftover loose TIFs from a partial run.
+        return grouped, out_dir, None
+
+    # v5.x.x resume support: ``raw/in/`` already has well content,
+    # but a prior ``--move-source-tifs`` run may have crashed
+    # mid-way and left some TIFs at ``raw/`` (only some were
+    # moved). Detect that state and re-run the zipper to consume
+    # ONLY the truly-unconsumed ones — for copy-mode reruns where
+    # every loose TIF already has a same-named copy under
+    # ``raw/in/<well>/``, the zipper is a no-op and skipping it
+    # avoids re-copying the same files (which would show up as
+    # noisy "zipping" log lines against files already in place
+    # from a prior successful copy).
+    loose_at_top = tif_files_in(raw)
+    if loose_at_top:
+        existing_basenames: set[str] = set()
+        try:
+            for well_dir in grouped.iterdir():
+                if not well_dir.is_dir():
+                    continue
+                for child in well_dir.iterdir():
+                    if child.is_file() and child.suffix.lower() in (".tif", ".tiff"):
+                        existing_basenames.add(child.name)
+        except OSError:
+            pass
+        leftover_tifs = [
+            p for p in loose_at_top if p.name not in existing_basenames
+        ]
+    else:
+        leftover_tifs = []
+
+    if leftover_tifs:
+        if log_fn:
+            log_fn(
+                f"[zipper] Resume: found {len(leftover_tifs)} unconsumed "
+                f"loose TIF(s) at top level after partial run; consuming "
+                f"into existing raw/in/ well folders.\n"
+            )
+        source_tifs = tuple(leftover_tifs)
+        run_zipper(
+            raw,
+            grouped,
+            log_fn=log_fn,
+            progress_fn=progress_fn,
+            filename_schema=filename_schema,
+            filename_sep=filename_sep,
+            proc_hook=proc_hook,
+            move_source_tifs=move_source_tifs,
+        )
+        if move_source_tifs:
+            return grouped, out_dir, None
+
+        def _on_success_resume() -> None:
+            """Delete the leftover loose TIFs from raw/ once the
+            pipeline completes cleanly. Mirror the fresh-run
+            callback."""
+            for tif in source_tifs:
+                try:
+                    tif.unlink()
+                except OSError:
+                    pass
+
+        return grouped, out_dir, _on_success_resume
+
+    # All loose TIFs at top level (if any) are already represented
+    # under raw/in/. If the prior run was copy-mode they're
+    # redundant and the on_success cleanup will tidy them up;
+    # otherwise (move-mode prior run, or no loose TIFs at all) the
+    # state is already fully consumed and there's nothing to do.
+    if loose_at_top:
+        if log_fn:
+            log_fn(
+                f"[zipper] Resume: all {len(loose_at_top)} loose TIF(s) at "
+                f"top level already have a copy under raw/in/. Skipping "
+                f"zipper re-run; will clean up the loose copies on "
+                f"successful pipeline completion.\n"
+            )
+        already_copied = tuple(loose_at_top)
+
+        def _on_success_post_copy() -> None:
+            for tif in already_copied:
+                try:
+                    tif.unlink()
+                except OSError:
+                    pass
+
+        return grouped, out_dir, _on_success_post_copy
+    return grouped, out_dir, None

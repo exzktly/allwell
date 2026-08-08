@@ -1,11 +1,16 @@
 """
 analyze_tab.py — AnalyzeTab widget (PySide6 port).
 
-Input-folder resolution rules (applied when Run is pressed):
-  1. Folder named "in"           → input = folder,     output = parent/"out"
-  2. Folder contains sub-dir "in"→ input = folder/"in", output = folder/"out"
-  3. Folder has >10 TIF files    → move TIFs to folder/"in"
-  4. Otherwise                   → error
+Input-folder resolution rules (applied when Run is pressed, and previewed under
+the input field the moment a folder is chosen):
+  1. Folder named "in"            → input = folder,     output = parent/"out"
+  2. Folder contains sub-dir "in" → input = folder/"in", output = folder/"out"
+  3. Folder has >3 TIF files      → group them into folder/"in" first
+  4. Otherwise                    → error
+
+Both the preview and the run take that decision from
+``services.input_resolution_service.plan_input_layout``; this module holds no
+layout rules of its own.
 
 process_microscopy.py must live alongside this file.
 """
@@ -24,10 +29,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
-from services.input_resolution_service import (
-    tif_files_in,
-)
-from util.well_token import is_valid_well_name
+from services.input_resolution_service import plan_input_layout
 from util.schema_infer import infer_from_dir
 from services.pipeline_runner import (
     PipelineRunner,
@@ -52,7 +54,6 @@ from analyze_tab_form import (  # form builders + schema vocab (split out)
     # so ``from analyze_tab import _numeric_option_errors`` still resolves.
     _numeric_option_errors,  # noqa: F401 (re-export)
 )
-
 
 
 # Numeric fields are plain QLineEdits with no validators, and bad values used to
@@ -84,18 +85,6 @@ _PREVIEW_TOKENS = {
     "timepoint":  "02d04h30m",
     "ignore":     "X",
 }
-
-_tif_files_in = tif_files_in
-
-
-def _has_well_content(folder: Path) -> bool:
-    if any(folder.glob("*.zip")):
-        return True
-    try:
-        return any(is_valid_well_name(p.name) for p in folder.iterdir() if p.is_dir())
-    except OSError:
-        return False
-
 
 
 # ---------------------------------------------------------------------------
@@ -236,15 +225,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         return self._seg_method_cb.currentData() or "stardist_nuclei"
 
 
-
-
     # Sensible default morphology features (centroids are always emitted by the
     # pipeline regardless of selection, so they are not offered as chips).
     _SHAPE_DEFAULTS = ("area", "eccentricity", "solidity", "perimeter")
-
-
-
-
 
 
     def _refresh_remote_controls(self) -> None:
@@ -552,43 +535,21 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         self._apply_pipeline_info(info)
 
     def _refresh_output(self) -> None:
+        """Show where the run will read from and write to, and what it will do.
+
+        Every word of this comes from ``plan_input_layout`` — the same function
+        ``resolve_input_output`` executes when Run is pressed. The readout used
+        to re-implement the layout rules with a looser idea of what counts as
+        well content, so a folder holding ``in/Plate1_A1.zip`` displayed
+        "using as input" and then failed the run outright.
+        """
         raw_str = self._input_edit.text().strip()
         if not raw_str:
             self._output_lbl.setText("—"); self._layout_lbl.setText(""); return
-        # A raw packed OME-TIFF must be converted to a dataset folder first
-        # (Datasets → Convert OME-TIFF); Analyze only processes folders.
-        ome_hint = self._ome_input_hint()
-        if ome_hint is not None:
-            self._output_lbl.setText("—"); self._layout_lbl.setText(f"⚠ {ome_hint}")
-            return
-        raw = Path(raw_str)
-        if not raw.is_dir():
-            self._output_lbl.setText("—"); self._layout_lbl.setText("Not a directory."); return
-        if raw.name.lower() == "in":
-            self._output_lbl.setText(str(raw.parent / "out"))
-            loose = _tif_files_in(raw)
-            if not _has_well_content(raw) and len(loose) > 3:
-                self._layout_lbl.setText(
-                    f"✓ Will group {len(loose)} loose TIFs inside this in/ folder")
-            else:
-                self._layout_lbl.setText("✓ Using selected folder as input")
-            return
-        in_sub = raw / "in"
-        if (in_sub.is_dir() and not _has_well_content(in_sub)
-                and len(_tif_files_in(in_sub)) > 3):
-            self._output_lbl.setText(str(raw / "out"))
-            self._layout_lbl.setText(
-                f"✓ Will group {len(_tif_files_in(in_sub))} loose TIFs in in/")
-            return
-        if in_sub.is_dir() and _has_well_content(in_sub):
-            self._output_lbl.setText(str(raw / "out"))
-            self._layout_lbl.setText("✓ Found in/ subfolder — using as input"); return
-        tifs = _tif_files_in(raw)
-        if len(tifs) > 3:
-            self._output_lbl.setText(str(raw / "out"))
-            self._layout_lbl.setText(f"✓ Will run WellPlateZipper on {len(tifs)} TIF files → in/"); return
-        self._output_lbl.setText("—")
-        self._layout_lbl.setText("No TIF files or in/ folder found in selected directory.")
+        plan = plan_input_layout(Path(raw_str))
+        self._output_lbl.setText(
+            str(plan.output_dir) if plan.output_dir is not None else "—")
+        self._layout_lbl.setText(plan.message)
 
     # ------------------------------------------------------------------
     # Run / Stop

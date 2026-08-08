@@ -3,9 +3,10 @@
 Analyze is otherwise schema-*first*: the user declares the filename layout
 (``experiment:channel:well:fov:timepoint`` and a separator) before the pipeline
 can parse a single name. This module infers that layout instead, by sampling the
-names already on disk — loose ``.tif`` files, a single ``.zip``, or the
-folder-of-per-well-``.zip`` layout the OME converter emits — so the Analyze page
-can pre-fill the schema and channel fields when a folder is picked.
+names already on disk — loose ``.tif`` files, a single ``.zip``, the
+folder-of-per-well-``.zip`` layout the OME converter emits, or per-well
+``<WELL>/`` folders — so the Analyze page can pre-fill the schema and channel
+fields when a folder is picked.
 
 The inference is deliberately conservative and reuses the app's own per-token
 parsers so a slot is only labelled when the sampled tokens actually parse that
@@ -39,7 +40,7 @@ from util.channel_roles import ChannelTokens, channel_tokens_from_roles, default
 from util.fov import parse_fov
 from util.schema import DEFAULT_SEP
 from util.timepoint import parse_hours
-from util.well_token import canonical_well_label
+from util.well_token import canonical_well_label, is_valid_well_name
 
 _TIF_SUFFIXES = (".tif", ".tiff")
 _SEP_CANDIDATES = ("_", "-", ".")
@@ -123,21 +124,59 @@ def _zip_stems_in(root: Path, limit: int) -> list[str]:
     return stems
 
 
+def _well_folder_stems_in(root: Path, limit: int) -> list[str]:
+    """Sample TIF stems out of *root*'s per-well ``<WELL>/`` subfolders.
+
+    The third of the three grouped layouts Analyze accepts, and the one that
+    used to yield nothing: a dataset laid out as ``in/<WELL>/*.tif`` has no
+    loose TIFs and no zips at either level, so the schema and channel fields
+    stayed blank and the run then failed on a schema the user was never
+    prompted to fill in. Takes a few names from each well the way
+    :func:`_zip_stems_in` takes a few members from each zip, so the sample spans
+    wells and channels rather than exhausting itself on the first well.
+    """
+    try:
+        wells = sorted(
+            p for p in root.iterdir()
+            if p.is_dir() and is_valid_well_name(p.name)
+        ) if root.is_dir() else []
+    except OSError:
+        return []
+    stems: list[str] = []
+    per_well = max(4, (limit // max(1, len(wells))) if wells else limit)
+    for well in wells:
+        taken = 0
+        try:
+            entries = sorted(well.iterdir())
+        except OSError:
+            continue
+        for f in entries:
+            if f.is_file() and f.suffix.lower() in _TIF_SUFFIXES:
+                stems.append(f.stem)
+                taken += 1
+                if taken >= per_well or len(stems) >= limit:
+                    break
+        if len(stems) >= limit:
+            break
+    return stems
+
+
 def sample_stems(input_dir: Path | str, *, limit: int = _SAMPLE_LIMIT) -> list[str]:
     """Return up to *limit* filename stems from *input_dir* (or its ``in/`` child).
 
-    Prefers loose TIFs; falls back to reading members out of the folder's zips.
-    Looks in ``input_dir`` and ``input_dir/in`` (the dataset layout Analyze reads).
+    Prefers loose TIFs, then members of the folder's per-well zips, then the
+    files inside its per-well folders — the three grouped layouts
+    ``services.input_resolution_service.plan_input_layout`` accepts, in the
+    order that costs least to read. Each tier looks in ``input_dir`` and
+    ``input_dir/in``, since the user may select either the dataset folder or the
+    ``in/`` inside it.
     """
     base = Path(input_dir)
-    for root in (base, base / "in"):
-        stems = _tif_stems_in(root, limit)
-        if stems:
-            return stems
-    for root in (base, base / "in"):
-        stems = _zip_stems_in(root, limit)
-        if stems:
-            return stems
+    for sample in (_tif_stems_in, _zip_stems_in, _well_folder_stems_in):
+        for root in (base, base / "in"):
+            stems = sample(root, limit)
+            if stems:
+                return stems
     return []
 
 

@@ -262,3 +262,39 @@ def test_tool_isolation_guard_clears_a_common_import(tmp_path, monkeypatch):
     assert _run_rooted_scan(monkeypatch, "tests.test_datasets_tool_isolation",
                             "test_no_tool_imports_another_tool", tmp_path,
                             {"DATASETS": tmp_path / "datasets"}) is None
+
+
+# ── the Analyze layout readout ───────────────────────────────────────────────
+# The shipped shape: the readout composed its own sentence from its own copy of
+# the layout rules, and promised "using as input" over a run that then raised
+# "Cannot determine input layout". The f-string variant is the one that survived
+# the first pass of the fix — a label written from an interpolated literal is
+# still a second opinion about the layout, ``✓`` prefix and all.
+
+@pytest.mark.parametrize("shape", [
+    'self._layout_lbl.setText("✓ Found in/ subfolder — using as input")',
+    'self._layout_lbl.setText(f"✓ Will group {n} loose TIFs in in/")',
+    'tab._layout_lbl.setText("No TIF files or in/ folder found.")',
+])
+def test_layout_readout_guard_catches_a_hand_written_verdict(
+        tmp_path, monkeypatch, shape):
+    _write(tmp_path, "analyze_tab.py",
+           f"def _refresh_output(self):\n    {shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_layout_readout_single_source",
+                    "test_the_layout_readout_is_not_written_in_the_gui",
+                    [tmp_path / "analyze_tab.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+    assert "analyze_tab.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    "self._layout_lbl.setText(plan.message)",
+    'self._layout_lbl.setText("")',
+    "self._layout_lbl.setText(msg)",
+])
+def test_layout_readout_guard_clears_a_quoted_value(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "analyze_tab.py",
+           f"def _refresh_output(self):\n    {shape}\n")
+    assert _run_scan(monkeypatch, "tests.test_layout_readout_single_source",
+                     "test_the_layout_readout_is_not_written_in_the_gui",
+                     [tmp_path / "analyze_tab.py"]) is None

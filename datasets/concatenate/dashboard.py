@@ -41,7 +41,6 @@ class ConcatDashboard(PlateProgress):
         self._wells: list[str] = []
         self._well_stage: dict[str, str] = {}
         self._phase = ""
-        self._outcome = ""            # "" | "done" | "failed" | "cancelled"
         self._rail: dict[str, tuple] = {}
         super().__init__("Concatenate Progress", parent)
         self.setObjectName("ConcatDashboard")
@@ -51,7 +50,7 @@ class ConcatDashboard(PlateProgress):
         self._wells = []
         self._well_stage = {}
         self._phase = ""
-        self._outcome = ""
+        self.clear_outcome()
         self._bar.setRange(0, 100); self._bar.setValue(0)
         self._plate.clearWellColors()
         self._plate.clearWellMarkers()
@@ -108,26 +107,11 @@ class ConcatDashboard(PlateProgress):
         self._phase = phase
         self._refresh_rail()
 
-    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
-        self._outcome = "done"
-        self._headline.setText(summary or "Done")
-        # The full text (often a full destination path baked into the
-        # summary string) survives as a tooltip even when the caller has
-        # shortened the displayed headline to a basename.
-        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
-        self._headline.setStyleSheet(f"color:{theme.Colors.success};")
-        self._refresh_rail()
-
-    def set_failed(self, message: str) -> None:
-        self._outcome = "failed"
-        self._headline.setText(f"Failed — {message}" if message else "Failed")
-        self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
-        self._refresh_rail()
-
-    def set_cancelled(self, message: str = "") -> None:
-        self._outcome = "cancelled"
-        self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
-        self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
+    def _on_outcome_changed(self) -> None:
+        """Concatenate's rail names the phase it reached, so a terminal state
+        changes what it says. The other dashboards' rails carry per-well counts
+        that a finished run has already settled, which is why this hook exists
+        rather than the base refreshing every rail unconditionally."""
         self._refresh_rail()
 
     # ── internals ───────────────────────────────────────────────────────────

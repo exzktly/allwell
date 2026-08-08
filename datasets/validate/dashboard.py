@@ -32,6 +32,10 @@ class ValidateDashboard(PlateProgress):
         self._wells = []
         self._well_state = {}
         self._well_missing_count = {}
+        # Validate never reads _outcome itself, but it inherits the setters that
+        # write it: leaving a previous run's value in place would make the first
+        # dashboard to read it after a re-run see a stale terminal state.
+        self.clear_outcome()
         self._bar.setRange(0, 100)
         self._bar.setValue(0)
         self._plate.clearWellColors()
@@ -72,18 +76,6 @@ class ValidateDashboard(PlateProgress):
         self._plate.setWellMarker(w, marker)
         self.set_overall(sum(1 for s in self._well_state.values() if s == "complete"))
         self._refresh_rail()
-
-    def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
-        self._headline.setText(summary or "Done")
-        # The full text (often a full destination path baked into the
-        # summary string) survives as a tooltip even when the caller has
-        # shortened the displayed headline to a basename.
-        self._headline.setToolTip(tooltip if tooltip is not None else (summary or "Done"))
-        self._headline.setStyleSheet(f"color:{theme.Colors.success};")
-
-    def set_failed(self, message: str) -> None:
-        self._headline.setText(f"Failed — {message}" if message else "Failed")
-        self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
 
     # ── internals ────────────────────────────────────────────────────────────
     def _well_color(self, w: str) -> str | None:

@@ -39,7 +39,7 @@ from datasets._common.dataset_paths import (
     resolve_dataset as _resolve_dataset,
 )
 from datasets._common.member_names import discover_parsed_member
-from datasets.concatenate.concatenate_compute import known_channel_tokens
+from datasets._common.dataset_paths import known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_subset_in_progress"
 
@@ -172,7 +172,7 @@ def build_subset_plan(
 
     info = read_info(src, label="source dataset")
     schema = load_schema(info)
-    channels = known_channel_tokens(info, info)
+    channels = known_channel_tokens(info)
 
     all_wells = dataset_wells(src)
     wells_kept = tuple(sorted(all_wells if filt.wells is None else (all_wells & filt.wells)))

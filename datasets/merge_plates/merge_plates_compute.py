@@ -48,7 +48,7 @@ from datasets._common.dataset_paths import (
     read_info as _read_info,
     resolve_dataset as _resolve_dataset,
 )
-from datasets.concatenate.concatenate_compute import ConcatError, check_compatible, known_channel_tokens
+from datasets._common.dataset_paths import check_compatible, known_channel_tokens
 
 IN_PROGRESS_MARKER = ".aw_merge_in_progress"
 
@@ -237,10 +237,7 @@ def build_plate_merge_plan(
 
     info1 = read_info(ds1, label="dataset 1")
     info2 = read_info(ds2, label="dataset 2")
-    try:
-        check_compatible(info1, info2)
-    except ConcatError as exc:
-        raise MergePlatesError(str(exc)) from exc
+    check_compatible(info1, info2, error_cls=MergePlatesError)
 
     if has_folder_mode_output(ds1) or has_folder_mode_output(ds2):
         which = "dataset 1" if has_folder_mode_output(ds1) else "dataset 2"

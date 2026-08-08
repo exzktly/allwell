@@ -53,6 +53,8 @@ from datasets._common.dataset_paths import (
     out_zips,  # noqa: F401 — re-exported for datasets.concatenate.apply
     resolve_dataset as _resolve_dataset,
     read_info as _read_info,
+    check_compatible as _check_compatible,
+    known_channel_tokens as _known_channel_tokens,
 )
 from datasets._common.member_names import rewrite_member_field
 
@@ -68,18 +70,6 @@ IN_PROGRESS_MARKER = ".aw_concat_in_progress"
 # laid out. Channel token lists (fluor_tokens/…) are allowed to differ and get
 # unioned — the CSV column set already tolerates that — but if these disagree the
 # two datasets aren't the same experiment and stitching them is meaningless.
-_COMPAT_KEYS = (
-    "schema",
-    "separator",
-    "schema_fields",
-    "well_index",
-    "channel_index",
-    "fov_index",
-    "tp_index",
-    "nuclear_token",
-    "segmentation_method",
-)
-
 # Sidecar list fields that are unioned (order-preserving) when merging.
 _UNION_LIST_KEYS = ("fluor_tokens", "smfish_tokens", "shape_features")
 
@@ -232,17 +222,13 @@ def remap_timepoint_label(old_label: str, offset_hours: float, fmt: TimepointFor
 
 # ── compatibility + timepoint remap ──────────────────────────────────────────
 def check_compatible(info1: dict, info2: dict) -> None:
-    """Raise :class:`ConcatError` if the two sidecars aren't concatenatable."""
-    diffs = [
-        f"  • {key}: dataset 1 = {info1.get(key)!r}, dataset 2 = {info2.get(key)!r}"
-        for key in _COMPAT_KEYS
-        if info1.get(key) != info2.get(key)
-    ]
-    if diffs:
-        raise ConcatError(
-            "The two datasets were not analysed the same way, so their "
-            "measurements can't be concatenated:\n" + "\n".join(diffs)
-        )
+    """Raise :class:`ConcatError` if the two sidecars aren't concatenatable.
+
+    The comparison itself is :func:`datasets._common.dataset_paths.check_compatible`,
+    which Merge Plates needs too; this wrapper only names the error class, the
+    same shape as :func:`resolve_dataset` above.
+    """
+    _check_compatible(info1, info2, error_cls=ConcatError)
 
 
 def _timepoint_hours(info: dict, *, label: str) -> list[tuple[str, float]]:
@@ -330,24 +316,10 @@ def merge_info(info1: dict, info2: dict, *, offset_hours: float, tp_format: Time
 
 
 def known_channel_tokens(info1: dict, info2: dict) -> tuple[str, ...]:
-    """Every channel-scoped-role discriminator token either dataset declares.
-
-    Used to disambiguate a channel-scoped role suffix (``_tophat_gfp``,
-    ``_smfish_nir``) when rewriting a zip member's timepoint field — the role
-    catalog can't strip that suffix without knowing which tokens are valid
-    channels for *this* dataset (see :func:`rewrite_member_name`).
-    """
-    tokens: list[str] = []
-    for info in (info1, info2):
-        for key in ("fluor_tokens", "smfish_tokens"):
-            for tok in info.get(key, []) or []:
-                tok = str(tok).strip().lower()
-                if tok and tok not in tokens:
-                    tokens.append(tok)
-        phase = str(info.get("phase_token", "") or "").strip().lower()
-        if phase and phase not in tokens:
-            tokens.append(phase)
-    return tuple(tokens)
+    """Re-export of :func:`datasets._common.dataset_paths.known_channel_tokens`,
+    pinned to this module's two-dataset signature so existing callers and tests
+    are unchanged."""
+    return _known_channel_tokens(info1, info2)
 
 
 def _csv_header(path: Path) -> list[str]:

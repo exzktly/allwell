@@ -46,6 +46,11 @@ WORKER_TIMEOUT_MS = 60_000
 #: settle once the thread itself has stopped.
 SETTLE_TIMEOUT_S = 10.0
 
+#: How long each blocking slice of the wait lasts before the event loop is
+#: pumped again. Short enough that a worker waiting on the GUI thread is not
+#: held up materially; long enough not to spin.
+_WAIT_SLICE_MS = 25
+
 
 def run_worker_to_completion(ctrl, *, timeout_ms: int = WORKER_TIMEOUT_MS) -> None:
     """Block until *ctrl*'s worker has finished and its page is idle again.
@@ -61,11 +66,22 @@ def run_worker_to_completion(ctrl, *, timeout_ms: int = WORKER_TIMEOUT_MS) -> No
         "no worker on the controller — the run never started, so waiting for it "
         "to finish would pass vacuously"
     )
-    assert worker.wait(timeout_ms), (
-        f"worker still running after {timeout_ms} ms. Returning here would hand "
-        f"the test a half-finished run to assert against, which is how this used "
-        f"to surface as an unrelated assertion elsewhere in the test."
-    )
+    # Wait in slices, pumping the event loop between them, rather than blocking
+    # on one long ``wait(timeout)``. A worker that needs the GUI thread to drain
+    # its queue before it can finish — anything routed through a bridge object,
+    # or a ``BlockingQueued`` connection — deadlocks against a caller holding
+    # that thread, and the deadlock only shows under a loaded full-lane run
+    # where the timing shifts. Pumping costs nothing when the worker is already
+    # independent, and is the difference between a hang and a pass when it
+    # isn't.
+    deadline = time.monotonic() + timeout_ms / 1000.0
+    while not worker.wait(_WAIT_SLICE_MS):
+        QApplication.processEvents()
+        assert time.monotonic() < deadline, (
+            f"worker still running after {timeout_ms} ms. Returning here would "
+            f"hand the test a half-finished run to assert against, which is how "
+            f"this used to surface as an unrelated assertion elsewhere."
+        )
 
     # The thread has stopped; its ``finished`` signal is queued and the
     # controller's handlers have not necessarily run yet.

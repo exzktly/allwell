@@ -590,6 +590,20 @@ A cell counts only when it is manually kept **and** it passes QC.
     across processes, so more workers don't help GPU throughput.
   - CPU-only: defaults to `floor((cpu_count − 1) / tf_threads)`.
 - **CPU-only.** Forces TensorFlow to ignore the GPU.
+- **Start even if the disk looks too small.** Overrides the space check that
+  refuses a run it estimates will not fit. Leave it off by default. Tick it when
+  a refusal looks wrong — that estimate sizes from the largest image in the
+  plate and gives no credit for compression, and the free-space figure it is
+  compared against is what the filesystem reports as claimable *right now*,
+  which on macOS reads lower than Finder's (Finder counts purgeable caches and
+  snapshots that are not claimable until something asks for the space). So the
+  two numbers can meet and refuse a run that would have finished. When the
+  volume really is tight, pointing **Scratch disk** at a roomier one or lowering
+  **Workers** is the better fix: workers multiply the staging need directly.
+  This box is the one Compute option that is *not* restored by **Open
+  pipeline_info…** — it disarms a check that exists because a volume filling
+  part-way costs hours of work, so it is a decision you make per run rather than
+  one a folder you happened to open makes for you.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist. On a
   remote run this now carries all the way to the end: the run will not decide
   the remote's existing outputs make the work unnecessary, the fetch will not
@@ -1160,7 +1174,9 @@ count) — plus a CDF.
   start with room and run out at the fortieth well. Three things say so rather
   than leaving you to find out: before it reads an image the run sizes
   itself against the volumes it will write to and warns (or, if there is not
-  room for even one well, stops); as wells complete it measures what they
+  room for even one well, stops — see **Start even if the disk looks too
+  small** under Compute options for when that refusal is wrong and how to
+  overrule it); as wells complete it measures what they
   actually wrote and warns once if the rest of the plate will not fit; and if a
   volume does fill, the error names *which* volume and how much is left on it
   instead of the bare system message. Free space, or point **Scratch disk** at a

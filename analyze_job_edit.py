@@ -58,6 +58,12 @@ def _opts_as_pinfo_keys(opts: dict) -> dict:
       expects the pipeline's negative sentinel for that, and skips a value it
       cannot read as a float — so a blank would leave whatever the field
       already held. Also restored explicitly by the caller.
+
+    A fifth, ``allow_low_disk``, is spelled the same on both sides and still
+    has to be restored by the caller: ``_apply_pipeline_info`` refuses it on
+    purpose, because a sidecar describes some folder's last run and must not
+    re-arm a safety override for the next one. A queued job is a decision the
+    user made for that job, so it does come back.
     """
     d = dict(opts)
     raw = d.get("raw")
@@ -128,6 +134,17 @@ class AnalyzeJobEditMixin:
                 widget.setText("")
         if "scratch_dir" in opts:
             self._scratch_user_set = bool(opts["scratch_dir"])
+
+        # ``allow_low_disk`` is the one option ``_apply_pipeline_info``
+        # deliberately declines to restore: a sidecar is a description of some
+        # folder's last run, and re-arming a safety override from one would
+        # disarm the disk check on a volume the user never measured. A queued
+        # job is the opposite — the user set that box for this job, when they
+        # queued it — so editing the job has to show it back, or saving the
+        # edit silently re-arms the check they turned off.
+        box = getattr(self, "_allow_low_disk_cb", None)
+        if box is not None and "allow_low_disk" in opts:
+            box.setChecked(bool(opts["allow_low_disk"]))
 
     def _hydrate_run_spec_fields(self, spec: dict) -> list[str]:
         """The ``RunSpec`` fields that live beside ``opts``, not inside it.

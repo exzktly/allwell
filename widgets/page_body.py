@@ -20,7 +20,7 @@ what alignment is made of, so it is always zero and the band always sits against
 it. A page that sets its own top inset is the drift this helper exists to remove.
 
 No All-Well coupling — a plain reusable helper, usable from the Review feature
-packages, ``analyze_tab_form.py`` and ``datasets_tab.py`` alike.
+packages, ``analyze_tab_log.py`` and ``datasets_tab.py`` alike.
 """
 
 from __future__ import annotations

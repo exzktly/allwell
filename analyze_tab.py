@@ -45,6 +45,7 @@ from analyze_input import AnalyzeInputMixin
 from analyze_progress import AnalyzeProgressMixin
 from analyze_run_spec import AnalyzeRunMixin
 from analyze_suspend import AnalyzeSuspendMixin
+from analyze_tab_log import AnalyzeLogPaneMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
@@ -89,8 +90,9 @@ _PREVIEW_TOKENS = {
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
-                 AnalyzeSuspendMixin, AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
+                 AnalyzeRunMixin, AnalyzeSuspendMixin, AnalyzeTabFormMixin,
+                 QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     # Positive-latch completion signal for a job queue: emitted exactly once
@@ -324,8 +326,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         # of the "smFISH" label. Minimum policy floors the width at this value.
         def _pin_checkbox(text: str) -> QCheckBox:
             cb = QCheckBox(text, row)
-            # indicator (14px + 1px border ×2 = 16) + QSS spacing + padding.
-            cb.setMinimumWidth(cb.fontMetrics().horizontalAdvance(text) + 34)
+            cb.setMinimumWidth(cb.fontMetrics().horizontalAdvance(text)
+                               + theme.Metrics.checkbox_chrome_w)
             cb.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
             rl.addWidget(cb)
             return cb
@@ -593,6 +595,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         self._dashboard.reset(remote=remote is not None)
         if getattr(self, "_last_run_card", None) is not None:
             self._last_run_card.setVisible(False)  # C4: hide stale summary while running
+        # Hand back the raw-log toggle if the previous run's failure opened it
+        # and the user has not since made that choice their own.
+        self.restore_raw_log()
         self._eta_deadline = None
         self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
@@ -778,8 +783,14 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                             self._log_line(f"[warn] Could not open Review tab: {exc}\n", "WARNING")
                 elif kind == "error":
                     self._log_line(payload, "ERROR")
-                    if self._run_error is None:  # keep the first message only
+                    # First message only, on both surfaces. The first is the
+                    # cause and anything after it is that cause's fallout, so
+                    # latching one and painting another would leave the
+                    # dashboard headline naming something other than the
+                    # message runFinished carries.
+                    if self._run_error is None:
                         self._run_error = str(payload)
+                        self._surface_run_failure(str(payload))
                 elif kind == "finished":
                     self._running = False
                     self._run_btn.setEnabled(True)
@@ -789,8 +800,14 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                     self._dashboard.set_status("")
                     self._dashboard.set_eta("")
                     self._stop_eta_timer()
-                    self._refresh_last_run_summary()  # C4: show the just-finished run
-                                # A directly-connected slot on either signal below may
+                    # C4: show the just-finished run — but only when there IS
+                    # one. The card's only test is that pipeline_info.json
+                    # exists, and the pipeline writes that before any image
+                    # work, so a run that died seconds in rendered a summary
+                    # indistinguishable from a successful plate.
+                    if self._run_ok:
+                        self._refresh_last_run_summary()
+                    # A directly-connected slot on either signal below may
                     # start the next queued run re-entrantly, so nothing after
                     # jobFinished's emit may touch run state.
                     ok, message = self._run_ok, (self._run_error or "")

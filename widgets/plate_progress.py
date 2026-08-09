@@ -217,8 +217,28 @@ class PlateProgress(QWidget):
     # ``tests/test_datasets_dashboard_outcomes.py``'s no-override rule true.
 
     def clear_outcome(self) -> None:
-        """Forget the previous run's terminal state. Call from ``reset``."""
+        """Forget the previous run's terminal state. Call from ``reset``.
+
+        The headline's tooltip and colour go with it. Both are set by the
+        outcome setters and neither belongs to the run that follows: a tooltip
+        nobody clears outlives the run it describes, so hovering a *successful*
+        plate produces the previous run's failure text, and a colour nobody
+        clears paints the next run's live progress and its "Complete —" line in
+        danger red. Both are "good output indistinguishable from degraded",
+        which is the thing these outcome states exist to prevent.
+
+        This is not the callers' job. Every Datasets tool happened to be immune
+        because each calls ``set_done`` on success, whose green overwrites the
+        red; a host that only ever reports failures (Analyze) had nothing to
+        correct it with.
+        """
         self._outcome = ""
+        self._clear_headline_decoration()
+
+    def _clear_headline_decoration(self) -> None:
+        """Drop the tooltip and colour an outcome setter left on the headline."""
+        self._headline.setToolTip("")
+        self._headline.setStyleSheet("")
 
     def set_done(self, summary: str, *, tooltip: str | None = None) -> None:
         self._outcome = "done"
@@ -230,15 +250,22 @@ class PlateProgress(QWidget):
         self._headline.setStyleSheet(f"color:{theme.Colors.success};")
         self._on_outcome_changed()
 
-    def set_failed(self, message: str) -> None:
+    def set_failed(self, message: str, *, tooltip: str | None = None) -> None:
         self._outcome = "failed"
         self._headline.setText(f"Failed — {message}" if message else "Failed")
+        # Same contract as ``set_done``: the caller may shorten what it displays,
+        # and the full text stays reachable on the label that displays it. A
+        # pipeline refusal names two volumes, two figures and two remedies, so
+        # the headline is a first sentence and this is the rest of it.
+        self._headline.setToolTip(tooltip if tooltip is not None else (message or "Failed"))
         self._headline.setStyleSheet(f"color:{theme.Colors.danger};")
         self._on_outcome_changed()
 
     def set_cancelled(self, message: str = "") -> None:
         self._outcome = "cancelled"
         self._headline.setText(f"Cancelled — {message}" if message else "Cancelled")
+        # A cancel carries no explanation, so it must not keep a failure's.
+        self._headline.setToolTip("")
         self._headline.setStyleSheet(f"color:{theme.Colors.warn};")
         self._on_outcome_changed()
 
@@ -246,7 +273,10 @@ class PlateProgress(QWidget):
         """Hook for a dashboard whose rail shows the outcome. Default no-op."""
 
     def set_headline(self, text: str) -> None:
+        # Live progress text, so it also leaves the terminal state's decoration
+        # behind — see ``clear_outcome``.
         self._headline.setText(text or "")
+        self._clear_headline_decoration()
 
     def set_eta(self, text: str) -> None:
         self._eta.setText(text or "")

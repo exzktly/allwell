@@ -16,12 +16,11 @@ name stays reachable on the form exactly where callers expect it.
 
 from __future__ import annotations
 
-import sys as _sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSizePolicy, QTextEdit, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from analyze_tab_chrome import AnalyzeFormChromeMixin
@@ -35,9 +34,9 @@ from analyze_tab_pinfo import AnalyzePipelineInfoMixin
 from analyze_tab_seg_params import AnalyzeSegParamsMixin
 from services.remote_config import default_remote_index, load_remotes
 from widgets.checkable_dropdown import CheckableDropdown
-from widgets.run_dashboard import RunDashboard
 from widgets.wrap_checkbox import WrapCheckBox
 import pipeline.shape_features as _sfc
+from pipeline.capacity import ALLOW_LOW_DISK_HELP
 
 # ---------------------------------------------------------------------------
 # Schema vocabulary — shared with process_microscopy and WellPlateZipper via
@@ -57,8 +56,8 @@ _LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
 _FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
 
 
-class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
-                          AnalyzeSegParamsMixin):
+class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
+                          AnalyzePipelineInfoMixin, AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""
 
@@ -546,6 +545,10 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
 
         self._cpu_only_cb = QCheckBox("CPU only (disable GPU)", sec)
         sec.layout().addWidget(self._cpu_only_cb)
+        self._allow_low_disk_cb = QCheckBox(
+            "Start even if the disk looks too small", sec)
+        self._allow_low_disk_cb.setToolTip(ALLOW_LOW_DISK_HELP)
+        sec.layout().addWidget(self._allow_low_disk_cb)
         self._force_cb = QCheckBox("Force reprocess all wells", sec)
         self._force_cb.setToolTip(
             "Reprocess every well from scratch, even one whose output already "
@@ -736,102 +739,6 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
         self._refresh_remote_controls()
 
         parent.layout().addWidget(self._build_run_row(parent))
-
-    def _refresh_last_run_summary(self) -> None:
-        """Populate the idle last-run card (C4) from the most recent run's
-        pipeline_info.json. Hidden when no previous run is available."""
-        card = getattr(self, "_last_run_card", None)
-        if card is None:
-            return
-        out = self._last_output_dir  # a @property (Path | None)
-        info_path = (out / "pipeline_info.json") if out else None
-        if not info_path or not info_path.exists():
-            card.setVisible(False)
-            return
-        try:
-            import json
-            info = json.loads(info_path.read_text())
-        except Exception:
-            card.setVisible(False)
-            return
-        method = str(info.get("segmentation_method", "—")).replace("_", " ")
-        fluors = ", ".join(info.get("fluor_tokens", []) or []) or "—"
-        n_tp = len(info.get("available_timepoints", []) or [])
-        card.setText(
-            f"Last run · {out.name}\n"
-            f"Method: {method}   ·   Channels: {fluors}   ·   {n_tp} timepoint(s)"
-        )
-        card.setVisible(True)
-
-    def _build_log(self, parent: QWidget) -> None:
-        # The same control band every Review page carries, so switching modes
-        # never moves the first row: the pane's title is scope, the raw-log
-        # toggle and Clear are actions.
-        from widgets.page_body import build_page_body
-        band, body = build_page_body(parent)
-        rl = body.layout()
-        rl.setSpacing(0)
-
-        title = QLabel("Pipeline Output", band)
-        band.add_scope("", title)
-        # F4: the dashboard above IS the summary view; the verbose text log is
-        # off by default and revealed on demand, so progress reads cleanly.
-        self._raw_log_cb = QCheckBox("Show raw log", band)
-        self._raw_log_cb.setToolTip("Show the full per-image pipeline log beneath the progress dashboard")
-        self._raw_log_cb.toggled.connect(self._on_toggle_raw_log)
-        band.add_action(self._raw_log_cb)
-        clear_btn = QPushButton("Clear", band)
-        clear_btn.setProperty("variant", "secondary")
-        clear_btn.clicked.connect(self._clear_log)
-        band.add_action(clear_btn)
-        # No separator under the band — ``#ControlBand`` paints its own
-        # border-bottom hairline, so the rule that sat here was a second one.
-
-        # Idle last-run summary (C4): a compact readout of the most recent run
-        # so the pane isn't blank when nothing's running. Hidden during a run
-        # and when there's no previous run to describe.
-        self._last_run_card = QLabel("", parent)
-        self._last_run_card.setObjectName("Muted")
-        self._last_run_card.setWordWrap(True)
-        self._last_run_card.setContentsMargins(12, 6, 12, 6)
-        self._last_run_card.setVisible(False)
-        rl.addWidget(self._last_run_card)
-        self._refresh_last_run_summary()
-
-        # Visual run dashboard — the single place run progress is reported:
-        # status + ETA (header), overall % (headline + bar), per-stage rail and
-        # the live per-well plate map. The raw log sits beneath it.
-        self._dashboard = RunDashboard(parent)
-        rl.addWidget(self._dashboard)
-
-        self._log_sep = QFrame(parent)
-        self._log_sep.setFrameShape(QFrame.HLine)
-        self._log_sep.setObjectName("HRule")
-        rl.addWidget(self._log_sep)
-
-        self._log = QTextEdit(parent)
-        self._log.setReadOnly(True)
-        self._log.setLineWrapMode(QTextEdit.NoWrap)
-        # Cap the QTextDocument so a multi-hour pipeline can't grow it to
-        # hundreds of megabytes. Older lines drop off the top once we hit
-        # the cap; the ring buffer in allwell captures everything for
-        # the help-drawer log tab anyway.
-        self._log.document().setMaximumBlockCount(10000)
-        font = self._log.font()
-        font.setFamily("Menlo" if _sys.platform == "darwin" else "Consolas")
-        font.setPointSize(9)
-        self._log.setFont(font)
-        rl.addWidget(self._log, 1)
-
-        # F4: raw log hidden until the user asks for it (dashboard is the summary).
-        self._on_toggle_raw_log(False)
-
-    def _on_toggle_raw_log(self, show: bool) -> None:
-        """Show/hide the verbose text log (F4). The progress dashboard stays
-        visible either way; this only toggles the raw per-image stream."""
-        for w in (getattr(self, "_log", None), getattr(self, "_log_sep", None)):
-            if w is not None:
-                w.setVisible(bool(show))
 
     def _build_auto_threshold_section(self, parent: QWidget) -> None:
         """Auto-threshold — every threshold-related control in one place.
@@ -1052,6 +959,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzePipelineInfoMixin,
                          self._force_wells_edit.text().replace(";", ",").split(",")
                          if w.strip()],
             cpu_only=self._cpu_only_cb.isChecked(),
+            allow_low_disk=self._allow_low_disk_cb.isChecked(),
             tf_threads=self._tf_threads_edit.text(),
             workers=self._workers_edit.text(),
             stardist_tile_px=self._stardist_tile_px_edit.text(),

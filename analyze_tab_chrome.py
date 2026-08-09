@@ -17,8 +17,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QLineEdit, QSizePolicy, QVBoxLayout, QWidget,
 )
+
+from well_viewer.core.ui_helpers import build_hline_separator
 
 
 class AnalyzeFormChromeMixin:
@@ -61,10 +63,7 @@ class AnalyzeFormChromeMixin:
         hl.addStretch(1)
         cl.addWidget(header)
 
-        rule = QFrame(container)
-        rule.setFrameShape(QFrame.HLine)
-        rule.setObjectName("HRule")
-        cl.addWidget(rule)
+        cl.addWidget(build_hline_separator(container))
 
         body = QWidget(container)
         bl = QVBoxLayout(body)

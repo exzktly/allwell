@@ -26,6 +26,7 @@ EXTRACTED = [
     "well_viewer/features/barplot/collect.py",
     "well_viewer/features/scatter/collect.py",
     "analyze_tab_form.py",
+    "analyze_tab_log.py",
 ]
 
 _BUILTINS = set(dir(builtins)) | {"__file__", "__name__"}

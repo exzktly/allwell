@@ -363,7 +363,6 @@ def redraw_scatter_agg(
             color=_muted_fg,
         )
     else:
-        clear_cut_status(ctx)   # a redraw that succeeds takes its own notice down
         # Plot each replicate/well-timepoint as a separate error-bar series.
         # ``label='_nolegend_'`` keeps every point OUT of the auto-legend — the
         # legend is built explicitly below as two compact keys (well marker +
@@ -522,6 +521,7 @@ def redraw_scatter_agg_orchestrate(ctx) -> None:
     stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
     if stat_x_var is None:
         return
+    clear_cut_status(ctx)   # before every exit below, not only the drawn one
     # Sync the hidden stat-string combos with the new per-axis
     # (channel, metric) state so downstream code (export_service,
     # save-figure helpers) sees a coherent view.

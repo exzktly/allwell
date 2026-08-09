@@ -347,6 +347,46 @@ def test_on_cutoff_guard_catches_an_indirect_reach(tmp_path, monkeypatch, shape)
     assert exc is not None, f"the guard walked past {shape!r}"
 
 
+def test_on_cutoff_exemption_is_not_shared_by_bare_name(tmp_path, monkeypatch):
+    """An exemption belongs to one closure, not to every closure of that name.
+
+    ``refresh_thresh_frac_quick_edit._sync`` legitimately reads a raw accessor:
+    it picks between the two by the same predicate the resolver uses. Keyed on
+    the bare ``_sync``, that exemption covered any closure of that name anywhere
+    in a 1,300-line module — including one added later by a plot path, which is
+    precisely the reach the rule exists to catch.
+    """
+    src = ("def refresh_thresh_frac_quick_edit(ctx):\n"
+           "    def _sync(attr):\n"
+           "        return get_thresh_frac_on(ctx, attr)\n"
+           "\n"
+           "def redraw_something(ctx):\n"
+           "    def _sync(attr):\n"
+           "        return get_thresh_frac_on(ctx, attr)\n")
+    path = _write(tmp_path, "channel_state_controller.py", src)
+    module = importlib.import_module("tests.test_on_cutoff_sweep")
+    monkeypatch.setattr(module, "python_sources", lambda **kw: [path])
+    monkeypatch.setattr(
+        module, "rel",
+        lambda p: "well_viewer/core/channel_state_controller.py")
+    try:
+        module.test_no_path_picks_its_own_on_cutoff()
+    except AssertionError as exc:
+        message = str(exc)
+    else:
+        pytest.fail("the guard walked past a second _sync closure")
+    assert "redraw_something._sync" in message
+    assert "refresh_thresh_frac_quick_edit._sync" not in message
+
+
+def test_on_cutoff_roster_rejects_a_name_that_does_not_exist(monkeypatch):
+    """The roster's own liveness check fires on a symbol nothing defines."""
+    module = importlib.import_module("tests.test_on_cutoff_sweep")
+    monkeypatch.setattr(module, "GUARDED", ("get_thresh_frac_on", "no_such_accessor"))
+    with pytest.raises(AssertionError, match="no_such_accessor"):
+        module.test_guarded_names_are_real()
+
+
 @pytest.mark.parametrize("shape", [
     "    threshold = on_cutoff_for_column(ctx, val_col)",
     "    threshold = on_cutoff_for_column(ctx, val_col, channel=ch_x)",

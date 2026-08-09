@@ -69,7 +69,15 @@ def agg_empty_message(ctx, cut_sink: dict | None) -> str:
 
 
 def clear_cut_status(ctx) -> None:
-    """Take down this tab's cut-cells notice once the plot draws again.
+    """Take down this tab's cut-cells notice before the aggregate redraws.
+
+    Called once, at the top of ``redraw_scatter_agg_orchestrate``, rather than
+    on the branch that succeeds in drawing. Every other exit from that redraw —
+    no timepoints available, none ticked, no wells selected, a collector error —
+    replaces the figure with a placeholder while leaving the shared status line
+    telling the user to lower a cutoff for a plot that is no longer on screen.
+    The notice is re-posted by :func:`agg_empty_message` when the cells really
+    were all cut, so clearing first costs nothing in the case it describes.
 
     Only when this tab is the one that posted it: the status bar is persistent
     and shared, so clearing unconditionally would wipe whatever another part of

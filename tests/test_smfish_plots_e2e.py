@@ -295,3 +295,80 @@ def test_heat_map_fraction_matches_the_bar_plot(loaded_app_smfish):
     mean_above = HM._cell_value(ctx, ["A01"], TP, HM.METRIC_MEAN, COUNT_COL,
                                 cutoff, get_all_fluor_gates(ctx))
     assert mean_above == pytest.approx(4.0)
+
+
+# ── the cut-cells notice, and the placeholder that used to outlive it ────────
+
+def _agg_axes_on_counts(ctx):
+    """Point both aggregate axes at the smFISH count Property.
+
+    ``redraw_scatter_agg_orchestrate`` re-derives its stat strings from the
+    per-axis channel/metric combos on every call (``sync_scatter_agg_stat_combos``),
+    so setting the composed stat combo directly is overwritten before the redraw
+    reads it.
+    """
+    for axis in ("x", "y"):
+        ctx.widgets.get_or_none(f"_scatter_agg_ch_{axis}_cb").setCurrentText(
+            SMFISH_CHANNEL.upper())
+        ctx.widgets.get_or_none(f"_scatter_agg_metric_{axis}_cb").setCurrentText(
+            "smFISH Count")
+
+
+def test_the_cut_cells_notice_does_not_outlive_its_plot(loaded_app_smfish):
+    """A redraw that ends in a placeholder takes the status line down with it.
+
+    The notice tells the user to lower a cutoff so the points come back. Once
+    the selection is gone the figure says something else entirely, and the
+    advice describes a plot that is no longer on screen — a stale instruction
+    the user can follow to no effect. Asserted at the boundary, on what reaches
+    ``ctx.notify.set_status``, because the tab's internal flag was right in the
+    broken version too.
+    """
+    from well_viewer.core.channel_state_controller import set_thresh_count_on
+    from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+
+    ctx = _select(loaded_app_smfish._ctx, "A01")
+    _agg_axes_on_counts(ctx)
+    set_thresh_count_on(ctx, 1000.0, SMFISH_CHANNEL)
+
+    posted: list[str] = []
+    ctx.notify.set_status = posted.append
+
+    redraw_scatter_agg_orchestrate(ctx)
+    assert posted and "ThreshCountOn" in posted[-1], (
+        "an all-cut redraw did not name the cutoff on the status line")
+    assert ctx.state.scatter.cut_status_posted is True
+
+    # Same tab, no selection: the figure is now the shared placeholder.
+    ctx.state.selection.selected_wells = set()
+    redraw_scatter_agg_orchestrate(ctx)
+    assert posted[-1] == "", (
+        "the cut-cells notice survived a redraw that drew a placeholder instead")
+    assert ctx.state.scatter.cut_status_posted is False
+
+
+def test_the_notice_clears_when_no_timepoints_are_ticked(loaded_app_smfish):
+    """The other early exit, which returns before the redraw is ever reached.
+
+    ``redraw_scatter_agg_orchestrate`` paints "Please select timepoints to plot."
+    and returns without calling ``redraw_scatter_agg`` at all, so clearing inside
+    the redraw would have missed this one.
+    """
+    from well_viewer.core.channel_state_controller import set_thresh_count_on
+    from well_viewer.features.scatter.controller import redraw_scatter_agg_orchestrate
+
+    ctx = _select(loaded_app_smfish._ctx, "A01")
+    _agg_axes_on_counts(ctx)
+    set_thresh_count_on(ctx, 1000.0, SMFISH_CHANNEL)
+
+    posted: list[str] = []
+    ctx.notify.set_status = posted.append
+
+    redraw_scatter_agg_orchestrate(ctx)
+    assert ctx.state.scatter.cut_status_posted is True
+
+    ctx.runtime.scatter.agg_tp_selections = {
+        tp: False for tp in ctx.runtime.scatter.agg_tp_selections}
+    redraw_scatter_agg_orchestrate(ctx)
+    assert posted[-1] == ""
+    assert ctx.state.scatter.cut_status_posted is False

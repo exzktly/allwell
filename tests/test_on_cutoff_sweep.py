@@ -32,26 +32,29 @@ from tests._repo_scan import python_sources, rel
 
 
 #: The raw per-channel accessors. Reaching one of these directly decides for
-#: yourself which cutoff applies — the thing this rule exists to stop. The
-#: ``cell_gating_*`` pair are the feature-side reads of the same two values, so
-#: they are equally raw and equally guarded.
+#: yourself which cutoff applies — the thing this rule exists to stop.
+#: ``cell_gating_get_thresh_frac_on`` is the feature-side read of the same
+#: stored value, so it is an equally raw route to it and equally guarded.
+#: Every name here must exist — see :func:`test_guarded_names_are_real`.
 GUARDED = (
     "get_thresh_frac_on",
     "get_thresh_count_on",
     "cell_gating_get_thresh_frac_on",
-    "cell_gating_get_thresh_count_on",
 )
 
-#: ``(repo-relative path, enclosing function)`` for every legitimate direct
-#: reach. The site, not the file: exempting a whole module would let the next
-#: plot path in it quietly reintroduce the bug.
+#: ``(repo-relative path, dotted enclosing function)`` for every legitimate
+#: direct reach. The site, not the file: exempting a whole module would let the
+#: next plot path in it quietly reintroduce the bug. Nested functions carry
+#: their enclosing chain — a bare ``_sync`` would hand the exemption to any
+#: other closure of that name added anywhere in a 1,300-line module.
 ALLOWED: frozenset[tuple[str, str]] = frozenset({
     # The resolver itself.
     ("well_viewer/core/channel_state_controller.py", "on_cutoff_for_column"),
     # The quick-edit display sync reads the value it is about to show. It picks
     # its accessor from ``quick_edit_cutoff_is_count`` — the same predicate the
     # resolver uses — so it cannot disagree with what the write path stores.
-    ("well_viewer/core/channel_state_controller.py", "_sync"),
+    ("well_viewer/core/channel_state_controller.py",
+     "refresh_thresh_frac_quick_edit._sync"),
     # The Playground's binary preview is an image-pixel cut, so it always wants
     # the intensity cutoff whatever Property the plots are showing — routing it
     # through the resolver handed it a spot tally to compare against pixels.
@@ -64,10 +67,13 @@ ALLOWED: frozenset[tuple[str, str]] = frozenset({
 
 
 def _enclosing_function(tree: ast.AST) -> dict[ast.AST, str]:
-    """Map every node to the name of the function that lexically contains it.
+    """Map every node to the dotted name of the function that contains it.
 
     Nested functions win over their parents, which is what makes a per-site
-    allowlist meaningful for a closure defined inside a tab builder.
+    allowlist meaningful for a closure defined inside a tab builder — and they
+    keep the chain that led to them (``outer.inner``), so an exemption granted
+    to one closure cannot be inherited by a same-named closure somewhere else
+    in the module.
     """
     owner: dict[ast.AST, str] = {}
 
@@ -75,7 +81,8 @@ def _enclosing_function(tree: ast.AST) -> dict[ast.AST, str]:
         for child in ast.iter_child_nodes(node):
             name = current
             if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                name = child.name
+                name = (child.name if current == "<module>"
+                        else f"{current}.{child.name}")
             owner[child] = name
             walk(child, name)
 
@@ -154,6 +161,32 @@ def test_no_path_picks_its_own_on_cutoff():
         "these sites decide for themselves which ON cutoff applies, which is "
         "how a spot tally ends up measured against a fluorescence threshold:\n"
         + "\n".join(found)
+    )
+
+
+def test_guarded_names_are_real():
+    """Every guarded name is a function that actually exists.
+
+    The companion to the allowlist liveness test, and it caught the same rot
+    from the other end: this roster once carried
+    ``cell_gating_get_thresh_count_on``, which was never defined anywhere. A
+    rule about a symbol that does not exist can never fire, so it reads as
+    cover the suite does not have — and if the accessor is ever written, it
+    arrives already believed to be guarded.
+    """
+    defined: set[str] = set()
+    for path in python_sources():
+        try:
+            tree = ast.parse(path.read_text())
+        except SyntaxError:            # pragma: no cover - not our concern here
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defined.add(node.name.lstrip("_"))
+    missing = sorted(n for n in GUARDED if n not in defined)
+    assert not missing, (
+        "these guarded names are not defined anywhere in the app, so the rule "
+        f"cannot fire for them — drop them or write them: {missing}"
     )
 
 

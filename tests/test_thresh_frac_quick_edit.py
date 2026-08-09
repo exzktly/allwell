@@ -95,6 +95,16 @@ class _FakeStepper:
         # setDecimals / setSuffix, which is why the refresh has to re-pin this.
         self.fixed_width = int(w)
 
+    def maximumWidth(self) -> int:
+        """What the real Stepper worked out it needs for its widest value.
+
+        Derived from the affixed text, so a count stepper asks for more room
+        than an intensity one — which is the whole reason the refresh re-pins
+        to the larger of this and the host row's token. ~7px a character over
+        the real one's 11-digit clamp, plus the edit padding and arrow column.
+        """
+        return 7 * (11 + len(self.suffix)) + 42
+
     def blockSignals(self, b: bool) -> bool:
         prev = self.blocked
         self.blocked = b
@@ -454,3 +464,40 @@ def test_a_channel_without_counts_keeps_the_intensity_cutoff(monkeypatch):
     set_on_cutoff(app._ctx, 42.0, "mcherry")
     assert get_thresh_frac_on(app._ctx, "mcherry") == 42.0
     assert get_thresh_count_on(app._ctx, "mcherry") == -1.0
+
+
+# ── the box has to fit what it displays ──────────────────────────────────────
+
+def test_the_count_stepper_is_wide_enough_for_its_suffix(loaded_app_smfish):
+    """Retargeting to counts re-pins the width, and must not pin it too narrow.
+
+    ``setRange`` / ``setDecimals`` / ``setSuffix`` each re-run the Stepper's own
+    sizing, which resets the width bounds the host row pinned at build time, so
+    the refresh re-pins them. That token width is chosen for "50.0" and is
+    deliberately tighter than the Stepper asks for; re-pinning it verbatim once
+    a " spots" suffix is on the box clipped "20 spots", an ordinary cutoff to
+    type. Asserted against the widget's own statement of what it needs.
+    """
+    from tests.fixtures.mini_dataset import SMFISH_CHANNEL
+    from well_viewer.core.channel_state_controller import (
+        set_active_channel, set_active_metric,
+    )
+
+    ctx = loaded_app_smfish._ctx
+    stepper = ctx.widgets.get_or_none("_plotting_thresh_frac_stepper")
+    assert stepper is not None
+
+    set_active_channel(ctx, SMFISH_CHANNEL)
+    set_active_metric(ctx, "smfish_count")
+    assert stepper._edit.text().endswith(" spots")
+    needed = stepper._edit.fontMetrics().horizontalAdvance("100 spots") + 16 + 26
+    assert stepper.width() >= needed, (
+        f"the count stepper is pinned to {stepper.width()}px, too narrow for "
+        f"the {needed}px its own text needs"
+    )
+
+    # The intensity case keeps the tighter token the host rows chose.
+    import theme
+    set_active_metric(ctx, "mean_intensity")
+    assert stepper._edit.text() == "" or not stepper._edit.text().endswith(" spots")
+    assert stepper.width() == theme.Metrics.stepper_w

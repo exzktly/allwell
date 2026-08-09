@@ -511,6 +511,35 @@ def test_well_health_classifies_the_four_dataset_health_states():
     assert vc.well_health(nothing) == "no_output"
 
 
+def test_well_health_agrees_with_the_shared_pipeline_side_classifier():
+    """Validate and the pipeline's end-of-run check paint the same well the
+    same colour.
+
+    ``vc.well_health`` delegates to ``pipeline.completeness.health``; this
+    walks every combination of the five inputs and asserts the wrapper adds no
+    opinion of its own. Two surfaces disagreeing about one well — green on the
+    Home page, red in a Validate scan — is the failure this delegation exists
+    to make impossible, and it would look like a rendering bug from either end.
+    """
+    from pipeline.completeness import HEALTH_STATES, health
+
+    for missing in ((), (("F001", "24h"),)):
+        for csv_state in ("ok", "empty", "unreadable", "missing"):
+            for has_in in (True, False):
+                for has_zip in (True, False):
+                    for has_folder in (True, False):
+                        report = vc.WellReport(
+                            well="A01", missing=missing, csv_state=csv_state,
+                            has_in_container=has_in, has_out_zip=has_zip,
+                            has_out_folder=has_folder)
+                        answer = vc.well_health(report)
+                        assert answer == health(
+                            missing=missing, csv_state=csv_state,
+                            has_in_container=has_in, has_out_zip=has_zip,
+                            has_out_folder=has_folder)
+                        assert answer in HEALTH_STATES
+
+
 def _count_reads(monkeypatch):
     """Count container opens and CSV parses a scan actually performs.
 

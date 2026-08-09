@@ -331,6 +331,9 @@ _REQUIRED_REMOTE_FILES: tuple[str, ...] = (
     "pipeline/background.py",
     "pipeline/capacity.py",
     "pipeline/cellpose.py",
+    # The one definition of "is this well complete", shared by the end-of-run
+    # check and the Datasets Validate tool.
+    "pipeline/completeness.py",
     "pipeline/flatfield.py",
     "pipeline/incremental_keys.py",
     "pipeline/well_skip.py",

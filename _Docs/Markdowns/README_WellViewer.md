@@ -1512,8 +1512,7 @@ place cells in a grid that mirrors your plate or your experimental design.
     printf-style format for the number written in each cell: `%.2f` for two
     decimals, `%.1e` for scientific notation, `%d` for a whole number. Leave it
     blank to let the tab choose per metric — counts as whole numbers, fractions to
-    two places, intensities scaled to their size. The hover readout uses the same
-    format, so it always matches the number on the map.
+    two places, intensities scaled to their size.
   - The layout editor: drag wells into the grid and **Edit label** on any row /
     column header.
 - **Selecting wells.** The sidebar plate map does double duty on this tab: a

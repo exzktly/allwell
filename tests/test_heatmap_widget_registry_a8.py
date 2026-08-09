@@ -21,7 +21,7 @@ _HANDLES = (
     "_heatmap_export_dock", "_chan_cb_heatmap", "_heatmap_metric_cb",
     "_heatmap_cmap_cb", "_heatmap_scale_cb", "_heatmap_vmin_edit",
     "_heatmap_vmax_edit", "_heatmap_repset_avg_cb", "_heatmap_log_scale_cb",
-    "_heatmap_status_lbl", "_heatmap_tp_cb",
+    "_heatmap_tp_cb",
     "_heatmap_card", "_heatmap_fig", "_heatmap_ax", "_heatmap_cax",
     "_heatmap_canvas",
 )

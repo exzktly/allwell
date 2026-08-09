@@ -184,7 +184,9 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     edit_btn, edit_menu = make_action_menu_button(
         "Edit ▾", ctrl, tooltip="Crop and reset actions")
     add_menu_action(edit_menu, "Clear crop", lambda: clear_crop_region(ctx))
-    add_menu_action(edit_menu, "Reset — restore all cells & remove crop",
+    # Same scope, same words as the Curation entry in the title bar's Reset
+    # analysis checklist — one action a user can find from either place.
+    add_menu_action(edit_menu, "Reset crop + curation",
                     lambda: reset_crop_and_overrides(ctx))
     ctrl.add_action(edit_btn)
 

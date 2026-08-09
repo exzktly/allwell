@@ -151,8 +151,12 @@ def test_cell_gating_rows_seed_the_nuclear_channel_at_zero():
     from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
     _qapp = QApplication.instance() or QApplication([])
+    # Each decision has its own table host: the inclusion floors live under the
+    # Cell inclusion section, the ON cutoffs under Fraction-on.
     inner = QWidget()
     QVBoxLayout(inner)
+    thresh_inner = QWidget()
+    QVBoxLayout(thresh_inner)
 
     from well_viewer.features.grouping.cell_gating.controller import (
         _cell_gating_build_channel_controls,
@@ -160,7 +164,8 @@ def test_cell_gating_rows_seed_the_nuclear_channel_at_zero():
     ctx = _ctx()
     ctx.state.channel.ratio_metrics = []
     ctx.runtime = SimpleNamespace(cell_gating=SimpleNamespace(
-        inner=inner, fluor_gate_edits={}, thresh_frac_edits={},
+        inner=inner, thresh_inner=thresh_inner,
+        fluor_gate_edits={}, thresh_frac_edits={}, thresh_count_edits={},
     ))
     _cell_gating_build_channel_controls(ctx)
 

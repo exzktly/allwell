@@ -4,8 +4,24 @@ Constructs the tab inside *parent* and registers its widgets on
 ``ctx.runtime.cell_gating``, wiring every control to a handler in
 :mod:`controller`. The behaviour those handlers implement — the gating workers,
 the optimizers, the scatter-gate plumbing — lives there; the CDF panel is drawn
-by :mod:`renderer`. This module is the only one of the three that imports the
-other two, which is what keeps the package acyclic.
+by :mod:`renderer`, and the optimizer's own window by :mod:`optimizer_view`.
+
+The tab answers two questions and is laid out as those two questions, in the
+order the pipeline applies them:
+
+1. **Cell inclusion** — which cells count. The QC debris gate (always applied),
+   then either per-channel intensity floors or the scatter gates.
+2. **Fraction-on** — which of the included cells count as "on". Either the
+   per-channel cutoffs or a scatter gate.
+
+Each question offers its two sources as a radio pair, because the code has
+always treated them as exclusive: ticking the scatter option *replaces* the
+per-channel numbers rather than composing with them, and each question's
+per-channel table sits inside its own section rather than in a shared block
+below both — the numbers have the same shape but answer different questions, and
+a table serving both needs a heading that names neither. The CDFs the numbers are
+placed against follow immediately, so an edit and its consequence are on one
+screen.
 
 * :func:`build_cell_gating_tab` — construct the UI inside *parent*.
 * :func:`build_cell_gating_subtab` — build it and run the initial data load.
@@ -15,11 +31,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout,
-    QWidget,
+    QButtonGroup, QFrame, QHBoxLayout, QLabel, QPushButton, QRadioButton,
+    QScrollArea, QVBoxLayout, QWidget,
 )
 
-from widgets.flow_layout import FlowLayout, flow_group
 from well_viewer.core.safe import swallowed
 from well_viewer.core.ui_helpers import (
     build_hline_separator,
@@ -30,10 +45,10 @@ from well_viewer.features.qc.tab_view import build_qc_gate_controls
 from well_viewer.features.grouping.cell_gating.controller import (
     _GATE_BUTTON_ATTR,
     _GATE_CHOICES_ATTR,
+    _GATE_HINT_ATTR,
+    _GATE_RADIO_ATTR,
     _cell_gating_apply_scatter_gate_mode,
-    _cell_gating_autofill_opt_range,
     _cell_gating_gate_names,
-    _cell_gating_on_opt_scope_changed,
     _cell_gating_refresh_gate_filter,
     _cell_gating_refresh_gate_summary,
     _cell_gating_refresh_optimizer_controls,
@@ -43,25 +58,29 @@ from well_viewer.features.grouping.cell_gating.controller import (
     cell_gating_load_threshold_frac_on,
     cell_gating_on_use_scatter_gates_change,
     cell_gating_on_use_scatter_thresh_change,
-    cell_gating_optimize_thresh_frac_on,
     cell_gating_refresh_included_count,
     cell_gating_sync_scatter_gates,
     logger,
 )
+from well_viewer.features.grouping.cell_gating.optimizer_view import (
+    build_optimizer_window, show_optimizer_window,
+)
 from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
-import theme
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
-_GATING_SCROLL_H = 120
 _GATING_PLOT_MIN_H = 420
-_FC_BASELINE_MIN_W = 110
-_GATING_BTN_MIN_W = 150
-_OPT_TP_MIN_W = 110
-_OPT_WELL_A_MIN_W = 90
-_OPT_WELL_B_MIN_W = 90
-_THRESH_BTN_MIN_W = 150
+_GATE_BTN_MIN_W = 150
+_RADIO_INDENT = 20
+
+# Widget-registry key for each layer's gate picker. The controller reads the
+# buttons through ``_GATE_BUTTON_ATTR`` (the runtime attr the registry stamps);
+# these are the register() names that produce them.
+_GATE_BUTTON_HANDLE = {
+    "gating": "_cell_gating_gating_gate_btn",
+    "thresh": "_cell_gating_thresh_gate_btn",
+}
 
 
 # ── builder ───────────────────────────────────────────────────────────────
@@ -103,14 +122,14 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # None ⇒ all gates, which auto-includes gates drawn later).
     # Epic-cellgating: the flags + per-layer gate selections are typed state on
     # ``ctx.state.cell_gating`` (defaults: False / None), so no seeding is needed
-    # here — the checkboxes below read the slice.
+    # here — the radios below read the slice.
 
-    # The tab stacks a tall column of gating controls *above* the CDF plot and
-    # the optimizer panel. On shorter windows that column squeezed the plot down
-    # to a sliver (the CDFs were clipped to their top edge). Host the whole tab
-    # in one vertical scroll area and give the plot a real minimum height: the
-    # CDFs always render full-size, and anything that overflows a short window is
-    # reachable by scrolling instead of collapsing the plot.
+    # The tab is taller than a short window, so the whole thing scrolls as one
+    # and the CDF keeps a real minimum height. There is deliberately no second,
+    # inner scroll area: the per-channel table used to sit in a fixed 120px one,
+    # which meant the tab's primary input surface scrolled inside the page that
+    # was already scrolling, and stayed 120px tall on a window with room to
+    # spare.
     outer_layout = parent.layout()
     if outer_layout is None:
         outer_layout = QVBoxLayout(parent)
@@ -123,8 +142,6 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     outer_layout.addWidget(outer_scroll)
     content = QWidget()
     outer_scroll.setWidget(content)
-    # Section builders below append to ``root``; point it at the scrollable
-    # content so the existing ``root.addWidget(...)`` calls need no changes.
     root = QVBoxLayout(content)
     root.setContentsMargins(12, 12, 12, 12)
 
@@ -133,134 +150,11 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     cf_layout = QVBoxLayout(control_frame)
     cf_layout.setContentsMargins(6, 6, 6, 6)
 
-    # QC debris gate — the fundamental inclusion layer. It is ALWAYS applied
-    # (QC_Pass at the df_included_mask chokepoint), composing with FluorGating
-    # and the scatter gates below, so it leads the tab. Editing here re-flags the
-    # whole dataset live and refreshes the Segmentation overlay.
-    cf_layout.addWidget(build_section_header(
-        control_frame, "QC debris gate (always applied)",
-        hint="Size / solidity debris gating — a fundamental layer applied to "
-             "every cell, on top of the FluorGating thresholds and any scatter "
-             "gates below.",
-    ))
-    try:
-        cf_layout.addWidget(build_qc_gate_controls(ctx, control_frame))
-    except Exception:
-        swallowed()  # QC controls are best-effort; never block the tab build
+    _build_inclusion_section(ctx, control_frame, cf_layout)
+    _build_fraction_on_section(ctx, control_frame, cf_layout)
+    _build_readout_section(ctx, control_frame, cf_layout)
+    root.addWidget(control_frame)
 
-    cf_layout.addWidget(build_hline_separator(control_frame))
-    cf_layout.addWidget(build_section_header(
-        control_frame, "FluorGating (Cell Inclusion)",
-    ))
-
-    # FluorGating is MFI-only whatever the Property; the fraction-on cut is not
-    # — it follows the Property onto ThreshFracOn or ThreshCountOn.
-    mfi_note = QLabel(
-        "Note: FluorGating (cell inclusion) always cuts on per-cell mean "
-        "fluorescence intensity (MFI). The fraction-on cut follows the "
-        "Property: an intensity Property uses ThreshFracOn, an smFISH Count "
-        "Property uses ThreshCountOn.",
-        control_frame,
-    )
-    mfi_note.setObjectName("Muted")
-    mfi_note.setWordWrap(True)
-    cf_layout.addWidget(mfi_note)
-
-    # Scatter-gate inclusion. The user draws named rectangular gates on the
-    # Scatter Plot tab; ticking this replaces the FluorGating intensity floors,
-    # and the dropdown picks which gate filters (or all of them, unioned).
-    from PySide6.QtWidgets import QCheckBox as _QCheckBox, QPushButton as _QPushButton
-    sg_row = QWidget(control_frame)
-    sg_layout = QHBoxLayout(sg_row)
-    sg_layout.setContentsMargins(0, 0, 0, 0)
-    use_sg_cb = _QCheckBox(
-        "Use scatter-plot gates for cell inclusion (replaces FluorGating)",
-        sg_row,
-    )
-    use_sg_cb.setChecked(bool(ctx.state.cell_gating.use_scatter_gates))
-    use_sg_cb.setToolTip(
-        "Define the Included population from the named rectangular gates drawn "
-        "on the Scatter Plot tab instead of the per-channel intensity "
-        "thresholds. Pick which gate filters with the dropdown. Gates are saved "
-        "with the dataset."
-    )
-    use_sg_cb.toggled.connect(
-        lambda _on: cell_gating_on_use_scatter_gates_change(ctx)
-    )
-    reg.register("_cell_gating_use_scatter_gates_cb", use_sg_cb)
-    sg_layout.addWidget(use_sg_cb)
-    sg_layout.addSpacing(8)
-    sg_layout.addWidget(QLabel("Gates:", sg_row))
-    gating_btn = _QPushButton("All gates", sg_row)
-    gating_btn.setMinimumWidth(_GATING_BTN_MIN_W)
-    gating_btn.setToolTip(
-        "Which scatter gates define the Included population (union of the "
-        "checked gates). Independent of the fraction-on selection below."
-    )
-    gating_btn.clicked.connect(
-        lambda _=False: _open_gate_filter_menu(ctx, "gating")
-    )
-    reg.register("_cell_gating_gating_gate_btn", gating_btn)
-    sg_layout.addWidget(gating_btn)
-    sg_layout.addStretch(1)
-    cf_layout.addWidget(sg_row)
-
-    # Thresholding mode — independent of the gating checkbox above, with its OWN
-    # gate selection: instead of removing cells, counts cells inside the chosen
-    # gate(s) as "on" for fraction-on stats (replaces ThreshFracOn).
-    th_row = QWidget(control_frame)
-    th_layout = QHBoxLayout(th_row)
-    th_layout.setContentsMargins(0, 0, 0, 0)
-    use_th_cb = _QCheckBox(
-        "Use scatter gate for fraction-on (thresholding, replaces ThreshFracOn)",
-        th_row,
-    )
-    use_th_cb.setChecked(bool(ctx.state.cell_gating.use_scatter_thresh))
-    use_th_cb.setToolTip(
-        "Define the 'on' population for fraction-on stats as the cells inside "
-        "the selected gate(s), instead of cells above the per-channel "
-        "ThreshFracOn cutoff. Independent of cell inclusion — no cells removed."
-    )
-    use_th_cb.toggled.connect(
-        lambda _on: cell_gating_on_use_scatter_thresh_change(ctx)
-    )
-    reg.register("_cell_gating_use_scatter_thresh_cb", use_th_cb)
-    th_layout.addWidget(use_th_cb)
-    th_layout.addSpacing(8)
-    th_layout.addWidget(QLabel("Gates:", th_row))
-    thresh_btn = _QPushButton("All gates", th_row)
-    thresh_btn.setMinimumWidth(_THRESH_BTN_MIN_W)
-    thresh_btn.setToolTip(
-        "Which scatter gates define the fraction-on 'on' population (union of "
-        "the checked gates). Independent of the inclusion selection above."
-    )
-    thresh_btn.clicked.connect(
-        lambda _=False: _open_gate_filter_menu(ctx, "thresh")
-    )
-    reg.register("_cell_gating_thresh_gate_btn", thresh_btn)
-    th_layout.addWidget(thresh_btn)
-    th_layout.addStretch(1)
-    cf_layout.addWidget(th_row)
-
-    reg.register("_cell_gating_gate_summary", QLabel("", control_frame))
-    ctx.widgets.get("_cell_gating_gate_summary").setObjectName("Muted")
-    ctx.widgets.get("_cell_gating_gate_summary").setWordWrap(True)
-    cf_layout.addWidget(ctx.widgets.get("_cell_gating_gate_summary"))
-
-    # Live inclusion readout, directly under the controls that move it.
-    reg.register("_cell_gating_included_count", QLabel("", control_frame))
-    _count_lbl = ctx.widgets.get("_cell_gating_included_count")
-    _count_lbl.setObjectName("Muted")
-    _count_lbl.setWordWrap(True)
-    _count_lbl.setToolTip(
-        "Cells passing every inclusion layer — manual curation, the QC debris "
-        "gate, the crop region, and the cell-gating / scatter-gate layer — "
-        "across all loaded wells (not just the selected ones the curves below "
-        "show). The fraction-on cutoffs (ThreshFracOn / ThreshCountOn) do not "
-        "change this number: "
-        "they define which included cells count as 'on', not which cells count."
-    )
-    cf_layout.addWidget(_count_lbl)
     # QC edits rewrite QC_Pass without running the gating pass, and the QC
     # controls sit on this very tab — so the readout has to follow them too.
     # QC fires a feature-agnostic callback; this tab is what registers for it,
@@ -278,212 +172,285 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     _cell_gating_apply_scatter_gate_mode(ctx)
     cell_gating_refresh_included_count(ctx)
 
-    # Auto-threshold all channels: runs the same Otsu pass the pipeline's
-    # final stage executes (well_viewer.auto_threshold) and writes the
-    # results into the ThreshFracOn edits for every loaded channel — it
-    # is the fraction-on cut used in downstream plots, NOT the per-cell
-    # FluorGating inclusion threshold. Status messages stream to the log
-    # drawer via the standard logger. Sits in its own row directly above
-    # the per-channel FluorGating / ThreshFracOn table it modifies, so it
-    # never floats away from the controls it acts on.
-    cf_layout.addWidget(build_hline_separator(control_frame))
-    cf_layout.addWidget(build_section_header(
-        control_frame, "ON cutoffs (Fraction-On Cut)",
-        hint="Per-channel cut used for fraction-on in downstream plots / stats "
-             "(separate from the FluorGating inclusion thresholds above). "
-             "Intensity Properties use ThreshFracOn; smFISH Count uses "
-             "ThreshCountOn.",
-    ))
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    auto_row = QWidget(control_frame)
-    auto_row_layout = QHBoxLayout(auto_row)
-    auto_row_layout.setContentsMargins(0, 0, 0, 0)
-    auto_btn = _QPushButton("Auto-threshold all channels (ThreshFracOn)", auto_row)
-    auto_btn.setProperty("variant", "secondary")
-    auto_btn.setToolTip(
-        "Compute a default ThreshFracOn cut per channel via Otsu on "
-        "a per-cell + matched-background-pixel distribution sampled from "
-        "the first, middle, and last timepoint of every FOV. The "
-        "per-cell FluorGating inclusion thresholds are NOT modified.\n\n"
-        "Progress + per-channel results are written to the log drawer."
-    )
-    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx))
-    auto_row_layout.addWidget(auto_btn)
-    auto_row_layout.addStretch(1)
-    reg.register("_cell_gating_auto_btn", auto_btn)
-    cf_layout.addWidget(auto_row)
+    _build_cdf_section(ctx, parent, root, FigureCanvas, Figure)
 
-    reg.register("_cell_gating_scroll", QScrollArea(control_frame))
-    ctx.widgets.get("_cell_gating_scroll").setWidgetResizable(True)
-    ctx.widgets.get("_cell_gating_scroll").setFrameShape(QFrame.NoFrame)
-    ctx.widgets.get("_cell_gating_scroll").setFixedHeight(_GATING_SCROLL_H)
-    reg.register("_cell_gating_inner", QWidget())
-    QVBoxLayout(ctx.widgets.get("_cell_gating_inner"))
-    ctx.widgets.get("_cell_gating_scroll").setWidget(ctx.widgets.get("_cell_gating_inner"))
-    cf_layout.addWidget(ctx.widgets.get("_cell_gating_scroll"))
-    root.addWidget(control_frame)
-
-    # CDF plot area
-    reg.register("_cell_gating_figure", Figure(figsize=(8, 5), dpi=100))
-    reg.register("_cell_gating_canvas", FigureCanvas(ctx.widgets.get("_cell_gating_figure")))
-
-    reg.register("_cell_gating_plot_scroll", QScrollArea(parent))
-    ctx.widgets.get("_cell_gating_plot_scroll").setWidgetResizable(True)
-    ctx.widgets.get("_cell_gating_plot_scroll").setFrameShape(QFrame.NoFrame)
-    ctx.widgets.get("_cell_gating_plot_scroll").setWidget(ctx.widgets.get("_cell_gating_canvas"))
-    # Floor the plot height so the gating controls above can never squeeze the
-    # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
-    ctx.widgets.get("_cell_gating_plot_scroll").setMinimumHeight(_GATING_PLOT_MIN_H)
-    install_canvas_wheel_scroll(ctx.widgets.get("_cell_gating_canvas"), ctx.widgets.get("_cell_gating_plot_scroll"))
-
-    from widgets.mpl_toolbar import MplToolbar
-    reg.register("_cell_gating_toolbar", MplToolbar(ctx.widgets.get("_cell_gating_canvas"), parent))
-
-    reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
-    ctx.widgets.get("_cell_gating_status_label").setObjectName("Muted")
-    root.addWidget(ctx.widgets.get("_cell_gating_status_label"))
-
-    opt_panel = QWidget(parent)
-    opt_layout = QVBoxLayout(opt_panel)
-    opt_layout.setContentsMargins(0, 4, 0, 0)
-    opt_layout.addWidget(build_hline_separator(opt_panel))
-    opt_layout.addWidget(build_section_header(
-        opt_panel, "Optimize ThreshFracOn between two wells",
-    ))
-    opt_row = QWidget(opt_panel)
-    # FlowLayout + flow_group: each label stays glued to its control, and the row
-    # wraps onto extra lines at narrow width instead of clipping controls off-edge.
-    opt_row_layout = FlowLayout(opt_row)
-    opt_row_layout.setContentsMargins(0, 0, 0, 0)
-    opt_channel = reg.register("_cell_gating_opt_channel_combo", QComboBox(opt_row))
-    opt_channel.setMinimumWidth(theme.Metrics.combo_min_w)
-    opt_row_layout.addWidget(flow_group(opt_row, "Channel:", opt_channel))
-    opt_well_a = reg.register("_cell_gating_opt_well_a_combo", QComboBox(opt_row))
-    opt_well_a.setMinimumWidth(_OPT_WELL_A_MIN_W)
-    opt_row_layout.addWidget(flow_group(opt_row, "Well A:", opt_well_a))
-    opt_well_b = reg.register("_cell_gating_opt_well_b_combo", QComboBox(opt_row))
-    opt_well_b.setMinimumWidth(_OPT_WELL_B_MIN_W)
-    opt_row_layout.addWidget(flow_group(opt_row, "Well B:", opt_well_b))
-    opt_tp = reg.register("_cell_gating_opt_timepoint_combo", QComboBox(opt_row))
-    opt_tp.setMinimumWidth(_OPT_TP_MIN_W)
-    opt_tp.setToolTip(
-        "Restrict the fraction-on comparison to one timepoint, or pool all "
-        "timepoints. Pooling across timepoints where the wells are both 'off' "
-        "early dilutes the difference, so picking the relevant timepoint gives a "
-        "sharper threshold."
-    )
-    opt_row_layout.addWidget(flow_group(opt_row, "Timepoint:", opt_tp))
-    opt_min = reg.register("_cell_gating_opt_min_edit", QLineEdit("0.0", opt_row))
-    opt_min.setFixedWidth(theme.Metrics.num_field_w_lg)
-    opt_row_layout.addWidget(flow_group(opt_row, "Min:", opt_min))
-    opt_max = reg.register("_cell_gating_opt_max_edit", QLineEdit("100.0", opt_row))
-    opt_max.setFixedWidth(theme.Metrics.num_field_w_lg)
-    opt_row_layout.addWidget(flow_group(opt_row, "Max:", opt_max))
-    opt_steps = reg.register("_cell_gating_opt_steps_edit", QLineEdit("101", opt_row))
-    opt_steps.setFixedWidth(theme.Metrics.short_field_w)
-    opt_steps.setToolTip(
-        "Number of thresholds scanned across the Min–Max range, evenly "
-        "spaced via numpy.linspace. NOT a step size — \"101\" scans 101 "
-        "thresholds (every 1 unit across a 0–100 range). Higher values "
-        "give a finer scan at the cost of a little compute."
-    )
-    opt_row_layout.addWidget(flow_group(opt_row, "# Points:", opt_steps))
-    from PySide6.QtWidgets import QPushButton as _QPushButton
-    opt_btn = _QPushButton("Optimize ThreshFracOn", opt_row)
-    opt_btn.setProperty("variant", "secondary")
-    opt_btn.setToolTip(
-        "Scan # Points thresholds between Min and Max for the selected "
-        "channel, compute fraction-on in Well A and Well B at each "
-        "threshold, then apply the threshold that maximizes their "
-        "relative fraction-on gap, |Δ| / max(fa, fb)."
-    )
-    opt_btn.clicked.connect(lambda _=False: cell_gating_optimize_thresh_frac_on(ctx))
-    reg.register("_cell_gating_opt_btn", opt_btn)
-    opt_row_layout.addWidget(opt_btn)
-    opt_row_layout.addStretch(1)
-    opt_layout.addWidget(opt_row)
-
-    # Optional fold-change row: optimise over a fold-change-adjusted fraction-on
-    # (the same vs-control / vs-t0 normalisation the plot tabs use), so the
-    # threshold that best separates A and B is chosen on the *normalised* metric.
-    # These controls are INDEPENDENT of the plotting tabs' fold-change state —
-    # they live only here and are read at optimise time, so configuring them
-    # never disturbs the Bar / Line plots.
-    fc_row = QWidget(opt_panel)
-    fc_row_layout = FlowLayout(fc_row)
-    fc_row_layout.setContentsMargins(0, 0, 0, 0)
-    fc_control = reg.register("_cell_gating_opt_fc_control_combo", QComboBox(fc_row))
-    fc_control.setMinimumWidth(theme.Metrics.combo_min_w_sm)
-    fc_control.setToolTip(
-        "Divide (or subtract) each well's fraction-on by a control well / "
-        "replicate set's fraction-on at the same scanned threshold. \"—\" "
-        "optimises over the raw fraction-on (the original behaviour).\n\n"
-        "Note: with the Ratio operator a shared control cancels in the "
-        "relative gap, so it only narrows the scan to where the control still "
-        "has signal — use Subtract, or a Baseline, to actually reshape the "
-        "A-vs-B separation."
-    )
-    fc_ctrl_op = reg.register("_cell_gating_opt_fc_ctrl_op_combo", QComboBox(fc_row))
-    fc_ctrl_op.addItem("Ratio", "ratio")
-    fc_ctrl_op.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(flow_group(fc_row, "Fold change —  Control:", fc_control, fc_ctrl_op))
-    fc_baseline = reg.register("_cell_gating_opt_fc_baseline_combo", QComboBox(fc_row))
-    fc_baseline.setMinimumWidth(_FC_BASELINE_MIN_W)
-    fc_baseline.setToolTip(
-        "Divide (or subtract) each well's fraction-on by its own fraction-on at "
-        "a baseline timepoint. \"t0\" uses each well's earliest timepoint."
-    )
-    fc_t0_op = reg.register("_cell_gating_opt_fc_t0_op_combo", QComboBox(fc_row))
-    fc_t0_op.addItem("Ratio", "ratio")
-    fc_t0_op.addItem("Subtract", "subtract")
-    fc_row_layout.addWidget(flow_group(fc_row, "Baseline:", fc_baseline, fc_t0_op))
-    fc_order = reg.register("_cell_gating_opt_fc_order_combo", QComboBox(fc_row))
-    fc_order.addItem("Control first", "ctrl_first")
-    fc_order.addItem("Baseline first", "t0_first")
-    fc_row_layout.addWidget(flow_group(fc_row, "Order:", fc_order))
-    fc_row_layout.addStretch(1)
-    opt_layout.addWidget(fc_row)
-
-    # Changing the channel or either well re-derives the available timepoints and
-    # auto-fills Min/Max from the data range (so the scan actually spans the
-    # values — the hardcoded 0–100 default sits below typical MFI data, which is
-    # why a fresh Optimize used to return the range minimum). Changing only the
-    # timepoint just re-derives the range.
-    for _combo in (
-        ctx.widgets.get("_cell_gating_opt_channel_combo"),
-        ctx.widgets.get("_cell_gating_opt_well_a_combo"),
-        ctx.widgets.get("_cell_gating_opt_well_b_combo"),
-    ):
-        _combo.currentIndexChanged.connect(
-            lambda _idx=0: _cell_gating_on_opt_scope_changed(ctx)
-        )
-    ctx.widgets.get("_cell_gating_opt_timepoint_combo").currentIndexChanged.connect(
-        lambda _idx=0: _cell_gating_autofill_opt_range(ctx)
-    )
-    opt_result_label = reg.register("_cell_gating_opt_result_label", QLabel(
-        "Choose two wells and a threshold range, then optimize.",
-        opt_panel,
-    ))
-    opt_result_label.setObjectName("Muted")
-    opt_result_label.setWordWrap(True)
-    opt_layout.addWidget(opt_result_label)
-    root.addWidget(opt_panel)
-
-    # CDFs anchor the bottom of the tab — controls + optimizer sit above,
-    # CDFs (with their toolbar) are the visual readout the user reads while
-    # tuning those controls, so we put them last.
-    root.addWidget(build_hline_separator(parent))
-    root.addWidget(build_section_header(
-        parent, "Cumulative distributions (CDF)",
-    ))
-    root.addWidget(ctx.widgets.get("_cell_gating_plot_scroll"))
-    root.addWidget(ctx.widgets.get("_cell_gating_toolbar"))
-
+    # The optimizer is a tool, not tab state, so it lives in its own non-modal
+    # window — built now (hidden) so its handles register with everything else.
+    ctx.runtime.cell_gating.optimizer_window = build_optimizer_window(ctx, parent)
     _cell_gating_refresh_optimizer_controls(ctx)
 
     # Paint the themed empty state now so the canvas is never a bare white
     # block before a dataset loads (it only gets painted on data otherwise).
     _cell_gating_plot_cdf(ctx)
+
+
+def _source_radio(parent: QWidget, layout: QVBoxLayout, label: str,
+                  tooltip: str) -> QRadioButton:
+    """The "per-channel numbers" half of a layer's radio pair, indented to sit
+    under its section's lead-in line."""
+    row = QWidget(parent)
+    row_layout = QHBoxLayout(row)
+    row_layout.setContentsMargins(_RADIO_INDENT, 0, 0, 0)
+    radio = QRadioButton(label, row)
+    radio.setToolTip(tooltip)
+    row_layout.addWidget(radio)
+    row_layout.addStretch(1)
+    layout.addWidget(row)
+    return radio
+
+
+def _gate_source_row(ctx, parent: QWidget, mode: str, *, label: str,
+                     tooltip: str, btn_tooltip: str) -> QRadioButton:
+    """The "scatter gates" half of a layer's radio pair, plus its gate picker.
+
+    The picker sits inside its own layer's row. Both pickers used to read "All
+    gates" and stand 37 lines apart, with only the checkbox text above to say
+    which layer each belonged to.
+
+    The radio and its "no gates drawn" hint are stamped on the runtime so
+    ``_cell_gating_refresh_gate_filter`` can re-enable them the moment a gate is
+    drawn on the Scatter Plot tab — deciding it once here would leave the option
+    dead for the rest of the session.
+    """
+    row = QWidget(parent)
+    layout = QHBoxLayout(row)
+    layout.setContentsMargins(_RADIO_INDENT, 0, 0, 0)
+    radio = QRadioButton(label, row)
+    radio.setToolTip(tooltip)
+    layout.addWidget(radio)
+    layout.addSpacing(8)
+    btn = QPushButton("All gates", row)
+    btn.setMinimumWidth(_GATE_BTN_MIN_W)
+    btn.setToolTip(btn_tooltip)
+    btn.clicked.connect(lambda _=False: _open_gate_filter_menu(ctx, mode))
+    layout.addWidget(btn)
+    layout.addStretch(1)
+    parent.layout().addWidget(row)
+
+    # A dead control says why it is dead and where to go. Both pickers used to
+    # sit fully enabled over an empty menu whose only entry read "No gates drawn
+    # yet".
+    hint = QLabel("No gates drawn yet — draw one on the Scatter Plot tab.", parent)
+    hint.setObjectName("Muted")
+    hint.setContentsMargins(_RADIO_INDENT * 2, 0, 0, 0)
+    parent.layout().addWidget(hint)
+
+    ctx.widgets.register(_GATE_BUTTON_HANDLE[mode], btn)
+    setattr(ctx.runtime.cell_gating, _GATE_RADIO_ATTR[mode], radio)
+    setattr(ctx.runtime.cell_gating, _GATE_HINT_ATTR[mode], hint)
+    return radio
+
+
+def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
+    """Section 1 — which cells count at all."""
+    layout.addWidget(build_section_header(
+        frame, "Cell inclusion — which cells count",
+        hint="Layers that remove cells from every plot, statistic and export.",
+    ))
+
+    # The QC debris gate leads: it is applied to every cell no matter what the
+    # rest of this section says, so it cannot be one of the alternatives below.
+    layout.addWidget(QLabel("Always applied:", frame))
+    try:
+        layout.addWidget(build_qc_gate_controls(ctx, frame))
+    except Exception:
+        swallowed()  # QC controls are best-effort; never block the tab build
+
+    layout.addWidget(QLabel("Then include cells by:", frame))
+    per_channel = _source_radio(
+        frame, layout, "Per-channel intensity minimum (table below)",
+        "Exclude cells whose mean fluorescence intensity falls below the "
+        "channel's Include ≥ floor.")
+
+    scatter = _gate_source_row(
+        ctx, frame, "gating",
+        label="Scatter-plot gates",
+        tooltip="Define the Included population from the named rectangular "
+                "gates drawn on the Scatter Plot tab instead of the per-channel "
+                "intensity thresholds. Gates are saved with the dataset.",
+        btn_tooltip="Which scatter gates define the Included population (union "
+                    "of the checked gates). Independent of the fraction-on "
+                    "selection below.",
+    )
+    _wire_source_radios(
+        ctx, frame, per_channel, scatter,
+        active=bool(ctx.state.cell_gating.use_scatter_gates),
+        handle="_cell_gating_use_scatter_gates_cb",
+        on_change=cell_gating_on_use_scatter_gates_change,
+    )
+    _mount_threshold_table(ctx, frame, layout, "_cell_gating_inner")
+
+
+def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
+    """Section 2 — which of the included cells count as ON."""
+    layout.addWidget(build_hline_separator(frame))
+    layout.addWidget(build_section_header(
+        frame, "Fraction-on — which included cells count as ON",
+        hint="Removes no cells; decides which of the included ones are 'on' for "
+             "fraction-on statistics.",
+    ))
+
+    per_channel = _source_radio(
+        frame, layout, "Per-channel ON cutoff (table below)",
+        "Count an included cell as 'on' when its mean fluorescence intensity "
+        "reaches the channel's ON ≥ cutoff.")
+
+    scatter = _gate_source_row(
+        ctx, frame, "thresh",
+        label="Scatter-plot gate",
+        tooltip="Count the cells inside the selected gate(s) as 'on' instead of "
+                "the cells above the per-channel cutoff. Independent of cell "
+                "inclusion — no cells are removed.",
+        btn_tooltip="Which scatter gates define the fraction-on 'on' population "
+                    "(union of the checked gates). Independent of the inclusion "
+                    "selection above.",
+    )
+    _wire_source_radios(
+        ctx, frame, per_channel, scatter,
+        active=bool(ctx.state.cell_gating.use_scatter_thresh),
+        handle="_cell_gating_use_scatter_thresh_cb",
+        on_change=cell_gating_on_use_scatter_thresh_change,
+    )
+    _mount_threshold_table(ctx, frame, layout, "_cell_gating_thresh_inner")
+
+    auto_row = QWidget(frame)
+    auto_row_layout = QHBoxLayout(auto_row)
+    auto_row_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 0)
+    auto_btn = QPushButton("Auto-threshold all channels", auto_row)
+    auto_btn.setProperty("variant", "secondary")
+    auto_btn.setToolTip(
+        "Compute a default ON cutoff per channel via Otsu on "
+        "a per-cell + matched-background-pixel distribution sampled from "
+        "the first, middle, and last timepoint of every FOV. The "
+        "per-cell inclusion floors are NOT modified.\n\n"
+        "Progress + per-channel results are written to the log drawer."
+    )
+    auto_btn.clicked.connect(lambda _=False: cell_gating_auto_threshold(ctx))
+    auto_row_layout.addWidget(auto_btn)
+    opt_btn = QPushButton("Optimize ON cutoff…", auto_row)
+    opt_btn.setProperty("variant", "secondary")
+    opt_btn.setToolTip(
+        "Open the optimizer: scan a range of cutoffs for one channel and apply "
+        "the one that best separates two wells' fraction-on.")
+    opt_btn.clicked.connect(lambda _=False: show_optimizer_window(ctx))
+    auto_row_layout.addWidget(opt_btn)
+    auto_row_layout.addStretch(1)
+    ctx.widgets.register("_cell_gating_auto_btn", auto_btn)
+    ctx.widgets.register("_cell_gating_open_optimizer_btn", opt_btn)
+    layout.addWidget(auto_row)
+
+
+def _wire_source_radios(ctx, frame: QWidget, per_channel: QRadioButton,
+                        scatter: QRadioButton, *, active: bool, handle: str,
+                        on_change) -> None:
+    """Make one layer's two sources exclusive and wire the change handler.
+
+    Only the scatter radio is registered and only it drives the handler: the
+    pair is exclusive, so one signal carries the whole state, and the controller
+    keeps reading a single ``isChecked()`` exactly as it did from the checkbox
+    this replaced.
+    """
+    group = QButtonGroup(frame)
+    group.setExclusive(True)
+    group.addButton(per_channel)
+    group.addButton(scatter)
+    scatter.setChecked(active)
+    per_channel.setChecked(not active)
+    ctx.widgets.register(handle, scatter)
+    scatter.toggled.connect(lambda _on: on_change(ctx))
+    # Keep the group alive for as long as its buttons: a QButtonGroup parented
+    # to the frame is fine, but the reference here documents that exclusivity is
+    # what makes the single registered handle sufficient.
+    ctx.runtime.cell_gating.button_groups = (
+        list(ctx.runtime.cell_gating.button_groups or []) + [group])
+
+
+def _mount_threshold_table(ctx, frame: QWidget, layout: QVBoxLayout,
+                          handle: str) -> None:
+    """Host for one decision's per-channel table, indented under its radio pair.
+
+    Each table sits inside the section that owns the decision it feeds rather
+    than in a shared "Per-channel thresholds" block below both. A shared block
+    needs a heading that names neither decision, which is the shape of the
+    original defect (both columns under the ThreshFracOn header) with a more
+    neutral label on it — and since the two columns grey out independently, that
+    block is half-dead whenever either layer is driven by a scatter gate.
+
+    The rows themselves come from ``controller._cell_gating_build_channel_controls``
+    on data load; this only frames the container.
+    """
+    host = ctx.widgets.register(handle, QWidget(frame))
+    host_layout = QVBoxLayout(host)
+    host_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 4)
+    layout.addWidget(host)
+
+
+def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
+    """The gate summary, the per-layer funnel, and the Included total."""
+    layout.addWidget(build_hline_separator(frame))
+
+    summary = ctx.widgets.register("_cell_gating_gate_summary", QLabel("", frame))
+    summary.setObjectName("Muted")
+    summary.setWordWrap(True)
+    layout.addWidget(summary)
+
+    # Which layer removed what. One aggregate figure says a gate did something;
+    # it cannot say which gate, and a layer that was never applied is reported
+    # as "not applied" rather than as a zero it did not measure.
+    funnel = ctx.widgets.register("_cell_gating_funnel_label", QLabel("", frame))
+    funnel.setObjectName("Muted")
+    funnel.setToolTip(
+        "Each inclusion layer applied on top of the ones above it, in the order "
+        "the app composes them. Manual curation and the intensity gate share "
+        "one line because they write the same column and cannot be separated "
+        "from the data.")
+    layout.addWidget(funnel)
+
+    count = ctx.widgets.register("_cell_gating_included_count", QLabel("", frame))
+    count.setWordWrap(True)
+    count.setToolTip(
+        "Cells passing every inclusion layer — manual curation, the QC debris "
+        "gate, the crop region, and the cell-gating / scatter-gate layer — "
+        "across all loaded wells (not just the selected ones the curves below "
+        "show). The fraction-on cutoffs (ThreshFracOn / ThreshCountOn) do not "
+        "change this number: they define which included cells count as 'on', "
+        "not which cells count."
+    )
+    layout.addWidget(count)
+
+
+def _build_cdf_section(ctx, parent: QWidget, root: QVBoxLayout,
+                       FigureCanvas, Figure) -> None:
+    """The CDFs, directly under the controls they are read against."""
+    reg = ctx.widgets
+    reg.register("_cell_gating_figure", Figure(figsize=(8, 5), dpi=100))
+    canvas = reg.register("_cell_gating_canvas",
+                          FigureCanvas(ctx.widgets.get("_cell_gating_figure")))
+
+    plot_scroll = reg.register("_cell_gating_plot_scroll", QScrollArea(parent))
+    plot_scroll.setWidgetResizable(True)
+    plot_scroll.setFrameShape(QFrame.NoFrame)
+    plot_scroll.setWidget(canvas)
+    # Floor the plot height so the gating controls above can never squeeze the
+    # CDFs into an unreadable sliver (the outer scroll absorbs any overflow).
+    plot_scroll.setMinimumHeight(_GATING_PLOT_MIN_H)
+    install_canvas_wheel_scroll(canvas, plot_scroll)
+
+    from widgets.mpl_toolbar import MplToolbar
+    toolbar = reg.register("_cell_gating_toolbar", MplToolbar(canvas, parent))
+
+    status = reg.register("_cell_gating_status_label", QLabel("No data loaded", parent))
+    status.setObjectName("Muted")
+
+    root.addWidget(build_hline_separator(parent))
+    root.addWidget(build_section_header(
+        parent, "Cumulative distributions (CDF)",
+        hint="Where the thresholds above fall in the data. The optimizer used "
+             "to sit between these and the controls they explain.",
+    ))
+    root.addWidget(status)
+    root.addWidget(plot_scroll)
+    root.addWidget(toolbar)
 
 
 # ── sub-tab entry point ───────────────────────────────────────────────────

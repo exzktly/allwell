@@ -50,6 +50,7 @@ from well_viewer.features.image_browser.image_table.controller import (
 from well_viewer.features.image_browser.image_table.build_layout import (
     image_table_clear_render,
     image_table_reset_layout,
+    image_table_reset_on_dataset_load,
 )
 from well_viewer.features.image_browser.image_table.builder_view import (
     build_shelf, builder_notify_rendered, builder_flush_pending,
@@ -295,6 +296,10 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     _it = ctx.runtime.image_table
     if _it.cells is None:
         _it.cells = []
+    # The view reset returns the grid to fresh-tab state through this stamp, so
+    # persistence/reset_scopes.py never names the Image Table (and no-ops when
+    # this lazy tab was never built).
+    _it.reset_cb = lambda: image_table_reset_on_dataset_load(ctx)
     # Shared square-region crop helper. on_change re-runs Generate so the
     # rendered grid follows mode toggles and crop changes automatically.
     if _it.crop_tool is None:

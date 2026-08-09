@@ -1,7 +1,8 @@
 """Sample-definitions persistence (in ``pipeline_info.json``).
 
-Bundles per-block savers/loaders into the single Save / Load / Clear All
-buttons exposed on the Sample Definitions tab.
+Reads and writes the ``sample_definitions`` block — well labels, the unified
+selections model, notes, and a copy of the plot groups. Clearing them is a reset
+scope rather than a function here; see ``persistence/reset_scopes.py``.
 """
 
 from __future__ import annotations
@@ -9,8 +10,6 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtWidgets import QMessageBox
-
-from well_viewer.core.safe import swallowed
 
 _logger = logging.getLogger("well_viewer")
 
@@ -223,91 +222,3 @@ def load_from_pipeline_info(ctx) -> bool:
     from well_viewer.core.selection_controller import invalidate_stats_cache
     invalidate_stats_cache(ctx)
     return True
-
-
-def clear_all(ctx) -> None:
-    """Clear every definition driven from the Sample Definitions tab."""
-    app = ctx.window  # transitional bridge: the refresh tail below still reads app._*
-    confirm = QMessageBox.question(
-        ctx.window, "Clear sample definitions",
-        "Discard all well labels, replicate sets, bar groups, ratio "
-        "metrics, and cell-gating thresholds defined on this tab?\n\n"
-        "This writes to the dataset's saved state immediately — the cleared "
-        "plot groups, notes and ratios are persisted as part of the clear, "
-        "not held until you press Save.",
-        QMessageBox.Yes | QMessageBox.No,
-        QMessageBox.No,
-    )
-    if confirm != QMessageBox.Yes:
-        return
-
-    sel_state = ctx.state.selection
-    ctx.state.dataset.well_labels.clear()
-    if hasattr(ctx.window, "_label_panel_refresh"):
-        try:
-            # Function-local feature import: this Clear-All *command* drives a UI
-            # refresh, but the persistence module stays data-only at module scope
-            # (see test_layering) — same escape hatch the cell-gating reset below
-            # already uses.
-            from well_viewer.features.grouping.label_grid_view import label_grid_refresh
-            label_grid_refresh(ctx)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-
-    sel_state.notes_text = ""
-    notes_edit = ctx.widgets.get_or_none("_notes_edit")
-    if notes_edit is not None:
-        blocked = notes_edit.blockSignals(True)
-        try:
-            notes_edit.clear()
-        finally:
-            notes_edit.blockSignals(blocked)
-
-    sel_state.selections = []
-    sel_state.current_selection_id = None
-    sel_state.plot_groups = []
-    try:
-        ctx.persistence.save("plot_groups")
-    except Exception:
-        _logger.exception("Plot Groups save after Clear failed")
-
-    # set_ratio_metrics is core (persistence->core is allowed); function-local to
-    # keep this module's import surface minimal, matching the feature imports below.
-    from well_viewer.core.channel_state_controller import set_ratio_metrics
-    set_ratio_metrics(ctx, [])
-
-    fluor_edits = ctx.widgets.get_or_none("_cell_gating_fluor_gate_edits")
-    if fluor_edits is not None:
-        try:
-            from well_viewer.features.grouping.cell_gating.controller import (
-                cell_gating_on_gating_change,
-                cell_gating_on_threshold_frac_on_change,
-            )
-            # cell-area gating retired (now QC-owned); reset only fluor + frac.
-            thresh_edits = ctx.widgets.get_or_none("_cell_gating_thresh_frac_edits") or {}
-            for edit in fluor_edits.values():
-                edit.setText("0.0")
-            for edit in thresh_edits.values():
-                edit.setText("50.0")
-            cell_gating_on_gating_change(ctx)
-            cell_gating_on_threshold_frac_on_change(ctx)
-        except Exception:
-            _logger.exception("Cell Gating reset during Clear failed")
-
-    if hasattr(app, "_groups_centre_refresh"):
-        try:
-            app._groups_centre_refresh()
-        except Exception:
-            _logger.exception("Sample Definitions refresh after Clear failed")
-    if hasattr(app, "_plot_groups_refresh"):
-        try:
-            app._plot_groups_refresh()
-        except Exception:
-            _logger.exception("Plot Groups refresh after Clear failed")
-    app._invalidate_stats_cache()
-    if hasattr(app, "_redraw"):
-        try:
-            app._redraw()
-        except Exception:
-            swallowed()  # was: pass (silent except)
-    app._set_status("Sample definitions cleared.")

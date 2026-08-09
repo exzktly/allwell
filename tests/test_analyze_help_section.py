@@ -108,7 +108,10 @@ def test_every_section_is_recorded(analyze_tab):
 def test_sections_are_recorded_in_build_order(analyze_tab):
     titles = list(analyze_tab._section_widgets)
     assert titles[0] == "Filename Schema"
-    assert titles.index("Folders") > titles.index("Channel Tokens")
+    # The form builds Folders before Channel tokens, and the manual numbers its
+    # Analyze headings to match. This assertion had the pair the other way
+    # round, which is the order neither the form nor the manual uses.
+    assert titles.index("Channel Tokens") > titles.index("Folders")
     assert titles[-1] == "Scratch Disk"
 
 

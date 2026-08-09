@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
+from PySide6.QtWidgets import QLabel, QLineEdit, QWidget
 
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.channel_state_controller import (
@@ -65,7 +65,9 @@ from well_viewer.features.grouping.cell_gating.gating_compute import (
     _valid_values_for_channel,
     apply_fluor_gating,
     format_inclusion_counts,
+    format_inclusion_funnel,
     inclusion_counts,
+    inclusion_funnel,
 )
 from well_viewer.features.grouping.cell_gating.opt_curve_view import (
     _cell_gating_show_opt_curve_popup,
@@ -504,6 +506,17 @@ _GATE_BUTTON_ATTR = {
     "gating": "gating_gate_btn",
     "thresh": "thresh_gate_btn",
 }
+# The "scatter gates" radio of each layer's source pair, and the hint shown
+# beneath it while no gate exists to pick. Stamped by the tab builder; absent
+# until the tab is built, so every reader guards for None.
+_GATE_RADIO_ATTR = {
+    "gating": "gating_source_radio",
+    "thresh": "thresh_source_radio",
+}
+_GATE_HINT_ATTR = {
+    "gating": "gating_no_gates_hint",
+    "thresh": "thresh_no_gates_hint",
+}
 _GATE_MODE_ACTIVE_ATTR = {
     "gating": "use_scatter_gates",
     "thresh": "use_scatter_thresh",
@@ -564,7 +577,14 @@ def _cell_gating_gate_button_text(ctx, mode: str) -> str:
 
 def _cell_gating_refresh_gate_filter(ctx) -> None:
     """Sync both Gates buttons (text + enabled) to the current gates, pruning any
-    explicitly-selected names that no longer exist (in each layer's set)."""
+    explicitly-selected names that no longer exist (in each layer's set).
+
+    Also drives each layer's "scatter gates" radio and its "no gates drawn yet"
+    hint. Gates are drawn on a *different* tab, so whether that option is
+    selectable can change while this tab sits open — deciding it once at build
+    time would leave the option permanently dead for anyone who opened Cell
+    Gating before drawing their first gate.
+    """
     names = set(_cell_gating_gate_names(ctx))
     for mode in _GATE_MODES:
         choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
@@ -577,6 +597,12 @@ def _cell_gating_refresh_gate_filter(ctx) -> None:
             btn.setText(_cell_gating_gate_button_text(ctx, mode))
             # Each Gates button is only relevant when its own layer is active.
             btn.setEnabled(bool(getattr(ctx.state.cell_gating, _GATE_MODE_ACTIVE_ATTR[mode], False)))
+        radio = getattr(ctx.runtime.cell_gating, _GATE_RADIO_ATTR[mode], None)
+        if radio is not None:
+            radio.setEnabled(bool(names))
+        hint = getattr(ctx.runtime.cell_gating, _GATE_HINT_ATTR[mode], None)
+        if hint is not None:
+            hint.setVisible(not names)
 
 
 def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
@@ -599,11 +625,17 @@ def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
     lbl = ctx.runtime.cell_gating.included_count
     if lbl is None:
         return
-    included, total, qc_failed = inclusion_counts(
-        (ctx.state.dataset.cache or {}).values())
+    frames = list((ctx.state.dataset.cache or {}).values())
+    included, total, qc_failed = inclusion_counts(frames)
     ctx.runtime.cell_gating.last_counts = (included, total, qc_failed)
     lbl.setText(format_inclusion_counts(
         included, total, qc_failed, pending=pending, failed=failed))
+
+    # The same population, broken down by the layer that removed each cell. One
+    # aggregate number says a gate did something; it cannot say which gate.
+    funnel = ctx.runtime.cell_gating.funnel_label
+    if funnel is not None:
+        funnel.setText(format_inclusion_funnel(inclusion_funnel(frames)))
 
 
 def _cell_gating_scatter_mode_on(ctx) -> bool:
@@ -1130,12 +1162,50 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
 
 
 def _cell_gating_build_channel_controls(ctx) -> None:
-    inner_layout = ctx.runtime.cell_gating.inner.layout()
+    """Rebuild both per-channel threshold tables — one per decision.
+
+    The inclusion floor and the fraction-on cutoff are per-channel numbers of
+    the same shape, which is a poor reason to put them in one table: one decides
+    whether a cell is in the dataset at all, the other only how the cells that
+    are in it get counted. A single table needs a heading that names neither,
+    and the tab already had that failure in its original form (both columns
+    under the ThreshFracOn header). Each column therefore lives under the
+    section that owns the decision it feeds.
+
+    Two symptoms make the split concrete rather than tidy-minded. The columns
+    grey out independently — ``_cell_gating_apply_scatter_gate_mode`` disables
+    whichever layer a scatter gate has replaced — so a shared table spends much
+    of its life half-dead under a neutral heading. And the two are rarely edited
+    together: the inclusion floors usually stay at their defaults while the ON
+    cutoffs are auto-thresholded and optimised.
+    """
+    rt = ctx.runtime.cell_gating
+    # ``getattr`` rather than attribute access: either host is absent until the
+    # tab has been built, and a caller may drive this with only one of them.
+    _build_threshold_grid(ctx, getattr(rt, "inner", None), kind="include")
+    _build_threshold_grid(ctx, getattr(rt, "thresh_inner", None), kind="on")
+
+
+def _build_threshold_grid(ctx, host, *, kind: str) -> None:
+    """Fill *host* with a ``Channel | <bound>`` table for one decision.
+
+    ``kind`` is ``"include"`` (the FluorGating inclusion floor) or ``"on"`` (the
+    ThreshFracOn fraction-on cutoff). The edit widgets are created once and
+    cached per channel, so a rebuild re-parents the existing fields rather than
+    dropping the user's unsaved keystrokes.
+    """
+    from PySide6.QtWidgets import QGridLayout
+
+    if host is None:
+        return
+    inner_layout = host.layout()
     while inner_layout.count():
         item = inner_layout.takeAt(0)
         w = item.widget()
         if w is not None:
-            w.deleteLater()
+            w.setParent(None)
+            if w not in _threshold_edit_widgets(ctx):
+                w.deleteLater()
 
     channels = list(ctx.state.channel.fluor_channels)
     # Ratios show up as virtual channels in the plot dropdowns; surface
@@ -1153,75 +1223,128 @@ def _cell_gating_build_channel_controls(ctx) -> None:
         row_specs.append((r.key(), f"{label} (ratio):"))
 
     if not row_specs:
-        lbl = QLabel("No channels loaded", ctx.runtime.cell_gating.inner)
+        lbl = QLabel("No channels loaded", host)
         lbl.setObjectName("Muted")
         inner_layout.addWidget(lbl)
         return
 
-    seg_tok = seg_channel_token_of(ctx)
-    for channel, row_label in row_specs:
-        ch_row = QWidget(ctx.runtime.cell_gating.inner)
-        rl = QHBoxLayout(ch_row)
-        rl.setContentsMargins(0, 0, 0, 0)
+    include = kind == "include"
+    # Column headers name the layer each column feeds and the measurement it is
+    # made against. The fraction-on table carries two, because an intensity
+    # Property and an smFISH Count Property are cut against different units:
+    # ThreshFracOn is a brightness, ThreshCountOn a spot tally.
+    if include:
+        headers = [("Include \u2265   (FluorGating, per-cell MFI)",
+                    "Cells whose mean fluorescence intensity in this channel is "
+                    "below the floor are excluded from analysis entirely.")]
+    else:
+        headers = [
+            ("ON \u2265   (ThreshFracOn, per-cell MFI)",
+             "Included cells at or above this cut count as 'on' when the "
+             "selected Property is an intensity. It removes no cells."),
+            ("ON >   (ThreshCountOn, spot count)",
+             "Included cells above this count as 'on' when the selected "
+             "Property is an smFISH Count. -1 counts every cell, including the "
+             "ones carrying no spots."),
+        ]
 
-        ch_lbl = QLabel(row_label, ch_row)
+    table = QWidget(host)
+    grid = QGridLayout(table)
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(16)
+    grid.setVerticalSpacing(4)
+    grid.setColumnMinimumWidth(0, _CH_LBL_W)
+    grid.setColumnStretch(len(headers) + 1, 1)
+
+    # The column header names its layer and the measurement it is made against —
+    # per-cell MFI, whatever Property the plotting tabs are showing. That caveat
+    # used to be a three-line paragraph at the top of the tab, far from either
+    # field it qualifies.
+    head = QLabel("Channel", table)
+    head.setObjectName("Muted")
+    grid.addWidget(head, 0, 0)
+    for col, (text, tip) in enumerate(headers, start=1):
+        head = QLabel(text, table)
+        head.setObjectName("Muted")
+        head.setToolTip(tip)
+        grid.addWidget(head, 0, col)
+
+    seg_tok = seg_channel_token_of(ctx)
+    for r, (channel, row_label) in enumerate(row_specs, start=1):
+        ch_lbl = QLabel(row_label, table)
         ch_lbl.setFixedWidth(_CH_LBL_W)
-        rl.addWidget(ch_lbl)
+        grid.addWidget(ch_lbl, r, 0)
 
         # R6: the typed slice is the source of truth — seed the slice with the
         # historical defaults for new rows, and seed the edit's text FROM the
         # slice (so values persisted/loaded before this row was built appear).
         gate_state = ctx.state.cell_gating
+        if include:
+            edits = ctx.runtime.cell_gating.fluor_gate_edits
+            if channel not in edits:
+                edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), table)
+                edit.setFixedWidth(_GATE_EDIT_W)
+                edit.editingFinished.connect(
+                    lambda _c=ctx: cell_gating_on_gating_change(_c))
+                edits[channel] = edit
+        else:
+            edits = ctx.runtime.cell_gating.thresh_frac_edits
+            if channel not in edits:
+                # Seed the slice with this channel's default — 50.0 for a
+                # readout channel, 0.0 for the nuclear/segmentation one, which
+                # has no meaningful ON/OFF brightness cut.
+                seeded = gate_state.thresh_frac_on.setdefault(
+                    channel, default_thresh_frac_on(channel, seg_tok))
+                edit = QLineEdit(str(seeded), table)
+                edit.setFixedWidth(_THRESH_EDIT_W)
+                edit.editingFinished.connect(
+                    lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c))
+                edits[channel] = edit
+        edits[channel].setParent(table)
+        grid.addWidget(edits[channel], r, 1)
 
-        rl.addWidget(QLabel("FluorGating:", ch_row))
-        if channel not in ctx.runtime.cell_gating.fluor_gate_edits:
-            gate_edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), ch_row)
-            gate_edit.setFixedWidth(_GATE_EDIT_W)
-            gate_edit.editingFinished.connect(
-                lambda _c=ctx: cell_gating_on_gating_change(_c)
-            )
-            ctx.runtime.cell_gating.fluor_gate_edits[channel] = gate_edit
-        rl.addWidget(ctx.runtime.cell_gating.fluor_gate_edits[channel])
+        if not include:
+            # The count metrics are cut against their own tally, not a
+            # brightness, so they carry a separate cutoff — and only the
+            # channels that actually have a ``_smfish_count`` column get the
+            # field. The others show an em-dash: "this channel has no count
+            # metric" is a different fact from "a cutoff I have not set", and an
+            # empty cell in a column of editable cells reads as the second.
+            count_edits = ctx.runtime.cell_gating.thresh_count_edits
+            if channel_supports_smfish(channel, ctx.state.channel.smfish_channels):
+                if channel not in count_edits:
+                    seeded_count = gate_state.thresh_count_on.setdefault(
+                        channel, default_thresh_count_on(channel))
+                    count_edit = QLineEdit(str(seeded_count), table)
+                    count_edit.setFixedWidth(_THRESH_EDIT_W)
+                    count_edit.setToolTip(
+                        "A cell is ON when its spot count is above this. -1 "
+                        "counts every cell, including the ones carrying no spots."
+                    )
+                    count_edit.editingFinished.connect(
+                        lambda _c=ctx: cell_gating_on_threshold_count_on_change(_c)
+                    )
+                    count_edits[channel] = count_edit
+                count_edits[channel].setParent(table)
+                grid.addWidget(count_edits[channel], r, 2)
+            else:
+                absent = QLabel("\u2014", table)
+                absent.setObjectName("Muted")
+                absent.setToolTip(
+                    "This channel has no smFISH count column, so there is no "
+                    "count cutoff to set.")
+                grid.addWidget(absent, r, 2)
 
-        rl.addWidget(QLabel("ThreshFracOn:", ch_row))
-        if channel not in ctx.runtime.cell_gating.thresh_frac_edits:
-            # Seed the slice with this channel's default — 50.0 for a readout
-            # channel, 0.0 for the nuclear/segmentation one, which has no
-            # meaningful ON/OFF brightness cut.
-            seeded = gate_state.thresh_frac_on.setdefault(
-                channel, default_thresh_frac_on(channel, seg_tok))
-            thresh_edit = QLineEdit(str(seeded), ch_row)
-            thresh_edit.setFixedWidth(_THRESH_EDIT_W)
-            thresh_edit.editingFinished.connect(
-                lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c)
-            )
-            ctx.runtime.cell_gating.thresh_frac_edits[channel] = thresh_edit
-        rl.addWidget(ctx.runtime.cell_gating.thresh_frac_edits[channel])
+    inner_layout.addWidget(table)
 
-        # The count metrics are cut against their own tally, not a brightness, so
-        # they carry a separate cutoff — and only the channels that actually have
-        # a ``_smfish_count`` column get the field.
-        if channel_supports_smfish(channel, ctx.state.channel.smfish_channels):
-            rl.addWidget(QLabel("ThreshCountOn:", ch_row))
-            if channel not in ctx.runtime.cell_gating.thresh_count_edits:
-                seeded_count = gate_state.thresh_count_on.setdefault(
-                    channel, default_thresh_count_on(channel))
-                count_edit = QLineEdit(str(seeded_count), ch_row)
-                count_edit.setFixedWidth(_THRESH_EDIT_W)
-                count_edit.setToolTip(
-                    "A cell is ON when its spot count is above this. -1 counts "
-                    "every cell, including the ones carrying no spots."
-                )
-                count_edit.editingFinished.connect(
-                    lambda _c=ctx: cell_gating_on_threshold_count_on_change(_c)
-                )
-                ctx.runtime.cell_gating.thresh_count_edits[channel] = count_edit
-            rl.addWidget(ctx.runtime.cell_gating.thresh_count_edits[channel])
 
-        rl.addStretch(1)
-
-        inner_layout.addWidget(ch_row)
-    inner_layout.addStretch(1)
+def _threshold_edit_widgets(ctx) -> set:
+    """Every cached threshold edit, so a rebuild re-parents rather than deletes
+    them — a deleted field takes the user's unsaved keystrokes with it."""
+    rt = ctx.runtime.cell_gating
+    return (set((rt.fluor_gate_edits or {}).values())
+            | set((rt.thresh_frac_edits or {}).values())
+            | set((rt.thresh_count_edits or {}).values()))
 
 
 def _cell_gating_optimizer_channel_specs(ctx) -> list[tuple[str, str]]:

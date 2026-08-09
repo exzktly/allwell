@@ -346,13 +346,15 @@ well_viewer/
 │   ├── grouping/     controller.py, tab_view.py, label_grid_view.py,
 │   │                 replicate_panel_view.py, pipeline_info_view.py
 │   │   └── cell_gating/   tab_view.py, controller.py, renderer.py,
-│   │                      opt_curve_view.py, gating_compute.py
+│   │                      optimizer_view.py, opt_curve_view.py,
+│   │                      gating_compute.py
 │   │                      ← the Cell Gating sub-tab, split by layer: the tab
 │   │                        builder wires controls to the controller, which
 │   │                        owns the two QThread workers, the ThreshFracOn
 │   │                        optimizers and the scatter-gate plumbing; the CDF
-│   │                        panel and the optimizer-curve window each draw on
-│   │                        their own, over Qt-free math in gating_compute
+│   │                        panel, the optimizer's own window and the
+│   │                        optimizer-curve window each draw on their own,
+│   │                        over Qt-free math in gating_compute
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py, _report.py
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
@@ -779,10 +781,12 @@ readout from the buttons that drive it.
 
 One `TabCtrl` control row remains, and it is deliberate: Sample Definitions' Cell
 Gating frame is inside a sub-tab, not a centre tab's control row. That page's own
-Import / Clear All buttons are actions on its band — they used to be a bespoke
-toolbar row with a separator under it, a whole strip of chrome carrying two icon
-buttons, which started every one of its sub-tab bodies 52px below where the other
-pages' content starts.
+Import button is an action on its band — it used to be a bespoke toolbar row with
+a separator under it, a whole strip of chrome, which started every one of its
+sub-tab bodies 52px below where the other pages' content starts. It is labelled
+rather than left as a bare glyph: the band renders level with the Cell Gating
+sub-tab, so an unlabelled icon there reads as an action on cell gating rather
+than on the page.
 
 **Image Table** is the deliberate exception: its controls stay split between the
 builder shelf and an action strip directly above the images, because the strip's
@@ -1505,6 +1509,77 @@ scope registry and dirty-flag helpers it re-exports — stays in
 `domain/fold_change_scopes.py`, which is what lets the unit tests reach
 that logic without importing Qt.
 
+### The Cell Gating tab
+
+The most control-dense tab in Review, and the one whose layout carries the most
+meaning, because it composes four gating layers that are easy to confuse. It is
+laid out as the two questions it answers, in the order the app applies them:
+
+1. **Cell inclusion — which cells count.** The QC debris gate leads, labelled
+   *always applied*: it composes with everything below and is not one of the
+   alternatives. Then a radio pair for the source of the inclusion decision —
+   per-channel intensity floors, or the Scatter Plot's rectangular gates.
+
+   `qc/tab_view.build_qc_gate_controls` lays the gate out as a grid with one row
+   per *measured quantity* — Area, Solidity, Region area, Circularity — and its
+   min / max bounds in aligned columns, rather than the single wrapping strip of
+   six independently-labelled fields it was. A quantity that admits only one
+   bound (solidity has no upper, region area no lower) renders an em-dash in the
+   other column: a bound that does not exist must not look like one left blank.
+2. **Fraction-on — which included cells count as ON.** The same radio pair
+   shape: per-channel cutoffs, or a scatter gate. Then Auto-threshold and the
+   button that opens the optimizer.
+
+Radio pairs rather than checkboxes because the code has always treated the two
+sources as exclusive — ticking the scatter option *replaces* the per-channel
+numbers rather than composing with them — and each layer's gate picker sits
+inside its own radio's row, since the two pickers are otherwise identical
+buttons reading "All gates". Only the scatter radio of each pair is registered
+(`_cell_gating_use_scatter_gates_cb` / `_cell_gating_use_scatter_thresh_cb`,
+names kept from the checkboxes they replace): exclusivity means one signal
+carries the whole state, and the controller keeps reading a single
+`isChecked()`. Gates are drawn on a *different* tab, so whether the scatter
+option is selectable is refreshed by `_cell_gating_refresh_gate_filter` — which
+also shows or hides the "no gates drawn yet" hint — rather than decided once at
+build time.
+
+Each section carries **its own** per-channel table, built by
+`controller._cell_gating_build_channel_controls` into `_cell_gating_inner`
+(the inclusion floors) and `_cell_gating_thresh_inner` (the ON cutoffs), one row
+per fluorescence channel and ratio metric. The fraction-on table has two value
+columns, because the cutoff that applies follows the selected Property:
+`ThreshFracOn` for an intensity, `ThreshCountOn` for an smFISH count. A channel
+with no spot-count column renders an em-dash in the count column rather than an
+empty cell — it has no count cutoff to set, which is not the same as one left
+unfilled. Two tables rather than one with two
+columns: the numbers share a shape but not a meaning — one decides membership of
+the dataset, the other only how members are counted — so a shared table needs a
+heading that names neither decision, which is the original defect (both columns
+under the ThreshFracOn header) wearing a politer label. The columns also grey out
+independently, since `_cell_gating_apply_scatter_gate_mode` disables whichever
+layer a scatter gate has replaced, so a shared table is half-dead whenever either
+layer is gate-driven. Neither table is inside a scroll area of its own: the tab
+already scrolls as a whole, and a second, height-capped scroll around the primary
+input surface scrolls inside the scrolling page.
+
+Under the table sits the readout: the gate summary, then the **inclusion
+funnel** — `gating_compute.inclusion_funnel`, each layer applied on top of the
+one above it in `df_included_mask`'s own order, so the last figure equals the
+Included total. A layer whose column is absent reports `None`, rendered "not
+applied", never "−0": a layer that was never applied and one that removed
+nothing are different facts (§7 of CLAUDE.md). Manual curation and the intensity
+gate share one line because they write the same `Included` column and cannot be
+separated from the frame — the label says so rather than implying a split the
+data does not support.
+
+The **CDFs** follow immediately, so a threshold edit and the distribution it is
+placed against are on one screen. The optimizer — twelve controls answering an
+occasional question — is not on the tab at all: `optimizer_view` builds it into
+its own **non-modal** window (non-modal because its answer is judged against the
+CDFs behind it), hidden, at tab-build time, so every optimizer widget handle
+registers at the same moment as the rest and the refreshers that repopulate
+those combos on a data change need no build-state guard.
+
 ### 5.4 The left sidebar
 
 `core/sidebar_view.build_sidebar(app, parent)` builds the well picker
@@ -1558,7 +1633,9 @@ definitions autosave). The `pipeline_info.json` hydrator runs first on load and
 `persistence/plot_groups.load_from_data_dir` runs second; an *absent*
 `persistence.json` section leaves the hydrated groups in place rather than
 clearing them, so a folder shared or copied without the sidecar keeps its
-groups.
+groups. The corollary matters for anything that clears them: writing only one of
+the two copies clears nothing, because the surviving copy re-hydrates on the next
+load. The Sample definitions reset scope writes both (§5.7).
 
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is
@@ -1740,26 +1817,68 @@ each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.
 
-**Resetting saved state.** The mode band's `rotate-ccw` button resets only the
-*view* (`view_state.reset` — selected wells, fold-change scopes, per-tab combos).
-A second button in the same cluster (`trash-2`, next to the Presentation/plot
-screen↔publication toggle) does a **full** reset: `_doc.delete(app)` deletes the
-whole `persistence.json` (every section above) and clears the in-memory cache,
-then `AllWellApp._on_reset_saves_clicked` reloads the dataset fresh. It's the
-"my saved state is wedged" escape hatch.
+**Resetting saved state — the scope model.** `persistence/reset_scopes.py` is
+the one map from what a user names to the state that name owns. State is
+modelled in two tiers and both title-bar reset buttons are expressed in them:
 
-`persistence.json` is not the whole of the user's state, though, so the handler
-clears the sidecar's user-curated blocks first: `persistence.cell_gating.clear_from_pipeline_info`
-(fluorescence gates, ThreshFracOn cutoffs, the drawn scatter gates and their
-per-layer selections) and `persistence.smfish.clear_thresholds`. Those blocks
-live in `pipeline_info.json` so they travel with the dataset, which meant a
-reset that only deleted `persistence.json` left every gate standing and the
-reload restored them from the sidecar as if the reset had skipped them. Each
-helper resets the live typed slice *before* touching the file, so nothing in the
-reload can write the old values back. The pipeline's own keys in the sidecar —
-including the sample-definition labels — are left intact, as are the dataset's
-data files. The handler is synchronous, so no debounced save can race between
-the delete and the reload.
+- **View** — how the data currently looks: selected wells and group visibility,
+  fold-change scopes, per-tab controls, plot and figure preferences, draw order,
+  the heatmap arrangement, the Multivariate configuration, the Image Table grid.
+  Cheap to rebuild and carrying no scientific decision, it resets as a whole:
+  `reset_view(ctx)`, behind the mode band's `rotate-ccw` button.
+- **Analysis** — the decisions themselves. One `ANALYSIS_SCOPES` entry each for
+  sample definitions, gating, curation, ratio metrics, smFISH thresholds and
+  Batch Export groups, picked individually from the checklist behind the
+  `trash-2` button (`core/reset_scopes_view.py`), then cleared by
+  `clear_analysis(ctx, keys)` and followed by a dataset reload.
+
+The dataset's own image and CSV files are a third tier no reset touches.
+
+A scope names every storage **domain** it owns, and its `clear` is responsible
+for all of them — the live typed state and every file the value is written to,
+whether that is `persistence.json`, `pipeline_info.json`, or a standalone
+sidecar. That is the property the design turns on, because the same value is
+often stored twice: plot groups live in both `persistence.json::plot_groups` and
+the `sample_definitions` block of the sidecar, and clearing one of the two is a
+no-op once the loader (which treats an absent section as "nothing to say", so a
+folder shared without its sidecar keeps its groups) re-hydrates from the other.
+Manual cell curation is in neither file — it has its own `cell_overrides.json`.
+
+`tests/test_reset_scopes.py` asserts the scopes **partition** the domain set
+exactly: every name the persistence registry registers, plus the two sidecar
+domains (`cell_gating`, `smfish`), is claimed by exactly one scope. A new
+persistence domain that belongs to no scope fails the suite. Its companion
+`test_the_partition_guard_bites` proves the guard fires on both halves of that —
+an unclaimed domain and a claim on a domain that no longer exists.
+
+Two consequences worth stating, because both were bugs before the model existed:
+
+- **Reset one domain at a time, never the file.** There is deliberately no
+  "delete `persistence.json`" helper. Deleting the shared document meant one
+  wrong argument at one call site could silently spare every section at once,
+  and the failure was invisible because the reload afterwards looked like a
+  reload of reset state.
+- **What resets live must equal what is dropped from disk.** `view_state.reset`
+  restores `PlotState` and `ExportPrefsState` generically via
+  `domain/state_defaults.restore_defaults` (so a field added to either slice is
+  covered without anybody extending a reset), then **re-saves** the section
+  instead of deleting it. Screen and disk therefore agree by construction rather
+  than by two lists staying in sync.
+
+`reset_scopes.py` imports no feature module. It reaches a built feature's
+widgets through callbacks the feature stamps on its `ctx.runtime.<feature>`
+namespace — `qc.refresh_widgets_cb`, `image_table.reset_cb`, alongside the
+existing `qc.changed_cb` — and recomputes derived columns by clearing the row
+cache so the registered cache projectors re-derive `QC_Pass` / `Crop_Pass` on the
+next fetch. An unstamped callback means the lazily-built feature was never
+built, so there are no widgets to refresh. The Segmentation tab's own "Reset
+crop + curation" menu action calls the same `clear_curation` the Curation
+checkbox does (`crop.controller.reset_crop_and_overrides_now` wraps it with the
+crop-mode exit and redraw only that entry point needs), so the two cannot drift.
+
+Each clear writes through `PersistenceRegistry.save` rather than
+`schedule_save`: the reload that follows would otherwise race the debounce timer
+and read the pre-reset value back.
 
 ### 5.8 The Export Style sidebar
 

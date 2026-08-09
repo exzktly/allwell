@@ -856,28 +856,59 @@ def load_from_data_dir(ctx) -> None:
 
 
 def reset(ctx) -> None:
-    app = ctx.window  # transitional bridge (B4)
-    """Wipe the live view-state (selections + fold-change + per-tab combos)
-    and drop the ``view_state`` section from ``persistence.json``.
+    """Return every field :func:`snapshot` captures to its default, in place.
 
     Caller is responsible for confirming with the user — this is destructive.
-    Dataset-level state (loaded wells, channels, ratios, heatmap layouts) is
-    intentionally left alone; only the user's *view* selections reset.
+    Dataset-level state (loaded wells, channels, gating, ratios) is left alone;
+    only the user's *view* resets.
+
+    Two properties this has to hold, both of which it previously did not:
+
+    **What resets and what is dropped from disk are the same set.** The old
+    version cleared selected wells, the fold-change scopes and three tabs'
+    combos, then deleted the whole ``view_state`` section — which also carried
+    the time-axis scale, legend visibility, draw order, focus timepoint, error-
+    band mode and export preferences. Those stayed on screen and vanished from
+    disk, so the app showed one thing and the next open showed another, with
+    nothing to indicate a reset had half-happened.
+
+    **The section is re-saved, not deleted.** Writing the post-reset snapshot
+    makes screen and disk agree by construction, so a field added to
+    ``PlotState`` later cannot reintroduce the divergence: it is reset by
+    ``restore_defaults`` and then written in the same state it is displayed in.
+
+    ``active_channel`` / ``active_metric`` are deliberately kept. They are
+    derived from the loaded dataset rather than chosen as a preference, and the
+    declared default ("") is not a state the app can draw.
     """
-    # Selected wells.
+    from well_viewer.domain.state_defaults import restore_defaults
+
+    app = ctx.window  # transitional bridge (B4)
+    # Selected wells, plus the wells stashed for plates that are not currently
+    # loaded — snapshot() unions those back in, so leaving them would re-save a
+    # selection the reset just cleared.
     if hasattr(app, "_set_selected_wells"):
         try:
             app._set_selected_wells(set(), commit=False)
         except Exception:
             _logger.debug("reset: clearing selected wells failed", exc_info=True)
-    # Fold-change scopes.
-    app._app_state.plot.fc_vs_control_on = False
-    app._app_state.plot.fc_control_label = ""
-    app._app_state.plot.fc_vs_t0_on = False
-    app._app_state.plot.fc_baseline_tp = ""
-    app._app_state.plot.fc_op_ctrl = "ratio"
-    app._app_state.plot.fc_op_t0 = "ratio"
-    app._app_state.plot.fc_order = "ctrl_first"
+    ctx.runtime.view_state.absent_wells = set()
+    ctx.runtime.view_state.absent_solo = set()
+
+    # Every cross-tab plot option and fold-change field in one move, including
+    # ones added after this function was written.
+    restore_defaults(ctx.state.plot)
+
+    # Group visibility + solo are selection state the view owns: a reset shows
+    # every group again rather than leaving rows hidden with no visible cause.
+    sel = ctx.state.selection
+    for s in sel.selections or []:
+        s["hidden"] = False
+    sel.active_solo_wells = set()
+
+    # Publication-style and per-figure axis preferences.
+    restore_defaults(ctx.state.export_prefs)
+
     try:
         from well_viewer.core.fold_change_controls_view import _sync_widgets_to_state
         _sync_widgets_to_state(ctx)
@@ -889,10 +920,11 @@ def reset(ctx) -> None:
     _reset_scatter(app)
     # Drop any pending state stashed from a previous restore.
     ctx.runtime.view_state.pending = None
-    # Drop the view_state section so a fresh open doesn't repopulate.
+    # Persist the reset view rather than deleting the section, so the saved copy
+    # and the screen cannot disagree about what was reset.
     if app._app_state.dataset.data_dir:
         try:
-            _doc.set_section(ctx, "view_state", None)
+            save_to_data_dir(ctx)
         except Exception:
             _logger.debug("reset: persistence.json update failed", exc_info=True)
     # Force a redraw on whatever tab is active. The scope coalescer redraws

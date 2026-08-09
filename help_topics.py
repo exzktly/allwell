@@ -79,8 +79,10 @@ SECTION_BY_PAGE: dict[str, str] = {
 #: numbered in the order the form builds its sections, so these read in step.
 ANALYZE_SECTION_HELP: dict[str, str] = {
     "Filename Schema": "1. Filename schema",
-    "Channel Tokens": "2. Channel tokens",
-    "Folders": "3. Folders",
+    # The manual numbers Folders before Channel tokens; these follow the
+    # headings as written rather than the order the form happens to build in.
+    "Folders": "2. Folders",
+    "Channel Tokens": "3. Channel tokens",
     "Quality Control": "5. Quality control — field flatness & background correction",
     "Auto-threshold": '6. Auto-threshold — picking each channel\'s "on" cut',
     "Shape Metrics": "7. Shape metrics",

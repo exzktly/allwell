@@ -22,16 +22,17 @@ from .tab_view import format_value, legend_label, legend_swatch_style
 
 #: The masthead's actions, in the order they appear. Each is handled by
 #: :func:`run_home_action`, which is also what the next-step row calls — one
-#: place decides what "open this in Analyze" means.
+#: place decides what an action means.
 #:
-#: Reveal-folder and open-dataset are deliberately absent: the shell already
-#: carries both in the mode band's action cluster, a few pixels above this page
-#: and visible on every Review tab. A second copy here would be a second thing
-#: to keep working.
+#: Deliberately almost empty. Reveal-folder and open-dataset are carried by the
+#: shell's own action cluster a few pixels above this page, and Analyze and
+#: Datasets are two of the three mode segments in the title bar, permanently on
+#: screen. Repeating a control that is already visible does not make it easier
+#: to find; it makes two of them to keep working, and teaches that this page is
+#: where you go to leave it. Reload stays because nothing else offers it and the
+#: page reports a record that another process can replace underneath it.
 HOME_ACTIONS = (
     ("reload", "Reload"),
-    ("analyze", "Analyze"),
-    ("datasets", "Datasets"),
 )
 
 #: Index of each pane in the shell's central stack, mirroring
@@ -155,6 +156,13 @@ def on_home_dataset_loaded(ctx) -> None:
                 edit.setPlainText(text)
             finally:
                 edit.blockSignals(blocked)
+    # A new dataset's notes are whatever it carries, not an unsaved edit — the
+    # status line has to start over with them or the previous dataset's "Saved."
+    # reads as a statement about this one.
+    from .tab_view import NOTES_IDLE
+    status = _widget(ctx, "_home_notes_status")
+    if status is not None:
+        status.setText(NOTES_IDLE)
     refresh_home(ctx)
 
 
@@ -404,11 +412,13 @@ def _row_widget(parent: QWidget, row: dict, *, kind: str) -> QWidget:
 
 
 #: Where each action lands, for the ones that are a Review page.
+#:
+#: The shortfall states are not here. Showing a user the gap a second time is
+#: not a next step — every one of them is fixed by running the pipeline again
+#: over what is missing, so they all route to ``complete``.
 _ACTION_PAGE = {
     "samples": "Sample Definitions",
     "plot": "Plotting",
-    "partial": "Review CSV",
-    "errors": "Review CSV",
 }
 
 
@@ -433,6 +443,9 @@ def run_home_action(ctx, action: str) -> None:
             return
         if action == "validate":
             _open_validate(ctx)
+            return
+        if action == "complete":
+            _complete_run_in_analyze(ctx)
             return
         page = _ACTION_PAGE.get(action)
         if page:
@@ -476,8 +489,70 @@ def _open_validate(ctx) -> None:
     open_tool = getattr(pane, "open_tool", None)
     if not callable(open_tool):
         return
-    data_dir = getattr(ctx.state.dataset, "data_dir", None)
-    open_tool("validate", dataset_path=str(data_dir) if data_dir else "")
+    open_tool("validate", dataset_path=dataset_root(ctx))
+
+
+def _complete_run_in_analyze(ctx) -> None:
+    """Hand this dataset to Analyze, configured to finish what it started.
+
+    The offer Home makes for every kind of shortfall it can report. Opening
+    Analyze on the folder alone is not enough to complete a run, in two
+    independent ways, and both were paid for once already in Validate & Repair's
+    own handoff — this goes through the same shell entry point rather than
+    re-deriving them:
+
+    * the form keeps whatever was in it, so the schema, separator, channel roles
+      and — the one that silently breaks the done-set lookup — the ``csv_prefix``
+      would all have to be re-entered by hand and matched exactly. The dataset's
+      own recorded sidecar goes with it instead. Review has already read that
+      file, so it is passed from state rather than re-read.
+    * a plain re-run *skips* any well whose archive and CSV both exist, however
+      few of its FOV-groups landed, which is precisely the state this page
+      exists to report. So the run is asked for FOV-level incremental mode, and
+      the wells an incremental run would skip forever are named explicitly.
+
+    Reached through the top-level window because the Analyze pane is the outer
+    shell's, not Review's; ``ctx.window`` is Review's own. Duck-typed and
+    guarded, the same shape as the Datasets handoff above, because a build that
+    mounts no Analyze pane must do nothing rather than raise.
+    """
+    shell = ctx.window.window()
+    handoff = getattr(shell, "_open_dataset_in_analyze", None)
+    if not callable(handoff):
+        return
+    root = dataset_root(ctx)
+    if not root:
+        return
+    handoff(
+        Path(root),
+        dict(getattr(ctx.state.dataset, "pipeline_info", None) or {}),
+        incremental=True,
+        force_wells=hc.wells_needing_force(ctx),
+    )
+
+
+def dataset_root(ctx) -> str:
+    """The folder a Datasets tool wants, which is not the one Review loaded.
+
+    Review's ``data_dir`` is where the measurements CSVs are, and for the layout
+    the pipeline writes that is the ``out/`` subfolder — Analyze's own loader
+    descends into it (``load_controller.load_path``). Every Datasets tool wants
+    the folder *above* it, the one holding both ``in/`` and ``out/``, because
+    that is what a dataset is to them (``datasets._common.dataset_paths``).
+    Handing them ``out/`` fails their check and leaves the user re-picking a
+    folder the app already had open.
+
+    ``in_dir`` is the honest signal: the loader sets it precisely when it
+    detected that layout, and leaves it ``None`` for a flat folder of CSVs,
+    which has no parent to prefer and is not a dataset those tools can read
+    anyway.
+    """
+    dataset = getattr(ctx.state, "dataset", None)
+    in_dir = getattr(dataset, "in_dir", None)
+    if in_dir is not None:
+        return str(Path(in_dir).parent)
+    data_dir = getattr(dataset, "data_dir", None)
+    return str(data_dir) if data_dir else ""
 
 
 def _show_pane(ctx, index: int) -> None:

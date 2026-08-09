@@ -1304,6 +1304,45 @@ opened and yielded nothing readable. Since the placeholder covering the page is
 gated on the wells, a page gated on anything else could describe a dataset the
 placeholder says is not there.
 
+**Opening a dataset always lands on Home**, whatever page the last session
+ended on. `persistence/view_state.apply_view_state` restores `active_centre_tab`
+for everything else, but the arrival of a *dataset* is the moment a reader most
+needs to be told what they just opened, and dropping them onto a plot of a plate
+they have not been oriented to is not that. A profile with no Home page falls
+back to the saved tab.
+
+**Every shortfall Home reports offers the same next step: finish the run.**
+Failures, partial wells, images without measurements, staged-but-never-processed
+— all four route to `run_home_action(ctx, "complete")`, which hands the dataset
+to Analyze through the shell's `_open_dataset_in_analyze`, the same entry point
+Validate & Repair's *Complete this run in Analyze* uses. That carries three
+things a bare folder path does not: the dataset's own recorded sidecar (so the
+schema, separator and `csv_prefix` match the run being finished — a mismatched
+prefix reads its done-set from files that do not exist and silently reprocesses
+the plate), FOV-level incremental mode, and the per-well force list. The last is
+`collect.wells_needing_force`, the same rule Validate applies: a well with
+images and no CSV has nothing missing by the incremental diff, so it is skipped
+forever unless named, while a merely partial well the diff does fix. Sending the
+reader to a page that shows them the gap a second time is not a next step.
+
+**A Datasets tool is handed the project folder, not the loaded one.** Review's
+`data_dir` is where the CSVs are, which for the pipeline's layout is `out/`;
+every Datasets tool wants the folder above it holding both `in/` and `out/`.
+`controller.dataset_root` reads `dataset.in_dir`, which the loader sets exactly
+when it detected that layout, and falls back to `data_dir` for a flat folder of
+CSVs that has no parent to prefer.
+
+**Home's plate takes `role="editor"`, not `"picker"`.** The wells are clickable
+— that is what separates it from a dashboard's read-only map — but the built-in
+All / Invert / Clear row is not shown. Those act on the plot selection, and
+nothing on this page plots, so their effect is invisible from where they sit.
+
+**The masthead carries one action.** Reveal-folder and open-dataset are in the
+shell's own action cluster directly above the page, and Analyze and Datasets are
+two of the three title-bar mode segments, permanently on screen. Only Reload is
+here, because nothing else offers it and this page reports a record another
+process can replace underneath it.
+
 **Home is the one page with no rail body.** Every other feature's activation
 hook re-shows one of the sidebar's per-page frames, which `on_tab_change` has
 just hidden; Home shows none, because its plate is on the page and the rail's

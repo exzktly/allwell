@@ -159,3 +159,95 @@ def test_clearing_the_action_takes_the_button_away(qtbot):
     assert empty._action.isVisible() is False
     empty._action.click()
     assert fired == []
+
+
+# ── what a shortfall offers ─────────────────────────────────────────────────
+
+def _record(wells):
+    return {"version": 1, "skipped": False, "partial_scan": False,
+            "suspended": False, "wells": wells,
+            "totals": {"wells": len(wells), "complete": 0, "partial": 0,
+                       "missing_csv": 0, "no_output": 0, "intent": 0,
+                       "covered_any": 0, "covered_csv": 0},
+            "errors": {"files": 0, "by_type": {}}, "findings": []}
+
+
+def _well(health, *, intent=8, covered=8, failed=()):
+    return {"intent": intent, "covered_csv": covered, "covered_any": covered,
+            "missing_count": intent - covered, "missing": [], "csv_state": "ok",
+            "has_in": True, "has_out_zip": covered > 0, "has_out_folder": False,
+            "failed": list(failed), "health": health}
+
+
+def _ctx_with(wells):
+    ctx, _ = _ctx(wells={w: None for w in wells})
+    ctx.state.dataset.pipeline_info = {"run_check": _record(wells)}
+    return ctx
+
+
+def test_every_shortfall_offers_to_finish_the_run():
+    """Sending the reader to a page that shows the gap again is not a next
+    step. Each of these is fixed by running the pipeline over what is missing,
+    and rebuilding the run's settings by hand is where the damage happens —
+    a mismatched csv_prefix silently reprocesses the whole plate."""
+    from well_viewer.features.home import collect as hc
+
+    for wells in (
+        {"A01": _well("complete", failed=["F001_0h"])},
+        {"A01": _well("partial", covered=4)},
+        {"A01": _well("missing", covered=8)},
+        {"A01": _well("partial", covered=0)},
+    ):
+        step = hc.next_step(_ctx_with(wells))
+        assert step["action"] == "complete", wells
+        assert step["label"] == "Finish this run"
+
+
+def test_only_the_wells_an_incremental_run_would_skip_are_forced():
+    """A partial well is fixed by the incremental diff at a fraction of the cost
+    of re-segmenting it. A well with images and no CSV has nothing missing by
+    that diff, so it is skipped forever unless named."""
+    from well_viewer.features.home import collect as hc
+
+    ctx = _ctx_with({
+        "A01": _well("complete"),
+        "A02": _well("partial", covered=4),
+        "A03": _well("missing", covered=8),
+    })
+    assert hc.wells_needing_force(ctx) == ["A03"]
+
+
+def test_a_dataset_with_no_record_forces_nothing():
+    from well_viewer.features.home import collect as hc
+
+    ctx, _ = _ctx(wells={"A01": None})
+    assert hc.wells_needing_force(ctx) == []
+
+
+# ── what a Datasets tool is handed ──────────────────────────────────────────
+
+def test_a_datasets_tool_is_given_the_project_folder_not_the_out_dir():
+    """Review loads ``<root>/out``; every Datasets tool wants ``<root>``, the
+    folder holding both ``in`` and ``out``. Handing over ``out/`` fails their
+    check and leaves the user re-picking a folder the app already had open."""
+    from pathlib import Path
+
+    from well_viewer.features.home.controller import dataset_root
+
+    ctx, _ = _ctx(wells={"A01": None})
+    ctx.state.dataset.data_dir = Path("/data/plate7/out")
+    ctx.state.dataset.in_dir = Path("/data/plate7/in")
+    assert dataset_root(ctx) == "/data/plate7"
+
+
+def test_a_flat_csv_folder_is_handed_over_as_itself():
+    """No ``in_dir`` means the loader found no in/out layout, so there is no
+    parent to prefer."""
+    from pathlib import Path
+
+    from well_viewer.features.home.controller import dataset_root
+
+    ctx, _ = _ctx(wells={"A01": None})
+    ctx.state.dataset.data_dir = Path("/data/loose_csvs")
+    ctx.state.dataset.in_dir = None
+    assert dataset_root(ctx) == "/data/loose_csvs"

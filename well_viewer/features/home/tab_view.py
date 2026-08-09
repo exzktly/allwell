@@ -223,6 +223,8 @@ def _build_notes(ctx, page: QWidget, reg) -> QWidget:
                 notes_schedule_save(ctx, widget_key=_NOTES_KEY)
             except Exception:
                 swallowed("home notes commit")
+            else:
+                _set_notes_status(ctx, "saved")
 
     edit = reg.register(_NOTES_KEY, _HomeNotes(frame))
     edit.setObjectName("HomeNotes")
@@ -230,8 +232,29 @@ def _build_notes(ctx, page: QWidget, reg) -> QWidget:
         "What happened on this plate? Anything the numbers won't tell you later.")
     edit.setPlainText(ctx.state.selection.notes_text or "")
     layout.addWidget(edit, 1)
-    layout.addWidget(_muted(frame, "Saves when you click away."))
+    # The commit is on focus-out and therefore invisible: a user types, clicks
+    # away, and nothing on screen distinguishes "written" from "lost". The line
+    # below says which, and is the only part of this page that changes without
+    # the record changing.
+    status = reg.register("_home_notes_status", _muted(frame, NOTES_IDLE))
+    layout.addWidget(status)
+    edit.textChanged.connect(lambda: _set_notes_status(ctx, "dirty"))
     return frame
+
+
+#: What the line under the notes box says in each state. Written out rather than
+#: assembled so the three readings can be compared side by side — the failure
+#: wording is the one that matters and it must not look like the others.
+NOTES_IDLE = "Saves when you click away."
+NOTES_DIRTY = "Unsaved — saves when you click away."
+NOTES_SAVED = "Saved."
+_NOTES_STATUS = {"idle": NOTES_IDLE, "dirty": NOTES_DIRTY, "saved": NOTES_SAVED}
+
+
+def _set_notes_status(ctx, state: str) -> None:
+    label = ctx.widgets.get_or_none("_home_notes_status")
+    if label is not None:
+        label.setText(_NOTES_STATUS.get(state, NOTES_IDLE))
 
 
 # ── tiles ───────────────────────────────────────────────────────────────────

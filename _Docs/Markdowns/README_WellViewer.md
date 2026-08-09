@@ -954,6 +954,8 @@ What is on it:
   recorded, staged but never processed, images with no measurements behind them.
   Clicking a well selects it, the same selection every other page uses — it does
   not navigate, so you can pick several. Hovering one says what its numbers are.
+  There is no All / Invert / Clear row here, unlike the plate in the rail: those
+  act on what gets plotted, and nothing on this page plots.
 - **Notes.** The same project notes as
   [Sample Definitions](#sample-definitions), editable here. Type and click away;
   it saves on its own. Whatever the numbers will not tell you in six months
@@ -977,6 +979,20 @@ What is on it:
 
 Above all of it, one line saying what most needs doing next, and a button that
 does it.
+
+**When something is missing, that button finishes the run.** Failed wells,
+partial wells, wells with images but no measurements, wells that were staged and
+never processed — all of them open **Analyze** already set up to complete this
+dataset: pointed at the project folder, configured from the run's own recorded
+settings, with *Incremental* on so only the missing fields are processed, and
+with the wells an incremental run would otherwise skip forever listed for a full
+reprocess. You do not have to remember what the original run was told to do; the
+handoff carries it, and Analyze says on its dashboard what it just set up.
+
+**Opening a dataset always brings you here first**, whichever page you were on
+when you last quit. Everything else about that session is restored as before —
+it is only arriving with a new dataset that starts on Home, since that is the
+moment there is most to tell you.
 
 ### The Review window at a glance
 

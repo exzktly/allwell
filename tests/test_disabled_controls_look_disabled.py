@@ -77,12 +77,21 @@ CONTROLS = (
 )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="module", autouse=True)
 def _stylesheet():
     """The rule under test lives in the app stylesheet, so it must be installed.
 
     Set rather than swapped-and-restored: the fast lane already runs with it
     applied, and every case here reads it the same way.
+
+    Module-scoped because ``QApplication.setStyleSheet`` re-polishes every live
+    widget in the process, and the fast lane keeps every widget any earlier test
+    built (ARCHITECTURE.md §10.4 — the Qt/Python reference web is never
+    reclaimed in-process). Late in the run one call costs tens of seconds, so
+    installing the sheet per test rather than per module multiplied that by the
+    case count. Every other file that installs the app sheet
+    (``test_theme_roles_render.py``, ``test_control_band_widget.py``) scopes it
+    the same way, for the same reason.
     """
     QApplication.instance().setStyleSheet(theme.qss())
 

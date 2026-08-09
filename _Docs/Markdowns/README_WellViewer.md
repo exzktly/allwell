@@ -1983,6 +1983,48 @@ buttons — you pick one or the other, because choosing the scatter option
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
   drawn a gate there, the scatter option is greyed out and says so.
+
+  **Area and Region area are not the same measurement**, and the difference is
+  the reason both exist. **Area** is the size of the one cell — how many pixels
+  that cell's own outline encloses. **Region area** is the size of the connected
+  bright blob the cell is sitting in: the app takes every bright pixel, joins the
+  ones that touch, and asks how big the resulting island is.
+
+  They only differ when the segmenter has been fooled. It draws small, roughly
+  round shapes, so it cannot represent one large lump of debris as a single
+  object — it shatters the lump into many small "cells" instead. Each fragment
+  then looks like a perfectly normal cell by size, which is exactly what an area
+  gate cannot see through:
+
+  ```
+                        Area        Region area
+    a real nucleus      253 px         253 px      ← sits alone
+    one debris fragment  64 px         729 px      ← 9 of these share one blob
+  ```
+
+  No `max area` setting can remove that debris: each fragment (64 px) is
+  *smaller* than the real nucleus (253 px), so any rule big enough to catch them
+  deletes real cells first. A `max region area` of, say, 400 removes all nine
+  fragments and keeps the nucleus, because it is judging the lump rather than the
+  pieces. In one line: **Area is how big I am; Region area is how big the crowd
+  I am standing in is.**
+
+  The same reasoning is the caution. Cells that genuinely touch each other also
+  form one crowd, so on a dense or confluent plate a tight `max region area` can
+  start discarding real cells that happen to be packed together. Change it in
+  steps and watch the QC line in the inclusion funnel below the table: if the
+  number it removes jumps far beyond the amount of visible debris, the bound is
+  catching neighbours rather than junk. Datasets processed before this
+  measurement existed have no region area recorded, and the bound is ignored for
+  them rather than excluding everything.
+
+  The other two bounds are about shape, not size. **Solidity** is the cell's area
+  divided by the area of a rubber band stretched round it, so low values mean
+  ragged or fragmented outlines; there is no upper bound, because a perfectly
+  smooth cell is not a defect. **Circularity** is 1.0 for a perfect circle and
+  falls as an outline becomes jagged or elongated, and it is bounded on both
+  sides — a maximum is useful when something in the image is *too* perfectly
+  round to be a cell.
 - **Fraction-on — which included cells count as ON.** Removes no cells. Choose
   the per-channel **ON cutoff** (the `ON ≥` column), or a scatter gate. The two
   questions have **independent** gate pickers, so you can include cells by one

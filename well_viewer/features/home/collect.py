@@ -107,6 +107,20 @@ def record_state(ctx) -> str:
     return "ok"
 
 
+def has_dataset(ctx) -> bool:
+    """Whether there is a dataset to report on.
+
+    The wells, not ``data_dir``. The two disagree for a whole moment of every
+    load — ``data_dir`` is set when the load *begins* and the wells arrive as it
+    runs — and they disagree permanently for a folder that opened but yielded
+    nothing readable. Home's empty state is flipped by the shared refresher,
+    which tests the wells (``core/ui_helpers.refresh_empty_state_pages``), so a
+    page testing something else could contradict the placeholder covering it.
+    """
+    dataset = getattr(ctx.state, "dataset", None)
+    return bool(getattr(dataset, "well_paths", None))
+
+
 def record_reason(ctx) -> str:
     """One sentence naming why a figure is unavailable, for the em-dashes."""
     return {
@@ -264,7 +278,11 @@ def stat_tiles(ctx) -> list:
     if totals:
         intent = int(totals.get("intent") or 0)
         covered = int(totals.get("covered_any") or 0)
-        pct = int(covered * 100 / intent) if intent else 0
+        # Rendered with its unit. Every other tile on the strip is a count, so a
+        # bare "90" next to "Wells 3" and "Timepoints 3" reads as ninety of
+        # something — the one number on the page that is a proportion has to say
+        # so where it is read, not only in the line beneath it.
+        pct = f"{int(covered * 100 / intent)}%" if intent else ""
         tiles.append(Stat("coverage", "Coverage",
                           pct if intent else Missing("nothing to compare against"),
                           f"{covered:,} of {intent:,} groups" if intent else reason))
@@ -458,6 +476,25 @@ def your_work(ctx) -> list:
     ]
 
 
+def wells_needing_force(ctx) -> list[str]:
+    """Wells an incremental re-run would skip forever, so it must be told.
+
+    A well with processed images and no measurements CSV has no *missing*
+    ``(fov, timepoint)`` pairs — its output archive already covers everything
+    its input held — so the incremental diff calls it done and the run skips it.
+    That is exactly the well whose CSV needs regenerating, and only a per-well
+    force does it. Wells that are merely partial are deliberately absent: an
+    incremental run does fix those, at a fraction of the cost of re-segmenting
+    them whole. Same rule as ``datasets.validate.validate_compute``'s, read off
+    the record rather than off a fresh scan.
+    """
+    wells = (_record(ctx).get("wells") or {})
+    return sorted(
+        well for well, rec in wells.items()
+        if isinstance(rec, dict) and rec.get("health") == "missing"
+    )
+
+
 def next_step(ctx) -> dict:
     """The one contextual action, chosen by what most needs doing.
 
@@ -466,7 +503,7 @@ def next_step(ctx) -> dict:
     and disappears between datasets moves everything below it and destroys the
     reader's sense of where things are.
     """
-    if getattr(getattr(ctx.state, "dataset", None), "data_dir", None) is None:
+    if not has_dataset(ctx):
         return {"severity": "accent", "text": "No dataset open.",
                 "action": "open", "label": "Open a dataset"}
 
@@ -487,23 +524,35 @@ def next_step(ctx) -> dict:
                         "were never read.",
                 "action": "validate", "label": "Check it now"}
 
+    # Every shortfall below is fixed by running the pipeline again over what is
+    # missing, so all three offer the same thing: Analyze, configured to finish
+    # this run. Sending the reader to a page that merely *shows* the gap again
+    # asks them to go and rebuild the run's settings by hand, and the settings
+    # that matter — the schema, the separator, the CSV prefix — are the ones
+    # whose mismatch silently reprocesses the whole plate.
     cells = plate_cells(ctx)
     failed = sum(1 for s in cells.values() if s == CELL_FAILED)
     partial = sum(1 for s in cells.values() if s == CELL_PARTIAL)
     unstarted = sum(1 for s in cells.values() if s == CELL_INPUT_ONLY)
+    no_measurements = sum(1 for s in cells.values() if s == CELL_NO_MEASUREMENTS)
     if failed:
         return {"severity": "danger",
                 "text": f"{failed} well(s) recorded failures during the run.",
-                "action": "errors", "label": "Show them"}
+                "action": "complete", "label": "Finish this run"}
     if partial:
         return {"severity": "warn",
                 "text": f"{partial} well(s) cover fewer field groups than their "
                         "input held.",
-                "action": "partial", "label": "Show them"}
+                "action": "complete", "label": "Finish this run"}
+    if no_measurements:
+        return {"severity": "warn",
+                "text": f"{no_measurements} well(s) have images but no "
+                        "measurements — an ordinary re-run skips them.",
+                "action": "complete", "label": "Finish this run"}
     if unstarted:
         return {"severity": "warn",
                 "text": f"{unstarted} well(s) were staged and never processed.",
-                "action": "analyze", "label": "Open in Analyze"}
+                "action": "complete", "label": "Finish this run"}
 
     work = {row["key"]: row["count"] for row in your_work(ctx)}
     if not work.get("labels"):

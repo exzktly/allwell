@@ -68,17 +68,19 @@ STATE_LABELS = {
 def build_home_plate(parent: QWidget) -> WellPlateSelector:
     """A selectable plate sized like every other in the app.
 
-    ``role="picker"`` rather than ``"status"``: the wells are clickable, which
-    is what separates this from a dashboard's read-only map. The built-in
-    All / Invert / Clear row comes with that role and is wanted — it is the same
-    gesture the rail's own picker offers.
+    ``role="editor"``: the wells are clickable, which is what separates this
+    from a dashboard's read-only map, but the built-in All / Invert / Clear row
+    is not shown. Those three act on the *plot selection*, and nothing on this
+    page plots — selecting all 96 positions of a plate that holds four wells
+    changes a number in a status bar and nothing else on screen. A control whose
+    effect is invisible from where it sits is worse than no control.
     """
     # No objectName: the plate paints every well itself through QPainter, so a
     # style hook here would resolve to nothing. The page reaches it through the
     # widget registry (``_home_plate``), not through a selector.
     plate = WellPlateSelector(parent)
     plate.setColoredWellsLit(True)
-    apply_plate_geometry(plate, role="picker")
+    apply_plate_geometry(plate, role="editor")
     return plate
 
 

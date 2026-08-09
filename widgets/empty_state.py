@@ -8,6 +8,12 @@ API
 ---
 * ``EmptyState(text="", icon="image", parent=None, *, hint="")``
 * ``setText(text)`` / ``setHint(text)`` / ``setIconName(name)``
+* ``setAction(label, on_click)`` / ``clearAction()`` — an optional button under
+  the hint, for a placeholder on a page where the way out is a single action.
+  Absent unless asked for, so a site that only describes its emptiness looks
+  exactly as it did. Note that the shared refresher
+  (``well_viewer.core.ui_helpers._apply_reason``) rewrites only the text, hint
+  and icon, so an action set once at build time survives every refresh.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ if _ROOT not in _sys.path:
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QLabel, QSizePolicy, QVBoxLayout, QWidget,
+    QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import theme
@@ -70,6 +76,15 @@ class EmptyState(QWidget):
         outer.addWidget(self._text, 0)
         outer.addSpacing(theme.Spacing.xs)
         outer.addWidget(self._hint, 0)
+        # Horizontally centred like the glyph rather than stretched: a
+        # full-width button on a page whose whole content is three centred
+        # lines reads as a banner, not as the one thing to press.
+        self._action = QPushButton("", self)
+        self._action.setObjectName("EmptyStateAction")
+        self._action.setVisible(False)
+        self._action_slot = None
+        outer.addSpacing(theme.Spacing.md)
+        outer.addWidget(self._action, 0, Qt.AlignHCenter)
         outer.addStretch(1)
         # Belt-and-suspenders against the same 1-line-sizeHint quirk: reserve a
         # two-line minimum for each wrap label, sized to that label's OWN font
@@ -95,6 +110,31 @@ class EmptyState(QWidget):
     def setIconName(self, name: str) -> None:
         self._icon_name = name
         self._refresh_glyph()
+
+    def setAction(self, label: str, on_click) -> None:
+        """Show a button under the hint, replacing any previously set one.
+
+        For a placeholder whose way out is one action the page can perform
+        itself. Most sites have no such action — the hint names a control
+        somewhere else — and those keep no button at all.
+        """
+        if self._action_slot is not None:
+            self._action.clicked.disconnect(self._action_slot)
+            self._action_slot = None
+        self._action.setText(label or "")
+        if callable(on_click):
+            def _slot(_checked=False, _fn=on_click):
+                _fn()
+            self._action.clicked.connect(_slot)
+            self._action_slot = _slot
+        self._action.setVisible(bool(label))
+
+    def clearAction(self) -> None:
+        if self._action_slot is not None:
+            self._action.clicked.disconnect(self._action_slot)
+            self._action_slot = None
+        self._action.setText("")
+        self._action.setVisible(False)
 
     # ── internals ────────────────────────────────────────────────────────
     def _icon_px(self) -> int:
@@ -142,6 +182,20 @@ class EmptyState(QWidget):
             color: {c.text_secondary};
             font-size: {t.small_size}px;
             background: transparent;
+        }}
+        /* The optional action, when a site sets one. Same shape as the app's
+           other secondary buttons — this is the way out of an empty page, not
+           a call to action competing with the message above it. */
+        QPushButton#EmptyStateAction {{
+            background: {c.panel_elevated};
+            border: 1px solid {c.border};
+            border-radius: {theme.Radii.sm}px;
+            color: {c.text_primary};
+            padding: {theme.Spacing.xs}px {theme.Spacing.lg}px;
+        }}
+        QPushButton#EmptyStateAction:hover {{
+            background: {c.hover};
+            border-color: {c.border_strong};
         }}
         """
 

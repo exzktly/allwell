@@ -178,6 +178,19 @@ class RailNav(QFrame):
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(1)
+        # Never taller than its rows need. A nav is a list of links, not a
+        # region to fill: nothing here has a reason to grow, and the rows
+        # carry no height of their own, so surplus height would be divided
+        # among them and the list would visibly spread apart.
+        #
+        # This is a property of the widget rather than of any one host,
+        # because the hosts do not agree. The Datasets rail follows the nav
+        # with its own ``addStretch(1)``; Review's rail relies on whichever
+        # per-page frame beneath it happens to be visible, and Home shows
+        # none — so navigating to Home left the nav as the only growable item
+        # in the column and its rows went from 33px to 81px. Fixing that in
+        # one host would leave the next host to rediscover it.
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
 
         self._rows: dict[str, _RailNavRow] = {}
         self._order: list[str] = []

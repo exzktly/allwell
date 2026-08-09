@@ -2050,22 +2050,22 @@ The pane's output half is `analyze_tab_log.AnalyzeLogPaneMixin` — the log view
 the raw-log toggle, and the idle "Last run ·" card. It is not form-building: the
 form gathers what a run is launched with, this shows what the run then said.
 
-**A failed run has to say so where the user is looking.** The runner turns a
-non-zero exit into one `("error", …)` event, and Analyze's handler used to put
-it in exactly one place — the log view, which is hidden at build. So a pipeline
-that refused to start looked identical to a run that had never been clicked:
-progress stopped, the Run button came back, nothing said why. Three things close
-that, and none of them is new machinery. `_surface_run_failure` calls the
-dashboard's `set_failed`, which every Datasets tool already calls and Analyze
-alone never did, and ticks the raw-log toggle, because the explanation is in
-that pane and the user has no reason to know it exists at the moment they need
-it. The `finished` branch gates `_refresh_last_run_summary` on the run having
-succeeded — the card's only test is that `pipeline_info.json` exists, and the
-pipeline writes that *before* any image work, so on failure it described a plate
-that was never produced. And `pipeline_runner.exit_message` quotes the
-pipeline's own last `ERROR` line beside the exit code, since "Pipeline exited
-with code 2" names nothing and, for a run refused before any work, was the whole
-of what the user got.
+**A failed run says so where the user is looking.** The runner turns a non-zero
+exit into one `("error", …)` event, and the log view that event's text lands in
+is hidden at build — on its own that makes a pipeline which refused to start
+indistinguishable from a run that was never clicked: progress stops, the Run
+button returns, nothing states a reason. Three things carry the failure out of
+that pane, none of them new machinery. `_surface_run_failure` calls the
+dashboard's `set_failed` — the same failure state every Datasets tool uses — and
+ticks the raw-log toggle, because the explanation is in that pane and the user
+has no reason to know it exists at the moment they need it. The `finished`
+branch gates `_refresh_last_run_summary` on the run having succeeded: the card's
+only test is that `pipeline_info.json` exists, and the pipeline writes that
+*before* any image work, so on a failure it would describe a plate that was
+never produced. And `pipeline_runner.exit_message` quotes the pipeline's own
+last `ERROR` line beside the exit code, because "Pipeline exited with code 2"
+names nothing, and for a run refused before any work it is the only thing the
+user would otherwise be given.
 
 The per-method segmentation parameters are their own mixin,
 `analyze_tab_seg_params.AnalyzeSegParamsMixin`: the `NamedPageStack` of

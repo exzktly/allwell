@@ -17,6 +17,7 @@ process_microscopy.py must live alongside this file.
 
 from __future__ import annotations
 
+import logging
 import queue
 import time as _time
 from pathlib import Path
@@ -629,21 +630,31 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         never been clicked: progress stopped at Grouped, the Run button came
         back, and nothing said why.
 
-        Two surfaces fix that, both already in the app. ``set_failed`` is the
-        dashboard's own failure state, which every Datasets tool calls and
-        Analyze alone never did. And the raw log is revealed, because the line
-        that explains the failure is in it and the user has no reason to know
-        that toggle exists at the moment they need it.
+        Two surfaces do that, both already in the app. ``set_failed`` is the
+        dashboard's own failure state, which every Datasets tool calls. And the
+        raw log is revealed, because the line that explains the failure is in it
+        and the user has no reason to know that toggle exists at the moment they
+        need it.
+
+        Neither is allowed to break the log drain — a widget fault here would
+        abort ``_poll_log``'s loop and freeze the live log for the rest of the
+        session — so both are guarded. But a *silent* guard would be this
+        function's own bug reintroduced inside it, so the guard logs at WARNING
+        rather than the default DEBUG. The caller writes ``message`` into the
+        log view before calling here, so the reason itself survives either
+        failure; what is lost is only the surfacing, and that is worth a line.
         """
         try:
             self._dashboard.set_failed(str(message).strip())
         except Exception:
-            swallowed()
+            swallowed("could not put the run failure on the dashboard",
+                      level=logging.WARNING)
         try:
             if hasattr(self, "_raw_log_cb") and not self._raw_log_cb.isChecked():
                 self._raw_log_cb.setChecked(True)
         except Exception:
-            swallowed()
+            swallowed("could not reveal the raw log after a run failure",
+                      level=logging.WARNING)
 
     # ------------------------------------------------------------------
     # Log helpers

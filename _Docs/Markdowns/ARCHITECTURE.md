@@ -5262,6 +5262,34 @@ stylesheet driver, no theme-manager class, no per-theme `.qss` files. The theme
 registry lives in `theme.py` (below), and `theme.qss()` is the one stylesheet
 builder.
 
+**Every interactive class the app disables needs a `:disabled` rule, and the
+base rule's `color` is why.** A stylesheet colour declared with no disabled
+variant is applied in *every* state — it overrides the palette's disabled
+group, so `setEnabled(False)` takes effect functionally (the popup will not
+open, the click does nothing) with no change on screen at all. `QComboBox` was
+the one input class missing the rule, so the Spatial tab's Timepoint picker,
+greyed at Summary level by `tp_cb.setEnabled(not is_summary)`, rendered
+pixel-identical to a live one; the same omission silenced the Metric picker
+beside it and every other disabled combo in the app. It also reached the custom
+painter: `LabeledComboBox.paintEvent` takes its pen from
+`palette().color(foregroundRole())`, which the stylesheet had forced to the
+enabled colour. A widget may answer this itself instead — `StyledSlider.paintEvent`
+branches on `isEnabled()` — but then it owes the same visible difference.
+`tests/test_disabled_controls_look_disabled.py` asserts it on **rendered
+pixels** rather than on the QSS text or on `isEnabled()`: `isEnabled()` was
+already `False` throughout and proved nothing, and a text check would pass the
+day the rule is spelled differently. `QTextEdit` / `QPlainTextEdit` share the
+`QLineEdit` base rule but not its `:disabled` variant; nothing disables either
+today (every `…_edit` the app greys is a `QLineEdit`), so that gap is recorded
+rather than filled with a rule describing nothing.
+
+**A disabled control should also say what would re-enable it.** Greying tells
+the user the control is inert; it does not distinguish "wrong mode for this"
+from "broken". The Spatial band does this with a swapped tooltip on both of its
+gated pickers — the Metric picker names the vizzes that ignore it, and the
+Timepoint picker states that Summary walks every timepoint because they are the
+columns of the matrix it draws.
+
 **`accent` and `accent2` mean two different things, and every caller has to
 pick the right one.** `Colors.accent` is used across several Datasets
 dashboards to flag an anomalous well — one whose state doesn't fit the normal

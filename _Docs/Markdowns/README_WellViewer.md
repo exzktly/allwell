@@ -1635,7 +1635,10 @@ Spatial, and use the controls row:
   `<channel>_<property>` intensity column, any `shape_*` morphology column,
   or any user-defined ratio is eligible.
 - **Timepoint** — which frame to analyse. *First available* uses the
-  smallest finite `timepoint_hours` in the well.
+  smallest finite `timepoint_hours` in the well. Greyed out at **Summary**
+  level, which walks every timepoint and draws them as the columns of its
+  well × timepoint matrix — there is no single frame to choose there. Hover it
+  for the same explanation.
 - **Recompute** — forces a fresh compute. The per-frame levels (Cell, Colony,
   Intra-colony) recompute on every control change, so this is only strictly
   needed at Summary level, where changes are queued until you press it (one

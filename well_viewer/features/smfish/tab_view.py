@@ -69,6 +69,16 @@ _NO_SMFISH_MESSAGE = (
     "Re-run the analysis with smFISH channels enabled to populate this tab."
 )
 
+#: Shown when the sidecar could not be read at all. A claim about the *file*,
+#: not about the run: the same sentence used to be printed for a missing
+#: pipeline_info.json, an unparseable one, and a run that genuinely had no
+#: smFISH channel, which sent users to re-run an analysis that was fine.
+_NO_SIDECAR_MESSAGE = (
+    "Could not read this dataset's pipeline_info.json.\n"
+    "The tab needs it to know which channels hold smFISH images — check the "
+    "file is present and valid in the results folder."
+)
+
 
 from widgets.labeled_combo import LabeledComboBox
 from widgets.page_body import build_page_body
@@ -91,11 +101,30 @@ def _smfish_empty_reason(ctx):
 
     The no-smFISH message is painted on the canvas too, for the case where a
     well *is* selected — the placeholder is not in front of it then.
+
+    The answer comes from the sidecar the loader already parsed, not from
+    ``ctx.runtime.smfish.tokens``. That list is this tab's own scratch: the
+    builder sets it to ``[]`` and ``smfish_sync_from_app`` fills it in
+    afterwards, and the shared refresh runs between the two — so on the first
+    open of the tab the reason was computed at the one moment the list is
+    guaranteed empty, and a dataset full of spot counts was told its pipeline
+    had generated none. Reading the sidecar makes the answer independent of
+    build-versus-sync order rather than merely reordering two calls.
+
+    ``ctx.state.channel.smfish_channels`` looks like the obvious shared source
+    and is the wrong one: ``recalculate_threshold`` overwrites it with channels
+    detected from ``_smfish_count`` columns, so a freshly-processed dataset with
+    smFISH images but no counts yet would report "no smFISH data" — which is
+    this tab's primary use case, since generating those counts is what it does.
     """
     from well_viewer.core.selection_controller import has_plottable_selection
     from well_viewer.core.ui_helpers import EmptyReason
 
-    if not (ctx.runtime.smfish.tokens or []):
+    info = ctx.state.dataset.pipeline_info or {}
+    if not info:
+        title, _, hint = _NO_SIDECAR_MESSAGE.partition("\n")
+        return EmptyReason(title, hint)
+    if not (info.get("smfish_tokens") or []):
         title, _, hint = _NO_SMFISH_MESSAGE.partition("\n")
         return EmptyReason(title, hint)
     if has_plottable_selection(ctx):
@@ -314,7 +343,7 @@ def smfish_sync_from_app(ctx) -> None:
         ctx.runtime.smfish.tokens = []
         ctx.runtime.smfish.well_to_zip = {}
         ctx.runtime.smfish.fov_tp_extractor = None
-        _smfish_show_no_smfish_state(ctx)
+        _smfish_show_no_smfish_state(ctx, _NO_SIDECAR_MESSAGE)
         return
     try:
         info = json.loads(info_path.read_text())
@@ -356,7 +385,7 @@ def smfish_sync_from_app(ctx) -> None:
         ctx.runtime.smfish.tokens = []
         ctx.runtime.smfish.well_to_zip = {}
         ctx.runtime.smfish.fov_tp_extractor = None
-        _smfish_show_no_smfish_state(ctx)
+        _smfish_show_no_smfish_state(ctx, _NO_SIDECAR_MESSAGE)
         return
 
     ctx.runtime.smfish.out_dir = out_dir
@@ -621,10 +650,19 @@ def _smfish_paint_empty(ctx, message: str) -> None:
         swallowed()
 
 
-def _smfish_show_no_smfish_state(ctx) -> None:
+def _smfish_show_no_smfish_state(ctx, message: str = _NO_SMFISH_MESSAGE) -> None:
+    """Stand the tab down, saying which of its two blank states this is.
+
+    *message* separates "the run had no smFISH channel" from "the sidecar that
+    would say so could not be read". They are different claims — the first is
+    about the analysis, the second about a file — and printing the first for
+    both sent users to re-run an analysis that was fine.
+    """
     # The full guidance is drawn once, centered on the canvas below; keep the
     # status line concise so the same paragraph is not shown twice.
-    _smfish_set_status(ctx, "smFISH not enabled for this dataset.")
+    _smfish_set_status(
+        ctx, "smFISH not enabled for this dataset."
+        if message is _NO_SMFISH_MESSAGE else "Could not read pipeline_info.json.")
     for cb in (ctx.runtime.smfish.channel_cb, ctx.runtime.smfish.fov_cb, ctx.runtime.smfish.tp_cb):
         cb.blockSignals(True)
         cb.clear()
@@ -634,7 +672,7 @@ def _smfish_show_no_smfish_state(ctx) -> None:
     ctx.runtime.smfish.current_log_img = None
     ctx.runtime.smfish.current_labels = None
     ctx.runtime.smfish.current_sorted_vals = None
-    _smfish_paint_empty(ctx, _NO_SMFISH_MESSAGE)
+    _smfish_paint_empty(ctx, message)
 
 
 def _smfish_selected_well_token(ctx) -> str | None:

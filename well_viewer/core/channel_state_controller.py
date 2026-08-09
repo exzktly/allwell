@@ -1212,23 +1212,15 @@ def refresh_thresh_frac_quick_edit(ctx) -> None:
             stepper.setRange(-1.0 if count else 0.0, 1e9)
             stepper.setDecimals(0 if count else 1)
             stepper.setSingleStep(1.0)
-            # The unit inside the box the user types into — the one place they
-            # are certainly looking — and what stops a bare "-1" reading as a
-            # sentinel or an error rather than "no cut".
-            stepper.setSuffix(" spots" if count else "")
+            # No unit inside the box: the caption beside it already reads "ON
+            # spots", so a suffix repeats in the one place the user is typing.
+            stepper.setSuffix("")
             stepper.setValue(float(value))
             stepper.setToolTip(_COUNT_TIP if count else _INTENSITY_TIP)
             # setRange / setDecimals / setSuffix each re-run Stepper._update_size,
             # which resets the width bounds — undoing the setFixedWidth its host
-            # row applied at build time and reflowing the band. Re-pin it — but
-            # never below the width the stepper just worked out it needs. The
-            # host rows pin the token deliberately tighter than the Stepper's
-            # own preference, which is fine for "50.0" and clips "20 spots";
-            # a two-digit count is an ordinary cutoff to type, so widen for the
-            # suffix and keep the tight token everywhere else.
-            stepper.setFixedWidth(
-                max(theme.Metrics.stepper_w, stepper.maximumWidth()) if count
-                else theme.Metrics.stepper_w)
+            # row applied at build time and reflowing the band. Re-pin it.
+            stepper.setFixedWidth(theme.Metrics.stepper_w)
         finally:
             stepper.blockSignals(blocked)
         lbl = ctx.widgets.get_or_none(label_attr) if label_attr else None

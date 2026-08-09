@@ -682,10 +682,10 @@ an already-invalid field accepts every keystroke. The affix therefore converted
 "input refused" into "input accepted, then silently discarded on commit". The
 affixes are matched without their own padding, because deleting the digits from
 `20 spots` leaves `" spots"`, which is the state the box passes through every
-time a value is typed over. Anything re-pinning a `Stepper`'s width after
-changing its range, decimals or affixes must take the larger of its own token
-and `maximumWidth()`: the widget re-derives the room its widest affixed value
-needs, and a token chosen for a bare number clips a suffixed one.
+time a value is typed over. No `Stepper` in the app carries an affix today —
+the ON-cutoff quick-edit takes its unit from the caption beside it rather than
+repeating it inside the field — so this is the widget honouring its own API for
+the next caller, not a live code path.
 
 The five sub-tabs share that one band; none builds its own. A sub-tab claims a
 `ControlBandSlot` through `ui_helpers.plotting_band_slot(ctx, title[, mode])` and
@@ -1078,6 +1078,25 @@ So `redraw_heatmap`, Spatial's `_sync_empty_state` (called from every
 `stats_refresh_group_list` each end by calling `refresh_empty_state_pages`. When
 you add a reason, the question to answer is *what changes the answer, and what
 runs then*.
+
+The other way out of that trap is to make the reason read state no build order
+can move, and **smFISH is the worked example**. Its reason asks whether the run
+had any smFISH channel, and the tab holds an answer to that in
+`ctx.runtime.smfish.tokens` — but that list is the tab's own scratch: the builder
+sets it to `[]` and `smfish_sync_from_app` fills it in afterwards, with the
+lazy-build refresh between the two. Read from there, the reason was computed at
+the one moment the list is guaranteed empty, so the first open of the tab told a
+dataset full of spot counts that the pipeline had generated none, and any later
+refresh cleared it. It reads `ctx.state.dataset.pipeline_info["smfish_tokens"]`
+instead — parsed by the loader before any tab is built, so the ordering question
+does not arise. `ctx.state.channel.smfish_channels` is the trap next door:
+`recalculate_threshold` overwrites it with channels *detected from
+`_smfish_count` columns*, so a freshly-processed dataset with smFISH images but
+no counts yet would be told it has no smFISH data — which is the tab's primary
+use case, since generating those counts is what it is for. The tab's two blank
+states are also distinct strings: "the run had no smFISH channel" is a claim
+about the analysis, "the sidecar could not be read" is a claim about a file, and
+printing the first for both sent users to re-run an analysis that was fine.
 
 **Where the refresh is called from matters as much as the rule.**
 `refresh_empty_state_pages` is the cheap half — one reason call and a
@@ -1608,7 +1627,7 @@ The relevant modules:
 | `data/image_discovery.py` | Scans zips / loose directories for masks, overlays, tophat images. Classifies by suffix + schema. |
 | `data/image_resolver.py` | Filename → kind classifier (`mask` / `overlay` / `fluor_processed` / `smfish`). Also the single home for `normalize_numeric_token`, the FOV/timepoint token normaliser that collapses `1`, `01` and `1.0` to one key. Every site that compares such a token routes through it: `review_image/collect.review_norm_fov` (the review side's public name, kept because the image-table and review-image call sites are written against it), `core/dataset_state._norm_fov` and `image_table/image_compose._norm_token` are aliases of it. Tokens reach the viewer from filenames, CSV columns and combo text, so a second copy that formats differently silently strands a filter. |
 | `data/cache_projectors.py` | Registry of the inclusion-verdict projectors, plus `project_verdict_column` — the one cache walk they all perform (resolve the target wells, skip empty / missing frames, write the int column, log a computation failure against its layer rather than raising). `features/qc` and `features/crop` register here and share that walk; the registry is what lets `data_loading.get_rows` apply them without the data layer importing `features/`, and the shared walk lives here for the same reason — neither feature may depend on the other. |
-| `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. |
+| `domain/viewer_state.py` | `read_pipeline_info` + the `make_schema_extractor(sep, fov_idx, tp_idx)` factory used everywhere the app needs a `(fov, tp)` from a filename. It returns the channel-token lists both separately *and* inside the curated `pipeline_info` dict (`fluor_tokens`, `smfish_tokens`), so a consumer holding only that dict can answer "which channels did this run have?" without re-reading the file. An unreadable or unparseable sidecar yields an empty dict, which is how a caller tells "no sidecar" apart from "a sidecar naming no such channel". |
 | `domain/plate_layout.py` | `PLATE_ROWS`, `PLATE_COLS`, the 96-colour well palette (one colour per plate position — a shorter, submultiple-of-12 palette repeats colours down each column). |
 | `domain/selections_model.py` | Saved-selections schema v2: shape, validators, the v1→v2 migration. The on-disk contract is documented in the module's own docstring. |
 | `domain/sample_definitions.py` | Read / write the `sample_definitions` block inside `pipeline_info.json`. |

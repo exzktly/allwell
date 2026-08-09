@@ -1023,7 +1023,8 @@ first key of `well_paths` — one arbitrary well, unannounced. Its Summary level
 keeps falling back to every loaded well, which is a defensible default rather
 than an arbitrary pick.
 
-Statistics uses the same widget on its own trigger (no comparison groups), so a
+Statistics uses the same widget on its own trigger (fewer than two comparison
+groups — one group cannot be compared either), so a
 user moving between pages reads one treatment rather than two. Batch Export
 deliberately does not: the widget wrapped there is the whole panel including
 OUTPUT SETTINGS and the Run button, and swapping that for a placeholder would
@@ -1046,6 +1047,21 @@ the Image Browser's **own** lazy funnel and does not pass through
 `centre_view._build_pending` — so it repeats the same `refresh_plot_empty_states`
 call. That was latent for as long as no sub-tab registered a stack; the moment
 Cell Browser got one it reproduced the Spatial / smFISH bug in a new place.
+
+**A reason is only as current as its last refresh, and that is the rule's sharp
+edge.** A reason may read any state, but nothing re-evaluates it on its own. The
+app-wide triggers cover app-wide state — dataset load, lazy build, selection
+change — so a reason reading *feature-local* state must be re-run from that
+feature's own funnel, or the placeholder is decided once and then stands over a
+page that has something to draw. Heat Map's placeholder says "click Auto-populate
+from selection"; doing exactly that filled the layout and left the placeholder up,
+because `_persist_and_redraw` is the only thing that knows the layout changed.
+Spatial's reason is level-dependent and nothing re-ran it when the level changed.
+So `redraw_heatmap`, Spatial's `_sync_empty_state` (called from every
+`render_spatial` path), Cell Browser's `apply_filters` and
+`stats_refresh_group_list` each end by calling `refresh_empty_state_pages`. When
+you add a reason, the question to answer is *what changes the answer, and what
+runs then*.
 
 **Where the refresh is called from matters as much as the rule.**
 `refresh_empty_state_pages` is the cheap half — one reason call and a

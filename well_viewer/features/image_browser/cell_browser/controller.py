@@ -186,6 +186,7 @@ def apply_filters(ctx, *, live_sync: bool = False) -> None:
     st.loaded = 0
     ctx.runtime.cell_browser.gen = (ctx.runtime.cell_browser.gen or 0) + 1
     _clear_grid(ctx)
+    _sync_empty_state(ctx)
     _update_count(ctx)
     if not st.channels_on:
         _set_status(ctx, "Select at least one channel to display.")
@@ -360,6 +361,19 @@ def _page_size(ctx) -> int:
         return max(1, int(float(edit.text().strip())))
     except (TypeError, ValueError):
         return ctx.runtime.cell_browser.state.page_size
+
+
+def _sync_empty_state(ctx) -> None:
+    """Re-evaluate this tab's reason after its own gallery state changed.
+
+    The reason reads ``state.cells``, which only this feature writes, so none of
+    the app-wide refresh triggers fire when Generate fills or empties it.
+    """
+    from well_viewer.core.ui_helpers import refresh_empty_state_pages
+    try:
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
 
 
 def _clear_grid(ctx) -> None:

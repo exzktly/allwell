@@ -26,6 +26,9 @@ from well_viewer.core.plot_style import apply_time_rescale
 from well_viewer.domain.time_rescale import axis_label as time_axis_label
 
 
+#: Written onto an otherwise-empty figure so an *exported* copy states its
+#: own shortfall; the on-screen placeholder covers this canvas.
+EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
 NO_DATA_MSG = "Load a directory.\nOpen… is at the top of the left rail (⌘O)."
 
 
@@ -711,6 +714,12 @@ def redraw_line_plots(
             ax.cla()
             ax.set_facecolor(_bg)
             ax.set_axis_off()
+        # One line, on the first panel only. Invisible on screen (the tab's
+        # shared placeholder is in front of this canvas) but present in anything
+        # exported from the figure, which carries no placeholder with it.
+        ax_mean.text(0.5, 0.5, EMPTY_SELECTION_EXPORT_NOTE,
+                     transform=ax_mean.transAxes, ha="center", va="center",
+                     color=_muted_fg, fontsize=10)
         canvas.draw_idle()
         return
 

@@ -79,6 +79,33 @@ from util.well_token import canonical_well_label
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _THRESHOLD_EDIT_W = 90
 
+
+def _smfish_empty_reason(ctx):
+    """This tab's placeholder reason, worst-news-first.
+
+    A run with no smFISH channel can never populate this tab, and that outranks
+    "no well selected": asking the user to click a well, and only telling them
+    the tab cannot work *after* they do, wastes the one action the placeholder
+    asked for. The same precedence the shared refresh applies between "no
+    dataset" and everything else, one level down.
+
+    The no-smFISH message is painted on the canvas too, for the case where a
+    well *is* selected — the placeholder is not in front of it then.
+    """
+    from well_viewer.core.selection_controller import has_plottable_selection
+    from well_viewer.core.ui_helpers import EmptyReason
+
+    if not (ctx.runtime.smfish.tokens or []):
+        title, _, hint = _NO_SMFISH_MESSAGE.partition("\n")
+        return EmptyReason(title, hint)
+    if has_plottable_selection(ctx):
+        return None
+    return EmptyReason(
+        "No well selected.",
+        "Click a well on the plate at the left. smFISH shows one well at a time.",
+    )
+
+
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
 
@@ -231,20 +258,18 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # on-canvas messages below stay where they are — no smFISH channel in the
     # run, an image that failed to load — because those are per-plot causes the
     # placeholder cannot know about.
-    from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
-    # smFISH is ``single_well_selection``, so on_plate_sel_change collapses any
-    # multi-well selection to one while this tab is current: zero wells is the
-    # only empty selection it can be in. Gating on it gives the tab's own
-    # "No smFISH/mask pair found…" message its real meaning back — an empty
-    # selection used to trigger that line, reporting a missing image pair for a
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    # ``_smfish_empty_reason`` puts the worst news first: a run with no smFISH
+    # channel can never populate this tab, so saying that outranks asking for a
+    # well. Below that it gates on the selection — smFISH is
+    # ``single_well_selection``, so a multi-well selection is collapsed to one
+    # while this tab is current and zero wells is the only empty case it reaches.
+    # That also gives its own "No smFISH/mask pair found…" line its meaning back:
+    # an empty selection used to trigger it, reporting a missing image pair for a
     # well the user had never chosen.
     root.addWidget(wrap_with_empty_state(
         ctx.window, plot_host, icon="image",
-        reason=no_selection_reason(
-            title="No well selected.",
-            hint="Click a well on the plate at the left. "
-                 "smFISH shows one well at a time.",
-        ),
+        reason=_smfish_empty_reason,
     ), 1)
 
     canvas_img.mpl_connect(

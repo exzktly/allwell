@@ -296,7 +296,17 @@ def refresh_empty_state_pages(win: Any) -> None:
                 _apply_reason(stack, NO_DATASET)
                 continue
             reason_fn = getattr(stack, "_empty_reason", None)
-            reason = reason_fn(ctx) if (reason_fn is not None and ctx is not None) else None
+            # The reason call is guarded on its own. Letting it share the outer
+            # ``except`` meant a raising reason left the stack on whatever page
+            # it was already on — page 0 for a freshly-registered stack, i.e.
+            # "Load a directory." over a loaded dataset, for the session. That is
+            # exactly the bug the lazy-build fix removed, reintroduced by a
+            # feature bug rather than a missing hook.
+            try:
+                reason = reason_fn(ctx) if (reason_fn is not None and ctx is not None) else None
+            except Exception:
+                swallowed()
+                reason = None
             if reason is None:
                 if stack.currentIndex() != 1:
                     stack.setCurrentIndex(1)

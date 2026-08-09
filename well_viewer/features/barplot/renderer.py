@@ -775,11 +775,14 @@ def redraw_bars(ctx) -> None:
         )
         return
     if not bar_selected and not active_rsets:
-        # No message: the tab's shared placeholder covers this canvas and says it
-        # once, where this painted it three times — once per panel. The axes are
-        # already cleared above, which is what keeps a stale figure from being
-        # exported while the placeholder is up.
-        draw_bar_empty_state(ctx, ax_mean, ax_frac, "", ax_n=ax_n)
+        # One line, where this used to paint the same sentence onto all three
+        # panels. On screen it is invisible — the tab's shared placeholder covers
+        # this canvas and says it properly — but the figure is what Export,
+        # Save figure, Copy and Save-to-gallery write, and those carry no
+        # placeholder with them. A blank rectangle in the gallery is degraded
+        # output that does not say so, which is the rule this branch is about.
+        draw_bar_empty_state(ctx, ax_mean, ax_frac, EMPTY_SELECTION_EXPORT_NOTE,
+                             ax_n=ax_n, message_on_first_only=True)
         return
 
     tp_list = resolve_bar_timepoints(ctx)
@@ -821,7 +824,14 @@ def redraw_bars(ctx) -> None:
     apply_export_style_to_current(ctx, ctx.runtime.barplot.fig, getattr(ctx.runtime.barplot, "canvas", None))
 
 
-def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None) -> None:
+#: Written onto an otherwise-empty figure so an *exported* copy states its own
+#: shortfall. Never read on screen: the shared EmptyState placeholder is in front
+#: of this canvas whenever it is drawn.
+EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
+
+
+def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None,
+                         message_on_first_only: bool = False) -> None:
     # Honour Screen vs Publication mode so the placeholder doesn't render
     # as a glaring white block when the rest of the ctx is dark.
     _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax_mean)
@@ -832,12 +842,13 @@ def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
     axes = [ax_mean, ax_frac]
     if ax_n is not None:
         axes.append(ax_n)
-    for ax in axes:
+    for i, ax in enumerate(axes):
         ax.set_facecolor(_bg)
         # An empty message means a caller whose words live on the tab's shared
         # placeholder instead; it still wants the themed, axis-less blank canvas
-        # behind it.
-        if message:
+        # behind it. ``message_on_first_only`` writes the note once rather than
+        # once per panel — the stutter that made this state unreadable before.
+        if message and not (message_on_first_only and i):
             ax.text(
                 0.5, 0.5, message,
                 transform=ax.transAxes,

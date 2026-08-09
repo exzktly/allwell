@@ -37,6 +37,10 @@ from well_viewer.features.scatter.gating import (
 from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix
 
 
+#: Written onto an otherwise-empty figure so an *exported* copy states its
+#: own shortfall; the on-screen placeholder covers this canvas.
+EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
+
 #: Agg-scatter Property labels that map to a synthetic aggregation key rather
 #: than a metric-intensity column (mirrors ``WellViewerApp._SCATTER_AGG_METRIC_EXTRA``).
 SCATTER_AGG_METRIC_EXTRA = {"Fraction above threshold": "fraction_above_threshold"}
@@ -96,6 +100,11 @@ def redraw_scatter(
         # so the figure behind it holds nothing an export could misrepresent.
         ctx.runtime.scatter.interaction_cache = {"points": []}
         ax_scatter.set_axis_off()
+        # Invisible on screen behind the shared placeholder; the only thing that
+        # speaks in an exported copy of this figure.
+        ax_scatter.text(0.5, 0.5, EMPTY_SELECTION_EXPORT_NOTE,
+                        transform=ax_scatter.transAxes, ha="center", va="center",
+                        color=_muted_fg, fontsize=10)
         scatter_canvas.draw()
         return
 
@@ -319,6 +328,9 @@ def redraw_scatter_agg(
         # Words on the shared placeholder; axes cleared above (see the per-cell
         # branch) so nothing stale can be exported from behind it.
         ax_agg.set_axis_off()
+        ax_agg.text(0.5, 0.5, EMPTY_SELECTION_EXPORT_NOTE,
+                    transform=ax_agg.transAxes, ha="center", va="center",
+                    color=_muted_fg, fontsize=10)
         agg_canvas.draw()
         return
 

@@ -14,36 +14,45 @@ messages: "no timepoints", "no channel data", "no feature columns", "no
 smFISH/mask pair" all stay on the axes, because those are per-plot causes the
 placeholder cannot know about.
 
-**Export renderers are exempt, deliberately.** A figure written to disk carries no
-placeholder with it, and ARCHITECTURE's rule is that degraded output must state
-its own shortfall *in the artifact*. Banning the message there would forbid the
-one place it is required. The exemption is per-file and asserted live below, so it
-cannot quietly grow to cover an interactive renderer.
+**A statement is not a prompt.** A figure written to disk carries no placeholder
+with it, so the plot renderers write one line onto an otherwise-empty figure —
+"No wells selected — nothing to plot." — and ARCHITECTURE's rule is that degraded
+output must state its own shortfall *in the artifact*. That reads as a report, not
+as an instruction, and the rule below is written to tell the two apart: it fires
+on the imperative verbs only. An exemption mechanism exists for a case that
+genuinely needs one, and a liveness test fails any entry that stops describing a
+real violation.
 """
 from __future__ import annotations
 
 import ast
+import re
 
 from tests._repo_scan import python_sources, rel
 
-#: Files allowed to paint a selection message onto axes, with the reason.
-#: Keep this per-site and short; ``test_the_exemptions_still_describe_real_files``
-#: fails when an entry stops naming a real file.
-_EXPORT_RENDERER_EXEMPTIONS = {
-    "well_viewer/features/saved_plots/_report.py":
-        "writes a PDF report; a placeholder cannot travel with the file",
-}
+#: Files allowed to paint a selection *prompt* onto axes, with the reason.
+#: Empty, and that is the point: the export renderers write
+#: ``EMPTY_SELECTION_EXPORT_NOTE`` — "No wells selected — nothing to plot." — which
+#: is a statement about the artifact, not an instruction, so the rule permits it
+#: outright. ``test_every_exemption_still_covers_a_real_violation`` is what proved
+#: that: added as exemptions first, it reported all three as exempting nothing.
+#: Kept as a mechanism for a case that genuinely needs it, with the liveness test
+#: standing guard over it.
+_EXPORT_RENDERER_EXEMPTIONS: dict[str, str] = {}
 
-#: Words that make a message about the *plate selection* specifically.
-_SELECTION_WORDS = ("well", "wells")
+#: Words that make a message about the *plate selection* specifically, matched on
+#: word boundaries: a bare substring test catches "as well as" and "dwell time",
+#: which would push honest prose into worse wording to satisfy the guard.
+_SELECTION_WORD_RE = re.compile(r"\bwells?\b", re.I)
 
-#: The message must *ask for a selection*, not merely mention its absence.
-#: "no wells" on its own is not enough: a renderer reporting what it computed
-#: ("the summary produced no wells or timepoints") is stating a result, and
+#: The message must *ask for a selection* in the imperative, not merely mention
+#: one. Matched on word boundaries against the bare verbs, so "selected" and
+#: "selection" do not count: a renderer reporting what it did — "Showing 12 of 40
+#: selected wells", "the summary produced no wells" — is stating a result, and
 #: banning that wording would push honest reports into worse phrasing to satisfy
-#: a substring. "select" also matches "selection", which is the shape the old
-#: messages used ("… in the current selection").
-_ASK_WORDS = ("select", "choose", "pick")
+#: a substring. "Select wells on the left panel" still matches, which is the
+#: whole family this guard exists to keep off the axes.
+_ASK_RE = re.compile(r"\b(select|choose|pick)\b", re.I)
 
 #: Calls that put text on a matplotlib canvas.
 _TEXT_CALLS = {"text", "suptitle", "set_title"}
@@ -61,28 +70,50 @@ _DRAW_HELPERS = {
 
 def _is_selection_message(value: str) -> bool:
     low = value.lower()
-    if not any(w in low for w in _ASK_WORDS):
+    if _ASK_RE.search(low) is None:
         return False
-    return any(f"{w}" in low for w in _SELECTION_WORDS)
+    return _SELECTION_WORD_RE.search(low) is not None
 
 
 def _string_constants(tree: ast.AST) -> dict[str, str]:
-    """Module-level ``NAME = "..."`` constants, so an indirected message is seen.
+    """Every ``NAME = "..."`` binding in the file, at any nesting.
 
-    Distribution reaches its message through a module constant and a helper
-    rather than passing a literal at the call site; a guard that only looked at
-    literal arguments would have been blind to exactly the shape that existed.
+    Distribution reached its message through a module constant and a helper;
+    Spatial reaches its through ``st.last_error``. A guard that only read literal
+    call arguments was blind to both, and a guard that only read *module-level*
+    constants is still blind to the most natural way to write the banned thing —
+    a local ``msg = "..."`` two lines above the draw call.
     """
     out: dict[str, str] = {}
-    for node in getattr(tree, "body", []):
+    for node in ast.walk(tree):
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
         target = node.targets[0]
-        if not isinstance(target, ast.Name):
-            continue
-        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            out[target.id] = node.value.value
+        name = None
+        if isinstance(target, ast.Name):
+            name = target.id
+        elif isinstance(target, ast.Attribute):
+            # ``st.last_error = "Select one or more wells…"`` — the shape that
+            # survived the first sweep of this branch untouched.
+            name = target.attr
+        if name and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            out[name] = node.value.value
     return out
+
+
+def _text_of(arg, consts: dict[str, str]) -> str | None:
+    """Best-effort string behind a call argument."""
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+        return arg.value
+    if isinstance(arg, ast.Name):
+        return consts.get(arg.id)
+    if isinstance(arg, ast.Attribute):
+        return consts.get(arg.attr)
+    if isinstance(arg, ast.JoinedStr):
+        # f-string: judge the literal parts, which is where the prose lives.
+        return "".join(v.value for v in arg.values
+                       if isinstance(v, ast.Constant) and isinstance(v.value, str))
+    return None
 
 
 def _offenders_in(path, source: str) -> list[str]:
@@ -105,11 +136,7 @@ def _offenders_in(path, source: str) -> list[str]:
         if not drawing:
             continue
         for arg in list(node.args) + [kw.value for kw in node.keywords]:
-            text = None
-            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                text = arg.value
-            elif isinstance(arg, ast.Name):
-                text = consts.get(arg.id)
+            text = _text_of(arg, consts)
             if text and _is_selection_message(text):
                 hits.append(f"{rel(path)}:{node.lineno} -> {text!r}")
     return hits
@@ -130,11 +157,44 @@ def test_no_interactive_renderer_paints_a_selection_message() -> None:
     )
 
 
-def test_the_exemptions_still_describe_real_files() -> None:
-    """An allowlist entry that no longer names a real file is a stale claim."""
+def test_every_exemption_still_covers_a_real_violation() -> None:
+    """A stale exemption is a hole, so each one must still name an offender.
+
+    Checking only that the file exists is not a liveness test — it passes for
+    ever after the violation it was written for is gone, quietly exempting
+    everything else in that file. This asserts the exemption is still *doing*
+    something.
+    """
     from tests._repo_scan import REPO_ROOT
-    missing = [name for name in _EXPORT_RENDERER_EXEMPTIONS
-               if not (REPO_ROOT / name).is_file()]
+
+    dead = []
+    for name in _EXPORT_RENDERER_EXEMPTIONS:
+        path = REPO_ROOT / name
+        if not path.is_file():
+            dead.append(f"{name} (no such file)")
+            continue
+        if not _offenders_in(path, path.read_text(encoding="utf-8")):
+            dead.append(f"{name} (no longer paints one)")
+    assert not dead, (
+        "exemptions that no longer describe a real violation — drop them, or the "
+        f"whole file stays exempt for nothing: {dead}"
+    )
+
+
+def test_the_helper_names_the_guard_relies_on_still_exist() -> None:
+    """``_DRAW_HELPERS`` is a hard-coded roster; a rename silently narrows it."""
+    import subprocess
+    from tests._repo_scan import REPO_ROOT
+
+    missing = []
+    for helper in _DRAW_HELPERS:
+        hit = subprocess.run(
+            ["grep", "-rqE", rf"def {helper}\b", str(REPO_ROOT / "well_viewer")],
+            capture_output=True,
+        )
+        if hit.returncode != 0:
+            missing.append(helper)
     assert not missing, (
-        f"exemptions name files that no longer exist: {missing} — drop the entries"
+        f"_DRAW_HELPERS names functions that no longer exist: {missing} — the guard "
+        "is silently not looking at them any more"
     )

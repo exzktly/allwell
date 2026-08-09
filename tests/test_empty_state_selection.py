@@ -95,13 +95,15 @@ def test_a_background_page_is_updated_too(loaded_app):
 
 @pytest.mark.slow
 def test_heat_map_is_not_gated_on_the_selection(loaded_app):
-    """Heat Map draws its layout, so clearing the plate must not blank it.
+    """A *populated* Heat Map must keep drawing when the plate is cleared.
 
-    It reads the selection only to outline cells. Gating it the way the plot
-    tabs are gated would hide a populated saved layout the moment the user
-    cleared the plate — a worse bug than the blank grid it was meant to fix.
+    The fixture's active layout is the empty ``Sidebar`` one the sidebar seeds,
+    so this seeds a real layout first. Branching on whether the layout happened
+    to have cells — which the first version of this test did — meant the case it
+    is named for never ran.
     """
     from well_viewer.features.heatmap.controller import active_layout, heatmap_empty_reason
+    from well_viewer.features.heatmap.models import make_plate_layout
 
     app = loaded_app
     ctx = app._ctx
@@ -109,14 +111,89 @@ def test_heat_map_is_not_gated_on_the_selection(loaded_app):
     app._plotting_notebook.setCurrentByName("Heat Map")
     app._drain_pending_centre_builders()
 
-    layout = active_layout(ctx)
+    populated = make_plate_layout(ctx.state.dataset.well_paths.keys())
+    assert populated.cells, "the fixture's wells should populate a plate layout"
+    ctx.runtime.heatmap.layouts = [populated]
+    ctx.state.heatmap.active_layout_name = populated.name
+    assert active_layout(ctx).cells
+
     app._set_selected_wells(set(), commit=True)
-    if layout.cells:
-        assert heatmap_empty_reason(ctx) is None, (
-            "the layout holds wells, so an empty plate selection must still draw"
-        )
-    else:
-        reason = heatmap_empty_reason(ctx)
-        assert reason is not None and "heat map" in reason.title.lower(), (
-            "an empty layout should say so rather than draw a blank grid"
-        )
+    assert heatmap_empty_reason(ctx) is None, (
+        "the layout holds wells, so clearing the plate must not blank the map"
+    )
+
+
+@pytest.mark.slow
+def test_heat_map_placeholder_retracts_when_its_layout_is_filled(loaded_app):
+    """Its own instruction has to work.
+
+    The placeholder reads "click Auto-populate from selection". Doing exactly
+    that filled the layout and left the placeholder standing, because nothing
+    re-evaluated the reason — the reason depends on state only this feature
+    writes, so none of the app-wide refresh triggers fire for it.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+
+    from well_viewer.features.heatmap.controller import active_layout
+    from well_viewer.features.heatmap.sidebar_view import _on_autopopulate
+    from tests.fixtures.mini_dataset import WELLS
+
+    app = loaded_app
+    ctx = app._ctx
+    _open(app, "Plotting")
+    app._plotting_notebook.setCurrentByName("Heat Map")
+    app._drain_pending_centre_builders()
+
+    canvas = ctx.widgets.get_or_none("_heatmap_canvas")
+    stack = canvas
+    while stack is not None and not (
+        isinstance(stack, QStackedWidget) and stack.objectName() == "PlotEmptyStateStack"
+    ):
+        stack = stack.parentWidget()
+    assert stack is not None, "the heat map canvas is not inside an empty-state stack"
+
+    if active_layout(ctx).cells:                      # nothing to prove
+        return
+    assert stack.currentIndex() == 0
+
+    app._set_selected_wells(set(WELLS), commit=True)
+    _on_autopopulate(ctx)
+    assert active_layout(ctx).cells, "auto-populate should have filled the layout"
+    assert stack.currentIndex() == 1, (
+        "the layout is populated, so the placeholder that told the user to "
+        "populate it must be gone"
+    )
+
+
+@pytest.mark.slow
+def test_spatial_placeholder_retracts_at_summary_level(loaded_app):
+    """Spatial's reason is level-dependent, so a level change must re-run it.
+
+    Summary falls back to every loaded well, so it has something to draw with no
+    selection — the reason returns None — but nothing re-evaluated it on the
+    level change and the placeholder stayed over a populated page.
+    """
+    from PySide6.QtWidgets import QStackedWidget
+
+    from well_viewer.features.spatial import controller as sp
+    from well_viewer.features.spatial import state as sp_state
+
+    app = loaded_app
+    ctx = app._ctx
+    _open(app, "Spatial")
+    app._set_selected_wells(set(), commit=True)
+
+    canvas = ctx.widgets.get_or_none("_sp_canvas")
+    stack = canvas
+    while stack is not None and not (
+        isinstance(stack, QStackedWidget) and stack.objectName() == "PlotEmptyStateStack"
+    ):
+        stack = stack.parentWidget()
+    assert stack is not None, "the spatial canvas is not inside an empty-state stack"
+    assert stack.currentIndex() == 0, "per-frame level with no selection: placeholder"
+
+    sp.sp_set_level(ctx, sp_state.LEVEL_SUMMARY)
+    assert sp.spatial_empty_reason(ctx) is None
+    assert stack.currentIndex() == 1, (
+        "Summary draws every loaded well, so its placeholder must have retracted"
+    )

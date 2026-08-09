@@ -693,6 +693,16 @@ def redraw_heatmap(ctx) -> None:
         swallowed()  # was: pass (silent except)
 
     canvas.draw_idle()
+    # Re-evaluate this tab's empty-state reason, which reads ``layout.cells``.
+    # Nothing outside this feature touches the layout, so none of the app-wide
+    # refresh triggers fire when the user fills it — and the placeholder's own
+    # instruction is "click Auto-populate from selection". Without this, doing
+    # exactly what it says left the placeholder standing over a populated grid.
+    try:
+        from well_viewer.core.ui_helpers import refresh_empty_state_pages
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
 
 
 def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:

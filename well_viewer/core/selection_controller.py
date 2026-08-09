@@ -143,17 +143,25 @@ def _announce_selection(ctx) -> None:
     back to every well when nothing is picked must not make the status line claim
     those wells were selected.
     """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
     sel = ctx.state.selection
     well_paths = ctx.state.dataset.well_paths or {}
     n = len([w for w in sel.selected_wells if w in well_paths])
     if n:
         ctx.notify.set_status(f"{n} well{'s' if n != 1 else ''} selected")
+        return
+    # A visible replicate set is a selection expressed a different way, and the
+    # plots draw it. Saying "No wells selected" while they do is the same
+    # contradiction, one level up, that this branch set out to remove.
+    n_sets = len(list(active_replicate_sets(sel.selections, well_paths)))
+    if n_sets:
+        ctx.notify.set_status(f"{n_sets} group{'s' if n_sets != 1 else ''} shown")
     else:
         ctx.notify.set_status("No wells selected")
 
 
 def apply_selection_refresh(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Refresh the sidebar and every visible tab's view after a selection change.
 
     The subscriber body for the ``selection_changed`` bus signal: every
@@ -181,6 +189,7 @@ def apply_selection_refresh(ctx) -> None:
     said "Selected: A01", because a tab the user had left wrote it. One writer on
     the one signal that means the selection changed.
     """
+    app = ctx.window  # transitional bridge (A3)
     from well_viewer.core.ui_helpers import refresh_empty_state_pages
     refresh_empty_state_pages(app)
     _announce_selection(ctx)
@@ -913,9 +922,16 @@ def has_plottable_selection(ctx) -> bool:
     from well_viewer.domain.selections_model import active_replicate_sets
 
     sel = ctx.state.selection
-    if sel.selected_wells:
-        return True
     well_paths = ctx.state.dataset.well_paths or {}
+    # Filtered by ``well_paths``, exactly as three of the four renderers this
+    # replaced were. A label the dataset does not have plots nothing, so counting
+    # it as "plottable" hides the placeholder over a figure with no data in it.
+    # That state is reachable and outlives a frame: a saved heat-map layout can
+    # push a stale label through ``on_heatmap_click`` -> ``set_selected_wells``,
+    # and the plate widget only prunes it on the *debounced* sidebar refresh,
+    # which lands after this has already decided what to show.
+    if any(w in well_paths for w in sel.selected_wells):
+        return True
     return bool(list(active_replicate_sets(sel.selections, well_paths)))
 
 

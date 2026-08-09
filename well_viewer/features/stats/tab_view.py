@@ -253,8 +253,18 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import EmptyReason, wrap_with_empty_state
 
     def _no_groups(c):
-        if c.state.stats.groups:
+        # Two, not one: this tab compares groups, so a single group cannot run a
+        # test either. Gating on "any group at all" let the old top-left QTextEdit
+        # placeholder — the inconsistency this replaced — come straight back the
+        # moment the user added the first one.
+        n = len(c.state.stats.groups or [])
+        if n >= 2:
             return None
+        if n == 1:
+            return EmptyReason(
+                "One comparison group so far.",
+                "Add a second group to run a test — + Add in the left panel.",
+            )
         return EmptyReason(
             "No comparison groups yet.",
             "Click + Add in the left panel, then drag wells onto a group card.",

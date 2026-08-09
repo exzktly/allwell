@@ -1331,9 +1331,11 @@ when it has nothing to draw, instead of an empty table or a blank panel that
 looks like something failed. The placeholder says *which* nothing it is: before a
 dataset is open it asks you to load a directory, and once one is open it names
 what the page is still waiting for. On the plot tabs, Multivariate, Review CSV
-and smFISH that is a well selection, so they read "No wells selected." with a
+and smFISH that is a well selection, so they read "No wells selected." — "No well
+selected." on smFISH, which shows one well at a time — with a
 line telling you to click wells on the plate at the left (or open Plot Groups
-below it) until you pick some. Statistics asks for two comparison groups instead,
+below it) until you pick some. Statistics asks for two comparison groups instead — it names the gap when you
+have one as well as when you have none —
 because it compares groups rather than plotting the plate directly, and the Heat
 Map asks you to put wells on its grid — press **Auto-populate from selection**,
 or drag them in from the plate.

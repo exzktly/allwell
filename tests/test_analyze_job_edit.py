@@ -58,6 +58,7 @@ _OPTS = {
     "background": "top_hat",
     "background_well": "H12",
     "auto_threshold": False,
+    "run_check": False,
     "auto_threshold_method": "controls",
     "pos_control_well": "A1",
     "neg_control_well": "A2",

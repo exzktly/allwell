@@ -1768,6 +1768,133 @@ def _tp_sort_key(tok: str):
     return tp_sort_key(tok)
 
 
+def _local_input_dir_from_argv(argv) -> "Path | None":
+    """The ``--input_dir`` the local argv named, before the remote rewrite.
+
+    This is the user's own plate directory. For an incremental run the *staged*
+    upload is a different, partial directory, and a completeness check pointed
+    at that one would call a plate finished on the strength of the slice that
+    happened to be re-uploaded.
+    """
+    argv = list(argv or [])
+    for i, arg in enumerate(argv):
+        if arg == "--input_dir" and i + 1 < len(argv):
+            return Path(argv[i + 1])
+        if arg.startswith("--input_dir="):
+            return Path(arg.split("=", 1)[1])
+    return None
+
+
+def run_client_side_completeness_check(
+    local_input_dir: Path | None, local_output_dir: Path, *,
+    log_fn: Callable[[str], None] | None = None,
+) -> dict:
+    """Record completeness for a remote run, on the client, after the fetch.
+
+    The remote never writes this block — ``_build_remote_argv`` appends
+    ``--no_run_check`` to every remote launch. Three reasons, and they compound:
+    an incremental run's remote output dir holds only the uploaded split, so a
+    record written there would inventory the wrong tree; the fetched sidecar
+    overwrites the local one, so the record would be destroyed on arrival
+    anyway; and a batched run is N separate pipeline launches, each of which
+    would describe its own slice as if it were the plate.
+
+    Running here answers a strictly better question. "Did the remote produce
+    it" is what a remote-side check could say; "did it get here" is what this
+    one says, and a file that failed to transfer is missing locally whether or
+    not it ever existed on the far side.
+
+    **Any ``run_check`` the fetch brought back is dropped first.** The remote's
+    suppression writes the same "turned off" stub a user's own
+    ``--no_run_check`` would, and that stub riding back would tell the user they
+    turned the check off when they did not. Clearing it first means the two
+    outcomes here are an honest record or no record at all — and no record
+    reads as "not checked", which is what actually happened.
+
+    Best-effort throughout: a remote run's output is already on disk and
+    verified, and failing to describe it must not fail it.
+    """
+    log = log_fn or (lambda _m: None)
+    out_dir = Path(local_output_dir)
+    info_path = out_dir / "pipeline_info.json"
+    try:
+        from pipeline.completeness import record_run_check
+        from pipeline.io import _safe_atomic_text_write
+
+        info = json.loads(info_path.read_text()) if info_path.exists() else {}
+        if not isinstance(info, dict):
+            info = {}
+        if "run_check" in info:
+            info.pop("run_check")
+            with _safe_atomic_text_write(info_path) as fh:
+                json.dump(info, fh, indent=2)
+
+        schema = [f.strip() for f in str(info.get("schema") or "").split(":") if f.strip()]
+        if not schema:
+            log("[remote] no schema in the sidecar — skipping the completeness check.\n")
+            return {}
+        sep = str(info.get("separator") or "_")
+        csv_prefix = str(
+            (info.get("execution_options") or {}).get("csv_prefix") or "measurements")
+
+        containers = {}
+        if local_input_dir is not None:
+            from util.well_token import canonical_well_label
+
+            in_dir = Path(local_input_dir)
+            try:
+                for path in sorted(in_dir.iterdir()):
+                    if path.name.startswith(".") or path.name.startswith("_"):
+                        continue
+                    stem = path.stem if path.suffix == ".zip" else path.name
+                    label = canonical_well_label(stem)
+                    if label and (path.is_dir() or path.suffix == ".zip"):
+                        containers[label] = path
+            except OSError:
+                containers = {}
+
+        return record_run_check(
+            info_path=info_path,
+            output_dir=out_dir,
+            in_containers=containers,
+            schema=schema,
+            sep=sep,
+            csv_prefix=csv_prefix,
+            started_at=None,
+            mode="remote",
+            atomic_writer=_safe_atomic_text_write,
+            log=_LogFnLogger(log),
+        )
+    except Exception as exc:
+        log(f"[remote] completeness check failed: {exc}\n")
+        return {}
+
+
+class _LogFnLogger:
+    """Adapts the remote runner's ``log(text)`` sink to a logger-shaped object.
+
+    ``record_run_check`` writes through ``logging``-style calls because it is
+    normally driven from inside the pipeline; here the destination is the GUI's
+    line stream, which takes whole lines with a trailing newline.
+    """
+
+    def __init__(self, log_fn):
+        self._log = log_fn
+
+    def _emit(self, prefix, msg, args):
+        text = (msg % args) if args else str(msg)
+        self._log(f"{prefix}{text}\n")
+
+    def info(self, msg, *args):
+        self._emit("[remote] ", msg, args)
+
+    def warning(self, msg, *args):
+        self._emit("[remote] ", msg, args)
+
+    def error(self, msg, *args):
+        self._emit("[remote] ", msg, args)
+
+
 def refresh_pipeline_info_available_from_outputs(
     local_output_dir: Path, *, log_fn: Callable[[str], None] | None = None,
 ) -> bool:
@@ -3262,6 +3389,12 @@ class _RemoteRun:
     remote_pidfile: str
     local_output_dir: Path
     local_input_mode: LocalInputMode
+    #: The user's own input directory, as the local argv named it — not the
+    #: staged upload, which for an incremental run holds only the new-FOV
+    #: split. The end-of-run completeness check compares against it, and
+    #: comparing against the split would report a plate as finished because
+    #: only the part that was re-uploaded was checked.
+    local_input_dir: Path | None = None
     # v5.2.29: tracked here so the verify step can check the right
     # local artifacts (CSV always; out_zip / extracted folder only
     # when the user opted into the full output set).
@@ -3539,6 +3672,7 @@ class _BatchedRemoteProcess:
             remote_pidfile=remote_pidfile,
             local_output_dir=local_output_dir,
             local_input_mode=zipped.mode,
+            local_input_dir=_local_input_dir_from_argv(pipeline_argv),
             output_filter=output_filter,
             incremental=zipped.incremental,
             force=_force, force_wells=_forced_wells,
@@ -5122,6 +5256,7 @@ class RemoteRunner:
             remote_pidfile=remote_pidfile,
             local_output_dir=local_output_dir,
             local_input_mode=zipped.mode,
+            local_input_dir=_local_input_dir_from_argv(pipeline_argv),
             output_filter=output_filter,
             incremental=zipped.incremental,
             force=_force, force_wells=_forced_wells,
@@ -5359,6 +5494,15 @@ class RemoteRunner:
         # from the *merged* local outputs (the <well>_out.zip members keep the
         # input stem), which hold the complete picture after the fetch.
         refresh_pipeline_info_available_from_outputs(run.local_output_dir, log_fn=log)
+
+        # Completeness, client-side. Must run AFTER the refresh above: that call
+        # rewrites available_timepoints/available_fovs from the merged local
+        # outputs, and a check reading the sidecar before it would describe
+        # fields the very next line repairs. Runs before the `ok` gate too — a
+        # run that came back short is exactly the one whose record is worth
+        # having, and the shortfall is what the record is for.
+        run_client_side_completeness_check(
+            run.local_input_dir, run.local_output_dir, log_fn=log)
 
         if not ok:
             log("[remote] pipeline returned non-zero — skipping cleanup, leaving remote state.\n")
@@ -5932,6 +6076,14 @@ class RemoteRunner:
         remote_script = f"{self.host.remote_project_dir}/process_microscopy.py"
         out = [*_conda_run_prefix_for(self.env_selector), "python", remote_script]
         i = 2  # skip the interpreter + script slots
+        # Suppress the remote completeness check unconditionally; the client
+        # runs it after the fetch instead (see verify_and_cleanup). A record
+        # written remotely would describe the wrong tree — an incremental run's
+        # remote output dir holds only the uploaded split — and would be
+        # destroyed anyway when the fetched sidecar overwrites the local one.
+        # The client-side check answers "did it get here", which strictly
+        # supersets "did the remote produce it".
+        suppress_run_check = "--no_run_check" not in local_argv
         while i < len(local_argv):
             arg = local_argv[i]
             if arg == "--input_dir":
@@ -5965,6 +6117,8 @@ class RemoteRunner:
             else:
                 out.append(arg)
                 i += 1
+        if suppress_run_check:
+            out.append("--no_run_check")
         # Apply the output filter.
         if output_filter is OutputFilter.CSV_ONLY and "--no_save_tophat" not in out:
             out.append("--no_save_tophat")

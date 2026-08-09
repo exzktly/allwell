@@ -621,6 +621,17 @@ Collapsed by default.
   `measurements` by default, giving `measurements_<WELL>.csv`. Change it to keep
   two differently-configured runs distinguishable inside one output folder.
 
+- **Check completeness when the run finishes.** On by default. After the last
+  well, the run compares what each well's input archive held against what its
+  measurements CSV and output archive actually cover, and records the answer in
+  `pipeline_info.json`. It costs seconds — the files were written moments
+  earlier and are still in the operating system's cache — and it is what lets
+  Review tell you afterwards whether the plate is whole. This matters because a
+  well that lost some of its fields still writes a CSV and an archive that look
+  exactly like a complete well's on disk; without the record there is nothing to
+  compare them against. Turning it off leaves the dataset with no completeness
+  record, and Review then says the check was turned off rather than guessing.
+
 Packaging is not configurable: inputs are always read from per-well `.zip`
 archives and outputs are always written as per-well `.zip` archives. See
 [What the pipeline writes](#what-the-pipeline-writes) for the full layout.
@@ -833,9 +844,29 @@ and by `remote_fetch_report.txt` in the output folder.
 ├── <well>_out.zip          ← masks + tophat-corrected fluorescence + overlays
 ├── <prefix>_<well>.csv     ← per-well measurement CSV (one row per nucleus)
 ├── pipeline_info.json      ← schema + channel tokens + FOVs + timepoints +
-│                              gating thresholds + saved selections, etc.
+│                              gating thresholds + saved selections +
+│                              the completeness record, etc.
+├── errors/                 ← one traceback per failed field, when any fail
 └── (transient tmp_<well>/  ← deleted on success)
 ```
+
+**The completeness record.** `pipeline_info.json` gains a `run_check` block at
+the end of every run, holding one entry per well: how many
+`(field, timepoint)` groups its input held, how many its measurements CSV
+covers, how many the CSV and the output archive cover between them, which are
+missing, and whether that adds up to complete, partial, or images-with-no-
+measurements. It is written *after* the last well, which is why its presence
+means something on its own — the rest of `pipeline_info.json` is written before
+the first image is read, so a run that died in its first seconds still leaves
+that file behind looking perfectly normal.
+
+Three things worth knowing about it. It describes the **whole dataset**, not
+just the wells this run touched, so re-running to add a timepoint still leaves a
+record covering every well. It is a **snapshot of the moment the run ended** — if
+you repair a dataset by hand afterwards, the record still describes it as it was,
+which is why the date it was taken is shown alongside it. And a run that was
+**stopped** part-way records that it was stopped, rather than reporting the wells
+it never got to as though they had failed.
 
 Every archive the app writes — the `<well>_out.zip` results and the
 `in/<WELL>.zip` inputs the Analyze tab packs for you — is built alongside its
@@ -2521,6 +2552,17 @@ Use this to check whether an Analyze run actually finished — a crash or a
 partial run can leave `pipeline_info.json` advertising more timepoints than
 `out/` actually holds, so Review would show gaps with no obvious cause and a
 plain re-run would skip the very wells that need finishing.
+
+Every run already records its own completeness when it ends (see
+[What the pipeline writes](#what-the-pipeline-writes)), and the two answer
+different questions. That record is a snapshot of the moment the run finished,
+free, and always there. This tool is the on-demand sweep: it re-reads the
+dataset as it stands *now*, checks things the end-of-run record does not —
+sidecar metadata that has drifted out of sync, CSVs that look like a well's data
+but aren't, stale cell-inclusion overrides — and it can repair what it finds.
+Reach for it when a dataset has been moved, edited, merged or hand-repaired
+since the run, or when the run's own record is missing. Both use the same
+definition of a complete well, so they will never disagree about one.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel
    appears showing a "Ready — N well(s)" preview of the plate, before you've

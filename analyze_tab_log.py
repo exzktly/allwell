@@ -16,9 +16,13 @@ mixins start it and drain its queue; this shows what the run then said.
 * ``_surface_run_failure`` — the whole outcome path: the dashboard's failed or
   cancelled state, the raw log, and unfolding whichever form section the
   message names.
-* ``_refresh_last_run_summary`` — the idle "Last run ·" card. Its only test is
-  that ``pipeline_info.json`` exists, and the pipeline writes that before any
-  image work, so the caller must gate it on the run having actually succeeded.
+* ``_refresh_last_run_summary`` — the idle "Last run ·" card. It shows whenever
+  ``pipeline_info.json`` exists, which the pipeline writes before any image
+  work, so the caller still gates it on the run having actually succeeded. What
+  the card *says* about the run now leans on the ``run_check`` block instead:
+  that one is written after the last well, so a run which died early has no
+  completeness line to show and the card says so rather than reporting a
+  method and a channel list that were true before anything happened.
 
 They bind to ``self`` — the host is ``AnalyzeTab``, and they reach its runner,
 dashboard and collapsible sections through it.
@@ -78,6 +82,37 @@ def _headline_of(message: str) -> str:
     return cut.rstrip(" ,;:-") + "…"
 
 
+def _completeness_line(info: dict) -> str:
+    """What the last run's completeness record says, in one line.
+
+    The card above it is built entirely from keys ``pipeline_info.json`` carries
+    *before* any image is read, so every one of them is equally true of a run
+    that died in its first five seconds. ``run_check`` is the only key written
+    at the end, and it is what lets this card say something a failed run could
+    not have produced.
+
+    Absent means the run predates the check, so the line says exactly that
+    rather than implying a shortfall. A run whose check was turned off says
+    that instead — a different thing, with a different fix.
+    """
+    check = info.get("run_check")
+    if not isinstance(check, dict):
+        return "Completeness: not recorded for this run"
+    if check.get("skipped"):
+        return "Completeness: check was turned off for this run"
+    totals = check.get("totals") or {}
+    n_wells = int(totals.get("wells") or 0)
+    complete = int(totals.get("complete") or 0)
+    bits = [f"{complete}/{n_wells} well(s) complete"]
+    if int(totals.get("partial") or 0):
+        bits.append(f"{int(totals['partial'])} partial")
+    if check.get("suspended"):
+        bits.append("run was suspended")
+    if check.get("partial_scan"):
+        bits.append("check did not finish")
+    return "Completeness: " + "   ·   ".join(bits)
+
+
 class AnalyzeLogPaneMixin:
     """The Analyze pane's log view + last-run summary."""
 
@@ -103,7 +138,8 @@ class AnalyzeLogPaneMixin:
         n_tp = len(info.get("available_timepoints", []) or [])
         card.setText(
             f"Last run · {out.name}\n"
-            f"Method: {method}   ·   Channels: {fluors}   ·   {n_tp} timepoint(s)"
+            f"Method: {method}   ·   Channels: {fluors}   ·   {n_tp} timepoint(s)\n"
+            f"{_completeness_line(info)}"
         )
         card.setVisible(True)
 

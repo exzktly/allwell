@@ -2007,6 +2007,7 @@ def test_required_files_list_is_what_we_promised():
         "pipeline/background.py",
         "pipeline/capacity.py",
         "pipeline/cellpose.py",
+        "pipeline/completeness.py",
         "pipeline/flatfield.py",
         "pipeline/incremental_keys.py",
         "pipeline/well_skip.py",

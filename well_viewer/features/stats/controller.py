@@ -832,7 +832,7 @@ def threshold_for_val_col(ctx, val_col: str) -> float:
 
 
 def stats_active_threshold(ctx) -> float:
-    """The per-channel ThreshFracOn for the currently-selected stats value column."""
+    """The per-channel ON cutoff for the currently-selected stats value column."""
     return threshold_for_val_col(ctx, stats_active_val_col(ctx))
 
 

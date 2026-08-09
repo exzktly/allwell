@@ -109,8 +109,8 @@ def clear_from_pipeline_info(ctx) -> None:
     """Reset the live gating slice and drop the sidecar's ``cell_gating`` block.
 
     The title bar's "Reset all saved state" action deletes ``persistence.json``,
-    but the fluorescence gates, ThreshFracOn cutoffs, and the drawn scatter
-    gates are not stored there — they live in ``pipeline_info.json`` so they
+    but the fluorescence gates, the ThreshFracOn / ThreshCountOn cutoffs, and
+    the drawn scatter gates are not stored there — they live in ``pipeline_info.json`` so they
     travel with the dataset. Deleting the one file therefore left every gate in
     place, and the reload restored them from the sidecar as if nothing had
     happened. This clears both halves: the slice first (so nothing in the reload

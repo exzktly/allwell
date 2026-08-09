@@ -253,8 +253,9 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # The QC debris-gate controls now live on the Sample Definitions → Cell
     # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
     # gates). This overlay still *renders* the QC verdict — excluded cells show
-    # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
-    # here again, via the inline "ON threshold" quick-edit on the control row above.
+    # here. The per-channel ON cutoff IS editable here again, via the inline
+    # quick-edit on the control row above — ThreshFracOn for an intensity
+    # Property, ThreshCountOn for a spot count.
     status = reg.register("_review_image_status", QLabel("", inner))
     status.setObjectName("Muted")
     il.addWidget(status)
@@ -285,11 +286,12 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
 
     ctrl.add_action(lut_btn)
 
-    # ON/OFF intensity threshold quick-edit — inline on the control row (its
-    # original home), not tucked inside the LUT ▾ popover. Edits the active
-    # channel's ThreshFracOn — the same value the Cell Gating tab and the
-    # Plotting quick-edit own — and re-renders, so the Binary (≥ ON threshold)
-    # overlay updates live without leaving the tab.
+    # ON-cutoff quick-edit — inline on the control row (its original home), not
+    # tucked inside the LUT ▾ popover. Edits the active channel's cutoff for the
+    # selected Property — the same value the Cell Gating tab and the Plotting
+    # quick-edit own — and re-renders, so the Binary (≥ ON threshold) overlay
+    # updates live without leaving the tab. The caption follows the target, so a
+    # spot-count Property reads "ON spots".
     thr_row = QWidget()
     thr_lay = QHBoxLayout(thr_row)
     thr_lay.setContentsMargins(0, 0, 0, 0)

@@ -1184,10 +1184,17 @@ controls row — **Cells** (one point per cell, X vs Y feature) and **Wells** (o
 point per well/timepoint). Cells can be coloured **by well** or, via **Color by
 time**, by timepoint.
 
-The Channel, Property and Threshold controls that the other plot tabs share
+The Channel, Property and ON cutoff controls that the other plot tabs share
 disappear from the controls row here, and the View toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and
-Y-axis dropdowns below — the shared controls have nothing to act on.
+Y-axis dropdowns below — the shared controls have nothing to act on. Each axis
+still uses its own channel's cutoff from Cell Gating; since the quick-edit is
+hidden here, that tab is where you change it.
+
+In **Wells** view, a plot that comes back empty says which of the two reasons it
+is empty for: no cells at the timepoints you picked, or cells that were all cut
+by an axis's ON cutoff — naming the channel, the cutoff and how many of how many
+cells it kept.
 
 - **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis
@@ -1681,8 +1688,11 @@ channel for every well).
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
   with a **channel** dropdown choosing which channel it applies to (the same
-  ThreshFracOn shared with Cell Gating and the plot tabs; it follows the picked
-  channel, and reads 0 for the nuclear channel until you set one) · **Export ▾** (to file ·
+  cutoff shared with Cell Gating and the plot tabs; it follows the picked
+  channel, and reads 0 for the nuclear channel until you set one). It also
+  follows the selected **Property**: on an smFISH Count property the caption
+  reads **ON spots** and the box edits that channel's ThreshCountOn instead, so
+  the number you see is always the number you are changing · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
@@ -1835,7 +1845,8 @@ exact correction and segmentation code).
     per-cell measurement); every **pixel** above the threshold, if there is no
     usable mask; or every labelled pixel with the threshold ignored. The
     read-out names which one you are seeing, and where the threshold came from —
-    set on this tab, or the channel's app-wide ON threshold.
+    set on this tab, or the channel's app-wide ON cutoff (its ThreshFracOn, or
+    its ThreshCountOn when the selected Property is a spot count).
   - **Colour cells** (on by default) gives every cell its own colour in Binary
     mode instead of painting them all white. Two nuclei that touch are one white
     shape otherwise, so a segmentation that merged them looks exactly like one
@@ -1947,6 +1958,15 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
   `|fa − fb| / max(fa, fb)`, opening a non-modal validation graph so you can
   sanity-check the pick. Independent Control / Baseline pickers let you optimize
   on a fold-change-adjusted fraction-on.
+- **Fraction-on for spot counts** — per-channel **ThreshCountOn** cutoffs, shown
+  only for the smFISH channels (the ones that carry a spot-count column). This
+  is a separate value from ThreshFracOn on purpose: one asks how *bright* a cell
+  must be before it counts as on, the other how many *spots* it must carry, and
+  the two live on scales that share no useful number. It starts at **-1**, which
+  is below the smallest tally a cell can have, so every cell counts as on —
+  including the cells carrying no spots at all, which are a real measurement and
+  not missing data. Raise it to N to plot "the fraction of cells with more than
+  N spots"; the mean, the fraction-on panel, and the events panel all follow it.
 - Inclusion and fraction-on have **independent** gate pickers, so you can gate
   on one set of gates and compute fraction-on from a different set.
 - **Included for analysis** — a live count under the gate controls, e.g.

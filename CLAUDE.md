@@ -87,14 +87,28 @@ for a bare `python -m pytest`.
 The suite has two lanes and **running the wrong one hangs the run and OOM-kills
 the container**:
 
-- **Fast lane** (~1,770 tests, ~55s): `scripts/test.sh`. Pure-logic, guardrail,
-  and per-feature tests. CI invokes this same script, so local and CI runs
-  cannot drift in flags or config — don't hand-roll a `pytest` command.
-- **Full-app tests**: anything using the `viewer_app` / `loaded_app` /
-  `loaded_app_shape` / `image_table_app` fixtures (~70 files, auto-marked `slow`
-  by `conftest.py`). Each builds a real `WellViewerApp` (~1,800 QObjects) whose
-  Qt↔Python reference web is **never reclaimed in-process** — RSS climbs ~40 MB
-  per test, monotonically.
+- **Fast lane** (~4,100 tests of ~4,460 collected, across ~490 files):
+  `scripts/test.sh`. Pure-logic, guardrail, and per-feature tests. CI invokes
+  this same script, so local and CI runs cannot drift in flags or config —
+  don't hand-roll a `pytest` command.
+- **Full-app tests** (~370 tests in ~85 files): anything using the `viewer_app`
+  / `loaded_app` / `loaded_app_shape` / `image_table_app` fixtures, auto-marked
+  `slow` by `conftest.py`. Each builds a real `WellViewerApp` (~1,800 QObjects)
+  whose Qt↔Python reference web is **never reclaimed in-process** — RSS climbs
+  ~40 MB per test, monotonically.
+
+**How long it actually takes**, so a run that is merely slow is not mistaken for
+one that is wedged:
+
+| | Measured |
+|---|---|
+| Fast lane, local, quiet container | ~3.5 min |
+| Fast lane, local, while other work runs in the same container | up to ~11 min — same suite, 3× the wall clock; contention, not the tests |
+| Fast lane, CI job end to end | ~9 min, including checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
+| One slow-lane file of ~15 full-app tests | ~3.5 min, i.e. ~14 s per app construction |
+
+Re-count rather than trusting these when it matters: `python -m pytest tests -m
+"not slow" -q --collect-only | tail -1` prints the split in about two seconds.
 
 Rules: never run a bare `pytest tests/` or `-m slow` across everything here. Run
 full-app tests a file or two per process (budget ≲15–20 app constructions per
@@ -168,7 +182,7 @@ well_viewer/            Review pane — the bulk of the app
 widgets/                reusable Qt widgets, zero app coupling
 theme.py, ui/theme/     design tokens + QSS (never hardcode colours)
 profiles/*.toml         build profiles (feature subsets)
-tests/                  ~315 test files, incl. the guardrails
+tests/                  ~490 test files, incl. the guardrails
 _Docs/Markdowns/        the three live docs — ARCHITECTURE.md, README_WellViewer.md,
                         GOD_OBJECT_REPOSITORY_ROADMAP.md
 ```

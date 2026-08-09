@@ -932,6 +932,17 @@ QComboBox:hover {{
 QComboBox:focus, QComboBox:on {{
     border-color: {c.accent};
 }}
+/* Every other input type here has a disabled rule and this one did not, so a
+   combo that a tab had greyed out rendered pixel-identical to a live one —
+   ``setEnabled(False)`` took effect (the popup would not open) with nothing on
+   screen to say so. Setting ``color`` in the base rule is what makes the
+   omission total: a stylesheet colour with no disabled variant is applied in
+   every state, so the palette's disabled group never gets a look in. Matches
+   the ``QLineEdit`` family, whose base rule this one mirrors token for token. */
+QComboBox:disabled {{
+    color: {c.text_muted};
+    background-color: {c.panel};
+}}
 QComboBox::drop-down {{
     border: none;
     width: 18px;

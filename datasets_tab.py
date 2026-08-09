@@ -121,6 +121,7 @@ def _build_job_queue(tab: "DatasetsTab") -> tuple[QWidget, Callable[[], None] | 
         if callable(sink):
             sink(lambda spec: controller.add_job("analyze", spec))
     controller.set_session_hooks(tab._begin_session, tab._end_session)
+    controller.set_reveal_hook(tab._reveal_page)
     tab._controllers["job_queue"] = controller
     return controller.page, controller.shutdown
 
@@ -151,12 +152,20 @@ class DatasetsTab(QWidget):
         *,
         on_open_in_review: Callable[[Path], None] | None = None,
         on_open_in_analyze: Callable[..., None] | None = None,
+        on_reveal_analyze: Callable[[], bool] | None = None,
         analyze_controller: object | None = None,
         queue_state_dir: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_open_in_review = on_open_in_review
         self._on_open_in_analyze = on_open_in_analyze
+        # "Switch to the Analyze pane, change nothing on it." Analyze is the one
+        # queueable kind with no rail entry here, so revealing its page means
+        # leaving this pane entirely, which only the shell can do. None when a
+        # DatasetsTab is built without a shell (tests, and the Datasets-only
+        # profiles): _reveal_page then reports that it could not get there
+        # rather than pretending it did.
+        self._on_reveal_analyze = on_reveal_analyze
         # The already-built AnalyzeTab, injected by allwell.py the same way
         # on_open_in_review/on_open_in_analyze are — duck-typed to
         # datasets.job_queue.controller.QueueableController via
@@ -178,6 +187,32 @@ class DatasetsTab(QWidget):
         job_queue = self._controllers.get("job_queue")
         if job_queue is not None:
             job_queue.add_job(kind, spec)
+
+    # ── queue navigation ─────────────────────────────────────────────────────
+    def _reveal_page(self, kind: str) -> bool:
+        """Show *kind*'s page and change nothing on it. Returns whether it worked.
+
+        Deliberately not :meth:`_begin_session` with the banner left off. That
+        one exists to stand a page in for a job being *edited*, and it is
+        reached only after the queue controller has decided a session may
+        start; this is the plain "take me to that tool" half, which a click on
+        a running row needs precisely because its page must not be written to.
+        Keeping them separate is what lets the running case navigate without
+        populating.
+
+        The return value is not decoration: Analyze has no rail entry here, so
+        reaching it depends on a shell callback that need not exist. The caller
+        says why the click did nothing rather than leaving it silent, which is
+        the defect this whole path was reported for.
+        """
+        page_name = self._page_name_for(kind)
+        if page_name is None:
+            if self._on_reveal_analyze is None:
+                return False
+            return bool(self._on_reveal_analyze())
+        self._nav.setCurrentKey(page_name)
+        self._pages.setCurrentByName(page_name)
+        return True
 
     # ── queue edit sessions ──────────────────────────────────────────────────
     def _begin_session(self, kind: str, message: str) -> None:

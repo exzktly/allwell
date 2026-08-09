@@ -407,6 +407,7 @@ class AllWellApp(QMainWindow):
             parent=None,
             on_open_in_review=self._open_dataset_in_review,
             on_open_in_analyze=self._open_dataset_in_analyze,
+            on_reveal_analyze=self._reveal_analyze_pane,
             analyze_controller=self._analyze,
         )
         self._review.mountDatasetsPane(self._datasets)
@@ -1382,6 +1383,25 @@ class AllWellApp(QMainWindow):
         self._nb.setCurrentIndex(0)
         QTimer.singleShot(50, lambda: self._review._load_path(dataset_path))
         self._update_dataset_chip(dataset_path)
+
+    def _reveal_analyze_pane(self) -> bool:
+        """Switch to the Analyze pane and change nothing on it.
+
+        The Job Queue's counterpart to :meth:`_open_dataset_in_analyze`, for a
+        click on a row whose job is already running: Analyze has no rail entry
+        in the Datasets pane to switch to, so getting the user to that job's
+        progress means changing pane. Nothing else is touched — the pane is
+        mid-run and its fields *are* the run's own progress display.
+
+        The stack watcher installed by ``_install_mode_bar_sync`` re-syncs the
+        mode bar off the index change, which is why this needs no explicit
+        ``_sync_mode_bar()`` (and why ``_open_dataset_in_analyze`` needs none
+        either).
+        """
+        if self._analyze is None:
+            return False
+        self._nb.setCurrentIndex(1)
+        return True
 
     def _open_dataset_in_analyze(
         self, dataset_path: Path, pipeline_info: dict | None = None,

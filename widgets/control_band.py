@@ -42,15 +42,33 @@ No All-Well coupling — a plain reusable widget.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 import theme
+from widgets.checkbox_fit import fit_checkbox_width
 from widgets.flow_layout import FlowLayout, flow_group, sync_flow_height
 
 
 #: Sentinel for "this band's page has not chosen a leaf yet" — distinct from
 #: ``None``, which is the page explicitly showing no leaf's controls at all.
 _NO_SLOT = object()
+
+
+def _fit_checkboxes(widgets) -> None:
+    """Floor every checkbox's width to what its own style needs for its label.
+
+    Done here rather than at each call site for the reason ``trailing=True``
+    lives here: the rule belongs with the control row, not in each builder's
+    memory. A ``QCheckBox`` whose style places the label further right than
+    ``sizeHint()`` budgeted clips its own text, and the flow layout then packs
+    the next control immediately against the cut — reported on macOS for the
+    Distribution tab's ``log x`` / ``log y`` boxes. See
+    :mod:`widgets.checkbox_fit`; it is a no-op wherever the label already fits,
+    which is every case under Fusion.
+    """
+    for widget in widgets:
+        if isinstance(widget, QCheckBox):
+            fit_checkbox_width(widget)
 
 
 class ControlBandSlot(QWidget):
@@ -198,6 +216,7 @@ class ControlBand(QWidget):
         """
         if not widgets:
             raise ValueError("add_scope needs at least one widget")
+        _fit_checkboxes(widgets)
         if label:
             cap = QLabel(label, self._scope_host)
             cap.setObjectName("Muted")
@@ -222,6 +241,7 @@ class ControlBand(QWidget):
 
     def add_action(self, widget: QWidget) -> QWidget:
         """Add an action to the right zone, in call order, flush to the edge."""
+        _fit_checkboxes((widget,))
         widget.setParent(self)
         self._actions.addWidget(widget)
         return widget

@@ -1467,6 +1467,12 @@ as a histogram, KDE, or violin.
   group)*); **Layout** (*Overlay* all wells, or *Faceted (one per group)*);
   **Bins** count; **log x** / **log y** toggles; the timepoint picker; the
   channel-wide threshold reference line.
+- **No error band** — this tab draws the whole population per group rather than
+  reducing it to a mean, so there is no spread for a band to describe and no
+  SEM/SD control on its controls row. The SEM/SD choice itself is app-wide: set
+  it on Bar Plots or Line Graphs (under **Display ▾**), or in the **Properties**
+  panel under *Statistics* → *Error bars*, and every tab that draws a band
+  follows.
 - **Optimal use** — compare a handful of wells at a single timepoint to read
   how a treatment shifts the *whole* population, not just its mean; facet when
   overlaid distributions get too crowded to read.
@@ -1718,7 +1724,10 @@ Spatial, and use the controls row:
   `<channel>_<property>` intensity column, any `shape_*` morphology column,
   or any user-defined ratio is eligible.
 - **Timepoint** — which frame to analyse. *First available* uses the
-  smallest finite `timepoint_hours` in the well.
+  smallest finite `timepoint_hours` in the well. Greyed out at **Summary**
+  level, which walks every timepoint and draws them as the columns of its
+  well × timepoint matrix — there is no single frame to choose there. Hover it
+  for the same explanation.
 - **Recompute** — forces a fresh compute. The per-frame levels (Cell, Colony,
   Intra-colony) recompute on every control change, so this is only strictly
   needed at Summary level, where changes are queued until you press it (one
@@ -2832,6 +2841,19 @@ instead of babysitting each one.
   whatever that page currently holds.
 - **+ Queue** beside Analyze's **Run Pipeline** button, which captures the
   whole Analyze form — every option, not just the input folder.
+
+**Looking at a job** — click its row and All-Well takes you to that tool's
+page. What you find there depends on the job:
+
+- A **running** job's page is left exactly as it is and simply shown, so you
+  land on that run's own live progress — its dashboard and its plate filling
+  in. Nothing is written to the page, because those fields *are* the progress
+  display.
+- Any **waiting or finished** job has its settings loaded into the page first,
+  so you arrive looking at what that job will run.
+- If the tool is busy with a *different* run, the click is refused and says so
+  — its page is describing the run in flight, and loading another job's
+  settings over it would misdescribe both.
 
 **Changing a queued job** — open the row's **⋯** menu and choose **Edit…**.
 The job's tool page opens with all of its settings restored and the same

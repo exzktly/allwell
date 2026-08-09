@@ -116,6 +116,22 @@ _METRIC_PICKER_TOOLTIP = (
     "morphology column, and any user-defined ratio channel is eligible."
 )
 
+_TP_PICKER_TOOLTIP = (
+    "Spatial analysis is per frame — pick which timepoint to analyse. "
+    "'First available' uses each well's smallest finite timepoint."
+)
+
+#: Why the picker is greyed at Summary level. The Metric picker states its own
+#: reason when disabled and this one did not, so a control that had just been
+#: given a visibly disabled appearance still could not say what would re-enable
+#: it.
+_TP_PICKER_SUMMARY_TOOLTIP = (
+    _TP_PICKER_TOOLTIP
+    + "\n\n(Disabled: Summary level walks every timepoint — they are the "
+    "columns of the well × timepoint matrix it draws, not a choice. Pick "
+    "another Level to analyse one frame.)"
+)
+
 _METHOD_ORDER = (
     (sp_state.METHOD_DBSCAN, "DBSCAN"),
     (sp_state.METHOD_SINGLE_LINKAGE, "Single-linkage"),
@@ -189,10 +205,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
 
     tp_cb = LabeledComboBox("Timepoint")
     tp_cb.addItem("First available", None)
-    tp_cb.setToolTip(
-        "Spatial analysis is per frame — pick which timepoint to analyse. "
-        "'First available' uses each well's smallest finite timepoint."
-    )
+    tp_cb.setToolTip(_TP_PICKER_TOOLTIP)
     tp_cb.currentIndexChanged.connect(
         lambda _i: sp_ctrl.sp_set_timepoint(ctx, tp_cb.currentData()))
     reg.register("_sp_tp_cb", tp_cb)
@@ -383,8 +396,12 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
                 "structural / statistical, not signal.)"
             )
         # Single-timepoint picker is meaningless at Summary level (all tps
-        # are walked).
+        # are walked), and says so rather than only greying — a disabled
+        # control that gives no reason reads as broken.
         tp_cb.setEnabled(not is_summary)
+        tp_cb.setToolTip(
+            _TP_PICKER_SUMMARY_TOOLTIP if is_summary else _TP_PICKER_TOOLTIP
+        )
         export_csv_act.setEnabled(is_summary)
 
     reg.register("_sp_sync_summary_visibility", _sync_visibility)

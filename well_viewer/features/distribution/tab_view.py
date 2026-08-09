@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, make_action_menu_button, make_band_controls,
+    add_menu_action, make_action_menu_button,
     make_plot_with_right_dock, make_properties_button, plotting_band_slot)
 from well_viewer.features.export.service import export_distribution_data
 from well_viewer.data.data_loading import get_all_timepoints
@@ -139,7 +139,13 @@ def build_distribution_tab(ctx, parent: QWidget) -> None:
     reg.register("_distribution_ax", fig.add_subplot(1, 1, 1))
     fig.subplots_adjust(top=0.93, bottom=0.12, left=0.10, right=0.97)
     reg.register("_distribution_canvas", card.canvas)
-    card.setControlsWidget(make_band_controls(ctx, card, with_fov=False))
+    # NOTE: no shared SEM/SD band control here. The card's controls row stays
+    # hidden because this tab draws per-group histograms / KDEs / violins and
+    # never reduces to a mean, so there is no spread for a band to describe --
+    # nothing in redraw_distribution reads PlotState.use_sem. The button is
+    # app-global (core/plot_toggles.toggle_sem writes the flag every other plot
+    # path reads), so offering it here changed Bar / Line / Scatter-aggregate /
+    # Batch Export while the figure under it stayed identical.
     # NOTE: don't trigger a redraw on theme change — the distribution renderer
     # doesn't use plot_style.apply_ax_style, so ax.clear() would wipe the
     # widget-side theme styling that setPlotTheme already applied. Let

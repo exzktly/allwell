@@ -176,7 +176,8 @@ def _reset_sample_definitions_state(ctx) -> None:
     sel.notes_text = ""
     # Sync the Notes editor so it doesn't keep showing the previous dataset's
     # text (the hydrator re-fills it only when the new dataset has notes). Mirrors
-    # the clear in ``sample_definitions.clear_all``; no-op before it's built.
+    # the clear in ``reset_scopes._clear_sample_definitions``; no-op before it's
+    # built.
     notes_edit = ctx.widgets.get_or_none("_notes_edit")
     if notes_edit is not None:
         blocked = notes_edit.blockSignals(True)

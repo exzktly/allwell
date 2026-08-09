@@ -8,6 +8,13 @@ for live UI selections), and ``qc_params``.
 ``cell_overrides`` stays in its own file (size + write-frequency);
 ``pipeline_info.json`` is owned by the batch pipeline and is left alone.
 
+There is deliberately no "delete the whole document" helper. Resets clear one
+domain at a time (``persistence/reset_scopes.py``), writing each domain's
+cleared value through its own saver. Deleting the shared file instead was how a
+single wrong argument at one call site — ``delete(app)`` where the function
+wanted ``app._app_state`` — could silently spare *every* section at once, and a
+per-domain clear cannot fail that way for domains it does not name.
+
 Migration: on first read, any raw-format legacy sidecars (see ``LEGACY_SIDECARS``)
 present in the data directory are absorbed into a fresh ``persistence.json`` and
 then deleted. ``qc_params`` migrates its own legacy ``qc_params.json`` (which
@@ -40,27 +47,6 @@ def path_for(state) -> Path | None:
     if state.dataset.data_dir:
         return Path(state.dataset.data_dir) / PERSISTENCE_FILENAME
     return None
-
-
-def delete(state) -> bool:
-    """Delete the dataset's ``persistence.json`` and drop the in-memory cache.
-
-    This wipes every persistence.json-backed domain (view state, per-row LUTs,
-    crop, plot groups, heatmap layouts, cell overrides, line order, ratios, QC
-    params) for the active data dir. The dataset's own files — including
-    ``pipeline_info.json`` (sample-definition labels) — are left untouched.
-    Returns ``True`` when a file was removed. Caller reloads the dataset.
-    """
-    p = path_for(state)
-    state.dataset.persistence_doc = None
-    if p is None or not p.exists():
-        return False
-    try:
-        p.unlink()
-        return True
-    except OSError:
-        _logger.warning("Failed to delete %s", p, exc_info=True)
-        return False
 
 
 def read(state) -> dict:

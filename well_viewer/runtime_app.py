@@ -546,10 +546,6 @@ class WellViewerApp(QWidget):
         from well_viewer.persistence import sample_definitions as _sd
         return _sd.load_from_pipeline_info(self._ctx)
 
-    def _clear_sample_definitions_all(self) -> None:
-        from well_viewer.persistence import sample_definitions as _sd
-        _sd.clear_all(self._ctx)
-
     def _load_gating_from_pipeline_info(self) -> bool:
         from well_viewer.persistence import cell_gating as _cg
         return _cg.load_from_pipeline_info(self._ctx)

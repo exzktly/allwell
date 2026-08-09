@@ -46,6 +46,7 @@ to add features, how to debug, and build / environment troubleshooting), see
    - [Statistics](#statistics) · [Multivariate analysis](#multivariate-analysis) · [Spatial analysis](#spatial-analysis)
    - [Image Browser](#image-browser) (Segmentation · Image Table · Cell Browser · Playground) · [smFISH](#smfish) · [Review CSV](#review-csv)
    - [Sample Definitions](#sample-definitions) · [Saved Plots](#saved-plots) · [Batch export](#batch-export)
+   - [Starting over](#starting-over)
 6. [Datasets mode — dataset-level tools](#datasets-mode--dataset-level-tools)
    - [Convert OME-TIFF](#convert-ome-tiff) · [Concatenate datasets](#concatenate-datasets) ·
      [Validate & Repair Dataset](#validate--repair-dataset) ·
@@ -805,10 +806,11 @@ the viewer always tracks the schema + channel tokens the dataset was built with
   left, the `[Review | Analyze | Datasets]` selector switches modes; beside it
   are the current page's sub-tabs; and at the far right the dataset actions —
   Refresh (re-read the folder), presentation toggle (flip every plot
-  Screen ↔ Publication), reset saved state, reveal the dataset folder, reset the
-  view, and the **`i`** Help drawer. Those six act on the loaded dataset or on
-  the plots drawn from it, so they appear in Review only; `Ctrl+/` opens the
-  Help drawer from any mode.
+  Screen ↔ Publication), **Reset analysis**, reveal the dataset folder,
+  **Reset view**, and the **`i`** Help drawer. Those six act on the loaded
+  dataset or on the plots drawn from it, so they appear in Review only; `Ctrl+/`
+  opens the Help drawer from any mode. The two resets are described under
+  [Starting over](#starting-over).
 - **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
   grouped into **Analysis**, **Images**, and **Data**, under the dataset control
   at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
@@ -1953,12 +1955,12 @@ per-nucleus rows behind every plot.
 ### Sample Definitions
 
 **Sample Definitions** is where you tell the app what your wells *mean*. Its
-sub-tabs are led by **Cell Gating**. Two buttons sit at the right end of the
-page's controls row and act on everything the page defines: **+** imports
-definitions from a JSON file (merging them into what is already there), and
-**×** clears the lot — well labels, replicate sets, bar groups, ratio metrics
-and cell-gating thresholds. Everything here autosaves to the dataset folder as
-you edit, so there is no Save button to look for.
+sub-tabs are led by **Cell Gating**. An **Import** button at the right end of the
+page's controls row merges definitions from a JSON file into what is already
+there. Everything here autosaves to the dataset folder as you edit, so there is
+no Save button to look for; to discard definitions, use **Reset analysis** in the
+title bar ([Starting over](#starting-over)), which lets you pick exactly which
+kinds to drop.
 
 #### Cell Gating
 
@@ -2083,6 +2085,40 @@ sample name** (their Well Label) rather than the raw well token, and line-graph
 batch panels carry the **timepoint ticks and x-axis label on every time panel**.
 Building a batch no longer writes to the dataset on every click — the panel edits
 are held and saved once.
+
+### Starting over
+
+Two buttons at the right of the top band discard saved state, and they divide it
+between them. Neither ever touches your image or CSV files.
+
+**Reset view** (the circular arrow) returns the window to how a freshly-opened
+dataset looks, in one step: selected wells and group visibility, fold-change
+scopes, per-tab controls, plot and figure preferences, draw order, the heatmap
+arrangement, the Multivariate configuration, and the Image Table grid. Nothing it
+clears is a decision about your samples, so it asks once and clears the lot.
+
+**Reset analysis** (the trash can) discards decisions, and asks which ones. It
+opens a checklist — everything ticked by default — and clears only what you
+leave ticked, then reloads the dataset:
+
+| Item | What you lose |
+|---|---|
+| **Sample definitions** | Well labels, groups, notes, plot groups. |
+| **Gating** | FluorGating floors, ThreshFracOn cutoffs, drawn scatter gates, and the QC debris gate — the last returning to the settings the pipeline run itself used, not to no gate at all. |
+| **Curation** | The crop region and every manual include/exclude on individual cells. |
+| **Ratio metrics** | Every ratio channel you defined. |
+| **smFISH thresholds** | The saved per-channel thresholds. |
+| **Batch Export groups** | The export groups on each Batch Export panel. |
+
+Each item is cleared everywhere it is stored — some of this state lives in
+`persistence.json`, some in `pipeline_info.json` beside your data, and manual
+curation in its own `cell_overrides.json` — so a reload cannot bring back
+something you asked to discard. If one item fails (an unreadable file, say), the
+others still run and the status line names the one that did not.
+
+Smaller resets stay next to the thing they affect: **Clear all groups** on
+Sample Definitions → Groups, and **Reset crop + curation** in the Segmentation
+tab's Edit menu, which is the same action as the Curation checkbox above.
 
 ---
 

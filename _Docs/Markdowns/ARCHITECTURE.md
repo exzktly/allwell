@@ -764,10 +764,12 @@ readout from the buttons that drive it.
 
 One `TabCtrl` control row remains, and it is deliberate: Sample Definitions' Cell
 Gating frame is inside a sub-tab, not a centre tab's control row. That page's own
-Import / Clear All buttons are actions on its band — they used to be a bespoke
-toolbar row with a separator under it, a whole strip of chrome carrying two icon
-buttons, which started every one of its sub-tab bodies 52px below where the other
-pages' content starts.
+Import button is an action on its band — it used to be a bespoke toolbar row with
+a separator under it, a whole strip of chrome, which started every one of its
+sub-tab bodies 52px below where the other pages' content starts. It is labelled
+rather than left as a bare glyph: the band renders level with the Cell Gating
+sub-tab, so an unlabelled icon there reads as an action on cell gating rather
+than on the page.
 
 **Image Table** is the deliberate exception: its controls stay split between the
 builder shelf and an action strip directly above the images, because the strip's
@@ -1477,7 +1479,9 @@ definitions autosave). The `pipeline_info.json` hydrator runs first on load and
 `persistence/plot_groups.load_from_data_dir` runs second; an *absent*
 `persistence.json` section leaves the hydrated groups in place rather than
 clearing them, so a folder shared or copied without the sidecar keeps its
-groups.
+groups. The corollary matters for anything that clears them: writing only one of
+the two copies clears nothing, because the surviving copy re-hydrates on the next
+load. The Sample definitions reset scope writes both (§5.7).
 
 Other sidebar bodies live with their feature: the preview picker is
 `features/preview/preview_view.py`, the image-table picker is
@@ -1659,26 +1663,68 @@ each row with the well's
 `<well>_out.zip` mtime so a pipeline re-run drops the now-stale overrides
 on load instead of re-binding them to unrelated cells.
 
-**Resetting saved state.** The mode band's `rotate-ccw` button resets only the
-*view* (`view_state.reset` — selected wells, fold-change scopes, per-tab combos).
-A second button in the same cluster (`trash-2`, next to the Presentation/plot
-screen↔publication toggle) does a **full** reset: `_doc.delete(app)` deletes the
-whole `persistence.json` (every section above) and clears the in-memory cache,
-then `AllWellApp._on_reset_saves_clicked` reloads the dataset fresh. It's the
-"my saved state is wedged" escape hatch.
+**Resetting saved state — the scope model.** `persistence/reset_scopes.py` is
+the one map from what a user names to the state that name owns. State is
+modelled in two tiers and both title-bar reset buttons are expressed in them:
 
-`persistence.json` is not the whole of the user's state, though, so the handler
-clears the sidecar's user-curated blocks first: `persistence.cell_gating.clear_from_pipeline_info`
-(fluorescence gates, ThreshFracOn cutoffs, the drawn scatter gates and their
-per-layer selections) and `persistence.smfish.clear_thresholds`. Those blocks
-live in `pipeline_info.json` so they travel with the dataset, which meant a
-reset that only deleted `persistence.json` left every gate standing and the
-reload restored them from the sidecar as if the reset had skipped them. Each
-helper resets the live typed slice *before* touching the file, so nothing in the
-reload can write the old values back. The pipeline's own keys in the sidecar —
-including the sample-definition labels — are left intact, as are the dataset's
-data files. The handler is synchronous, so no debounced save can race between
-the delete and the reload.
+- **View** — how the data currently looks: selected wells and group visibility,
+  fold-change scopes, per-tab controls, plot and figure preferences, draw order,
+  the heatmap arrangement, the Multivariate configuration, the Image Table grid.
+  Cheap to rebuild and carrying no scientific decision, it resets as a whole:
+  `reset_view(ctx)`, behind the mode band's `rotate-ccw` button.
+- **Analysis** — the decisions themselves. One `ANALYSIS_SCOPES` entry each for
+  sample definitions, gating, curation, ratio metrics, smFISH thresholds and
+  Batch Export groups, picked individually from the checklist behind the
+  `trash-2` button (`core/reset_scopes_view.py`), then cleared by
+  `clear_analysis(ctx, keys)` and followed by a dataset reload.
+
+The dataset's own image and CSV files are a third tier no reset touches.
+
+A scope names every storage **domain** it owns, and its `clear` is responsible
+for all of them — the live typed state and every file the value is written to,
+whether that is `persistence.json`, `pipeline_info.json`, or a standalone
+sidecar. That is the property the design turns on, because the same value is
+often stored twice: plot groups live in both `persistence.json::plot_groups` and
+the `sample_definitions` block of the sidecar, and clearing one of the two is a
+no-op once the loader (which treats an absent section as "nothing to say", so a
+folder shared without its sidecar keeps its groups) re-hydrates from the other.
+Manual cell curation is in neither file — it has its own `cell_overrides.json`.
+
+`tests/test_reset_scopes.py` asserts the scopes **partition** the domain set
+exactly: every name the persistence registry registers, plus the two sidecar
+domains (`cell_gating`, `smfish`), is claimed by exactly one scope. A new
+persistence domain that belongs to no scope fails the suite. Its companion
+`test_the_partition_guard_bites` proves the guard fires on both halves of that —
+an unclaimed domain and a claim on a domain that no longer exists.
+
+Two consequences worth stating, because both were bugs before the model existed:
+
+- **Reset one domain at a time, never the file.** There is deliberately no
+  "delete `persistence.json`" helper. Deleting the shared document meant one
+  wrong argument at one call site could silently spare every section at once,
+  and the failure was invisible because the reload afterwards looked like a
+  reload of reset state.
+- **What resets live must equal what is dropped from disk.** `view_state.reset`
+  restores `PlotState` and `ExportPrefsState` generically via
+  `domain/state_defaults.restore_defaults` (so a field added to either slice is
+  covered without anybody extending a reset), then **re-saves** the section
+  instead of deleting it. Screen and disk therefore agree by construction rather
+  than by two lists staying in sync.
+
+`reset_scopes.py` imports no feature module. It reaches a built feature's
+widgets through callbacks the feature stamps on its `ctx.runtime.<feature>`
+namespace — `qc.refresh_widgets_cb`, `image_table.reset_cb`, alongside the
+existing `qc.changed_cb` — and recomputes derived columns by clearing the row
+cache so the registered cache projectors re-derive `QC_Pass` / `Crop_Pass` on the
+next fetch. An unstamped callback means the lazily-built feature was never
+built, so there are no widgets to refresh. The Segmentation tab's own "Reset
+crop + curation" menu action calls the same `clear_curation` the Curation
+checkbox does (`crop.controller.reset_crop_and_overrides_now` wraps it with the
+crop-mode exit and redraw only that entry point needs), so the two cannot drift.
+
+Each clear writes through `PersistenceRegistry.save` rather than
+`schedule_save`: the reload that follows would otherwise race the debounce timer
+and read the pre-reset value back.
 
 ### 5.8 The Export Style sidebar
 

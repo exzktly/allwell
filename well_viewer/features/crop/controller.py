@@ -202,9 +202,7 @@ def toggle_crop_edit_mode(ctx) -> None:
 
 
 def reset_crop_and_overrides(ctx) -> None:
-    """Return every cell to Included (even manually-deleted ones) and remove the
-    crop region, after a confirmation. Dataset-wide.
-    """
+    """Confirm, then run :func:`reset_crop_and_overrides_now`. Dataset-wide."""
     from PySide6.QtWidgets import QMessageBox
 
     resp = QMessageBox.question(
@@ -220,28 +218,28 @@ def reset_crop_and_overrides(ctx) -> None:
     )
     if resp != QMessageBox.Yes:
         return
+    reset_crop_and_overrides_now(ctx)
 
-    # (a) drop every manual include/exclude override, (b) drop the crop region.
+
+def reset_crop_and_overrides_now(ctx) -> None:
+    """Return every cell to Included (even manually-deleted ones) and remove the
+    crop region, without asking. Dataset-wide.
+
+    The state and disk half is the Curation reset scope
+    (``persistence/reset_scopes._clear_curation``) — the same function the title
+    bar's Reset analysis runs, so this menu action and that checkbox cannot come
+    to mean different things. What is added here is what only this entry point
+    needs: leaving crop-draw mode, the redraw, and the status line.
+
+    Split from the confirming wrapper above so the reset scope can run it behind
+    its own single confirmation instead of stacking a second dialog on the first.
+    """
     from well_viewer.core.selection_controller import invalidate_stats_cache
-    ctx.runtime.review.included_overrides.clear()
-    ctx.state.dataset.crop_region = None
+    from well_viewer.persistence.reset_scopes import clear_curation
 
-    # Clearing the override dict is not enough on its own: the cached rows still
-    # carry the previously-projected Included=0, and apply_review_overrides_to_cache
-    # early-returns on an empty dict (it never *un-writes* a 0). Drop the dataset
-    # cache so frames reload their original Included from the source CSVs; lazy
-    # _get_rows then re-applies the now-empty crop/QC layers.
-    ctx.state.dataset.cache.clear()
+    clear_curation(ctx)
     try:
         invalidate_stats_cache(ctx)
-    except Exception:
-        swallowed()  # was: pass (silent except)
-    ctx.state.review_image.override_version += 1
-
-    try:
-        if ctx.persistence is not None:
-            ctx.persistence.schedule_save("cell_overrides")
-            ctx.persistence.schedule_save("crop_region")
     except Exception:
         swallowed()  # was: pass (silent except)
 

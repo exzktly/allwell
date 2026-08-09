@@ -105,7 +105,12 @@ FEATURE_PREFIX = "well_viewer.features"
 # import to avoid a real init-order cycle, not just a style choice.
 # 112 -> 110: `ui_helpers.on_theme_change` was deleted as dead code, taking
 # its function-local imports of grouping/tab_view and stats/controller.
-MAX_DEFERRED_FEATURE_IMPORTS = 110
+# 110 -> 108: the reset scopes replaced `sample_definitions.clear_all`, whose
+# body reached into grouping/label_grid_view and cell_gating/controller. The
+# replacement (`persistence/reset_scopes.py`) reaches every feature through a
+# stamped `ctx.runtime.<feature>` callback instead, so a module that clears
+# state across the whole app imports no feature at all.
+MAX_DEFERRED_FEATURE_IMPORTS = 108
 
 
 def _is_feature_import(node: ast.ImportFrom) -> bool:

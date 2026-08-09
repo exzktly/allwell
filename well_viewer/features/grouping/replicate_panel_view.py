@@ -142,7 +142,9 @@ def build_replicate_groups_centre(ctx, parent: QWidget) -> None:
     hdr_l.setContentsMargins(0, 8, 0, 4)
     layout.addWidget(hdr)
     hdr_l.addStretch(1)
-    hdr_l.addWidget(btn_secondary(hdr, "Clear All", lambda: rep_clear_all(ctx)))
+    # Named for its scope: an unqualified "Clear All" on a page that also holds
+    # well labels, ratios and gating reads as if it clears those too.
+    hdr_l.addWidget(btn_secondary(hdr, "Clear all groups", lambda: rep_clear_all(ctx)))
     hdr_l.addWidget(btn_primary(hdr, "+ Add", lambda: rep_add(ctx)))
 
     # Quick Replicates dropdowns
@@ -255,36 +257,28 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_subtab
     from well_viewer.features.scatter.ratio_panel_view import build_ratios_inline_panel
     from well_viewer.core.ui_helpers import notes_schedule_save
-    from well_viewer.persistence import sample_definitions as _sd
     from widgets.icon_button import IconButton as _IconButton
 
-    # ── Import / Clear All, in the page's own control band ───────────────
-    # They used to sit in a bespoke toolbar row of their own, with a separator
-    # under it — a whole strip of chrome carrying two icon buttons, which pushed
-    # this page's sub-tab bodies below where every other page's content starts.
-    # They are actions on the page, so they go in the band every page has.
-    #
+    # ── Import, in the page's own control band ───────────────────────────
     # Every definition on this tab (well labels, replicate sets, bar groups,
     # ratios, and cell gating) AUTOSAVES to the data folder on edit —
     # selections/labels/notes/plot-groups + ratios via the persistence registry,
     # cell gating via _cell_gating_persist_params. So there is no manual
-    # Save/Reload button: Import merges an external JSON, Clear All wipes the
-    # definitions.
+    # Save/Reload button; Import merely merges an external JSON in.
+    #
+    # An unlabelled x sat beside it and cleared every definition on the page.
+    # Rendered level with the Cell Gating sub-tab, it read as "clear cell
+    # gating" while actually discarding well labels and groups, and it was one
+    # of three overlapping reset commands with no stated boundary between them.
+    # Clearing is now the title bar's Reset analysis, where the scope is picked
+    # explicitly (``persistence/reset_scopes.py``).
     band, body = build_page_body(parent)
     outer_layout = body.layout()
 
-    import_ib = _IconButton("plus", band)
+    import_ib = _IconButton("plus", band, text="Import")
     import_ib.setToolTip("Import selections from a JSON file (merges into the current set).")
     import_ib.clicked.connect(lambda _=False: import_selections_from_json(ctx))
     band.add_action(import_ib)
-
-    clear_ib = _IconButton("x", band)
-    clear_ib.setToolTip(
-        "Clear every definition on this tab — well labels, replicate "
-        "sets, bar groups, ratio metrics, and cell-gating thresholds."
-    )
-    clear_ib.clicked.connect(lambda _=False: _sd.clear_all(ctx))
-    band.add_action(clear_ib)
 
     # ── Sub-tabs ────────────────────────────────────────────────────────
     sub_tabs = _QTabWidget(parent)

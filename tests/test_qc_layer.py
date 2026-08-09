@@ -195,9 +195,12 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
         qc=QcState(params=QCParams(enabled=True, min_circularity=0.5, max_circularity=0.95)))
     # qc_gate_refresh_widgets reads the params through get_qc_params(ctx); the
     # builder registers its widget handles through ctx.widgets (which also stamp
-    # ``app._qc_gate_widgets`` for the legacy reader below).
+    # ``app._qc_gate_widgets`` for the legacy reader below), and stamps its
+    # refresh callback on ctx.runtime.qc for the Gating reset scope to fire.
     from well_viewer.core.widget_registry import WidgetRegistry
-    app._ctx = SimpleNamespace(state=app._app_state, app=app, widgets=WidgetRegistry(app))
+    app._ctx = SimpleNamespace(
+        state=app._app_state, app=app, widgets=WidgetRegistry(app),
+        runtime=SimpleNamespace(qc=SimpleNamespace(refresh_widgets_cb=None)))
 
     parent = QWidget()
     qtbot.addWidget(parent)

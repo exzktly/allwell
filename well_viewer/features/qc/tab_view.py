@@ -163,6 +163,11 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
         w.textChanged.connect(
             lambda _t=None, _w=w: _debounce.start() if _w.hasFocus() else None)
 
+    # Let a reset that clears the QC params re-fill this row without naming the
+    # QC feature: the Gating reset scope fires whatever is stamped here and
+    # no-ops when the row was never built (persistence/reset_scopes.py).
+    ctx.runtime.qc.refresh_widgets_cb = lambda: qc_gate_refresh_widgets(ctx.window)
+
     _sync_enabled()
     _update_status()
     return row

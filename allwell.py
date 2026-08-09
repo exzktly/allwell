@@ -297,14 +297,16 @@ class AllWellApp(QMainWindow):
         self._present_btn.toggled.connect(self._on_present_toggled)
         ra.addWidget(self._present_btn)
 
-        # Reset ALL persisted state for the dataset (more aggressive than the
-        # rotate-ccw "reset view"): deletes persistence.json and reloads, for
-        # when saved state gets into a bad state. Confirmed; data left intact.
+        # Discard analysis decisions — sample definitions, gating, curation,
+        # ratios, smFISH thresholds, Batch Export groups — picked from a
+        # checklist. The companion to the rotate-ccw "reset view" beside it:
+        # that one drops how the data looks, this one drops what was decided
+        # about it. Both scopes are defined in persistence/reset_scopes.py.
         self._reset_saves_btn = IconButton("trash-2")
         self._reset_saves_btn.setToolTip(
-            "Reset all saved state for this dataset (selections, LUTs, crops, "
-            "plot groups, heatmap layouts, cell overrides, ratios, QC params) "
-            "and reload. Your data files and sample labels are left intact."
+            "Reset analysis — choose what to discard: sample definitions, "
+            "gating, curation, ratio metrics, smFISH thresholds, Batch Export "
+            "groups. Your image and CSV files are never touched."
         )
         self._reset_saves_btn.clicked.connect(self._on_reset_saves_clicked)
         ra.addWidget(self._reset_saves_btn)
@@ -317,15 +319,17 @@ class AllWellApp(QMainWindow):
         self._open_btn.clicked.connect(self._reveal_dataset_in_file_manager)
         ra.addWidget(self._open_btn)
 
-        # Reset selections / view state. Asks before clearing — the action
-        # wipes wells, fold-change scopes, and per-tab combo state but
-        # leaves the dataset itself intact. ``rotate-ccw`` reads as "undo
-        # / reset"; the plain ``x`` icon previously sitting here was too
-        # close to a window-close glyph.
+        # Reset the view tier: wells, group visibility, fold-change scopes,
+        # per-tab controls, plot and figure preferences, draw order, the heatmap
+        # arrangement and the Image Table grid. Asks first, but discards no
+        # scientific decision — those belong to the trash can beside it.
+        # ``rotate-ccw`` reads as "undo / reset"; the plain ``x`` icon
+        # previously sitting here was too close to a window-close glyph.
         self._reset_view_btn = IconButton("rotate-ccw")
         self._reset_view_btn.setToolTip(
-            "Reset selections and view (clears wells, fold-change, and "
-            "per-tab combos)"
+            "Reset view — selected wells, fold-change, per-tab controls, plot "
+            "and figure preferences, heatmap and Image Table layout. Sample "
+            "definitions, gating, and curation are left alone."
         )
         self._reset_view_btn.clicked.connect(self._on_reset_view_clicked)
         ra.addWidget(self._reset_view_btn)
@@ -1138,78 +1142,40 @@ class AllWellApp(QMainWindow):
                 swallowed()  # was: pass (silent except)
 
     def _on_reset_view_clicked(self) -> None:
-        """Confirm + wipe the view-state (selections, fold-change, combos)."""
+        """Reset the view tier — see ``core/reset_scopes_view.prompt_reset_view``."""
         review = self._review
-        if review is None or not hasattr(review, "_view_state_reset"):
+        if review is None:
             return
-        resp = QMessageBox.question(
-            self,
-            "Reset selections and view?",
-            "This will clear selected wells, fold-change scopes, and the "
-            "per-tab combo state for every plotting tab. The loaded "
-            "dataset itself is left alone.\n\nContinue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if resp != QMessageBox.Yes:
-            return
-        try:
-            review._view_state_reset()
-        except Exception:
-            swallowed()  # was: pass (silent except)
+        from well_viewer.core.reset_scopes_view import prompt_reset_view
+        prompt_reset_view(review._ctx)
 
     def _on_reset_saves_clicked(self) -> None:
-        """Confirm, delete persistence.json, and reload the dataset fresh."""
+        """Reset analysis decisions, chosen from a checklist, then reload.
+
+        The scopes and what each one clears live in
+        ``well_viewer/persistence/reset_scopes.py``; this handler only supplies
+        the reload. It used to delete ``persistence.json`` and name the cleared
+        state in its own dialog text, which is how that text came to promise two
+        things the action did not do — manual cell curation, which lives in
+        ``cell_overrides.json``, and plot groups, whose second copy in
+        ``pipeline_info.json`` the reload restored immediately afterwards.
+        """
         review = self._review
         if review is None:
             return
         cur = self._current_data_dir()
         if not cur:
             QMessageBox.information(
-                self, "No dataset", "Load a dataset before resetting saved state.")
+                self, "No dataset", "Load a dataset before resetting.")
             return
-        resp = QMessageBox.question(
-            self,
-            "Reset all saved state?",
-            "This deletes ALL saved view/analysis state for this dataset — "
-            "selections, per-row LUTs, crop regions, plot groups, heatmap "
-            "layouts, cell overrides, ratios, QC params, the cell-gating "
-            "thresholds and drawn scatter gates, and the saved smFISH "
-            "thresholds — then reloads it fresh.\n\nYour data files and "
-            "sample-definition labels are left untouched. This cannot be "
-            "undone.\n\nContinue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if resp != QMessageBox.Yes:
-            return
-        # Cell gating (fluor gates, ThreshFracOn, drawn scatter gates) and the
-        # smFISH thresholds live in pipeline_info.json, not persistence.json, so
-        # they travel with the dataset. Deleting persistence.json alone left them
-        # in place and the reload restored them from the sidecar — the reset
-        # looked like it had skipped the gates. Clear those blocks first, so the
-        # reload below can't write the old values back.
-        try:
-            from well_viewer.persistence import cell_gating as _persist_gating
-            _persist_gating.clear_from_pipeline_info(review._ctx)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-        try:
-            from well_viewer.persistence import smfish as _persist_smfish
-            _persist_smfish.clear_thresholds(review._ctx)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-        try:
-            from well_viewer.persistence import _doc as _persist_doc
-            _persist_doc.delete(review)
-        except Exception:
-            swallowed()  # was: pass (silent except)
-        try:
+
+        def _reload() -> None:
             root = self._current_dataset_root() or cur
             if hasattr(review, "_load_path"):
                 review._load_path(Path(root))
-        except Exception:
-            swallowed()  # was: pass (silent except)
+
+        from well_viewer.core.reset_scopes_view import prompt_reset_analysis
+        prompt_reset_analysis(review._ctx, reload_after=_reload)
 
     def _toggle_log_drawer(self) -> None:
         if self._log_drawer is None:

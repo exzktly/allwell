@@ -48,6 +48,7 @@ from util.disk_space import (
 )
 
 __all__ = [
+    "ALLOW_LOW_DISK_HELP",
     "OutputCapacityMonitor",
     "directory_bytes",
     "enospc_message",
@@ -108,9 +109,6 @@ def sample_image_bytes(input_dir: Path, image_exts) -> int:
     return 0
 
 
-# Intermediates written per FOV-group (corrected + top-hat per channel, the
-# label image, the overlay). Deliberately conservative — under-estimating the
-# need is the failure this exists to prevent.
 #: Said whenever a free-space figure is quoted back to a user, because the
 #: number will not match the one their file manager shows. ``statvfs`` reports
 #: what is claimable *now*; macOS counts caches and local snapshots as
@@ -127,8 +125,10 @@ _FREE_IS_CLAIMABLE_NOW = (
 #: safe to overrule the check cannot say two different things.
 ALLOW_LOW_DISK_HELP = (
     "Start the run even when the disk check estimates it will not fit.\n\n"
-    "That estimate is deliberately pessimistic — it sizes from the largest "
-    "image in the plate and gives no credit for compression — and the "
+    "That estimate is rough. It sizes from the largest image in the plate and "
+    "gives no credit for compression, which overshoots; it also models a flat "
+    "number of intermediates per FOV-group when several of them are written "
+    "per channel, which undershoots on a plate with many channels. And the "
     "free-space figure it is compared against is what the filesystem reports "
     "as claimable right now, which on macOS reads lower than Finder's (Finder "
     "counts purgeable caches and snapshots). So the check can refuse a run "
@@ -140,6 +140,9 @@ ALLOW_LOW_DISK_HELP = (
     "tight."
 )
 
+# Intermediates written per FOV-group (corrected + top-hat per channel, the
+# label image, the overlay). Deliberately conservative — under-estimating the
+# need is the failure this exists to prevent.
 _INTERMEDIATES_PER_GROUP = 6
 # float32 intermediates against 16-bit inputs.
 _INTERMEDIATE_WIDENING = 2.0
@@ -217,8 +220,9 @@ def preflight_scratch_space(
     if free < per_well:
         # Quote the figure this test actually used. The sentence above
         # describes ``scratch_need`` — every well staging at once — so pairing
-        # it with "even one well" told the user the run wanted 20.8 GiB when
-        # what failed the comparison was the 5.2 GiB one well needs, and left
+        # it with "even one well" reported the whole-run figure as the
+        # shortfall, when what failed the comparison was the per-well one — a
+        # number ``--workers`` times smaller, never shown — and left
         # the one remedy that would have fixed it (fewer workers is irrelevant
         # here; a bigger volume is not) unstated.
         return False, (
@@ -290,8 +294,9 @@ def preflight_scratch_for_run(
     comparison lean the same way: the estimate takes the *largest* member and
     gives no credit for deflate, while the free figure is ``statvfs``-available,
     which on APFS excludes purgeable space and so reads well under what the
-    machine will actually hand over — a Mac showing 14.3 GB in Finder reports
-    6.0 GiB here. Two conservative numbers meeting at a hard exit can refuse a
+    machine will actually hand over — one Mac measured at 14.3 GB in Finder
+    reported 6.0 GiB here. Two conservative numbers meeting at a hard exit can
+    refuse a
     run that would have finished, and no heuristic should be able to lock
     someone out of their own data with no way past it.
     """

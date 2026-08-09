@@ -129,7 +129,11 @@ REVIEW_IMAGE_CONTROLLER_BUDGET = 870
 # app's one interactive segmenter; a second, thinner preview here duplicated it
 # for the sake of not re-typing two numbers into the form, which is not a trade
 # worth a whole page. The right pane is a plain log panel again.
-ANALYZE_TAB_BUDGET = 895
+#
+# 895 -> 855: the run-outcome path (_surface_run_failure and the headline
+# shortener behind it) moved to analyze_tab_log.AnalyzeLogPaneMixin, which
+# already owns the log view that path reveals.
+ANALYZE_TAB_BUDGET = 855
 
 # analyze_tab_form.py carried no budget while analyze_tab.py did, so every
 # addition to the pair landed here by default. Opened at its measured size so it
@@ -149,7 +153,10 @@ ANALYZE_TAB_BUDGET = 895
 # 1105 -> 1086: the whole run-controls row (Run / Suspend / + Queue / Stop) moved
 # to analyze_run_spec.AnalyzeRunMixin._build_run_row, beside the queue hooks the
 # new button belongs to. Genuine extraction -- ratchet down to the new size.
-ANALYZE_TAB_FORM_BUDGET = 1086
+# 1086 -> 994: the pane's output half (the log view, the raw-log toggle and the
+# "Last run ·" card) moved to analyze_tab_log.AnalyzeLogPaneMixin. It is one job
+# and it is not form-building. Genuine extraction -- ratchet down again.
+ANALYZE_TAB_FORM_BUDGET = 994
 
 
 def _line_count(rel: str) -> int:

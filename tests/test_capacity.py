@@ -310,13 +310,18 @@ def _preflight(monkeypatch, *, n_channels, free=_FREE, **over):
     return capacity.preflight_scratch_space(Path("/scratch"), **kwargs)
 
 
-def test_the_reported_run_is_no_longer_refused(monkeypatch):
-    """Five channels is what that plate has — w1594, DIC, w2Turq, w3Cit, w4Cy5.
+def test_one_phantom_channel_is_the_difference_between_refuse_and_allow(monkeypatch):
+    """What the off-by-one was worth, at the reported plate's scale.
 
-    ``main()`` passed ``1 + len(fluor_tokens_for_quant)``, but that list already
-    leads with the segmentation channel, so every per-group estimate carried one
-    extra frame. Removing the phantom channel is the whole difference between
-    refusing this run and letting it start.
+    Characterisation, not a guard: ``capacity.py``'s arithmetic is unchanged by
+    the fix, so this passes on either side of it. It exists to pin how much a
+    single phantom channel moves the verdict — one frame per FOV-group, which at
+    five channels and ten groups is the whole margin. The guard that bites is
+    ``test_main_passes_the_real_channel_count``, which watches the call site
+    where both numbers are in scope.
+
+    The sample size here is chosen, not measured off the reported plate, so the
+    GiB figures are this fixture's and not that machine's.
     """
     refused, _ = _preflight(monkeypatch, n_channels=6)     # the old count
     allowed, message = _preflight(monkeypatch, n_channels=5)
@@ -367,7 +372,7 @@ def test_the_refusal_quotes_the_figure_it_tested(monkeypatch):
     assert "--allow_low_disk" in message
 
 
-def test_allow_low_disk_downgrades_the_refusal(monkeypatch, tmp_path):
+def test_allow_low_disk_downgrades_the_refusal(monkeypatch, tmp_path, caplog):
     """A conservative estimate must never be able to lock someone out of their
     own data with no way past it."""
     from pipeline import capacity
@@ -387,7 +392,16 @@ def test_allow_low_disk_downgrades_the_refusal(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         _run(False)
     assert exc.value.code == 2
-    assert _run(True) is None          # returns instead of exiting
+
+    # Continuing is not the same as continuing quietly. The override exists so
+    # a wrong estimate cannot wedge someone out of their data — not so a real
+    # shortfall can pass unremarked, which is the substitution this repo's
+    # rules exist to prevent.
+    with caplog.at_level(logging.WARNING, logger=log.name):
+        assert _run(True) is None      # returns instead of exiting
+    msgs = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("Not enough scratch space" in m and "allow_low_disk" in m
+               for m in msgs), msgs
 
 
 # ── the exit had to reach the user, not just happen ─────────────────────────
@@ -409,13 +423,39 @@ def test_the_exit_message_carries_the_pipelines_own_reason():
     assert "Not enough scratch space" in msg
 
 
-def test_the_exit_message_falls_back_to_the_last_line():
+def test_the_exit_message_never_invents_a_cause():
+    """With no line that classifies as an error there is nothing to quote.
+
+    Presenting the last line whatever it is makes a routine progress line into
+    the stated reason a run stopped — "quantify: 1.2 s" is not why anything
+    failed, and a Stop produces exactly that shape. Severity comes from
+    ``classify_log_line`` rather than a substring test, because the pipeline
+    writes its tracebacks to a directory named ``errors/`` and its clean summary
+    says "wells failed : 0"; a substring test reads both as failures.
+    """
     from services.pipeline_runner import exit_message
 
-    assert "boom" in exit_message(1, ["something", "boom"])
-    # Nothing to quote is still a usable sentence, not a crash.
-    assert exit_message(1, []).strip() == "Pipeline exited with code 1."
-    assert exit_message(1, None).strip() == "Pipeline exited with code 1."
+    bare = "Pipeline exited with code 1."
+    assert exit_message(1, []).strip() == bare
+    assert exit_message(1, None).strip() == bare
+    # A stopped run: two routine INFO lines, nothing to blame.
+    assert exit_message(1, [
+        "2026-08-08 19:10:32  INFO      Well A01 — starting (pid 4)",
+        "2026-08-08 19:10:32  INFO      quantify:    1.2 s  (431 nuclei)",
+    ]).strip() == bare
+    # A path naming errors/ is not an error, and neither is a "note:".
+    assert exit_message(1, [
+        "[remote] note: out/errors/ not present on remote",
+        "2026-08-08 19:10:32  INFO      Fetched 96 well(s)",
+    ]).strip() == bare
+    # And when there IS a real error line, the summary that mentions errors/
+    # afterwards must not displace it.
+    got = exit_message(2, [
+        "2026-08-08 19:10:32  ERROR     real cause: no wells found",
+        "2026-08-08 19:10:32  INFO      wrote /out/ERROR summary to errors/",
+    ])
+    assert got.startswith("real cause: no wells found")
+    assert "code 2" in got
 
 
 def test_allow_low_disk_reaches_the_argv_only_when_asked():

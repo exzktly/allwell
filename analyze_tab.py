@@ -17,7 +17,6 @@ process_microscopy.py must live alongside this file.
 
 from __future__ import annotations
 
-import logging
 import queue
 import time as _time
 from pathlib import Path
@@ -77,6 +76,12 @@ def _validate_schema_mappings() -> None:
 
 
 _validate_schema_mappings()
+
+#: Width a checkbox needs beside its label text: the indicator (14 px plus a
+#: 1 px border either side = 16) plus the QSS spacing and padding around it.
+#: Named so the fluor-row checkboxes can floor their width on a measurement
+#: rather than on a number written at the call site.
+_CHECKBOX_CHROME_W = 34
 
 _PREVIEW_TOKENS = {
     "experiment": "Exp01",
@@ -325,8 +330,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         # of the "smFISH" label. Minimum policy floors the width at this value.
         def _pin_checkbox(text: str) -> QCheckBox:
             cb = QCheckBox(text, row)
-            # indicator (14px + 1px border ×2 = 16) + QSS spacing + padding.
-            cb.setMinimumWidth(cb.fontMetrics().horizontalAdvance(text) + 34)
+            cb.setMinimumWidth(
+                cb.fontMetrics().horizontalAdvance(text) + _CHECKBOX_CHROME_W)
             cb.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
             rl.addWidget(cb)
             return cb
@@ -594,6 +599,9 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         self._dashboard.reset(remote=remote is not None)
         if getattr(self, "_last_run_card", None) is not None:
             self._last_run_card.setVisible(False)  # C4: hide stale summary while running
+        # Hand back the raw-log toggle if the previous run's failure opened it
+        # and the user has not since made that choice their own.
+        self.restore_raw_log()
         self._eta_deadline = None
         self._dashboard.set_eta("ETA")
         self._pipeline_started_at = _time.monotonic()
@@ -619,42 +627,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
             self._log_line("\n[User stopped the pipeline]\n", "WARNING")
         except Exception:
             swallowed()
-
-    def _surface_run_failure(self, message: str) -> None:
-        """Put a failed run where the user is already looking.
-
-        The reason a run failed used to reach exactly one place: a red line in
-        ``self._log``, a QTextEdit hidden behind the "Show raw log" toggle and
-        off by default. So a pipeline that refused to start — the disk preflight
-        exiting before the first well, say — looked identical to a run that had
-        never been clicked: progress stopped at Grouped, the Run button came
-        back, and nothing said why.
-
-        Two surfaces do that, both already in the app. ``set_failed`` is the
-        dashboard's own failure state, which every Datasets tool calls. And the
-        raw log is revealed, because the line that explains the failure is in it
-        and the user has no reason to know that toggle exists at the moment they
-        need it.
-
-        Neither is allowed to break the log drain — a widget fault here would
-        abort ``_poll_log``'s loop and freeze the live log for the rest of the
-        session — so both are guarded. But a *silent* guard would be this
-        function's own bug reintroduced inside it, so the guard logs at WARNING
-        rather than the default DEBUG. The caller writes ``message`` into the
-        log view before calling here, so the reason itself survives either
-        failure; what is lost is only the surfacing, and that is worth a line.
-        """
-        try:
-            self._dashboard.set_failed(str(message).strip())
-        except Exception:
-            swallowed("could not put the run failure on the dashboard",
-                      level=logging.WARNING)
-        try:
-            if hasattr(self, "_raw_log_cb") and not self._raw_log_cb.isChecked():
-                self._raw_log_cb.setChecked(True)
-        except Exception:
-            swallowed("could not reveal the raw log after a run failure",
-                      level=logging.WARNING)
 
     # ------------------------------------------------------------------
     # Log helpers
@@ -815,9 +787,14 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                             self._log_line(f"[warn] Could not open Review tab: {exc}\n", "WARNING")
                 elif kind == "error":
                     self._log_line(payload, "ERROR")
-                    if self._run_error is None:  # keep the first message only
+                    # First message only, on both surfaces. The first is the
+                    # cause and anything after it is that cause's fallout, so
+                    # latching one and painting another would leave the
+                    # dashboard headline naming something other than the
+                    # message runFinished carries.
+                    if self._run_error is None:
                         self._run_error = str(payload)
-                    self._surface_run_failure(str(payload))
+                        self._surface_run_failure(str(payload))
                 elif kind == "finished":
                     self._running = False
                     self._run_btn.setEnabled(True)
@@ -834,7 +811,7 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
                     # indistinguishable from a successful plate.
                     if self._run_ok:
                         self._refresh_last_run_summary()
-                                # A directly-connected slot on either signal below may
+                    # A directly-connected slot on either signal below may
                     # start the next queued run re-entrantly, so nothing after
                     # jobFinished's emit may touch run state.
                     ok, message = self._run_ok, (self._run_error or "")

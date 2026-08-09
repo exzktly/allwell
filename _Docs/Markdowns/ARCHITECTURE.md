@@ -114,7 +114,7 @@ allwell/
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
 ├── analyze_tab_form.py          ← Analyze form builders + _collect_run_options (mixin)
 ├── analyze_tab_log.py           ← Analyze mixin: the output pane — log view, raw-log
-│                                   toggle, "Last run ·" card
+│                                   toggle, run-outcome surfacing, "Last run ·" card
 ├── analyze_tab_pinfo.py         ← Analyze mixin: restore a prior run's pipeline_info into the form
 ├── analyze_tab_chrome.py        ← Analyze mixin: form chrome (sections, rows, entries, ⓘ markers)
 ├── analyze_tab_seg_params.py    ← Analyze mixin: per-method segmentation params + StarDist thresholds
@@ -2047,8 +2047,10 @@ in and wrong for a control something else just changed on their behalf, which
 otherwise leaves no visible trace at all (see `_open_dataset_in_analyze`).
 
 The pane's output half is `analyze_tab_log.AnalyzeLogPaneMixin` — the log view,
-the raw-log toggle, and the idle "Last run ·" card. It is not form-building: the
-form gathers what a run is launched with, this shows what the run then said.
+the raw-log toggle, the run-outcome surfacing described next, and the idle
+"Last run ·" card. It is neither form-building nor run-driving: the form gathers
+what a run is launched with and the run mixins start it and drain its queue,
+while this shows what the run then said.
 
 **A failed run says so where the user is looking.** The runner turns a non-zero
 exit into one `("error", …)` event, and the log view that event's text lands in
@@ -2057,8 +2059,16 @@ indistinguishable from a run that was never clicked: progress stops, the Run
 button returns, nothing states a reason. Three things carry the failure out of
 that pane, none of them new machinery. `_surface_run_failure` calls the
 dashboard's `set_failed` — the same failure state every Datasets tool uses — and
-ticks the raw-log toggle, because the explanation is in that pane and the user
-has no reason to know it exists at the moment they need it. The `finished`
+ticks the raw-log toggle through `force_raw_log_open`, because the explanation is
+in that pane and the user has no reason to know it exists at the moment they need
+it. That tick is a change to a setting the user chose, so it is recorded rather
+than kept: `_set_running_ui_state` calls `restore_raw_log` at the start of the
+next run, which puts the toggle back unless `_on_toggle_raw_log` saw the user
+work it themselves in the meantime, in which case the choice is theirs and stands.
+Only the *first* `("error", …)` event of a run reaches either surface — the first
+is the cause and anything after it is that cause's fallout, and `_run_error`
+latches the first, so painting a later one would leave the dashboard headline
+naming something other than the message `runFinished` carries. The `finished`
 branch gates `_refresh_last_run_summary` on the run having succeeded: the card's
 only test is that `pipeline_info.json` exists, and the pipeline writes that
 *before* any image work, so on a failure it would describe a plate that was
@@ -2723,14 +2733,18 @@ parent process supervises the per-well worker pool:
     whole-run figure beside it — the two differ by `--workers`, and reporting
     the larger one under the words "not enough for even one well" describes a
     shortfall the test never measured. `--allow_low_disk` (Analyze → Compute
-    Options) downgrades it to the warning path. Both sides of the comparison
-    lean the same way and a hard exit between them can refuse a run that would
-    have finished: the estimate takes the *largest* member and gives no deflate
-    credit, while the free figure is `statvfs`-available, which on APFS excludes
-    purgeable space and reads well under what the machine will hand over — a Mac
-    showing 14.3 GB in Finder reports 6.0 GiB here. Any free figure quoted to a
-    user says so, because it will not match their file manager and a check whose
-    numbers cannot be reconciled reads as broken. The wording of the override
+    Options) downgrades it to the warning path, because a hard exit sitting on
+    top of an estimate can refuse a run that would have finished. **The estimate
+    is rough in both directions**, which is why it is a refusal that can be
+    overruled rather than a number to trust: it takes the *largest* member and
+    gives no deflate credit, which overshoots, while `_INTERMEDIATES_PER_GROUP`
+    is a flat count where several of those images are written *per channel*,
+    which undershoots past about four channels. The free figure it is compared
+    against is `statvfs`-available, which on APFS excludes purgeable space and
+    reads well under what the machine will hand over — a Mac measured at 14.3 GB
+    in Finder reported 6.0 GiB here. Any free figure quoted to a user says so,
+    because it will not match their file manager and a check whose numbers
+    cannot be reconciled reads as broken. The wording of the override
     lives once, in `capacity.ALLOW_LOW_DISK_HELP`, shared by the CLI flag's help
     and the checkbox's tooltip. When scratch and output share a volume —
     the default, `~/.allwell/scratch` beside an output dir on the home volume —
@@ -3346,7 +3360,7 @@ is unit-testable without the app (`tests/test_concatenate_compute.py`):
 | `concatenate_compute.py` | Pure planner. Reads + validates both `pipeline_info.json` (refuses on differing schema/separator/indices/nuclear-token/segmentation-method, and on dataset 1 and dataset 2 being the same folder), detects dataset 1's timepoint label format, computes the hour offset, enumerates wells, and returns a `MergePlan`. Also owns the structural filename-rewrite gate (`rewrite_member_name`) and the in-progress-marker restart check. |
 | `apply.py` | Qt-free executor. Given a `MergePlan`, copies dataset 1's per-well inputs/CSVs/QC-zips as-is, re-packs dataset 2's with every timepoint-derived value shifted, stitches shared wells (CSV columns unioned like `pipeline/io.merge_records_into_csv`), carries over `cell_overrides.json`, verifies the result, and writes the merged sidecar. Copying goes through `_common.containers.copy_container_members`, so a well that comes from one dataset only is a whole-file copy, and a merged well moves each member's compressed bytes straight from whichever side holds it — dataset 2's under a name whose timepoint field has been shifted, dataset 1's under its own. A timepoint offset changes the name in the member's header and nothing else, so there is nothing to decode on either side. It tracks which member names collided and were dropped rather than silently discarding them; a nonzero drop count marks that well `"warned"` and fails `_verify` outright, since a name that "looks fine" in the merged archive can be the wrong dataset's bytes under it (see Verification below). Progress via a `log` callback, a `progress(well, stage)` callback (`"merging"` → `"merged"`/`"warned"`) that drives the live dashboard, and a `sub_progress(well, done, total)` callback that drives that well's dial *within* the stage (fused across the well's two container passes by `_common.containers.WellFraction`). `sub_progress` is the one callback deliberately left outside the callback lock: every call names its own well, so interleaving is harmless, and taking the lock once per member would serialise the parallel copy it reports on. Wells merge in parallel through a `ThreadPoolExecutor` (`pick_workers`) — each owns its own destination files, so `log`/`progress` calls before a well's work starts are the only thing serialised behind a lock; aggregating each future's result into `well_stats`/`dropped_members`/etc. and reporting the terminal `"merged"`/`"warned"` state both happen back on `execute_plan`'s own thread as futures complete, so that bookkeeping needs no lock at all. |
 | `worker.py` | Thin `ConcatenateWorker(QThread)`; runs planning + `execute_plan` off the UI thread, marshalling progress/result/errors through queued signals (`logLine`, `wellsPlanned`, `wellStage`, `wellFraction`, `succeeded`, `failed`), and forwards `isInterruptionRequested` as a cancellation check. `wellFraction(well, done, total)` is the per-well sub-progress signal every Datasets tool's worker that copies data carries beside `wellStage` (Validate has none — it inspects rather than copies, so a well has no sub-steps); it is what lets a well render as a progress dial rather than a flat in-progress colour. A controller connects it to its dashboard's `set_well_progress` when that dashboard owns a plate, and straight to its page's own plate otherwise — Subset's dashboard is built `show_plate=False`, so `SubsetController._on_well_fraction` drives the picker plate's `setWellFraction` instead. |
-| `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (mirrors `analyze_tab_form.py`'s log panel). Emits `runRequested` / `openInReviewRequested`. |
+| `view.py` | `ConcatenatePage(QWidget)` — a one-line equation row (dataset 1 + dataset 2 = destination; compact `_FolderField`s showing a basename with the full path on hover, each with its own inline validity hint) above a `ConcatDashboard`, with the raw text log demoted to a collapsible "Show raw log" checkbox (mirrors `analyze_tab_log.py`'s log panel). Emits `runRequested` / `openInReviewRequested`. |
 | `controller.py` | `ConcatenateController` — wires the page to the worker, drives the dashboard's per-well and per-run state at each signal, distinguishes a cancelled run from a failed one, and confirms before resuming into a destination with leftovers from an interrupted attempt. |
 | `dashboard.py` | `ConcatDashboard`, built on `widgets/plate_progress.py::PlateProgress` (shared with Analyze's `RunDashboard` — see §7). Two independent state axes: **per well** (`pending`/`merging`/`merged`/`warned` — image data survived on one side with no matching measurements CSV) and **per run**, a phase rail (Validate → Merge → Verify → Finalize) with a terminal Done/Failed/Cancelled outcome painted on the headline. The per-run axis exists because `apply._verify` and the cell-override carry-over run *after* every well already shows green — without it, a verification failure would leave the plate looking like a complete success. Every well's terminal states carry a marker glyph too, not just its colour — `merged` gets `✓`, `warned` gets `!` — so state is legible without relying on distinguishing success-green from accent-blue by colour alone. A well still `merging` carries no glyph: it is drawn as a progress dial, and a glyph would sit in the middle of exactly the area the dial fills. `set_done(summary, *, tooltip=None)` shows a caller-shortened headline (via `_common.dataset_paths.shorten_headline`, stripping the destination path down to its basename) while the full original text — the one still written to the log — survives as the headline's own tooltip. |
 

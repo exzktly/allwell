@@ -158,8 +158,8 @@ _LABELFREE_METHODS = ("cellpose_labelfree",)
 # ``pipeline.io`` module. Re-exported so the many call sites here (and the
 # remote worker) are unchanged. See that module for the implementations + the
 # tmp -> fsync -> rename rationale.
+from pipeline.capacity import ALLOW_LOW_DISK_HELP
 from pipeline.io import (  # noqa: F401
-    ALLOW_LOW_DISK_HELP,
     _AtomicTextHandle, _fsync_path,
     _commit_staging_dir,
     _safe_atomic_text_write,

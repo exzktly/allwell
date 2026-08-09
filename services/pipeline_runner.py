@@ -53,37 +53,6 @@ from util.aw_safe import swallowed
 #: frame; short enough that the dashboard headline stays readable.
 _ERROR_TAIL_LINES = 6
 
-#: ``process_microscopy`` logs as "%(asctime)s  %(levelname)-8s  %(message)s";
-#: strip that prefix when quoting one of its lines back as a failure reason.
-_RE_LOG_PREFIX = re.compile(
-    r"^\S+\s+\S+\s+(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\s+")
-
-
-def exit_message(rc: int, tail) -> str:
-    """The failure text for a pipeline that exited *rc*, quoting what it said.
-
-    ``Pipeline exited with code 2.`` names nothing, and for a run refused
-    before any work — the disk preflight, an input with no wells the pipeline
-    recognises — the exit code is the *only* thing the user was shown. The
-    pipeline always explains itself on stdout first; this carries that
-    explanation to where the failure is reported.
-    """
-    lines = [ln.strip() for ln in (tail or []) if ln and ln.strip()]
-    head = f"Pipeline exited with code {rc}."
-    if not lines:
-        return head + "\n"
-    # Prefer the pipeline's own last ERROR line when there is one: on a refusal
-    # it is the sentence that names the cause, and the lines after it are
-    # usually routine.
-    errs = [ln for ln in lines if " ERROR " in ln or ln.startswith("ERROR")]
-    reason = errs[-1] if errs else lines[-1]
-    # Drop the log's own "<date> <time>  LEVEL" prefix. It is redundant beside a
-    # line already presented as the failure, and it is what pushes the sentence
-    # that matters off the end of a dashboard headline.
-    return f"{head} {_RE_LOG_PREFIX.sub('', reason).strip()}\n"
-
-
-
 # ``process_microscopy`` logs as "%(asctime)s  %(levelname)-8s  %(message)s"
 # (workers add "[worker N]" after the level), so most lines state their own
 # severity and there is nothing to infer. Anchored at the start so a level word
@@ -150,6 +119,36 @@ def classify_log_line(line: str) -> str:
     if "warning" in ll or "warn" in ll or "skipping" in ll:
         return "WARNING"
     return "INFO"
+
+
+def exit_message(rc: int, tail, *, where: str = "Pipeline") -> str:
+    """The failure text for a pipeline that exited *rc*, quoting what it said.
+
+    ``Pipeline exited with code 2.`` names nothing, and for a run refused
+    before any work — the disk preflight, an input with no wells the pipeline
+    recognises — the exit code is the *only* thing the user was shown. The
+    pipeline always explains itself on stdout first; this carries that
+    explanation to where the failure is reported.
+    """
+    lines = [ln.strip() for ln in (tail or []) if ln and ln.strip()]
+    code = f"{where} exited with code {rc}."
+    # Only a line the log classifier calls an ERROR may be quoted as the cause.
+    # A substring test for "error" reads paths and column labels — the pipeline
+    # writes its tracebacks to a directory named ``errors/`` and its clean
+    # summary says "wells failed : 0" — which is the whole reason
+    # ``classify_log_line`` exists forty lines below. And with no such line
+    # there is nothing to quote: presenting the last line, whatever it is, as
+    # the reason invents a cause ("quantify: 1.2 s" is not why a run stopped).
+    errs = [ln for ln in lines if classify_log_line(ln) == "ERROR"]
+    if not errs:
+        return code + "\n"
+    # Reason first: this text leads a dashboard headline, and the exit code is
+    # the part a user can do nothing with.
+    # ``_RE_LOG_LEVEL`` already matches exactly this prefix — one spelling of
+    # "where does the message start", not two.
+    reason = _RE_LOG_LEVEL.sub("", errs[-1]).strip()
+    return f"{reason} ({code[:-1].lower()})\n"
+
 
 
 _RE_TF_WORKERS = re.compile(r"TF threads/worker\s*:\s*\d+\s+\(workers:\s*(\d+)\s+x")
@@ -937,8 +936,15 @@ class PipelineRunner:
                 self._enqueue(("line", "[info] Remote run cancelled before launch.\n"))
                 return
             assert proc.stdout is not None
+            # Same tail as the local path: the pipeline runs on the worker, so
+            # every reason it can refuse to start — the disk preflight, an input
+            # with no wells it recognises — reaches the user here too, and did so
+            # as a naked exit code.
+            tail: collections.deque[str] = collections.deque(maxlen=_ERROR_TAIL_LINES)
             for line in proc.stdout:
                 self._enqueue(("line", line))
+                if line.strip():
+                    tail.append(line.rstrip("\n"))
             proc.wait()
             rc = proc.returncode
 
@@ -985,7 +991,7 @@ class PipelineRunner:
                         ))
                 self._enqueue(("done", "Remote pipeline completed successfully.\n"))
             elif rc != 0:
-                self._enqueue(("error", f"Remote pipeline exited with code {rc}.\n"))
+                self._enqueue(("error", exit_message(rc, tail, where="Remote pipeline")))
             else:
                 self._enqueue((
                     "error",

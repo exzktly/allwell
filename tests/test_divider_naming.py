@@ -41,7 +41,7 @@ from tests._repo_scan import python_sources, rel
 
 # Every application source file, from the one shared definition — this guard
 # originally named three root modules and could not see `analyze_tab_chrome.py`
-# or `analyze_tab_form.py`, both of which build dividers. `tests/` is excluded
+# or `analyze_tab_log.py`, both of which build dividers. `tests/` is excluded
 # there: a test may build a throwaway frame to measure the behaviour above.
 
 # The names ``theme.qss`` styles. ``Separator`` is the Review shell's,

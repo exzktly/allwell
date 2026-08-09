@@ -330,6 +330,23 @@ def test_on_cutoff_guard_catches_a_raw_accessor(tmp_path, monkeypatch, shape):
     assert "redraw_foo" in str(exc)
 
 
+# The four shapes a reviewer used to walk straight past an earlier version of
+# this guard. Each stayed green; each is now a case.
+
+@pytest.mark.parametrize("shape", [
+    "from x import get_thresh_frac_on as fetch_cutoff\nfetch_cutoff(ctx, ch)",
+    '_raw = _lazy("well_viewer.core.channel_state_controller", "get_thresh_frac_on")',
+    'threshold = getattr(csc, "get_thresh_frac_on")(ctx, ch)',
+    'threshold = vars(csc)["get_thresh_count_on"](ctx, ch)',
+])
+def test_on_cutoff_guard_catches_an_indirect_reach(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"{shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                    "test_no_path_picks_its_own_on_cutoff",
+                    [tmp_path / "controller.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+
+
 @pytest.mark.parametrize("shape", [
     "    threshold = on_cutoff_for_column(ctx, val_col)",
     "    threshold = on_cutoff_for_column(ctx, val_col, channel=ch_x)",

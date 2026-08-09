@@ -1638,8 +1638,9 @@ channel for every well).
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
-  Corrected**, **Mask**, **≥ threshold** (renders that channel's ThreshFracOn
-  threshold-binary, positive cells white), **Colour cells**, a **boundary** outline
+  Corrected**, **Mask**, **≥ threshold** (renders that channel's
+  ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
+  is a spot count — positive cells white), **Colour cells**, a **boundary** outline
   overlay, and a **colormap + LUT** min/max. The options travel with the channel
   wherever it sits, so the same channel looks identical on either axis. Remove a
   chip with its **×**.
@@ -1690,9 +1691,12 @@ channel for every well).
   with a **channel** dropdown choosing which channel it applies to (the same
   cutoff shared with Cell Gating and the plot tabs; it follows the picked
   channel, and reads 0 for the nuclear channel until you set one). It also
-  follows the selected **Property**: on an smFISH Count property the caption
-  reads **ON spots** and the box edits that channel's ThreshCountOn instead, so
-  the number you see is always the number you are changing · **Export ▾** (to file ·
+  follows the selected **Property**: with **smFISH Count** selected the caption
+  reads **ON spots**, the box shows a spot count, and it edits that channel's
+  ThreshCountOn instead. Caption, value and write target move together, so the
+  number you see is the number you are changing. A channel with no spot-count
+  column has no count cutoff, so it keeps editing its ON threshold whatever the
+  Property says · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,

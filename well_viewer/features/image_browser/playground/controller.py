@@ -737,18 +737,21 @@ def _corrected_frame(ctx, *, ff_mode: str, bg_method: str, ff, bg, store: bool =
 
 def _effective_threshold(ctx) -> float:
     """Frame-local binary threshold: the user's override if set, else the
-    channel's app-wide ON cutoff as a read-only default (never written back).
+    channel's app-wide ThreshFracOn as a read-only default (never written back).
 
-    Which cutoff that is follows the active metric — a spot-count readout is cut
-    against its tally, not against a brightness."""
+    Deliberately the *intensity* cutoff whatever Property the plots are showing.
+    This number is applied to image pixels — ``_cells_above`` compares it against
+    each label's mean intensity in the frame on screen — so a spot-count cutoff
+    would be measured against the wrong quantity entirely. At its -1 default it
+    would pass every cell and paint the whole frame, while the stepper beside it
+    (built with ``minimum=0``) clamped the display to 0.
+    """
     st = _st(ctx)
     if st.threshold is not None:
         return float(st.threshold)
     try:
-        from well_viewer.core.channel_state_controller import on_cutoff_for_column
-        channel = (st.channel or "").lower()
-        col = f"{channel}_{ctx.state.channel.active_metric}"
-        return float(on_cutoff_for_column(ctx, col, channel=channel))
+        from well_viewer.core.channel_state_controller import get_thresh_frac_on
+        return float(get_thresh_frac_on(ctx, (st.channel or "").lower()))
     except Exception:
         return 0.0
 

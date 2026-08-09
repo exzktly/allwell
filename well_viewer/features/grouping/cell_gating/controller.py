@@ -433,19 +433,6 @@ def cell_gating_get_thresh_frac_on(ctx, channel: str) -> float:
     return float(val)
 
 
-def cell_gating_get_thresh_count_on(ctx, channel: str) -> float:
-    """ThreshCountOn cutoff for *channel* from the typed slice.
-
-    A channel with no stored cutoff falls back to
-    ``well_viewer.domain.gating_state.default_thresh_count_on`` — below the
-    minimum a spot tally can take, so every cell counts as on."""
-    key = _cell_gating_resolve_key(ctx, channel)
-    val = ctx.state.cell_gating.thresh_count_on.get(key)
-    if val is None:
-        return default_thresh_count_on(channel)
-    return float(val)
-
-
 def cell_gating_on_gating_change(ctx) -> None:
     try:
         for edit in ctx.runtime.cell_gating.fluor_gate_edits.values():

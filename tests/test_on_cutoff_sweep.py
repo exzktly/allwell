@@ -17,10 +17,11 @@ the rule would rot: the accessors have to stay reachable for the resolver and
 the Cell Gating tab's own row plumbing, so this is an allowlist rather than a
 ban, and an allowlist is only as good as the liveness test beside it.
 
-Three spellings all count, because all three exist in this repository: the bare
-call, the aliased import (both batch-export panels), and the ``app._``-prefixed
-method (``runtime_app``). A guard that saw only the first would have reported a
-clean sweep over two unconverted sites.
+Every spelling counts, not only the ones the codebase happens to use today. A
+reviewer evaded an earlier version four ways — a non-underscore import alias,
+``_lazy("...", "get_thresh_frac_on")``, ``getattr`` and ``vars()`` — and the
+suite stayed green. ``_lazy`` is not a hypothetical: it is how
+``features/preview/panel_view.py`` already reaches this module.
 """
 
 from __future__ import annotations
@@ -31,23 +32,34 @@ from tests._repo_scan import python_sources, rel
 
 
 #: The raw per-channel accessors. Reaching one of these directly decides for
-#: yourself which cutoff applies — the thing this rule exists to stop.
-GUARDED = ("get_thresh_frac_on", "get_thresh_count_on")
+#: yourself which cutoff applies — the thing this rule exists to stop. The
+#: ``cell_gating_*`` pair are the feature-side reads of the same two values, so
+#: they are equally raw and equally guarded.
+GUARDED = (
+    "get_thresh_frac_on",
+    "get_thresh_count_on",
+    "cell_gating_get_thresh_frac_on",
+    "cell_gating_get_thresh_count_on",
+)
 
 #: ``(repo-relative path, enclosing function)`` for every legitimate direct
 #: reach. The site, not the file: exempting a whole module would let the next
 #: plot path in it quietly reintroduce the bug.
 ALLOWED: frozenset[tuple[str, str]] = frozenset({
-    # The resolver itself, and the shared row-key helper behind both accessors.
+    # The resolver itself.
     ("well_viewer/core/channel_state_controller.py", "on_cutoff_for_column"),
-    # The Image Table quick-edit reads the value it is about to display; which
-    # accessor it picks comes from ``quick_edit_cutoff_is_count``, the same
-    # predicate the resolver uses.
-    ("well_viewer/core/channel_state_controller.py", "refresh_thresh_frac_quick_edit"),
-    ("well_viewer/features/image_browser/image_table/tab_view.py",
-     "_sync_thresh_for_channel"),
-    # The god-object shim, kept while the burn-down runs.
+    # The quick-edit display sync reads the value it is about to show. It picks
+    # its accessor from ``quick_edit_cutoff_is_count`` — the same predicate the
+    # resolver uses — so it cannot disagree with what the write path stores.
+    ("well_viewer/core/channel_state_controller.py", "_sync"),
+    # The Playground's binary preview is an image-pixel cut, so it always wants
+    # the intensity cutoff whatever Property the plots are showing — routing it
+    # through the resolver handed it a spot tally to compare against pixels.
+    ("well_viewer/features/image_browser/playground/controller.py",
+     "_effective_threshold"),
+    # The god-object shim, kept while the burn-down runs, and its import line.
     ("well_viewer/runtime_app.py", "_get_thresh_frac_on"),
+    ("well_viewer/runtime_app.py", "<module>"),
 })
 
 
@@ -75,17 +87,31 @@ def _enclosing_function(tree: ast.AST) -> dict[ast.AST, str]:
 def _guarded_name(node: ast.AST) -> str | None:
     """The accessor a node names, for every spelling that reaches a cutoff.
 
-    ``get_thresh_frac_on(ctx)``   → ``get_thresh_frac_on``
-    ``_get_thresh_frac_on(ctx)``  → ``get_thresh_frac_on`` (aliased import)
-    ``app._get_thresh_frac_on()`` → ``get_thresh_frac_on`` (method shim)
-    ``read = get_thresh_frac_on`` → ``get_thresh_frac_on`` (bound, called later)
+    ``get_thresh_frac_on(ctx)``       → the bare call
+    ``_get_thresh_frac_on(ctx)``      → aliased import (both batch-export panels)
+    ``app._get_thresh_frac_on()``     → the god-object method shim
+    ``read = get_thresh_frac_on``     → bound to a local, called on the next line
+    ``import ... as fetch_cutoff``    → aliased to an unrelated name
+    ``_lazy("...", "get_thresh_frac_on")`` → this repo's own lazy-binding idiom
+    ``getattr(csc, "get_thresh_frac_on")`` / ``vars(csc)["..."]`` → by string
 
-    *References*, not calls. The first version of this guard matched
-    ``ast.Call`` and reported a clean sweep over two sites that pick an accessor
-    into a local and call it on the next line — the same shape a deliberate
-    evasion would take. Binding the name is the reach; where it is invoked is
-    incidental.
+    Two rounds of hardening, both from evasions demonstrated against an earlier
+    version rather than imagined. The first matched ``ast.Call`` and walked past
+    two sites that bind the accessor to a local; the second matched only
+    identifiers, and walked past an import alias that does not happen to be
+    underscore-prefixed and past every string spelling — including
+    ``core.lazy.lazy``, which is how ``features/preview/panel_view.py`` already
+    reaches this very module. A guard that only sees the spellings the codebase
+    happens to use today is not a rule, it is a description.
     """
+    # A string that names an accessor is a reach: it is the argument to _lazy /
+    # getattr / vars(), and there is no other reason to write it.
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value if node.value in GUARDED else None
+    # ``from ... import get_thresh_frac_on as anything`` — the alias may be
+    # spelled freely, so the imported name is what counts.
+    if isinstance(node, ast.alias):
+        return node.name if node.name in GUARDED else None
     if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
         raw = node.id
     elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):

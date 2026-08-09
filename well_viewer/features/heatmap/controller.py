@@ -706,8 +706,8 @@ def _metric_axis_label(metric: str, ctx) -> str:
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:
-        # smFISH counts now honour ThreshFracOn like intensities, so the
-        # generic "above threshold" wording is accurate for every metric.
+        # Every metric is cut by some ON cutoff — ThreshFracOn or
+        # ThreshCountOn — so the generic "above threshold" wording holds.
         return f"{label} fraction above threshold"
     if metric == METRIC_RATIO:
         return f"{label} (mean ratio)"

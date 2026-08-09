@@ -196,15 +196,32 @@ def _shared_bin_edges(
 
 
 def _has_on_cutoff(ctx) -> bool:
-    """True when the active metric is measured against an ON cutoff at all.
+    """True when a threshold line would mark anything on this histogram.
 
-    The threshold line marks where the ON population starts, so a metric that
-    has no such cutoff — shape/morphology — must not draw one. Its resolved
-    value is a sub-minimum sentinel, which would put a visible marker off the
-    left edge of the histogram rather than omitting it.
+    The line marks where the ON population starts, so it is drawn only when
+    there is a cut to see. Two cases have none:
+
+    * shape/morphology, which is measured against no cutoff at all;
+    * a count metric sitting at its sub-minimum default, which admits every
+      cell. Drawing that one is worse than omitting it — matplotlib expands the
+      x-limits to reach a line at -1, so a histogram whose data starts at 0 gets
+      a dead left margin and an orange marker hanging in negative-spot space,
+      which is exactly the artifact this test exists to prevent for shapes.
     """
-    from well_viewer.domain.metric_registry import CUTOFF_NONE, cutoff_kind_for_column
-    return cutoff_kind_for_column(ctx.state.channel.active_val_col) != CUTOFF_NONE
+    from well_viewer.core.channel_state_controller import on_cutoff_for_column
+    from well_viewer.domain.metric_registry import (
+        CUTOFF_COUNT, CUTOFF_NONE, cutoff_kind_for_column,
+    )
+    val_col = ctx.state.channel.active_val_col
+    kind = cutoff_kind_for_column(val_col)
+    if kind == CUTOFF_NONE:
+        return False
+    if kind == CUTOFF_COUNT:
+        from well_viewer.domain.gating_state import DEFAULT_THRESH_COUNT_ON
+        cutoff = on_cutoff_for_column(
+            ctx, val_col, channel=ctx.state.channel.active_channel)
+        return cutoff > DEFAULT_THRESH_COUNT_ON
+    return True
 
 
 def _setup_axes(ctx, n_axes: int):

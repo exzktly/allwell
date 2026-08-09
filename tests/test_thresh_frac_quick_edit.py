@@ -66,6 +66,8 @@ class _FakeStepper:
         self.decimals = 1
         self.single_step = 1.0
         self.tooltip = ""
+        self.suffix = ""
+        self.fixed_width = None
 
     def value(self) -> float:
         return self._value
@@ -84,6 +86,14 @@ class _FakeStepper:
 
     def setToolTip(self, tip: str) -> None:
         self.tooltip = str(tip)
+
+    def setSuffix(self, text: str) -> None:
+        self.suffix = str(text or "")
+
+    def setFixedWidth(self, w: int) -> None:
+        # The real Stepper re-derives its width bounds inside setRange /
+        # setDecimals / setSuffix, which is why the refresh has to re-pin this.
+        self.fixed_width = int(w)
 
     def blockSignals(self, b: bool) -> bool:
         prev = self.blocked
@@ -106,6 +116,8 @@ class _FakeChannel:
     active_channel = "gfp"
     active_metric = "mean_intensity"
     threshold = 50.0
+    # Only "gfp" carries a spot-count column here, matching the count edit bank.
+    smfish_channels = frozenset({"gfp"})
 
 
 class _FakeDataset:
@@ -418,3 +430,27 @@ def test_channel_and_property_combos_fold_their_own_label(loaded_app):
     caption_texts = {lbl.text() for lbl in scope_host.findChildren(QLabel)}
     assert "Channel" not in caption_texts
     assert "Property" not in caption_texts
+
+
+def test_a_channel_without_counts_keeps_the_intensity_cutoff(monkeypatch):
+    """The Image Table picks its own channel; the Property is app-wide.
+
+    With a count Property selected but the Image Table pointed at a channel that
+    has no spot-count column, retargeting would caption the box "ON spots", show
+    a value that channel cannot store, and drop the edit — the Cell Gating tab
+    only builds a count field for smFISH channels, so the write would find no
+    edit and return. Such a channel stays on the cutoff it actually has.
+    """
+    from well_viewer.core.channel_state_controller import quick_edit_cutoff_is_count
+    import well_viewer.features.grouping.cell_gating.controller as cg
+    monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
+
+    app = _FakeApp()
+    app._app_state.channel.active_metric = "smfish_count"
+
+    assert quick_edit_cutoff_is_count(app._ctx, "gfp") is True
+    assert quick_edit_cutoff_is_count(app._ctx, "mcherry") is False
+
+    set_on_cutoff(app._ctx, 42.0, "mcherry")
+    assert get_thresh_frac_on(app._ctx, "mcherry") == 42.0
+    assert get_thresh_count_on(app._ctx, "mcherry") == -1.0

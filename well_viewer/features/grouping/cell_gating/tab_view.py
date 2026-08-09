@@ -153,13 +153,13 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         control_frame, "FluorGating (Cell Inclusion)",
     ))
 
-    # MFI-only note: FluorGating + ThreshFracOn always run against per-cell
-    # mean fluorescence intensity, regardless of which Property the user
-    # picks in Plotting's band.
+    # FluorGating is MFI-only whatever the Property; the fraction-on cut is not
+    # — it follows the Property onto ThreshFracOn or ThreshCountOn.
     mfi_note = QLabel(
-        "Note: FluorGating (cell inclusion) and ThreshFracOn cuts are "
-        "applied against per-cell mean fluorescence intensity (MFI) only, "
-        "independent of the Property selected for plots, stats, and exports.",
+        "Note: FluorGating (cell inclusion) always cuts on per-cell mean "
+        "fluorescence intensity (MFI). The fraction-on cut follows the "
+        "Property: an intensity Property uses ThreshFracOn, an smFISH Count "
+        "Property uses ThreshCountOn.",
         control_frame,
     )
     mfi_note.setObjectName("Muted")
@@ -256,7 +256,8 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
         "Cells passing every inclusion layer — manual curation, the QC debris "
         "gate, the crop region, and the cell-gating / scatter-gate layer — "
         "across all loaded wells (not just the selected ones the curves below "
-        "show). Fraction-on cutoffs (ThreshFracOn) do not change this number: "
+        "show). The fraction-on cutoffs (ThreshFracOn / ThreshCountOn) do not "
+        "change this number: "
         "they define which included cells count as 'on', not which cells count."
     )
     cf_layout.addWidget(_count_lbl)
@@ -287,9 +288,11 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # never floats away from the controls it acts on.
     cf_layout.addWidget(build_hline_separator(control_frame))
     cf_layout.addWidget(build_section_header(
-        control_frame, "ThreshFracOn (Fraction-On Cut)",
+        control_frame, "ON cutoffs (Fraction-On Cut)",
         hint="Per-channel cut used for fraction-on in downstream plots / stats "
-             "(separate from the FluorGating inclusion thresholds above).",
+             "(separate from the FluorGating inclusion thresholds above). "
+             "Intensity Properties use ThreshFracOn; smFISH Count uses "
+             "ThreshCountOn.",
     ))
     from PySide6.QtWidgets import QPushButton as _QPushButton
     auto_row = QWidget(control_frame)

@@ -21,7 +21,6 @@ from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
 from well_viewer.features.scatter.collect import (  # re-export
-    agg_empty_message,
     collect_scatter_agg_data,
     collect_scatter_data,
     gate_filter_title_suffix,
@@ -29,6 +28,7 @@ from well_viewer.features.scatter.collect import (  # re-export
     get_all_timepoints,
     scatter_points_gated,
 )
+from well_viewer.features.scatter._messages import agg_empty_message, clear_cut_status
 from well_viewer.features.scatter.gating import (
     paint_gates,
     refresh_gate_selector,
@@ -340,9 +340,8 @@ def redraw_scatter_agg(
         agg_canvas.draw()
         return
 
-    # Collect aggregate scatter data. ``cut_sink`` comes back naming an axis
-    # whose cells were all cut by its ON cutoff, so an empty plot can say which
-    # of the two very different reasons it is empty for.
+    # ``cut_sink`` comes back naming an axis whose cells were all cut, so an
+    # empty plot can say which of two very different reasons it is empty for.
     cut_sink: dict = {}
     scatter_data = collect_scatter_agg_data(
         ctx,
@@ -363,6 +362,7 @@ def redraw_scatter_agg(
             color=_muted_fg,
         )
     else:
+        clear_cut_status(ctx)   # a redraw that succeeds takes its own notice down
         # Plot each replicate/well-timepoint as a separate error-bar series.
         # ``label='_nolegend_'`` keeps every point OUT of the auto-legend — the
         # legend is built explicitly below as two compact keys (well marker +

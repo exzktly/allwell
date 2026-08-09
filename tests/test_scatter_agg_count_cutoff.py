@@ -14,10 +14,18 @@ Counts now carry their own per-channel cutoff, defaulting below the minimum a
 tally can take so every cell — including the zero-spot ones, which are a
 measurement and not a gap — is in the ON population.
 
-These tests deliberately name no symbol the fix introduces. They seed
-``thresh_frac_on`` (a name that exists on both sides of the change) and assert
-the *outcome*, so running them against the pre-fix tree produces a plain
+Every test in this file deliberately names no symbol the fix introduces. They
+seed ``thresh_frac_on`` (a name that exists on both sides of the change) and
+assert the *outcome*, so running them against the pre-fix tree produces a plain
 assertion failure rather than an ImportError that would measure nothing.
+
+That property is why the empty-plot-message tests live in
+``test_scatter_agg_empty_message.py`` instead of here: they import
+``agg_empty_message`` and pass ``cut_sink``, so on the pre-fix tree they raise
+ImportError and TypeError — which is exactly the false proof this file exists to
+avoid. Keeping them alongside would have made the claim above untrue of half the
+file, and a proof run would have reported "it failed on main" for cases that
+measured nothing.
 """
 
 from __future__ import annotations
@@ -161,48 +169,3 @@ def test_intensity_axes_still_honour_their_own_cutoff():
     (point,) = out.values()
     # Only the two cells above the 500 cutoff contribute.
     assert point["x"] == [1500.0]
-
-
-# ── the empty-plot message ───────────────────────────────────────────────────
-
-def _cut_sink_for(ctx, stat="smFISH Count W3CY5"):
-    sink: dict = {}
-    collect_scatter_agg_data(ctx, stat, stat, [24.0],
-                             well_colors=["#000000"], cut_sink=sink)
-    return sink
-
-
-def test_cut_cells_are_reported_not_blamed_on_the_selection():
-    """The message must name the cutoff, not send the user back to the picker.
-
-    Wells were selected and timepoints ticked; the cells existed and were cut.
-    Telling them to "select wells/groups and timepoints" is the failure this
-    replaced.
-    """
-    from well_viewer.features.scatter.collect import agg_empty_message
-
-    ctx = _ctx({"A01": _well_df([0, 3, 5, 0, 2, 1])},
-               thresh_count_on={"w3cy5": 500.0})
-    sink = _cut_sink_for(ctx)
-    assert sink, "an all-cut axis must record why it produced nothing"
-    assert sink["X"]["n_total"] == 6 and sink["X"]["n_above"] == 0
-
-    msg = agg_empty_message(ctx, sink)
-    assert "cut by the ON cutoff" in msg
-    assert "W3CY5" in msg and "kept 0 of 6 cells" in msg
-    assert "ThreshCountOn" in msg
-    assert "select wells" not in msg.lower()
-
-
-def test_no_cells_at_all_reads_as_a_timepoint_problem():
-    """The other branch: nothing was cut because there was nothing there."""
-    from well_viewer.features.scatter.collect import agg_empty_message
-
-    msg = agg_empty_message(_ctx({}), {})
-    assert "No data at the selected timepoints" in msg
-    assert "cut by" not in msg
-
-
-def test_nothing_is_recorded_when_the_plot_succeeds():
-    ctx = _ctx({"A01": _well_df([0, 3, 5, 0, 2, 1])})
-    assert _cut_sink_for(ctx) == {}

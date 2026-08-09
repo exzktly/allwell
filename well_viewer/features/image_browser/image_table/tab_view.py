@@ -428,17 +428,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
 
     def _sync_thresh_for_channel(_chan: str) -> None:
+        # Routed through the shared refresh rather than a local setValue: the
+        # picked channel decides caption, range, decimals and suffix as well as
+        # the value, and a bare setValue would clamp a -1 count cutoff to the
+        # intensity range's 0 — a different population, shown as if deliberate.
         from well_viewer.core.channel_state_controller import (
-            get_thresh_count_on, get_thresh_frac_on, quick_edit_cutoff_is_count,
+            refresh_thresh_frac_quick_edit,
         )
-        read = (get_thresh_count_on if quick_edit_cutoff_is_count(ctx)
-                else get_thresh_frac_on)
-        val = read(ctx, _thresh_chan())
-        blocked = thresh_stepper.blockSignals(True)
-        try:
-            thresh_stepper.setValue(float(val))
-        finally:
-            thresh_stepper.blockSignals(blocked)
+        refresh_thresh_frac_quick_edit(ctx)
     thresh_chan_cb.currentTextChanged.connect(_sync_thresh_for_channel)
     tr.addWidget(thresh_stepper)
 

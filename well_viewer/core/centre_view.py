@@ -29,7 +29,7 @@ from collections.abc import Callable
 
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtWidgets import (
-    QStackedWidget, QVBoxLayout, QWidget,
+    QLabel, QStackedWidget, QVBoxLayout, QWidget,
 )
 from well_viewer.core.tab_controller import on_tab_change
 from well_viewer.core.safe import swallowed
@@ -413,11 +413,17 @@ def build_centre(win, parent: QWidget) -> None:
         win._plotting_thresh_frac_stepper.valueChanged.connect(
             lambda v: _set_on_cutoff(win._ctx, v)
         )
-        # "ON cutoff" rather than "Threshold": the box edits whichever cutoff the
-        # selected Property is measured against, and the band owns this caption,
-        # so it has to read true for both.
+        # The box edits whichever cutoff the selected Property is measured
+        # against, so its caption switches with the target like the other two
+        # quick-edits'. The band builds the caption inside the group it returns
+        # rather than handing it back, so it is fished out and registered here —
+        # two of three captions switching and the third not would be worse than
+        # either consistent choice.
         win._plotting_thresh_frac_grp = band.add_scope(
-            "ON cutoff", win._plotting_thresh_frac_stepper, trailing=True)
+            "ON threshold", win._plotting_thresh_frac_stepper, trailing=True)
+        _thr_cap = win._plotting_thresh_frac_grp.findChild(QLabel)
+        if _thr_cap is not None:
+            win._ctx.widgets.register("_plotting_thresh_frac_lbl", _thr_cap)
 
         # "+ Add panel" button retired — the underlying per-renderer
         # multi-subplot story was never wired (the _add_panel handler

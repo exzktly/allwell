@@ -10,14 +10,20 @@ itself, the two would drift and a well would read complete in one surface and
 partial in the other, with neither looking wrong — so the rule lives here and
 both import it.
 
-What is *not* here is the scan. Deciding which wells exist, listing containers,
-parsing CSVs and building a report are the callers' own business, and they do
-them very differently: Validate parallelises across wells and pins its read
-counts with a test, while the pipeline walks a directory it has just written.
-The functions below take data the caller already holds — member names, parsed
-CSV rows — and open exactly one thing between them: the well's output container,
-through :mod:`pipeline.incremental_keys`. That constraint is what lets Validate
-delegate without changing how many times it touches the disk.
+The module is in two halves, and the split matters.
+
+**The predicate** — everything up to ``coverage_for_well`` — is what both
+callers share. Those functions take data the caller already holds (member
+names, parsed CSV rows) and open exactly one thing between them: the well's
+output container, through :mod:`pipeline.incremental_keys`. That constraint is
+what lets Validate delegate without changing how many times it touches the
+disk, which its own tests pin as an exact number.
+
+**The scan** — ``scan_run`` and its helpers — belongs to the pipeline alone. It
+walks a directory the run has just written and produces the ``run_check`` block
+the sidecar carries. Validate has its own scan, which parallelises across wells
+and layers findings, run-record evidence and repair on top; it does not call
+this one. Two scans, shaped by what each caller needs, over one predicate.
 
 Stdlib plus :mod:`pipeline.incremental_keys` only. No Qt, no imaging stack, no
 pandas — the module has to import cleanly inside a pipeline run on a remote host
@@ -236,3 +242,338 @@ def coverage_for_well(
         has_out_folder=out_folder is not None,
         failed=tuple(failed),
     )
+
+
+# ── the end-of-run scan ─────────────────────────────────────────────────────
+#
+# Everything above is the rule, shared with the Datasets Validate tool.
+# Everything below is the pipeline's own scan: it walks a directory the run has
+# just written and produces the ``run_check`` block the sidecar carries and the
+# Review side reports. Validate does not use it — its scan parallelises across
+# wells, layers findings and run-record evidence on top, and pins its read
+# counts with a test — but both go through the same predicate, so they cannot
+# disagree about whether a given well is complete.
+
+#: How many missing ``(fov, timepoint)`` pairs a well records before the list
+#: is truncated. The count is kept whole in ``missing_count``; this bounds only
+#: what a badly-broken plate can do to the size of the sidecar.
+MAX_MISSING_PER_WELL = 20
+
+#: Traceback files read to name their exception type. The *count* is never
+#: capped — every file is counted — but on a plate that failed wholesale there
+#: is nothing to learn from the ten-thousandth one that the first hundred did
+#: not already say.
+_MAX_ERROR_FILES_TYPED = 200
+
+_ERRORS_DIRNAME = "errors"
+_EXCEPTION_TYPE_PREFIX = "Exception type:"
+
+
+def _member_names(container: Path):
+    """Every member/file basename in a well's input container, or ``None`` if
+    it cannot be read.
+
+    ``None`` is "there is nothing here to compare against" — an absent
+    container, a corrupt archive, a zip with no members — and it is distinct
+    from an empty set, which would claim the container was read and found to
+    hold nothing.
+    """
+    import zipfile
+
+    if container is None:
+        return None
+    try:
+        if container.is_dir():
+            names = {p.name for p in container.iterdir() if p.is_file()}
+        else:
+            with zipfile.ZipFile(container) as zf:
+                names = {Path(n).name for n in zf.namelist() if not n.endswith("/")}
+    except (OSError, zipfile.BadZipFile):
+        return None
+    return names or None
+
+
+def csv_keys_and_state(path: Path) -> tuple[set[tuple[str, str]], str]:
+    """A per-well CSV's ``(fov, timepoint)`` keys and how readable it was.
+
+    The Validate scan has its own reader because it needs the *rows* — its
+    row-content findings compare each row's ``timepoint_hours`` and
+    ``filename`` against the archive. The pipeline only needs the keys, and
+    holding every row of a plate's worth of CSVs in memory to throw them away
+    would be a needless cost at the end of a run that has just finished doing
+    real work. Two readers with different appetites, both feeding the same two
+    rules — :func:`csv_keys_from_rows` and :func:`reduce_csv_state` — so what
+    they *mean* by a key or by "empty" cannot drift.
+    """
+    import csv
+
+    if not path.exists():
+        return set(), "missing"
+    try:
+        with path.open(newline="") as handle:
+            reader = csv.DictReader(handle)
+            fieldnames = list(reader.fieldnames or [])
+            if not fieldnames:
+                return set(), "unreadable"
+            keys = csv_keys_from_rows(reader, fieldnames)
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return set(), "unreadable"
+    if not keys:
+        # No keys can mean no rows, or rows without the two columns. Both are
+        # "this file told us nothing", which is `empty` — a readable file that
+        # holds no measurements, not a defect in the file itself.
+        return set(), "empty"
+    return keys, "ok"
+
+
+def errors_since(output_dir: Path, since_ts: float | None) -> tuple[int, dict[str, int]]:
+    """Count the run's own traceback files, and name their exception types.
+
+    ``<output_dir>/errors/`` is never cleared between runs and its filenames
+    carry a pid but no run id, so a clean re-run into the same output dir would
+    otherwise report the *previous* run's failures as its own. Filtering by
+    modification time against the run's start is what keeps a block called
+    ``run_check`` describing this run. Pass ``None`` to count everything, which
+    is what a caller with no start time should do — an over-count that says so
+    beats a silent under-count.
+
+    The type comes from the ``Exception type:`` header the pipeline writes into
+    every trace, not from parsing the traceback body: the writer already knows
+    the answer, and a regex over a traceback finds whatever exception names the
+    *source lines* happen to mention.
+    """
+    err_dir = Path(output_dir) / _ERRORS_DIRNAME
+    try:
+        entries = sorted(err_dir.glob("*.txt"))
+    except OSError:
+        return 0, {}
+    count = 0
+    by_type: dict[str, int] = {}
+    for path in entries:
+        try:
+            if since_ts is not None and path.stat().st_mtime < since_ts:
+                continue
+        except OSError:
+            continue
+        count += 1
+        if count > _MAX_ERROR_FILES_TYPED:
+            continue
+        try:
+            with path.open() as handle:
+                for line in handle:
+                    if line.startswith(_EXCEPTION_TYPE_PREFIX):
+                        name = line[len(_EXCEPTION_TYPE_PREFIX):].strip()
+                        if name:
+                            by_type[name] = by_type.get(name, 0) + 1
+                        break
+        except (OSError, UnicodeDecodeError):
+            continue
+    return count, by_type
+
+
+def wells_with_output(output_dir: Path, csv_prefix: str) -> set[str]:
+    """Wells the output directory holds evidence for, whatever the input says.
+
+    A dataset can outlive its inputs — staged, run, and the ``in/`` folder
+    cleaned away — and a scan that enumerated only from the input would then
+    report a finished plate as having no wells at all. Every well token here
+    goes through the shared ``canonical_well_label`` parser, so ``a1``, ``A1``
+    and ``A01`` land on one key rather than three.
+    """
+    from util.well_token import canonical_well_label
+
+    found: set[str] = set()
+    directory = Path(output_dir)
+    try:
+        entries = list(directory.iterdir())
+    except OSError:
+        return found
+    prefix = f"{csv_prefix}_"
+    for path in entries:
+        stem = path.name
+        label = None
+        if stem.endswith("_out.zip"):
+            label = canonical_well_label(stem[: -len("_out.zip")])
+        elif path.is_dir() and stem != _ERRORS_DIRNAME:
+            label = canonical_well_label(stem)
+        elif stem.startswith(prefix) and stem.endswith(".csv"):
+            label = canonical_well_label(stem[len(prefix): -len(".csv")])
+        if label:
+            found.add(label)
+    return found
+
+
+def _csv_prefixes_present(output_dir: Path) -> list[str]:
+    """Every distinct ``<prefix>`` among ``<prefix>_<well>.csv`` in the output.
+
+    More than one means two runs wrote into the same folder under different
+    ``--csv_prefix`` values, which leaves a plate whose wells are split across
+    two sets of measurements files. Nothing downstream reads both.
+    """
+    from util.well_token import canonical_well_label
+
+    prefixes: set[str] = set()
+    try:
+        entries = sorted(Path(output_dir).glob("*.csv"))
+    except OSError:
+        return []
+    for path in entries:
+        head, sep_, tail = path.stem.rpartition("_")
+        if sep_ and head and canonical_well_label(tail):
+            prefixes.add(head)
+    return sorted(prefixes)
+
+
+def scan_run(
+    *, in_containers, output_dir, schema, sep: str, csv_prefix: str,
+    fov_field_present: bool, started_at: float | None = None,
+    finished_at: str = "", started_at_iso: str = "", duration_s: float | None = None,
+    host: str = "", mode: str = "", failed_by_well=None, suspended: bool = False,
+    max_missing_per_well: int = MAX_MISSING_PER_WELL,
+) -> dict:
+    """Build the ``run_check`` block for a finished run.
+
+    *in_containers* is the ``{well: path}`` map the run itself resolved, passed
+    in rather than re-derived. The run has already walked its input directory,
+    already logged what it skipped, and already decided what counts as a well —
+    asking a second time would answer the same question with a second
+    implementation, and would repeat the warnings the first walk emitted.
+
+    Wells are the union of that map with whatever the output holds, so a
+    dataset whose inputs were cleaned away after the run still reports its
+    plate. Every well is recorded, including ones this run skipped because they
+    were already complete: the record is an inventory of the dataset, not a log
+    of what this invocation touched. That distinction is the whole reason it
+    cannot be derived from ``run_report``, whose per-well entries only cover
+    wells a run actually processed.
+
+    Never raises. A well whose files cannot be read is recorded as unreadable
+    and the scan continues; a failure that takes down the sweep itself sets
+    ``partial_scan``, so a truncated record can never be mistaken for a clean
+    plate.
+    """
+    from pipeline.well_skip import csv_path_for_well, out_folder_path, out_zip_path
+
+    out_dir = Path(output_dir)
+    in_map = {str(k): Path(v) for k, v in dict(in_containers or {}).items()}
+    failed_map = {str(k): tuple(v or ()) for k, v in dict(failed_by_well or {}).items()}
+
+    wells = sorted(set(in_map) | wells_with_output(out_dir, csv_prefix))
+    records: dict[str, dict] = {}
+    totals = dict.fromkeys(HEALTH_STATES, 0)
+    totals_intent = totals_csv = totals_any = 0
+    partial_scan = False
+
+    for well in wells:
+        try:
+            container = in_map.get(well)
+            out_zip = out_zip_path(out_dir, well)
+            out_folder = out_folder_path(out_dir, well)
+            csv_keys, csv_state = csv_keys_and_state(
+                csv_path_for_well(out_dir, well, csv_prefix))
+            cov = coverage_for_well(
+                well,
+                in_members=_member_names(container),
+                csv_keys=csv_keys,
+                csv_state=csv_state,
+                out_zip=out_zip if out_zip.exists() else None,
+                out_folder=out_folder if out_folder.is_dir() else None,
+                schema=schema, sep=sep, fov_field_present=fov_field_present,
+                skip_hidden=bool(container is not None and container.is_dir()),
+                failed=failed_map.get(well, ()),
+            )
+        except Exception:
+            # One unreadable well must not cost the record for the other 95.
+            partial_scan = True
+            continue
+        state = health(
+            missing=cov.missing, csv_state=cov.csv_state,
+            has_in_container=cov.has_in_container, has_out_zip=cov.has_out_zip,
+            has_out_folder=cov.has_out_folder)
+        totals[state] += 1
+        totals_intent += cov.intent
+        totals_csv += cov.covered_csv
+        totals_any += cov.covered_any
+        records[well] = {
+            "intent": cov.intent,
+            "covered_csv": cov.covered_csv,
+            "covered_any": cov.covered_any,
+            "missing_count": len(cov.missing),
+            "missing": [list(pair) for pair in cov.missing[:max_missing_per_well]],
+            "csv_state": cov.csv_state,
+            "has_in": cov.has_in_container,
+            "has_out_zip": cov.has_out_zip,
+            "has_out_folder": cov.has_out_folder,
+            "failed": list(cov.failed),
+            "health": state,
+        }
+
+    error_count, error_types = errors_since(out_dir, started_at)
+    findings = _scan_findings(out_dir, csv_prefix, records)
+
+    return {
+        "version": 1,
+        "finished_at": finished_at,
+        "started_at": started_at_iso,
+        "duration_s": duration_s,
+        "host": host,
+        "mode": mode,
+        "schema": ":".join(schema) if isinstance(schema, (list, tuple)) else str(schema or ""),
+        "separator": sep,
+        "csv_prefix": csv_prefix,
+        "skipped": False,
+        "skipped_reason": "",
+        "suspended": bool(suspended),
+        "partial_scan": partial_scan,
+        "wells": records,
+        "totals": {
+            "wells": len(records),
+            "complete": totals["complete"],
+            "partial": totals["partial"],
+            "missing_csv": totals["missing"],
+            "no_output": totals["no_output"],
+            "intent": totals_intent,
+            "covered_csv": totals_csv,
+            "covered_any": totals_any,
+        },
+        "errors": {"files": error_count, "by_type": error_types},
+        "findings": findings,
+    }
+
+
+def _scan_findings(out_dir: Path, csv_prefix: str, records: dict) -> list[dict]:
+    """The cheap dataset-wide problems visible from names already in hand.
+
+    Deliberately not the full sweep the Datasets Validate tool performs. Codes
+    are shared with ``datasets.validate.validate_compute.Finding`` so the two
+    surfaces name the same defect with the same word.
+    """
+    findings: list[dict] = []
+    prefixes = _csv_prefixes_present(out_dir)
+    if len(prefixes) > 1:
+        findings.append({
+            "severity": "warning", "code": "mixed_csv_prefix", "well": "",
+            "message": (
+                f"This output folder holds measurements CSVs under "
+                f"{len(prefixes)} different prefixes ({', '.join(prefixes)}). "
+                f"Only '{csv_prefix}' was written by this run — the rest came "
+                "from a run with a different --csv_prefix, and nothing "
+                "downstream reads both sets."
+            ),
+        })
+    orphans = sorted(
+        well for well, rec in records.items()
+        if rec["csv_state"] == "ok" and not rec["has_in"]
+        and not rec["has_out_zip"] and not rec["has_out_folder"]
+    )
+    if orphans:
+        shown = ", ".join(orphans[:8]) + (" …" if len(orphans) > 8 else "")
+        findings.append({
+            "severity": "warning", "code": "phantom_csv", "well": "",
+            "message": (
+                f"{len(orphans)} measurements CSV(s) name a well with no input "
+                f"and no images behind it ({shown}). They are most likely left "
+                "over from an earlier dataset written into this folder."
+            ),
+        })
+    return findings

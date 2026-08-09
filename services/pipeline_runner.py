@@ -53,6 +53,15 @@ from util.aw_safe import swallowed
 #: frame; short enough that the dashboard headline stays readable.
 _ERROR_TAIL_LINES = 6
 
+#: Error-level lines that are never a *cause*, and so cannot be quoted as one.
+#: ``exiting non-zero`` is ``process_microscopy``'s own end-of-run summary,
+#: emitted after the per-well error that produced it and saying only what the
+#: exit code already says. The traceback header scores ERROR on the word
+#: "traceback" while the exception line that explains it comes further down.
+_RE_TRACEBACK_HEAD = re.compile(r"^Traceback \(most recent call last\)")
+_RE_NOT_A_CAUSE = re.compile(
+    r"exiting non-zero|^Traceback \(most recent call last\)", re.IGNORECASE)
+
 # ``process_microscopy`` logs as "%(asctime)s  %(levelname)-8s  %(message)s"
 # (workers add "[worker N]" after the level), so most lines state their own
 # severity and there is nothing to infer. Anchored at the start so a level word
@@ -142,11 +151,41 @@ def exit_message(rc: int, tail, *, where: str = "Pipeline") -> str:
     errs = [ln for ln in lines if classify_log_line(ln) == "ERROR"]
     if not errs:
         return code + "\n"
+    # The *earliest* error still in the ring is the cause; anything after it is
+    # that cause's fallout (a cleanup that could not find the directory the
+    # first error had already abandoned, an abort summary counting the first
+    # error). One rule, shared with the GUI: ``AnalyzeTab._poll_log`` latches
+    # the first ``("error", …)`` event of a run for the same reason, and the
+    # two must not disagree about which line the run's reason is.
+    #
+    # "Earliest" is over the lines that are *candidates to be a cause*, which is
+    # not every line the classifier calls an ERROR. Two shapes are error-level
+    # and still say nothing about why:
+    #
+    # * the run's own exit summary ("N well(s) failed or produced partial
+    #   output — exiting non-zero…"), which restates the exit code the reader
+    #   already has and is emitted *after* the per-well error that caused it;
+    # * a traceback's ``Traceback (most recent call last):`` header, which
+    #   scores ERROR on the word "traceback" while the exception line beneath
+    #   it — the actual reason — comes later.
+    #
+    # Both sit at an end of the list, which is why neither ``errs[0]`` nor
+    # ``errs[-1]`` is the rule on its own: dropping them first makes "earliest"
+    # mean earliest *reason*. If they are all there is, quoting one still beats
+    # the bare code.
+    candidates = [ln for ln in errs if not _RE_NOT_A_CAUSE.search(ln)] or errs
+    # A traceback is the one shape that reads bottom-up: Python prints the
+    # frames first and the exception last, and the intervening ``raise Foo(…)``
+    # source lines score ERROR on the exception's own name. Inside one, the
+    # last candidate is the reason.
+    if any(_RE_TRACEBACK_HEAD.search(ln) for ln in lines):
+        candidates = candidates[-1:]
+    #
     # Reason first: this text leads a dashboard headline, and the exit code is
     # the part a user can do nothing with.
     # ``_RE_LOG_LEVEL`` already matches exactly this prefix — one spelling of
     # "where does the message start", not two.
-    reason = _RE_LOG_LEVEL.sub("", errs[-1]).strip()
+    reason = _RE_LOG_LEVEL.sub("", candidates[0]).strip()
     return f"{reason} ({code[:-1].lower()})\n"
 
 
@@ -503,6 +542,10 @@ class PipelineRunner:
         # winds down, and that this runner then leaves the remote's files alone
         # so a resume can pick them up. Read by ``was_suspended``.
         self._suspend_requested: threading.Event = threading.Event()
+        # Snapshots of the two events above, taken when a failure is queued —
+        # see ``cancel_state_at_failure``.
+        self._error_was_stopped = False
+        self._error_was_suspended = False
         # Remote-execution state. Set in start() when the user chose a
         # remote host; the runner threads it through _run_pipeline_thread
         # to swap spawn_pipeline for the SSH-staged remote run.
@@ -667,6 +710,26 @@ class PipelineRunner:
         """
         return self._suspend_requested.is_set()
 
+    @property
+    def cancel_state_at_failure(self) -> tuple[bool, bool]:
+        """``(stopped, suspended)`` as they stood when the failure was queued.
+
+        ``was_stopped`` / ``was_suspended`` are live flags, and the GUI reads
+        them one timer tick after the event reaches the queue. A Stop clicked
+        inside that window makes a genuine failure read as a deliberate cancel:
+        amber "Cancelled", no raw log opened, reason never shown — which is
+        precisely the reported bug this reporting path exists to fix, put back
+        by a race. So the answer is taken at ``_enqueue_error`` time and read
+        from here.
+        """
+        return self._error_was_stopped, self._error_was_suspended
+
+    def _enqueue_error(self, message: str) -> None:
+        """Queue a failure, recording the cancel state at this instant."""
+        self._error_was_stopped = self._stop_requested.is_set()
+        self._error_was_suspended = self._suspend_requested.is_set()
+        self._enqueue(("error", message))
+
     def stop(self, *, escalate: bool = True) -> None:
         # Flag the in-progress run as cancelled — used by the worker
         # thread to abort between phases (e.g. between grouping and
@@ -721,6 +784,8 @@ class PipelineRunner:
         # Each run starts with a fresh "not cancelled" state.
         self._stop_requested.clear()
         self._suspend_requested.clear()
+        self._error_was_stopped = False
+        self._error_was_suspended = False
         # The Analyze "Scratch disk" field routes per-well working files via
         # ALLWELL_SCRATCH_DIR. Set it on this process's env so the local
         # pipeline subprocess (inherits os.environ) and the in-process remote
@@ -765,7 +830,7 @@ class PipelineRunner:
             try:
                 output_dir.mkdir(parents=True, exist_ok=True)
             except OSError as exc:
-                self._enqueue(("error", f"Cannot create output dir: {exc}\n"))
+                self._enqueue_error(f"Cannot create output dir: {exc}\n")
                 return
             self._last_output_dir = output_dir
             args = build_pipeline_args(pipeline, input_dir, output_dir, opts)
@@ -791,7 +856,7 @@ class PipelineRunner:
             # build_pipeline_args value, etc.) must surface as an ``error`` so
             # the GUI shows *why* — the bare try/finally previously fell
             # straight through to ``finished`` with no reason (audit E6).
-            self._enqueue(("error", f"Pipeline setup failed: {exc}\n"))
+            self._enqueue_error(f"Pipeline setup failed: {exc}\n")
         finally:
             self._enqueue(("finished", None))
 
@@ -834,9 +899,9 @@ class PipelineRunner:
                         ))
                 self._enqueue(("done", "Pipeline completed successfully.\n"))
             else:
-                self._enqueue(("error", exit_message(rc, tail)))
+                self._enqueue_error(exit_message(rc, tail))
         except Exception as exc:  # surface any failure to the GUI
-            self._enqueue(("error", f"Failed to start pipeline: {exc}\n"))
+            self._enqueue_error(f"Failed to start pipeline: {exc}\n")
 
     def _run_pipeline_remote(
         self,
@@ -991,7 +1056,7 @@ class PipelineRunner:
                         ))
                 self._enqueue(("done", "Remote pipeline completed successfully.\n"))
             elif rc != 0:
-                self._enqueue(("error", exit_message(rc, tail, where="Remote pipeline")))
+                self._enqueue_error(exit_message(rc, tail, where="Remote pipeline"))
             else:
                 self._enqueue((
                     "error",
@@ -999,7 +1064,7 @@ class PipelineRunner:
                     "remote files preserved for retry.\n",
                 ))
         except Exception as exc:  # surface any failure to the GUI
-            self._enqueue(("error", f"Failed to run pipeline remotely: {exc}\n"))
+            self._enqueue_error(f"Failed to run pipeline remotely: {exc}\n")
         finally:
             # Always close any scheduler job this run spawned — on success,
             # failure, or exception. ``srun`` normally exits when the

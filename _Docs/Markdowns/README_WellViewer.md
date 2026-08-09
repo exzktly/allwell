@@ -600,6 +600,10 @@ A cell counts only when it is manually kept **and** it passes QC.
   two numbers can meet and refuse a run that would have finished. When the
   volume really is tight, pointing **Scratch disk** at a roomier one or lowering
   **Workers** is the better fix: workers multiply the staging need directly.
+  This box is the one Compute option that is *not* restored by **Open
+  pipeline_info…** — it disarms a check that exists because a volume filling
+  part-way costs hours of work, so it is a decision you make per run rather than
+  one a folder you happened to open makes for you.
 - **Force re-run.** Re-processes wells whose output ZIPs already exist. On a
   remote run this now carries all the way to the end: the run will not decide
   the remote's existing outputs make the work unnecessary, the fetch will not

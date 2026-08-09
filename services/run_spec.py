@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 # opts["raw"] is the only Path-valued key AnalyzeTabFormMixin._collect_run_options
-# produces (analyze_tab_form.py:1421-1479) — everything else is already
+# produces (in analyze_tab_form.py) — everything else is already
 # str/int/float/bool/list[str]/None. If a second Path-valued key is ever added
 # to that dict, it must be listed here too, or to_json()/from_json() will
 # silently mis-round-trip it.

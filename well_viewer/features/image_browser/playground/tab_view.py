@@ -16,7 +16,7 @@ from functools import partial
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QCheckBox, QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QScrollArea, QVBoxLayout, QWidget,
 )
 
@@ -25,6 +25,7 @@ from pipeline.stardist import NMS_THRESH_HELP, PROB_THRESH_HELP
 from process_microscopy import BACKGROUND_METHODS, FLATFIELD_MODES
 from widgets.info_icon import info_icon
 from widgets.page_body import build_page_body
+from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.features.image_browser.playground.controller import (
     correction_controls_enabled, playground_clear_loose_image, playground_on_change,
     playground_open_loose_image, playground_repopulate_dropdowns,
@@ -99,10 +100,7 @@ def build_playground_tab(ctx, parent: QWidget) -> None:
         lbl = QLabel(title, controls)
         lbl.setObjectName("SectionTitle")
         cl.addWidget(lbl)
-        rule = QFrame(controls)
-        rule.setFrameShape(QFrame.HLine)
-        rule.setObjectName("HRule")
-        cl.addWidget(rule)
+        cl.addWidget(build_hline_separator(controls))
 
     def _combo(cell, items, attr: str) -> QComboBox:
         cb = QComboBox(cell)

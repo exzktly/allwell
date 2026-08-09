@@ -17,9 +17,9 @@ from PySide6.QtWidgets import (
 )
 
 from well_viewer.core.ui_helpers import (
-    add_menu_action, install_canvas_wheel_scroll, make_action_menu_button,
-    make_band_controls, make_plot_with_right_dock, make_properties_button,
-    plotting_band_slot)
+    add_menu_action, build_hline_separator, install_canvas_wheel_scroll,
+    make_action_menu_button, make_band_controls, make_plot_with_right_dock,
+    make_properties_button, plotting_band_slot)
 from well_viewer.features.barplot.controller import (
     bar_reset_order,
     on_bar_drag_motion,
@@ -215,10 +215,7 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
 
     # Error band (SEM/SD + Spread) joins the same Display popover (C1) instead
     # of a separate card-controls row.
-    _band_sep = QFrame(_disp_panel)
-    _band_sep.setFrameShape(QFrame.HLine)
-    _band_sep.setObjectName("HRule")
-    _disp_lay.addWidget(_band_sep)
+    _disp_lay.addWidget(build_hline_separator(_disp_panel))
     _disp_lay.addWidget(make_band_controls(ctx, _disp_panel, with_fov=True))
 
     # ── the band's action zone, flush right ─────────────────────────────────

@@ -45,6 +45,7 @@ from analyze_input import AnalyzeInputMixin
 from analyze_progress import AnalyzeProgressMixin
 from analyze_run_spec import AnalyzeRunMixin
 from analyze_suspend import AnalyzeSuspendMixin
+from analyze_tab_log import AnalyzeLogPaneMixin
 from analyze_tab_form import (  # form builders + schema vocab (split out)
     AnalyzeTabFormMixin,
     DEFAULT_SEP, SCHEMA_FIELDS,
@@ -77,12 +78,6 @@ def _validate_schema_mappings() -> None:
 
 _validate_schema_mappings()
 
-#: Width a checkbox needs beside its label text: the indicator (14 px plus a
-#: 1 px border either side = 16) plus the QSS spacing and padding around it.
-#: Named so the fluor-row checkboxes can floor their width on a measurement
-#: rather than on a number written at the call site.
-_CHECKBOX_CHROME_W = 34
-
 _PREVIEW_TOKENS = {
     "experiment": "Exp01",
     "well":       "B03",
@@ -95,8 +90,9 @@ _PREVIEW_TOKENS = {
 # ---------------------------------------------------------------------------
 # AnalyzeTab
 # ---------------------------------------------------------------------------
-class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
-                 AnalyzeSuspendMixin, AnalyzeTabFormMixin, QWidget):
+class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
+                 AnalyzeRunMixin, AnalyzeSuspendMixin, AnalyzeTabFormMixin,
+                 QWidget):
     """Left: pipeline options form.  Right: live subprocess log."""
 
     # Positive-latch completion signal for a job queue: emitted exactly once
@@ -330,8 +326,8 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeProgressMixin, AnalyzeRunMixin,
         # of the "smFISH" label. Minimum policy floors the width at this value.
         def _pin_checkbox(text: str) -> QCheckBox:
             cb = QCheckBox(text, row)
-            cb.setMinimumWidth(
-                cb.fontMetrics().horizontalAdvance(text) + _CHECKBOX_CHROME_W)
+            cb.setMinimumWidth(cb.fontMetrics().horizontalAdvance(text)
+                               + theme.Metrics.checkbox_chrome_w)
             cb.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
             rl.addWidget(cb)
             return cb

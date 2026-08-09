@@ -2024,20 +2024,28 @@ can distinguish ICCs computed with different signals.
 
 ## 6. The Analyze side
 
-### 6.1 `analyze_tab.py` / `analyze_tab_form.py`
+### 6.1 `analyze_tab.py` / `analyze_tab_form.py` / `analyze_tab_log.py`
 
 The Qt form that builds the input panel (folder pickers, channel tokens,
 top-hat radii, segmentation method, smFISH options, worker count) plus a
-live-streaming log panel and a Run / Stop button. The form-building code was
-extracted into `analyze_tab_form.py` (a mixin consumed by `AnalyzeTab`) during
-the Code-Diet pass so `analyze_tab.py` stays under its line budget; the two are
-edited together. The split follows one rule: code that *reads the form's
-widgets* lives with the widgets, so `_collect_run_options`, the well-field
+live-streaming log panel and a Run / Stop button. `AnalyzeTab` itself is a thin
+host: it owns the runner, the queue drain (`_poll_log`), the run-state latch and
+the signals a job queue binds to, and it mixes in the three modules that hold
+everything else. Each of the three files carries a line budget
+(`test_monolith_budgets.py`).
+
+The split follows the pane's three jobs. *Gathering* what a run is launched with
+is `analyze_tab_form.AnalyzeTabFormMixin`: anything that reads the form's
+widgets lives with the widgets, so `_collect_run_options`, the well-field
 validators and the entry-boundary numeric parsers (`_safe_qc_float`,
-`_safe_seg_float`, `_numeric_option_errors`) are all in the mixin, and the tab
-keeps only the run/log/dashboard orchestration. Both files carry a line budget
-(`test_monolith_budgets.py`). Verbose inline helper paragraphs are collapsed
-behind hover `ⓘ` icons (`_info_icon` / `_section(info=…)`).
+`_safe_seg_float`, `_numeric_option_errors`) are all there. *Driving* the run is
+the tab plus `analyze_run_spec` / `analyze_suspend`. *Showing what the run said*
+is `analyze_tab_log.AnalyzeLogPaneMixin`, described below — the log view, the
+raw-log toggle, the run-outcome surfacing and the idle "Last run ·" card. That
+last mixin is inherited by `AnalyzeTab` directly rather than through the form
+mixin, so the outcome path is not reached through the class named for form
+building. Verbose inline helper paragraphs are collapsed behind hover `ⓘ` icons
+(`_info_icon` / `_section(info=…)`).
 
 The form's own chrome — `_section` (a collapsible titled section), `_row`,
 `_entry`, `_info_icon`, and `reveal_section` — is `analyze_tab_chrome.AnalyzeFormChromeMixin`,
@@ -2046,36 +2054,70 @@ section on demand: the fold-by-default rule is right for a user filling the form
 in and wrong for a control something else just changed on their behalf, which
 otherwise leaves no visible trace at all (see `_open_dataset_in_analyze`).
 
-The pane's output half is `analyze_tab_log.AnalyzeLogPaneMixin` — the log view,
-the raw-log toggle, the run-outcome surfacing described next, and the idle
-"Last run ·" card. It is neither form-building nor run-driving: the form gathers
-what a run is launched with and the run mixins start it and drain its queue,
-while this shows what the run then said.
-
 **A failed run says so where the user is looking.** The runner turns a non-zero
-exit into one `("error", …)` event, and the log view that event's text lands in
+exit into an `("error", …)` event, and the log view that event's text lands in
 is hidden at build — on its own that makes a pipeline which refused to start
 indistinguishable from a run that was never clicked: progress stops, the Run
-button returns, nothing states a reason. Three things carry the failure out of
-that pane, none of them new machinery. `_surface_run_failure` calls the
-dashboard's `set_failed` — the same failure state every Datasets tool uses — and
-ticks the raw-log toggle through `force_raw_log_open`, because the explanation is
-in that pane and the user has no reason to know it exists at the moment they need
-it. That tick is a change to a setting the user chose, so it is recorded rather
-than kept: `_set_running_ui_state` calls `restore_raw_log` at the start of the
-next run, which puts the toggle back unless `_on_toggle_raw_log` saw the user
-work it themselves in the meantime, in which case the choice is theirs and stands.
-Only the *first* `("error", …)` event of a run reaches either surface — the first
-is the cause and anything after it is that cause's fallout, and `_run_error`
-latches the first, so painting a later one would leave the dashboard headline
-naming something other than the message `runFinished` carries. The `finished`
-branch gates `_refresh_last_run_summary` on the run having succeeded: the card's
-only test is that `pipeline_info.json` exists, and the pipeline writes that
-*before* any image work, so on a failure it would describe a plate that was
-never produced. And `pipeline_runner.exit_message` quotes the pipeline's own
-last `ERROR` line beside the exit code, because "Pipeline exited with code 2"
-names nothing, and for a run refused before any work it is the only thing the
-user would otherwise be given.
+button returns, nothing states a reason. `_surface_run_failure` is the whole
+outcome path, and it is in the log mixin because the pane it has to open is.
+
+`set_failed` — the same dashboard failure state every Datasets tool uses —
+takes the message's first sentence, capped, since the headline is a wrapping
+label above the plate and a several-hundred-character refusal pushes the plate
+off screen; the untruncated text goes to the same call's `tooltip=`, which is
+`set_done`'s contract too. `PlateProgress.clear_outcome` drops both the tooltip
+and the outcome colour, because neither belongs to the run that follows: a
+tooltip nobody clears makes a hover over a *successful* plate report the
+previous run's failure, and a colour nobody clears paints the next run's live
+progress and its "Complete —" line in danger red. Every Datasets tool was
+immune to the second of those by accident — each calls `set_done` on success,
+whose green overwrites the red — so it is the base class's job, not the
+callers'.
+
+A **Stop or Suspend is not a failure**: both end the subprocess by signal and
+arrive as the same kind of event, so both take the amber `set_cancelled` and
+neither opens a pane the user had closed. Which of the three it was is read
+from `PipelineRunner.cancel_state_at_failure`, a snapshot taken when the
+failure is *queued*, not from the live `was_stopped` / `was_suspended`. The GUI
+drains one timer tick later, and a Stop clicked inside that window would
+otherwise turn a genuine failure amber and silent.
+
+The raw-log toggle is ticked through `force_raw_log_open`, because the
+explanation is in that pane and the user has no reason to know it exists at the
+moment they need it. That tick changes a setting the user chose, so it is
+recorded rather than kept: `_set_running_ui_state` calls `restore_raw_log` at
+the start of the next run, which puts the toggle back unless
+`_on_toggle_raw_log` saw the user work it themselves in the meantime, in which
+case the choice is theirs and stands. A message that names a collapsible
+section unfolds it, for the same reason `reveal_section` exists at all — naming
+a remedy the user cannot see is the same dead end as naming none.
+
+**The earliest error is the cause; everything after it is that cause's
+fallout.** That is one rule with two enforcement points, and they must not
+disagree, because the second is what the first reports. `_run_error` latches the
+first `("error", …)` event of a run and `_surface_run_failure` is called only
+for that one, so the dashboard headline and the message `runFinished` carries
+are the same string. Inside a single event, `pipeline_runner.exit_message`
+quotes the earliest `ERROR` line still in the runner's tail ring beside the
+exit code, because "Pipeline exited with code 2" names nothing and for a run
+refused before any work it is the only thing the user would otherwise be given.
+
+"Earliest" is over the lines that can *be* a cause, which is not every line
+`classify_log_line` scores ERROR. Two shapes are error-level and explain
+nothing: the pipeline's own end-of-run summary ("N well(s) failed or produced
+partial output — exiting non-zero…"), which restates the exit code and is
+emitted *after* the per-well error that produced it, and a traceback's
+`Traceback (most recent call last):` header, which scores ERROR on the word
+"traceback". Both are dropped first. A traceback is then the one shape read
+bottom-up — Python prints frames first and the exception last, and the
+intervening `raise Foo(…)` source lines carry the exception's own name — so
+inside one the *last* candidate is the reason. With nothing left after the
+filter, quoting the summary still beats the bare code.
+
+The `finished` branch gates `_refresh_last_run_summary` on the run having
+succeeded: the card's only test is that `pipeline_info.json` exists, and the
+pipeline writes that *before* any image work, so on a failure it would describe
+a plate that was never produced.
 
 The per-method segmentation parameters are their own mixin,
 `analyze_tab_seg_params.AnalyzeSegParamsMixin`: the `NamedPageStack` of
@@ -2721,9 +2763,9 @@ parent process supervises the per-well worker pool:
     working set (per-image bytes × channels + ~6 float32 intermediates per
     FOV-group, times the run's own field/timepoint enumeration, times how many
     wells `--workers` stages at once) and the plate's durable output, and
-    — the channel count being `fluor_tokens_for_quant`'s own length, since that
-    list already leads with the segmentation channel and adding one for it
-    charged every FOV-group a frame that does not exist —
+    — the channel count being `fluor_tokens_for_quant`'s own length, since
+    that list already leads with the segmentation channel and adding one for it
+    would charge every FOV-group a frame that is not there —
     compares them against the *resolved* scratch base and the output directory.
     Below one well's worth of scratch it exits before reading an image, because
     a run that starts there cannot finish; everything else warns, since the
@@ -4779,7 +4821,7 @@ Notable members worth knowing about by name:
 | `LabeledComboBox` (`widgets/labeled_combo.py`) | A `QComboBox` that paints its own scope label as a fixed prefix inside the closed box ("Channel: RFP", "Timepoint: 4.0h") rather than sitting beside a separate `QLabel`. `currentText()` / `currentIndex()` / every Qt signal still report the plain item value — only `paintEvent` changes, drawing `opt.currentText` set to the prefixed string. `sizeHint()` measures *only what's actually painted* (the current item's text plus the prefix, via `self.style().sizeFromContents(QStyle.CT_ComboBox, opt, content, self)`), not plain `QComboBox`'s default — which measures every item in the list up front (`AdjustToContentsOnFirstShow`) and sizes the closed box to the widest one, so a metric combo showing "N" sat as wide as its longest possible entry ("Property: Fraction Threshold On") the whole time. Callers must not layer `setFixedWidth` / `setMinimumContentsLength` / a QSS `min-width` on top — every one of those re-floors the box wider than its current content needs, which is exactly the waste this widget exists to cut; centre_view.py's Channel/Property combos and `review_csv/tab_view.py`'s Timepoint and FOV combos carried exactly that stale floor from before the box was made self-sizing, until removed. Before a caller populates the combo (or an empty dataset leaves it with no items), `currentText()` is `""` — `_painted_text()` falls back to the bare label ("Timepoint") rather than painting nothing, since a blank sliver reads as broken once the box tracks content width; `paintEvent` calls the same `_painted_text()` rather than duplicating the fallback, so painting and sizing can't drift apart. A repaint recomputes `sizeHint()` and calls `updateGeometry()` when it changed, which is what catches a text change made under `blockSignals(True)` (a common "seed without re-triggering the handler" pattern that suppresses `currentIndexChanged` but not Qt's own repaint scheduling). `ControlBand.add_scope("", combo)` is called with an empty label for one of these — the combo describes itself, so it's added alone rather than paired with a caption. Used for Plotting's page-level Channel and Property combos, every single-select Timepoint combo across Review (Stats, Spatial, Multivariate, Distribution, Heat Map, smFISH, Review CSV, Segmentation preview) — Heat Map's was a `StyledSlider` until unified onto the same combo every sibling tab uses — and every FOV combo (smFISH, Review CSV, Segmentation preview). Not every folded scope control is a `LabeledComboBox`: the checkbox-menu multi-select buttons (Bar Plots' and Scatter Cells/Agg's Timepoints pickers) fold the same way but by a different means, since there's no per-item combo box to paint a prefix on — `core.ui_helpers.multiselect_button_text` builds the readout string and the button's own `setText` carries it. The `ControlBand.add_scope(label, widget)` pairing is still what every other scope control uses — Heat Map's own Aggregation combo included, since there's no per-tab convention for what its prefix would read. |
 | `multiselect_button_text` (`core/ui_helpers.py`) | The button-text counterpart to `LabeledComboBox` for a checkbox-menu multi-select control (the "Select Timepoints" pattern Bar Plots and both Scatter sub-tabs use): folds a prefix and a `{token: bool}` selection dict into one string — `"Timepoints: 2/5 selected"`, `"Timepoints: All 5 selected"`, `"Timepoints: 0 selected"` — for the picker button's own text, in place of a separate count `QLabel` beside it. The three call sites (`barplot/controller.py::update_bar_tp_selection_display`, `scatter/controller.py::update_scatter_tp_selection_display` / `update_tp_selection_display`) call it on every selection change; `persistence/view_state.py`'s bar-tab restore path calls it directly too, since it predates and is Qt-free like the rest of `core`. |
 | `ControlBand` (`widgets/control_band.py`) | The one control row a Review tab uses, so that switching tabs does not also switch control layouts. Two zones and no third: **scope** on the left (what data is shown — channel, property, timepoint, threshold) and **actions** flush right (how it is shown and what to do with it — `Display ▾`, `Export ▾`, Properties). Which view is being shown is the tab bar's job, not the band's, so nothing is centred. The scope zone is a `FlowLayout` rather than a `QHBoxLayout`: a box layout has no wrap, so at narrow widths Qt compresses the children until a label is drawn over the combo beside it. `add_scope(label, *widgets)` bundles the label and its control through `flow_group` as **one** flow item, so a wrap can never strand a label from what it names, and returns that group so a caller can show or hide the pair. Three details are load-bearing and each cost a render to find: the action zone is `Qt.AlignTop`, or it centres itself against a wrapped scope zone and the buttons drift half a row down; the band's height floors at the action zone's, since `FlowLayout.heightForWidth` returns ~0 for an empty scope zone and the band would collapse behind its own buttons; and the band answers `heightForWidth` from the flow at the width the scope zone will actually get, because a tab built inside a stacked page is first realised at a narrow transient width where `sync_flow_height` pins the fully-wrapped height as the host's minimum — inheriting `QWidget`'s cached hint there left a 45px band 151px tall for good. `ROW_H` (28px; `band_height()` == 44 with the band's own padding) is what one row measures, whatever it holds — set as a real `setMinimumHeight`, because a parent layout asks the band's `QWidgetItem`, which delegates to `wid->layout()->heightForWidth()` and never reaches an override on the class. Its object name is `ControlBand`, which is data-gated (§5.2). A page whose body is a stack of leaf views still gets **one** band: each leaf claims a `ControlBandSlot` through `band.slot(name)`, adds its controls through the slot's mirror of `add_scope` / `add_action`, and `show_slot` shows one leaf's while hiding the rest. A slot is a real widget — a child of the band that is never laid out, so it is never painted — because leaves parent popover contents to what they think is their band. Items claimed by a slot that is not current arrive hidden, since `QLayout.addWidget` shows what it is handed and leaves build lazily. |
-| `build_page_body` (`widgets/page_body.py`) | The standard body of a main page: a `ControlBand` flush against the page's top, then the page's content beneath it. `build_page_body(parent, *, content_margins=(left, right, bottom), horizontal=False)` strips the page root's own margins and spacing, adds the band, and returns it together with a content host. There is no top-margin parameter — side and bottom padding are a page's own business, the top is what every page's first row is aligned by. **The band is added whether or not the page has controls for it**: a page with none (Image Table, the Playground, Batch Export, the Datasets tool pages) reserves the row so its content starts level with its neighbours', the same reservation the mode band's page-tabs host makes for a page with no sub-tab bar. `horizontal=True` gives the content host a `QHBoxLayout` for a page whose body is a row rather than a column (the Playground's canvas beside its property dock). No All-Well coupling, so the Review feature packages, `analyze_tab_form.py` and `datasets_tab.py` all build their bodies through it. Measured by `tests/test_page_alignment.py` (§5.2). |
+| `build_page_body` (`widgets/page_body.py`) | The standard body of a main page: a `ControlBand` flush against the page's top, then the page's content beneath it. `build_page_body(parent, *, content_margins=(left, right, bottom), horizontal=False)` strips the page root's own margins and spacing, adds the band, and returns it together with a content host. There is no top-margin parameter — side and bottom padding are a page's own business, the top is what every page's first row is aligned by. **The band is added whether or not the page has controls for it**: a page with none (Image Table, the Playground, Batch Export, the Datasets tool pages) reserves the row so its content starts level with its neighbours', the same reservation the mode band's page-tabs host makes for a page with no sub-tab bar. `horizontal=True` gives the content host a `QHBoxLayout` for a page whose body is a row rather than a column (the Playground's canvas beside its property dock). No All-Well coupling, so the Review feature packages, `analyze_tab_log.py` and `datasets_tab.py` all build their bodies through it. Measured by `tests/test_page_alignment.py` (§5.2). |
 | `ModeBar` (`widgets/mode_bar.py`) | The app's top-level Review / Analyze / Datasets selector. These are three applications sharing a window, not three tabs of one screen, and the control says so at rest: **every segment is filled at all times** — the active one accent-filled, the inactive ones on `panel_elevated` with full-strength `text_primary` and full-opacity glyphs. Nothing here is muted, because muting is how the rail's section list and the centre tab bar express "not currently selected", and borrowing it demotes a switch between applications to a third tab strip. Segments are flush — no gutters, no radius — so the bar is one band rather than three chips. `addSegment` takes a `widgets.icons` glyph *name*, not a `QIcon`, and repaints it in whichever foreground the segment's state calls for; a fixed `QIcon` draws its Normal pixmap in `text_secondary`, which on the accent fill is a dark glyph on saturated blue. The bar's default height is `tab_bar_height()`, measured off a throwaway polished `QTabBar` so the two bands share a bottom edge through any change to tab padding. That measurement is deliberately uncached — it depends on the application stylesheet and font, and a module-level cache freezes whichever were in force at the first call, which for a widget built during startup is a stylesheet that has not been applied yet. |
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | **The app's only painted well grid.** Every 8×12 plate the user sees is this control — Review's rails and the sample-definitions editor, the Datasets tools' pickers and status maps, Convert OME-TIFF's acquisition-path editor, and Batch Export's group map. What differs between them is which *selection model* the host drives it in (`setSelectionModel`): `"set"` (the default, an unordered selection), `"path"` (an ordered acquisition route — a click appends an off-path well or removes an on-path one, the wells carry their visit numbers derived from the list's own order, and an alpha-blended arrow traces the route across the plate), or `"paint"` (the grid owns **nothing** — it reports the press/drag/release gesture as `wellPaintPressed` / `wellPaintDragged` / `paintDragFinished` and the host applies it to whatever it is editing). The corner select-all toggle appears only in `"set"`, since it toggles a selection set the other two models do not have, and a paint gesture ends with `paintDragFinished` rather than `selectionDragFinished` — the latter means "the selection settled", and a paint gesture never changed one. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). Every lightening of a state colour goes through `_lighten` (an RGB blend toward white), never `QColor.lighter`: Qt's version raises the HSV *value* and, once value is at the ceiling, starts dropping *saturation* — it lightens toward white rather than toward a pale version of the hue. Every state colour in the app sits at value 245–253, so `accent2 #B98CF7` came back as literally `#ffffff`; a dial's unfilled share and the sphere gradient's highlight both used it, which is how an uploaded well rendered as a white disc with no hue left to say which stage it was in. `_blend` is the one lerp behind `_lighten` and `_mix_with_rail`. `darker()` needs no equivalent — lowering value never touches saturation. **The sphere gradient is damped on a dial and only on a dial** (`_DIAL_RELIEF`, scaling the stops `_sphere_stops` returns). Blending toward white keeps the hue but *compresses two tones together* — the nearer both are to white, the smaller the gap — so at a plain well's full relief the done and remaining halves of a green well came within 25 luminance of each other under the highlight, against 39 at the centre, and the completed wedge was itself 35 % of the way to white. Reported as "the completed portion is too light and I can't see the difference between complete and incomplete". At 0.43 relief the highlight is 15 % toward white and that worst case is 33. A plain well keeps the full relief because it has no internal boundary for the highlight to compress; only the dial carries a second signal in the same pixels, so only the dial pays. Tone alone still cannot carry green, so the wedge's radii and arc are **stroked** in `base.darker(170)` — skipped at a full dial, where the boundary *is* the rim the well already has. A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus three decoration layers that stack independently of each other and of the fill: a `setWellMarker` glyph, a `setWellFraction` / `clearWellFractions` progress dial, and a `setWellRing` / `setWellRings` / `clearWellRings` accent ring drawn just *outside* the well body. The dial is used by every live plate map that reports a run, whether that is a dashboard's own status plate (Analyze, Concatenate, Import Loose, Merge Plates) or a page's input plate doubling as the progress display (Subset's picker, Convert OME-TIFF's path editor); Validate has no dial because it inspects rather than copies. The ring exists because a host can need a third channel: Batch Export colours a well by which group owns it and rings the wells of the group *currently being edited*, two different questions that would otherwise fight over the same fill. **Every Batch Export mode shares one set of export groups.** Line, Bar, Scatter (cells) and Scatter (aggregate) used to persist under four private slots chosen by `_compute_persist_key`, so groups built in one mode were invisible in the others and anyone exporting the same conditions four ways built them four times; the groups describe the dataset's conditions, not the plot type, so they live in one slot (`base_panel.SHARED_PERSIST_KEY`). A document written before that has its four legacy keys merged in a fixed order and de-duplicated by name, and only when the shared key is absent — otherwise deleting a group would be undone by a legacy slot re-supplying it on the next load. The four panels are cached children of one host toggled by `setVisible`, so `tab_view._show_mode` calls `_reload_persisted_groups()` on the panel it reveals; that is not the auto-resync from the *Sample Definitions* replicate sets which the same function's comment rules out (that one wiped the user's export groups on every visit). No `EventBus` signal — the catalogue is capped at five by contract and a mode switch is local. Batch Export drives the plate in `"paint"` because an export group's model is replicate sets plus solo wells, not a flat set of clicked wells: `_apply_drag` resolves the well under the cursor to the sample definition that owns it and adds or removes that whole **member**, falling back to a solo well only for a well no sample claims. Membership is compared **by name** — `grouping.rep_sets_loaded` builds a fresh `ReplicateSet` on every call and the class defines no `__eq__`, so an identity test never matched an already-present member: dragging across two wells of one sample appended it twice (and the group then exported that condition twice), while dragging a sample back off a group removed nothing. The name is already the identity key everywhere else, being what `_serialize_groups` persists and what hydration matches on. All three decorations, plus the path, are pruned by `setEnabledWells` / `setWellEnabled` — a disabled well paints as an empty socket, and a ring or a dial on a socket describes a well that is not there. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. Every host sizes and places its plate through `plate_geometry.apply_plate_geometry` (below) rather than setting its own caps. |
@@ -4974,8 +5016,11 @@ entry to `ui/theme/styles.py` — that module is a two-token legacy remnant
 Every hairline in the app — the rule under the topbar, the rules between
 Analyze's form sections, the vertical rules inside the run dashboard — is a
 `QFrame` carrying one of four opt-in names, all matched by a single rule in
-`theme.qss()`: `#Separator` (the Review shell's name), `#HRule` / `#VRule`
-(the Analyze pane's and `widgets/run_dashboard.py`'s), and the
+`theme.qss()`: `#Separator` (what `build_hline_separator` /
+`build_vline_separator` apply), `#HRule` / `#VRule` (the equivalent hand-rolled
+spellings — `widgets/plate_progress.py`'s vertical rules, the Batch Export
+divider that picks its orientation at run time, and
+`datasets/_common/log_panel.hrule`), and the
 `hline`/`vline` dynamic properties. They all paint `Colors.border_subtle` with
 `border: none`, and `#HRule` / `#VRule` are pinned to one pixel in the QSS so a
 caller need not also call `setFixedHeight(1)`. `widgets/mpl_toolbar.py` carries
@@ -5005,8 +5050,8 @@ called `setFixedHeight(1)`, so for those only the colour was wrong.
 set its shape, and pin it to `theme.Metrics.hairline`. `build_hline_separator`
 takes a `thickness` keyword for the one divider that is deliberately heavier
 (the Image Table's shelf rule, at 2 px). `datasets/_common/log_panel.hrule` is
-the Datasets-side twin, since `datasets/` reaches `#HRule` without importing
-`well_viewer`. `tests/test_divider_naming.py` fails on any
+the Datasets-side twin, one helper for the six tool pages that build the same
+log header. `tests/test_divider_naming.py` fails on any
 `setFrameShape(QFrame.HLine|VLine)` whose frame is never given a sanctioned
 name.
 

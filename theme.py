@@ -316,6 +316,15 @@ class Metrics:
     icon_btn_w     = 28   # a square glyph-only button (zoom, close, delete)
     swatch_w       = 28   # a colour swatch chip (its height varies by host)
     scroll_max_h   = 200  # a scroll area capped so it cannot eat its page
+    # Everything a QCheckBox occupies beside its label text: the indicator, the
+    # QSS ``spacing`` between it and the label, and Qt's own focus/frame margin.
+    # A measurement, not arithmetic over the QSS tokens — those account for only
+    # 26 px of it. Taken as ``sizeHint().width() - fontMetrics().horizontalAdvance(text)``
+    # on a polished checkbox under this stylesheet, which reads 30–33 across the
+    # fluor-row labels; rounded up so the widest of them still clears. It is a
+    # floor for call sites that cannot use ``sizeHint()`` because they run before
+    # the global stylesheet is applied and it under-reports there.
+    checkbox_chrome_w = 34
 
 
 def _icon_path(name: str) -> str:

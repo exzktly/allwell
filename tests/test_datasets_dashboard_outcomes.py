@@ -96,10 +96,17 @@ def test_every_dashboard_paints_the_same_terminal_states(qapp, kind):
     dash.set_failed("disk full")
     assert dash._headline.text() == "Failed — disk full"
     assert theme.Colors.danger in dash._headline.styleSheet()
+    # Same contract as set_done: a caller that shortens what it displays keeps
+    # the whole of it reachable.
+    assert dash._headline.toolTip() == "disk full"
+    dash.set_failed("short", tooltip="the whole refusal, all 700 characters")
+    assert dash._headline.toolTip() == "the whole refusal, all 700 characters"
 
     dash.set_cancelled()
     assert dash._headline.text() == "Cancelled"
     assert theme.Colors.warn in dash._headline.styleSheet()
+    # A cancel carries no explanation, so it must not leave the failure's.
+    assert dash._headline.toolTip() == ""
 
 
 @pytest.mark.parametrize("kind", ALL)
@@ -111,3 +118,8 @@ def test_reset_forgets_the_previous_run_s_outcome(qapp, kind):
     assert dash._outcome == "failed"
     dash.reset()
     assert dash._outcome == ""
+    # The explanation goes with the state. A tooltip nobody clears outlives the
+    # run it describes — hover a *successful* plate and read the previous run's
+    # failure, which is the "degraded output indistinguishable from good output"
+    # these outcome states exist to prevent.
+    assert dash._headline.toolTip() == ""

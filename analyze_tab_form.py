@@ -24,7 +24,6 @@ from PySide6.QtWidgets import (
 )
 
 from analyze_tab_chrome import AnalyzeFormChromeMixin
-from analyze_tab_log import AnalyzeLogPaneMixin
 from analyze_tab_fields import (  # noqa: F401 — re-exported for analyze_tab
     _INT_FIELDS,
     _numeric_option_errors,
@@ -57,7 +56,7 @@ _LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
 _FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
 
 
-class AnalyzeTabFormMixin(AnalyzeFormChromeMixin, AnalyzeLogPaneMixin,
+class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
                           AnalyzePipelineInfoMixin, AnalyzeSegParamsMixin):
     """The Analyze-tab Qt form builders. Mixed into ``AnalyzeTab`` (with
     ``QWidget``); every method binds to the ``AnalyzeTab`` instance ``self``."""

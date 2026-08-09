@@ -233,8 +233,14 @@ def preflight_scratch_space(
             f"want about {_gib(scratch_need)} with {concurrent_wells} well(s) "
             f"staging at once. {move_it} "
             f"{_FREE_IS_CLAIMABLE_NOW} "
-            f"To start anyway, use --allow_low_disk (Analyze → Compute "
-            f"Options → “Start even if the disk looks too small”)."
+            # Both audiences in one sentence: this module has no idea which one
+            # is reading it. A CLI run sees a flag it can pass and a
+            # parenthesised note about where the same switch lives in the GUI;
+            # a GUI run sees the control it can tick, named exactly as the form
+            # labels it, and the flag it corresponds to.
+            f"To start anyway, pass --allow_low_disk on the command line, or "
+            f"in Analyze tick Compute Options → “Start even if the disk looks "
+            f"too small”."
         )
 
     output_need = 0

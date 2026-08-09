@@ -39,13 +39,17 @@ import ast
 
 from tests._repo_scan import python_sources, rel
 
-# Every application source file, from the one shared definition — this guard
-# originally named three root modules and could not see `analyze_tab_chrome.py`
-# or `analyze_tab_log.py`, both of which build dividers. `tests/` is excluded
-# there: a test may build a throwaway frame to measure the behaviour above.
+# Every application source file, from the one shared definition. A guard that
+# names its own roots goes blind exactly where another can see: this one named
+# three root modules and so could not read the Analyze form's chrome, which
+# builds a divider under every section title. `tests/` is excluded there: a
+# test may build a throwaway frame to measure the behaviour above.
 
-# The names ``theme.qss`` styles. ``Separator`` is the Review shell's,
-# ``HRule`` / ``VRule`` are the Analyze pane's and the run dashboard's.
+# The names ``theme.qss`` styles. ``Separator`` is what
+# ``ui_helpers.build_hline_separator`` / ``build_vline_separator`` apply, and is
+# how a divider should be built; ``HRule`` / ``VRule`` are the equivalent
+# hand-rolled spellings, needed by the frames that choose an orientation at run
+# time and by ``datasets/_common/log_panel.hrule``.
 SANCTIONED_NAMES = frozenset({"Separator", "HRule", "VRule"})
 SANCTIONED_PROPS = frozenset({"hline", "vline"})
 

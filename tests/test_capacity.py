@@ -458,6 +458,27 @@ def test_the_exit_message_never_invents_a_cause():
     assert "code 2" in got
 
 
+def test_the_earliest_error_in_the_ring_is_the_cause():
+    """With more than one ERROR line in the tail, the first one is quoted.
+
+    Anything after it is that cause's fallout — a cleanup that cannot find the
+    directory the first error had already abandoned, an abort summary counting
+    the first error. This is the same rule ``AnalyzeTab._poll_log`` applies to
+    the queue events it drains, where the first ``("error", …)`` of a run is
+    latched and later ones are dropped. The two have to agree: the GUI reports
+    the first and this text *is* what the GUI reports.
+    """
+    from services.pipeline_runner import exit_message
+
+    got = exit_message(1, [
+        "2026-08-08 19:10:32  ERROR     StarDist failed on well A01: out of memory",
+        "2026-08-08 19:10:33  ERROR     could not remove scratch dir (already gone)",
+        "2026-08-08 19:10:33  INFO      Exiting.",
+    ])
+    assert got.startswith("StarDist failed on well A01"), got
+    assert "already gone" not in got
+
+
 def test_allow_low_disk_reaches_the_argv_only_when_asked():
     from services.pipeline_service import build_pipeline_args
 

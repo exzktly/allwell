@@ -207,7 +207,13 @@ class AnalyzePipelineInfoMixin:
         s("_workers_edit", d.get("workers"))
         s("_stardist_tile_px_edit", d.get("stardist_tile_px"))
         chk("_cpu_only_cb", d.get("cpu_only"))
-        chk("_allow_low_disk_cb", d.get("allow_low_disk"))
+        # ``allow_low_disk`` is deliberately NOT restored, though the sidecar
+        # records it. Every other option here describes how a plate was
+        # analysed and is worth reproducing; that one disarms a check that
+        # exists because a volume filling part-way costs hours of work, and
+        # re-arming it from a folder someone happened to open would be a safety
+        # override the user never chose on a disk they may not have measured.
+        # It is a per-run decision, so it starts unticked every time.
         chk("_force_cb", d.get("force"))
         chk("_incremental_cb", d.get("incremental"))
         forced = d.get("force_wells")

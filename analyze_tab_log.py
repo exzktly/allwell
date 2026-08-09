@@ -38,21 +38,29 @@ from well_viewer.core.ui_helpers import build_hline_separator
 from widgets.run_dashboard import RunDashboard
 
 
-#: Longest failure text the dashboard headline takes before it is cut back to
-#: its first sentence. The headline is one line beside a progress plate; the
-#: disk refusal alone runs to ~700 characters (two volumes, two figures, two
-#: remedies), and pasting that into a wrapping label grew the dashboard by
-#: 70 px and pushed the plate off screen. The whole text stays in the log and
-#: on the tooltip, so the cut costs nothing.
+#: Longest failure text the dashboard headline takes before it is cut back.
+#: The headline is a wrapping label above the progress plate, so the cost of a
+#: long message is vertical: measured on an 840 px dashboard, the disk refusal
+#: at its full ~700 characters takes the label to 144 px and the dashboard to
+#: 396 px; capped here it is 80 px and 332 px, against 316 px idle. So this is
+#: not a one-liner — it is a few lines instead of a dozen, which is what keeps
+#: the plate on screen. The whole text stays in the log and on the headline's
+#: tooltip, so the cut costs nothing.
 _HEADLINE_MAX_CHARS = 160
 
 
 def _headline_of(message: str) -> str:
-    """The one-line form of a failure message: its first sentence, capped.
+    """The short form of a failure message: its first sentence, capped.
 
     Sentence-first rather than a blunt truncation because these messages are
     written to lead with what happened and follow with what to do about it, so
     the first sentence is the part a headline wants.
+
+    The disk refusal's own first sentence is longer than the cap, so the cap
+    does apply to the message this exists for. It cuts at the last space before
+    the limit rather than mid-token: the sentence ends in a parenthesised count
+    of wells and FOV-groups, and a blunt cut landed inside it as
+    ``(10 FOV-gro…``, which reads as a rendering fault rather than an elision.
     """
     text = " ".join(str(message or "").split())
     if not text:
@@ -61,7 +69,13 @@ def _headline_of(message: str) -> str:
     first = (head + sep).strip() if sep else text
     if len(first) <= _HEADLINE_MAX_CHARS:
         return first
-    return first[: _HEADLINE_MAX_CHARS - 1].rstrip() + "…"
+    cut = first[: _HEADLINE_MAX_CHARS - 1]
+    space = cut.rfind(" ")
+    # Only honour the word boundary when one exists late enough to leave a
+    # usable headline; a single 200-character token still has to be cut.
+    if space >= _HEADLINE_MAX_CHARS // 2:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:-") + "…"
 
 
 class AnalyzeLogPaneMixin:
@@ -227,16 +241,19 @@ class AnalyzeLogPaneMixin:
         is only the surfacing.
         """
         text = str(message).strip()
-        stopped = bool(getattr(self._runner, "was_stopped", False))
-        suspended = bool(getattr(self._runner, "was_suspended", False))
+        # The state as it stood when the failure was *queued*, not now. The
+        # live ``was_stopped`` / ``was_suspended`` would let a Stop clicked in
+        # the tick between the event landing and this draining turn a genuine
+        # failure amber and silent — the reported bug, reintroduced by a race.
+        stopped, suspended = getattr(
+            self._runner, "cancel_state_at_failure", (False, False))
         try:
             if suspended:
                 self._dashboard.set_cancelled("suspended; resume to finish")
             elif stopped:
                 self._dashboard.set_cancelled("stopped")
             else:
-                self._dashboard.set_failed(_headline_of(text))
-                self._dashboard.setToolTip(text)
+                self._dashboard.set_failed(_headline_of(text), tooltip=text)
         except Exception:
             swallowed("could not put the run outcome on the dashboard",
                       level=logging.WARNING)

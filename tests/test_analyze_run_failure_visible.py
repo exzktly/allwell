@@ -96,6 +96,10 @@ def test_a_failed_run_does_not_paint_a_last_run_card(tab, tmp_path, monkeypatch)
 
 
 def test_a_successful_run_still_paints_it(tab, monkeypatch):
+    """The other half of the gate. Characterisation, not a guard: this passes
+    against the pre-fix code too, where the card was painted unconditionally.
+    It exists so a future tightening of the gate cannot silently take the card
+    away from the runs that should have it."""
     called = []
     monkeypatch.setattr(type(tab), "_refresh_last_run_summary",
                         lambda self: called.append(1), raising=False)
@@ -120,6 +124,10 @@ def _end_run(tab, *, stopped=False, suspended=False, message=_REFUSAL):
         tab._runner._stop_requested.set()
     if suspended:
         tab._runner._suspend_requested.set()
+    # The runner snapshots these when it queues the failure; this stands in for
+    # the enqueue the real runner would have done.
+    tab._runner._error_was_stopped = tab._runner._stop_requested.is_set()
+    tab._runner._error_was_suspended = tab._runner._suspend_requested.is_set()
     tab._run_ok = False
     tab._run_error = None
     tab._log_q.put(("error", message))
@@ -143,7 +151,12 @@ def test_a_suspended_run_reads_as_cancelled_not_failed(tab):
 
 def test_a_cancel_does_not_force_the_log_open(tab):
     """The user asked for this and knows why; opening a pane they had closed
-    would be the app arguing with them."""
+    would be the app arguing with them.
+
+    Characterisation, not a guard: it passes against the pre-fix code, which
+    never opened the pane for anything. It pins the exemption so the failure
+    path added beside it cannot later grow to cover cancels.
+    """
     assert tab._raw_log_cb.isChecked() is False
     _end_run(tab, stopped=True)
     assert tab._raw_log_cb.isChecked() is False
@@ -162,19 +175,41 @@ def test_a_long_reason_is_cut_for_the_headline_and_kept_on_the_tooltip(tab):
     assert len(headline) < len(long_reason)
     assert "Not enough scratch space" in headline
     # Nothing is lost — the whole sentence is still reachable.
-    assert "lower Workers" in tab._dashboard.toolTip()
+    assert "lower Workers" in tab._dashboard._headline.toolTip()
 
 
-def test_a_refusal_unfolds_the_section_it_names(tab):
+def test_a_refusal_unfolds_the_section_it_names(tab, tmp_path, monkeypatch):
     """Naming a remedy the user cannot see is the same dead end as not naming
-    one. The disk check points at Compute Options, which folds by default."""
-    body, _caret = tab._collapsible_sections["Compute Options"]
-    assert body.isVisibleTo(tab) is False
-    _end_run(tab, message=(
-        "Not enough scratch space to process even one well: 4.9 GiB free. "
-        "To start anyway, use --allow_low_disk (Analyze → Compute Options → "
-        "“Start even if the disk looks too small”). (pipeline exited with code 2)"))
-    assert body.isVisibleTo(tab) is True
+    one. The disk check points at Compute Options, which folds by default.
+
+    The message comes from the real ``preflight_scratch_space`` rather than
+    being written out here. The whole mechanism is a text match between what
+    `pipeline/capacity.py` writes and the form's own section titles, so a
+    hand-copied message would leave the test green through a reword of either
+    side — the one failure this guard exists to catch.
+    """
+    import pipeline.capacity as cap
+
+    # 4.9 GiB free, as reported. The volume this test runs on has plenty, so
+    # the shortfall is imposed rather than found.
+    monkeypatch.setattr(cap, "free_bytes", lambda _p: int(4.9 * 1024 ** 3))
+    ok, message = cap.preflight_scratch_space(
+        tmp_path,
+        sample_image_bytes=64 * 1024 * 1024,
+        n_channels=5, groups_per_well=10, concurrent_wells=4,
+    )
+    assert ok is False, "fixture no longer produces the refusal branch"
+
+    folded_before = {t: b.isVisibleTo(tab)
+                     for t, (b, _c) in tab._collapsible_sections.items()}
+    assert folded_before["Compute Options"] is False
+    _end_run(tab, message=message)
+    assert tab._collapsible_sections["Compute Options"][0].isVisibleTo(tab) is True
+    # And nothing it did not name: the message points at Compute Options and
+    # the scratch field, not at every folded section on the form.
+    unfolded = {t for t, (b, _c) in tab._collapsible_sections.items()
+                if b.isVisibleTo(tab) and not folded_before[t]}
+    assert all(t.lower() in message.lower() for t in unfolded), unfolded
 
 
 def test_only_the_first_error_reaches_the_dashboard(tab):
@@ -198,7 +233,13 @@ def test_only_the_first_error_reaches_the_dashboard(tab):
 
 def test_the_next_run_hands_the_raw_log_toggle_back(tab):
     """Revealing the log is a change to a setting the user chose. It is made on
-    their behalf so a failure can be read, not kept: the next run restores it."""
+    their behalf so a failure can be read, not kept: the next run restores it.
+
+    This and the test below pin new API. Run against ``origin/main`` they fail
+    on their own first assertion — that a failure opened the pane at all —
+    which is what ``test_a_failed_run_reveals_the_raw_log`` already proves, so
+    neither has ever been red for the behaviour it names.
+    """
     assert tab._raw_log_cb.isChecked() is False
     _fail_run(tab)
     assert tab._raw_log_cb.isChecked() is True
@@ -208,7 +249,8 @@ def test_the_next_run_hands_the_raw_log_toggle_back(tab):
 
 def test_a_toggle_the_user_worked_themselves_is_not_taken_back(tab):
     """Once they have opened it deliberately, it is theirs — a later run must
-    not close a pane the user asked for."""
+    not close a pane the user asked for. See the note above on what this can
+    and cannot prove against the pre-fix code."""
     _fail_run(tab)
     assert tab._raw_log_cb.isChecked() is True
     tab._raw_log_cb.setChecked(False)      # the user closes it …
@@ -217,9 +259,39 @@ def test_a_toggle_the_user_worked_themselves_is_not_taken_back(tab):
     assert tab._raw_log_cb.isChecked() is True
 
 
+def test_a_stop_clicked_after_the_failure_does_not_hide_it(tab):
+    """The reported bug, reintroduced by a race, if the cancel test ran live.
+
+    A genuine failure queues its ``("error", …)`` event; the GUI drains one
+    timer tick later. A Stop clicked in that window sets the runner's live
+    ``was_stopped``, and reading it at drain time paints amber "Cancelled",
+    leaves the raw log shut and never states the reason. The runner snapshots
+    the answer when it queues the failure instead.
+    """
+    tab._run_ok = False
+    tab._run_error = None
+    # Failure queued while nothing was cancelled …
+    tab._runner._error_was_stopped = False
+    tab._runner._error_was_suspended = False
+    tab._log_q.put(("error", _REFUSAL))
+    # … then the user hits Stop before the next poll.
+    tab._runner._stop_requested.set()
+    tab._log_q.put(("finished", None))
+    tab._poll_log()
+
+    headline = tab._dashboard._headline.text()
+    assert headline.startswith("Failed"), headline
+    assert tab._raw_log_cb.isChecked() is True
+
+
 def test_an_unrelated_failure_leaves_the_sections_folded(tab):
     """It unfolds what the message names and nothing else — a segmentation
-    crash has no business rearranging the form."""
+    crash has no business rearranging the form.
+
+    Characterisation, not a guard: it passes against the pre-fix code, which
+    unfolded nothing at all. Its job is to bound the mechanism the test above
+    introduces, and it bites on any widening of the match.
+    """
     folded_before = {t: b.isVisibleTo(tab)
                      for t, (b, _c) in tab._collapsible_sections.items()}
     _end_run(tab, message="StarDist failed on well A01: out of memory.")

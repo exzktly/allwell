@@ -104,6 +104,25 @@ def test_review_unknown_leaf_lands_on_the_review_overview(monkeypatch):
     assert shell._help_section_for_current_page() == help_topics.MODE_OVERVIEW["review"]
 
 
+def test_review_without_a_ctx_lands_on_the_review_overview():
+    """Same rule as the other two panes: a pane that cannot name a page falls
+    back to its own mode's overview. Returning "" here would leave the drawer at
+    the top of the manual, which reads as a failed scroll rather than a choice."""
+    shell = _shell("review")                       # no ctx built yet
+    assert shell._help_section_for_current_page() == help_topics.MODE_OVERVIEW["review"]
+
+
+def test_review_lands_on_the_overview_when_the_leaf_lookup_raises(monkeypatch):
+    import well_viewer.core.tab_controller as tc
+
+    def _boom(_ctx):
+        raise RuntimeError("tab controller not ready")
+
+    monkeypatch.setattr(tc, "current_centre_tab", _boom)
+    shell = _shell("review", leaf="anything")
+    assert shell._help_section_for_current_page() == help_topics.MODE_OVERVIEW["review"]
+
+
 def test_no_review_pane_yields_no_target():
     shell = types.SimpleNamespace(_review=None)
     shell._help_section_for_current_page = types.MethodType(

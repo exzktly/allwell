@@ -405,16 +405,24 @@ def test_help_topic_guard_catches_an_analyze_section_with_no_topic(tmp_path, mon
     assert "Brand New Section" in str(exc)
 
 
-def test_help_topic_guard_catches_a_topic_naming_no_heading(tmp_path, monkeypatch):
-    """A value that matches no heading scrolls nowhere, silently."""
+def test_help_topic_guard_catches_a_topic_naming_no_heading(monkeypatch):
+    """A value that matches no heading scrolls nowhere, silently.
+
+    Run against the *real* manual, with one entry repointed. A synthetic README
+    holding a handful of headings would fail this guard on every topic at once,
+    with or without the repointing — the case would go green while proving
+    nothing about the entry it claims to be testing.
+    """
     import help_topics
-    root = _help_topics_root(tmp_path)
+    from tests import test_help_topics as guard
+
+    guard.test_every_topic_names_a_real_heading()      # clean before
     monkeypatch.setitem(help_topics.DATASETS_PAGE_HELP, "Merge Plates",
                         "No Such Heading")
-    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
-                           "test_every_topic_names_a_real_heading", root)
-    assert exc is not None, "a topic naming no heading went uncaught"
-    assert "No Such Heading" in str(exc)
+    with pytest.raises(AssertionError) as caught:
+        guard.test_every_topic_names_a_real_heading()
+    assert "No Such Heading" in str(caught.value)
+    assert "Merge Plates" in str(caught.value), "the failure must name the key at fault"
 
 
 def test_help_topic_guard_catches_a_duplicated_heading(tmp_path, monkeypatch):

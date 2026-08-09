@@ -136,11 +136,21 @@ def test_sync_round_trips_across_modes(qapp):
         assert shell._help_btn.isVisibleTo(band) is True
 
 
-def test_band_fits_the_help_button_without_the_cluster(qapp):
-    """Outside Review the cluster is hidden, so the band's pin has to have been
-    measured against the help button too or the glyph is clipped."""
-    shell, _box = _shell(qapp, "analyze")
+def test_band_fits_the_help_button_when_there_is_no_cluster(qapp):
+    """A shell with a help button and no cluster still has to raise the pin.
+
+    Not "the cluster is hidden outside Review" — a hidden widget keeps its
+    sizeHint, so with both present the max() reads the same either way and a
+    test phrased that way passes with the help button dropped from it entirely.
+    The case that bites is the one `test_missing_cluster_is_safe` shows is
+    reachable: a build that got one of the two and not the other.
+    """
+    from widgets.icon_button import IconButton
+
     band, _layout = _band(qapp)
+    shell = types.SimpleNamespace(_help_btn=IconButton("info"))
+    shell._sync_review_actions = types.MethodType(
+        AllWellApp._sync_review_actions, shell)
     AllWellApp._mount_review_actions(shell, band)
     assert band.minimumHeight() >= shell._help_btn.sizeHint().height()
 

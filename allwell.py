@@ -916,15 +916,22 @@ class AllWellApp(QMainWindow):
             page, help_topics.MODE_OVERVIEW["datasets"])
 
     def _review_help_section(self, review) -> str:
-        """The Review leaf tab's own heading, else the Review overview."""
+        """The Review leaf tab's own heading, else the Review overview.
+
+        Every route out of here that cannot name a leaf lands on the overview
+        rather than on ``""``: an empty target leaves the drawer at the top of a
+        2600-line manual, which reads as the scroll having failed rather than as
+        "no more specific page than the mode itself".
+        """
+        overview = help_topics.MODE_OVERVIEW["review"]
         ctx = getattr(review, "_ctx", None)
         if ctx is None:
-            return ""
+            return overview
         try:
             from well_viewer.core.tab_controller import current_centre_tab
             leaf = current_centre_tab(ctx) or ""
         except Exception:
-            return ""
+            return overview
         pages = help_topics.SECTION_BY_PAGE
         if leaf in pages:
             return pages[leaf]
@@ -934,7 +941,7 @@ class AllWellApp(QMainWindow):
             if key.lower() in leaf.lower():
                 return section
         # Unknown leaf → land on the Review-mode overview heading.
-        return help_topics.MODE_OVERVIEW["review"]
+        return overview
 
     def _scroll_help_to_current_section(self) -> None:
         """Scroll the open help drawer so the heading for the current page sits
@@ -1060,9 +1067,13 @@ class AllWellApp(QMainWindow):
             layout.addWidget(help_btn)
         # The band is pinned to a tab bar's height — a row of text. The icon
         # buttons are taller than that, so raise the pin rather than let the
-        # layout clip them; a clipped glyph reads as a broken icon. Both are
-        # measured: outside Review the cluster is hidden and the help button
-        # alone has to fit.
+        # layout clip them; a clipped glyph reads as a broken icon. Whichever of
+        # the two is present is measured, rather than the cluster alone: they
+        # are the same height today (both rows of one icon button), so this is
+        # about a build that has one and not the other — a trimmed build, or a
+        # partial construction that never reached the cluster. Hiding the
+        # cluster outside Review does *not* shrink this: a hidden widget keeps
+        # its sizeHint.
         needed = max(
             (w.sizeHint().height() for w in (box, help_btn) if w is not None),
             default=0,

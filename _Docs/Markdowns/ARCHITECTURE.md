@@ -445,9 +445,9 @@ allwell.main()
     ├── app.setStyleSheet(theme.qss())                        ← global QSS
     ├── AllWellApp().__init__
     │       ├── _build_ui()
-    │       │    ├── title bar (logo + version pill; the mode seg and the
-    │       │    │            Review action cluster are re-parented into the
-    │       │    │            Review pane's mode band below)
+    │       │    ├── title bar (logo + version pill; the mode seg, the Review
+    │       │    │            action cluster and the help button after it are
+    │       │    │            re-parented into the Review pane's mode band below)
     │       │    └── central stack:
     │       │         ├── page 0  ←  WellViewerApp() (Review)
     │       │         │       ├── _build_ui()
@@ -857,13 +857,25 @@ Opening the drawer aims it at the page the user is on.
 mode's pane which of its own pages is showing: Review resolves its leaf tab
 through `tab_controller.current_centre_tab`, `DatasetsTab.current_help_page`
 returns the rail key of the tool page, and `AnalyzeTab.current_help_section`
-answers by scroll position, since the Analyze pane is one tall form rather than
-a stack of pages. That last one returns the topmost section with any part of
-itself on screen, recorded by `_section` in build order in `_section_widgets`.
-The form is taller than the distance the scrollbar travels to reach its end, so
-at the bottom of the form every remaining section header sits *below* the
-viewport top; a rule phrased as "the last header above the top" names a section
-several screens out of sight there.
+answers from focus and scroll position, since the Analyze pane is one tall form
+rather than a stack of pages. Its sections are recorded by `_section` in build
+order in `_section_widgets`, and the lookup reads two signals in order: the
+section containing the focused widget, then — among sections with any part of
+themselves on screen — the one whose *header* is nearest the viewport top.
+
+Both halves of that second rule are load-bearing, and the two obvious phrasings
+are wrong in mirrored ways. The scrollbar's travel is the form's height minus one
+viewport, so at the end of the form every remaining header sits *below* the
+viewport top: "the last header above the top" names a section several screens out
+of sight. And a section whose body is taller than the viewport still clips the top
+of it by a few pixels long after the user has scrolled past everything it says, so
+"the first section with any part on screen" names the one they have just left.
+
+Geometry alone cannot name the short sections packed into the form's final
+screenful — they are all visible at once, and no scroll position singles one out.
+That is what the focus branch is for, and it is the only route to those sections'
+help; `tests/test_analyze_help_section.py` asserts focus reaches every entry in
+`ANALYZE_SECTION_HELP`, not a subset.
 
 `help_topics.py` holds the maps from a page to the exact manual heading that
 documents it — `SECTION_BY_PAGE` for Review leaves, `ANALYZE_SECTION_HELP` for
@@ -873,8 +885,11 @@ fallback each mode uses when its pane cannot say. It is Qt-free so
 `README_WellViewer.md` in the fast lane: every value must be a heading that
 exists, every Datasets tool and Analyze section must have a key, and no key may
 name a page that no longer exists. `tests/test_guards_bite.py` carries that
-guard's bite cases — the base branch predates `help_topics.py`, so
-`scripts/prove_guard.sh` cannot prove it there. It sits on the band
+guard's bite cases, since `scripts/prove_guard.sh` cannot reach a guard whose
+maps live in a module the base ref does not have — the run there dies importing
+`help_topics` before it measures anything.
+
+The action cluster sits on the band
 rather than in the window header a row above because that put a second strip of
 chrome across the top of the window carrying controls for a mode the user might
 not be in. An earlier pass set `RAIL_W` to whichever mode's content needed the
@@ -4333,8 +4348,16 @@ it from.
 **Zip Loose Folder** (`datasets/import_loose/`) groups a folder of loose,
 ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
 wells × FOVs × timepoints × channels, plus unparsed and unreadable-symlink
-counts — that updates on every schema/separator keystroke, so a mismatch is
-caught before conversion rather than mid-run. It does **not** modify
+counts — that updates on every schema/separator change, so a mismatch is
+caught before conversion rather than mid-run. The schema is described with the
+shared `SchemaPicker` (see the widgets table), the same control the Analyze
+form's Filename Schema section mounts: this page's whole output is a dataset
+Analyze reads next, so the two ask about the same filenames with the same
+vocabulary. `_can_run` refuses a schema `util.schema.validate_schema` rejects
+and shows the reason, rather than letting the scan examine every file and group
+none of them — the in-place route shells out to `WellPlateZipper.py`, which
+exits 2 on exactly those errors, and a schema with no `channel` yields archives
+Analyze cannot read. It does **not** modify
 `WellPlateZipper.py` or `services.input_resolution_service.resolve_input_output`
 — Analyze's own loose-TIF handling keeps working exactly as it does today.
 Conversion progress is a per-well plate map
@@ -5019,6 +5042,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `RailNav` | The left-rail section navigator. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
+| `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |
 | `SavedSelectionsList` | The rich saved-selection list with composition (drag-to-reorder, per-group flat well editing, recolour popovers). A group is one condition — its wells are its implicit replicate set, so there are no replicate sub-partitions / solo strips. |
 | `LutSelector`, `GradientStrip`, `ColorPickerPopover` | The colour-map picker + its preview strip + the freeform colour-picker popover. |
@@ -6019,9 +6043,19 @@ Adding a Review tab, a Datasets tool, or an Analyze form section means adding
 two things: a section in `_Docs/Markdowns/README_WellViewer.md`, and an entry in
 the matching map in `help_topics.py` whose value is that heading's exact text.
 Without both, the drawer opens on the mode overview for that page and nothing
-says so. `tests/test_help_topics.py` fails until they are there — it reads the
-Datasets roster and the Analyze section titles out of their own source, so a new
-page cannot be added without the guard noticing.
+says so.
+
+For a **Datasets tool or an Analyze form section**, `tests/test_help_topics.py`
+fails until they are there: it reads the Datasets roster out of `datasets_tab.py`
+and the section titles out of `analyze_tab_form.py`, so neither can be added
+without the guard noticing.
+
+For a **Review tab** nothing enforces it. Review leaves are resolved at run time
+through `tab_controller.current_centre_tab` and `SECTION_BY_PAGE` deliberately
+keeps loose aliases for renamed and prefixed ones, so there is no roster to check
+a key against. A new Review tab without a `SECTION_BY_PAGE` entry silently opens
+the drawer on the Review overview, and the fast lane stays green. Add the entry
+by hand.
 
 ---
 

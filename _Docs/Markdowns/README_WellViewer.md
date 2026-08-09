@@ -297,9 +297,15 @@ The Analyze tab is one tall scrollable form. Top to bottom:
 
 A colon-separated list of field names, applied left-to-right against the
 underscore-separated tokens in each filename. The `Schema string` field is
-editable directly; the picker chips above it mirror it. When you pick an input
+editable directly; the **Position** dropdowns above it are the same value seen
+the other way round, and the two follow each other — pick a field and the
+string rewrites, type a string and the dropdowns reset. When you pick an input
 folder All-Well guesses this schema (and the separator) from a sample of the
 filenames and fills it in — a starting point you can correct, not a lock.
+
+The Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool asks for the
+schema with this same control, since the archives it builds are what Analyze
+reads next.
 
 Recognised field names: `experiment`, `channel`, `well`, `fov`, `timepoint`,
 `ignore`.
@@ -591,13 +597,15 @@ The section holds a single dropdown; tick the features you want.
   Major Axis Length, Minor Axis Length, Orientation. **Area, Eccentricity,
   Solidity and Perimeter** are ticked when the form opens.
 - **Always measured, whatever the dropdown says** — the two centroid columns
-  (`shape_centroid_row` / `shape_centroid_col`) and `shape_circularity`. They
-  are not offered as checkboxes because features elsewhere in the app depend on
-  them: centroids are what cross-timepoint cell tracking links on and what the
-  [Cell Browser](#cell-browser)'s region delete and the crop rectangle test
-  cells against on frames whose masks are not loaded, and circularity is what
-  the Quality Control debris gate filters on. Untick everything in the dropdown
-  and those three columns are still written.
+  (`shape_centroid_row` / `shape_centroid_col`), `shape_circularity`, and
+  `shape_solidity`. Features elsewhere in the app depend on them, so they are
+  not left to a per-run choice: centroids are what cross-timepoint cell tracking
+  links on and what the [Cell Browser](#cell-browser)'s region delete and the
+  crop rectangle test cells against on frames whose masks are not loaded, and
+  the Quality Control debris gate filters on size, **solidity** and
+  **circularity** — a gate you can edit after the run precisely because those
+  columns are always there. Solidity appears in the dropdown as well (it is
+  ticked by default); unticking it slims nothing, since the run adds it back.
 - **Choosing** — these are measured once, at run time, and cannot be added to a
   dataset afterwards without re-running the pipeline, so tick anything you might
   plot. The cost is a few extra CSV columns, not extra segmentation work. What
@@ -693,7 +701,46 @@ that lands on the scratch disk.
   tracebacks in `<output folder>/errors/` say so. Free space or move scratch,
   then re-run with **Incremental**.
 
-### 11. Run / Suspend / Stop / Log
+### 11. Running on a remote host
+
+The last thing the form asks before the run buttons is a **Run on:** dropdown.
+It lists `Local` plus every SSH host configured in
+`~/.config/allwell/remotes.toml` (on Windows, `%APPDATA%\allwell\remotes.toml`
+takes precedence, and the `ALLWELL_REMOTES` environment variable overrides
+both), and it defaults to the first configured remote when there is one.
+Picking a remote changes nothing
+about the form above it — the same schema, channels, folders and options are
+sent — only where the segmentation runs. Results come back into the same output
+folder, so Review cannot tell the difference afterwards.
+
+**Manage…** opens the remote-host dialog: add, edit, delete, test, or bootstrap
+a host (bootstrap installs the pipeline and its Python environment on a machine
+that has never run All-Well). A malformed `remotes.toml` never blocks the app —
+the run log carries a warning and the dropdown stays on `Local`.
+
+Choosing a remote reveals a **Remote options** group, hidden for a local run
+because none of it applies:
+
+- **Batch size (0=off).** `0` uploads the whole plate up front and runs the
+  pipeline once across it — the lowest total runtime. Any positive `N` processes
+  `N` wells at a time, which bounds peak disk on the remote to roughly `N` wells
+  of input plus about one well of output, at the cost of reloading the
+  segmentation model once per batch (a few seconds each). Set it from the
+  remote's free disk, not from its core count.
+- **Auto-delete remote files when done.** On by default. After a run the app
+  verifies succeeded, it deletes both the per-run output directory and the
+  cached input on the remote, so a shared machine does not fill up. It never
+  deletes failed work. Unticking it leaves everything in place.
+- **Dry-run cleanup.** Only selectable while auto-delete is on. Logs the path,
+  file count and total bytes of every remote directory that *would* be removed
+  at end of run, and removes nothing — worth one run on a shared host before
+  trusting auto-delete on it.
+
+What a remote run does before it uploads (which archives it rebuilds, which it
+sends untouched) and what it reports on the way back are covered by the run log
+and by `remote_fetch_report.txt` in the output folder.
+
+### 12. Run / Suspend / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
@@ -777,42 +824,6 @@ that lands on the scratch disk.
   All-Well is closed or crashes while a job is running, that job comes back
   marked *interrupted* and is resumed the same way; jobs chained after it wait
   rather than being written off.
-
-### 12. Running on a remote host
-
-Directly above the Run button is a **Run on:** dropdown. It lists `Local` plus
-every SSH host configured in `~/.config/allwell/remotes.toml`, and it defaults to
-the first configured remote when there is one. Picking a remote changes nothing
-about the form above it — the same schema, channels, folders and options are
-sent — only where the segmentation runs. Results come back into the same output
-folder, so Review cannot tell the difference afterwards.
-
-**Manage…** opens the remote-host dialog: add, edit, delete, test, or bootstrap
-a host (bootstrap installs the pipeline and its Python environment on a machine
-that has never run All-Well). A malformed `remotes.toml` never blocks the app —
-the run log carries a warning and the dropdown stays on `Local`.
-
-Choosing a remote reveals a **Remote options** group, hidden for a local run
-because none of it applies:
-
-- **Batch size (0=off).** `0` uploads the whole plate up front and runs the
-  pipeline once across it — the lowest total runtime. Any positive `N` processes
-  `N` wells at a time, which bounds peak disk on the remote to roughly `N` wells
-  of input plus about one well of output, at the cost of reloading the
-  segmentation model once per batch (a few seconds each). Set it from the
-  remote's free disk, not from its core count.
-- **Auto-delete remote files when done.** On by default. After a run the app
-  verifies succeeded, it deletes both the per-run output directory and the
-  cached input on the remote, so a shared machine does not fill up. It never
-  deletes failed work. Unticking it leaves everything in place.
-- **Dry-run cleanup.** Only selectable while auto-delete is on. Logs the path,
-  file count and total bytes of every remote directory that *would* be removed
-  at end of run, and removes nothing — worth one run on a shared host before
-  trusting auto-delete on it.
-
-What a remote run does before it uploads (which archives it rebuilds, which it
-sends untouched) and what it reports on the way back are covered by the run log
-and by `remote_fetch_report.txt` in the output folder.
 
 ### What the pipeline writes
 
@@ -2452,10 +2463,16 @@ the source, same as Concatenate. The source dataset is never modified.
 Use this to group a folder of loose, ungrouped TIFs (no `in/<WELL>.zip`
 structure yet) into the layout Analyze reads directly.
 
-1. Pick the folder of loose TIFs. A readout below the schema/separator fields
-   shows how the files split into wells × FOVs × timepoints × channels,
-   updating on every keystroke — so a wrong separator or schema is obvious
-   before you convert, not partway through.
+1. Pick the folder of loose TIFs, then describe their filenames. The separator
+   box and the position dropdowns are the same control as
+   [Analyze → Filename schema](#1-filename-schema) — the same field vocabulary
+   in the same order, so the schema you build here is the one Analyze will use
+   on the result. A readout below it shows how the files split into
+   wells × FOVs × timepoints × channels, updating as you change it, so a wrong
+   separator or schema is obvious before you convert rather than partway
+   through. A schema the run would reject — no **Well** field, or two of them,
+   or no **Channel** — says so under the control and holds **Zip folder**
+   disabled instead of scanning every file and grouping none of them.
 2. By default the result is written to a **new destination folder** you pick,
    leaving the loose TIFs exactly where they are. Check **Group in place**
    instead to group the files directly in the source folder and delete the

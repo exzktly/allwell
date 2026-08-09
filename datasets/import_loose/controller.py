@@ -129,6 +129,11 @@ class ImportLooseController(DatasetToolController):
         elif self.page.in_place():
             produced = self._launch_source_root
             self.page.show_open_in_analyze(produced)
+            # The loose images in that folder are archives now, so there is
+            # nothing left for a second run to group. Tell the page, or the
+            # button stays armed and the next click trades this result for a
+            # failure.
+            self.page.mark_in_place_done()
         self._last_result = (True, summary, produced)
 
     def _on_failed(self, message: str) -> None:
@@ -154,12 +159,31 @@ class ImportLooseController(DatasetToolController):
             self._on_open_in_analyze(dataset_root)
 
     def _confirm_in_place(self) -> bool:
+        """Ask before the one action on this page that destroys anything.
+
+        The page scanned this folder moments ago, so the dialog can say what it
+        is about to act on rather than describing the operation in the
+        abstract — the counts are the whole difference between "yes, that is my
+        plate" and "wait, that is the wrong folder". The path goes on its own
+        line (the house shape, ``_common/tool_controller.py``) instead of being
+        interpolated mid-sentence with ``!r``, where a long path made one very
+        wide line wrapped in quotes.
+
+        The left-alone note matters at exactly this moment: the readout says
+        non-matching files are left where they are, and a user consenting to a
+        delete should not have to remember that from another part of the page.
+        """
+        tail = ["The loose originals are deleted once each well is safely "
+                "zipped. This can't be undone."]
+        note = self.page.unmatched_note()
+        if note:
+            tail.insert(0, note)
         answer = QMessageBox.question(
             self.page,
             "Group in place?",
-            "This will group the loose TIFs directly in "
-            f"{self.page.source_path()!r} and delete them once each well is "
-            "safely zipped. This can't be undone. Continue?",
+            f"{self.page.confirm_counts()}directly in:\n\n"
+            f"{self.page.source_path()}\n\n"
+            + " ".join(tail),
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

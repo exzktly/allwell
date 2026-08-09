@@ -143,7 +143,13 @@ def test_run_gate_refuses_a_destination_that_already_has_content(qapp, tmp_path)
     page._refresh_run_enabled()
     assert not page._run_btn.isEnabled()
     assert not page._dest_field.isHidden()
-    assert "already has files" in page._dest_field.message().lower()
+    # The shared rejection, word for word — not a re-typed copy of it. This page
+    # kept its own validator and its own phrasing for the same verdict, which is
+    # what `_common/dataset_fields` exists to stop: a user moving between two
+    # Datasets tools should not be told the same thing two different ways.
+    from datasets.subset.view import _is_destination as _subset_destination
+    assert page._dest_field.message() == _subset_destination(existing)
+    assert "empty folder" in page._dest_field.message()
 
     page._dest_field.set_path(str(tmp_path / "fresh_dest"))
     page._refresh_run_enabled()
@@ -385,3 +391,222 @@ def test_no_match_reports_failure_not_crash(qapp, tmp_path):
     _run_worker_to_completion(ctrl)
     assert seen and "No files matched" in seen[0]
     ctrl.shutdown()
+
+
+# ── the second UX review: saying which thing went wrong, and refusing early ──
+
+def _page(qapp):
+    from datasets.import_loose.view import ImportLoosePage
+
+    page = ImportLoosePage()
+    page.show()
+    for _ in range(4):
+        qapp.processEvents()
+    return page
+
+
+def test_an_empty_result_says_which_of_the_three_reasons_it_is(qapp, tmp_path):
+    """One sentence — "No files matched the schema." — used to cover a folder
+    whose images are one level down, a folder with no images at all, and a
+    genuinely wrong schema. Two of those are not about the schema, and the
+    page sent the user off to rebuild one that was never the problem."""
+    nested = tmp_path / "nested"
+    _write_loose(nested / "condition_a", ["A01"])
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "notes.txt").write_text("x")
+    wrong = tmp_path / "wrong"
+    _write_loose(wrong, ["A01"])
+
+    page = _page(qapp)
+
+    page._src_field.set_path(str(nested))
+    page._on_source_changed()
+    nested_text = page._readout.text()
+
+    page._src_field.set_path(str(empty))
+    page._on_source_changed()
+    empty_text = page._readout.text()
+
+    page._src_field.set_path(str(wrong))
+    page._on_source_changed()
+    page.set_filename_sep("-")                     # real files, wrong separator
+    wrong_text = page._readout.text()
+
+    assert "subfolder" in nested_text.lower()
+    assert "1" in nested_text, "it should say how many are down there"
+    assert "no .tif" in empty_text.lower()
+    assert "schema" in wrong_text.lower()
+    assert len({nested_text, empty_text, wrong_text}) == 3, (
+        f"three causes, three messages: {nested_text!r} / {empty_text!r} / {wrong_text!r}")
+
+
+def test_the_run_is_refused_when_the_scan_found_nothing(qapp, tmp_path):
+    """The page has already scanned and knows the answer is zero. Offering the
+    run spends the user's click to tell them what the readout above the button
+    already says — and the failure it produces replaces any previous result."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    page = _page(qapp)
+    page._dest_field.set_path(str(tmp_path / "dest"))
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    assert page._run_btn.isEnabled()
+
+    page.set_filename_sep("-")                     # nothing matches now
+    assert not page._run_btn.isEnabled()
+    assert not page._queue_btn.isEnabled(), "queueing a doomed run only defers it"
+    assert "schema" in page._readout.text().lower()
+
+    page.set_filename_sep("_")
+    assert page._run_btn.isEnabled()
+
+
+def test_the_destination_may_not_be_the_source(qapp, tmp_path):
+    """It used to be allowed, and left the folder half loose images and half
+    dataset with the originals undeleted — neither what the new-destination
+    mode promises nor what Group in place does."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    page = _page(qapp)
+    page._dest_field.set_path(str(src))
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    assert not page._run_btn.isEnabled()
+    assert "different folder" in page._dest_field._hint.text().lower()
+
+    page._dest_field.set_path(str(tmp_path / "elsewhere"))
+    page._refresh_run_enabled()
+    assert page._run_btn.isEnabled()
+
+
+def test_arming_in_place_takes_the_destination_error_with_the_field(qapp, tmp_path):
+    """A red "choose an empty folder" under a greyed-out box, beside a live Run
+    button that does not use the destination at all."""
+    from tests.fixtures.dataset_builder import build_dataset
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    existing = tmp_path / "existing"
+    build_dataset(existing, wells=["A01"], timepoints=["0h"])
+
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page._dest_field.set_path(str(existing))
+    page._refresh_run_enabled()
+    assert page._dest_field._hint.isVisibleTo(page)
+
+    page.set_in_place(True)
+    assert not page._dest_field._hint.isVisibleTo(page)
+    assert page._run_btn.isEnabled()
+
+    page.set_in_place(False)
+    assert page._dest_field._hint.isVisibleTo(page)
+
+
+def test_one_scan_per_input_change_not_two(qapp, tmp_path, monkeypatch):
+    """The readout and the plate preview ask the same question of the same
+    folder with the same arguments. Scanning twice walks a whole plate twice on
+    the GUI thread, on fields that update per keystroke."""
+    import datasets.import_loose.view as view_mod
+
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01", "B02"])
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    calls = []
+    real = view_mod.scan_folder
+    monkeypatch.setattr(view_mod, "scan_folder",
+                        lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    page.set_filename_sep("-")
+    assert len(calls) == 1, f"{len(calls)} scans for one change"
+
+
+def test_after_an_in_place_run_the_page_does_not_contradict_itself(qapp, tmp_path):
+    """The folder now holds archives, so a re-scan reports that nothing matches
+    the schema — directly above this run's own green "Grouped loose TIFs …".
+    And Run stayed enabled: pressing it traded the result, including the Open
+    in Analyze handoff, for a red failure."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page.set_in_place(True)
+    assert page._run_btn.isEnabled()
+
+    page.mark_in_place_done()
+
+    assert not page._run_btn.isEnabled()
+    assert not page._queue_btn.isEnabled()
+    text = page._readout.text().lower()
+    assert "archive" in text
+    assert "no " not in text.split("archive")[0], f"still reporting a failure: {text!r}"
+
+
+def test_picking_a_new_source_clears_the_in_place_verdict(qapp, tmp_path):
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    other = tmp_path / "other"
+    _write_loose(other, ["B02"])
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page.set_in_place(True)
+    page.mark_in_place_done()
+    assert not page._run_btn.isEnabled()
+
+    page._src_field.set_path(str(other))
+    page._on_source_changed()
+    assert page._run_btn.isEnabled()
+
+
+def test_the_readout_names_files_that_did_not_match(qapp, tmp_path):
+    """The count alone leaves the user guessing which files; the names are the
+    fastest way to spot a wrong separator."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    (src / "IMG_thumbnail.tif").write_bytes(b"img")
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    assert "IMG_thumbnail.tif" in page._readout.text()
+
+
+def test_a_total_mismatch_is_not_also_called_reassuring(qapp, tmp_path):
+    """"would be left alone" reads as fine when nothing matched at all, and the
+    summary has already said so."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01"])
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+    page.set_filename_sep("-")
+    assert "left alone" not in page._readout.text().lower()
+
+
+def test_the_confirmation_states_what_it_will_touch(qapp, tmp_path):
+    """A dialog for an irreversible delete, built from a scan taken seconds
+    earlier. Not driven through QMessageBox — a modal blocks forever offscreen
+    (tests/conftest.py::_no_modal_dialogs); this checks the text the controller
+    composes it from."""
+    src = tmp_path / "loose"
+    _write_loose(src, ["A01", "B02"])
+    (src / "IMG_thumbnail.tif").write_bytes(b"img")
+    page = _page(qapp)
+    page._src_field.set_path(str(src))
+    page._on_source_changed()
+
+    counts = page.confirm_counts()
+    assert "2" in counts, f"no well count in {counts!r}"
+    assert "don't match" in page.unmatched_note()
+
+
+def test_the_confirmation_states_no_counts_it_has_not_measured(qapp, tmp_path):
+    page = _page(qapp)
+    assert page.confirm_counts() == "This will group the loose TIFs "
+    assert page.unmatched_note() == ""

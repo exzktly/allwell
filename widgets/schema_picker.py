@@ -55,6 +55,15 @@ POSITIONS = len(DEFAULT_SCHEMA.split(":"))
 _SEP_EDIT_W = 30
 _COMBO_W = 160
 _SCHEMA_EDIT_MIN_W = 165
+#: Cap on the schema string edit for a host that does not pin a width. The value
+#: is ~37 characters of the default schema plus room to type; without it the
+#: edit's stretch takes the whole row, which reads as a text *area* on a
+#: full-width page while a sidebar host is unaffected either way.
+_SCHEMA_EDIT_MAX_W = 420
+#: Label-column width and label→control gap for the fallback row. A host that
+#: brings its own ``row_factory`` (the Analyze form) sets its own.
+_PLAIN_LABEL_W = 110
+_PLAIN_LABEL_GAP = 4
 
 
 class SchemaPicker(QWidget):
@@ -73,12 +82,16 @@ class SchemaPicker(QWidget):
         row_factory: Callable[[QWidget, str], QWidget] | None = None,
         combo_width: int = _COMBO_W,
         schema_edit_min_width: int = _SCHEMA_EDIT_MIN_W,
+        schema_edit_max_width: int | None = _SCHEMA_EDIT_MAX_W,
         separator_edit_width: int = _SEP_EDIT_W,
+        label_width: int = _PLAIN_LABEL_W,
     ) -> None:
         super().__init__(parent)
         self._combo_w = combo_width
         self._schema_edit_min_w = schema_edit_min_width
+        self._schema_edit_max_w = schema_edit_max_width
         self._sep_edit_w = separator_edit_width
+        self._label_w = label_width
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -88,6 +101,10 @@ class SchemaPicker(QWidget):
         sep_cell = self._row(self, "Separator char")
         self._sep_edit = QLineEdit(DEFAULT_SEP, sep_cell)
         self._sep_edit.setFixedWidth(self._sep_edit_w)
+        # An empty box still separates on the default, so say which one rather
+        # than substituting it invisibly — a blank field beside a readout that
+        # keeps splitting on "_" looks like the readout is ignoring the field.
+        self._sep_edit.setPlaceholderText(DEFAULT_SEP)
         sep_cell.layout().addWidget(self._sep_edit)
         sep_cell.layout().addStretch(1)
         self._sep_edit.textChanged.connect(lambda _t: self.changed.emit())
@@ -107,13 +124,22 @@ class SchemaPicker(QWidget):
 
         schema_cell = self._row(self, "Schema string")
         self._schema_edit = QLineEdit(DEFAULT_SCHEMA, schema_cell)
-        # Expand to fill the row. The string never fits unscrolled at the width
-        # a sidebar offers — a scrollable single-line edit, so the minimum just
-        # keeps a legible chunk on screen, and the cursor starts at the front so
-        # the field opens showing the beginning rather than the tail.
+        # Expand to fill the row, up to a cap. The string never fits unscrolled
+        # at the width a sidebar offers — a scrollable single-line edit, so the
+        # minimum just keeps a legible chunk on screen, and the cursor starts at
+        # the front so the field opens showing the beginning rather than the
+        # tail. The cap is what keeps a full-width page from stretching a
+        # 37-character value across the window; a sidebar never reaches it.
         self._schema_edit.setMinimumWidth(self._schema_edit_min_w)
+        if self._schema_edit_max_w is not None:
+            self._schema_edit.setMaximumWidth(self._schema_edit_max_w)
         self._schema_edit.setCursorPosition(0)
         schema_cell.layout().addWidget(self._schema_edit, 1)
+        # Both halves of this control answer the same question, so both answer
+        # it at the same moment: the separator is live per keystroke, and so is
+        # this. `editingFinished` additionally re-syncs the dropdowns, which
+        # would otherwise thrash through five fields mid-word.
+        self._schema_edit.textChanged.connect(lambda _t: self.changed.emit())
         self._schema_edit.editingFinished.connect(self._on_schema_text_committed)
 
     # ── layout ───────────────────────────────────────────────────────────────
@@ -124,9 +150,13 @@ class SchemaPicker(QWidget):
         row = QWidget(parent)
         rl = QHBoxLayout(row)
         rl.setContentsMargins(0, 0, 0, 0)
-        rl.setSpacing(0)
+        rl.setSpacing(_PLAIN_LABEL_GAP)
         lbl = QLabel(label, row)
         lbl.setObjectName("Muted")
+        # Fixed, so all seven rows put their control at one left edge. Sized to
+        # the natural width of each label, the rows step in and out by tens of
+        # pixels and the block reads as three separate groups.
+        lbl.setFixedWidth(self._label_w)
         rl.addWidget(lbl, 0, Qt.AlignVCenter)
         cell = QWidget(row)
         cl = QHBoxLayout(cell)

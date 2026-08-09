@@ -161,3 +161,57 @@ def test_zip_loose_folder_refuses_a_schema_the_run_would_reject(qapp, tmp_path):
     page.set_filename_schema(DEFAULT_SCHEMA)
     assert page._run_btn.isEnabled()
     assert not page._schema_err.isVisibleTo(page)
+
+
+# ── layout, in a host that is not a narrow sidebar ──────────────────────────
+
+def test_the_rows_share_one_left_edge(qapp):
+    """Sized to each label's natural width, the seven rows step in and out by
+    tens of pixels and the block reads as three separate groups."""
+    from PySide6.QtWidgets import QLabel
+
+    picker = SchemaPicker()
+    picker.resize(900, 400)
+    picker.show()
+    for _ in range(5):
+        qapp.processEvents()
+    widths = {lbl.width() for lbl in picker.findChildren(QLabel)
+              if lbl.objectName() == "Muted"}
+    assert len(widths) == 1, f"label column is ragged: {sorted(widths)}"
+
+
+def test_the_schema_edit_does_not_swallow_a_wide_page(qapp):
+    """Its stretch is right in a 165px sidebar and absurd on a full-width page,
+    where it became a 1300px box for a 37-character value."""
+    picker = SchemaPicker()
+    picker.resize(1440, 400)
+    picker.show()
+    for _ in range(5):
+        qapp.processEvents()
+    assert picker.schema_edit.width() <= 500, picker.schema_edit.width()
+
+
+def test_typing_in_the_schema_string_reports_immediately(qapp):
+    """The separator beside it is live per keystroke; this was not, so the
+    readout, plate, error label and run gate all went on describing the
+    previous schema until focus left the field."""
+    from PySide6.QtTest import QTest
+
+    picker = SchemaPicker()
+    picker.show()
+    for _ in range(3):
+        qapp.processEvents()
+    seen: list[int] = []
+    picker.changed.connect(lambda: seen.append(1))
+    picker.schema_edit.setFocus()
+    QTest.keyClicks(picker.schema_edit, "x")
+    for _ in range(3):
+        qapp.processEvents()
+    assert seen, "one keystroke reported nothing"
+
+
+def test_the_separator_shows_the_fallback_it_will_use(qapp):
+    """An empty box still separates on the default; substituting it invisibly
+    makes the readout look like it is ignoring the field."""
+    picker = SchemaPicker()
+    assert picker.separator_edit.placeholderText() == DEFAULT_SEP

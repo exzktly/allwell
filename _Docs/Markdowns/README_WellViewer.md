@@ -2468,22 +2468,36 @@ structure yet) into the layout Analyze reads directly.
    [Analyze → Filename schema](#1-filename-schema) — the same field vocabulary
    in the same order, so the schema you build here is the one Analyze will use
    on the result. A readout below it shows how the files split into
-   wells × FOVs × timepoints × channels, updating as you change it, so a wrong
+   wells × FOVs × timepoints × channels, updating on every keystroke, so a wrong
    separator or schema is obvious before you convert rather than partway
    through. A schema the run would reject — no **Well** field, or two of them,
    or no **Channel** — says so under the control and holds **Zip folder**
    disabled instead of scanning every file and grouping none of them.
+
+   When nothing comes back, the readout says *which* of the three reasons it
+   is, because two of them are not about the schema at all: the folder holds no
+   images; its images are one level down, in per-condition subfolders (this tool
+   reads only the top level); or the images are there and the schema does not
+   describe them. **Zip folder** stays disabled while the answer is nothing, and
+   the readout names a couple of the files that did not match — usually enough
+   to spot a wrong separator at a glance.
 2. By default the result is written to a **new destination folder** you pick,
-   leaving the loose TIFs exactly where they are. Check **Group in place**
-   instead to group the files directly in the source folder and delete the
-   loose TIFs once each well is safely zipped — the same thing Analyze itself
-   does when it's pointed at a folder of loose TIFs, exposed here as its own
-   step. Checking it shows an explicit warning under the checkbox spelling out
-   that this deletes the originals and can't be undone, and the destination
-   field (unused in this mode) stays visible but greyed out rather than
-   disappearing; you're still asked to confirm before anything is deleted.
+   leaving the loose TIFs exactly where they are. It has to be a different
+   folder from the source, and one that doesn't already hold a dataset — the
+   field says so under itself either way. Check **Group in place** instead to
+   group the files directly in the source folder and delete the loose TIFs once
+   each well is safely zipped — the same thing Analyze itself does when it's
+   pointed at a folder of loose TIFs, exposed here as its own step. Checking it
+   shows an explicit warning under the checkbox spelling out that this deletes
+   the originals and can't be undone, and the destination field (unused in this
+   mode) stays visible but greyed out rather than disappearing. You're still
+   asked to confirm before anything is deleted, and that confirmation names the
+   folder, how many files and wells it is about to zip, and how many files it is
+   leaving alone. Once an in-place run succeeds, **Zip folder** goes dark — the
+   folder holds archives now, not loose images, and a second run would replace
+   the result with a failure.
 3. As soon as the scan finds any wells, a status panel appears below showing
-   a "Ready — N well(s) to convert" plate preview. Press **Zip folder** and
+   a "Ready — N well(s) to zip" plate preview. Press **Zip folder** and
    that same plate fills in as each well is zipped, the same graphical
    progress view Analyze itself uses. On success, **Open dataset in Analyze**
    sends the resulting folder there.

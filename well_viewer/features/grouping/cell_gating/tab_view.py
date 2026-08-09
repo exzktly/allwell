@@ -107,6 +107,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # ctx.state.cell_gating slice (R6); these edits are the input surface.
     reg.register("_cell_gating_fluor_gate_edits", {})
     reg.register("_cell_gating_thresh_frac_edits", {})
+    # ThreshCountOn edits exist only for the smFISH channels — a channel with no
+    # ``_smfish_count`` column has no count metric to cut, so an always-present
+    # field would be dead furniture on most rows.
+    reg.register("_cell_gating_thresh_count_edits", {})
     ctx.runtime.cell_gating.fluor_data = {}
     ctx.runtime.cell_gating.ratio_data = {}
     ctx.runtime.cell_gating.ax = None
@@ -408,8 +412,9 @@ def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
         "Cells passing every inclusion layer — manual curation, the QC debris "
         "gate, the crop region, and the cell-gating / scatter-gate layer — "
         "across all loaded wells (not just the selected ones the curves below "
-        "show). Fraction-on cutoffs do not change this number: they define "
-        "which included cells count as 'on', not which cells count."
+        "show). The fraction-on cutoffs (ThreshFracOn / ThreshCountOn) do not "
+        "change this number: they define which included cells count as 'on', "
+        "not which cells count."
     )
     layout.addWidget(count)
 

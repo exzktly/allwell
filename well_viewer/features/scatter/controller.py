@@ -28,6 +28,7 @@ from well_viewer.features.scatter.collect import (  # re-export
     get_all_timepoints,
     scatter_points_gated,
 )
+from well_viewer.features.scatter._messages import agg_empty_message, clear_cut_status
 from well_viewer.features.scatter.gating import (
     paint_gates,
     refresh_gate_selector,
@@ -334,24 +335,28 @@ def redraw_scatter_agg(
         agg_canvas.draw()
         return
 
-    # Collect aggregate scatter data
+    # ``cut_sink`` comes back naming an axis whose cells were all cut, so an
+    # empty plot can say which of two very different reasons it is empty for.
+    cut_sink: dict = {}
     scatter_data = collect_scatter_agg_data(
         ctx,
         stat_x,
         stat_y,
         timepoints_h,
         well_colors=well_colors,
+        cut_sink=cut_sink,
     )
 
     if not scatter_data:
         # Reached with a selection in hand that still produced no points — a
-        # timepoint nothing matched, gating that excluded every cell. The
+        # timepoint nothing matched, or a cutoff that excluded every cell. The
         # no-selection half of what this used to say is the tab's shared
-        # placeholder now, and naming it here too would cover two causes the
-        # user acts on differently with one sentence.
+        # placeholder now; the two that remain are told apart rather than
+        # merged, since the user acts on them differently. ``cut_sink`` says
+        # which happened and the message names the channel and cutoff.
         ax_agg.text(
             0.5, 0.5,
-            "No data available.\nTry another timepoint — or check the cell gating.",
+            agg_empty_message(ctx, cut_sink),
             ha='center', va='center',
             transform=ax_agg.transAxes,
             fontsize=10,
@@ -516,6 +521,7 @@ def redraw_scatter_agg_orchestrate(ctx) -> None:
     stat_x_var = ctx.widgets.get_or_none("_scatter_agg_stat_x_var")
     if stat_x_var is None:
         return
+    clear_cut_status(ctx)   # before every exit below, not only the drawn one
     # Sync the hidden stat-string combos with the new per-axis
     # (channel, metric) state so downstream code (export_service,
     # save-figure helpers) sees a coherent view.

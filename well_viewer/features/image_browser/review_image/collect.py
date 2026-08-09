@@ -324,20 +324,22 @@ def _binary_gate_columns(ctx, channel=None):
     would otherwise pull the wrong channel. Falls back to the plotting column
     when no image channel is set (e.g. the nuc+seg overlay).
 
-    ``channel`` overrides the channel whose value-column + per-channel
-    ThreshFracOn are used — the Image Table passes the *cell's* channel so each
-    cell honours its own Sample-Definitions threshold rather than whatever the
-    Segmentation tab last displayed.
+    ``channel`` overrides the channel whose value-column + per-channel ON cutoff
+    are used — the Image Table passes the *cell's* channel so each cell honours
+    its own Sample-Definitions threshold rather than whatever the Segmentation
+    tab last displayed. Which cutoff applies follows the column: an
+    ``smfish_count`` readout is cut against the spot tally, not a brightness.
     """
-    from well_viewer.core.channel_state_controller import get_thresh_frac_on
+    from well_viewer.core.channel_state_controller import on_cutoff_for_column
     if channel is not None:
         img_chan = str(channel).strip().lower()
     else:
         img_chan = str(ctx.state.channel.active_image_channel or "").strip()
     if img_chan:
-        return (f"{img_chan}_{ctx.state.channel.active_metric}",
-                get_thresh_frac_on(ctx, img_chan))
-    return (ctx.state.channel.active_val_col, get_thresh_frac_on(ctx))
+        col = f"{img_chan}_{ctx.state.channel.active_metric}"
+        return (col, on_cutoff_for_column(ctx, col, channel=img_chan))
+    val_col = ctx.state.channel.active_val_col
+    return (val_col, on_cutoff_for_column(ctx, val_col))
 
 
 def review_build_threshold_map(

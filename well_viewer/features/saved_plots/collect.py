@@ -68,7 +68,7 @@ def capture_params(ctx, tab: str) -> tuple[dict, dict]:
     if stats_cfg is not None:
         params["stats"] = stats_cfg
 
-    # The full gating block — fluor gates, ThreshFracOn cuts, AND the scatter-gate
+    # The full gating block — fluor gates, ThreshFracOn / ThreshCountOn cuts, AND the scatter-gate
     # inclusion/thresholding config — captured with the SAME serializer the
     # pipeline-info sidecar uses (``build_gating_block``), so Restore can re-apply
     # the exact Included population that shaped the saved figure. Stored on
@@ -97,6 +97,7 @@ def _capture_gating_block(ctx) -> dict:
         scatter_gate_choices_thresh=_sorted_or_none(cg.thresh_choices),
         use_scatter_thresh=cg.use_scatter_thresh,
         seg_channel_token=seg_channel_token_of(ctx),
+        thresh_count_on=dict(cg.thresh_count_on),
     )
 
 
@@ -209,5 +210,10 @@ def build_summary(tab: str, params: dict, thresholds: dict) -> str:
         t = tfo.get(ch)
         if t is not None:
             lines.append(f"ThreshFracOn[{ch}]: {t:g}")
+    tco = thresholds.get("thresh_count_on") or {}
+    if tco:
+        c = tco.get(ch)
+        if c is not None:
+            lines.append(f"ThreshCountOn[{ch}]: {c:g}")
 
     return "\n".join(lines)

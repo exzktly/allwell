@@ -38,6 +38,7 @@ def _ctx(*, saved=None, seg_token=NUCLEAR, active_channel=READOUT):
                 active_image_channel="",
                 active_metric="mean_intensity",
                 active_val_col=f"{active_channel}_mean_intensity",
+                smfish_channels=set(),
                 fluor_channels=[READOUT, NUCLEAR],
                 seg_channel_token=seg_token,
                 threshold=50.0,
@@ -164,7 +165,7 @@ def test_cell_gating_rows_seed_the_nuclear_channel_at_zero():
     ctx.state.channel.ratio_metrics = []
     ctx.runtime = SimpleNamespace(cell_gating=SimpleNamespace(
         inner=inner, thresh_inner=thresh_inner,
-        fluor_gate_edits={}, thresh_frac_edits={},
+        fluor_gate_edits={}, thresh_frac_edits={}, thresh_count_edits={},
     ))
     _cell_gating_build_channel_controls(ctx)
 

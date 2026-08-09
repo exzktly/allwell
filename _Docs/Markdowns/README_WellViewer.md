@@ -298,9 +298,15 @@ The Analyze tab is one tall scrollable form. Top to bottom:
 
 A colon-separated list of field names, applied left-to-right against the
 underscore-separated tokens in each filename. The `Schema string` field is
-editable directly; the picker chips above it mirror it. When you pick an input
+editable directly; the **Position** dropdowns above it are the same value seen
+the other way round, and the two follow each other — pick a field and the
+string rewrites, type a string and the dropdowns reset. When you pick an input
 folder All-Well guesses this schema (and the separator) from a sample of the
 filenames and fills it in — a starting point you can correct, not a lock.
+
+The Datasets pane's [Zip Loose Folder](#zip-loose-folder) tool asks for the
+schema with this same control, since the archives it builds are what Analyze
+reads next.
 
 Recognised field names: `experiment`, `channel`, `well`, `fov`, `timepoint`,
 `ignore`.
@@ -331,33 +337,7 @@ Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
 Any string  preserved as-is and sorted lexicographically
 ```
 
-### 2. Channel tokens
-
-- **Nuclear (segmentation) channel.** The token used to find the image
-  StarDist runs against (also gets quantified — its intensities appear in
-  the CSV like any other channel).
-- **Fluorescent channels.** One or more tokens whose intensities you want
-  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
-  `<token>_total_intensity`, etc.).
-- **smFISH channels** (optional). Channels processed for spot detection.
-  Each smFISH channel appears with both a regular intensity column set and
-  a `_smfish_count` column.
-- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
-  holding your brightfield / DIC image. That channel skips flat-field and
-  background correction entirely — those corrections have nothing to remove from
-  a brightfield frame and only add artefacts — and is saved from the original.
-  It is still quantified like any other channel. At most one channel can be
-  Phase, and it cannot also be smFISH.
-
-  **The Phase channel cannot also be the segmentation channel**, except under the
-  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
-  correction, segmenting it with a fluorescence routine means running that
-  routine over an uncorrected brightfield image; the run would finish and write a
-  complete-looking set of CSVs measured on the wrong picture. Setting both to the
-  same channel is refused before the run starts, with a message naming the
-  channel.
-
-### 3. Folders
+### 2. Folders
 
 The input folder is resolved by
 [`services/input_resolution_service.py`](../services/input_resolution_service.py).
@@ -392,6 +372,32 @@ Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
 
+### 3. Channel tokens
+
+- **Nuclear (segmentation) channel.** The token used to find the image
+  StarDist runs against (also gets quantified — its intensities appear in
+  the CSV like any other channel).
+- **Fluorescent channels.** One or more tokens whose intensities you want
+  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
+  `<token>_total_intensity`, etc.).
+- **smFISH channels** (optional). Channels processed for spot detection.
+  Each smFISH channel appears with both a regular intensity column set and
+  a `_smfish_count` column.
+- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
+  holding your brightfield / DIC image. That channel skips flat-field and
+  background correction entirely — those corrections have nothing to remove from
+  a brightfield frame and only add artefacts — and is saved from the original.
+  It is still quantified like any other channel. At most one channel can be
+  Phase, and it cannot also be smFISH.
+
+  **The Phase channel cannot also be the segmentation channel**, except under the
+  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
+  correction, segmenting it with a fluorescence routine means running that
+  routine over an uncorrected brightfield image; the run would finish and write a
+  complete-looking set of CSVs measured on the wrong picture. Setting both to the
+  same channel is refused before the run starts, with a message naming the
+  channel.
+
 ### 4. Pipeline options
 
 - **Segmentation method.** `stardist_nuclei` (default — segment nuclei
@@ -424,69 +430,7 @@ You can also explicitly override the output folder.
     these same two values and can open any image straight from disk — then type
     what worked into the two fields here.
 
-### 5. Auto-threshold — picking each channel's "on" cut
-
-Collapsed by default. When a run finishes, All-Well can choose a default **on**
-threshold for each channel and store it with the dataset, so the Cell Gating tab
-opens with sensible values instead of a flat 50 everywhere.
-
-- **Calculate cell-gating thresholds when the run finishes** — on by default.
-  Turn it off and no thresholds are written; the Cell Gating tab starts from its
-  own defaults and you set them by hand.
-- **Method** — how each threshold is chosen:
-  - **Otsu (whole dataset)** — the default. Splits each channel's per-cell
-    signal from image background, pooled across the whole plate. Needs no
-    controls, but it cannot tell which cells are *biologically* positive, so it
-    works when a channel's cells are cleanly brighter than background and not
-    otherwise.
-  - **Positive / negative controls** — the cut that best separates a well you
-    know is ON from one you know is OFF. Usually the better answer, because it
-    is anchored to biology rather than to pixel statistics.
-- **Positive control well** / **Negative control well** — shown for the control
-  method, which needs both. Switching back to Otsu hides them but keeps what you
-  typed, so you can flip between the two methods without re-entering wells.
-
-Under the control method the run is blocked if only one well is filled in, if
-either is not a valid 96-well position, if the two are the same well, or if
-either is missing from the input folder. Under Otsu the fields are dormant and
-never checked.
-
-**The segmentation channel is always set to 0.** That channel exists to find
-cell boundaries, not to be gated on, so a threshold for it is meaningless. Zero
-means every cell counts as "on" for that channel, which is how it is
-neutralised — it is not the same as leaving it unset. Like every other value
-here it is only a default: a threshold you have already set on the Cell Gating
-tab is never overwritten by a later run.
-
-One thing the software cannot check for you: the two control wells are compared
-symmetrically, so entering them the wrong way round still produces a threshold.
-The run log warns when the positive control ends up with the *lower* fraction of
-on cells, which is the tell.
-
-**If the Cell Gating tab opens with no thresholds, read the end of the run log.**
-The Otsu pass takes its samples from the per-well output archives, pairing each
-channel's corrected image with the segmentation mask of the same field and
-timepoint — which means reading those coordinates out of the filenames using the
-filename schema you set. It does not require the schema to name every slot: a
-layout with no field token, or no timepoint token, works exactly as well. What it
-cannot do is work with a schema that does not describe the filenames at all, and
-in that case it says so, naming the schema and an example filename. The lines to
-look for, in order of what they mean:
-
-| line | meaning |
-|---|---|
-| `Auto-threshold defaults written for N channel(s): …` | worked; those values are now the Cell Gating defaults |
-| `no threshold could be estimated for any of …` | nothing was computed — the lines above it say why |
-| `none of its N image member(s) could be placed by the run's filename schema …` | the schema does not match the filenames |
-| `produced no new defaults (every channel already has a stored value)` | nothing to do; the dataset already had thresholds |
-| *(no `Auto-threshold` line at all)* | the run ended before the pass — check for an earlier failure |
-
-The last routine case is worth knowing: thresholds already stored for a channel
-are never overwritten, so re-running a plate into an output folder that already
-has them changes nothing. Clear the values on the Cell Gating tab first if you
-want a re-run to recompute them.
-
-### 6. Quality control — field flatness & background correction
+### 5. Quality control — field flatness & background correction
 
 The **Quality Control** section bundles optional, pre-measurement clean-up that
 runs **per channel at quantification time** (so it changes the pixel values that
@@ -582,7 +526,106 @@ recomputes the verdict live as you tune the thresholds, with no re-segmentation
 (the debris gate is edited from the [Cell Gating](#cell-gating) tab in Review).
 A cell counts only when it is manually kept **and** it passes QC.
 
-### 7. Compute options
+### 6. Auto-threshold — picking each channel's "on" cut
+
+Collapsed by default. When a run finishes, All-Well can choose a default **on**
+threshold for each channel and store it with the dataset, so the Cell Gating tab
+opens with sensible values instead of a flat 50 everywhere.
+
+- **Calculate cell-gating thresholds when the run finishes** — on by default.
+  Turn it off and no thresholds are written; the Cell Gating tab starts from its
+  own defaults and you set them by hand.
+- **Method** — how each threshold is chosen:
+  - **Otsu (whole dataset)** — the default. Splits each channel's per-cell
+    signal from image background, pooled across the whole plate. Needs no
+    controls, but it cannot tell which cells are *biologically* positive, so it
+    works when a channel's cells are cleanly brighter than background and not
+    otherwise.
+  - **Positive / negative controls** — the cut that best separates a well you
+    know is ON from one you know is OFF. Usually the better answer, because it
+    is anchored to biology rather than to pixel statistics.
+- **Positive control well** / **Negative control well** — shown for the control
+  method, which needs both. Switching back to Otsu hides them but keeps what you
+  typed, so you can flip between the two methods without re-entering wells.
+
+Under the control method the run is blocked if only one well is filled in, if
+either is not a valid 96-well position, if the two are the same well, or if
+either is missing from the input folder. Under Otsu the fields are dormant and
+never checked.
+
+**The segmentation channel is always set to 0.** That channel exists to find
+cell boundaries, not to be gated on, so a threshold for it is meaningless. Zero
+means every cell counts as "on" for that channel, which is how it is
+neutralised — it is not the same as leaving it unset. Like every other value
+here it is only a default: a threshold you have already set on the Cell Gating
+tab is never overwritten by a later run.
+
+One thing the software cannot check for you: the two control wells are compared
+symmetrically, so entering them the wrong way round still produces a threshold.
+The run log warns when the positive control ends up with the *lower* fraction of
+on cells, which is the tell.
+
+**If the Cell Gating tab opens with no thresholds, read the end of the run log.**
+The Otsu pass takes its samples from the per-well output archives, pairing each
+channel's corrected image with the segmentation mask of the same field and
+timepoint — which means reading those coordinates out of the filenames using the
+filename schema you set. It does not require the schema to name every slot: a
+layout with no field token, or no timepoint token, works exactly as well. What it
+cannot do is work with a schema that does not describe the filenames at all, and
+in that case it says so, naming the schema and an example filename. The lines to
+look for, in order of what they mean:
+
+| line | meaning |
+|---|---|
+| `Auto-threshold defaults written for N channel(s): …` | worked; those values are now the Cell Gating defaults |
+| `no threshold could be estimated for any of …` | nothing was computed — the lines above it say why |
+| `none of its N image member(s) could be placed by the run's filename schema …` | the schema does not match the filenames |
+| `produced no new defaults (every channel already has a stored value)` | nothing to do; the dataset already had thresholds |
+| *(no `Auto-threshold` line at all)* | the run ended before the pass — check for an earlier failure |
+
+The last routine case is worth knowing: thresholds already stored for a channel
+are never overwritten, so re-running a plate into an output folder that already
+has them changes nothing. Clear the values on the Cell Gating tab first if you
+want a re-run to recompute them.
+
+### 7. Shape metrics
+
+Collapsed by default. Per-cell morphology, measured from each nucleus mask at
+quantification time and written as `shape_…` columns in the measurements CSV.
+The section holds a single dropdown; tick the features you want.
+
+- **Selectable features** — Area, Perimeter, Eccentricity, Solidity, Extent,
+  Major Axis Length, Minor Axis Length, Orientation. **Area, Eccentricity,
+  Solidity and Perimeter** are ticked when the form opens.
+- **Always measured, whatever the dropdown says** — the two centroid columns
+  (`shape_centroid_row` / `shape_centroid_col`), `shape_circularity`, and
+  `shape_solidity`. Features elsewhere in the app depend on them, so they are
+  not left to a per-run choice: centroids are what cross-timepoint cell tracking
+  links on and what the [Cell Browser](#cell-browser)'s region delete and the
+  crop rectangle test cells against on frames whose masks are not loaded, and
+  the Quality Control debris gate filters on size, **solidity** and
+  **circularity** — a gate you can edit after the run precisely because those
+  columns are always there. Solidity appears in the dropdown as well (it is
+  ticked by default); unticking it slims nothing, since the run adds it back.
+- **Choosing** — these are measured once, at run time, and cannot be added to a
+  dataset afterwards without re-running the pipeline, so tick anything you might
+  plot. The cost is a few extra CSV columns, not extra segmentation work. What
+  you tick here is what the Review pane's [Multivariate](#multivariate-analysis)
+  and [Spatial](#spatial-analysis) tabs can offer as an axis.
+
+### 8. Output options
+
+Collapsed by default.
+
+- **CSV prefix.** The stem of the per-well measurements files the run writes;
+  `measurements` by default, giving `measurements_<WELL>.csv`. Change it to keep
+  two differently-configured runs distinguishable inside one output folder.
+
+Packaging is not configurable: inputs are always read from per-well `.zip`
+archives and outputs are always written as per-well `.zip` archives. See
+[What the pipeline writes](#what-the-pipeline-writes) for the full layout.
+
+### 9. Compute options
 
 - **TF threads.** TensorFlow intra-op parallelism (CPU only; ignored on
   Metal). Defaults to 4.
@@ -630,7 +673,75 @@ A cell counts only when it is manually kept **and** it passes QC.
   Repair* → **Complete this run in Analyze** ticks this for you. Force re-run
   overrides it.
 
-### 8. Run / Suspend / Stop / Log
+### 10. Scratch disk
+
+Collapsed by default. One field plus **Browse…**, and the last option above the
+Run controls.
+
+A run does most of its file churn somewhere other than your input and output
+folders: each well's archive is extracted, intermediate images are written, and
+per-FOV checkpoints are kept so a crashed run can be completed later. All of
+that lands on the scratch disk.
+
+- **Leave it blank** and the run uses `~/.allwell/scratch`. That is the right
+  answer on a machine with room on its system volume.
+- **Keep it on fast local storage.** Pointing it at a network drive (NAS, SMB
+  share) puts the run's GB-scale temporary I/O on a volume whose dropped
+  sessions invalidate every open file handle — the configuration behind wells
+  failing with *Bad file descriptor*. The field deliberately does **not** follow
+  the input folder for this reason.
+- **It is also the fix for a run that will not start on space.** When the
+  pre-run space check refuses a run, moving scratch to a roomier volume (or
+  lowering **Workers**, which multiply the staging need directly) is the real
+  fix; *Start even if the disk looks too small* under
+  [Compute options](#9-compute-options) only disarms the check.
+- **It fills up.** A run that dies mid-way with a disk-full message, or that
+  finishes with wells reported incomplete, usually ran out of room here rather
+  than on the output volume — scratch defaults to your home drive, so a dataset
+  on a roomy external disk can still exhaust a full internal one. The per-FOV
+  tracebacks in `<output folder>/errors/` say so. Free space or move scratch,
+  then re-run with **Incremental**.
+
+### 11. Running on a remote host
+
+The last thing the form asks before the run buttons is a **Run on:** dropdown.
+It lists `Local` plus every SSH host configured in
+`~/.config/allwell/remotes.toml` (on Windows, `%APPDATA%\allwell\remotes.toml`
+takes precedence, and the `ALLWELL_REMOTES` environment variable overrides
+both), and it defaults to the first configured remote when there is one.
+Picking a remote changes nothing
+about the form above it — the same schema, channels, folders and options are
+sent — only where the segmentation runs. Results come back into the same output
+folder, so Review cannot tell the difference afterwards.
+
+**Manage…** opens the remote-host dialog: add, edit, delete, test, or bootstrap
+a host (bootstrap installs the pipeline and its Python environment on a machine
+that has never run All-Well). A malformed `remotes.toml` never blocks the app —
+the run log carries a warning and the dropdown stays on `Local`.
+
+Choosing a remote reveals a **Remote options** group, hidden for a local run
+because none of it applies:
+
+- **Batch size (0=off).** `0` uploads the whole plate up front and runs the
+  pipeline once across it — the lowest total runtime. Any positive `N` processes
+  `N` wells at a time, which bounds peak disk on the remote to roughly `N` wells
+  of input plus about one well of output, at the cost of reloading the
+  segmentation model once per batch (a few seconds each). Set it from the
+  remote's free disk, not from its core count.
+- **Auto-delete remote files when done.** On by default. After a run the app
+  verifies succeeded, it deletes both the per-run output directory and the
+  cached input on the remote, so a shared machine does not fill up. It never
+  deletes failed work. Unticking it leaves everything in place.
+- **Dry-run cleanup.** Only selectable while auto-delete is on. Logs the path,
+  file count and total bytes of every remote directory that *would* be removed
+  at end of run, and removes nothing — worth one run on a shared host before
+  trusting auto-delete on it.
+
+What a remote run does before it uploads (which archives it rebuilds, which it
+sends untouched) and what it reports on the way back are covered by the run log
+and by `remote_fetch_report.txt` in the output folder.
+
+### 12. Run / Suspend / Stop / Log
 
 - Click **Run**. The log streams the pipeline's stdout/stderr live.
 - The **plate map** above the log colours each well by the stage it has reached.
@@ -806,11 +917,14 @@ the viewer always tracks the schema + channel tokens the dataset was built with
   left, the `[Review | Analyze | Datasets]` selector switches modes; beside it
   are the current page's sub-tabs; and at the far right the dataset actions —
   Refresh (re-read the folder), presentation toggle (flip every plot
-  Screen ↔ Publication), **Reset analysis**, reveal the dataset folder,
-  **Reset view**, and the **`i`** Help drawer. Those six act on the loaded
-  dataset or on the plots drawn from it, so they appear in Review only; `Ctrl+/`
-  opens the Help drawer from any mode. The two resets are described under
-  [Starting over](#starting-over).
+  Screen ↔ Publication), **Reset analysis**, reveal the dataset folder, and
+  **Reset view**. Those five act on the loaded dataset or on the plots drawn
+  from it, so they appear in Review only; the two resets are described under
+  [Starting over](#starting-over). The **`i`** Help drawer button sits to their
+  right and stays in that same spot in all three modes, because the manual it
+  opens documents all three; `Ctrl+/` opens it too. Opening it from a Datasets
+  tool lands on that tool's section of the manual, and from Analyze on the form
+  section you have scrolled to.
 - **Section rail** — the left navigator lists every centre tab (Plotting, etc.),
   grouped into **Analysis**, **Images**, and **Data**, under the dataset control
   at its head. Tabs that own sub-tabs (e.g. Plotting) show them in the top band,
@@ -1202,10 +1316,17 @@ controls row — **Cells** (one point per cell, X vs Y feature) and **Wells** (o
 point per well/timepoint). Cells can be coloured **by well** or, via **Color by
 time**, by timepoint.
 
-The Channel, Property and Threshold controls that the other plot tabs share
+The Channel, Property and ON cutoff controls that the other plot tabs share
 disappear from the controls row here, and the View toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and
-Y-axis dropdowns below — the shared controls have nothing to act on.
+Y-axis dropdowns below — the shared controls have nothing to act on. Each axis
+still uses its own channel's cutoff from Cell Gating; since the quick-edit is
+hidden here, that tab is where you change it.
+
+In **Wells** view, a plot that comes back empty says which of the two reasons it
+is empty for: no cells at the timepoints you picked, or cells that were all cut
+by an axis's ON cutoff — naming the channel, the cutoff and how many of how many
+cells it kept.
 
 - **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis
@@ -1270,7 +1391,12 @@ place cells in a grid that mirrors your plate or your experimental design.
   dropdown.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
-    *Rep-set avg*).
+    *Rep-set avg*). **Mean above threshold** and **Fraction above threshold**
+    are offered only for a Property that has an ON cutoff of its own — Mean
+    Intensity (ThreshFracOn) and smFISH Count (ThreshCountOn). They grey out for
+    Total / Max / Min / Std intensity, because the cutoff is a *mean* intensity
+    and cutting a total with it would compare two different scales; those fall
+    back to *Mean (all cells)*.
   - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`; its position
     persists across reopen).
 
@@ -1672,8 +1798,9 @@ channel for every well).
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
-  Corrected**, **Mask**, **≥ threshold** (renders that channel's ThreshFracOn
-  threshold-binary, positive cells white), **Colour cells**, a **boundary** outline
+  Corrected**, **Mask**, **≥ threshold** (renders that channel's
+  ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
+  is a spot count — positive cells white), **Colour cells**, a **boundary** outline
   overlay, and a **colormap + LUT** min/max. The options travel with the channel
   wherever it sits, so the same channel looks identical on either axis. Remove a
   chip with its **×**.
@@ -1722,8 +1849,14 @@ channel for every well).
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
   with a **channel** dropdown choosing which channel it applies to (the same
-  ThreshFracOn shared with Cell Gating and the plot tabs; it follows the picked
-  channel, and reads 0 for the nuclear channel until you set one) · **Export ▾** (to file ·
+  cutoff shared with Cell Gating and the plot tabs; it follows the picked
+  channel, and reads 0 for the nuclear channel until you set one). It also
+  follows the selected **Property**: with **smFISH Count** selected the caption
+  reads **ON spots**, the box shows a spot count, and it edits that channel's
+  ThreshCountOn instead. Caption, value and write target move together, so the
+  number you see is the number you are changing. A channel with no spot-count
+  column has no count cutoff, so it keeps editing its ON threshold whatever the
+  Property says · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
@@ -1876,7 +2009,8 @@ exact correction and segmentation code).
     per-cell measurement); every **pixel** above the threshold, if there is no
     usable mask; or every labelled pixel with the threshold ignored. The
     read-out names which one you are seeing, and where the threshold came from —
-    set on this tab, or the channel's app-wide ON threshold.
+    set on this tab, or the channel's app-wide ON cutoff (its ThreshFracOn, or
+    its ThreshCountOn when the selected Property is a spot count).
   - **Colour cells** (on by default) gives every cell its own colour in Binary
     mode instead of painting them all white. Two nuclei that touch are one white
     shape otherwise, so a segmentation that merged them looks exactly like one
@@ -2026,17 +2160,32 @@ buttons — you pick one or the other, because choosing the scatter option
   sides — a maximum is useful when something in the image is *too* perfectly
   round to be a cell.
 - **Fraction-on — which included cells count as ON.** Removes no cells. Choose
-  the per-channel **ON cutoff** (the `ON ≥` column), or a scatter gate. The two
-  questions have **independent** gate pickers, so you can include cells by one
-  set of gates and compute fraction-on from a different set.
+  the per-channel **ON cutoff**, or a scatter gate. The two questions have
+  **independent** gate pickers, so you can include cells by one set of gates and
+  compute fraction-on from a different set.
+
+  This question has **two** cutoffs per channel, because the answer depends on
+  what you are plotting. `ON ≥ (ThreshFracOn)` is the brightness a cell must
+  reach, and applies when the selected Property is an intensity.
+  `ON > (ThreshCountOn)` is the number of spots it must carry, and applies when
+  the Property is an smFISH Count. They are separate values on purpose: one asks
+  how *bright* a cell is, the other how many *spots* it holds, and the two live
+  on scales that share no useful number. A channel with no spot-count column has
+  no count cutoff to set, and shows an em-dash in that column.
+
+  ThreshCountOn starts at **-1**, below the smallest tally a cell can have, so
+  every cell counts as on — including cells carrying no spots at all, which are
+  a real measurement and not missing data. Raise it to N to plot "the fraction
+  of cells with more than N spots"; the mean, the fraction-on panel and the
+  events panel all follow it.
 
 Each question has **its own table** directly under it, with a row per
-fluorescence channel and ratio metric. They are kept apart on purpose: the two
+fluorescence channel and ratio metric. They are kept apart on purpose: the
 numbers have the same shape but answer different questions — the inclusion floor
-decides whether a cell is in the dataset at all, the ON cutoff only decides how
+decides whether a cell is in the dataset at all, the ON cutoffs only decide how
 the cells already in it are counted — and a single table serving both would need
-a heading that names neither. Both are measured against per-cell mean
-fluorescence intensity, whichever Property is selected elsewhere. A
+a heading that names neither. The inclusion floor is always measured against
+per-cell mean fluorescence intensity, whichever Property is selected elsewhere. A
 readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
 starts at 0, because an ON/OFF brightness cut has no meaning for the channel
 nuclei are *found* with — every segmented cell is by construction a detection in
@@ -2472,21 +2621,41 @@ the source, same as Concatenate. The source dataset is never modified.
 Use this to group a folder of loose, ungrouped TIFs (no `in/<WELL>.zip`
 structure yet) into the layout Analyze reads directly.
 
-1. Pick the folder of loose TIFs. A readout below the schema/separator fields
-   shows how the files split into wells × FOVs × timepoints × channels,
-   updating on every keystroke — so a wrong separator or schema is obvious
-   before you convert, not partway through.
+1. Pick the folder of loose TIFs, then describe their filenames. The separator
+   box and the position dropdowns are the same control as
+   [Analyze → Filename schema](#1-filename-schema) — the same field vocabulary
+   in the same order, so the schema you build here is the one Analyze will use
+   on the result. A readout below it shows how the files split into
+   wells × FOVs × timepoints × channels, updating on every keystroke, so a wrong
+   separator or schema is obvious before you convert rather than partway
+   through. A schema the run would reject — no **Well** field, or two of them,
+   or no **Channel** — says so under the control and holds **Zip folder**
+   disabled instead of scanning every file and grouping none of them.
+
+   When nothing comes back, the readout says *which* of the three reasons it
+   is, because two of them are not about the schema at all: the folder holds no
+   images; its images are one level down, in per-condition subfolders (this tool
+   reads only the top level); or the images are there and the schema does not
+   describe them. **Zip folder** stays disabled while the answer is nothing, and
+   the readout names a couple of the files that did not match — usually enough
+   to spot a wrong separator at a glance.
 2. By default the result is written to a **new destination folder** you pick,
-   leaving the loose TIFs exactly where they are. Check **Group in place**
-   instead to group the files directly in the source folder and delete the
-   loose TIFs once each well is safely zipped — the same thing Analyze itself
-   does when it's pointed at a folder of loose TIFs, exposed here as its own
-   step. Checking it shows an explicit warning under the checkbox spelling out
-   that this deletes the originals and can't be undone, and the destination
-   field (unused in this mode) stays visible but greyed out rather than
-   disappearing; you're still asked to confirm before anything is deleted.
+   leaving the loose TIFs exactly where they are. It has to be a different
+   folder from the source, and one that doesn't already hold a dataset — the
+   field says so under itself either way. Check **Group in place** instead to
+   group the files directly in the source folder and delete the loose TIFs once
+   each well is safely zipped — the same thing Analyze itself does when it's
+   pointed at a folder of loose TIFs, exposed here as its own step. Checking it
+   shows an explicit warning under the checkbox spelling out that this deletes
+   the originals and can't be undone, and the destination field (unused in this
+   mode) stays visible but greyed out rather than disappearing. You're still
+   asked to confirm before anything is deleted, and that confirmation names the
+   folder, how many files and wells it is about to zip, and how many files it is
+   leaving alone. Once an in-place run succeeds, **Zip folder** goes dark — the
+   folder holds archives now, not loose images, and a second run would replace
+   the result with a failure.
 3. As soon as the scan finds any wells, a status panel appears below showing
-   a "Ready — N well(s) to convert" plate preview. Press **Zip folder** and
+   a "Ready — N well(s) to zip" plate preview. Press **Zip folder** and
    that same plate fills in as each well is zipped, the same graphical
    progress view Analyze itself uses. On success, **Open dataset in Analyze**
    sends the resulting folder there.

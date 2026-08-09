@@ -114,6 +114,11 @@ def read_pipeline_info(
         "tp_index": tp_idx,
         "nuclear_token": str(data.get("nuclear_token", "")).strip().lower(),
         "fluor_tokens": list(fluor_tokens),
+        # Carried alongside its sibling so a consumer holding the parsed block
+        # can answer "did this run have smFISH channels?" without re-reading the
+        # file or borrowing a runtime scratch list that is filled in later.
+        # Sorted because the source is a set and the value is displayed.
+        "smfish_tokens": sorted(smfish_tokens),
         "available_timepoints": [
             str(tp).strip()
             for tp in data.get("available_timepoints", []) or []

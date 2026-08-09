@@ -269,7 +269,7 @@ def _resolve_review_fov_tp(ctx, widgets, status, _set_combo_values, *, well, cha
 def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: bool, image_load_debug: bool) -> None:
     from well_viewer.data.image_discovery import open_imgref_as_array
     from well_viewer.core.channel_state_controller import (
-        get_all_fluor_gates, get_thresh_frac_on,
+        get_all_fluor_gates, on_cutoff_for_column,
     )
 
     widgets = ctx.widgets
@@ -380,7 +380,10 @@ def _refresh_review_image_impl(ctx, _set_combo_values, *, channel_switch_debug: 
     above_by_nid: dict[int, bool] | None = None
     if bool(state.review_image.binary_mask):
         fluor_gates = get_all_fluor_gates(ctx)
-        threshold = get_thresh_frac_on(ctx)
+        # Part of the cache key, so it has to be the cutoff
+        # ``review_build_threshold_map`` will actually apply — otherwise a
+        # cached map computed under a different cutoff is served back.
+        threshold = on_cutoff_for_column(ctx, state.channel.active_val_col)
         tm_key = (
             well, fov, tp, state.review_image.override_version,
             state.channel.active_val_col, threshold,

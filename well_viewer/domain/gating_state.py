@@ -11,11 +11,18 @@ Schema written under the ``cell_gating`` key:
     {
         "fluor_gates":      {"gfp": 50.0, "mcherry": 0.0},
         "thresh_frac_on":   {"gfp": 60.0, "mcherry": 50.0},
+        "thresh_count_on":  {"w3cy5": 4.0},
         "use_scatter_gates": true,
         "scatter_gates":    [{"x0": .., "y0": .., "x1": .., "y1": ..,
                               "x_col": "gfp_mean_intensity",
                               "y_col": "mcherry_mean_intensity"}],
     }
+
+``thresh_frac_on`` is the ON cutoff for the fluorescence-intensity metrics;
+``thresh_count_on`` is the separate one for the integer count metrics (smFISH
+spot tallies). They are different rows because they are answers to questions on
+different scales — "how bright before a cell is ON" against "how many spots
+before a cell is ON" — and a single value cannot serve both.
 
 Only non-default values are persisted; channels at default are omitted. The
 ``scatter_gates`` / ``use_scatter_gates`` pair is written only when the
@@ -49,6 +56,7 @@ def pipeline_info_available(out_dir: Path) -> bool:
 DEFAULT_FLUOR_GATE = 0.0
 DEFAULT_THRESH_FRAC_ON = 50.0
 DEFAULT_THRESH_FRAC_ON_NUCLEAR = 0.0
+DEFAULT_THRESH_COUNT_ON = -1.0
 
 _EPS = 1e-9
 
@@ -78,6 +86,33 @@ def default_thresh_frac_on(channel: str, seg_channel_token: str = "") -> float:
     return DEFAULT_THRESH_FRAC_ON
 
 
+def default_thresh_count_on(channel: str = "") -> float:
+    """The ON cutoff a *count* metric (an smFISH spot tally) starts at.
+
+    :data:`DEFAULT_THRESH_COUNT_ON` sits below the minimum a tally can take. A
+    cell is "on" when ``count > cutoff``, so -1.0 admits every cell including the
+    zero-spot ones. Zero spots is a measurement — the cell was imaged, segmented,
+    and found to carry no transcripts — and dropping those cells raises every
+    reported mean and shrinks every N.
+
+    This is the same convention the shape/morphology features use, and for the
+    same reason: neither is a fluorescence intensity, so
+    :data:`DEFAULT_THRESH_FRAC_ON` is not merely the wrong number for them, it is
+    above the entire range the data can occupy and empties the plot.
+
+    Unlike :func:`default_thresh_frac_on` the answer does not depend on which
+    channel is asking — no channel's spot tally wants an intensity-scaled floor,
+    and the segmentation channel carries no count column at all. The parameter is
+    kept so the two defaults are interchangeable in the diff-against-default
+    loops that decide what reaches the sidecar.
+
+    A value the user has actually set is unaffected: this is consulted only when
+    a channel has no stored count cutoff, and "the fraction of cells carrying more
+    than N spots" stays a real question the Cell Gating tab can be asked.
+    """
+    return DEFAULT_THRESH_COUNT_ON
+
+
 # The sidecar lives at the dataset root even when the data dir is its
 # ``out/`` child, so save and load have to agree on the fallback.
 _resolve_pipeline_info_path = resolve_pipeline_info_path
@@ -99,6 +134,7 @@ def build_gating_block(
     scatter_gate_choices_thresh: list | None = None,
     use_scatter_thresh: bool = False,
     seg_channel_token: str = "",
+    thresh_count_on: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Snapshot non-default gating values as a JSON-friendly dict.
 
@@ -117,6 +153,10 @@ def build_gating_block(
     a nuclear cutoff the user deliberately raised to the readout default would
     be dropped, and the zero it starts at would be written out as if it were a
     deliberate choice.
+
+    ``thresh_count_on`` carries the same shape for the *count* metrics, and needs
+    no such channel knowledge: :func:`default_thresh_count_on` answers the same
+    for every channel.
     """
     block: dict[str, Any] = {}
     fg_out: dict[str, float] = {}
@@ -132,6 +172,13 @@ def build_gating_block(
             tfo_out[str(ch)] = float(val)
     if tfo_out:
         block["thresh_frac_on"] = tfo_out
+
+    tco_out: dict[str, float] = {}
+    for ch, val in (thresh_count_on or {}).items():
+        if not _is_default(val, default_thresh_count_on(ch)):
+            tco_out[str(ch)] = float(val)
+    if tco_out:
+        block["thresh_count_on"] = tco_out
 
     # Persist the gates when EITHER scatter-gate layer (inclusion / fraction-on
     # thresholding) is on — both consume the same selected gate(s).

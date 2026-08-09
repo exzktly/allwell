@@ -737,7 +737,15 @@ def _corrected_frame(ctx, *, ff_mode: str, bg_method: str, ff, bg, store: bool =
 
 def _effective_threshold(ctx) -> float:
     """Frame-local binary threshold: the user's override if set, else the
-    channel's app-wide ThreshFracOn as a read-only default (never written back)."""
+    channel's app-wide ThreshFracOn as a read-only default (never written back).
+
+    Deliberately the *intensity* cutoff whatever Property the plots are showing.
+    This number is applied to image pixels — ``_cells_above`` compares it against
+    each label's mean intensity in the frame on screen — so a spot-count cutoff
+    would be measured against the wrong quantity entirely. At its -1 default it
+    would pass every cell and paint the whole frame, while the stepper beside it
+    (built with ``minimum=0``) clamped the display to 0.
+    """
     st = _st(ctx)
     if st.threshold is not None:
         return float(st.threshold)

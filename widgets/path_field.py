@@ -150,6 +150,20 @@ class PathField(QWidget):
         self._hint.setText(text)
         self._hint.setVisible(bool(text))
 
+    def show_warning(self, text: str) -> None:
+        """Show *text* as a red inline hint, in place of the validator's own,
+        until the next :meth:`revalidate` call.
+
+        The counterpart to :meth:`show_note`, for a rule the validator cannot
+        reach: a cross-field one. A validator sees a single path, so "this
+        destination is also the source" can only be decided by the page — and
+        without somewhere to say it, the page's Run button goes dark with no
+        reason attached.
+        """
+        self._set_hint_style("Danger")
+        self._hint.setText(text)
+        self._hint.setVisible(bool(text))
+
     def _set_hint_style(self, object_name: str) -> None:
         if self._hint.objectName() == object_name:
             return

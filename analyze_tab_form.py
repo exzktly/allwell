@@ -43,17 +43,12 @@ from pipeline.capacity import ALLOW_LOW_DISK_HELP
 # util.schema, so the Analyze form's field picker offers exactly the tokens the
 # pipeline parses. This module previously kept its own copy "in sync with
 # process_microscopy.py" by hand, which is the arrangement util.schema exists
-# to replace.
+# to replace. The picker widget itself is shared with the Datasets pane's Zip
+# Loose Folder page — see widgets/schema_picker.py.
 # ---------------------------------------------------------------------------
-from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP
+from util.schema import SCHEMA_FIELDS, DEFAULT_SCHEMA, DEFAULT_SEP  # noqa: F401 (re-export)
 from util.well_token import canonical_well_label, is_valid_well_name
-
-_SCHEMA_LABELS = ("Experiment", "Channel", "Well", "FOV", "Timepoint", "— ignore —")
-# strict=: the two tuples are positionally paired, so a length mismatch is a
-# real bug — a dropped label would silently make a schema field unreachable in
-# the picker rather than raising.
-_LABEL_TO_FIELD = dict(zip(_SCHEMA_LABELS, SCHEMA_FIELDS, strict=True))
-_FIELD_TO_LABEL = dict(zip(SCHEMA_FIELDS, _SCHEMA_LABELS, strict=True))
+from widgets.schema_picker import SchemaPicker
 
 
 class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
@@ -65,8 +60,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         parent.layout().addWidget(self._build_resume_banner(parent))
         self._build_open_pinfo_row(parent)
         self._build_schema_section(parent)
-        self._build_channel_tokens_section(parent)
+        # Folder first, then what is in it; Schema leads both (see its hint).
         self._build_folders_section(parent)
+        self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
         # Quality Control leads the optional sections and stays open: its
         # correction stages are common tuning knobs, not an afterthought.
@@ -82,32 +78,19 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
     def _build_schema_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Filename Schema")
 
-        sep_row = self._row(sec, "Separator char")
-        self._filename_sep_edit = self._entry(sep_row, DEFAULT_SEP, width=30)
-        sep_row.layout().addStretch(1)
-        self._filename_sep_edit.textChanged.connect(lambda _: self._refresh_schema_preview())
-
-        default_fields = DEFAULT_SCHEMA.split(":")
-        for pos_idx in range(5):
-            row = self._row(sec, f"Position {pos_idx + 1}")
-            cb = QComboBox(row)
-            cb.addItems(list(_SCHEMA_LABELS))
-            cb.setCurrentText(_FIELD_TO_LABEL.get(default_fields[pos_idx], "— ignore —"))
-            cb.setFixedWidth(self._CB_W)
-            row.layout().addWidget(cb)
-            row.layout().addStretch(1)
-            self._schema_cbs.append(cb)
-            cb.currentIndexChanged.connect(lambda _i, c=cb: self._on_combobox_selected(c))
-
-        schema_str_row = self._row(sec, "Schema string")
-        self._schema_str_edit = QLineEdit(DEFAULT_SCHEMA, schema_str_row)
-        # Expand to fill the row. The string never fits unscrolled at any width
-        # this sidebar offers — a scrollable single-line edit (cursor pinned to
-        # the start below), so the minimum just keeps a legible chunk on screen.
-        self._schema_str_edit.setMinimumWidth(self._SCHEMA_STR_EDIT_MIN_W)
-        self._schema_str_edit.setCursorPosition(0)  # show the start, not the tail
-        schema_str_row.layout().addWidget(self._schema_str_edit, 1)
-        self._schema_str_edit.editingFinished.connect(self._sync_dropdowns_from_string)
+        # The separator, the five position dropdowns and the schema string they
+        # write are one reusable control (`widgets.schema_picker`), because the
+        # Datasets pane's Zip Loose Folder page asks the user the same question
+        # about the same filenames. Passing `self._row` in keeps it inside this
+        # form's label column and general look.
+        self._schema_picker = SchemaPicker(
+            sec,
+            row_factory=self._row,
+            combo_width=self._CB_W,
+            schema_edit_min_width=self._SCHEMA_STR_EDIT_MIN_W,
+        )
+        sec.layout().addWidget(self._schema_picker)
+        self._schema_picker.changed.connect(self._refresh_schema_preview)
 
         self._schema_err_lbl = QLabel("", sec)
         self._schema_err_lbl.setObjectName("Error")
@@ -868,7 +851,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
                     f"('{pos}').\n\nThey have to differ — the threshold comes "
                     "from the separation between them.")
         input_dir = Path(self._input_edit.text().strip())
-        sep = self._filename_sep_edit.text() or DEFAULT_SEP
+        sep = self._schema_picker.separator()
         schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
         from services.input_resolution_service import well_present_in_input
         missing_wells = [w for w in (pos, neg)
@@ -907,7 +890,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
                     "comma-separated (e.g. H12, G12) — so its measured "
                     "background can be sampled.")
         input_dir = Path(self._input_edit.text().strip())
-        sep = self._filename_sep_edit.text() or DEFAULT_SEP
+        sep = self._schema_picker.separator()
         schema = [f.strip().lower() for f in self._build_schema_arg().split(":") if f.strip()]
         from services.input_resolution_service import well_present_in_input
         missing = [w for w in wells
@@ -966,7 +949,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             stardist_prob_thresh=sd_prob,
             stardist_nms_thresh=sd_nms,
             filename_schema=self._build_schema_arg(),
-            filename_sep=self._filename_sep_edit.text() or DEFAULT_SEP,
+            filename_sep=self._schema_picker.separator(),
             smfish_tokens=self._smfish_tokens_list(),
             shape_features=list(self._shape_chips.checkedData()),
             flatfield=self._flatfield_cb.currentText(),

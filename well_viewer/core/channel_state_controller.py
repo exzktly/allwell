@@ -37,6 +37,7 @@ from well_viewer.domain.ratio_models import is_ratio_key, ratio_name_from_key
 from well_viewer.core.ui_helpers import set_combo_values, set_combo_values_sectioned
 from pipeline.shape_features import is_shape_column, label_for as shape_label_for
 from well_viewer.core.safe import swallowed
+import theme
 
 _logger = logging.getLogger("well_viewer")
 
@@ -162,6 +163,7 @@ def recalculate_threshold(ctx) -> None:
     if ctx.runtime.cell_gating.fluor_gate_edits is not None:
         from well_viewer.features.grouping.cell_gating.controller import (
             cell_gating_load_cell_areas,
+            cell_gating_load_threshold_count_on,
             cell_gating_load_threshold_frac_on,
         )
         cell_gating_load_cell_areas(ctx)
@@ -173,7 +175,12 @@ def recalculate_threshold(ctx) -> None:
         # re-toggles a field. (The saved value is always current — every gate
         # edit persists immediately — so re-applying never clobbers a live edit.)
         load_from_pipeline_info(ctx)
+        # Both cutoff banks, not just the intensity one: a stale count edit that
+        # survives the rebuild is copied back into the typed slice by the next
+        # ``_cell_gating_sync_gate_state`` and then persisted, which destroys the
+        # saved ThreshCountOn.
         cell_gating_load_threshold_frac_on(ctx)
+        cell_gating_load_threshold_count_on(ctx)
 
 
 # ── Active channel switching ────────────────────────────────────────────────
@@ -613,6 +620,13 @@ def set_active_metric(ctx, metric: str) -> None:
     refresh_metric_combo_for_channel(ctx)
     refresh_heatmap_aggregation_options(ctx)
     recalculate_threshold(ctx)
+    # The quick-edit Steppers take their target — and therefore their caption,
+    # range and value — from this metric, so switching it without re-syncing
+    # them leaves a box displaying the intensity cutoff while typing into it
+    # writes the count one. That is the exact substitution ``set_on_cutoff``
+    # exists to prevent, so the refresh belongs here and not only on the tab
+    # switch that used to be the first thing to correct it.
+    refresh_thresh_frac_quick_edit(ctx)
     invalidate_stats_cache(ctx)
     redraw_app(ctx)
     if ctx.widgets.get_or_none("_bar_tp_cb") is not None:
@@ -700,13 +714,22 @@ def populate_metric_combo(
 
 
 def refresh_heatmap_aggregation_options(ctx) -> None:
-    """Grey out threshold-based heatmap aggregations for non-MFI properties.
+    """Grey out the threshold-based heatmap aggregations for metrics that have
+    no cutoff of their own.
 
-    The ThreshFracOn cut is defined against mean fluorescence intensity
-    (see Cell Gating tab), so "Mean above threshold" and "Fraction above
-    threshold" only make sense when the active Property is MFI. When the
-    user picks Total / Max / Min / Std / smFISH Count, those options
-    disable so they're not silently misapplied.
+    "Mean above threshold" and "Fraction above threshold" need a cutoff the
+    active Property is actually measured against. Mean intensity has one
+    (ThreshFracOn) and the spot counts have one (ThreshCountOn), so both offer
+    these aggregations — the heat map computes them the same way the bar, line
+    and scatter paths already do. Total / Max / Min / Std do not: ThreshFracOn is
+    a *mean* intensity, and cutting a total (area × mean) with it would silently
+    misapply a number from another scale. Those stay disabled and fall back to
+    "Mean (all cells)".
+
+    The rule is ``metric_registry.metric_has_own_cutoff``, not an equality
+    against mean intensity: that spelling also disabled the counts, on the
+    premise that the only per-channel cutoff was a brightness, which stopped
+    being true when counts got their own.
 
     A8: takes ``ctx``; the heatmap metric combo comes from ``ctx.widgets`` and
     the active metric from typed state, so it names no god-object.
@@ -717,7 +740,8 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
     from well_viewer.features.heatmap.controller import (
         METRIC_MEAN, METRIC_FRACTION,
     )
-    is_mfi = ctx.state.channel.active_metric == "mean_intensity"
+    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+    thresholdable = metric_has_own_cutoff(ctx.state.channel.active_metric)
     model = cb.model()
     if model is None:
         return
@@ -727,10 +751,10 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
             continue
         item = model.item(idx)
         if item is not None:
-            item.setEnabled(is_mfi)
+            item.setEnabled(thresholdable)
     # If the currently selected aggregation just went unavailable, fall
     # back to "Mean (all cells)" so the heatmap stays valid.
-    if not is_mfi:
+    if not thresholdable:
         current = str(cb.currentText() or "")
         if current in (METRIC_MEAN, METRIC_FRACTION):
             from well_viewer.features.heatmap.controller import METRIC_MEAN_ALL
@@ -912,8 +936,25 @@ def seg_channel_token_of(ctx) -> str:
     return str(getattr(channel_state, "seg_channel_token", "") or "")
 
 
+def _gating_row_key(ctx, channel: str) -> str:
+    """The Cell Gating row key *channel* is stored under.
+
+    The one import of the feature-side resolver, shared by every cutoff accessor
+    here — ``well_viewer/core`` carries a hard-capped budget of feature imports
+    (``tests/test_guardrails.py::test_core_feature_import_budget``), so the
+    accessors route through this rather than importing it apiece.
+    """
+    from well_viewer.features.grouping.cell_gating.controller import _cell_gating_resolve_key
+    return _cell_gating_resolve_key(ctx, channel)
+
+
 def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     """Get ThreshFracOn threshold. Uses active channel if not specified.
+
+    This is the ON cutoff for the *fluorescence-intensity* metrics only; the
+    integer count metrics carry their own (:func:`get_thresh_count_on`), and
+    neither is reached directly by a plot path — they go through
+    :func:`on_cutoff_for_column`.
 
     A8 teardown: pure typed state, so it takes ``ctx``. Post-R6 the per-channel
     ThreshFracOn cutoffs live on the ``CellGatingState`` slice; a channel with no
@@ -923,12 +964,72 @@ def get_thresh_frac_on(ctx, channel: Optional[str] = None) -> float:
     if channel is None:
         channel = ctx.state.channel.active_channel
     from well_viewer.domain.gating_state import default_thresh_frac_on
-    from well_viewer.features.grouping.cell_gating.controller import _cell_gating_resolve_key
-    key = _cell_gating_resolve_key(ctx, channel)
+    key = _gating_row_key(ctx, channel)
     tf = ctx.state.cell_gating.thresh_frac_on
     if key in tf:
         return tf[key]
     return default_thresh_frac_on(channel, seg_channel_token_of(ctx))
+
+
+def get_thresh_count_on(ctx, channel: Optional[str] = None) -> float:
+    """Get ThreshCountOn — the ON cutoff for the integer *count* metrics.
+
+    A cell is "on" when its spot tally exceeds this. A channel with no configured
+    cutoff falls back to :func:`well_viewer.domain.gating_state.default_thresh_count_on`,
+    which sits below the minimum a tally can take so every cell — including the
+    zero-spot ones — is in the ON population.
+
+    Read defensively: this is reached from leaves whose unit tests stand the
+    cell-gating slice up as a minimal namespace carrying only the map they need.
+    """
+    if channel is None:
+        channel = ctx.state.channel.active_channel
+    from well_viewer.domain.gating_state import default_thresh_count_on
+    key = _gating_row_key(ctx, channel)
+    tc = getattr(ctx.state.cell_gating, "thresh_count_on", None) or {}
+    if key in tc:
+        return float(tc[key])
+    return default_thresh_count_on(channel)
+
+
+def on_cutoff_for_column(ctx, val_col: str, *, channel: Optional[str] = None) -> float:
+    """The ON cutoff *val_col* is measured against — the one resolver.
+
+    Every aggregate plot path (bar, line, scatter-aggregate, heatmap, stats,
+    export) reduces its values through ``value > cutoff``, and each used to pick
+    that cutoff for itself. They disagreed: a spot tally was handed the channel's
+    fluorescence cutoff, which starts at 50.0 and sits above the entire range a
+    count can occupy, so the ON population came back empty and the plot drew
+    nothing at all.
+
+    ``cutoff_kind_for_column`` classifies the column and this turns the answer
+    into a number: shape/morphology keeps every cell, counts read ThreshCountOn,
+    intensities read ThreshFracOn. ``tests/test_on_cutoff_sweep.py`` fails when a
+    path reaches for one of those accessors directly instead.
+
+    ``channel`` defaults to the token carried by the column itself, so a caller
+    holding a per-axis channel (the scatter-aggregate tab) passes it and the ones
+    following the app's active channel need not.
+
+    Ratio keys carry no channel token and no cutoff of their own. The three plot
+    paths that offer ratios disagree about what a ratio's cutoff should be, so
+    each of those handles ratios in front of this resolver rather than folding
+    the disagreement in here; a ratio key reaching this function falls back to
+    the active channel's ThreshFracOn, which is what it resolved to before.
+    """
+    from well_viewer.domain.metric_registry import (
+        CUTOFF_COUNT, CUTOFF_NONE, cutoff_kind_for_column,
+    )
+    kind = cutoff_kind_for_column(val_col)
+    if kind == CUTOFF_NONE:
+        return -1.0
+    if channel is None:
+        from well_viewer.data.metric_labels import split_metric_col
+        parts = split_metric_col(val_col) if isinstance(val_col, str) else None
+        channel = parts[0] if parts else ctx.state.channel.active_channel
+    if kind == CUTOFF_COUNT:
+        return get_thresh_count_on(ctx, channel)
+    return get_thresh_frac_on(ctx, channel)
 
 
 def ensure_cell_gating_tab_built(ctx) -> bool:
@@ -977,11 +1078,41 @@ def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
     # The Cell Gating tab is built lazily; materialize it so its edits dict exists.
     if not ensure_cell_gating_tab_built(ctx):
         return
+    _write_gating_edit(ctx, channel, value, count=False)
+
+
+def set_thresh_count_on(ctx, value, channel: Optional[str] = None) -> None:
+    """Set ThreshCountOn for a channel (the active channel by default).
+
+    The count-metric half of :func:`set_thresh_frac_on`, writing through the same
+    Cell Gating edit surface. Only the smFISH channels carry a count edit, so
+    this no-ops for a channel that has none.
+    """
+    if not ctx.state.dataset.data_dir:
+        return
+    if channel is None:
+        channel = ctx.state.channel.active_channel
+    if not channel or channel == "—":
+        return
+    if not ensure_cell_gating_tab_built(ctx):
+        return
+    _write_gating_edit(ctx, channel, value, count=True)
+
+
+def _write_gating_edit(ctx, channel: str, value, *, count: bool) -> None:
+    """Push *value* through the Cell Gating edit for *channel* and fire its handler.
+
+    The single feature import behind both cutoff setters — ``well_viewer/core``
+    carries a hard-capped budget of feature imports, so the two share one
+    statement rather than repeating it.
+    """
     from well_viewer.features.grouping.cell_gating.controller import (
         _cell_gating_resolve_key,
+        cell_gating_on_threshold_count_on_change,
         cell_gating_on_threshold_frac_on_change,
     )
-    edits = ctx.runtime.cell_gating.thresh_frac_edits or {}
+    runtime = ctx.runtime.cell_gating
+    edits = (runtime.thresh_count_edits if count else runtime.thresh_frac_edits) or {}
     edit = edits.get(_cell_gating_resolve_key(ctx, channel))
     if edit is None:
         return
@@ -990,47 +1121,127 @@ def set_thresh_frac_on(ctx, value, channel: Optional[str] = None) -> None:
         edit.setText(str(float(value)))
     finally:
         edit.blockSignals(blocked)
-    cell_gating_on_threshold_frac_on_change(ctx)
+    if count:
+        cell_gating_on_threshold_count_on_change(ctx)
+    else:
+        cell_gating_on_threshold_frac_on_change(ctx)
+
+
+def set_on_cutoff(ctx, value, channel: Optional[str] = None) -> None:
+    """Set whichever ON cutoff the active metric is measured against.
+
+    The write half of the quick-edit Steppers. They show one box whose meaning
+    follows the selected Property, so the write has to follow it too: pointing
+    the display at the count cutoff while the write still landed in
+    ThreshFracOn would destroy the user's intensity cutoff and leave the count
+    one untouched — a box that reads one number and edits another.
+
+    Decided by the same predicate the display sync uses, ``channel`` included,
+    so the two cannot disagree about a channel that has no count cutoff to write.
+    """
+    if quick_edit_cutoff_is_count(ctx, channel):
+        set_thresh_count_on(ctx, value, channel)
+    else:
+        set_thresh_frac_on(ctx, value, channel)
+
+
+def quick_edit_cutoff_is_count(ctx, channel: Optional[str] = None) -> bool:
+    """True when a quick-edit Stepper is editing the *count* cutoff.
+
+    The Steppers carry no Property picker of their own, so they follow the app's
+    active metric — a spot-count readout retargets them onto ThreshCountOn.
+
+    ``channel`` matters for the one quick-edit that has its own channel picker.
+    A channel with no ``_smfish_count`` column has no count cutoff and no Cell
+    Gating field to write through, so retargeting there would caption the box
+    "ON spots", show a value it cannot store, and drop the user's edit on the
+    floor. Such a channel keeps the intensity cutoff, which it does have.
+    """
+    from well_viewer.domain.metric_registry import (
+        CUTOFF_COUNT, channel_supports_smfish, cutoff_kind_for_metric_key,
+    )
+    if cutoff_kind_for_metric_key(ctx.state.channel.active_metric) != CUTOFF_COUNT:
+        return False
+    if channel is None:
+        return True
+    return channel_supports_smfish(channel, ctx.state.channel.smfish_channels)
 
 
 def refresh_thresh_frac_quick_edit(ctx) -> None:
-    """Sync the ON-threshold quick-edit Steppers to the active channel's
-    ThreshFracOn.
+    """Sync the ON-cutoff quick-edit Steppers to the active channel's cutoff.
 
-    There are now three of these quick-edits — Plotting's band, the
-    Segmentation (Review Image) controls row, and the Image Table controls row —
-    all editing the same per-channel value (the active channel's ON/OFF
-    intensity threshold). Signals are blocked so this display sync doesn't loop
-    back through ``set_thresh_frac_on`` (``Stepper.setValue`` emits
-    ``valueChanged``). No-op for any stepper that hasn't been built yet.
+    There are three of these quick-edits — Plotting's band, the Segmentation
+    (Review Image) controls row, and the Image Table controls row — all editing
+    one per-channel value. *Which* value follows the selected Property: an
+    intensity metric edits ThreshFracOn, a spot count edits ThreshCountOn. The
+    caption and the range move with the target in the same pass, so the number on
+    screen is always the number being written; the range has to widen *before*
+    the value is set, because ``Stepper.setValue`` clamps to it and the count
+    default is negative — a stepper still pinned at ``minimum=0`` would silently
+    display 0, which means "cells with at least one spot" rather than "every
+    cell".
 
-    A8/D-thresh: ctx-native — the status-chip refresh and the ThreshFracOn read
-    both take ``ctx``, and each quick-edit stepper resolves through
-    ``ctx.widgets``.
+    Signals are blocked so this display sync doesn't loop back through the write
+    handler (``Stepper.setValue`` emits ``valueChanged``). No-op for any stepper
+    that hasn't been built yet.
+
+    A8/D-thresh: ctx-native — the status-chip refresh and the cutoff read both
+    take ``ctx``, and each quick-edit stepper resolves through ``ctx.widgets``.
     """
-    def _sync(attr: str, val: float) -> None:
+    _COUNT_TIP = (
+        "A cell is ON when its spot count is above this — drives the "
+        "fraction-on series and the binary overlay. -1 counts every cell, "
+        "including the ones carrying no spots. Same value as the Cell Gating "
+        "tab's ThreshCountOn."
+    )
+    _INTENSITY_TIP = (
+        "ON/OFF intensity threshold for the active channel — cells above it "
+        "count toward the fraction-above- and mean-above-threshold series. "
+        "Edits the same value as the Cell Gating tab's ThreshFracOn."
+    )
+
+    def _sync(attr: str, *, channel: Optional[str] = None,
+              label_attr: str | None = None) -> None:
         stepper = ctx.widgets.get_or_none(attr)
         if stepper is None:
             return
+        count = quick_edit_cutoff_is_count(ctx, channel)
+        value = (get_thresh_count_on if count else get_thresh_frac_on)(ctx, channel)
         blocked = stepper.blockSignals(True)
         try:
-            stepper.setValue(float(val))
+            stepper.setRange(-1.0 if count else 0.0, 1e9)
+            stepper.setDecimals(0 if count else 1)
+            stepper.setSingleStep(1.0)
+            # No unit inside the box: the caption beside it already reads "ON
+            # spots", so a suffix repeats in the one place the user is typing.
+            stepper.setSuffix("")
+            stepper.setValue(float(value))
+            stepper.setToolTip(_COUNT_TIP if count else _INTENSITY_TIP)
+            # setRange / setDecimals / setSuffix each re-run Stepper._update_size,
+            # which resets the width bounds — undoing the setFixedWidth its host
+            # row applied at build time and reflowing the band. Re-pin it.
+            stepper.setFixedWidth(theme.Metrics.stepper_w)
         finally:
             stepper.blockSignals(blocked)
+        lbl = ctx.widgets.get_or_none(label_attr) if label_attr else None
+        if lbl is not None:
+            lbl.setText("ON spots" if count else "ON threshold")
 
     # Plotting + Segmentation quick-edits have no channel picker of their own —
     # they edit the app's ACTIVE channel, so they follow it.
-    active_value = float(get_thresh_frac_on(ctx))
-    _sync("_plotting_thresh_frac_stepper", active_value)
-    _sync("_review_thresh_frac_stepper", active_value)
+    _sync("_plotting_thresh_frac_stepper", label_attr="_plotting_thresh_frac_lbl")
+    _sync("_review_thresh_frac_stepper", label_attr="_review_thresh_frac_lbl")
 
     # The Image Table quick-edit has its OWN channel dropdown, so it must follow
     # THAT channel — not the active one. Syncing it to the active channel here was
     # clobbering the user's per-channel value with the active channel's (often 0),
     # so a threshold set on the Image Table appeared to reset to zero.
+    # It also decides count-vs-intensity from that channel: a channel with no
+    # spot-count column keeps the intensity cutoff, which is the only one it has.
     it_cb = ctx.widgets.get_or_none("_image_table_thresh_chan_cb")
     it_chan = (it_cb.currentText().strip().lower() or None) if it_cb is not None else None
-    _sync("_image_table_thresh_frac_stepper", get_thresh_frac_on(ctx, it_chan))
+    _sync("_image_table_thresh_frac_stepper", channel=it_chan,
+          label_attr="_image_table_thresh_frac_lbl")
 
 
 def get_fluor_gate(ctx, channel: str) -> float:

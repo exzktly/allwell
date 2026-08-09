@@ -300,6 +300,104 @@ def test_layout_readout_guard_clears_a_quoted_value(tmp_path, monkeypatch, shape
                      [tmp_path / "analyze_tab.py"]) is None
 
 
+# ── ON-cutoff sweep ──────────────────────────────────────────────────────────
+#
+# Every plot path must reach its ON cutoff through `on_cutoff_for_column`, or a
+# spot tally gets measured against a fluorescence threshold that sits above the
+# whole range a tally can occupy — the plot then draws nothing at all.
+#
+# All four shapes below are real. The bare call is what most of the converted
+# sites looked like; the aliased import is how both batch-export panels spell
+# it; `app._get_thresh_frac_on` is the god-object shim in `runtime_app`. The
+# fourth — binding the accessor to a local and calling it on the next line — is
+# the one that matters most here: the first version of this guard matched
+# `ast.Call` and reported a clean sweep straight past two sites written that
+# way, which is also the shape a deliberate evasion would take.
+
+@pytest.mark.parametrize("shape", [
+    "    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)",
+    "    threshold = _get_thresh_frac_on(self._ctx, key)",
+    "    threshold = app._get_thresh_frac_on(channel)",
+    "    read = get_thresh_frac_on\n    threshold = read(ctx)",
+    "    threshold = get_thresh_count_on(ctx, channel)",
+])
+def test_on_cutoff_guard_catches_a_raw_accessor(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"def redraw_foo(ctx):\n{shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                    "test_no_path_picks_its_own_on_cutoff",
+                    [tmp_path / "controller.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+    assert "redraw_foo" in str(exc)
+
+
+# The four shapes a reviewer used to walk straight past an earlier version of
+# this guard. Each stayed green; each is now a case.
+
+@pytest.mark.parametrize("shape", [
+    "from x import get_thresh_frac_on as fetch_cutoff\nfetch_cutoff(ctx, ch)",
+    '_raw = _lazy("well_viewer.core.channel_state_controller", "get_thresh_frac_on")',
+    'threshold = getattr(csc, "get_thresh_frac_on")(ctx, ch)',
+    'threshold = vars(csc)["get_thresh_count_on"](ctx, ch)',
+])
+def test_on_cutoff_guard_catches_an_indirect_reach(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"{shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                    "test_no_path_picks_its_own_on_cutoff",
+                    [tmp_path / "controller.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+
+
+def test_on_cutoff_exemption_is_not_shared_by_bare_name(tmp_path, monkeypatch):
+    """An exemption belongs to one closure, not to every closure of that name.
+
+    ``refresh_thresh_frac_quick_edit._sync`` legitimately reads a raw accessor:
+    it picks between the two by the same predicate the resolver uses. Keyed on
+    the bare ``_sync``, that exemption covered any closure of that name anywhere
+    in a 1,300-line module — including one added later by a plot path, which is
+    precisely the reach the rule exists to catch.
+    """
+    src = ("def refresh_thresh_frac_quick_edit(ctx):\n"
+           "    def _sync(attr):\n"
+           "        return get_thresh_frac_on(ctx, attr)\n"
+           "\n"
+           "def redraw_something(ctx):\n"
+           "    def _sync(attr):\n"
+           "        return get_thresh_frac_on(ctx, attr)\n")
+    path = _write(tmp_path, "channel_state_controller.py", src)
+    module = importlib.import_module("tests.test_on_cutoff_sweep")
+    monkeypatch.setattr(module, "python_sources", lambda **kw: [path])
+    monkeypatch.setattr(
+        module, "rel",
+        lambda p: "well_viewer/core/channel_state_controller.py")
+    try:
+        module.test_no_path_picks_its_own_on_cutoff()
+    except AssertionError as exc:
+        message = str(exc)
+    else:
+        pytest.fail("the guard walked past a second _sync closure")
+    assert "redraw_something._sync" in message
+    assert "refresh_thresh_frac_quick_edit._sync" not in message
+
+
+def test_on_cutoff_roster_rejects_a_name_that_does_not_exist(monkeypatch):
+    """The roster's own liveness check fires on a symbol nothing defines."""
+    module = importlib.import_module("tests.test_on_cutoff_sweep")
+    monkeypatch.setattr(module, "GUARDED", ("get_thresh_frac_on", "no_such_accessor"))
+    with pytest.raises(AssertionError, match="no_such_accessor"):
+        module.test_guarded_names_are_real()
+
+
+@pytest.mark.parametrize("shape", [
+    "    threshold = on_cutoff_for_column(ctx, val_col)",
+    "    threshold = on_cutoff_for_column(ctx, val_col, channel=ch_x)",
+    "    threshold = _on_cutoff_for_column(self._ctx, col, channel=key)",
+])
+def test_on_cutoff_guard_clears_the_resolver(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"def redraw_foo(ctx):\n{shape}\n")
+    assert _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                     "test_no_path_picks_its_own_on_cutoff",
+                     [tmp_path / "controller.py"]) is None
+
 # ── selection messages on axes ──────────────────────────────────────────────
 # Every shape below either shipped in this repository or slipped past an earlier
 # version of the guard. The direct ``ax.text`` call is what four of the five
@@ -345,3 +443,103 @@ def test_axes_selection_guard_clears_a_non_prompt(tmp_path, monkeypatch, shape):
     assert _run_scan(monkeypatch, "tests.test_no_axes_selection_message",
                      "test_no_interactive_renderer_paints_a_selection_message",
                      [good]) is None
+
+
+# ── help topics ─────────────────────────────────────────────────────────────
+#
+# The help-topic guard cannot be proven with `scripts/prove_guard.sh`: the maps
+# it reads live in `help_topics.py`, a module the base branch does not have, so
+# the run there dies on an import before measuring anything. This is the whole
+# proof it gets, so both rules are exercised in both directions.
+
+_FAKE_README = """# Manual
+
+## Datasets mode — dataset-level tools
+
+### Merge Plates
+
+## Analyze mode — running the pipeline
+
+### 1. Filename schema
+"""
+
+_FAKE_DATASETS_TAB = '''
+_FEATURES = (
+    _Feature(name="Merge Plates", icon="layout-grid", build=_b, kind="merge_plates"),
+    _Feature(name="Brand New Tool", icon="boxes", build=_b, kind="brand_new"),
+)
+'''
+
+_FAKE_ANALYZE_FORM = '''
+class Form:
+    def _build(self, parent):
+        self._section(parent, "Filename Schema")
+        self._section(parent, "Brand New Section", collapsible=True)
+'''
+
+
+def _help_topics_root(tmp_path: Path) -> Path:
+    """A synthetic repo root holding the three files the guard reads."""
+    _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md", _FAKE_README)
+    _write(tmp_path, "datasets_tab.py", _FAKE_DATASETS_TAB)
+    _write(tmp_path, "analyze_tab_form.py", _FAKE_ANALYZE_FORM)
+    return tmp_path
+
+
+def test_help_topic_guard_catches_a_datasets_tool_with_no_topic(tmp_path, monkeypatch):
+    """The shape that shipped: seven Datasets tools, zero topic keys."""
+    root = _help_topics_root(tmp_path)
+    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                           "test_every_datasets_tool_has_a_topic", root)
+    assert exc is not None, "an unmapped Datasets tool went uncaught"
+    assert "Brand New Tool" in str(exc)
+
+
+def test_help_topic_guard_catches_an_analyze_section_with_no_topic(tmp_path, monkeypatch):
+    root = _help_topics_root(tmp_path)
+    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                           "test_every_analyze_section_has_a_topic", root)
+    assert exc is not None, "an unmapped Analyze form section went uncaught"
+    assert "Brand New Section" in str(exc)
+
+
+def test_help_topic_guard_catches_a_topic_naming_no_heading(monkeypatch):
+    """A value that matches no heading scrolls nowhere, silently.
+
+    Run against the *real* manual, with one entry repointed. A synthetic README
+    holding a handful of headings would fail this guard on every topic at once,
+    with or without the repointing — the case would go green while proving
+    nothing about the entry it claims to be testing.
+    """
+    import help_topics
+    from tests import test_help_topics as guard
+
+    guard.test_every_topic_names_a_real_heading()      # clean before
+    monkeypatch.setitem(help_topics.DATASETS_PAGE_HELP, "Merge Plates",
+                        "No Such Heading")
+    with pytest.raises(AssertionError) as caught:
+        guard.test_every_topic_names_a_real_heading()
+    assert "No Such Heading" in str(caught.value)
+    assert "Merge Plates" in str(caught.value), "the failure must name the key at fault"
+
+
+def test_help_topic_guard_catches_a_duplicated_heading(tmp_path, monkeypatch):
+    """Two identical headings share one anchor, so one topic aims at the other's
+    page."""
+    root = tmp_path
+    _write(root, "_Docs/Markdowns/README_WellViewer.md",
+           _FAKE_README + "\n### Merge Plates\n")
+    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                           "test_headings_are_unique", root)
+    assert exc is not None and "Merge Plates" in str(exc)
+
+
+def test_help_topic_guard_clears_the_real_tree(monkeypatch):
+    """The other direction: against the repository itself every rule holds, so
+    the guard is measuring rather than failing on everything."""
+    import tests.test_help_topics as guard
+    guard.test_every_datasets_tool_has_a_topic()
+    guard.test_every_analyze_section_has_a_topic()
+    guard.test_every_topic_names_a_real_heading()
+    guard.test_headings_are_unique()
+    guard.test_no_topic_keys_for_pages_that_no_longer_exist()

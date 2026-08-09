@@ -17,10 +17,10 @@ input/view:
 - persistence serialises this slice, not widget text.
 
 Keys are the Cell Gating row keys: bare fluor-channel names (``"gfp"``) and
-full ratio keys (``"ratio:<name>"``). An absent key means the historical
-defaults (FluorGating 0.0 = gate off; ThreshFracOn 50.0) — encoded in the
-accessors, not here, so "never set" stays distinguishable from "set to the
-default value".
+full ratio keys (``"ratio:<name>"``). An absent key means the default
+(FluorGating 0.0 = gate off; ThreshFracOn 50.0 for a readout channel and 0.0 for
+the nuclear one; ThreshCountOn -1.0) — encoded in the accessors, not here, so
+"never set" stays distinguishable from "set to the default value".
 
 This is a **core** slice (a field on ``AppState``), like ``QcState``: the gate
 values feed the core channel/threshold layer consumed by every plot, stat, and
@@ -40,6 +40,13 @@ class CellGatingState:
 
     ``fluor_gates`` — FluorGating inclusion thresholds (0.0 = gate off).
     ``thresh_frac_on`` — ThreshFracOn fraction-on cutoffs (default 50.0).
+    ``thresh_count_on`` — ThreshCountOn cutoffs for the integer *count* metrics
+      (smFISH spot tallies), default -1.0 so every cell including the zero-count
+      ones is in the ON population. Separate from ``thresh_frac_on`` because the
+      two answer questions on different scales: "how bright before a cell is ON"
+      (an intensity in the hundreds) against "how many spots before a cell is ON"
+      (an integer, a handful per cell). One value cannot serve both, and the
+      intensity cutoff sits above the whole range a tally can occupy.
 
     Scatter-gate configuration (Epic-cellgating — persisted config that used to
     live as loose ``app._scatter_gates`` / ``app._cell_gating_*`` god-object
@@ -58,6 +65,7 @@ class CellGatingState:
 
     fluor_gates: dict[str, float] = field(default_factory=dict)
     thresh_frac_on: dict[str, float] = field(default_factory=dict)
+    thresh_count_on: dict[str, float] = field(default_factory=dict)
     scatter_gates: list[dict] = field(default_factory=list)
     use_scatter_gates: bool = False
     use_scatter_thresh: bool = False

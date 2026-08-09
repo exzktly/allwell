@@ -32,7 +32,7 @@ from well_viewer.core.plot_style import apply_export_style_to_current
 from well_viewer.core.channel_state_controller import (
     active_channel_label,
     get_all_fluor_gates,
-    get_thresh_frac_on,
+    on_cutoff_for_column,
 )
 from well_viewer.core.timepoint_sync import current_focus_tp, nearest_index
 
@@ -468,12 +468,10 @@ def redraw_heatmap(ctx) -> None:
 
     metric = _selected_metric(ctx)
     val_col = ctx.state.channel.active_val_col
-    # Shapes keep every cell (no ON cutoff); smFISH counts honour the
-    # channel's ThreshFracOn like intensities (count > cutoff is "on").
-    if ctx.state.channel.is_shape_active():
-        threshold = -1.0
-    else:
-        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    # The ON cutoff follows the value column: shapes keep every cell, spot
+    # counts read ThreshCountOn, intensities read ThreshFracOn.
+    threshold = on_cutoff_for_column(
+        ctx, val_col, channel=ctx.state.channel.active_channel)
     fluor_gates = get_all_fluor_gates(ctx)
     ratios = ctx.state.channel.ratio_index
     cmap_name = _selected_cmap(ctx)
@@ -750,8 +748,8 @@ def _metric_axis_label(metric: str, ctx) -> str:
     if metric == METRIC_COUNT:
         return "Cell count"
     if metric == METRIC_FRACTION:
-        # smFISH counts now honour ThreshFracOn like intensities, so the
-        # generic "above threshold" wording is accurate for every metric.
+        # Every metric is cut by some ON cutoff — ThreshFracOn or
+        # ThreshCountOn — so the generic "above threshold" wording holds.
         return f"{label} fraction above threshold"
     if metric == METRIC_RATIO:
         return f"{label} (mean ratio)"

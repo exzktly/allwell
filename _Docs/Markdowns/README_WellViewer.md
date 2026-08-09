@@ -1378,6 +1378,12 @@ as a histogram, KDE, or violin.
   group)*); **Layout** (*Overlay* all wells, or *Faceted (one per group)*);
   **Bins** count; **log x** / **log y** toggles; the timepoint picker; the
   channel-wide threshold reference line.
+- **No error band** — this tab draws the whole population per group rather than
+  reducing it to a mean, so there is no spread for a band to describe and no
+  SEM/SD control on its controls row. The SEM/SD choice itself is app-wide: set
+  it on Bar Plots or Line Graphs (under **Display ▾**), or in the **Properties**
+  panel under *Statistics* → *Error bars*, and every tab that draws a band
+  follows.
 - **Optimal use** — compare a handful of wells at a single timepoint to read
   how a treatment shifts the *whole* population, not just its mean; facet when
   overlaid distributions get too crowded to read.

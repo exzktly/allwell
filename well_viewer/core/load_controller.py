@@ -8,7 +8,10 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QMessageBox
 from well_viewer.core.channel_state_controller import recalculate_threshold, set_ratio_metrics
-from well_viewer.core.ui_helpers import refresh_plot_empty_states
+from well_viewer.core.ui_helpers import (
+    clear_notes_editors as _clear_notes_editors,
+    refresh_plot_empty_states,
+)
 from well_viewer.core.safe import swallowed
 
 
@@ -175,17 +178,11 @@ def _reset_sample_definitions_state(ctx) -> None:
     sel.current_selection_id = None
     sel.active_solo_wells.clear()
     sel.notes_text = ""
-    # Sync the Notes editor so it doesn't keep showing the previous dataset's
-    # text (the hydrator re-fills it only when the new dataset has notes). Mirrors
-    # the clear in ``reset_scopes._clear_sample_definitions``; no-op before it's
-    # built.
-    notes_edit = ctx.widgets.get_or_none("_notes_edit")
-    if notes_edit is not None:
-        blocked = notes_edit.blockSignals(True)
-        try:
-            notes_edit.clear()
-        finally:
-            notes_edit.blockSignals(blocked)
+    # Sync every Notes editor so none keeps showing the previous dataset's text
+    # (the hydrator re-fills them only when the new dataset has notes). Mirrors
+    # the clear in ``reset_scopes._clear_sample_definitions``; no-op for an
+    # editor that has not been built.
+    _clear_notes_editors(ctx)
 
 
 def _report_incomplete_wells(ctx) -> None:

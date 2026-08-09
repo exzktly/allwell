@@ -1242,15 +1242,103 @@ def toggle_log(ctx) -> None:
 
 
 
-def notes_schedule_save(ctx) -> None:
-    """Capture the Notes text and queue a debounced save.
+#: Every registered editor of the project notes, in no particular order. The
+#: same string lives in two places on screen — Sample Definitions → Notes is the
+#: long-form editor, Home carries the same text beside the plate — and both
+#: write through the helpers below rather than being read directly by the save
+#: path. One roster, so adding a third editor is one edit.
+NOTES_WIDGET_KEYS: tuple[str, ...] = ("_notes_edit", "_home_notes_edit")
+
+
+def notes_widgets(ctx):
+    """The notes editors that currently exist, as ``(key, widget)`` pairs.
+
+    Either can be absent: both pages build lazily, and a feature profile may
+    drop one of them entirely.
+    """
+    for key in NOTES_WIDGET_KEYS:
+        widget = ctx.widgets.get_or_none(key)
+        if widget is not None:
+            yield key, widget
+
+
+def commit_focused_notes(ctx) -> None:
+    """Fold an in-progress edit into the state slice before anything reads it.
+
+    The editors commit on focus-out, which is deliberate — a freeform notes box
+    should not autosave per keystroke. The cost is that every save path which
+    does *not* move focus first (the explicit Save button, the debounced
+    autosave, window close, a dataset swap) would otherwise persist whatever the
+    slice last held and silently drop what is on screen. That is why the save
+    path used to read the widget directly; with two editors that read has no
+    tiebreak, so the focused one is folded in here instead and the save path
+    reads one thing.
+    """
+    for _key, widget in notes_widgets(ctx):
+        try:
+            if widget.hasFocus():
+                ctx.state.selection.notes_text = widget.toPlainText()
+                return
+        except RuntimeError:
+            # The C++ side is gone (page torn down mid-save); nothing to commit.
+            continue
+
+
+def mirror_notes(ctx, *, source_key: str) -> None:
+    """Push the committed text into every *other* notes editor.
+
+    Without this: edit on Home, switch to Sample Definitions, and its box still
+    shows the previous text — then focusing out of it writes that stale text
+    back over the edit. Signals are blocked so mirroring is not itself read as
+    an edit.
+    """
+    text = ctx.state.selection.notes_text or ""
+    for key, widget in notes_widgets(ctx):
+        if key == source_key:
+            continue
+        try:
+            if widget.toPlainText() == text:
+                continue
+            blocked = widget.blockSignals(True)
+            try:
+                widget.setPlainText(text)
+            finally:
+                widget.blockSignals(blocked)
+        except RuntimeError:
+            continue
+
+
+def clear_notes_editors(ctx) -> None:
+    """Blank every notes editor, without either of them reading it as an edit.
+
+    Called when a dataset is swapped or the sample definitions are reset. The
+    slice is blanked by the caller; this keeps the boxes from going on showing
+    the previous dataset's text, which a focus-out would then write to the new
+    dataset.
+    """
+    for _key, widget in notes_widgets(ctx):
+        try:
+            blocked = widget.blockSignals(True)
+            try:
+                widget.clear()
+            finally:
+                widget.blockSignals(blocked)
+        except RuntimeError:
+            continue
+
+
+def notes_schedule_save(ctx, *, widget_key: str = "_notes_edit") -> None:
+    """Capture one editor's Notes text and queue a debounced save.
 
     The widget read must stay here (the registry never touches widgets);
-    the debounce + disk write live in the PersistenceRegistry.
+    the debounce + disk write live in the PersistenceRegistry. *widget_key*
+    names the editor that is committing, so the caller's own box wins and the
+    other is mirrored to match rather than competing with it.
     """
-    edit = ctx.widgets.get_or_none("_notes_edit")
+    edit = ctx.widgets.get_or_none(widget_key)
     if edit is not None:
         ctx.state.selection.notes_text = edit.toPlainText()
+    mirror_notes(ctx, source_key=widget_key)
     ctx.persistence.schedule_save("notes")
 
 

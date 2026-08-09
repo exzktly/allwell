@@ -11,6 +11,10 @@ import logging
 
 from PySide6.QtWidgets import QMessageBox
 
+from well_viewer.core.ui_helpers import (
+    commit_focused_notes as _commit_focused_notes,
+)
+
 _logger = logging.getLogger("well_viewer")
 
 
@@ -47,12 +51,11 @@ def autosave_to_pipeline_info(ctx) -> None:
     ds = app._app_state.dataset
     if not ds.data_dir or app._app_state.selection.v2_writes_disabled:
         return
-    notes_edit = getattr(app, "_notes_edit", None)
-    notes_text = (
-        notes_edit.toPlainText() if notes_edit is not None
-        else app._app_state.selection.notes_text or ""
-    )
-    app._app_state.selection.notes_text = notes_text
+    # Fold an in-progress edit in first, then read the slice — the slice is the
+    # single truth, and with two notes editors on screen a direct widget read
+    # here has no tiebreak. See ui_helpers.commit_focused_notes.
+    _commit_focused_notes(ctx)
+    notes_text = app._app_state.selection.notes_text or ""
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
     plot_groups = list(app._app_state.selection.plot_groups or [])
@@ -89,12 +92,8 @@ def save_to_pipeline_info(app) -> None:
             "so writing them is disabled to avoid corrupting the file. See the log.",
         )
         return
-    notes_edit = getattr(app, "_notes_edit", None)
-    notes_text = (
-        notes_edit.toPlainText() if notes_edit is not None
-        else app._app_state.selection.notes_text or ""
-    )
-    app._app_state.selection.notes_text = notes_text
+    _commit_focused_notes(app._ctx)
+    notes_text = app._app_state.selection.notes_text or ""
     selections = list(app._app_state.selection.selections or [])
     current_id = app._app_state.selection.current_selection_id
     plot_groups = list(app._app_state.selection.plot_groups or [])

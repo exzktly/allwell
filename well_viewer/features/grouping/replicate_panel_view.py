@@ -343,7 +343,9 @@ def build_sample_definitions_centre(ctx, parent: QWidget) -> None:
     # (persistence._apply_unified_state) writes migrated notes back through
     # ctx.widgets; register() also stamps app._notes_edit for the legacy readers.
     notes_edit = ctx.widgets.register(
-        "_notes_edit", _NotesEdit(notes_tab, lambda: notes_schedule_save(ctx)))
+        "_notes_edit",
+        _NotesEdit(notes_tab,
+                   lambda: notes_schedule_save(ctx, widget_key="_notes_edit")))
     notes_edit.setPlaceholderText("Project notes…")
     notes_edit.setPlainText(ctx.state.selection.notes_text or "")
     nl.addWidget(notes_edit, 1)

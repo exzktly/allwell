@@ -6268,6 +6268,21 @@ fixture (it doesn't help).
    ~12 minutes with the machine to itself and passes — and a batch cut off here
    writes no report, so too tight a ceiling reports green tests as a failure.
 
+6. **Install the application stylesheet once per module, never per test.**
+   `QApplication.setStyleSheet` re-polishes every live widget in the process, and
+   because rule 1's leak means that set only grows, a single call late in the fast
+   lane costs tens of seconds. A function-scoped fixture that installs
+   `theme.qss()` therefore multiplies that cost by the file's case count — enough
+   on its own to triple the lane's wall time. Files that need the real sheet
+   (`test_theme_roles_render.py`, `test_control_band_widget.py`,
+   `test_disabled_controls_look_disabled.py`, `test_analyze_narrow_sidebar_fit.py`,
+   `test_analyze_help_section.py`) install it from a `scope="module"` fixture and
+   pay for it once. Applying the sheet to a single host widget instead
+   (`test_control_row_spacing.py`) is cheaper again, and is the right shape
+   whenever the assertion does not need it applied app-wide. `--durations=N` is
+   how this shows up: the cost lands in `setup`, not in the test body, and the
+   same file run on its own is fast because almost nothing is alive yet.
+
 **The slow lane runs nightly, not on PRs** — `.github/workflows/slow-lane.yml`,
 six sharded runners, plus `workflow_dispatch` for on demand. It is not a PR gate
 because it takes minutes rather than seconds and its per-test memory profile is

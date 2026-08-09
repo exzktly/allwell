@@ -188,29 +188,46 @@ def wrap_with_empty_state(
 _DATA_GATED_OBJECT_NAMES = ("TabCtrl", "ControlBand")
 
 
-def refresh_plot_empty_states(win: Any) -> None:
-    """Flip every registered plot-empty-state stack based on whether a
-    dataset is currently loaded. Safe to call before any stacks have been
-    registered (no-ops)."""
+def refresh_empty_state_pages(win: Any) -> None:
+    """Flip every registered stack to the page its current state calls for.
+
+    Split out of :func:`refresh_plot_empty_states` because this half is cheap —
+    one ``currentIndex()`` comparison per registered stack — while the
+    control-bar gating below it walks the whole widget tree twice. Callers that
+    fire on every selection change want this one; callers reacting to a dataset
+    load want the full refresh.
+    """
     stacks = getattr(win, "_plot_empty_stacks", None) or []
-    has_data = bool(win._app_state.dataset.well_paths)
-    target = 1 if has_data else 0
+    target = 1 if bool(win._app_state.dataset.well_paths) else 0
     for stack in stacks:
         try:
             if stack.currentIndex() != target:
                 stack.setCurrentIndex(target)
         except Exception:
             swallowed()  # was: pass (silent except)
+
+
+def refresh_plot_empty_states(win: Any) -> None:
+    """Flip every registered plot-empty-state stack based on whether a
+    dataset is currently loaded, and gate the per-tab control bars to match.
+    Safe to call before any stacks have been registered (no-ops)."""
+    refresh_empty_state_pages(win)
     # Grey out the per-tab control bars until a dataset is loaded. Disabling the
     # container cascades to its children; re-enabling restores each child's own
     # enabled state (so tab-local logic like smFISH's combo gating still wins).
-    if isinstance(win, QWidget):
-        for name in _DATA_GATED_OBJECT_NAMES:
-            for bar in win.findChildren(QWidget, name):
-                try:
-                    bar.setEnabled(has_data)
-                except Exception:
-                    swallowed()
+    #
+    # This is the expensive half: two recursive ``findChildren`` walks over a
+    # widget tree of ~1,800 QObjects. It answers a question only a dataset load
+    # can change, so it stays out of ``refresh_empty_state_pages``.
+    if not isinstance(win, QWidget):
+        return
+    has_data = bool(win._app_state.dataset.well_paths)
+    for name in _DATA_GATED_OBJECT_NAMES:
+        for bar in win.findChildren(QWidget, name):
+            try:
+                bar.setEnabled(has_data)
+            except Exception:
+                swallowed()
 
 
 def build_section_header(

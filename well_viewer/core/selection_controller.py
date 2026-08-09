@@ -149,7 +149,17 @@ def apply_selection_refresh(ctx) -> None:
     With Split View a single change can touch two panes, so the per-tab
     refresh runs for each visible leaf; off split this is exactly one tab and
     the behaviour is unchanged.
+
+    The empty-state pass runs first and covers **every** registered stack, not
+    just the visible tabs. It has to: the loop below only touches
+    ``_visible_tabs``, and a feature carrying an ``on_selection_changed`` hook
+    (Review CSV, smFISH, Multivariate, Spatial, Bar Plots, Scatter) returns
+    without ever reaching ``plot_orchestrator.redraw_app``, which is where the
+    other empty-state refresh lives. Anything less leaves a background page
+    showing whatever state it held when the user last looked at it.
     """
+    from well_viewer.core.ui_helpers import refresh_empty_state_pages
+    refresh_empty_state_pages(app)
     app._refresh_sidebar_map()
     redrew = False
     for tab in _visible_tabs(ctx):

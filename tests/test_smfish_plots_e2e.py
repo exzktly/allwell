@@ -248,3 +248,50 @@ def test_the_count_cutoff_persists_and_reloads(loaded_app_smfish, mini_dataset_s
     assert get_thresh_count_on(reloaded, SMFISH_CHANNEL) == 2.0
     assert _select(reloaded, "A01") is reloaded
     assert _agg_x(reloaded) == 4.0, "the reloaded cutoff did not reach the plot"
+
+
+# ── the heat map, which refused these aggregations until it was told counts
+#    have a cutoff of their own ────────────────────────────────────────────────
+
+def test_heat_map_fraction_matches_the_bar_plot(loaded_app_smfish):
+    """The loop the dropdown gate used to prevent closing.
+
+    The heat map's arithmetic always resolved the right cutoff; only its
+    Property gate refused, so this asserts the number it produces agrees with
+    the one the bar plot reports for the same well and cutoff — 3 of A01's 6
+    cells carry more than 2 spots.
+    """
+    from well_viewer.core.channel_state_controller import (
+        refresh_heatmap_aggregation_options, set_thresh_count_on,
+    )
+    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+    from well_viewer.features.heatmap import controller as HM
+
+    ctx = _select(loaded_app_smfish._ctx, "A01")
+    set_thresh_count_on(ctx, 2.0, SMFISH_CHANNEL)
+
+    # The gate now admits the count Property...
+    assert metric_has_own_cutoff("smfish_count") is True
+    refresh_heatmap_aggregation_options(ctx)
+    cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
+    if cb is not None:
+        model = cb.model()
+        item = model.item(cb.findText(HM.METRIC_FRACTION))
+        assert item is None or item.isEnabled(), (
+            "the heat map still refuses fraction-on for a metric that has a "
+            "cutoff of its own"
+        )
+
+    # ...and the number behind it is the one the other plots already report.
+    from well_viewer.core.channel_state_controller import (
+        get_all_fluor_gates, on_cutoff_for_column,
+    )
+    cutoff = on_cutoff_for_column(ctx, COUNT_COL, channel=SMFISH_CHANNEL)
+    assert cutoff == 2.0
+    frac = HM._cell_value(ctx, ["A01"], TP, HM.METRIC_FRACTION, COUNT_COL,
+                          cutoff, get_all_fluor_gates(ctx))
+    assert frac == pytest.approx(0.5)
+
+    mean_above = HM._cell_value(ctx, ["A01"], TP, HM.METRIC_MEAN, COUNT_COL,
+                                cutoff, get_all_fluor_gates(ctx))
+    assert mean_above == pytest.approx(4.0)

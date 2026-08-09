@@ -1275,7 +1275,12 @@ place cells in a grid that mirrors your plate or your experimental design.
   dropdown.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
-    *Rep-set avg*).
+    *Rep-set avg*). **Mean above threshold** and **Fraction above threshold**
+    are offered only for a Property that has an ON cutoff of its own — Mean
+    Intensity (ThreshFracOn) and smFISH Count (ThreshCountOn). They grey out for
+    Total / Max / Min / Std intensity, because the cutoff is a *mean* intensity
+    and cutting a total with it would compare two different scales; those fall
+    back to *Mean (all cells)*.
   - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`; its position
     persists across reopen).
 

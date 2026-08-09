@@ -129,6 +129,34 @@ def cutoff_kind_for_metric_key(metric_key: str) -> str:
     return CUTOFF_INTENSITY
 
 
+#: The intensity metric the per-channel ThreshFracOn cutoff is defined against.
+#: Stated once, here, because it is a fact about the gating model rather than
+#: about any one plot: the Cell Gating tab's cutoff is a *mean* intensity, which
+#: is why the other intensity flavours have no ON cutoff of their own.
+GATING_ANCHOR_METRIC = "mean_intensity"
+
+
+def metric_has_own_cutoff(metric_key: str) -> bool:
+    """True when *metric_key* is measured against a cutoff defined on itself.
+
+    The question the threshold-based aggregations ("mean above threshold",
+    "fraction above threshold") actually need answered, and it is not the same
+    as :func:`cutoff_kind_for_metric_key`. Every count metric qualifies: its
+    cutoff, ThreshCountOn, is a spot tally compared against spot tallies. Of the
+    intensity flavours only :data:`GATING_ANCHOR_METRIC` does, because
+    ThreshFracOn is a mean intensity — comparing a *total* intensity (area ×
+    mean, orders of magnitude larger) against it is the same units error that
+    feeding a spot tally a brightness was, relocated.
+
+    Derived from ``kind`` rather than a literal pair of keys, so a second count
+    metric is covered the day it is declared in :data:`METRICS`.
+    """
+    m = METRIC_BY_KEY.get(metric_key)
+    if m is None:
+        return False
+    return m.kind == "count" or m.key == GATING_ANCHOR_METRIC
+
+
 def cutoff_kind_for_column(col: str) -> str:
     """Which ON cutoff the value column *col* is measured against.
 

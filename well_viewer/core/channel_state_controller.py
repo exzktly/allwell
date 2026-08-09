@@ -714,13 +714,22 @@ def populate_metric_combo(
 
 
 def refresh_heatmap_aggregation_options(ctx) -> None:
-    """Grey out threshold-based heatmap aggregations for non-MFI properties.
+    """Grey out the threshold-based heatmap aggregations for metrics that have
+    no cutoff of their own.
 
-    The ThreshFracOn cut is defined against mean fluorescence intensity
-    (see Cell Gating tab), so "Mean above threshold" and "Fraction above
-    threshold" only make sense when the active Property is MFI. When the
-    user picks Total / Max / Min / Std / smFISH Count, those options
-    disable so they're not silently misapplied.
+    "Mean above threshold" and "Fraction above threshold" need a cutoff the
+    active Property is actually measured against. Mean intensity has one
+    (ThreshFracOn) and the spot counts have one (ThreshCountOn), so both offer
+    these aggregations — the heat map computes them the same way the bar, line
+    and scatter paths already do. Total / Max / Min / Std do not: ThreshFracOn is
+    a *mean* intensity, and cutting a total (area × mean) with it would silently
+    misapply a number from another scale. Those stay disabled and fall back to
+    "Mean (all cells)".
+
+    The rule is ``metric_registry.metric_has_own_cutoff``, not an equality
+    against mean intensity: that spelling also disabled the counts, on the
+    premise that the only per-channel cutoff was a brightness, which stopped
+    being true when counts got their own.
 
     A8: takes ``ctx``; the heatmap metric combo comes from ``ctx.widgets`` and
     the active metric from typed state, so it names no god-object.
@@ -731,7 +740,8 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
     from well_viewer.features.heatmap.controller import (
         METRIC_MEAN, METRIC_FRACTION,
     )
-    is_mfi = ctx.state.channel.active_metric == "mean_intensity"
+    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+    thresholdable = metric_has_own_cutoff(ctx.state.channel.active_metric)
     model = cb.model()
     if model is None:
         return
@@ -741,10 +751,10 @@ def refresh_heatmap_aggregation_options(ctx) -> None:
             continue
         item = model.item(idx)
         if item is not None:
-            item.setEnabled(is_mfi)
+            item.setEnabled(thresholdable)
     # If the currently selected aggregation just went unavailable, fall
     # back to "Mean (all cells)" so the heatmap stays valid.
-    if not is_mfi:
+    if not thresholdable:
         current = str(cb.currentText() or "")
         if current in (METRIC_MEAN, METRIC_FRACTION):
             from well_viewer.features.heatmap.controller import METRIC_MEAN_ALL

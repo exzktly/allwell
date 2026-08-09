@@ -305,7 +305,17 @@ def test_work_is_counted_from_state():
 # ── next step ───────────────────────────────────────────────────────────────
 
 def test_no_dataset_offers_to_open_one():
-    assert hc.next_step(_ctx(None, data_dir=None))["action"] == "open"
+    assert hc.next_step(_ctx(None, wells=(), data_dir=None))["action"] == "open"
+
+
+def test_a_folder_that_opened_but_holds_no_wells_still_offers_to_open_one():
+    """``data_dir`` is set when a load *begins*, and for a folder that turns out
+    to hold nothing readable it stays set. The page is gated on the wells — the
+    same thing the shared empty state covering it is gated on — so the two
+    cannot describe the same moment differently."""
+    step = hc.next_step(_ctx(None, wells=(), data_dir="/data/plate7"))
+    assert step["action"] == "open"
+    assert not hc.has_dataset(_ctx(None, wells=(), data_dir="/data/plate7"))
 
 
 def test_the_ladder_puts_failures_above_everything_else():

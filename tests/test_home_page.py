@@ -209,6 +209,85 @@ def test_repainting_twice_leaves_one_set_of_rows(loaded_app):
         "a repaint must replace the rows, not append to them")
 
 
+# ── the rail, across a navigation ───────────────────────────────────────────
+#
+# These are the only tests in this file that measure geometry, so they are the
+# only ones that need the window actually shown and its events pumped: an
+# unshown ``WellViewerApp`` has never laid anything out, and every height reads
+# as a widget default.
+
+_RAIL_W, _RAIL_H = 1600, 1000
+
+
+def _laid_out(app, qapp):
+    app.resize(_RAIL_W, _RAIL_H)
+    app.show()
+    for _ in range(15):
+        qapp.processEvents()
+    return app
+
+
+def _goto(app, qapp, name: str) -> None:
+    app._notebook.setCurrentByName(name)
+    for _ in range(5):
+        qapp.processEvents()
+
+
+def test_leaving_home_and_coming_back_leaves_the_rail_links_alone(loaded_app, qapp):
+    """The reported defect, in the sequence it was reported in.
+
+    Home is the one page that shows no rail frame — its plate is on the page,
+    so the rail's picker would be a second one. ``on_tab_change`` hides every
+    frame before dispatching, so on Home the rail's nav was the only growable
+    item left in a column stretched to the viewport, and its rows spread from
+    33px to 81px.
+    """
+    app = _laid_out(loaded_app, qapp)
+    nav = app._section_nav
+    hint = nav.sizeHint().height()
+
+    _goto(app, qapp, "Plotting")
+    away = nav.height()
+    _goto(app, qapp, "Home")
+
+    assert away == hint, "premise: the nav sits at its hint on an ordinary page"
+    assert nav.height() == hint, (
+        f"back on Home the nav is {nav.height()}px against a hint of {hint}px — "
+        "the links have spread to fill the rail")
+
+
+def test_a_page_with_a_rail_body_still_gets_the_space(loaded_app, qapp):
+    """The other half: the trailing spacer must not compete with the frame it
+    was added to sit beside. Plotting's rail body owns the slack."""
+    app = _laid_out(loaded_app, qapp)
+    _goto(app, qapp, "Plotting")
+    frame = app._sidebar_main_frame
+
+    assert frame.isVisible()
+    assert frame.height() > app._section_nav.height(), (
+        "the rail's per-page frame should still take the column's spare height")
+
+
+# ── before a dataset is open ────────────────────────────────────────────────
+
+def test_home_shows_the_load_prompt_rather_than_an_unfilled_page(viewer_app):
+    """Home is the page the app launches on, so this is the first screen."""
+    from well_viewer.core.ui_helpers import NO_DATASET_TITLE
+
+    stack = viewer_app._ctx.widgets.get_or_none("_home_empty_stack")
+    assert stack is not None, "premise: Home's body is wrapped"
+    assert stack.currentIndex() == 0, "an unfilled Home is showing instead"
+    placeholder = stack._empty_placeholder
+    assert placeholder._text.text() == NO_DATASET_TITLE
+    assert placeholder._action.text() == "Open a dataset…"
+
+
+def test_the_page_comes_back_once_a_dataset_is_open(loaded_app):
+    stack = loaded_app._ctx.widgets.get_or_none("_home_empty_stack")
+    assert stack is not None
+    assert stack.currentIndex() == 1, "the placeholder is still covering Home"
+
+
 def test_the_record_survives_a_round_trip_through_the_sidecar(loaded_app, tmp_path):
     """What the page reads is what the pipeline writes — same shape, no
     adapter in between."""

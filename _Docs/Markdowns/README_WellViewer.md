@@ -921,10 +921,16 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 
 ### Home
 
-The page Review opens on, with or without a dataset. It answers the four things
-you want to know before doing anything else: what this plate is, whether the run
-that produced it actually finished, what it was run with, and what you have
-already done to it.
+The page Review opens on. It answers the four things you want to know before
+doing anything else: what this plate is, whether the run that produced it
+actually finished, what it was run with, and what you have already done to it.
+
+**Before you open anything** it shows the same "Load a directory." prompt every
+other page in Review shows when there is no dataset — with an **Open a
+dataset…** button on it, since this is the page the app starts on. The button
+opens the same folder picker as *Open…* at the top of the left rail (⌘O); there
+is one dialog, not two. Nothing else on the page is drawn until a dataset is
+open, because there would be nothing in it to read.
 
 **It reports; it does not measure.** Working out how much of each well's input
 its output covers means opening an archive and reading a whole CSV for every

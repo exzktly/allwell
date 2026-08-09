@@ -66,9 +66,38 @@ def _clear(host: QWidget) -> None:
 
 
 def activate_home(ctx) -> None:
-    """Fired when the page is shown."""
+    """Fired when the page is shown.
+
+    Home is the one page that shows **no rail frame**. Every other feature's
+    activation hook re-shows one of the sidebar's per-page frames, which
+    ``on_tab_change`` has just hidden; Home does not, because its own plate is
+    on the page and the rail's picker would be a second one on screen.
+
+    That used to leave the rail's nav as the only growable item in its column,
+    so its links spread over the full height. The column now carries a trailing
+    spacer and ``RailNav`` refuses to exceed its size hint, so a page with no
+    rail body is a supported state rather than one that happens to work.
+    """
+    hide_rail_body(ctx)
     resync_record(ctx)
     refresh_home(ctx)
+
+
+def hide_rail_body(ctx) -> None:
+    """Put the rail into the state Home wants: navigation, and nothing else.
+
+    ``on_tab_change`` has already hidden every frame by the time
+    :func:`activate_home` runs, so this is redundant there — and it is not
+    redundant at startup, which is the case it exists for. The landing page is
+    selected before the change handler is connected
+    (``core/centre_view.build_centre``), so the handler never fires for it and
+    the rail keeps whatever it was built showing. Without this, Home had two
+    appearances: the plate picker on launch, none after visiting another page
+    and coming back.
+    """
+    frame = ctx.widgets.get_or_none("_sidebar_main_frame")
+    if frame is not None:
+        frame.setVisible(False)
 
 
 def resync_record(ctx) -> None:
@@ -393,6 +422,9 @@ def run_home_action(ctx, action: str) -> None:
     profile does not include — do nothing rather than half-doing something.
     """
     with swallow(f"home action {action}"):
+        if action == "open":
+            _open_dataset(ctx)
+            return
         if action == "reload":
             _reload_dataset(ctx)
             return
@@ -407,6 +439,19 @@ def run_home_action(ctx, action: str) -> None:
             notebook = getattr(ctx.window, "_notebook", None)
             if notebook is not None:
                 notebook.setCurrentByName(page)
+
+
+def _open_dataset(ctx) -> None:
+    """The folder picker, reached from Home's empty state and its next-step row.
+
+    The window's own ``_browse`` rather than a second ``QFileDialog`` here: the
+    rail head's Open… menu action already calls it, and it is the only place
+    that knows what happens after a folder is chosen — the picker is followed by
+    a deferred load, not a direct one.
+    """
+    browse = getattr(ctx.window, "_browse", None)
+    if callable(browse):
+        browse()
 
 
 def _reload_dataset(ctx) -> None:

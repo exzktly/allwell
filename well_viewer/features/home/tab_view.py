@@ -63,7 +63,24 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setObjectName("HomeScroll")
-    outer.addWidget(scroll)
+    # Before a dataset is open there is nothing here to report, and a page of
+    # em-dashes under a masthead reading "No dataset open" describes its own
+    # emptiness at length rather than saying what to do about it. Home takes the
+    # same placeholder every other Review page shows, through the same registry,
+    # so the wording and the moment of the swap are shared rather than
+    # re-decided here. No ``reason``: Home is gated on the dataset alone.
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+
+    stack = wrap_with_empty_state(ctx.window, scroll, icon="home")
+    reg.register("_home_empty_stack", stack)
+    outer.addWidget(stack)
+    # ...but Home is the page the app opens on, so pointing at a control in the
+    # rail and stopping there is weaker here than anywhere else. The button runs
+    # the same action the masthead and the next-step row use, so "open a
+    # dataset" cannot come to mean two things.
+    placeholder = getattr(stack, "_empty_placeholder", None)
+    if placeholder is not None:
+        placeholder.setAction("Open a dataset…", _action_handler(ctx, "open"))
 
     page = QWidget(scroll)
     scroll.setWidget(page)
@@ -80,7 +97,12 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     body.addWidget(_build_your_work(ctx, page, reg))
     body.addStretch(1)
 
-    from .controller import refresh_home
+    from .controller import hide_rail_body, refresh_home
+    # Home is the landing page, and the landing page's activation hook never
+    # fires — ``build_centre`` selects it before connecting the change handler.
+    # So the rail has to be put into Home's state here, or the page looks one
+    # way on launch and another way every time after.
+    hide_rail_body(ctx)
     refresh_home(ctx)
 
 

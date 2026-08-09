@@ -1070,12 +1070,21 @@ loaded (the `.../out` path in the split case), not the climbed display name.
 #### Empty states and build failures
 
 `ui_helpers.wrap_with_empty_state` wraps every centre tab whose body needs a
-dataset — the plots, Statistics, Spatial, Review CSV, Batch Export and smFISH —
-so a tab with nothing to show renders the same placeholder rather than an empty
-table, a blank panel, or a bare matplotlib canvas that reads as a failure. The
-wrap registers a `QStackedWidget` on `win._plot_empty_stacks` (page 0 the
-`EmptyState`, page 1 the body) and the refresh helpers flip all of them together,
-which is what keeps the wording and the moment of the swap identical across tabs.
+dataset — Home, the plots, Statistics, Spatial, Review CSV, Batch Export and
+smFISH — so a tab with nothing to show renders the same placeholder rather than
+an empty table, a blank panel, or a bare matplotlib canvas that reads as a
+failure. The wrap registers a `QStackedWidget` on `win._plot_empty_stacks`
+(page 0 the `EmptyState`, page 1 the body) and the refresh helpers flip all of
+them together, which is what keeps the wording and the moment of the swap
+identical across tabs.
+
+**A placeholder may carry one action.** `EmptyState.setAction(label, on_click)`
+adds a button under the hint; without it there is no button at all, which is
+what every site but Home wants — their hint names a control somewhere else and
+a button would be a second way to say it. Home is the page the application opens
+on, so its placeholder is the first screen and gets an explicit *Open a
+dataset…*. The refresher rewrites only a placeholder's text, hint and icon, so
+an action set once at build time survives every pass.
 
 **The placeholder says which "nothing" it is; the axes carry per-plot causes.**
 Each wrap site may pass a `reason(ctx) -> EmptyReason | None`, called on every
@@ -1275,6 +1284,34 @@ function on the page.
 Everything computable lives in `collect.py`, Qt-free and ctx-first, so the whole
 page is exercised in the fast lane against a plain namespace; `controller.py`
 paints widgets from what it returns and `tab_view.py` holds the arrangement.
+
+**Before a dataset is open, the page is not shown at all.** Home's body is
+wrapped in the shared `wrap_with_empty_state` stack like every other Review
+page, so the same "Load a directory." placeholder covers it and the same
+refresher flips it — a landing page reporting on nothing would otherwise open
+the application on a masthead reading "No dataset open" above an empty plate and
+a column of em-dashes. The one thing Home adds is an action on the placeholder
+itself (`EmptyState.setAction`, optional and unused by the other twelve sites):
+the hint names a control in the rail, and on the page the app launches on it is
+worth also being able to press the thing. The button runs `run_home_action(ctx,
+"open")`, the same route the next-step row takes, which reaches the window's own
+`_browse` rather than opening a second file dialog of its own.
+
+Home's own "is there a dataset" predicate is `collect.has_dataset`, which tests
+the **wells** rather than `data_dir`. The two disagree for the whole duration of
+a load — `data_dir` is set when one begins — and permanently for a folder that
+opened and yielded nothing readable. Since the placeholder covering the page is
+gated on the wells, a page gated on anything else could describe a dataset the
+placeholder says is not there.
+
+**Home is the one page with no rail body.** Every other feature's activation
+hook re-shows one of the sidebar's per-page frames, which `on_tab_change` has
+just hidden; Home shows none, because its plate is on the page and the rail's
+picker would be a second one on screen. That is a supported state rather than an
+accident: `RailNav` caps itself at its size hint and the rail column ends in a
+stretch-0 spacer, so the surplus height has somewhere to go. Before both, the
+nav was the only growable item left in a column stretched to the viewport and
+its rows spread from 33px to 81px on every visit to Home.
 
 Three rules the page is built around:
 

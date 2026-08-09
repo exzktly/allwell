@@ -107,6 +107,20 @@ def record_state(ctx) -> str:
     return "ok"
 
 
+def has_dataset(ctx) -> bool:
+    """Whether there is a dataset to report on.
+
+    The wells, not ``data_dir``. The two disagree for a whole moment of every
+    load — ``data_dir`` is set when the load *begins* and the wells arrive as it
+    runs — and they disagree permanently for a folder that opened but yielded
+    nothing readable. Home's empty state is flipped by the shared refresher,
+    which tests the wells (``core/ui_helpers.refresh_empty_state_pages``), so a
+    page testing something else could contradict the placeholder covering it.
+    """
+    dataset = getattr(ctx.state, "dataset", None)
+    return bool(getattr(dataset, "well_paths", None))
+
+
 def record_reason(ctx) -> str:
     """One sentence naming why a figure is unavailable, for the em-dashes."""
     return {
@@ -466,7 +480,7 @@ def next_step(ctx) -> dict:
     and disappears between datasets moves everything below it and destroys the
     reader's sense of where things are.
     """
-    if getattr(getattr(ctx.state, "dataset", None), "data_dir", None) is None:
+    if not has_dataset(ctx):
         return {"severity": "accent", "text": "No dataset open.",
                 "action": "open", "label": "Open a dataset"}
 

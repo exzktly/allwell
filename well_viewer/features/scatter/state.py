@@ -28,10 +28,14 @@ class ScatterState:
     "Show gates" toggle). ``apply_gates_to_points`` — plot only the cells inside
     the scatter gates, instead of the full cloud with the gates drawn over it
     (the per-cell scatter is the one view that does not filter by its own gates
-    unless asked; default off keeps that).
+    unless asked; default off keeps that). ``cut_status_posted`` — this tab put
+    the "every cell was cut" notice on the status bar and still owns it, so a
+    later successful redraw knows to take its own message down without
+    clobbering one another part of the app has since posted there.
     """
 
     mode: str = "cells"
     color_by_tp: bool = False
     gates_hidden: bool = False
     apply_gates_to_points: bool = False
+    cut_status_posted: bool = False

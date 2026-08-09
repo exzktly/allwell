@@ -399,7 +399,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # it belongs beside the images it thresholds. A channel dropdown chooses
     # which channel it applies to (its own ThreshFracOn, shared with the Cell
     # Gating tab / plot tabs); the stepper edits that channel.
-    _on_thr_lbl = QLabel("ON threshold", action_row)
+    _on_thr_lbl = reg.register(
+        "_image_table_thresh_frac_lbl", QLabel("ON threshold", action_row))
     _on_thr_lbl.setObjectName("Muted")
     tr.addWidget(_on_thr_lbl)
     thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
@@ -428,13 +429,14 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
 
     def _sync_thresh_for_channel(_chan: str) -> None:
-        from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        val = get_thresh_frac_on(ctx, _thresh_chan())
-        blocked = thresh_stepper.blockSignals(True)
-        try:
-            thresh_stepper.setValue(float(val))
-        finally:
-            thresh_stepper.blockSignals(blocked)
+        # Routed through the shared refresh rather than a local setValue: the
+        # picked channel decides caption, range, decimals and suffix as well as
+        # the value, and a bare setValue would clamp a -1 count cutoff to the
+        # intensity range's 0 — a different population, shown as if deliberate.
+        from well_viewer.core.channel_state_controller import (
+            refresh_thresh_frac_quick_edit,
+        )
+        refresh_thresh_frac_quick_edit(ctx)
     thresh_chan_cb.currentTextChanged.connect(_sync_thresh_for_channel)
     tr.addWidget(thresh_stepper)
 

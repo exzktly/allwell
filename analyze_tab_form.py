@@ -65,8 +65,9 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         parent.layout().addWidget(self._build_resume_banner(parent))
         self._build_open_pinfo_row(parent)
         self._build_schema_section(parent)
-        self._build_channel_tokens_section(parent)
+        # Folder first, then what is in it; Schema leads both (see its hint).
         self._build_folders_section(parent)
+        self._build_channel_tokens_section(parent)
         self._refresh_schema_preview()
         # Quality Control leads the optional sections and stays open: its
         # correction stages are common tuning knobs, not an afterthought.

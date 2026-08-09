@@ -215,7 +215,10 @@ def build_heatmap_layout_sidebar(ctx, parent: QWidget) -> QWidget:
     body_layout.setSpacing(2)
     scroll.setWidget(body)
 
-    hdr = QLabel("HEATMAP LAYOUT", body)
+    # Sentence case, like every other header sharing this style: the all-caps
+    # spelling was compensating for the old caption-sized eyebrow treatment and
+    # reads as shouting now the headers are a real heading size.
+    hdr = QLabel("Heatmap layout", body)
     hdr.setObjectName("SidebarHeader")
     hdr.setProperty("role", "header")
     body_layout.addWidget(hdr)

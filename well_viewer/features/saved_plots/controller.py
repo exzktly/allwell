@@ -70,7 +70,7 @@ def restore_saved_plot(ctx, plot_id: str) -> None:
     rec = get_store(ctx).get(plot_id)
     if rec is None:
         return
-    # Re-apply the gating block (fluor gates / ThreshFracOn / scatter-gate config)
+    # Re-apply the gating block (fluor gates / ON cutoffs / scatter-gate config)
     # FIRST so the Included population that shapes every downstream plot matches
     # the saved figure — the async gating worker recomputes it, and the redraws
     # below (and the worker's own completion redraw) reflect it.
@@ -117,7 +117,7 @@ def _reapply_target_tab(ctx, tab: str) -> None:
 
 def _restore_thresholds(ctx, block) -> None:
     """Re-apply a saved plot's gating *block* (as produced by
-    ``build_gating_block``): fluor gates, ThreshFracOn cuts, and the scatter-gate
+    ``build_gating_block``): fluor gates, ON cutoffs, and the scatter-gate
     inclusion/thresholding config.
 
     Delegates to ``persistence.cell_gating.restore_gating_block``, which resets

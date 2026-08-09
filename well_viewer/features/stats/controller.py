@@ -47,7 +47,8 @@ def collect_group_values(
     val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
+            threshold = float(on_cutoff_for_column(
+                ctx, val_col, channel=ctx.state.channel.active_channel))
         except Exception:
             threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
@@ -72,7 +73,8 @@ def collect_group_per_cell_values(
     val_col = val_col or ctx.state.channel.active_val_col
     if threshold is None:
         try:
-            threshold = float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
+            threshold = float(on_cutoff_for_column(
+                ctx, val_col, channel=ctx.state.channel.active_channel))
         except Exception:
             threshold = float(ctx.state.channel.threshold)
     threshold = float(threshold)
@@ -495,7 +497,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLay
 from well_viewer.domain.plate_layout import WELL_COLORS
 from well_viewer.domain.batch_models import BarGroup
 from well_viewer.core.ui_helpers import ask_name_dialog as _ask_name_dialog, clear_layout as _clear_layout
-from well_viewer.core.channel_state_controller import get_thresh_frac_on, refresh_stats_property_combo, set_active_metric
+from well_viewer.core.channel_state_controller import on_cutoff_for_column, refresh_stats_property_combo, set_active_metric
 from well_viewer.core.safe import swallowed
 # A8 teardown: the stats group-editor controllers now take ``ctx`` and derive
 # the loaded / visible rep-sets and their rank colours through the pure DOMAIN
@@ -827,22 +829,20 @@ def stats_refresh_colors(ctx) -> None:
 
 
 def threshold_for_val_col(ctx, val_col: str) -> float:
-    """The ThreshFracOn cutoff for a value column (per-channel Cell-Gating cut).
+    """The ON cutoff for a value column (the per-channel Cell-Gating cut).
 
-    Ratio columns have no per-channel cut → the global threshold. Keyed off the
-    passed ``val_col`` (not the live widget) so it's reusable at Saved-Plot
-    re-run time."""
+    Ratio columns have no per-channel cut → the global threshold. Everything
+    else defers to ``on_cutoff_for_column``, which picks ThreshFracOn or
+    ThreshCountOn from what the column measures. Keyed off the passed
+    ``val_col`` (not the live widget) so it's reusable at Saved-Plot re-run
+    time."""
     if is_ratio_key(val_col):
         return float(ctx.state.channel.threshold)
-    # val_col is "<channel>_mean_intensity" or "<channel>_smfish_count".
-    if "_" in val_col:
-        channel = val_col.split("_", 1)[0]
-        return float(get_thresh_frac_on(ctx, channel))
-    return float(get_thresh_frac_on(ctx, ctx.state.channel.active_channel))
+    return float(on_cutoff_for_column(ctx, val_col))
 
 
 def stats_active_threshold(ctx) -> float:
-    """The per-channel ThreshFracOn for the currently-selected stats value column."""
+    """The per-channel ON cutoff for the currently-selected stats value column."""
     return threshold_for_val_col(ctx, stats_active_val_col(ctx))
 
 

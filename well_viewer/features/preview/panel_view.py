@@ -61,7 +61,7 @@ refresh_review_image_binary_btn = _lazy(_RI_RENDER, "refresh_review_image_binary
 toggle_review_image_outline = _lazy(_RI_RENDER, "toggle_review_image_outline")
 refresh_review_image_outline_btn = _lazy(_RI_RENDER, "refresh_review_image_outline_btn")
 toggle_selected_review_cell = _lazy(_RI_RENDER, "toggle_selected_review_cell")
-set_thresh_frac_on = _lazy("well_viewer.core.channel_state_controller", "set_thresh_frac_on")
+set_on_cutoff = _lazy("well_viewer.core.channel_state_controller", "set_on_cutoff")
 
 
 def build_review_image_panel(ctx, parent: QWidget) -> None:
@@ -253,8 +253,9 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
     # The QC debris-gate controls now live on the Sample Definitions → Cell
     # Gating tab (a fundamental inclusion layer alongside FluorGating / scatter
     # gates). This overlay still *renders* the QC verdict — excluded cells show
-    # here. The per-channel ON/OFF intensity threshold (ThreshFracOn) IS editable
-    # here again, via the inline "ON threshold" quick-edit on the control row above.
+    # here. The per-channel ON cutoff IS editable here again, via the inline
+    # quick-edit on the control row above — ThreshFracOn for an intensity
+    # Property, ThreshCountOn for a spot count.
     status = reg.register("_review_image_status", QLabel("", inner))
     status.setObjectName("Muted")
     il.addWidget(status)
@@ -285,16 +286,19 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
 
     ctrl.add_action(lut_btn)
 
-    # ON/OFF intensity threshold quick-edit — inline on the control row (its
-    # original home), not tucked inside the LUT ▾ popover. Edits the active
-    # channel's ThreshFracOn — the same value the Cell Gating tab and the
-    # Plotting quick-edit own — and re-renders, so the Binary (≥ ON threshold)
-    # overlay updates live without leaving the tab.
+    # ON-cutoff quick-edit — inline on the control row (its original home), not
+    # tucked inside the LUT ▾ popover. Edits the active channel's cutoff for the
+    # selected Property — the same value the Cell Gating tab and the Plotting
+    # quick-edit own — and re-renders, so the Binary (≥ ON threshold) overlay
+    # updates live without leaving the tab. The caption follows the target, so a
+    # spot-count Property reads "ON spots".
     thr_row = QWidget()
     thr_lay = QHBoxLayout(thr_row)
     thr_lay.setContentsMargins(0, 0, 0, 0)
     thr_lay.setSpacing(6)
-    _thr_lbl = QLabel("ON threshold", thr_row)
+    # Registered because the caption follows the cutoff the selected Property
+    # uses — ``refresh_thresh_frac_quick_edit`` rewrites it alongside the value.
+    _thr_lbl = reg.register("_review_thresh_frac_lbl", QLabel("ON threshold", thr_row))
     _thr_lbl.setObjectName("Muted")   # the band's own captions read this way
     thr_lay.addWidget(_thr_lbl)
     thresh_stepper = reg.register(
@@ -311,7 +315,7 @@ def build_review_image_panel(ctx, parent: QWidget) -> None:
         "ThreshFracOn and the plot tabs' Threshold quick-edit."
     )
     thresh_stepper.valueChanged.connect(
-        lambda v: (set_thresh_frac_on(ctx, v), refresh_review_image_ctx(ctx))
+        lambda v: (set_on_cutoff(ctx, v), refresh_review_image_ctx(ctx))
     )
     thr_lay.addWidget(thresh_stepper)
     ctrl.add_scope("", thr_row)

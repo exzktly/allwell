@@ -38,6 +38,7 @@ def _ctx(*, saved=None, seg_token=NUCLEAR, active_channel=READOUT):
                 active_image_channel="",
                 active_metric="mean_intensity",
                 active_val_col=f"{active_channel}_mean_intensity",
+                smfish_channels=set(),
                 fluor_channels=[READOUT, NUCLEAR],
                 seg_channel_token=seg_token,
                 threshold=50.0,

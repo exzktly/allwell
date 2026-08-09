@@ -40,7 +40,7 @@ from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.plot_style import mark_time_rescale
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
-    get_thresh_frac_on as _get_thresh_frac_on,
+    on_cutoff_for_column as _on_cutoff_for_column,
 )
 from well_viewer.domain.selections_model import (
     well_display_label as _well_display_label,
@@ -199,12 +199,15 @@ class BarBatchExportPanel(BatchExportPanel):
             return
 
         _ch_selected = self._selected_export_channel() or self._ctx.state.channel.active_channel
-        # Threshold lookup keys by the canonical channel/ratio key, not
-        # the dropdown's display label — translate ratio labels first so
-        # the bar plot draws against the user-configured ThreshFracOn
-        # instead of the 50.0 default.
-        threshold = _get_thresh_frac_on(self._ctx,
-            self._resolved_channel_key(_ch_selected)
+        # The cutoff lookup keys by the canonical channel/ratio key, not by the
+        # dropdown's display label — translate ratio labels first so the bar
+        # plot draws against the user-configured cutoff instead of the default
+        # that empties the plot. Which cutoff (intensity or spot count) follows
+        # the column the panel's own Property combo selected.
+        threshold = _on_cutoff_for_column(
+            self._ctx,
+            self._export_val_col_for("_bar_channel_cb"),
+            channel=self._resolved_channel_key(_ch_selected),
         )
         use_sem = self._ctx.state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"

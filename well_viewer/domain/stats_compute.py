@@ -27,7 +27,7 @@ from well_viewer.data.data_loading import (
 from well_viewer.domain.tp_match import tp_close, tp_close_mask
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
-    get_thresh_frac_on,
+    on_cutoff_for_column,
 )
 
 
@@ -385,7 +385,9 @@ def compute_rep_n_above(ctx, rset: ReplicateSet, target_t: float) -> int:
     cells that actually exceeded the active threshold — the same
     numerator that drives the fraction-above-threshold value.
     """
-    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above", rset.name, tuple(rset.wells), target_t, threshold,
                  ctx.state.channel.active_val_col,
@@ -422,7 +424,9 @@ def compute_rep_n_above_stats(ctx, rset: ReplicateSet, target_t: float,
     and Fraction panels (a per-well mean with a cross-well spread), so the
     Events panel gets replicate error bars instead of a spread-less total.
     """
-    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
     fluor_gates = get_all_fluor_gates(ctx)
     cache_key = ("rep_n_above_stats", rset.name, tuple(rset.wells), target_t,
                  threshold, use_sem, ctx.state.channel.active_val_col,

@@ -18,7 +18,7 @@ from well_viewer.core.plot_style import (
     apply_export_style_to_current, figure_prefs, style_legend,
 )
 from well_viewer.core.channel_state_controller import (
-    active_channel_label, get_all_fluor_gates, get_thresh_frac_on,
+    active_channel_label, get_all_fluor_gates, on_cutoff_for_column,
 )
 
 
@@ -203,6 +203,35 @@ def _shared_bin_edges(
     if log_x and lo > 0:
         return np.logspace(math.log10(lo), math.log10(hi), n_edges)
     return np.linspace(lo, hi, n_edges)
+
+
+def _has_on_cutoff(ctx) -> bool:
+    """True when a threshold line would mark anything on this histogram.
+
+    The line marks where the ON population starts, so it is drawn only when
+    there is a cut to see. Two cases have none:
+
+    * shape/morphology, which is measured against no cutoff at all;
+    * a count metric sitting at its sub-minimum default, which admits every
+      cell. Drawing that one is worse than omitting it — matplotlib expands the
+      x-limits to reach a line at -1, so a histogram whose data starts at 0 gets
+      a dead left margin and an orange marker hanging in negative-spot space,
+      which is exactly the artifact this test exists to prevent for shapes.
+    """
+    from well_viewer.core.channel_state_controller import on_cutoff_for_column
+    from well_viewer.domain.metric_registry import (
+        CUTOFF_COUNT, CUTOFF_NONE, cutoff_kind_for_column,
+    )
+    val_col = ctx.state.channel.active_val_col
+    kind = cutoff_kind_for_column(val_col)
+    if kind == CUTOFF_NONE:
+        return False
+    if kind == CUTOFF_COUNT:
+        from well_viewer.domain.gating_state import DEFAULT_THRESH_COUNT_ON
+        cutoff = on_cutoff_for_column(
+            ctx, val_col, channel=ctx.state.channel.active_channel)
+        return cutoff > DEFAULT_THRESH_COUNT_ON
+    return True
 
 
 def _setup_axes(ctx, n_axes: int):
@@ -512,15 +541,17 @@ def _render_overlay(ctx, ax, groups, mode, bins, log_x, tp_h, *, log_y=False) ->
             except Exception:
                 swallowed()  # was: pass (silent except)
 
-    # Threshold marker for non-violin modes — drawn for intensities and now
-    # for smFISH counts too (ThreshFracOn is the spot-count cutoff). Shape
-    # metrics have no per-channel cutoff, so they fall out via is_shape_active.
+    # Threshold marker for non-violin modes. Drawn for whichever cutoff the
+    # metric is measured against; shape/morphology has none, and its resolved
+    # -1.0 would otherwise draw a line off the left edge of every histogram.
     _show_thr = bool(getattr(getattr(ctx.state, "plot", None),
                              "show_threshold_line", False))
     if (mode != "Violin (per group)" and _show_thr
-            and not ctx.state.channel.is_shape_active()):
+            and _has_on_cutoff(ctx)):
         try:
-            threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+            threshold = on_cutoff_for_column(
+                ctx, ctx.state.channel.active_val_col,
+                channel=ctx.state.channel.active_channel)
             if math.isfinite(threshold):
                 ax.axvline(threshold, color="orange", linestyle="--", linewidth=1.0, alpha=0.8)
         except Exception:
@@ -542,13 +573,14 @@ def _render_faceted_histograms(ctx, groups, mode, bins, log_x, tp_h, *, log_y=Fa
     edges = _shared_bin_edges((vs for _, _, vs in groups), bins, log_x)
     grid = _grid_for((vs for _, _, vs in groups), log_x=log_x)
 
-    # Shapes have no ON cutoff → no threshold line. smFISH counts now draw
-    # the ThreshFracOn line like intensities.
-    if ctx.state.channel.is_shape_active():
+    # Metrics with no ON cutoff draw no line — see ``_has_on_cutoff``.
+    if not _has_on_cutoff(ctx):
         threshold = float("nan")
     else:
         try:
-            threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+            threshold = on_cutoff_for_column(
+                ctx, ctx.state.channel.active_val_col,
+                channel=ctx.state.channel.active_channel)
         except Exception:
             threshold = float("nan")
     show_threshold = math.isfinite(threshold) and bool(getattr(

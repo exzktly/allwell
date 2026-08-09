@@ -330,33 +330,7 @@ Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
 Any string  preserved as-is and sorted lexicographically
 ```
 
-### 2. Channel tokens
-
-- **Nuclear (segmentation) channel.** The token used to find the image
-  StarDist runs against (also gets quantified — its intensities appear in
-  the CSV like any other channel).
-- **Fluorescent channels.** One or more tokens whose intensities you want
-  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
-  `<token>_total_intensity`, etc.).
-- **smFISH channels** (optional). Channels processed for spot detection.
-  Each smFISH channel appears with both a regular intensity column set and
-  a `_smfish_count` column.
-- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
-  holding your brightfield / DIC image. That channel skips flat-field and
-  background correction entirely — those corrections have nothing to remove from
-  a brightfield frame and only add artefacts — and is saved from the original.
-  It is still quantified like any other channel. At most one channel can be
-  Phase, and it cannot also be smFISH.
-
-  **The Phase channel cannot also be the segmentation channel**, except under the
-  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
-  correction, segmenting it with a fluorescence routine means running that
-  routine over an uncorrected brightfield image; the run would finish and write a
-  complete-looking set of CSVs measured on the wrong picture. Setting both to the
-  same channel is refused before the run starts, with a message naming the
-  channel.
-
-### 3. Folders
+### 2. Folders
 
 The input folder is resolved by
 [`services/input_resolution_service.py`](../services/input_resolution_service.py).
@@ -390,6 +364,32 @@ convert it to a dataset folder first in the **Datasets tab → Convert OME-TIFF*
 Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
+
+### 3. Channel tokens
+
+- **Nuclear (segmentation) channel.** The token used to find the image
+  StarDist runs against (also gets quantified — its intensities appear in
+  the CSV like any other channel).
+- **Fluorescent channels.** One or more tokens whose intensities you want
+  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
+  `<token>_total_intensity`, etc.).
+- **smFISH channels** (optional). Channels processed for spot detection.
+  Each smFISH channel appears with both a regular intensity column set and
+  a `_smfish_count` column.
+- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
+  holding your brightfield / DIC image. That channel skips flat-field and
+  background correction entirely — those corrections have nothing to remove from
+  a brightfield frame and only add artefacts — and is saved from the original.
+  It is still quantified like any other channel. At most one channel can be
+  Phase, and it cannot also be smFISH.
+
+  **The Phase channel cannot also be the segmentation channel**, except under the
+  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
+  correction, segmenting it with a fluorescence routine means running that
+  routine over an uncorrected brightfield image; the run would finish and write a
+  complete-looking set of CSVs measured on the wrong picture. Setting both to the
+  same channel is refused before the run starts, with a message naming the
+  channel.
 
 ### 4. Pipeline options
 
@@ -1200,10 +1200,17 @@ controls row — **Cells** (one point per cell, X vs Y feature) and **Wells** (o
 point per well/timepoint). Cells can be coloured **by well** or, via **Color by
 time**, by timepoint.
 
-The Channel, Property and Threshold controls that the other plot tabs share
+The Channel, Property and ON cutoff controls that the other plot tabs share
 disappear from the controls row here, and the View toggle takes their place.
 That is because this tab picks its channels per axis, from the X-axis and
-Y-axis dropdowns below — the shared controls have nothing to act on.
+Y-axis dropdowns below — the shared controls have nothing to act on. Each axis
+still uses its own channel's cutoff from Cell Gating; since the quick-edit is
+hidden here, that tab is where you change it.
+
+In **Wells** view, a plot that comes back empty says which of the two reasons it
+is empty for: no cells at the timepoints you picked, or cells that were all cut
+by an axis's ON cutoff — naming the channel, the cutoff and how many of how many
+cells it kept.
 
 - **Needs** — a well selection, a **Channel**, and an **X-axis** and **Y-axis**
   metric (any intensity, ratio, or `shape_*` column) chosen from the axis
@@ -1268,7 +1275,12 @@ place cells in a grid that mirrors your plate or your experimental design.
   dropdown.
 - **Controls** — on the controls row:
   - **Aggregation** — how multiple cells/wells in a grid cell combine (e.g.
-    *Rep-set avg*).
+    *Rep-set avg*). **Mean above threshold** and **Fraction above threshold**
+    are offered only for a Property that has an ON cutoff of its own — Mean
+    Intensity (ThreshFracOn) and smFISH Count (ThreshCountOn). They grey out for
+    Total / Max / Min / Std intensity, because the cutoff is a *mean* intensity
+    and cutting a total with it would compare two different scales; those fall
+    back to *Mean (all cells)*.
   - **Timepoint** dropdown (reads e.g. `Timepoint: 4.0h`; its position
     persists across reopen).
 
@@ -1670,8 +1682,9 @@ channel for every well).
   come from the sidebar plate; changing that selection — including **Select all /
   none** — re-runs the layout in place.
 - **Per-channel render options** — each channel chip has a **⚙** menu: **Raw /
-  Corrected**, **Mask**, **≥ threshold** (renders that channel's ThreshFracOn
-  threshold-binary, positive cells white), **Colour cells**, a **boundary** outline
+  Corrected**, **Mask**, **≥ threshold** (renders that channel's
+  ON-cutoff binary — ThreshFracOn, or ThreshCountOn when the selected Property
+  is a spot count — positive cells white), **Colour cells**, a **boundary** outline
   overlay, and a **colormap + LUT** min/max. The options travel with the channel
   wherever it sits, so the same channel looks identical on either axis. Remove a
   chip with its **×**.
@@ -1720,8 +1733,14 @@ channel for every well).
   the images *show*; it is not the Segmentation tab's **Crop cells**, which
   excludes cells from every plot, statistic and export. · an **ON threshold** value
   with a **channel** dropdown choosing which channel it applies to (the same
-  ThreshFracOn shared with Cell Gating and the plot tabs; it follows the picked
-  channel, and reads 0 for the nuclear channel until you set one) · **Export ▾** (to file ·
+  cutoff shared with Cell Gating and the plot tabs; it follows the picked
+  channel, and reads 0 for the nuclear channel until you set one). It also
+  follows the selected **Property**: with **smFISH Count** selected the caption
+  reads **ON spots**, the box shows a spot count, and it edits that channel's
+  ThreshCountOn instead. Caption, value and write target move together, so the
+  number you see is the number you are changing. A channel with no spot-count
+  column has no count cutoff, so it keeps editing its ON threshold whatever the
+  Property says · **Export ▾** (to file ·
   Copy PNG / SVG · Save to Saved Plots) · **zoom** (− · the current % · +; click the
   % to reset to 100) · a **Properties** button that slides out a
   right-side panel for the grouped view's **spacing gaps** and **label font sizes**,
@@ -1874,7 +1893,8 @@ exact correction and segmentation code).
     per-cell measurement); every **pixel** above the threshold, if there is no
     usable mask; or every labelled pixel with the threshold ignored. The
     read-out names which one you are seeing, and where the threshold came from —
-    set on this tab, or the channel's app-wide ON threshold.
+    set on this tab, or the channel's app-wide ON cutoff (its ThreshFracOn, or
+    its ThreshCountOn when the selected Property is a spot count).
   - **Colour cells** (on by default) gives every cell its own colour in Binary
     mode instead of painting them all white. Two nuclei that touch are one white
     shape otherwise, so a segmentation that merged them looks exactly like one
@@ -1986,6 +2006,15 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
   `|fa − fb| / max(fa, fb)`, opening a non-modal validation graph so you can
   sanity-check the pick. Independent Control / Baseline pickers let you optimize
   on a fold-change-adjusted fraction-on.
+- **Fraction-on for spot counts** — per-channel **ThreshCountOn** cutoffs, shown
+  only for the smFISH channels (the ones that carry a spot-count column). This
+  is a separate value from ThreshFracOn on purpose: one asks how *bright* a cell
+  must be before it counts as on, the other how many *spots* it must carry, and
+  the two live on scales that share no useful number. It starts at **-1**, which
+  is below the smallest tally a cell can have, so every cell counts as on —
+  including the cells carrying no spots at all, which are a real measurement and
+  not missing data. Raise it to N to plot "the fraction of cells with more than
+  N spots"; the mean, the fraction-on panel, and the events panel all follow it.
 - Inclusion and fraction-on have **independent** gate pickers, so you can gate
   on one set of gates and compute fraction-on from a different set.
 - **Included for analysis** — a live count under the gate controls, e.g.

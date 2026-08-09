@@ -35,7 +35,10 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
         # quick-edit via refresh_thresh_frac_quick_edit → get_thresh_frac_on,
         # which reads the active channel + its 50.0 threshold default off the
         # channel slice (no steppers registered here → the mirror is a no-op).
-        channel=SimpleNamespace(active_channel="gfp", threshold=50.0),
+        channel=SimpleNamespace(active_channel="gfp", threshold=50.0,
+                                active_metric="mean_intensity",
+                                active_val_col="gfp_mean_intensity",
+                                smfish_channels=set()),
         plot=SimpleNamespace(),
         # The thresh change-handler persists via cell_gating.save_to_pipeline_info
         # (now ctx-native); with no data dir it returns early, so the pure-logic

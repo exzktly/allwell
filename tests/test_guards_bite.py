@@ -300,6 +300,104 @@ def test_layout_readout_guard_clears_a_quoted_value(tmp_path, monkeypatch, shape
                      [tmp_path / "analyze_tab.py"]) is None
 
 
+# ── ON-cutoff sweep ──────────────────────────────────────────────────────────
+#
+# Every plot path must reach its ON cutoff through `on_cutoff_for_column`, or a
+# spot tally gets measured against a fluorescence threshold that sits above the
+# whole range a tally can occupy — the plot then draws nothing at all.
+#
+# All four shapes below are real. The bare call is what most of the converted
+# sites looked like; the aliased import is how both batch-export panels spell
+# it; `app._get_thresh_frac_on` is the god-object shim in `runtime_app`. The
+# fourth — binding the accessor to a local and calling it on the next line — is
+# the one that matters most here: the first version of this guard matched
+# `ast.Call` and reported a clean sweep straight past two sites written that
+# way, which is also the shape a deliberate evasion would take.
+
+@pytest.mark.parametrize("shape", [
+    "    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)",
+    "    threshold = _get_thresh_frac_on(self._ctx, key)",
+    "    threshold = app._get_thresh_frac_on(channel)",
+    "    read = get_thresh_frac_on\n    threshold = read(ctx)",
+    "    threshold = get_thresh_count_on(ctx, channel)",
+])
+def test_on_cutoff_guard_catches_a_raw_accessor(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"def redraw_foo(ctx):\n{shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                    "test_no_path_picks_its_own_on_cutoff",
+                    [tmp_path / "controller.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+    assert "redraw_foo" in str(exc)
+
+
+# The four shapes a reviewer used to walk straight past an earlier version of
+# this guard. Each stayed green; each is now a case.
+
+@pytest.mark.parametrize("shape", [
+    "from x import get_thresh_frac_on as fetch_cutoff\nfetch_cutoff(ctx, ch)",
+    '_raw = _lazy("well_viewer.core.channel_state_controller", "get_thresh_frac_on")',
+    'threshold = getattr(csc, "get_thresh_frac_on")(ctx, ch)',
+    'threshold = vars(csc)["get_thresh_count_on"](ctx, ch)',
+])
+def test_on_cutoff_guard_catches_an_indirect_reach(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"{shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                    "test_no_path_picks_its_own_on_cutoff",
+                    [tmp_path / "controller.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+
+
+def test_on_cutoff_exemption_is_not_shared_by_bare_name(tmp_path, monkeypatch):
+    """An exemption belongs to one closure, not to every closure of that name.
+
+    ``refresh_thresh_frac_quick_edit._sync`` legitimately reads a raw accessor:
+    it picks between the two by the same predicate the resolver uses. Keyed on
+    the bare ``_sync``, that exemption covered any closure of that name anywhere
+    in a 1,300-line module — including one added later by a plot path, which is
+    precisely the reach the rule exists to catch.
+    """
+    src = ("def refresh_thresh_frac_quick_edit(ctx):\n"
+           "    def _sync(attr):\n"
+           "        return get_thresh_frac_on(ctx, attr)\n"
+           "\n"
+           "def redraw_something(ctx):\n"
+           "    def _sync(attr):\n"
+           "        return get_thresh_frac_on(ctx, attr)\n")
+    path = _write(tmp_path, "channel_state_controller.py", src)
+    module = importlib.import_module("tests.test_on_cutoff_sweep")
+    monkeypatch.setattr(module, "python_sources", lambda **kw: [path])
+    monkeypatch.setattr(
+        module, "rel",
+        lambda p: "well_viewer/core/channel_state_controller.py")
+    try:
+        module.test_no_path_picks_its_own_on_cutoff()
+    except AssertionError as exc:
+        message = str(exc)
+    else:
+        pytest.fail("the guard walked past a second _sync closure")
+    assert "redraw_something._sync" in message
+    assert "refresh_thresh_frac_quick_edit._sync" not in message
+
+
+def test_on_cutoff_roster_rejects_a_name_that_does_not_exist(monkeypatch):
+    """The roster's own liveness check fires on a symbol nothing defines."""
+    module = importlib.import_module("tests.test_on_cutoff_sweep")
+    monkeypatch.setattr(module, "GUARDED", ("get_thresh_frac_on", "no_such_accessor"))
+    with pytest.raises(AssertionError, match="no_such_accessor"):
+        module.test_guarded_names_are_real()
+
+
+@pytest.mark.parametrize("shape", [
+    "    threshold = on_cutoff_for_column(ctx, val_col)",
+    "    threshold = on_cutoff_for_column(ctx, val_col, channel=ch_x)",
+    "    threshold = _on_cutoff_for_column(self._ctx, col, channel=key)",
+])
+def test_on_cutoff_guard_clears_the_resolver(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"def redraw_foo(ctx):\n{shape}\n")
+    assert _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                     "test_no_path_picks_its_own_on_cutoff",
+                     [tmp_path / "controller.py"]) is None
+
 # ── selection messages on axes ──────────────────────────────────────────────
 # Every shape below either shipped in this repository or slipped past an earlier
 # version of the guard. The direct ``ax.text`` call is what four of the five

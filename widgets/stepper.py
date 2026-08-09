@@ -24,7 +24,7 @@ if _ROOT not in _sys.path:
     _sys.path.insert(0, _ROOT)
 
 from PySide6.QtCore import QEvent, Qt, Signal
-from PySide6.QtGui import QDoubleValidator, QFontMetrics
+from PySide6.QtGui import QDoubleValidator, QValidator, QFontMetrics
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QLineEdit, QSizePolicy, QToolButton, QVBoxLayout,
 )
@@ -60,6 +60,36 @@ def control_row_height() -> int:
     return height
 
 
+class _AffixValidator(QValidator):
+    """Validate the *number* a Stepper's text carries, not the affixes around it.
+
+    ``QDoubleValidator`` alone judges the whole line, so the moment a prefix or
+    suffix is set every displayed value ("-1 spots") is ``Invalid``. That does
+    not merely mislabel the text: ``QLineEdit`` only reverts an edit that takes
+    the field from valid to invalid, so an already-invalid box accepts every
+    keystroke. The suffix turned "input refused" into "input accepted and then
+    silently discarded on commit" — the box showed the old number again and the
+    user's edit vanished with no feedback.
+
+    Delegating on the stripped text restores the refusal, and keeps the affixes
+    the display feature they were meant to be.
+    """
+
+    def __init__(self, stepper: "Stepper", inner: QDoubleValidator) -> None:
+        super().__init__(stepper)
+        self._stepper = stepper
+        self._inner = inner
+
+    def validate(self, text: str, pos: int):  # noqa: N802 - Qt override
+        stripped = self._stepper._strip(text)
+        # An empty box, or a lone sign / decimal point, is Intermediate: the user
+        # is mid-edit and must be allowed to get to a real number.
+        if stripped in ("", "-", "+", ".", "-.", "+."):
+            return (QValidator.Intermediate, text, pos)
+        state, _fixed, _p = self._inner.validate(stripped, min(pos, len(stripped)))
+        return (state, text, pos)
+
+
 class Stepper(QFrame):
     valueChanged = Signal(float)
 
@@ -89,7 +119,9 @@ class Stepper(QFrame):
         self._edit.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self._validator = QDoubleValidator(self._min, self._max, self._decimals, self)
         self._validator.setNotation(QDoubleValidator.StandardNotation)
-        self._edit.setValidator(self._validator)
+        # Wrapped so a prefix/suffix does not make every displayed value invalid
+        # — see _AffixValidator for what that silently costs.
+        self._edit.setValidator(_AffixValidator(self, self._validator))
         self._edit.editingFinished.connect(self._commit_text)
 
         btn_col = QVBoxLayout()
@@ -209,11 +241,21 @@ class Stepper(QFrame):
         return f"{self._prefix}{body}{self._suffix}"
 
     def _strip(self, text: str) -> str:
+        """The number inside *text*, with prefix and suffix taken off.
+
+        The affixes are matched without their own padding — a suffix of
+        " spots" is recognised in "spots" too. Deleting the digits from
+        "20 spots" leaves exactly that, and the whole-string match refused to
+        see a suffix there, so clearing the box to retype read as rubbish and
+        the keystroke was rejected.
+        """
         text = text.strip()
-        if self._prefix and text.startswith(self._prefix):
-            text = text[len(self._prefix):]
-        if self._suffix and text.endswith(self._suffix):
-            text = text[: -len(self._suffix)]
+        prefix = self._prefix.strip()
+        suffix = self._suffix.strip()
+        if prefix and text.startswith(prefix):
+            text = text[len(prefix):]
+        if suffix and text.endswith(suffix):
+            text = text[: -len(suffix)]
         return text.strip()
 
     def _commit_text(self) -> None:

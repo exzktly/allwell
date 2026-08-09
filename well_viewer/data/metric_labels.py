@@ -64,10 +64,10 @@ def split_metric_col(col: str) -> tuple[str, str, str] | None:
 # ── Title qualifiers ────────────────────────────────────────────────────────
 #
 # Plot titles say things like "(above threshold)" / "Fraction above threshold"
-# because the bar / line / heat-map data path filters cells via the channel's
-# ThreshFracOn cutoff. smFISH counts now honour that cutoff too (a cell is "on"
-# when its spot count exceeds ThreshFracOn), so the generic "above threshold"
-# wording is accurate for every metric. These helpers keep the ``metric_key``
+# because the bar / line / heat-map data path filters cells by an ON cutoff —
+# ThreshFracOn for the intensity metrics, ThreshCountOn for the spot counts. A
+# cell is "on" when its value exceeds whichever applies, so the generic "above
+# threshold" wording is accurate for every metric. These helpers keep the ``metric_key``
 # param for API stability and in case a future metric needs distinct phrasing.
 
 

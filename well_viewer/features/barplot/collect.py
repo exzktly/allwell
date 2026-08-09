@@ -11,7 +11,7 @@ re-export these names.
 from __future__ import annotations
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, replicate_display_label, well_display_label, active_replicate_sets)
-from well_viewer.core.channel_state_controller import get_all_fluor_gates, get_thresh_frac_on
+from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
 
@@ -155,15 +155,12 @@ def collect_bar_items(
         target_ts = [float(target_t)]
     if not target_ts:
         return False, [], band_lbl
-    # Shape/morphology metrics have no per-channel ON cutoff, so a negative
-    # floor keeps every cell in the population. smFISH counts now honour the
-    # channel's ThreshFracOn just like intensities — a cell is "on" when its
-    # spot count exceeds the cutoff (set ThreshFracOn to 0 for the classic
-    # "any detected spot" population).
-    if ctx.state.channel.is_shape_active():
-        threshold = -1.0
-    else:
-        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    # Which ON cutoff applies is a property of the value column, not of this
+    # tab — shape/morphology keeps every cell, spot counts read ThreshCountOn,
+    # intensities read ThreshFracOn.
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
     active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
     pool_reps = bool(getattr(ctx.state.plot, "bar_pool_replicates", True))
     # ``use_groups`` here drives the renderer's bar-width preset (wider for
@@ -929,13 +926,11 @@ def collect_bar_items_fov_pooled(
     if not target_ts:
         return [], band_lbl
 
-    if threshold is None:
-        if ctx.state.channel.is_shape_active():
-            threshold = -1.0
-        else:
-            threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
-
     val_col = ctx.state.channel.active_val_col
+    if threshold is None:
+        threshold = on_cutoff_for_column(
+            ctx, val_col, channel=ctx.state.channel.active_channel)
+
     fluor_gates = get_all_fluor_gates(ctx) or {}
     ratios = ctx.state.channel.ratio_index
 

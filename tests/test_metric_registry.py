@@ -119,3 +119,46 @@ def test_adding_a_metric_flows_everywhere(monkeypatch):
     populate_metric_combo(_a._ctx, cb, channel_entry="gfp")
     assert "Median Intensity" in cb.items
     assert "Foci Count" in cb.items
+
+
+# ── which metrics carry a cutoff of their own ────────────────────────────────
+
+def test_only_metrics_with_their_own_cutoff_can_be_thresholded():
+    """The question the threshold-based aggregations need answered.
+
+    Not the same as ``cutoff_kind_for_metric_key``: ``total_intensity`` and
+    ``mean_intensity`` are both ``CUTOFF_INTENSITY``, and only the second is the
+    column ThreshFracOn is defined against. Cutting a total (area × mean) with a
+    mean-scale cutoff is the same units error that feeding a spot tally a
+    brightness was.
+    """
+    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+
+    assert metric_has_own_cutoff("mean_intensity") is True   # ThreshFracOn
+    assert metric_has_own_cutoff("smfish_count") is True     # ThreshCountOn
+    for key in ("total_intensity", "max_intensity", "min_intensity",
+                "std_intensity"):
+        assert metric_has_own_cutoff(key) is False, key
+    # Not a metric at all (a shape column, a ratio key, a typo).
+    assert metric_has_own_cutoff("shape_area") is False
+    assert metric_has_own_cutoff("") is False
+
+
+def test_a_new_count_metric_gets_a_cutoff_without_a_second_edit(monkeypatch):
+    """Derived from ``kind``, so the registry stays the one place to declare it.
+
+    A literal ``key in {"mean_intensity", "smfish_count"}`` would pass every
+    other test in this file and quietly exclude the next count metric someone
+    adds.
+    """
+    from well_viewer.domain.metric_registry import metric_has_own_cutoff
+
+    fake_count = MetricDef("foci_count", "Foci Count", "count", True)
+    fake_intensity = MetricDef("median_intensity", "Median Intensity",
+                               "intensity", False)
+    extended = (*reg.METRICS, fake_count, fake_intensity)
+    monkeypatch.setattr(reg, "METRICS", extended)
+    monkeypatch.setattr(reg, "METRIC_BY_KEY", {m.key: m for m in extended})
+
+    assert metric_has_own_cutoff("foci_count") is True
+    assert metric_has_own_cutoff("median_intensity") is False

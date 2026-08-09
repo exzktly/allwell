@@ -79,6 +79,33 @@ from util.well_token import canonical_well_label
 # (ARCHITECTURE §8: never hardcode a pixel size at a call site).
 _THRESHOLD_EDIT_W = 90
 
+
+def _smfish_empty_reason(ctx):
+    """This tab's placeholder reason, worst-news-first.
+
+    A run with no smFISH channel can never populate this tab, and that outranks
+    "no well selected": asking the user to click a well, and only telling them
+    the tab cannot work *after* they do, wastes the one action the placeholder
+    asked for. The same precedence the shared refresh applies between "no
+    dataset" and everything else, one level down.
+
+    The no-smFISH message is painted on the canvas too, for the case where a
+    well *is* selected — the placeholder is not in front of it then.
+    """
+    from well_viewer.core.selection_controller import has_plottable_selection
+    from well_viewer.core.ui_helpers import EmptyReason
+
+    if not (ctx.runtime.smfish.tokens or []):
+        title, _, hint = _NO_SMFISH_MESSAGE.partition("\n")
+        return EmptyReason(title, hint)
+    if has_plottable_selection(ctx):
+        return None
+    return EmptyReason(
+        "No well selected.",
+        "Click a well on the plate at the left. smFISH shows one well at a time.",
+    )
+
+
 def build_smfish_tab(ctx, parent: QWidget) -> None:
     """Build the smFISH tab inside *parent*.
 
@@ -189,10 +216,12 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     ctrl.add_action(cdf_btn)
 
-    # Status row
-    status_label = reg.register("_smfish_status_label", QLabel(
-        "Select a single well from the global picker.", parent
-    ))
+    # Status row. Starts blank: an empty selection is the shared placeholder's
+    # message now, and this label sits *outside* the empty-state stack, so any
+    # selection sentence here would print alongside the placeholder rather than
+    # instead of it. The label still carries this tab's own states (the smFISH
+    # channel missing, an image that failed to load, Apply-to-All progress).
+    status_label = reg.register("_smfish_status_label", QLabel("", parent))
     status_label.setObjectName("Muted")
     root.addWidget(status_label)
 
@@ -201,8 +230,11 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     reg.register("_smfish_ax_img", fig_img.add_subplot(111))
     canvas_img = reg.register("_smfish_canvas_img", FigureCanvas(fig_img))
     # Theme the canvas immediately so it's never a bare white figure before the
-    # first refresh paints data or an empty-state message.
-    _smfish_paint_empty(ctx, "Select a well to view smFISH images.")
+    # first refresh paints data. No message with it: the canvas sits behind the
+    # empty-state stack,
+    # which is what tells the user there is no dataset or no well selected. A
+    # sentence painted here would only ever be read through that placeholder.
+    _smfish_paint_empty(ctx, "")
 
     from widgets.mpl_toolbar import MplToolbar
     toolbar = reg.register("_smfish_toolbar", MplToolbar(canvas_img, parent))
@@ -218,17 +250,27 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     plot_host_l.addWidget(canvas_img, 1)
     plot_host_l.addWidget(toolbar)
 
-    # Until a dataset is loaded this tab used to paint its warning as
-    # matplotlib text on the axes — a bare muted string, no glyph and no
-    # "Open… is at the top of the left rail" hint, so it read as a different
-    # kind of message from the placeholder every other tab shows. The shared
-    # EmptyState is that placeholder; the stack registers itself and
-    # ``refresh_plot_empty_states`` flips it on load. The on-canvas messages
-    # below stay as they are: they describe states *within* a loaded dataset
-    # (no well selected, no smFISH channel, an image that failed to load),
-    # which is exactly where the other tabs paint on the axes too.
+    # This tab used to paint its warnings as matplotlib text on the axes — bare
+    # muted strings, no glyph and no hint, so they read as a different kind of
+    # message from the placeholder every other tab shows. The shared EmptyState
+    # is that placeholder, and its reason covers both the states that are about
+    # the app rather than about this plot: no dataset, and no well selected. The
+    # on-canvas messages below stay where they are — no smFISH channel in the
+    # run, an image that failed to load — because those are per-plot causes the
+    # placeholder cannot know about.
     from well_viewer.core.ui_helpers import wrap_with_empty_state
-    root.addWidget(wrap_with_empty_state(ctx.window, plot_host, icon="image"), 1)
+    # ``_smfish_empty_reason`` puts the worst news first: a run with no smFISH
+    # channel can never populate this tab, so saying that outranks asking for a
+    # well. Below that it gates on the selection — smFISH is
+    # ``single_well_selection``, so a multi-well selection is collapsed to one
+    # while this tab is current and zero wells is the only empty case it reaches.
+    # That also gives its own "No smFISH/mask pair found…" line its meaning back:
+    # an empty selection used to trigger it, reporting a missing image pair for a
+    # well the user had never chosen.
+    root.addWidget(wrap_with_empty_state(
+        ctx.window, plot_host, icon="image",
+        reason=_smfish_empty_reason,
+    ), 1)
 
     canvas_img.mpl_connect(
         "motion_notify_event", lambda ev: _smfish_on_img_hover(ctx, ev)

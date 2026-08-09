@@ -167,7 +167,24 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     grid.setSpacing(6)
     grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     scroll.setWidget(grid_host)
-    layout.addWidget(scroll, 1)
+    from well_viewer.core.ui_helpers import EmptyReason, wrap_with_empty_state
+
+    def _nothing_generated(c):
+        # Not selection-gated — this gallery follows the plotting layer's active
+        # wells and its own cell filters, not the plate. What it *is* gated on is
+        # having been generated: before that the grid is empty, and the body was
+        # a blank panel whose only explanation was a status-bar line.
+        st = c.runtime.cell_browser.state
+        if getattr(st, "cells", None):
+            return None
+        return EmptyReason(
+            "No cells shown yet.",
+            "Press Generate to build the gallery from the current filters.",
+        )
+
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, scroll, icon="boxes", reason=_nothing_generated,
+    ), 1)
     reg.register("_cell_browser_grid", grid)
     reg.register("_cell_browser_grid_host", grid_host)
 

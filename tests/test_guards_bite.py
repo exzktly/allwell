@@ -298,3 +298,50 @@ def test_layout_readout_guard_clears_a_quoted_value(tmp_path, monkeypatch, shape
     assert _run_scan(monkeypatch, "tests.test_layout_readout_single_source",
                      "test_the_layout_readout_is_not_written_in_the_gui",
                      [tmp_path / "analyze_tab.py"]) is None
+
+
+# ── selection messages on axes ──────────────────────────────────────────────
+# Every shape below either shipped in this repository or slipped past an earlier
+# version of the guard. The direct ``ax.text`` call is what four of the five
+# copies looked like; the message handed to ``draw_bar_empty_state`` is the one
+# the first version could not see, and it was the worst instance — Bar Plots
+# painted it onto three axes in a loop. The module-constant form is how
+# Distribution and Line Graphs actually reached their message, so a guard reading
+# only literal call arguments would have cleared both.
+
+AXES_SELECTION_VIOLATIONS = {
+    "direct": 'def draw(ax):\n    ax.text(0.5, 0.5, "No wells selected. Select wells to plot.")\n',
+    "helper": ('MSG = "No wells or well groups selected.\\nSelect wells on the left panel."\n'
+               "def draw(ctx, a, b):\n    draw_bar_empty_state(ctx, a, b, MSG)\n"),
+    "constant": ('PROMPT = "Select one or more wells to summarise."\n'
+                 "def draw(ax):\n    ax.text(0.5, 0.5, PROMPT)\n"),
+    "suptitle": 'def draw(fig):\n    fig.suptitle("Choose wells on the plate to begin.")\n',
+    "keyword": 'def draw(ax):\n    ax.text(0.5, 0.5, s="Pick a well to view its images.")\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(AXES_SELECTION_VIOLATIONS))
+def test_axes_selection_guard_catches_a_painted_prompt(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_renderer.py", AXES_SELECTION_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_no_axes_selection_message",
+                    "test_no_interactive_renderer_paints_a_selection_message", [bad])
+    assert exc is not None, f"the {shape} selection prompt went uncaught"
+    assert "bad_renderer.py" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    # Not about the plate selection — these are the per-plot causes the
+    # placeholder cannot know about, and they must stay on the axes.
+    'def draw(ax):\n    ax.text(0.5, 0.5, "No timepoints loaded.")\n',
+    'def draw(ax):\n    ax.text(0.5, 0.5, "Select a timepoint above")\n',
+    'def draw(ax):\n    ax.text(0.5, 0.5, "No smFISH/mask pair found for this frame.")\n',
+    # Reporting a computed result that happens to mention wells is not a prompt.
+    'def draw(fig):\n    _draw_message(fig, "The summary produced no wells or timepoints.")\n',
+    # A title naming the well being shown is not asking for one.
+    'def draw(ax, well):\n    ax.set_title(f"{well} - t=0 h")\n',
+])
+def test_axes_selection_guard_clears_a_non_prompt(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_renderer.py", shape)
+    assert _run_scan(monkeypatch, "tests.test_no_axes_selection_message",
+                     "test_no_interactive_renderer_paints_a_selection_message",
+                     [good]) is None

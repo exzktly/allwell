@@ -38,6 +38,7 @@ from well_viewer.features.image_browser.image_table.controller import (
     image_table_export,
     image_table_generate,
     image_table_open_export_settings,
+    image_table_refresh_empty_state,
     image_table_repopulate_dropdowns,
     image_table_rebuild_grid,
     image_table_save_to_gallery,
@@ -533,6 +534,10 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # gets clipped by tight sibling rows.
     empty_state.setMinimumHeight(_EMPTY_STATE_MIN_H)
     il.addWidget(empty_state)
+    # The strings above are the with-a-dataset case; resolve them for the state
+    # the app is actually in, so the first open of an un-loaded app does not ask
+    # the user to choose wells from a picker that has none.
+    image_table_refresh_empty_state(ctx)
 
     render_host = QWidget(inner)
     render_grid = QGridLayout(render_host)

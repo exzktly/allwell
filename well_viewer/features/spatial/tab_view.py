@@ -407,6 +407,7 @@ def build_spatial_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="waypoints",
+        reason=sp_ctrl.spatial_empty_reason,
     ), 1)
 
     # ── refresh closures registered on the widget registry ──────────────────

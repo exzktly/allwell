@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 
+from well_viewer.core.safe import swallowed
+
 # Sub-tab body/sidebar builders are imported *inside* each branch of
 # ``build_image_browser_subtab`` (not at module scope) so that a build profile
 # which drops a sub-tab — physically excluding its module from the binary —
@@ -71,6 +73,18 @@ def build_image_browser_subtab(ctx, idx: int) -> None:
         built[name] = True
     except Exception:
         _logger.exception("Image Browser: build sub-tab %r failed", name)
+        return
+    # This is the Image Browser's own lazy-build funnel — the sub-tab bodies do
+    # not go through ``centre_view._build_pending``, so the refresh that flips a
+    # newly-registered empty-state stack off page 0 has to be repeated here. A
+    # sub-tab built after the dataset was loaded would otherwise sit on "Load a
+    # directory." for the rest of the session, which is precisely the bug this
+    # branch fixed on Spatial and smFISH.
+    try:
+        from well_viewer.core.ui_helpers import refresh_plot_empty_states
+        refresh_plot_empty_states(ctx.window)
+    except Exception:
+        swallowed()
 
 
 def on_image_browser_subtab_changed(ctx, idx: int) -> None:

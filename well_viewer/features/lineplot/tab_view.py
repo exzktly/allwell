@@ -151,10 +151,21 @@ def build_line_graphs_tab(ctx, parent: QWidget) -> None:
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setWidget(card)
     install_canvas_wheel_scroll(canvas, scroll)
-    # Wrap the scroll area in an EmptyState stack — page 0 is the
-    # placeholder shown until a dataset is loaded, page 1 is the figure.
-    from well_viewer.core.ui_helpers import wrap_with_empty_state
-    layout.addWidget(wrap_with_empty_state(ctx.window, scroll), 1)
+    # Wrap the scroll area in an EmptyState stack — page 0 is the placeholder,
+    # page 1 is the figure. The reason gates it on the plate selection as well as
+    # on the dataset: without one, this page painted the same two-line message
+    # onto each of its four stacked panels, so the sentence stuttered down the
+    # page and the last copy was clipped by the status bar. The hint names the
+    # panels because they are the only thing that tells you what the page will
+    # produce, and a single centred line otherwise deletes that promise.
+    from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, scroll,
+        reason=no_selection_reason(
+            hint="Four panels: mean, fraction, N, and CDF. "
+                 "Click wells on the plate at the left.",
+        ),
+    ), 1)
 
     # Right-click an axes → toggle its legend. (The old left-click-drag-to-set
     # threshold on the CDF was removed — the threshold lives on the Cell Gating tab.)

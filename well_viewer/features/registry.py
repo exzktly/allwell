@@ -162,13 +162,15 @@ def _activate_image_table(ctx) -> None:
         builder_refresh,
     )
     from well_viewer.features.image_browser.image_table.controller import (
-        image_table_refresh_picker, image_table_repopulate_dropdowns,
+        image_table_refresh_empty_state, image_table_refresh_picker,
+        image_table_repopulate_dropdowns,
     )
     frame = ctx.widgets.get_or_none("_sidebar_image_table_frame")
     if frame is not None:
         frame.setVisible(True)
     image_table_repopulate_dropdowns(ctx)
     image_table_refresh_picker(ctx)
+    image_table_refresh_empty_state(ctx)
     # Redraw the builder shelf (trees + channel tray) from current state so the
     # channel chips reflect the loaded dataset. builder_refresh reads
     # ctx.state.channel and no-ops before the shelf is built, so this is a safe
@@ -426,8 +428,9 @@ def _loaded_image_table(ctx) -> None:
         image_table_reset_on_dataset_load,
     )
     from well_viewer.features.image_browser.image_table.controller import (
-        image_table_repopulate_dropdowns,
+        image_table_refresh_empty_state, image_table_repopulate_dropdowns,
     )
+    image_table_refresh_empty_state(ctx)
     # Refresh the dropdown options for the new dataset, then reset the grid to
     # fresh-tab defaults so a (re)load never inherits the previous dataset's grid.
     # This is also what makes the "Reset all saved state" trash-can reset the

@@ -36,7 +36,10 @@ from well_viewer.features.scatter.gating import (
 
 from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix
 
-NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
+
+#: Written onto an otherwise-empty figure so an *exported* copy states its
+#: own shortfall; the on-screen placeholder covers this canvas.
+EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
 
 #: Agg-scatter Property labels that map to a synthetic aggregation key rather
 #: than a metric-intensity column (mirrors ``WellViewerApp._SCATTER_AGG_METRIC_EXTRA``).
@@ -93,18 +96,15 @@ def redraw_scatter(
     _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(ctx, ax_scatter)
 
     if not selected_wells and not active_rsets:
+        # The words are the tab's shared placeholder; the axes are cleared above,
+        # so the figure behind it holds nothing an export could misrepresent.
         ctx.runtime.scatter.interaction_cache = {"points": []}
-        ax_scatter.text(
-            0.5,
-            0.5,
-            NO_SELECTION_MSG,
-            ha='center',
-            va='center',
-            transform=ax_scatter.transAxes,
-            fontsize=10,
-            color=_muted_fg,
-        )
         ax_scatter.set_axis_off()
+        # Invisible on screen behind the shared placeholder; the only thing that
+        # speaks in an exported copy of this figure.
+        ax_scatter.text(0.5, 0.5, EMPTY_SELECTION_EXPORT_NOTE,
+                        transform=ax_scatter.transAxes, ha="center", va="center",
+                        color=_muted_fg, fontsize=10)
         scatter_canvas.draw()
         return
 
@@ -325,17 +325,12 @@ def redraw_scatter_agg(
         ctx, ax_agg, fig=agg_fig)
 
     if not selected_wells and not active_rsets:
-        ax_agg.text(
-            0.5,
-            0.5,
-            NO_SELECTION_MSG,
-            ha='center',
-            va='center',
-            transform=ax_agg.transAxes,
-            fontsize=10,
-            color=_muted_fg,
-        )
+        # Words on the shared placeholder; axes cleared above (see the per-cell
+        # branch) so nothing stale can be exported from behind it.
         ax_agg.set_axis_off()
+        ax_agg.text(0.5, 0.5, EMPTY_SELECTION_EXPORT_NOTE,
+                    transform=ax_agg.transAxes, ha="center", va="center",
+                    color=_muted_fg, fontsize=10)
         agg_canvas.draw()
         return
 
@@ -349,9 +344,14 @@ def redraw_scatter_agg(
     )
 
     if not scatter_data:
+        # Reached with a selection in hand that still produced no points — a
+        # timepoint nothing matched, gating that excluded every cell. The
+        # no-selection half of what this used to say is the tab's shared
+        # placeholder now, and naming it here too would cover two causes the
+        # user acts on differently with one sentence.
         ax_agg.text(
             0.5, 0.5,
-            "No data available.\nPlease select wells/groups and timepoints.",
+            "No data available.\nTry another timepoint — or check the cell gating.",
             ha='center', va='center',
             transform=ax_agg.transAxes,
             fontsize=10,

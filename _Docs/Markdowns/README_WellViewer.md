@@ -1338,6 +1338,13 @@ because it compares groups rather than plotting the plate directly, and the Heat
 Map asks you to put wells on its grid — press **Auto-populate from selection**,
 or drag them in from the plate.
 
+Inside the Image Browser, **Image Table** and **Cell Browser** are not driven by
+the plate: Image Table has its own well picker, and Cell Browser follows whatever
+the plots are showing and its own cell filters. Both still show the load-a-directory
+placeholder before a dataset is open — Image Table used to ask you to choose wells
+and press Generate when there were no wells to choose, and Cell Browser showed a
+blank panel with no explanation at all.
+
 Messages about anything else stay on the plot itself: no timepoints chosen, a
 channel the run never produced, gating that excluded every cell. So a centred
 placeholder always means "this page is waiting for you to choose something", and

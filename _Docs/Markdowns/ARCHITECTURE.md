@@ -1029,6 +1029,24 @@ deliberately does not: the widget wrapped there is the whole panel including
 OUTPUT SETTINGS and the Run button, and swapping that for a placeholder would
 hide the output configuration exactly while it is being set up.
 
+Two Image Browser sub-tabs are dataset-gated but **not** selection-gated, and for
+different reasons. **Image Table** has its own picker plate, so the app-wide
+selection does not drive it; its placeholder is generation-gated and lives
+outside `_plot_empty_stacks`, so `image_table_refresh_empty_state` swaps its two
+strings instead — with a dataset it asks for wells and channels and a Generate,
+and without one it says what the rest of Review says, because the picker has no
+wells to choose and its own Channels panel already reads "load a dataset to see
+channels". **Cell Browser** mirrors the plotting layer's active wells rather than
+reading the plate directly and is scoped by its own criteria / timepoint / FOV
+filters, so it takes the plain dataset gate; before that it had no empty state at
+all, only a blank grid with its explanation in the status bar.
+
+Both build through `image_browser/controller.build_image_browser_subtab`, which is
+the Image Browser's **own** lazy funnel and does not pass through
+`centre_view._build_pending` — so it repeats the same `refresh_plot_empty_states`
+call. That was latent for as long as no sub-tab registered a stack; the moment
+Cell Browser got one it reproduced the Spatial / smFISH bug in a new place.
+
 **Where the refresh is called from matters as much as the rule.**
 `refresh_empty_state_pages` is the cheap half — one reason call and a
 `currentIndex()` comparison per stack — and runs from `apply_selection_refresh`,

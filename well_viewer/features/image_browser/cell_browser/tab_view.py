@@ -167,7 +167,14 @@ def build_cell_browser_tab(ctx, parent: QWidget) -> None:
     grid.setSpacing(6)
     grid.setAlignment(Qt.AlignTop | Qt.AlignLeft)
     scroll.setWidget(grid_host)
-    layout.addWidget(scroll, 1)
+    # Dataset-gated only: this gallery is scoped by its own criteria / timepoint
+    # / FOV filters, and it mirrors the plotting layer's active wells rather than
+    # being driven by the plate directly, so a well selection is not its gate.
+    # Before a dataset is open it had no empty state at all — a blank panel with
+    # its only explanation in the status bar, which is exactly the "looks like
+    # something failed" state every other page stopped showing.
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    layout.addWidget(wrap_with_empty_state(ctx.window, scroll, icon="boxes"), 1)
     reg.register("_cell_browser_grid", grid)
     reg.register("_cell_browser_grid_host", grid_host)
 

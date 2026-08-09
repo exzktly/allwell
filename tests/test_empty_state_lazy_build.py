@@ -67,6 +67,29 @@ def test_a_lazily_built_tab_does_not_ask_for_a_dataset_that_is_loaded(loaded_app
     )
 
 
+def test_an_image_browser_subtab_does_not_ask_for_a_dataset_either(loaded_app):
+    """Image Browser's sub-tabs build through their *own* funnel.
+
+    ``build_image_browser_subtab`` does not go through ``_build_pending``, so the
+    refresh has to be repeated there. This was safe for exactly as long as no
+    sub-tab registered an empty-state stack — the moment Cell Browser got one it
+    reproduced the original bug in a new place, showing "Load a directory." over
+    a loaded dataset.
+    """
+    from well_viewer.features.image_browser.controller import show_image_browser_subtab
+
+    app = loaded_app
+    assert app._app_state.dataset.well_paths
+
+    for sub in ("Image Table", "Cell Browser", "Segmentation", "Playground"):
+        show_image_browser_subtab(app._ctx, sub)
+
+    shown = _visible_placeholder_titles(app)
+    assert NO_DATASET_TITLE not in shown, (
+        f"an Image Browser sub-tab asks for a dataset that is loaded — {shown}"
+    )
+
+
 def test_the_placeholder_still_shows_before_any_dataset_is_loaded(viewer_app):
     """The other direction: the fix must not flip stacks on with no dataset.
 

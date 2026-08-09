@@ -137,6 +137,31 @@ def image_table_refresh_picker(ctx) -> None:
         lbl.setText(f"{n} well{'s' if n != 1 else ''} active")
 
 
+def image_table_refresh_empty_state(ctx) -> None:
+    """Keep the "nothing here yet" placeholder describing the right nothing.
+
+    This tab is generation-gated, not selection-gated — it has its own picker
+    plate, so the app-wide well selection does not drive it — but the placeholder
+    still has two states to tell apart. Its standing text asks the user to choose
+    wells and channels above and press Generate, which with no dataset open is an
+    instruction that cannot be followed: the picker reads "0 wells active" and
+    the Channels panel two rows up already says "load a dataset to see channels".
+    So with no dataset it says the same thing the rest of Review says, in the
+    same words.
+    """
+    empty = getattr(ctx.runtime.image_table, "empty_state", None)
+    if empty is None:
+        return
+    from well_viewer.core.ui_helpers import NO_DATASET_HINT, NO_DATASET_TITLE
+
+    if ctx.state.dataset.well_paths:
+        empty.setText("No image table generated")
+        empty.setHint("Choose wells/channels above, then press Generate.")
+    else:
+        empty.setText(NO_DATASET_TITLE)
+        empty.setHint(NO_DATASET_HINT)
+
+
 def image_table_select_all(ctx) -> None:
     ctx.state.image_table.active_wells = set(ctx.state.dataset.well_paths.keys())
     image_table_refresh_picker(ctx)

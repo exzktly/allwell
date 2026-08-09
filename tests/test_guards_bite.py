@@ -597,3 +597,66 @@ def test_health_roster_guard_clears_presentation_and_imports(tmp_path, monkeypat
     assert _run_scan(monkeypatch, "tests.test_no_second_completeness_predicate",
                      "test_no_module_restates_the_dataset_health_roster",
                      [good]) is None, f"the {shape} shape was wrongly flagged"
+
+
+# ── heat-map hover readout ──────────────────────────────────────────────────
+#
+# The heat-map guard walks its own directory rather than the repo tree, so it
+# is redirected through `_HEATMAP_DIR` instead of `python_sources`. Its two AST
+# checks read `tab_view.py` and `controller.py` by name from that directory, so
+# every case below writes files under those names.
+
+def _run_heatmap_scan(monkeypatch, tmp_path, test_name):
+    return _run_rooted_scan(monkeypatch, "tests.test_heatmap_no_hover_readout",
+                            test_name, tmp_path,
+                            extra={"_HEATMAP_DIR": tmp_path})
+
+
+def test_heatmap_guard_catches_a_reinstated_status_label(tmp_path, monkeypatch):
+    _write(tmp_path, "tab_view.py",
+           'def build(ctx, reg):\n'
+           '    reg.register("_heatmap_status_lbl", QLabel(""))\n')
+    exc = _run_heatmap_scan(monkeypatch, tmp_path,
+                            "test_no_hover_status_widget_in_the_heatmap_tab")
+    assert exc is not None and "tab_view.py" in str(exc)
+
+
+def test_heatmap_guard_clears_a_band_without_a_status_label(tmp_path, monkeypatch):
+    _write(tmp_path, "tab_view.py",
+           'def build(ctx, reg):\n'
+           '    reg.register("_heatmap_tp_cb", LabeledComboBox("Timepoint"))\n')
+    assert _run_heatmap_scan(monkeypatch, tmp_path,
+                             "test_no_hover_status_widget_in_the_heatmap_tab") is None
+
+
+def test_heatmap_guard_catches_motion_dispatch_to_a_hover_handler(tmp_path, monkeypatch):
+    _write(tmp_path, "tab_view.py",
+           'def _on_canvas_motion(ctx, evt):\n'
+           '    on_heatmap_label_drag_motion(ctx, evt)\n'
+           '    on_heatmap_motion(ctx, evt)\n')
+    exc = _run_heatmap_scan(monkeypatch, tmp_path,
+                            "test_canvas_motion_only_drives_the_label_drag")
+    assert exc is not None and "on_heatmap_motion" in str(exc)
+
+
+def test_heatmap_guard_clears_motion_dispatch_to_the_drag_alone(tmp_path, monkeypatch):
+    _write(tmp_path, "tab_view.py",
+           'def _on_canvas_motion(ctx, evt):\n'
+           '    on_heatmap_label_drag_motion(ctx, evt)\n')
+    assert _run_heatmap_scan(monkeypatch, tmp_path,
+                             "test_canvas_motion_only_drives_the_label_drag") is None
+
+
+def test_heatmap_guard_catches_a_reinstated_hover_handler(tmp_path, monkeypatch):
+    _write(tmp_path, "controller.py",
+           'def on_heatmap_motion(ctx, event):\n    return None\n')
+    exc = _run_heatmap_scan(monkeypatch, tmp_path,
+                            "test_controller_exposes_no_hover_motion_handler")
+    assert exc is not None and "on_heatmap_motion" in str(exc)
+
+
+def test_heatmap_guard_clears_a_controller_with_click_handlers_only(tmp_path, monkeypatch):
+    _write(tmp_path, "controller.py",
+           'def on_heatmap_click(ctx, event):\n    return None\n')
+    assert _run_heatmap_scan(monkeypatch, tmp_path,
+                             "test_controller_exposes_no_hover_motion_handler") is None

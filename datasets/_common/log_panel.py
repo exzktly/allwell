@@ -74,7 +74,7 @@ class LogPanelMixin:
 
         # The dashboard below IS the summary view; the verbose text log is off
         # by default and revealed on demand, matching Analyze's own pattern
-        # (analyze_tab_form.py::_build_log / _on_toggle_raw_log).
+        # (analyze_tab_log.py::_build_log / _on_toggle_raw_log).
         self._raw_log_cb = QCheckBox("Show raw log", hdr)
         if toggle_tooltip:
             self._raw_log_cb.setToolTip(toggle_tooltip)

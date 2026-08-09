@@ -111,3 +111,43 @@ def test_apply_pipeline_info_v1_fallback_no_exec_options(qtbot, tmp_path):
     assert tab._background_cb.currentText() == "sliding_disk"
     assert tab._seg_method_cb.currentData() == "stardist_nuclei"
     assert tab._fluor_tokens_list() == ["GFP"]
+
+
+def test_a_sidecar_never_re_arms_the_low_disk_override(qtbot, tmp_path):
+    """``allow_low_disk`` is recorded in the sidecar and deliberately not
+    restored from it.
+
+    Every other execution option describes how a plate was analysed and is
+    worth reproducing. That one disarms a check whose whole purpose is to stop
+    a run that will die of ENOSPC hours in, and a sidecar describes some folder
+    someone happened to open — a volume the user has not measured and may not
+    even be writing to now. Re-arming it from that is a safety override nobody
+    chose. A *queued job* is the opposite case and does restore it; see
+    ``analyze_job_edit._hydrate_opts_without_sidecar_equivalents``.
+    """
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    assert tab._allow_low_disk_cb.isChecked() is False
+
+    tab._apply_pipeline_info({
+        "schema_version": 2,
+        "execution_options": {"allow_low_disk": True, "cpu_only": True},
+    })
+    # The neighbouring flag proves the block was read at all, so this is not
+    # passing because nothing happened.
+    assert tab._cpu_only_cb.isChecked() is True
+    assert tab._allow_low_disk_cb.isChecked() is False
+
+
+def test_a_queued_job_does_restore_it(qtbot):
+    """The other half of the asymmetry above: the user set that box for this
+    job when they queued it, so editing the job has to show it back — otherwise
+    saving the edit silently re-arms the check they turned off."""
+    from analyze_tab import AnalyzeTab
+
+    tab = AnalyzeTab()
+    qtbot.addWidget(tab)
+    tab.hydrate_job({"opts": {"raw": "", "allow_low_disk": True}})
+    assert tab._allow_low_disk_cb.isChecked() is True

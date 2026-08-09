@@ -44,6 +44,7 @@ _OPTS = {
     "incremental": True,
     "force_wells": ["A1", "B2"],
     "cpu_only": True,
+    "allow_low_disk": True,
     "tf_threads": "4",
     "workers": "3",
     "stardist_tile_px": "512",

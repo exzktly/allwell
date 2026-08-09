@@ -518,11 +518,19 @@ QLabel#MutedCaption {{
     font-size: {t.caption_size}px;
     font-weight: {t.medium};
 }}
+/* Section headings on the Analyze form, its remote-run dialog, the Playground
+   panel and the heat-map sidebar. Sized ABOVE body text: a heading set smaller
+   than the fields under it (these were caption-sized, 2px below body) reads as
+   a label belonging to the row beneath rather than as the title of a group. The
+   eyebrow treatment that went with the small size — muted grey, wide tracking —
+   goes with it, since wide letter-spacing on primary-coloured text at this size
+   reads as stretched rather than deliberate.
+   Review's own section headers are a different selector (``role="section"``,
+   see core/ui_helpers.build_section_header) and are unaffected. */
 QLabel#SectionTitle, QLabel#SidebarHeader {{
-    font-size: {t.caption_size}px;
+    font-size: {t.h3_size}px;
     font-weight: {t.semibold};
-    color: {c.text_muted};
-    letter-spacing: 0.08em;
+    color: {c.text_primary};
 }}
 QLabel#PlotCardTitle {{
     font-size: {t.h3_size}px;

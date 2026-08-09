@@ -330,33 +330,7 @@ Prefixed    T01, day2, tp_3  (numeric suffix → ordinal)
 Any string  preserved as-is and sorted lexicographically
 ```
 
-### 2. Channel tokens
-
-- **Nuclear (segmentation) channel.** The token used to find the image
-  StarDist runs against (also gets quantified — its intensities appear in
-  the CSV like any other channel).
-- **Fluorescent channels.** One or more tokens whose intensities you want
-  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
-  `<token>_total_intensity`, etc.).
-- **smFISH channels** (optional). Channels processed for spot detection.
-  Each smFISH channel appears with both a regular intensity column set and
-  a `_smfish_count` column.
-- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
-  holding your brightfield / DIC image. That channel skips flat-field and
-  background correction entirely — those corrections have nothing to remove from
-  a brightfield frame and only add artefacts — and is saved from the original.
-  It is still quantified like any other channel. At most one channel can be
-  Phase, and it cannot also be smFISH.
-
-  **The Phase channel cannot also be the segmentation channel**, except under the
-  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
-  correction, segmenting it with a fluorescence routine means running that
-  routine over an uncorrected brightfield image; the run would finish and write a
-  complete-looking set of CSVs measured on the wrong picture. Setting both to the
-  same channel is refused before the run starts, with a message naming the
-  channel.
-
-### 3. Folders
+### 2. Folders
 
 The input folder is resolved by
 [`services/input_resolution_service.py`](../services/input_resolution_service.py).
@@ -390,6 +364,32 @@ convert it to a dataset folder first in the **Datasets tab → Convert OME-TIFF*
 Analyze at a raw `.ome.tif` just shows a reminder to convert it.
 
 You can also explicitly override the output folder.
+
+### 3. Channel tokens
+
+- **Nuclear (segmentation) channel.** The token used to find the image
+  StarDist runs against (also gets quantified — its intensities appear in
+  the CSV like any other channel).
+- **Fluorescent channels.** One or more tokens whose intensities you want
+  quantified. Each token gets its own CSV column set (`<token>_mean_intensity`,
+  `<token>_total_intensity`, etc.).
+- **smFISH channels** (optional). Channels processed for spot detection.
+  Each smFISH channel appears with both a regular intensity column set and
+  a `_smfish_count` column.
+- **Phase channel** (optional). Tick **Phase** on the fluorescent-channel row
+  holding your brightfield / DIC image. That channel skips flat-field and
+  background correction entirely — those corrections have nothing to remove from
+  a brightfield frame and only add artefacts — and is saved from the original.
+  It is still quantified like any other channel. At most one channel can be
+  Phase, and it cannot also be smFISH.
+
+  **The Phase channel cannot also be the segmentation channel**, except under the
+  `cellpose_labelfree` method, which exists to segment it. Because Phase skips
+  correction, segmenting it with a fluorescence routine means running that
+  routine over an uncorrected brightfield image; the run would finish and write a
+  complete-looking set of CSVs measured on the wrong picture. Setting both to the
+  same channel is refused before the run starts, with a message naming the
+  channel.
 
 ### 4. Pipeline options
 

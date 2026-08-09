@@ -2,8 +2,8 @@
 
 Renders an arbitrary R×C grid colored by a chosen metric (mean above
 threshold, fraction above threshold, cell count, or ratio mean) at a
-single timepoint. Supports click-to-select wells, modifier-aware
-selection, and a hover-value status update.
+single timepoint. Supports click-to-select wells and modifier-aware
+selection.
 """
 
 from __future__ import annotations
@@ -758,7 +758,7 @@ def _metric_axis_label(metric: str, ctx) -> str:
     return f"{label} {prop_label} (mean above threshold)"
 
 
-# ── Click + hover handlers ───────────────────────────────────────────────────
+# ── Click handlers ───────────────────────────────────────────────────────────
 
 def _cell_at_event(ctx, event) -> tuple[int, int] | None:
     if event.inaxes is None or event.xdata is None or event.ydata is None:
@@ -827,29 +827,6 @@ def on_heatmap_click(ctx, event) -> None:
     # redraw fan-out); it takes ctx, so thread the context.
     from well_viewer.core.selection_controller import set_selected_wells
     set_selected_wells(ctx, selected)
-
-
-def on_heatmap_motion(ctx, event) -> None:
-    rc = _cell_at_event(ctx, event)
-    status_lbl = ctx.widgets.get_or_none("_heatmap_status_lbl")
-    if rc is None:
-        if status_lbl is not None:
-            status_lbl.setText("")
-        return
-    cell_index = ctx.runtime.heatmap.cell_well_index or {}
-    arr = ctx.runtime.heatmap.array
-    wells = cell_index.get(rc, [])
-    if status_lbl is not None:
-        if not wells:
-            status_lbl.setText(f"({rc[0]},{rc[1]}): empty")
-        else:
-            v = arr[rc[0], rc[1]] if arr is not None else float("nan")
-            sample = ",".join(wells[:3]) + ("…" if len(wells) > 3 else "")
-            metric = _selected_metric(ctx)
-            # Same format as the drawn cell, so the readout matches what's under
-            # the cursor rather than showing a differently-rounded number.
-            fmt = _cell_value_format(ctx, ctx.widgets.get_or_none("_heatmap_fig"))
-            status_lbl.setText(f"{sample}: {_format_cell_value(v, metric, fmt)}")
 
 
 # ── Row/col label drag-to-reorder ────────────────────────────────────────────

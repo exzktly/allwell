@@ -108,10 +108,6 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     tp_cb.currentIndexChanged.connect(lambda _i: _on_tp_changed(ctx))
     band.add_scope("", tp_cb)
 
-    status_lbl = reg.register("_heatmap_status_lbl", QLabel(""))
-    status_lbl.setObjectName("Muted")
-    band.add_scope("", status_lbl)
-
     # ── Display popover: everything about how the grid is coloured ──────────
     # These change the figure's appearance rather than what it is showing, and
     # they are set once and left. One click is the right price for the row.
@@ -515,10 +511,12 @@ def _on_canvas_press(ctx, evt) -> None:
 
 
 def _on_canvas_motion(ctx, evt) -> None:
-    from well_viewer.features.heatmap.controller import on_heatmap_label_drag_motion, on_heatmap_motion
+    # Motion over the grid drives the label-drag highlight and nothing else.
+    # Hovering a cell deliberately writes no readout: the control band is a row
+    # of persistent controls, and a per-cell well/value string appearing in it
+    # resized the row and pushed the threshold control out of reach.
+    from well_viewer.features.heatmap.controller import on_heatmap_label_drag_motion
     on_heatmap_label_drag_motion(ctx, evt)
-    if not ctx.runtime.heatmap.label_drag:
-        on_heatmap_motion(ctx, evt)
 
 
 def _on_canvas_release(ctx, evt) -> None:

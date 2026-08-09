@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 )
 _boot_diag.boot("PySide6 imported OK")
 
+import help_topics
 import theme as theme_v2
 from version import __version__ as _APP_VERSION
 from widgets.brand_tile import BrandTile
@@ -264,13 +265,14 @@ class AllWellApp(QMainWindow):
 
         hl.addStretch(1)
 
-        # Every action below acts on the loaded dataset or on the plots Review
-        # draws from it, so the cluster belongs to Review and to no other mode.
-        # It is built here, where those handlers live, and then dropped into the
-        # mode band's right end (``_mount_review_actions``) so the whole of the
-        # app's chrome sits on one row; ``_sync_review_actions`` takes it off
-        # screen in Analyze and Datasets, where every one of them would be a
-        # control with nothing to act on.
+        # Every action in this cluster acts on the loaded dataset or on the
+        # plots Review draws from it, so the cluster belongs to Review and to no
+        # other mode. It is built here, where those handlers live, and then
+        # dropped into the mode band's right end (``_mount_review_actions``) so
+        # the whole of the app's chrome sits on one row;
+        # ``_sync_review_actions`` takes it off screen in Analyze and Datasets,
+        # where every one of them would be a control with nothing to act on.
+        # The help button is deliberately NOT one of them — see below.
         self._review_actions = QWidget()
         ra = QHBoxLayout(self._review_actions)
         ra.setContentsMargins(0, 0, 0, 0)
@@ -330,10 +332,17 @@ class AllWellApp(QMainWindow):
         self._reset_view_btn.clicked.connect(self._on_reset_view_clicked)
         ra.addWidget(self._reset_view_btn)
 
+        # The help drawer is the one control up here that is not about a loaded
+        # dataset: it opens a manual documenting all three modes, and Analyze
+        # and Datasets are exactly where a user is most likely to want it. So it
+        # sits OUTSIDE ``_review_actions`` and is mounted after it, keeping the
+        # band's rightmost slot in every mode while the cluster beside it comes
+        # and goes. Left inside the cluster it inherited that gating and simply
+        # vanished in the two modes with no other route to the drawer but
+        # ``Ctrl+/``, which a user has no way to discover from an empty band.
         self._help_btn = IconButton("info")
         self._help_btn.setToolTip("Open the help drawer")
         self._help_btn.clicked.connect(self._toggle_help_drawer)
-        ra.addWidget(self._help_btn)
         self._help_drawer = None  # built lazily on first open
         self._help_content = None
         self._help_manual_view = None  # None in trimmed builds without the manual
@@ -781,10 +790,10 @@ class AllWellApp(QMainWindow):
             # under _Docs/Markdowns/; PyInstaller bundles it to Markdowns/ at the
             # app root — try both. Missing file → quick help only (trimmed builds).
             base = Path(__file__).resolve().parent
+            candidates = help_topics.readme_candidates(base)
             readme_text = ""
-            readme_path = base / "Markdowns" / "README_WellViewer.md"
-            for _candidate in (base / "_Docs" / "Markdowns" / "README_WellViewer.md",
-                               base / "Markdowns" / "README_WellViewer.md"):
+            readme_path = candidates[-1]
+            for _candidate in candidates:
                 try:
                     readme_text = _candidate.read_text(encoding="utf-8")
                     readme_path = _candidate
@@ -869,63 +878,70 @@ class AllWellApp(QMainWindow):
             # before scrollToAnchor runs.
             QTimer.singleShot(60, self._scroll_help_to_current_section)
 
-    # Map the app's current leaf page → the reference-manual heading that
-    # documents it. Keys are the leaf-tab names returned by
-    # ``well_viewer.core.tab_controller.current_centre_tab`` (plus the special
-    # "Analyze" pane). Values are exact heading texts in
-    # ``README_WellViewer.md``. Every Review leaf now has its own dedicated
-    # per-feature heading; unknown leaves fall back to the Review-mode overview.
-    _HELP_SECTION_BY_PAGE = {
-        "Analyze": "Analyze mode — running the pipeline",
-        "Bar Plots": "Bar Plots",
-        "Line Graphs": "Line Graphs",
-        "Scatter Plot": "Scatter Plot",
-        "Distribution": "Distribution",
-        "Heat Map": "Heat Map",
-        "Statistics": "Statistics",
-        "Multivariate": "Multivariate analysis",
-        "Spatial": "Spatial analysis",
-        "Spatial Map": "Spatial analysis",
-        "Image Table": "Image Table",
-        "Segmentation": "Segmentation",
-        "Review Image": "Segmentation",
-        "Cell Browser": "Cell Browser",
-        "Playground": "Playground",
-        "smFISH": "smFISH",
-        "Review CSV": "Review CSV",
-        "Cell Gating": "Cell Gating",
-        "Sample Definitions": "Sample Definitions",
-        "Saved Plots": "Saved Plots",
-        "Batch Export": "Batch export",
-    }
-
     def _help_section_for_current_page(self) -> str:
         """Heading text in the reference manual that best matches the page the
-        user is currently viewing, or ``""`` when it can't be determined."""
+        user is currently viewing, or ``""`` when it can't be determined.
+
+        All three modes answer this, each asking its own pane which page is
+        showing; the maps live in ``help_topics``. A pane that cannot say
+        (nothing built yet, scrolled above the first section) falls back to its
+        mode's overview heading rather than to another mode's page.
+        """
         review = getattr(self, "_review", None)
         if review is None:
             return ""
-        # Analyze pane wins — its leaf tab isn't a WellViewer centre tab.
-        stack = getattr(review, "_central_pane_stack", None)
-        if stack is not None and stack.currentIndex() == 1:
-            return self._HELP_SECTION_BY_PAGE.get("Analyze", "")
+        mode = review.currentMode() if hasattr(review, "currentMode") else "review"
+        if mode == "analyze":
+            return self._analyze_help_section()
+        if mode == "datasets":
+            return self._datasets_help_section()
+        return self._review_help_section(review)
+
+    def _analyze_help_section(self) -> str:
+        """The Analyze form section the user has scrolled to, else the overview."""
+        pane = getattr(self, "_analyze", None)
+        section = ""
+        if pane is not None and hasattr(pane, "current_help_section"):
+            section = pane.current_help_section() or ""
+        return help_topics.ANALYZE_SECTION_HELP.get(
+            section, help_topics.MODE_OVERVIEW["analyze"])
+
+    def _datasets_help_section(self) -> str:
+        """The Datasets tool showing now, else the mode overview."""
+        pane = getattr(self, "_datasets", None)
+        page = ""
+        if pane is not None and hasattr(pane, "current_help_page"):
+            page = pane.current_help_page() or ""
+        return help_topics.DATASETS_PAGE_HELP.get(
+            page, help_topics.MODE_OVERVIEW["datasets"])
+
+    def _review_help_section(self, review) -> str:
+        """The Review leaf tab's own heading, else the Review overview.
+
+        Every route out of here that cannot name a leaf lands on the overview
+        rather than on ``""``: an empty target leaves the drawer at the top of a
+        2600-line manual, which reads as the scroll having failed rather than as
+        "no more specific page than the mode itself".
+        """
+        overview = help_topics.MODE_OVERVIEW["review"]
         ctx = getattr(review, "_ctx", None)
         if ctx is None:
-            return ""
+            return overview
         try:
             from well_viewer.core.tab_controller import current_centre_tab
             leaf = current_centre_tab(ctx) or ""
         except Exception:
-            return ""
-        if leaf in self._HELP_SECTION_BY_PAGE:
-            return self._HELP_SECTION_BY_PAGE[leaf]
+            return overview
+        pages = help_topics.SECTION_BY_PAGE
+        if leaf in pages:
+            return pages[leaf]
         # Fall back to a loose match so renamed/prefixed leaves ("Spatial Map",
         # "Bar Plots (split)") still resolve to a section.
-        for key, section in self._HELP_SECTION_BY_PAGE.items():
+        for key, section in pages.items():
             if key.lower() in leaf.lower():
                 return section
         # Unknown leaf → land on the Review-mode overview heading.
-        return "Review mode — exploring results"
+        return overview
 
     def _scroll_help_to_current_section(self) -> None:
         """Scroll the open help drawer so the heading for the current page sits
@@ -1026,7 +1042,7 @@ class AllWellApp(QMainWindow):
 
     # ── the Review action cluster ────────────────────────────────────────
     def _mount_review_actions(self, band) -> None:
-        """Drop the dataset actions into the mode band's right end.
+        """Drop the dataset actions, then the help button, into the band's right end.
 
         They used to sit in the window header, a row above — so the top of the
         window was two strips of chrome, and the actions were as prominent in
@@ -1035,30 +1051,48 @@ class AllWellApp(QMainWindow):
         already runs the full width of the window, so the cluster goes to its
         right end and the header row below it disappears.
 
-        The page-tabs host holds the band's only stretch, so the cluster is
-        pushed hard right whatever the tab strip is showing.
+        The page-tabs host holds the band's only stretch, so both are pushed
+        hard right whatever the tab strip is showing. Help goes on last, so it
+        keeps the band's rightmost slot in every mode while the cluster in front
+        of it appears and disappears with the mode.
         """
         layout = band.layout()
         box = getattr(self, "_review_actions", None)
-        if layout is None or box is None:
+        help_btn = getattr(self, "_help_btn", None)
+        if layout is None:
             return
-        layout.addWidget(box)
+        if box is not None:
+            layout.addWidget(box)
+        if help_btn is not None:
+            layout.addWidget(help_btn)
         # The band is pinned to a tab bar's height — a row of text. The icon
         # buttons are taller than that, so raise the pin rather than let the
-        # layout clip them; a clipped glyph reads as a broken icon.
-        needed = box.sizeHint().height()
+        # layout clip them; a clipped glyph reads as a broken icon. Whichever of
+        # the two is present is measured, rather than the cluster alone: they
+        # are the same height today (both rows of one icon button), so this is
+        # about a build that has one and not the other — a trimmed build, or a
+        # partial construction that never reached the cluster. Hiding the
+        # cluster outside Review does *not* shrink this: a hidden widget keeps
+        # its sizeHint.
+        needed = max(
+            (w.sizeHint().height() for w in (box, help_btn) if w is not None),
+            default=0,
+        )
         if needed > band.minimumHeight():
             band.setFixedHeight(needed)
         self._sync_review_actions()
 
     def _sync_review_actions(self) -> None:
-        """Show the action cluster in Review only.
+        """Show the dataset action cluster in Review only.
 
         Every one of them — reload, presentation mode, reset saved state,
-        reveal the folder, reset the view, help — acts on the loaded dataset or
-        on the plots drawn from it. In Analyze and Datasets they are controls
-        with nothing behind them, so the cluster goes off screen there. `Ctrl+/`
-        still opens the help drawer from any mode.
+        reveal the folder, reset the view — acts on the loaded dataset or on the
+        plots drawn from it. In Analyze and Datasets they are controls with
+        nothing behind them, so the cluster goes off screen there.
+
+        The help button is not part of the cluster and is never hidden: the
+        manual it opens covers all three modes, and the Analyze and Datasets
+        panes are where a user most needs it.
         """
         box = getattr(self, "_review_actions", None)
         if box is None:

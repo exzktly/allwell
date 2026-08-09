@@ -1,8 +1,11 @@
 """Qt builder for the Import Loose Folder page.
 
-A source-folder picker, editable filename-schema/separator fields, a live
-preview readout (wells × FOVs × timepoints × channels, plus unparsed/
-unreadable counts) that updates on every keystroke, a destination-folder
+A source-folder picker, the shared filename-schema builder
+(:class:`~widgets.schema_picker.SchemaPicker`, the same control the Analyze form
+uses, since this page parses the very filenames Analyze will go on to read), a
+live preview readout (wells × FOVs × timepoints × channels, plus unparsed/
+unreadable counts and the names of a couple of files that did not match) that
+updates on every keystroke from one scan shared with the plate, a destination-folder
 picker (hidden when "group in place" is checked), and the usual
 Analyze-style status section — a per-well plate map
 (:class:`~datasets.import_loose.dashboard.ImportLooseDashboard`) with the raw
@@ -24,7 +27,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -36,25 +38,42 @@ from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
-from datasets._common.dataset_paths import DatasetPaths, destination_has_content
+from widgets.schema_picker import SchemaPicker
+from datasets._common.dataset_fields import is_free_destination
+from datasets._common.dataset_paths import (
+    destination_has_unrecognized_content,
+    destination_is_complete_dataset,
+)
 from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import scan_folder
 
-# One-character separator field.
-_SEPARATOR_EDIT_W = 40
+
+#: A marker this tool never writes. The shared destination rule exempts a folder
+#: holding *this* tool's own interrupted attempt, because for the tools that
+#: write one that is a resume rather than a collision. Zipping a loose folder has
+#: no resume, so nothing is exempt and any content blocks — which is what passing
+#: a name that never appears on disk expresses.
+_NO_RESUME_MARKER = ".aw_import_loose_in_progress"
 
 
 def _is_destination(root: Path) -> str:
-    """Return "" if *root* is usable as a new-destination target, else a
-    short reason — the page-side early warning for the same guard
+    """Return "" if *root* is usable as a new-destination target, else a short
+    reason — the page-side early warning for the same guard
     ``apply.py::_check_new_destination`` enforces authoritatively before any
-    write happens."""
-    dest = DatasetPaths(root=root, in_dir=root / "in", out_dir=root / "out")
-    if destination_has_content(dest):
-        return "Already has files under 'in' or 'out' — choose an empty folder."
-    return ""
+    write happens.
 
-
+    The shared rule (`_common.dataset_fields.is_free_destination`), the same one
+    Concatenate, Subset and Merge Plates use. Its wording is shared on purpose:
+    a user moving between two Datasets tools should not be told the same thing
+    two different ways. Checking only `in`/`out` here, as this page used to, let
+    a destination full of unrelated files through.
+    """
+    return is_free_destination(
+        root,
+        is_complete=destination_is_complete_dataset,
+        has_unrecognized=lambda dest: destination_has_unrecognized_content(
+            dest, _NO_RESUME_MARKER),
+    )
 
 
 class ImportLoosePage(LogPanelMixin, QWidget):
@@ -67,6 +86,14 @@ class ImportLoosePage(LogPanelMixin, QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._dest_root = ""
+        #: The last scan, so the run gate can refuse what it can already see
+        #: will produce nothing. ``None`` means "not scanned yet", which is not
+        #: the same as "scanned and found nothing" and must not gate the run.
+        self._preview = None
+        #: Set once an in-place run has succeeded here. The source folder now
+        #: holds archives rather than loose images, so a second run has nothing
+        #: to do and would replace this run's result with a failure.
+        self._done_in_place = False
         self._build_ui()
         self.refresh_readout()
 
@@ -94,13 +121,16 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         outer.addWidget(_hrule(self))
 
         blurb = QLabel(
-            "Group a folder of loose, ungrouped TIFs into per-well "
-            "in/<WELL>.zip archives — the layout Analyze reads directly. "
-            "Writes to a new destination by default; check the box below to "
-            "group in place instead (deletes the loose TIFs on success, the "
-            "same way Analyze's own loose-file handling does).",
+            "Sort a folder of loose, ungrouped TIFs into one archive per well — "
+            "the layout Analyze reads. By default it writes a new folder and "
+            "leaves your images where they are; tick <b>Group in place</b> to "
+            "sort them where they sit and delete the loose originals instead. "
+            "Analyze does this for you when it meets a folder of loose TIFs, in "
+            "place and without asking, so use this page when you want to check "
+            "the split first or keep the originals.",
             self,
         )
+        blurb.setTextFormat(Qt.RichText)
         blurb.setObjectName("Muted")
         blurb.setWordWrap(True)
         outer.addWidget(blurb)
@@ -110,20 +140,40 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
 
-        schema_row = QWidget(self)
-        sl = QHBoxLayout(schema_row)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(theme.Spacing.sm)
-        sl.addWidget(QLabel("Schema:", schema_row))
-        self._schema_edit = QLineEdit(DEFAULT_SCHEMA, schema_row)
-        self._schema_edit.textChanged.connect(self._on_readout_input_changed)
-        sl.addWidget(self._schema_edit, 1)
-        sl.addWidget(QLabel("Separator:", schema_row))
-        self._sep_edit = QLineEdit(DEFAULT_SEP, schema_row)
-        self._sep_edit.setFixedWidth(_SEPARATOR_EDIT_W)
-        self._sep_edit.textChanged.connect(self._on_readout_input_changed)
-        sl.addWidget(self._sep_edit)
-        outer.addWidget(schema_row)
+        # The seven rows below are the same control the Analyze form's Filename
+        # Schema section uses, and there they sit under that section's title.
+        # Dropped straight onto a page they are seven unlabelled rows of jargon
+        # between a folder picker and a checkbox, with nothing saying they
+        # describe *filenames* or what a "position" is.
+        schema_heading = QLabel("How are the filenames laid out?", self)
+        schema_heading.setObjectName("Heading")
+        outer.addWidget(schema_heading)
+
+        schema_hint = QLabel(
+            "Positions are the chunks between separator characters. In "
+            "<tt>Exp01_GFP_A01_F001_24h.tif</tt> the separator is <tt>_</tt>, "
+            "position 1 is the experiment and position 3 is the well.",
+            self,
+        )
+        schema_hint.setObjectName("Muted")
+        schema_hint.setTextFormat(Qt.RichText)
+        schema_hint.setWordWrap(True)
+        outer.addWidget(schema_hint)
+
+        # This page parses the very filenames Analyze will go on to read, so
+        # asking for the schema a different way here — two bare text fields
+        # against Analyze's dropdowns — meant the user typed by hand what they
+        # pick from a list one pane over, with no field vocabulary in front of
+        # them and nothing to say which spellings the pipeline understands.
+        self._schema_picker = SchemaPicker(self)
+        self._schema_picker.changed.connect(self._on_readout_input_changed)
+        outer.addWidget(self._schema_picker)
+
+        self._schema_err = QLabel("", self)
+        self._schema_err.setObjectName("Error")
+        self._schema_err.setWordWrap(True)
+        self._schema_err.setVisible(False)
+        outer.addWidget(self._schema_err)
 
         self._readout = QLabel("", self)
         self._readout.setObjectName("Muted")
@@ -205,10 +255,10 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         return self._dest_field.path()
 
     def filename_schema(self) -> str:
-        return self._schema_edit.text().strip() or DEFAULT_SCHEMA
+        return self._schema_picker.schema() or DEFAULT_SCHEMA
 
     def filename_sep(self) -> str:
-        return self._sep_edit.text() or DEFAULT_SEP
+        return self._schema_picker.separator()
 
     def in_place(self) -> bool:
         return self._in_place_cb.isChecked()
@@ -223,10 +273,10 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._in_place_cb.setChecked(bool(in_place))
 
     def set_filename_schema(self, schema: str) -> None:
-        self._schema_edit.setText(schema or DEFAULT_SCHEMA)
+        self._schema_picker.setSchema(schema or DEFAULT_SCHEMA)
 
     def set_filename_sep(self, sep: str) -> None:
-        self._sep_edit.setText(sep or DEFAULT_SEP)
+        self._schema_picker.setSeparator(sep or DEFAULT_SEP)
 
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())
@@ -242,8 +292,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # setLocked(), not setEnabled(False) — see PathField.setLocked.
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
-        self._schema_edit.setEnabled(not running)
-        self._sep_edit.setEnabled(not running)
+        self._schema_picker.setEnabled(not running)
         self._in_place_cb.setEnabled(not running)
 
     def show_open_in_analyze(self, dest_root: str) -> None:
@@ -278,32 +327,73 @@ class ImportLoosePage(LogPanelMixin, QWidget):
             )
         self._refresh_run_enabled()
 
-    def refresh_readout(self) -> None:
+    def refresh_readout(self, preview=None) -> None:
+        """Describe what the current folder + schema would produce.
+
+        *preview* lets a caller that has already scanned pass the result in;
+        every input change updates this readout and the plate preview together,
+        and scanning twice for one keystroke walks a whole plate's worth of
+        files twice on the GUI thread.
+        """
+        if self._done_in_place:
+            # Re-scanning here would walk a folder whose loose images are now
+            # archives and report that nothing matches the schema — directly
+            # above this run's own green "Grouped loose TIFs … into N zip(s)".
+            # Say what is actually true of the folder instead.
+            self._preview = None
+            self._readout.setText(
+                "This folder now holds per-well archives. Pick another folder "
+                "of loose TIFs to zip.")
+            self._refresh_run_enabled()
+            return
         src = self.source_path()
         if not src or not Path(src).is_dir():
+            self._preview = None
             self._readout.setText("Pick a folder to preview.")
             self._refresh_run_enabled()
             return
-        preview = scan_folder(
-            src, filename_schema=self.filename_schema(), filename_sep=self.filename_sep(),
-        )
+        if preview is None:
+            preview = self._scan()
+        self._preview = preview
         lines = [preview.summary()]
         if preview.unreadable_count:
             lines.append(f"{preview.unreadable_count} unreadable file(s) (broken symlinks) skipped.")
-        if preview.unparsed_files:
+        if preview.unparsed_files and preview.matched:
+            # Only worth saying when some files *did* match — with nothing
+            # matched the summary has already said so, and "would be left
+            # alone" is reassuring phrasing for a total failure. Naming two of
+            # them is the fastest way to spot a wrong separator.
+            examples = ", ".join(Path(p).name for p in preview.unparsed_files[:2])
+            more = "" if len(preview.unparsed_files) <= 2 else ", …"
             lines.append(
                 f"{len(preview.unparsed_files)} of {preview.examined} file(s) didn't match the "
-                "schema and would be left alone."
+                f"schema and would be left alone (e.g. {examples}{more})."
             )
-        self._readout.setText(" ".join(lines))
+        # Each clause is its own sentence; without the stop they run together
+        # ("… channels: GFP 1 of 3 file(s) didn't match …").
+        self._readout.setText(" ".join(
+            line if line.endswith((".", "!", "?")) else line + "." for line in lines))
         self._refresh_run_enabled()
 
     # ── internals ────────────────────────────────────────────────────────────
-    def _on_readout_input_changed(self, *_args) -> None:
-        self.refresh_readout()
-        self._update_status_preview()
+    def _scan(self):
+        """One walk of the source folder with the current schema + separator."""
+        return scan_folder(
+            self.source_path(),
+            filename_schema=self.filename_schema(),
+            filename_sep=self.filename_sep(),
+        )
 
-    def _update_status_preview(self) -> None:
+    def _on_readout_input_changed(self, *_args) -> None:
+        # One scan feeds both the readout and the plate. They ask the same
+        # question of the same folder with the same arguments, and the schema
+        # and separator fields are both live per keystroke.
+        src = self.source_path()
+        preview = self._scan() if src and Path(src).is_dir() else None
+        self.refresh_readout(preview)
+        self._update_status_preview(preview)
+
+    def _update_status_preview(self, preview=None) -> None:
         # Deliberately separate from refresh_readout() -- ImportLooseController
         # ._on_finished calls refresh_readout() right after a run completes
         # (to refresh the readout text/run-gate against any now-changed
@@ -318,9 +408,8 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         if not src or not Path(src).is_dir():
             self.dashboard.setVisible(False)
             return
-        preview = scan_folder(
-            src, filename_schema=self.filename_schema(), filename_sep=self.filename_sep(),
-        )
+        if preview is None:
+            preview = self._scan()
         if not preview.wells:
             # Nothing the current schema/separator recognises yet -- an
             # empty "Ready — 0 well(s)" plate would answer a question
@@ -335,8 +424,44 @@ class ImportLoosePage(LogPanelMixin, QWidget):
 
     def _on_source_changed(self) -> None:
         set_variant(self._run_btn, "primary")
+        self._done_in_place = False        # a different folder, a fresh verdict
+        self._on_readout_input_changed()
+
+    def confirm_counts(self) -> str:
+        """The opening clause of the in-place confirmation — what this run will
+        actually touch, from the scan the page already has.
+
+        Ends with a trailing space so the caller can follow it with "directly
+        in:". Falls back to a countless phrasing if nothing has been scanned,
+        rather than asserting a zero it has not measured.
+        """
+        preview = self._preview
+        if preview is None or not preview.wells:
+            return "This will group the loose TIFs "
+        return (f"This will zip {preview.matched} file(s) into "
+                f"{len(preview.wells)} well archive(s) ")
+
+    def unmatched_note(self) -> str:
+        """A sentence naming what the run will *not* touch, or "".
+
+        The readout says non-matching files are left alone; someone consenting
+        to a delete should not have to remember that from another part of the
+        page."""
+        preview = self._preview
+        if preview is None or not preview.unparsed_files:
+            return ""
+        count = len(preview.unparsed_files)
+        return (f"{count} file(s) that don't match the schema are left "
+                "where they are.")
+
+    def mark_in_place_done(self) -> None:
+        """Record that an in-place run finished here, so the page stops offering
+        to do it again. The source folder now holds archives rather than loose
+        images: a second run finds nothing to group, fails, and replaces the
+        first run's result — including the *Open dataset in Analyze* handoff —
+        with a red failure the user caused by pressing an enabled button."""
+        self._done_in_place = True
         self.refresh_readout()
-        self._update_status_preview()
 
     def _on_in_place_toggled(self, checked: bool) -> None:
         # Disabled, not removed from the layout (UX audit P2-6) — the field
@@ -347,16 +472,72 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # an explicit inline warning that states what checking the box does.
         self._dest_field.setEnabled(not checked)
         self._in_place_warning.setVisible(checked)
+        # The destination's validator message goes with the field. Left behind
+        # it is a red "choose an empty folder" under a greyed-out box, beside a
+        # live Run button that does not use the destination at all.
+        if checked:
+            self._dest_field.show_note("")
+        else:
+            self._dest_field.revalidate()
         self._refresh_run_enabled()
 
     def _can_run(self) -> bool:
         src = self.source_path()
         if not src or not Path(src).is_dir():
             return False
+        # The same check the run itself makes, moved to where the schema is
+        # typed. A schema with no "well" cannot say which archive a file belongs
+        # to and one with two cannot choose, so the scan examines every file and
+        # groups none — a tidy zero with no reason attached. In-place runs fail
+        # harder still: they shell out to WellPlateZipper.py, which exits 2 on
+        # exactly these errors. And a schema with no "channel" produces archives
+        # Analyze cannot then read, which is the only reason to build them.
+        if self._schema_picker.errors():
+            return False
+        # The page has already scanned and knows the answer is zero. Offering a
+        # run it can see will fail spends the user's click to tell them what the
+        # readout above the button already says. Subset gates the same way on
+        # its selected wells, Concatenate on its cross-field message.
+        if self._preview is not None and not self._preview.wells:
+            return False
         if self.in_place():
-            return True
+            return not self._done_in_place
+        if self._same_folder_message():
+            return False
         return bool(self.destination_path()) and self._dest_field.is_valid()
 
+    def _same_folder_message(self) -> str:
+        """Why the destination cannot be the source, or "".
+
+        A cross-field rule, so it lives on the page rather than in the shared
+        validator, which cannot see two fields at once — the same split
+        Concatenate and Subset make. Writing into the source leaves the folder
+        half loose images and half dataset, with the originals undeleted:
+        neither what the new-destination mode promises nor what *Group in
+        place* does.
+        """
+        src, dest = self.source_path(), self.destination_path()
+        if not src or not dest:
+            return ""
+        try:
+            same = Path(src).resolve() == Path(dest).resolve()
+        except OSError:
+            same = str(src) == str(dest)
+        if same:
+            return ("Destination must be a different folder from the source — "
+                    "or tick Group in place.")
+        return ""
+
     def _refresh_run_enabled(self) -> None:
-        self._run_btn.setEnabled(self._can_run())
-        self._queue_btn.setEnabled(self._can_run())
+        errors = self._schema_picker.errors()
+        self._schema_err.setText("  ".join(errors))
+        self._schema_err.setVisible(bool(errors))
+        # A gate the user cannot see is a button that went dark for no reason.
+        # The schema and destination rules each show their own message; this one
+        # spans two fields, so it goes on the destination, where the fix is.
+        same = self._same_folder_message()
+        if same and not self.in_place():
+            self._dest_field.show_warning(same)
+        can_run = self._can_run()
+        self._run_btn.setEnabled(can_run)
+        self._queue_btn.setEnabled(can_run)

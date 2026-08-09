@@ -109,6 +109,7 @@ they're shell-wide:
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
 ├── version.py                   ← single source of truth for the app version (read by the pill + the PyInstaller spec)
+├── help_topics.py               ← Qt-free: which manual heading documents which page (help drawer)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -444,9 +445,9 @@ allwell.main()
     ├── app.setStyleSheet(theme.qss())                        ← global QSS
     ├── AllWellApp().__init__
     │       ├── _build_ui()
-    │       │    ├── title bar (logo + version pill; the mode seg and the
-    │       │    │            Review action cluster are re-parented into the
-    │       │    │            Review pane's mode band below)
+    │       │    ├── title bar (logo + version pill; the mode seg, the Review
+    │       │    │            action cluster and the help button after it are
+    │       │    │            re-parented into the Review pane's mode band below)
     │       │    └── central stack:
     │       │         ├── page 0  ←  WellViewerApp() (Review)
     │       │         │       ├── _build_ui()
@@ -845,17 +846,64 @@ the only way back to Analyze and Datasets while collapsed, since the bar is the
 app's sole mode switch.
 
 The band's right end carries the dataset action cluster — reload, presentation
-mode, full reset of saved state, reveal the dataset folder, reset the view, and
-the help drawer. They are built in `AllWellApp` alongside their handlers and
-then moved into the band by `_mount_review_actions`, which appends them after
-the page-tabs host; that host holds the band's only stretch, so the cluster is
-pushed hard right whatever the tab strip is showing, and the band's pinned
-height rises to whatever the buttons need rather than clipping them. Every one
-of the six acts on the loaded dataset or on the plots drawn from it, so
-`_sync_review_actions` shows the cluster in Review alone and hides it in Analyze
-and Datasets, where each would be a control with nothing behind it (`Ctrl+/`
-still opens the help drawer from any mode). Both mode-change handlers call it,
-so the cluster follows the seg and the pane stack alike. It sits on the band
+mode, full reset of saved state, reveal the dataset folder, and reset the view —
+and, outboard of it, the help-drawer button. They are built in `AllWellApp`
+alongside their handlers and then moved into the band by
+`_mount_review_actions`, which appends them after the page-tabs host; that host
+holds the band's only stretch, so both are pushed hard right whatever the tab
+strip is showing, and the band's pinned height rises to whatever the taller of
+the two needs rather than clipping them. Every one of the five acts on the
+loaded dataset or on the plots drawn from it, so `_sync_review_actions` shows
+the cluster in Review alone and hides it in Analyze and Datasets, where each
+would be a control with nothing behind it. Both mode-change handlers call it, so
+the cluster follows the seg and the pane stack alike.
+
+The help button is deliberately not one of them, which is why it is mounted
+after the cluster rather than inside it: the manual it opens documents all three
+modes, and it keeps the band's rightmost slot in every mode while the cluster in
+front of it comes and goes. Anything placed inside the cluster inherits the
+Review-only gating, and for this control that would leave Analyze and Datasets
+with `Ctrl+/` as their only route to the drawer — a shortcut nothing on screen
+advertises once the band's right end is empty.
+
+Opening the drawer aims it at the page the user is on.
+`_help_section_for_current_page` branches on the current mode and asks that
+mode's pane which of its own pages is showing: Review resolves its leaf tab
+through `tab_controller.current_centre_tab`, `DatasetsTab.current_help_page`
+returns the rail key of the tool page, and `AnalyzeTab.current_help_section`
+answers from focus and scroll position, since the Analyze pane is one tall form
+rather than a stack of pages. Its sections are recorded by `_section` in build
+order in `_section_widgets`, and the lookup reads two signals in order: the
+section containing the focused widget, then — among sections with any part of
+themselves on screen — the one whose *header* is nearest the viewport top.
+
+Both halves of that second rule are load-bearing, and the two obvious phrasings
+are wrong in mirrored ways. The scrollbar's travel is the form's height minus one
+viewport, so at the end of the form every remaining header sits *below* the
+viewport top: "the last header above the top" names a section several screens out
+of sight. And a section whose body is taller than the viewport still clips the top
+of it by a few pixels long after the user has scrolled past everything it says, so
+"the first section with any part on screen" names the one they have just left.
+
+Geometry alone cannot name the short sections packed into the form's final
+screenful — they are all visible at once, and no scroll position singles one out.
+That is what the focus branch is for, and it is the only route to those sections'
+help; `tests/test_analyze_help_section.py` asserts focus reaches every entry in
+`ANALYZE_SECTION_HELP`, not a subset.
+
+`help_topics.py` holds the maps from a page to the exact manual heading that
+documents it — `SECTION_BY_PAGE` for Review leaves, `ANALYZE_SECTION_HELP` for
+form sections, `DATASETS_PAGE_HELP` for rail labels, and `MODE_OVERVIEW` for the
+fallback each mode uses when its pane cannot say. It is Qt-free so
+`tests/test_help_topics.py` can check every entry against the real
+`README_WellViewer.md` in the fast lane: every value must be a heading that
+exists, every Datasets tool and Analyze section must have a key, and no key may
+name a page that no longer exists. `tests/test_guards_bite.py` carries that
+guard's bite cases, since `scripts/prove_guard.sh` cannot reach a guard whose
+maps live in a module the base ref does not have — the run there dies importing
+`help_topics` before it measures anything.
+
+The action cluster sits on the band
 rather than in the window header a row above because that put a second strip of
 chrome across the top of the window carrying controls for a mode the user might
 not be in. An earlier pass set `RAIL_W` to whichever mode's content needed the
@@ -4334,7 +4382,38 @@ it from.
 ungrouped TIFs into per-well `in/<WELL>.zip` archives with a live preview —
 wells × FOVs × timepoints × channels, plus unparsed and unreadable-symlink
 counts — that updates on every schema/separator keystroke, so a mismatch is
-caught before conversion rather than mid-run. It does **not** modify
+caught before conversion rather than mid-run. One `scan_folder` per change feeds
+both the readout and the plate preview: they ask the same question of the same
+folder with the same arguments, and walking a plate twice per keystroke is a
+stall on the GUI thread. The schema is described with the shared `SchemaPicker`
+(see the widgets table), the same control the Analyze form's Filename Schema
+section mounts: this page's whole output is a dataset Analyze reads next, so the
+two ask about the same filenames with the same vocabulary.
+
+`_can_run` refuses three things, each with its reason on screen, because a
+button that goes dark with no explanation is indistinguishable from a broken
+one. A schema `util.schema.validate_schema` rejects — the in-place route shells
+out to `WellPlateZipper.py`, which exits 2 on exactly those errors, and a schema
+with no `channel` yields archives Analyze cannot read. A scan that found no
+wells, which the page already knows from the preview it holds; offering that run
+spends a click to report what the readout above the button says. And a
+destination equal to the source, a cross-field rule the shared validator cannot
+see, which would leave the folder half loose images and half dataset. The
+destination itself goes through `_common/dataset_fields.is_free_destination`,
+the same rule and the same wording as Concatenate, Subset and Merge Plates.
+
+`ImportPreview.summary` distinguishes the three ways a scan comes back empty:
+no images in the folder, images only in subfolders (the scan is deliberately
+non-recursive, matching `WellPlateZipper`), and images that the schema does not
+describe. One sentence covered all three, and two of them are not about the
+schema — a per-condition subfolder layout is the ordinary shape of a loose
+export, so the page sent those users to rebuild a schema that was never wrong.
+An in-place run that succeeds calls `mark_in_place_done`, which stops the page
+re-scanning a folder whose loose images are now archives (it would report that
+nothing matches, directly above that run's own success headline) and disarms
+Run, which otherwise stayed live and traded the result for a failure.
+
+It does **not** modify
 `WellPlateZipper.py` or `services.input_resolution_service.resolve_input_output`
 — Analyze's own loose-TIF handling keeps working exactly as it does today.
 Conversion progress is a per-well plate map
@@ -4348,14 +4427,12 @@ disk, marking `done` with a terminal `✓` (accessibility — colour alone doesn
 distinguish success-green from `pending`'s text-muted grey). A `writing` well
 carries no glyph — it fills as a progress dial, and a glyph would sit in the
 middle of exactly the area the dial fills. The rail's own "Done" count row reads
-"Converted" instead, matching the vocabulary the dashboard's own well-state
+"Zipped" instead, matching the vocabulary the dashboard's own well-state
 marker and every other reference to this state on the page already use — it
 used to be the one place on this page still saying "Done" for the same
 state. `ImportLoosePage._update_status_preview` reveals the dashboard as
-soon as the source folder's live scan (`scan_folder`, the same call the
-readout already makes on every schema/separator keystroke) finds at least
-one well, seeded with those wells and a "Ready — N well(s) to convert."
-headline, rather than staying hidden until "▶ Zip folder" is pressed; a scan
+soon as the source folder's live scan finds at least one well, seeded with
+those wells and a "Ready — N well(s) to zip." headline, rather than staying hidden until "▶ Zip folder" is pressed; a scan
 that finds nothing yet leaves the dashboard hidden rather than showing an
 empty "Ready — 0 well(s)" plate, which would read as "broken" rather than
 "not ready yet".
@@ -4938,7 +5015,7 @@ Notable members worth knowing about by name:
 | `PlotCard` | The `QFrame` chrome around every matplotlib figure. Provides a custom toolbar (`MplToolbar`), Screen↔Publication mode toggle, and stats chip slot. |
 | `WellPlateSelector` | **The app's only painted well grid.** Every 8×12 plate the user sees is this control — Review's rails and the sample-definitions editor, the Datasets tools' pickers and status maps, Convert OME-TIFF's acquisition-path editor, and Batch Export's group map. What differs between them is which *selection model* the host drives it in (`setSelectionModel`): `"set"` (the default, an unordered selection), `"path"` (an ordered acquisition route — a click appends an off-path well or removes an on-path one, the wells carry their visit numbers derived from the list's own order, and an alpha-blended arrow traces the route across the plate), or `"paint"` (the grid owns **nothing** — it reports the press/drag/release gesture as `wellPaintPressed` / `wellPaintDragged` / `paintDragFinished` and the host applies it to whatever it is editing). The corner select-all toggle appears only in `"set"`, since it toggles a selection set the other two models do not have, and a paint gesture ends with `paintDragFinished` rather than `selectionDragFinished` — the latter means "the selection settled", and a paint gesture never changed one. Supports per-well colour overrides, drag-to-select, and drag mime types for the heatmap layout (a drag source arms on press and applies the ordinary click on release, so clicking still selects — see §9.2). Every lightening of a state colour goes through `_lighten` (an RGB blend toward white), never `QColor.lighter`: Qt's version raises the HSV *value* and, once value is at the ceiling, starts dropping *saturation* — it lightens toward white rather than toward a pale version of the hue. Every state colour in the app sits at value 245–253, so `accent2 #B98CF7` came back as literally `#ffffff`; a dial's unfilled share and the sphere gradient's highlight both used it, which is how an uploaded well rendered as a white disc with no hue left to say which stage it was in. `_blend` is the one lerp behind `_lighten` and `_mix_with_rail`. `darker()` needs no equivalent — lowering value never touches saturation. **The sphere gradient is damped on a dial and only on a dial** (`_DIAL_RELIEF`, scaling the stops `_sphere_stops` returns). Blending toward white keeps the hue but *compresses two tones together* — the nearer both are to white, the smaller the gap — so at a plain well's full relief the done and remaining halves of a green well came within 25 luminance of each other under the highlight, against 39 at the centre, and the completed wedge was itself 35 % of the way to white. Reported as "the completed portion is too light and I can't see the difference between complete and incomplete". At 0.43 relief the highlight is 15 % toward white and that worst case is 33. A plain well keeps the full relief because it has no internal boundary for the highlight to compress; only the dial carries a second signal in the same pixels, so only the dial pays. Tone alone still cannot carry green, so the wedge's radii and arc are **stroked** in `base.darker(170)` — skipped at a full dial, where the boundary *is* the rim the well already has. A non-interactive "lit" mode (`setColoredWellsLit`) paints colour-override wells with the raised/lit style instead of the depressed one, plus three decoration layers that stack independently of each other and of the fill: a `setWellMarker` glyph, a `setWellFraction` / `clearWellFractions` progress dial, and a `setWellRing` / `setWellRings` / `clearWellRings` accent ring drawn just *outside* the well body. The dial is used by every live plate map that reports a run, whether that is a dashboard's own status plate (Analyze, Concatenate, Import Loose, Merge Plates) or a page's input plate doubling as the progress display (Subset's picker, Convert OME-TIFF's path editor); Validate has no dial because it inspects rather than copies. The ring exists because a host can need a third channel: Batch Export colours a well by which group owns it and rings the wells of the group *currently being edited*, two different questions that would otherwise fight over the same fill. **Every Batch Export mode shares one set of export groups.** Line, Bar, Scatter (cells) and Scatter (aggregate) used to persist under four private slots chosen by `_compute_persist_key`, so groups built in one mode were invisible in the others and anyone exporting the same conditions four ways built them four times; the groups describe the dataset's conditions, not the plot type, so they live in one slot (`base_panel.SHARED_PERSIST_KEY`). A document written before that has its four legacy keys merged in a fixed order and de-duplicated by name, and only when the shared key is absent — otherwise deleting a group would be undone by a legacy slot re-supplying it on the next load. The four panels are cached children of one host toggled by `setVisible`, so `tab_view._show_mode` calls `_reload_persisted_groups()` on the panel it reveals; that is not the auto-resync from the *Sample Definitions* replicate sets which the same function's comment rules out (that one wiped the user's export groups on every visit). No `EventBus` signal — the catalogue is capped at five by contract and a mode switch is local. Batch Export drives the plate in `"paint"` because an export group's model is replicate sets plus solo wells, not a flat set of clicked wells: `_apply_drag` resolves the well under the cursor to the sample definition that owns it and adds or removes that whole **member**, falling back to a solo well only for a well no sample claims. Membership is compared **by name** — `grouping.rep_sets_loaded` builds a fresh `ReplicateSet` on every call and the class defines no `__eq__`, so an identity test never matched an already-present member: dragging across two wells of one sample appended it twice (and the group then exported that condition twice), while dragging a sample back off a group removed nothing. The name is already the identity key everywhere else, being what `_serialize_groups` persists and what hydration matches on. All three decorations, plus the path, are pruned by `setEnabledWells` / `setWellEnabled` — a disabled well paints as an empty socket, and a ring or a dial on a socket describes a well that is not there. Per-well rank colours are now pushed on **every** tab (not just the plotting tabs), so a given well reads as the same colour everywhere in the app. Every host sizes and places its plate through `plate_geometry.apply_plate_geometry` (below) rather than setting its own caps. |
 | `plate_geometry` (`widgets/plate_geometry.py`) | The single sizing and placement rule for every `WellPlateSelector` in the app — Review's five rail pickers, the "New Replicate Set" dialog, the saved-selections compose popover, Subset's well picker, Batch Export's group map, Convert OME-TIFF's acquisition-path plate, and each run dashboard's status map. **Every well grid the user can see goes through it**, with two documented exceptions that are not `WellPlateSelector`s at all: Sample Definitions' *Well Labels* grid (`features/grouping/label_grid_view.py`), which is 96 `QLineEdit`s because each cell takes free text, and the window icon's decorative plate in `allwell.py`, which is a painted graphic with no model behind it. `apply_plate_geometry(plate, *, role)` takes a `role` of `"rail"` (action row hidden, host has its own buttons), `"picker"` (action row shown), `"status"` (action row hidden, selection `"passive"`) or `"editor"` (action row hidden, interactive, and — unlike `"rail"` — subject to the size caps); the role decides **only** those behavioural things. Size, panel treatment and alignment are identical across all of them, which is the point: the same control used to render at three different cell scales depending on the pane. `"editor"` exists for an interactive plate that sits in a page rather than the rail and supplies its own actions — Convert OME-TIFF's acquisition-path plate, whose Generate/Clear buttons sit beneath it; uncapped it grows to the scroll area's full width and pushes the run button below the fold, which is why that page used to restate `330` / `210` as literals of its own. `PLATE_MAX_WIDTH` (330, the rail's own width) caps the card because the selector paints its panel background across its *entire* allocated box while the grid inside sizes cells to `min(width / 12, height / 8)` — past the height cap, extra width stretches the panel into a wide, mostly-empty card with a small grid floating in it. `PLATE_MAX_HEIGHT` (210) is the budget for a plate with its action row hidden; for a `"picker"` the helper *measures* that row from the widget's own layout and adds its height on top, so the grid budget — and therefore the cell size — is the same either way, and no caller re-derives an empirical "+48". `PLATE_ALIGNMENT` is the alignment flag every host passes to `addWidget`, so a container wider than the width cap centres the card instead of stranding it against an edge. **The `"rail"` role is exempt from both caps.** Review's left-rail picker is the app's primary interaction surface rather than a status readout: it scales to whatever width the rail gives it, with no ceiling. Capping it alongside the others shrank its cells from 23.7px to 20.8px — unifying the two by making the one people actually click on smaller, which is the wrong direction. It still takes the shared size *policy*, because the aspect-locked scaling genuinely is the same rule; only the ceiling differs. The module lives under `widgets/` rather than in `well_viewer/core/ui_helpers.py` because `widgets/` and `datasets/` both need it and `widgets/` must not import `well_viewer` (`test_architecture_contracts.py::test_widgets_do_not_import_the_app`). Every caller names its own role; Review's sidebar plate asks for `"rail"`. One rule the helper cannot enforce for its callers: a plate's container must add no horizontal inset, since the grid paints from the widget's own `width()` and a gutter on one host shrinks that host's plate in both dimensions. |
-| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. |
+| `PathField` (`widgets/path_field.py`) | A labelled folder/file picker: caption + read-only path box (basename shown, full path on hover) + icon Browse button, with an optional inline validity hint. Unifies two near-duplicate private widgets the Concatenate and Convert OME-TIFF pages grew independently. The dialog is opened by an injected `pick(current, parent)` callable rather than hardcoded, so the same widget serves a folder dialog (`folder_picker(prompt)`, the common case) or a page-owned file dialog (Convert OME-TIFF's `.ome.tif` source picker) — the picker takes *parent* explicitly because an unparented `QFileDialog` opens as a detached window on macOS instead of an app sheet. `setLocked(locked)` disables only the Browse button, not the whole widget — every Datasets tool page uses it (not `setEnabled(False)`) to lock a field for a run's duration, since the latter dims the *entire* field, including the already-read-only path text, the one piece of context a user watching a long run most wants to check. `show_note(text)` shows a neutral, "Muted"-styled inline note in place of the validator's own red "Danger"-styled hint, until the next `revalidate()` call — used after a successful run, when the validator's own message would otherwise be the exact "already holds a finished dataset" wording a pre-run pick gets, which is technically true but reads as a warning about the very output that run just correctly produced. `show_warning(text)` is its red counterpart, for a rule the validator cannot reach because it spans two fields — a validator sees one path, so "this destination is also the source" can only be decided by the page, and without somewhere to say it the page's Run button goes dark with no reason attached. |
 | `PlateOrderEditor` (`widgets/plate_order_editor.py`) | A `WellPlateSelector` driven in its ordered `"path"` selection model, so it is the same painted control as every other plate in the app; this ~90-line subclass adds only what the shared widget has no opinion about. The path model itself — lit wells carrying their 1-based visit number, the alpha-blended arrow tracing the order across the plate, and the click that appends an off-path well or removes an on-path one and renumbers the rest — lives in `well_plate_selector`. A *dirty* flag distinguishes a hand-drawn order from a `set_preview` seed (which is ignored once dirty). Used by the Convert OME-TIFF page to define an arbitrary, possibly non-rectangular `well_order`. |
 | `PlateProgress` (`widgets/plate_progress.py`) | The shared chrome behind every live run dashboard: a header (title/status/eta/collapse toggle), a headline label, one overall completion bar, and a 3-column body — a subclass-owned left "rail" slot, the plate map, and a legend. `RunDashboard` (Analyze), `ConcatDashboard`, `SubsetDashboard`, `MergePlatesDashboard`, `ValidateDashboard`, and `ImportLooseDashboard` each subclass it, building their own rail content and well-colour rules into the shared layout so none of them can visually drift apart. The plate map (`self._plate`, a `WellPlateSelector`) takes its size and placement from the shared `widgets/plate_geometry.apply_plate_geometry(plate, role="status")` — the one rule every plate map in the app goes through, so the status map here renders at exactly the cell scale of the Review rail's picker and of the Datasets tools' own pickers. `well_plate_selector._metrics()` derives cell size as `min(available_width / 12, available_height / 8)`, so a height-starved plate renders illegibly small even with hundreds of spare horizontal pixels — every Datasets tool page with a dashboard wraps its whole content in a `QScrollArea` (mirroring `analyze_tab.py`'s own form panel) for that reason: at the app's default launch size (`1640×980`, `allwell.py`), a plain `QVBoxLayout` crushes whatever's at the bottom of a long page instead of letting the user scroll to it. The plate is added with `center.addWidget(self._plate, 0, PLATE_ALIGNMENT)` and no layout stretch, so it sits centred in a centre column that is as wide as the page allows. `PlateProgress` also promotes the selector's per-well dial API onto the dashboard itself — `set_well_fraction(well, fraction)`, `set_well_progress(well, done, total)` and `clear_well_fractions()` — so a controller reports a well's progress without reaching through `self._plate`, which does not exist at all under `show_plate=False`; all three no-op in that case. The `done`/`total` arithmetic lives in the module-level `plate_progress.fraction_or_none`, which returns `None` for a non-positive `total` rather than dividing by it, since "not counted yet" must not render as a definite zero-filled dial — the same picture as a well that has genuinely done nothing. It is module-level because both kinds of dial host need it: `set_well_progress`, and a controller painting its page's *own* plate. **A no-op is the right base-class behaviour but it is not a progress report**, so a controller whose dashboard was built `show_plate=False` must drive the plate it does own instead of calling these and assuming something happened — `SubsetController` routes its worker's `wellFraction` signal to the picker plate's `setWellFraction` for exactly that reason (see the Subset rows in §11). Each host page's own outer layout ends in a trailing `outer.addStretch(1)` after its last real widget (and adds the dashboard itself with no stretch factor) for the same class of reason one level up: `QScrollArea.setWidgetResizable(True)` grows the page's content widget to fill the viewport, and with the raw log hidden by default nothing else in the column was willing to absorb that leftover height — the dashboard was, turning into a growing dead zone below the plate via its own internal `center.addStretch(1)`. The trailing stretch outranks every 0-stretch item above it, so slack collects as blank page background below everything instead. (Validate's page needs neither fix itself — its findings list is always visible with its own stretch factor, so it was already absorbing the slack correctly.) `PlateProgress.__init__` also takes `show_plate: bool = True` — a page whose input already has its own interactive plate map (Subset) passes `False` to skip the centre column entirely rather than leave a redundant second plate map, or worse, an empty-but-still-stretch-1 dead column between the rail and legend; see `SubsetDashboard` above. A second parameter, `show_legend: bool = True`, independently skips the legend column — `SubsetDashboard` passes `show_legend=False` alongside `show_plate=False`, since its counts rail already pairs a coloured dot with a state label per row, and a separate legend column would only repeat those same pairs without the live counts. Skipping either column when the centre plate column is also skipped no longer leaves a wide dead gap between whatever's left: with no widget left carrying a layout stretch factor, a trailing `body.addStretch(1)` collects the leftover width at the row's own right edge instead of Qt distributing it as blank padding around the remaining fixed-width items. The five dashboards on the Datasets-pane tools (`ConcatDashboard`, `ValidateDashboard`, `SubsetDashboard`, `ImportLooseDashboard`, `MergePlatesDashboard`) are each constructed **hidden** (`setVisible(False)`) by their host page, then revealed by that page's own `_update_status_preview` as soon as its inputs are valid enough to answer "what would this actually touch" — seeded with the real wells a run would touch (via `_common.dataset_paths.preview_wells`, or the tool's own live preview — Import Loose's `scan_folder`, Subset's own picker selection, Merge Plates' remap-applied union of both sources) and a "Ready — N well(s)" headline, rather than gated on the tool's own run/check method actually starting; each page hides it again on the next input edit that invalidates the preview. This replaced an earlier convention, gating the same reveal on a run actually starting, that read as "something is wrong" — an idle, empty status strip before anything had happened looked like a stuck or broken state rather than "nothing has run yet" (and, for `ConcatDashboard` specifically, an even earlier construction-time-visible default that painted a coloured plate with *zero* wells enabled from the moment the page loaded). `RunDashboard` (Analyze) is the one dashboard that still stays visible from construction — Analyze's own form has no comparable "not yet valid" gate to key a reveal off. Every well-coloured dashboard also marks a well's *terminal* states with a glyph layer (`WellPlateSelector.setWellMarker`), not just its colour: colour alone doesn't distinguish success-green from a warning hue for a user who can't tell the two apart, so each terminal state carries its own glyph (`✓` for success, `!` for a problem, `✕` for an error, and Merge Plates' persistent `"2"` for "this well came from dataset 2"). **A well being worked on carries no glyph anywhere in the app** — it is drawn as a progress dial, and a glyph sits in the middle of exactly the area the dial fills, while the fill and the colour already say the well is working. That is one rule across every plate map, not a per-dashboard choice: the `⚙` a computing/merging/writing/copying well used to wear is gone from Analyze's run dashboard, Concatenate, Import Loose, Merge Plates and Subset alike. Merge Plates' `"2"` is the one glyph that survives on a well mid-dial, because it reports *origin* rather than progress and is the only thing telling the two datasets apart once both sides are coloured dots on a small plate. |
 | `RunDashboard` | A thin `PlateProgress` subclass — the live, visual pipeline-run view shown above the Analyze log: a left stage rail (`group → upload → process → threshold → download`, the upload/download rungs only for remote runs) plus a centre plate map that colours each well by the stage it has reached. **Every well that has started is drawn as a dial rather than a solid disc** (`PlateProgress.set_well_fraction` → `WellPlateSelector.setWellFraction`): the well body itself is a two-tone pie of its own state colour — dark for the share completed, light for what is left, filled clockwise from twelve — so the hue still says which stage the well is in while the fill says how far through it is. Before that, a well on its first FOV-group and one on its last looked identical for however long the well took, which on a timelapse plate is most of the run. **The dial tracks whichever stage the well is actually inside**, decided by `_well_fraction`: a transfer in flight wins (bytes of its input zip sent while uploading, bytes of its output zip landed while downloading — a download outranks everything else, since a well being fetched has by definition already computed), then the FOV-group counts `set_well_fov` records from `well_fov` events, then the stages reached. A well sitting uploaded on the remote, waiting its turn, reads as a **full** dial: its archive is there in full, the dial has just spent the whole upload filling with the bytes sent, and what it waits for now is its turn rather than more transfer. Emptying it there — which is what "started but nothing finished" used to mean — reset the well from nearly-full to empty at the exact instant its upload completed, so the transfer appeared to undo itself. A full dial therefore means *uploaded* or *computed* depending on the well's colour, which is the accepted cost of a dial that never runs backwards. A well that is genuinely computing with no group measured yet is the empty dial, and that zero is true. A well with nothing started (grouped at most) and an errored well have no dial at all, since a part-filled ring beside the `✕` would suggest it is still going. Per-well transfer fractions arrive as `well_xfer` events (see `pipeline_runner` in §7) and are held in `_xfer` only while the transfer is live: a fraction of 1.0 *ends* the transfer rather than pinning the dial full, because a well is marked `upload` as rsync starts sending it. `setWellFraction` is opt-in, and only a surface that is *reporting a run* sets it — this dashboard, the four Datasets tool pages that copy per-well data, and nothing else — so Review's rail, the heat-map drag source and the replicate pickers are untouched. A computing well carries **no glyph** — the `⚙` it used to wear sat in the middle of exactly the area the dial now fills, and the fill plus the colour already say it is working; only `✕` for an error survives as a marker. There is no rail of per-well progress bars beneath the plate: the dial carries that information where the eye already is, and the exact counts (`FOV 7/12`, `downloading 42%`) live in the well's hover tooltip. |
@@ -5019,6 +5096,7 @@ The **Upload rail** counts wells off `[remote] ↑ …<well>.zip` lines, which u
 | `NamedPageStack` (in `core/centre_view.py`, not `widgets/` — but morally a widget) | A `QStackedWidget` keyed by page name; supports `detachPage`/`reattachPage` (Split View). |
 | `RailNav` | The left-rail section navigator. |
 | `info_icon` (`widgets/info_icon.py`) | The `ⓘ` hover-for-more marker, styled by the `#InfoHint` QSS rule. A function rather than a class — it returns a configured `QLabel`. Shared by the Analyze form (`AnalyzeFormChromeMixin._info_icon` delegates to it) and the Playground's threshold rows, so the app has one "there is an explanation here" affordance rather than a copy per pane. Sets WhatsThis as well as the tooltip, which is the route that works for someone who cannot hold a hover. |
+| `SchemaPicker` (`widgets/schema_picker.py`) | The filename-schema builder: a separator box, one dropdown per filename position, and the colon-delimited schema string the two of them write. The dropdowns and the string are two views of one value and sync both ways, each write blocking the other's signals so they cannot chase each other. Vocabulary and validity come from `util.schema` — the module the pipeline parses schemas with — so the picker offers exactly the fields the pipeline understands, reads a string the way `parse_schema` reads it (empty tokens collapse, rather than the dropdowns showing a layout the run will not use), and reports errors in `validate_schema`'s own wording. `schema()` returns the typed string in preference to the dropdowns, since the string can express more positions than there are dropdowns. `row_factory(parent, label) -> cell` is the layout seam: the Analyze form passes its own `_row` so the picker sits inside that form's label column, and the Datasets pane's Zip Loose Folder page takes the default plain row. Mounted by both, because both ask the user about the same filenames — Zip Loose Folder produces the archives Analyze then reads. |
 | `SegmentedControl`, `ChipGroup`, `Stepper`, `StyledSlider`, `ToggleSwitch` | Form controls; each exposes `bindingAdapter()` returning `(getter, setter, change_signal)` for the Export Style sidebar's binding loop. |
 | `SavedSelectionsList` | The rich saved-selection list with composition (drag-to-reorder, per-group flat well editing, recolour popovers). A group is one condition — its wells are its implicit replicate set, so there are no replicate sub-partitions / solo strips. |
 | `LutSelector`, `GradientStrip`, `ColorPickerPopover` | The colour-map picker + its preview strip + the freeform colour-picker popover. |
@@ -6015,6 +6093,26 @@ Add a `QShortcut(QKeySequence("Ctrl+X"), self, activated=self._handler)`
 line in `AllWellApp._install_shortcuts` (`allwell.py`). The help drawer's
 shortcut list is in `_toggle_help_drawer` in the same file — keep it
 in sync.
+
+### 11.6 Give a new page its help
+
+Adding a Review tab, a Datasets tool, or an Analyze form section means adding
+two things: a section in `_Docs/Markdowns/README_WellViewer.md`, and an entry in
+the matching map in `help_topics.py` whose value is that heading's exact text.
+Without both, the drawer opens on the mode overview for that page and nothing
+says so.
+
+For a **Datasets tool or an Analyze form section**, `tests/test_help_topics.py`
+fails until they are there: it reads the Datasets roster out of `datasets_tab.py`
+and the section titles out of `analyze_tab_form.py`, so neither can be added
+without the guard noticing.
+
+For a **Review tab** nothing enforces it. Review leaves are resolved at run time
+through `tab_controller.current_centre_tab` and `SECTION_BY_PAGE` deliberately
+keeps loose aliases for renamed and prefixed ones, so there is no roster to check
+a key against. A new Review tab without a `SECTION_BY_PAGE` entry silently opens
+the drawer on the Review overview, and the fast lane stays green. Add the entry
+by hand.
 
 ---
 

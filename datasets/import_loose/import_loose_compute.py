@@ -51,15 +51,51 @@ class ImportPreview:
     matched: int = 0
     unreadable_count: int = 0
     unparsed_files: tuple[str, ...] = field(default_factory=tuple)
+    #: Images found *below* the top level when the top level held none. Only
+    #: counted in that case — it is the difference between "your schema is
+    #: wrong" and "your images are one folder further down", and nothing else
+    #: on the page can tell those apart.
+    nested_count: int = 0
+    #: The parsed schema this preview was taken with, so the summary can leave
+    #: out the fields the schema never mentioned instead of reporting a count
+    #: for them.
+    schema_fields: tuple[str, ...] = field(default_factory=tuple)
 
     def summary(self) -> str:
+        """One line describing what this folder will become — or, when that is
+        nothing, *which* of the three reasons applies.
+
+        A single "No files matched the schema." covered all three, and two of
+        them are not about the schema at all: a folder whose images are one
+        level down (this tool reads only the top level) and a folder with no
+        images in it. Both sent the user off to rebuild a schema that was never
+        the problem.
+        """
+        if not self.examined:
+            if self.nested_count:
+                return (
+                    "No images directly in this folder — "
+                    f"{self.nested_count} found in subfolders, and this tool "
+                    "reads only the top level."
+                )
+            return "No .tif/.tiff files in this folder."
         if not self.matched:
-            return "No files matched the schema."
-        return (
-            f"{len(self.wells)} well(s) × {len(self.fovs) or 1} FOV(s) × "
-            f"{len(self.timepoints)} timepoint(s) · channels: "
-            f"{', '.join(self.channels) or '(none)'}"
-        )
+            return (
+                f"None of the {self.examined} image(s) here match the schema — "
+                "check the separator and the field positions."
+            )
+        parts = [f"{len(self.wells)} well(s)"]
+        # Only report a dimension the schema actually names. Reporting "1 FOV(s)
+        # × 0 timepoint(s)" for a schema holding neither invents one number and
+        # states the other as a measurement.
+        if "fov" in self.schema_fields:
+            parts.append(f"{len(self.fovs)} FOV(s)")
+        if "timepoint" in self.schema_fields:
+            parts.append(f"{len(self.timepoints)} timepoint(s)")
+        line = " × ".join(parts)
+        if "channel" in self.schema_fields:
+            line += f" · channels: {', '.join(self.channels) or '(none)'}"
+        return line
 
 
 @dataclass(frozen=True)
@@ -125,6 +161,25 @@ def _walk(
     )
 
 
+#: Stop counting nested images once the answer is "plenty". The count exists to
+#: say *which* problem this is, and any number past this reads the same.
+_NESTED_PROBE_CAP = 500
+
+
+def _count_images_below(search_dir: Path, cap: int = _NESTED_PROBE_CAP) -> int:
+    """How many images sit below *search_dir*'s top level, up to *cap*."""
+    found = 0
+    for root, _dirs, files in os.walk(search_dir):
+        if Path(root) == search_dir:
+            continue                      # the top level is the level we know is empty
+        for fname in files:
+            if fname.lower().endswith(_IMAGE_SUFFIXES):
+                found += 1
+                if found >= cap:
+                    return found
+    return found
+
+
 def scan_folder(
     search_dir: Path | str, *, filename_schema: str, filename_sep: str,
     recursive: bool = False,
@@ -139,6 +194,13 @@ def scan_folder(
     schema = parse_schema(filename_schema)
     result = _walk(Path(search_dir), schema=schema, sep=filename_sep, recursive=recursive)
     matched = sum(len(v) for v in result.by_well.values())
+    # Only when the top level held nothing: look one level further and count, so
+    # the page can say "they are in subfolders" instead of blaming the schema.
+    # Bounded, and reached only in the already-empty case, so it costs nothing
+    # on the path a real run takes.
+    nested = 0
+    if not result.examined and not recursive:
+        nested = _count_images_below(Path(search_dir))
     return ImportPreview(
         wells=tuple(sorted(result.by_well)),
         fovs=tuple(sorted(result.fovs)),
@@ -148,6 +210,8 @@ def scan_folder(
         matched=matched,
         unreadable_count=result.unreadable_count,
         unparsed_files=tuple(result.unparsed_files),
+        nested_count=nested,
+        schema_fields=tuple(schema),
     )
 
 

@@ -33,8 +33,8 @@ def test_browse_scan_prefills_schema_and_channels(qapp, tmp_path):
     tab._autofill_from_input_scan(str(tmp_path / "ds"))
 
     # Schema + separator inferred from the filenames…
-    assert tab._filename_sep_edit.text() == "_"
-    assert tab._schema_str_edit.text() == "experiment:channel:well:fov:timepoint"
+    assert tab._schema_picker.separator() == "_"
+    assert tab._schema_picker.schema() == "experiment:channel:well:fov:timepoint"
     # …and channel roles seeded (DAPI nuclear, GFP fluorescent).
     assert tab._nuclear_token_edit.text() == "DAPI"
     assert tab._fluor_tokens_list() == ["GFP"]
@@ -94,8 +94,8 @@ def test_scan_leaves_form_untouched_when_unparseable(qapp, tmp_path):
     d.mkdir()
     (d / "random.txt").write_text("x")
     tab = AnalyzeTab()
-    before_schema = tab._schema_str_edit.text()
+    before_schema = tab._schema_picker.schema()
     before_nuc = tab._nuclear_token_edit.text()
     tab._autofill_from_input_scan(str(d))
-    assert tab._schema_str_edit.text() == before_schema
+    assert tab._schema_picker.schema() == before_schema
     assert tab._nuclear_token_edit.text() == before_nuc

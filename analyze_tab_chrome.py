@@ -87,8 +87,86 @@ class AnalyzeFormChromeMixin:
                 self._collapsible_sections = {}
             self._collapsible_sections[title] = (body, caret)
 
+        # Every section, collapsible or not, is recorded in build order so
+        # current_help_section can say which one the user has scrolled to.
+        if not hasattr(self, "_section_widgets"):
+            self._section_widgets = {}
+        self._section_widgets[title] = container
+
         parent.layout().addWidget(container)
         return body
+
+    def current_help_section(self) -> str:
+        """Title of the form section the user is working in, or ``""``.
+
+        The Analyze pane is one tall scrolling form rather than a stack of
+        pages, so there is no "current page" to read off a stack. Two signals
+        answer it instead, in order:
+
+        1. **Keyboard focus.** If a control inside a section has focus, that is
+           the section, whatever the scroll position says. This is the only
+           signal that can name the short sections packed at the foot of the
+           form — see the limit below.
+        2. **The section at the top of the viewport**: among sections with any
+           part of themselves on screen, the one whose *header* is nearest the
+           viewport top. Nearest, not "the first one showing": a section whose
+           body is three screens tall is still on screen by its last few pixels
+           long after the user has scrolled past everything it says, and naming
+           it there is the same defect as naming the last header above the top.
+
+        The limit worth knowing: the scrollbar's travel is the form's height
+        minus one viewport, so the final screenful can never be scrolled to the
+        top. Every section in it shares whichever of them is topmost, unless
+        focus says otherwise. Geometry cannot separate sections the user is
+        looking at simultaneously.
+
+        Returns ``""`` — meaning "fall back to the mode overview" — before the
+        form is built, when the pane has no scroll area, or when the sidebar is
+        collapsed.
+        """
+        sections = getattr(self, "_section_widgets", None)
+        scroll = getattr(self, "_left_sidebar", None)
+        if not sections or scroll is None:
+            return ""
+        viewport = scroll.viewport() if hasattr(scroll, "viewport") else None
+        if viewport is None:
+            return ""
+
+        focused = self._section_holding_focus(sections)
+        if focused:
+            return focused
+
+        best_title, best_distance = "", None
+        for title, container in sections.items():
+            if container is None or not container.isVisible():
+                continue
+            # mapTo across the widget tree rather than reading y() directly:
+            # each section sits inside the form widget, not the viewport.
+            top = container.mapTo(viewport, container.rect().topLeft()).y()
+            if top + container.height() <= 0 or top >= viewport.height():
+                continue                      # entirely above / below the fold
+            distance = abs(top)
+            if best_distance is None or distance < best_distance:
+                best_title, best_distance = title, distance
+        return best_title
+
+    @staticmethod
+    def _section_holding_focus(sections: dict) -> str:
+        """Title of the section containing the focused widget, or ``""``.
+
+        Walks up from the focus widget rather than down from each section: the
+        form nests rows inside cells inside bodies, so ``isAncestorOf`` on the
+        way up is one pass whatever the depth.
+        """
+        from PySide6.QtWidgets import QApplication
+
+        focus = QApplication.focusWidget()
+        if focus is None:
+            return ""
+        for title, container in sections.items():
+            if container is not None and container.isAncestorOf(focus):
+                return title
+        return ""
 
     def reveal_section(self, title: str) -> None:
         """Unfold the collapsible section named *title*, if it is folded.

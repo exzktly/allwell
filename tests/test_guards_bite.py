@@ -443,3 +443,103 @@ def test_axes_selection_guard_clears_a_non_prompt(tmp_path, monkeypatch, shape):
     assert _run_scan(monkeypatch, "tests.test_no_axes_selection_message",
                      "test_no_interactive_renderer_paints_a_selection_message",
                      [good]) is None
+
+
+# ── help topics ─────────────────────────────────────────────────────────────
+#
+# The help-topic guard cannot be proven with `scripts/prove_guard.sh`: the maps
+# it reads live in `help_topics.py`, a module the base branch does not have, so
+# the run there dies on an import before measuring anything. This is the whole
+# proof it gets, so both rules are exercised in both directions.
+
+_FAKE_README = """# Manual
+
+## Datasets mode — dataset-level tools
+
+### Merge Plates
+
+## Analyze mode — running the pipeline
+
+### 1. Filename schema
+"""
+
+_FAKE_DATASETS_TAB = '''
+_FEATURES = (
+    _Feature(name="Merge Plates", icon="layout-grid", build=_b, kind="merge_plates"),
+    _Feature(name="Brand New Tool", icon="boxes", build=_b, kind="brand_new"),
+)
+'''
+
+_FAKE_ANALYZE_FORM = '''
+class Form:
+    def _build(self, parent):
+        self._section(parent, "Filename Schema")
+        self._section(parent, "Brand New Section", collapsible=True)
+'''
+
+
+def _help_topics_root(tmp_path: Path) -> Path:
+    """A synthetic repo root holding the three files the guard reads."""
+    _write(tmp_path, "_Docs/Markdowns/README_WellViewer.md", _FAKE_README)
+    _write(tmp_path, "datasets_tab.py", _FAKE_DATASETS_TAB)
+    _write(tmp_path, "analyze_tab_form.py", _FAKE_ANALYZE_FORM)
+    return tmp_path
+
+
+def test_help_topic_guard_catches_a_datasets_tool_with_no_topic(tmp_path, monkeypatch):
+    """The shape that shipped: seven Datasets tools, zero topic keys."""
+    root = _help_topics_root(tmp_path)
+    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                           "test_every_datasets_tool_has_a_topic", root)
+    assert exc is not None, "an unmapped Datasets tool went uncaught"
+    assert "Brand New Tool" in str(exc)
+
+
+def test_help_topic_guard_catches_an_analyze_section_with_no_topic(tmp_path, monkeypatch):
+    root = _help_topics_root(tmp_path)
+    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                           "test_every_analyze_section_has_a_topic", root)
+    assert exc is not None, "an unmapped Analyze form section went uncaught"
+    assert "Brand New Section" in str(exc)
+
+
+def test_help_topic_guard_catches_a_topic_naming_no_heading(monkeypatch):
+    """A value that matches no heading scrolls nowhere, silently.
+
+    Run against the *real* manual, with one entry repointed. A synthetic README
+    holding a handful of headings would fail this guard on every topic at once,
+    with or without the repointing — the case would go green while proving
+    nothing about the entry it claims to be testing.
+    """
+    import help_topics
+    from tests import test_help_topics as guard
+
+    guard.test_every_topic_names_a_real_heading()      # clean before
+    monkeypatch.setitem(help_topics.DATASETS_PAGE_HELP, "Merge Plates",
+                        "No Such Heading")
+    with pytest.raises(AssertionError) as caught:
+        guard.test_every_topic_names_a_real_heading()
+    assert "No Such Heading" in str(caught.value)
+    assert "Merge Plates" in str(caught.value), "the failure must name the key at fault"
+
+
+def test_help_topic_guard_catches_a_duplicated_heading(tmp_path, monkeypatch):
+    """Two identical headings share one anchor, so one topic aims at the other's
+    page."""
+    root = tmp_path
+    _write(root, "_Docs/Markdowns/README_WellViewer.md",
+           _FAKE_README + "\n### Merge Plates\n")
+    exc = _run_rooted_scan(monkeypatch, "tests.test_help_topics",
+                           "test_headings_are_unique", root)
+    assert exc is not None and "Merge Plates" in str(exc)
+
+
+def test_help_topic_guard_clears_the_real_tree(monkeypatch):
+    """The other direction: against the repository itself every rule holds, so
+    the guard is measuring rather than failing on everything."""
+    import tests.test_help_topics as guard
+    guard.test_every_datasets_tool_has_a_topic()
+    guard.test_every_analyze_section_has_a_topic()
+    guard.test_every_topic_names_a_real_heading()
+    guard.test_headings_are_unique()
+    guard.test_no_topic_keys_for_pages_that_no_longer_exist()

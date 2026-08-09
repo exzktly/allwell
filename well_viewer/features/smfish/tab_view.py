@@ -223,15 +223,14 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     plot_host_l.addWidget(canvas_img, 1)
     plot_host_l.addWidget(toolbar)
 
-    # Until a dataset is loaded this tab used to paint its warning as
-    # matplotlib text on the axes — a bare muted string, no glyph and no
-    # "Open… is at the top of the left rail" hint, so it read as a different
-    # kind of message from the placeholder every other tab shows. The shared
-    # EmptyState is that placeholder; the stack registers itself and
-    # ``refresh_plot_empty_states`` flips it on load. The on-canvas messages
-    # below stay as they are: they describe states *within* a loaded dataset
-    # (no well selected, no smFISH channel, an image that failed to load),
-    # which is exactly where the other tabs paint on the axes too.
+    # This tab used to paint its warnings as matplotlib text on the axes — bare
+    # muted strings, no glyph and no hint, so they read as a different kind of
+    # message from the placeholder every other tab shows. The shared EmptyState
+    # is that placeholder, and its reason covers both the states that are about
+    # the app rather than about this plot: no dataset, and no well selected. The
+    # on-canvas messages below stay where they are — no smFISH channel in the
+    # run, an image that failed to load — because those are per-plot causes the
+    # placeholder cannot know about.
     from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     # smFISH is ``single_well_selection``, so on_plate_sel_change collapses any
     # multi-well selection to one while this tab is current: zero wells is the

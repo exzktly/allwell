@@ -48,11 +48,18 @@ def render_spatial(ctx) -> None:
             _draw_message(fig, st.last_error)
         elif st.viz == sp_state.VIZ_SUMMARY_PANEL:
             if not st.last_result:
-                _draw_message(fig, "Select one or more wells to summarise.")
+                # Summary is deliberately *not* placeholder-gated — it falls back
+                # to every loaded well rather than to one arbitrary one — so this
+                # is the genuine "nothing computed yet" state, and the button is
+                # what resolves it.
+                _draw_message(fig, "Press Recompute to build the summary.")
             else:
                 _render_summary_panel(fig, st, ctx.state.plot.time_scale)
         elif not st.frames:
-            _draw_message(fig, "Select a well to explore its spatial structure.")
+            # The per-frame levels are placeholder-gated, so an empty selection
+            # never reaches here: this is wells chosen whose frames would not
+            # resolve.
+            _draw_message(fig, "No spatial data for the chosen wells and timepoint.")
         else:
             _render_frames_grid(fig, st)
     except Exception as exc:  # pragma: no cover - defensive
@@ -513,7 +520,9 @@ def _render_summary_panel(fig, st, time_scale=1.0) -> None:
     display = payload.get("summary_display") or sp_state.SUMMARY_DISPLAY_HEATMAP
     matrix, wells, tps = _summary_matrix(payload, key)
     if matrix.size == 0:
-        _draw_message(fig, "No wells / timepoints in the current selection.")
+        # The summary ran and produced an empty matrix — not a missing selection,
+        # which the shared placeholder would have caught before this point.
+        _draw_message(fig, "The summary produced no wells or timepoints.")
         return
     label, units = _summary_metric_label(key)
     ylabel = f"{label} ({units})" if units else label

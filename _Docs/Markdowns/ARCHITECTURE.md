@@ -982,21 +982,66 @@ loaded (the `.../out` path in the split case), not the climbed display name.
 
 `ui_helpers.wrap_with_empty_state` wraps every centre tab whose body needs a
 dataset — the plots, Statistics, Spatial, Review CSV, Batch Export and smFISH —
-so a tab opened before one is loaded shows the same placeholder rather than an
-empty table, a blank panel, or a bare matplotlib canvas that reads as a failure.
-The wrap registers a `QStackedWidget` on `win._plot_empty_stacks` and
-`refresh_plot_empty_states` flips all of them together, which is what keeps the
-wording and the moment of the swap identical across tabs.
+so a tab with nothing to show renders the same placeholder rather than an empty
+table, a blank panel, or a bare matplotlib canvas that reads as a failure. The
+wrap registers a `QStackedWidget` on `win._plot_empty_stacks` (page 0 the
+`EmptyState`, page 1 the body) and the refresh helpers flip all of them together,
+which is what keeps the wording and the moment of the swap identical across tabs.
 
-**The placeholder is for "no dataset"; the axes are for everything else.** A tab
-with a dataset loaded and nothing to draw — no well selected, no timepoints, a
-channel the run never produced — paints its own message on the axes, because the
-message is about the selection rather than about the app having nothing to work
-with. Mixing the two is what made smFISH look unlike its neighbours: it painted
-*both* kinds on the canvas, so the one state every other tab renders as a glyph,
-a sentence and an "Open…" hint appeared there as a muted line of matplotlib
-text. The wrap decides that split; a tab that skips it has no way to show the
-shared placeholder at all.
+**The placeholder says which "nothing" it is; the axes carry per-plot causes.**
+Each wrap site may pass a `reason(ctx) -> EmptyReason | None`, called on every
+refresh, where `None` means the tab has something to draw. An `EmptyReason`
+carries a title, a hint and optionally a glyph, which are written onto that
+stack's own placeholder — one widget, two pages, no third page and no second
+placeholder per tab. **`no_dataset` short-circuits ahead of every site reason**:
+with no dataset loaded every stack shows the shared "Load a directory." copy,
+because asking someone to pick wells on a plate that is not there is a worse
+message than the one it would replace.
+
+`selection_controller.has_plottable_selection` is the single predicate behind the
+shared `no_selection_reason` — wells picked, or a visible replicate set. Four
+renderers each spelled that condition out for themselves before it existed.
+Messages about *other* empty causes — no timepoints, no channel data, no feature
+columns, no smFISH/mask pair — stay on the axes, because the placeholder cannot
+know about them. `tests/test_no_axes_selection_message.py` enforces the split: no
+interactive renderer may paint a message that *asks for a well selection*, and it
+reads module constants and the message-drawing helpers as well as direct
+`ax.text` calls, because that is how the messages it replaced actually reached
+the canvas. Export renderers are exempt per file, since a figure written to disk
+carries no placeholder with it and must state its own shortfall (§7).
+
+Two tabs need reasons of their own rather than the shared one. **Heat Map is not
+selection-driven**: `redraw_heatmap` fills from `layout.cells` and reads the
+selection only to outline cells, so gating it on the selection would hide a
+populated saved map the moment the plate was cleared. It gates on an empty
+layout — which is the common case rather than a corner, because
+`_ensure_sidebar_layout` creates an empty `Sidebar` layout while the sidebar
+builds and leaves `active_layout_name` unset, so `active_layout` returns it and
+the populated `make_plate_layout` default is never reached. **Spatial gates only
+at its three per-frame levels**, where an empty selection otherwise renders the
+first key of `well_paths` — one arbitrary well, unannounced. Its Summary level
+keeps falling back to every loaded well, which is a defensible default rather
+than an arbitrary pick.
+
+Statistics uses the same widget on its own trigger (no comparison groups), so a
+user moving between pages reads one treatment rather than two. Batch Export
+deliberately does not: the widget wrapped there is the whole panel including
+OUTPUT SETTINGS and the Run button, and swapping that for a placeholder would
+hide the output configuration exactly while it is being set up.
+
+**Where the refresh is called from matters as much as the rule.**
+`refresh_empty_state_pages` is the cheap half — one reason call and a
+`currentIndex()` comparison per stack — and runs from `apply_selection_refresh`,
+the sole `selection_changed` subscriber, *before* its per-tab loop: that loop
+only touches `_visible_tabs`, and a feature with an `on_selection_changed` hook
+never reaches `plot_orchestrator.redraw_app`, so a background page would
+otherwise keep whatever state it held when last seen. `refresh_plot_empty_states`
+adds the dataset-gated greying of `TabCtrl` / `ControlBand` containers, which is
+two recursive `findChildren` walks and answers a question only a dataset load can
+change. It is also called from `centre_view._build_pending` after a deferred body
+is built: a `lazy_only` tab registers its stack *after* the load-time refresh, so
+without that call Spatial and smFISH showed "Load a directory." over a loaded
+dataset for the life of the session.
 
 An actual failure says so. A deferred tab builder that raises used to log a
 traceback and leave an empty page — indistinguishable from a tab with nothing to

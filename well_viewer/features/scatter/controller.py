@@ -332,9 +332,14 @@ def redraw_scatter_agg(
     )
 
     if not scatter_data:
+        # Reached with a selection in hand that still produced no points — a
+        # timepoint nothing matched, gating that excluded every cell. The
+        # no-selection half of what this used to say is the tab's shared
+        # placeholder now, and naming it here too would cover two causes the
+        # user acts on differently with one sentence.
         ax_agg.text(
             0.5, 0.5,
-            "No data available.\nPlease select wells/groups and timepoints.",
+            "No data available.\nTry another timepoint — or check the cell gating.",
             ha='center', va='center',
             transform=ax_agg.transAxes,
             fontsize=10,

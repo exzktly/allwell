@@ -136,6 +136,22 @@ def _refresh_tab_view(ctx, tab: str, *, redrew: bool) -> bool:
     return True
 
 
+def _announce_selection(ctx) -> None:
+    """Put the current well selection on the status bar. One writer, one place.
+
+    Counts what the user chose, not what a tab decided to plot: a page that falls
+    back to every well when nothing is picked must not make the status line claim
+    those wells were selected.
+    """
+    sel = ctx.state.selection
+    well_paths = ctx.state.dataset.well_paths or {}
+    n = len([w for w in sel.selected_wells if w in well_paths])
+    if n:
+        ctx.notify.set_status(f"{n} well{'s' if n != 1 else ''} selected")
+    else:
+        ctx.notify.set_status("No wells selected")
+
+
 def apply_selection_refresh(ctx) -> None:
     app = ctx.window  # transitional bridge (A3)
     """Refresh the sidebar and every visible tab's view after a selection change.
@@ -157,9 +173,17 @@ def apply_selection_refresh(ctx) -> None:
     without ever reaching ``plot_orchestrator.redraw_app``, which is where the
     other empty-state refresh lives. Anything less leaves a background page
     showing whatever state it held when the user last looked at it.
+
+    The status line is written from here for the same reason. It used to be
+    echoed by whichever tab happened to redraw, so it reported the selection on
+    the pages that bothered and kept a stale sentence everywhere else — the
+    Segmentation page read "No wells selected." over a lit A01 while its own rail
+    said "Selected: A01", because a tab the user had left wrote it. One writer on
+    the one signal that means the selection changed.
     """
     from well_viewer.core.ui_helpers import refresh_empty_state_pages
     refresh_empty_state_pages(app)
+    _announce_selection(ctx)
     app._refresh_sidebar_map()
     redrew = False
     for tab in _visible_tabs(ctx):

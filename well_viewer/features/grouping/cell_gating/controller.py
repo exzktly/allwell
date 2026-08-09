@@ -269,9 +269,20 @@ def cell_gating_load_cell_areas(ctx) -> None:
     if ctx.runtime.cell_gating.cell_areas:
         ctx.runtime.cell_gating.axes_stack = []
         _cell_gating_plot_cdf(ctx)
+        # Name what was actually used. ``_cell_gating_wells`` falls back to every
+        # loaded well when nothing is selected, and this line called them
+        # "selected well(s)" regardless — so a plate with a cleared selection
+        # read "Loaded 24 cells from 4 selected well(s)" with nothing selected,
+        # attributing a choice to the user that the fallback had made for them.
+        scoped = bool([
+            label for label in ctx.state.selection.selected_wells
+            if label in ctx.state.dataset.well_paths
+        ])
+        where = (f"{len(labels)} selected well(s)" if scoped
+                 else f"all {len(labels)} wells (no wells selected)")
         ctx.runtime.cell_gating.status_label.setText(
             f"Loaded {len(ctx.runtime.cell_gating.cell_areas)} cells from "
-            f"{len(labels)} selected well(s), first frame of first FOV"
+            f"{where}, first frame of first FOV"
         )
     else:
         ctx.runtime.cell_gating.status_label.setText("No cell data found")

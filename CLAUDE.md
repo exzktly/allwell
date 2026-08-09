@@ -104,7 +104,7 @@ one that is wedged:
 |---|---|
 | Fast lane, local, quiet container | ~3.5 min |
 | Fast lane, local, while other work runs in the same container | up to ~11 min — same suite, 3× the wall clock; contention, not the tests |
-| Fast lane, CI job end to end | ~9 min, including checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
+| Fast lane, CI job end to end | 9–11 min across observed runs, including checkout and installing the test stack. The job cap is 15 min (`ci.yml`) |
 | One slow-lane file of ~15 full-app tests | ~3.5 min, i.e. ~14 s per app construction |
 
 Re-count rather than trusting these when it matters: `python -m pytest tests -m

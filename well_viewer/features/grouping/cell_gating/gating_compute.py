@@ -74,6 +74,77 @@ def inclusion_counts(frames) -> tuple[int, int, int]:
     return included, total, qc_failed
 
 
+# The inclusion layers, in the order ``df_included_mask`` composes them, with
+# the column each one owns. ``Included`` is listed first because it is the
+# column the manual curation *and* the FluorGating pass both write — they cannot
+# be separated from the frame, and the label says so rather than implying a
+# split the data does not support.
+_FUNNEL_LAYERS: tuple[tuple[str, str], ...] = (
+    ("Curation + intensity gate", "Included"),
+    ("QC debris gate", "QC_Pass"),
+    ("Crop region", "Crop_Pass"),
+    ("Scatter gates", "Gate_Pass"),
+)
+
+
+def inclusion_funnel(frames) -> list[tuple[str, int | None, int]]:
+    """Per-layer inclusion counts: ``[(label, removed, surviving), …]``.
+
+    Each entry is that layer applied *on top of* the ones before it, in the
+    order :func:`~well_viewer.data.data_loading.df_included_mask` composes them,
+    so the last ``surviving`` equals the tab's Included figure. The first entry
+    of the returned list is always the ``("Segmented cells", None, total)``
+    starting population.
+
+    ``removed`` is ``None`` — not ``0`` — for a layer whose column is absent
+    from every frame. A layer that was never applied and a layer that removed
+    nothing are different facts, and rendering both as "−0" is exactly the
+    substitution that makes a partial result indistinguishable from a complete
+    one. Callers render ``None`` as "not applied".
+
+    Pure: DataFrames in, plain tuples out.
+    """
+    frames = [df for df in (frames or ())
+              if df is not None and not getattr(df, "empty", True)]
+    total = sum(len(df) for df in frames)
+    stages: list[tuple[str, int | None, int]] = [("Segmented cells", None, total)]
+    if not frames:
+        return stages
+
+    masks = {id(df): pd.Series(True, index=df.index) for df in frames}
+    surviving = total
+    for label, column in _FUNNEL_LAYERS:
+        present = False
+        after = 0
+        for df in frames:
+            mask = masks[id(df)]
+            if column in df.columns:
+                present = True
+                # ``Included`` defaults to excluded when unparseable (matching
+                # df_included_mask); the verdict columns default to pass.
+                fill = 0 if column == "Included" else 1
+                col = pd.to_numeric(df[column], errors="coerce").fillna(fill)
+                mask = mask & col.eq(1)
+                masks[id(df)] = mask
+            after += int(mask.sum())
+        stages.append((label, (surviving - after) if present else None, after))
+        surviving = after
+    return stages
+
+
+def format_inclusion_funnel(stages) -> str:
+    """One line per layer, for the tab's funnel readout. ``""`` when no data."""
+    if not stages or stages[0][2] <= 0:
+        return ""
+    lines = [f"{stages[0][2]:,} segmented cells"]
+    for label, removed, surviving in stages[1:]:
+        if removed is None:
+            lines.append(f"   {label}: not applied")
+        else:
+            lines.append(f"   {label}: −{removed:,}  →  {surviving:,}")
+    return "\n".join(lines)
+
+
 def format_inclusion_counts(
     included: int,
     total: int,

@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
+from PySide6.QtWidgets import QLabel, QLineEdit, QWidget
 
 from well_viewer.core import debug_flags as _debug_flags
 from well_viewer.core.channel_state_controller import (
@@ -62,7 +62,9 @@ from well_viewer.features.grouping.cell_gating.gating_compute import (
     _valid_values_for_channel,
     apply_fluor_gating,
     format_inclusion_counts,
+    format_inclusion_funnel,
     inclusion_counts,
+    inclusion_funnel,
 )
 from well_viewer.features.grouping.cell_gating.opt_curve_view import (
     _cell_gating_show_opt_curve_popup,
@@ -479,6 +481,17 @@ _GATE_BUTTON_ATTR = {
     "gating": "gating_gate_btn",
     "thresh": "thresh_gate_btn",
 }
+# The "scatter gates" radio of each layer's source pair, and the hint shown
+# beneath it while no gate exists to pick. Stamped by the tab builder; absent
+# until the tab is built, so every reader guards for None.
+_GATE_RADIO_ATTR = {
+    "gating": "gating_source_radio",
+    "thresh": "thresh_source_radio",
+}
+_GATE_HINT_ATTR = {
+    "gating": "gating_no_gates_hint",
+    "thresh": "thresh_no_gates_hint",
+}
 _GATE_MODE_ACTIVE_ATTR = {
     "gating": "use_scatter_gates",
     "thresh": "use_scatter_thresh",
@@ -539,7 +552,14 @@ def _cell_gating_gate_button_text(ctx, mode: str) -> str:
 
 def _cell_gating_refresh_gate_filter(ctx) -> None:
     """Sync both Gates buttons (text + enabled) to the current gates, pruning any
-    explicitly-selected names that no longer exist (in each layer's set)."""
+    explicitly-selected names that no longer exist (in each layer's set).
+
+    Also drives each layer's "scatter gates" radio and its "no gates drawn yet"
+    hint. Gates are drawn on a *different* tab, so whether that option is
+    selectable can change while this tab sits open — deciding it once at build
+    time would leave the option permanently dead for anyone who opened Cell
+    Gating before drawing their first gate.
+    """
     names = set(_cell_gating_gate_names(ctx))
     for mode in _GATE_MODES:
         choices = getattr(ctx.state.cell_gating, _GATE_CHOICES_ATTR[mode], None)
@@ -552,6 +572,12 @@ def _cell_gating_refresh_gate_filter(ctx) -> None:
             btn.setText(_cell_gating_gate_button_text(ctx, mode))
             # Each Gates button is only relevant when its own layer is active.
             btn.setEnabled(bool(getattr(ctx.state.cell_gating, _GATE_MODE_ACTIVE_ATTR[mode], False)))
+        radio = getattr(ctx.runtime.cell_gating, _GATE_RADIO_ATTR[mode], None)
+        if radio is not None:
+            radio.setEnabled(bool(names))
+        hint = getattr(ctx.runtime.cell_gating, _GATE_HINT_ATTR[mode], None)
+        if hint is not None:
+            hint.setVisible(not names)
 
 
 def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
@@ -574,11 +600,17 @@ def cell_gating_refresh_included_count(ctx, *, pending: bool = False,
     lbl = ctx.runtime.cell_gating.included_count
     if lbl is None:
         return
-    included, total, qc_failed = inclusion_counts(
-        (ctx.state.dataset.cache or {}).values())
+    frames = list((ctx.state.dataset.cache or {}).values())
+    included, total, qc_failed = inclusion_counts(frames)
     ctx.runtime.cell_gating.last_counts = (included, total, qc_failed)
     lbl.setText(format_inclusion_counts(
         included, total, qc_failed, pending=pending, failed=failed))
+
+    # The same population, broken down by the layer that removed each cell. One
+    # aggregate number says a gate did something; it cannot say which gate.
+    funnel = ctx.runtime.cell_gating.funnel_label
+    if funnel is not None:
+        funnel.setText(format_inclusion_funnel(inclusion_funnel(frames)))
 
 
 def _cell_gating_scatter_mode_on(ctx) -> bool:
@@ -1085,6 +1117,16 @@ def cell_gating_optimize_thresh_frac_on(ctx) -> None:
 
 
 def _cell_gating_build_channel_controls(ctx) -> None:
+    """Rebuild the per-channel threshold table.
+
+    One table, not two. The inclusion floor and the fraction-on cutoff are
+    different decisions but they are made per channel and read together, so they
+    are columns of one row rather than two controls stranded under two section
+    headers — which is what the tab had, with both columns living under the
+    header for only one of them.
+    """
+    from PySide6.QtWidgets import QGridLayout
+
     inner_layout = ctx.runtime.cell_gating.inner.layout()
     while inner_layout.count():
         item = inner_layout.takeAt(0)
@@ -1113,49 +1155,76 @@ def _cell_gating_build_channel_controls(ctx) -> None:
         inner_layout.addWidget(lbl)
         return
 
-    seg_tok = seg_channel_token_of(ctx)
-    for channel, row_label in row_specs:
-        ch_row = QWidget(ctx.runtime.cell_gating.inner)
-        rl = QHBoxLayout(ch_row)
-        rl.setContentsMargins(0, 0, 0, 0)
+    table = QWidget(ctx.runtime.cell_gating.inner)
+    grid = QGridLayout(table)
+    grid.setContentsMargins(0, 0, 0, 0)
+    grid.setHorizontalSpacing(16)
+    grid.setVerticalSpacing(4)
+    grid.setColumnMinimumWidth(0, _CH_LBL_W)
+    grid.setColumnStretch(3, 1)
 
-        ch_lbl = QLabel(row_label, ch_row)
+    # Column headers name the layer each column feeds, so the two decisions stay
+    # distinguishable now that they share a row. The measurement they are made
+    # against is stated once, here, rather than as a paragraph above the tab.
+    for col, (text, tip) in enumerate((
+        ("Channel", ""),
+        ("Include ≥  (FluorGating)",
+         "Cells whose mean fluorescence intensity in this channel is below the "
+         "floor are excluded from analysis entirely."),
+        ("ON ≥  (ThreshFracOn)",
+         "Included cells at or above this cut count as 'on' for fraction-on "
+         "statistics. It removes no cells."),
+    )):
+        head = QLabel(text, table)
+        head.setObjectName("Muted")
+        if tip:
+            head.setToolTip(tip)
+        grid.addWidget(head, 0, col)
+
+    seg_tok = seg_channel_token_of(ctx)
+    for row, (channel, row_label) in enumerate(row_specs, start=1):
+        ch_lbl = QLabel(row_label, table)
         ch_lbl.setFixedWidth(_CH_LBL_W)
-        rl.addWidget(ch_lbl)
+        grid.addWidget(ch_lbl, row, 0)
 
         # R6: the typed slice is the source of truth — seed the slice with the
         # historical defaults for new rows, and seed the edit's text FROM the
         # slice (so values persisted/loaded before this row was built appear).
         gate_state = ctx.state.cell_gating
 
-        rl.addWidget(QLabel("FluorGating:", ch_row))
         if channel not in ctx.runtime.cell_gating.fluor_gate_edits:
-            gate_edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), ch_row)
+            gate_edit = QLineEdit(str(gate_state.fluor_gates.setdefault(channel, 0.0)), table)
             gate_edit.setFixedWidth(_GATE_EDIT_W)
             gate_edit.editingFinished.connect(
                 lambda _c=ctx: cell_gating_on_gating_change(_c)
             )
             ctx.runtime.cell_gating.fluor_gate_edits[channel] = gate_edit
-        rl.addWidget(ctx.runtime.cell_gating.fluor_gate_edits[channel])
+        grid.addWidget(ctx.runtime.cell_gating.fluor_gate_edits[channel], row, 1)
 
-        rl.addWidget(QLabel("ThreshFracOn:", ch_row))
         if channel not in ctx.runtime.cell_gating.thresh_frac_edits:
             # Seed the slice with this channel's default — 50.0 for a readout
             # channel, 0.0 for the nuclear/segmentation one, which has no
             # meaningful ON/OFF brightness cut.
             seeded = gate_state.thresh_frac_on.setdefault(
                 channel, default_thresh_frac_on(channel, seg_tok))
-            thresh_edit = QLineEdit(str(seeded), ch_row)
+            thresh_edit = QLineEdit(str(seeded), table)
             thresh_edit.setFixedWidth(_THRESH_EDIT_W)
             thresh_edit.editingFinished.connect(
                 lambda _c=ctx: cell_gating_on_threshold_frac_on_change(_c)
             )
             ctx.runtime.cell_gating.thresh_frac_edits[channel] = thresh_edit
-        rl.addWidget(ctx.runtime.cell_gating.thresh_frac_edits[channel])
-        rl.addStretch(1)
+        grid.addWidget(ctx.runtime.cell_gating.thresh_frac_edits[channel], row, 2)
 
-        inner_layout.addWidget(ch_row)
-    inner_layout.addStretch(1)
+    inner_layout.addWidget(table)
+
+    note = QLabel(
+        "Both columns are measured against per-cell mean fluorescence intensity "
+        "(MFI), whichever Property is selected for plots, stats, and exports.",
+        ctx.runtime.cell_gating.inner,
+    )
+    note.setObjectName("Muted")
+    note.setWordWrap(True)
+    inner_layout.addWidget(note)
 
 
 def _cell_gating_optimizer_channel_specs(ctx) -> list[tuple[str, str]]:

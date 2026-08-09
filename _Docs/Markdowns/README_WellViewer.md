@@ -1966,30 +1966,62 @@ kinds to drop.
 
 **What it is.** The single place that decides which cells are *included* and
 which count as *on* for fraction-on statistics — the gating layer every plot,
-statistic, and export consumes. Its fluorescence CDFs anchor the bottom of the
-tab and respect the crop region + QC gate, so you can place thresholds by eye.
+statistic, and export consumes.
 
-- **QC debris gate** (min/max area + solidity) — the fundamental layer, *always*
-  applied on top of everything else.
-- **Inclusion** — per-channel **FluorGating** thresholds, or tick **Use
-  scatter-plot gates** and pick a filtering gate to let the [Scatter
-  Plot](#scatter-plot)'s rectangular gates define inclusion instead.
-- **Fraction-on** — per-channel **ThreshFracOn** cutoffs. A readout channel
-  starts at 50; the nuclear (segmentation) channel starts at 0, because an
-  ON/OFF brightness cut has no meaning for the channel nuclei are *found* with —
-  every segmented cell is by construction a detection in it, so a non-zero cut
-  there only hides nuclei from the Image Table's "≥ threshold" view. Whichever
-  channel it is, a value you set yourself always wins over the starting one.
-  The panel also offers
-  **Auto-threshold all channels** (an Otsu pass over per-cell + matched-
-  background pixels) to derive sensible defaults, and **Optimize ThreshFracOn**
-  — pick two wells, a timepoint, and a Min / Max / # Points range, and the
-  optimizer finds the threshold that maximises the *relative* fraction-on gap
-  `|fa − fb| / max(fa, fb)`, opening a non-modal validation graph so you can
-  sanity-check the pick. Independent Control / Baseline pickers let you optimize
-  on a fold-change-adjusted fraction-on.
-- Inclusion and fraction-on have **independent** gate pickers, so you can gate
-  on one set of gates and compute fraction-on from a different set.
+The tab is laid out as the two questions it answers, in the order they are
+applied, and each question offers the same two sources as a pair of radio
+buttons — you pick one or the other, because choosing the scatter option
+*replaces* the per-channel numbers rather than adding to them.
+
+- **Cell inclusion — which cells count.** The **QC debris gate** (min/max area,
+  solidity, circularity) leads and is marked *always applied*: it composes with
+  everything else on the tab. Then choose the source of the inclusion decision —
+  the per-channel **intensity minimum** (the `Include ≥` column below), or the
+  rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
+  drawn a gate there, the scatter option is greyed out and says so.
+- **Fraction-on — which included cells count as ON.** Removes no cells. Choose
+  the per-channel **ON cutoff** (the `ON ≥` column), or a scatter gate. The two
+  questions have **independent** gate pickers, so you can include cells by one
+  set of gates and compute fraction-on from a different set.
+
+Both read from **one table** underneath, with a row per fluorescence channel and
+ratio metric and a column for each decision. Both columns are measured against
+per-cell mean fluorescence intensity, whichever Property is selected elsewhere. A
+readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
+starts at 0, because an ON/OFF brightness cut has no meaning for the channel
+nuclei are *found* with — every segmented cell is by construction a detection in
+it, so a non-zero cut there only hides nuclei from the Image Table's
+"≥ threshold" view. Whichever channel it is, a value you set yourself always wins
+over the starting one.
+
+Two helpers sit beside the fraction-on section:
+
+- **Auto-threshold all channels** — an Otsu pass over per-cell + matched
+  background pixels, to derive sensible ON cutoffs for every channel at once.
+- **Optimize ON cutoff…** — opens the optimizer in its own window (which you can
+  leave open while you read the CDFs behind it). Pick two wells, a timepoint and
+  a Min / Max / # Points range, and it applies the threshold that maximises the
+  *relative* fraction-on gap `|fa − fb| / max(fa, fb)`, opening a validation
+  graph so you can sanity-check the pick. Independent Control / Baseline pickers
+  let you optimize on a fold-change-adjusted fraction-on.
+
+Below the table is the readout:
+
+- **The inclusion funnel** — each layer applied on top of the one above it, so
+  you can see *which* layer removed what rather than only the final total:
+
+  ```
+  20,000 segmented cells
+     Curation + intensity gate: −1,240  →  18,760
+     QC debris gate: −1,204  →  17,556
+     Crop region: not applied
+     Scatter gates: not applied
+  ```
+
+  A layer reads "not applied" when it is not in play at all — which is different
+  from a layer that ran and removed nothing, and is never shown as `−0`. Manual
+  curation and the intensity gate share a line because they write the same
+  underlying column and cannot be told apart after the fact.
 - **Included for analysis** — a live count under the gate controls, e.g.
   `Included for analysis: 12,345 / 20,000 cells  ·  1,204 failed QC`. The first
   number is the population every plot, statistic, and export actually uses, so
@@ -1998,12 +2030,17 @@ tab and respect the crop region + QC gate, so you can place thresholds by eye.
   curves below show). The QC figure is a diagnostic alongside, not a separate
   slice — a cell can fail QC *and* be gated out. It updates as you edit
   thresholds, toggle the scatter-gate modes, or change the QC gate, and reads
-  `updating…` while a pass is running. ThreshFracOn deliberately does not move
+  `updating…` while a pass is running. The ON cutoff deliberately does not move
   it: that cutoff decides which included cells count as *on*, not which cells
   count.
-- **Optimal use** — set the QC gate first, auto-threshold to get baseline
-  ThreshFracOn values, then use Optimize on the one channel that separates your
-  conditions.
+
+The fluorescence **CDFs** come next, directly under the numbers they explain, so
+you can place a threshold and see where it falls without scrolling. They respect
+the crop region and the QC gate.
+
+**Optimal use** — set the QC gate first, auto-threshold to get baseline ON
+cutoffs, then use the optimizer on the one channel that separates your
+conditions.
 
 #### Groups, Well Labels & Ratios
 

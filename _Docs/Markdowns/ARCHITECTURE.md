@@ -345,13 +345,15 @@ well_viewer/
 │   ├── grouping/     controller.py, tab_view.py, label_grid_view.py,
 │   │                 replicate_panel_view.py, pipeline_info_view.py
 │   │   └── cell_gating/   tab_view.py, controller.py, renderer.py,
-│   │                      opt_curve_view.py, gating_compute.py
+│   │                      optimizer_view.py, opt_curve_view.py,
+│   │                      gating_compute.py
 │   │                      ← the Cell Gating sub-tab, split by layer: the tab
 │   │                        builder wires controls to the controller, which
 │   │                        owns the two QThread workers, the ThreshFracOn
 │   │                        optimizers and the scatter-gate plumbing; the CDF
-│   │                        panel and the optimizer-curve window each draw on
-│   │                        their own, over Qt-free math in gating_compute
+│   │                        panel, the optimizer's own window and the
+│   │                        optimizer-curve window each draw on their own,
+│   │                        over Qt-free math in gating_compute
 │   ├── spatial/      controller.py, collect.py, renderer.py, state.py, tab_view.py
 │   ├── saved_plots/  controller.py, collect.py, state.py, tab_view.py, _report.py
 │   ├── crop/         controller.py, region.py        ← support lib (always present)
@@ -1425,6 +1427,59 @@ visually in lockstep across tab switches. Its pure-logic half — the
 scope registry and dirty-flag helpers it re-exports — stays in
 `domain/fold_change_scopes.py`, which is what lets the unit tests reach
 that logic without importing Qt.
+
+### The Cell Gating tab
+
+The most control-dense tab in Review, and the one whose layout carries the most
+meaning, because it composes four gating layers that are easy to confuse. It is
+laid out as the two questions it answers, in the order the app applies them:
+
+1. **Cell inclusion — which cells count.** The QC debris gate leads, labelled
+   *always applied*: it composes with everything below and is not one of the
+   alternatives. Then a radio pair for the source of the inclusion decision —
+   per-channel intensity floors, or the Scatter Plot's rectangular gates.
+2. **Fraction-on — which included cells count as ON.** The same radio pair
+   shape: per-channel cutoffs, or a scatter gate. Then Auto-threshold and the
+   button that opens the optimizer.
+
+Radio pairs rather than checkboxes because the code has always treated the two
+sources as exclusive — ticking the scatter option *replaces* the per-channel
+numbers rather than composing with them — and each layer's gate picker sits
+inside its own radio's row, since the two pickers are otherwise identical
+buttons reading "All gates". Only the scatter radio of each pair is registered
+(`_cell_gating_use_scatter_gates_cb` / `_cell_gating_use_scatter_thresh_cb`,
+names kept from the checkboxes they replace): exclusivity means one signal
+carries the whole state, and the controller keeps reading a single
+`isChecked()`. Gates are drawn on a *different* tab, so whether the scatter
+option is selectable is refreshed by `_cell_gating_refresh_gate_filter` — which
+also shows or hides the "no gates drawn yet" hint — rather than decided once at
+build time.
+
+Both sections read their numbers from **one** per-channel table below them
+(`Channel | Include ≥ | ON ≥`, one row per fluorescence channel and ratio
+metric), built by `controller._cell_gating_build_channel_controls` into
+`_cell_gating_inner`. One table, because the two decisions are different but are
+made per channel and read together. It is not inside a scroll area of its own:
+the tab already scrolls as a whole, and a second, height-capped scroll around
+the primary input surface scrolls inside the scrolling page.
+
+Under the table sits the readout: the gate summary, then the **inclusion
+funnel** — `gating_compute.inclusion_funnel`, each layer applied on top of the
+one above it in `df_included_mask`'s own order, so the last figure equals the
+Included total. A layer whose column is absent reports `None`, rendered "not
+applied", never "−0": a layer that was never applied and one that removed
+nothing are different facts (§7 of CLAUDE.md). Manual curation and the intensity
+gate share one line because they write the same `Included` column and cannot be
+separated from the frame — the label says so rather than implying a split the
+data does not support.
+
+The **CDFs** follow immediately, so a threshold edit and the distribution it is
+placed against are on one screen. The optimizer — twelve controls answering an
+occasional question — is not on the tab at all: `optimizer_view` builds it into
+its own **non-modal** window (non-modal because its answer is judged against the
+CDFs behind it), hidden, at tab-build time, so every optimizer widget handle
+registers at the same moment as the rest and the refreshers that repopulate
+those combos on a data change need no build-state guard.
 
 ### 5.4 The left sidebar
 

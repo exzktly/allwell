@@ -88,6 +88,10 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
     # ctx.state.cell_gating slice (R6); these edits are the input surface.
     reg.register("_cell_gating_fluor_gate_edits", {})
     reg.register("_cell_gating_thresh_frac_edits", {})
+    # ThreshCountOn edits exist only for the smFISH channels — a channel with no
+    # ``_smfish_count`` column has no count metric to cut, so an always-present
+    # field would be dead furniture on most rows.
+    reg.register("_cell_gating_thresh_count_edits", {})
     ctx.runtime.cell_gating.fluor_data = {}
     ctx.runtime.cell_gating.ratio_data = {}
     ctx.runtime.cell_gating.ax = None

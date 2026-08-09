@@ -100,6 +100,60 @@ def column_gating_exempt(col: str) -> bool:
     return is_shape_column(col)
 
 
+# ── The ON cutoff a value column is measured against ────────────────────────
+#
+# Three kinds, because there are three scales. A ``shape_*`` morphology value has
+# no ON/OFF question attached to it at all. A ``<channel>_smfish_count`` is an
+# integer spot tally, typically a handful per cell. A ``<channel>_mean_intensity``
+# is a fluorescence reading in the hundreds or thousands. Feeding one kind's
+# cutoff to another does not merely give a wrong answer: an intensity cutoff sits
+# above the entire range a count can occupy, so it empties the ON population and
+# the plot draws nothing at all.
+
+CUTOFF_NONE = "none"            # shape / morphology — no ON cutoff, keep every cell
+CUTOFF_COUNT = "count"          # integer tallies — the per-channel ThreshCountOn
+CUTOFF_INTENSITY = "intensity"  # fluorescence — the per-channel ThreshFracOn
+
+
+def cutoff_kind_for_metric_key(metric_key: str) -> str:
+    """Which ON cutoff the metric named by *metric_key* is measured against.
+
+    Unknown keys answer :data:`CUTOFF_INTENSITY`: every metric in the combo that
+    is not a declared count is an intensity flavour, and the shape features that
+    would answer :data:`CUTOFF_NONE` are not metric keys at all (they are column
+    names, so they reach :func:`cutoff_kind_for_column` instead).
+    """
+    m = METRIC_BY_KEY.get(metric_key)
+    if m is not None and m.kind == "count":
+        return CUTOFF_COUNT
+    return CUTOFF_INTENSITY
+
+
+def cutoff_kind_for_column(col: str) -> str:
+    """Which ON cutoff the value column *col* is measured against.
+
+    This is the single predicate; ``channel_state_controller.on_cutoff_for_column``
+    is the single resolver that turns its answer into a number, and every
+    aggregate plot path reaches its cutoff through that resolver rather than
+    deciding for itself. ``tests/test_on_cutoff_sweep.py`` fails when a new path
+    asks the question its own way.
+
+    Ratio keys answer :data:`CUTOFF_INTENSITY`. They are computed values with no
+    cutoff of their own, and each call site already handles them in front of the
+    resolver — the three that exist disagree with one another, so folding them in
+    here would silently change what those plots draw.
+    """
+    if not isinstance(col, str):
+        return CUTOFF_INTENSITY
+    for m in METRICS:
+        if m.kind == "count" and col.endswith(f"_{m.key}"):
+            return CUTOFF_COUNT
+    from pipeline.shape_features import is_shape_column
+    if is_shape_column(col):
+        return CUTOFF_NONE
+    return CUTOFF_INTENSITY
+
+
 def channel_supports_smfish(channel_entry: str, smfish_channels) -> bool:
     """True when *channel_entry* names one of the dataset's smFISH channels.
 

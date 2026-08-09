@@ -153,6 +153,7 @@ def _reset_gating_state(ctx) -> None:
     # and the gating accessors read this slice, not the edits.
     cg.fluor_gates.clear()
     cg.thresh_frac_on.clear()
+    cg.thresh_count_on.clear()
     ctx.runtime.review.included_overrides = {}
     app._app_state.heatmap.active_layout_name = None
 

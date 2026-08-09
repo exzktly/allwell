@@ -11,7 +11,7 @@ from well_viewer.features.barplot.controller import refresh_bar_layout_btn_state
 from well_viewer.features.barplot.collect import collect_bar_items_for_app
 
 from well_viewer.domain.selections_model import (color_for_replicate_set, color_for_well, well_display_label, active_replicate_sets)
-from well_viewer.core.channel_state_controller import get_all_fluor_gates, get_thresh_frac_on
+from well_viewer.core.channel_state_controller import get_all_fluor_gates, on_cutoff_for_column
 from well_viewer.data.data_loading import get_rows
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.time_rescale import format_scaled as _rescale_tp
@@ -724,12 +724,11 @@ def redraw_bars(ctx) -> None:
 
     use_sem = ctx.state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    # Shapes keep every cell (no ON cutoff); smFISH counts honour the
-    # channel's ThreshFracOn like intensities.
-    if ctx.state.channel.is_shape_active():
-        threshold = -1.0
-    else:
-        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    # The ON cutoff follows the value column: shapes keep every cell, spot
+    # counts read ThreshCountOn, intensities read ThreshFracOn.
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
 
     active_rsets = active_replicate_sets(ctx.state.selection.selections, ctx.state.dataset.well_paths)
     # Keep the Display-popover toggles (notably "Pool Replicates", hidden until

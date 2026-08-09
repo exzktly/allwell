@@ -17,7 +17,7 @@ from well_viewer.domain.selections_model import (
 )
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.channel_state_controller import (
-    get_all_fluor_gates, get_thresh_frac_on,
+    get_all_fluor_gates, on_cutoff_for_column,
 )
 from well_viewer.data.data_loading import get_rows
 from well_viewer.core.safe import swallowed
@@ -621,12 +621,11 @@ def redraw_line_plots(
 
     use_sem = ctx.state.plot.use_sem
     band_lbl = "SEM" if use_sem else "SD"
-    # Shapes keep every cell (no ON cutoff); smFISH counts honour the
-    # channel's ThreshFracOn like intensities (count > cutoff is "on").
-    if ctx.state.channel.is_shape_active():
-        threshold = -1.0
-    else:
-        threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)
+    # The ON cutoff follows the value column: shapes keep every cell, spot
+    # counts read ThreshCountOn, intensities read ThreshFracOn.
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col,
+        channel=ctx.state.channel.active_channel)
     selected = sorted(ctx.state.selection.selected_wells, key=parse_rc)
 
     # Fold-change state read once for the axis title suffix. The actual

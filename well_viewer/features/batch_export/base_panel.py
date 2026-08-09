@@ -62,7 +62,7 @@ from well_viewer.core.lazy import lazy as _lazy
 from well_viewer.core.ui_helpers import build_hline_separator
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates as _get_all_fluor_gates,
-    get_thresh_frac_on as _get_thresh_frac_on,
+    on_cutoff_for_column as _on_cutoff_for_column,
 )
 from util.well_token import canonical_well_label
 
@@ -1612,13 +1612,15 @@ class BatchExportPanel(QWidget):
             return
 
         _ch_selected = self._selected_export_channel() or self._ctx.state.channel.active_channel
-        # ``_get_thresh_frac_on`` looks up by the canonical key (bare
-        # channel token or ``ratio:<name>``), not by the dropdown's
-        # display label \u2014 translate ratio labels first so the user's
-        # configured ThreshFracOn is honoured instead of the 50.0
-        # default that empties out the ratio plot.
-        threshold = _get_thresh_frac_on(self._ctx,
-            self._resolved_channel_key(_ch_selected)
+        # The cutoff lookup keys by the canonical key (bare channel token or
+        # ``ratio:<name>``), not by the dropdown's display label -- translate
+        # ratio labels first so the user's configured cutoff is honoured
+        # instead of the default that empties out the plot. Which cutoff
+        # (intensity or spot count) follows the selected column.
+        threshold = _on_cutoff_for_column(
+            self._ctx,
+            self._export_val_col_for("_line_channel_cb"),
+            channel=self._resolved_channel_key(_ch_selected),
         )
         use_sem = self._ctx.state.plot.use_sem
         band_lbl = "SEM" if use_sem else "SD"

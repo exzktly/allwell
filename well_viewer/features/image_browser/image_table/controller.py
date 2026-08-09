@@ -27,7 +27,7 @@ from well_viewer.core.ui_helpers import set_combo_values
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.core.channel_state_controller import (
     refresh_thresh_frac_quick_edit,
-    set_thresh_frac_on,
+    set_on_cutoff,
 )
 
 
@@ -357,18 +357,21 @@ def image_table_set_display(ctx, key: str, value) -> None:
 
 
 def image_table_set_thresh_frac(ctx, value, channel=None) -> None:
-    """Edit a channel's ON/OFF intensity threshold (ThreshFracOn) from the Image
-    Table controls row, then re-composite so its "≥ Thr" binary overlay reflects
-    it. ``channel`` picks which channel (from the ON-threshold dropdown); ``None``
-    falls back to the active channel.
+    """Edit a channel's ON cutoff from the Image Table controls row, then
+    re-composite so its "≥ Thr" binary overlay reflects it. ``channel`` picks
+    which channel (from the ON-cutoff dropdown); ``None`` falls back to the
+    active channel.
 
-    Writes through ``set_thresh_frac_on`` (the single source of truth shared with
-    the Cell Gating tab and the other quick-edits). Re-renders only when a table
-    has already been generated — the cached images are reused, so it's the same
-    cheap re-composite the zoom control does; before the first Generate it just
-    stores the value.
+    Writes through ``set_on_cutoff`` (the single source of truth shared with the
+    Cell Gating tab and the other quick-edits), which routes to the intensity or
+    the spot-count cutoff depending on the selected Property — the same rule the
+    stepper's own caption and value follow, so the box never edits a different
+    number than the one it shows. Re-renders only when a table has already been
+    generated — the cached images are reused, so it's the same cheap
+    re-composite the zoom control does; before the first Generate it just stores
+    the value.
     """
-    set_thresh_frac_on(ctx, value, channel)
+    set_on_cutoff(ctx, value, channel)
     if getattr(ctx.state.image_table, "last_render", None):
         image_table_generate(ctx)
 

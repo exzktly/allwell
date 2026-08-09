@@ -398,7 +398,8 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     # it belongs beside the images it thresholds. A channel dropdown chooses
     # which channel it applies to (its own ThreshFracOn, shared with the Cell
     # Gating tab / plot tabs); the stepper edits that channel.
-    _on_thr_lbl = QLabel("ON threshold", action_row)
+    _on_thr_lbl = reg.register(
+        "_image_table_thresh_frac_lbl", QLabel("ON threshold", action_row))
     _on_thr_lbl.setObjectName("Muted")
     tr.addWidget(_on_thr_lbl)
     thresh_chan_cb = reg.register("_image_table_thresh_chan_cb", QComboBox(action_row))
@@ -427,8 +428,12 @@ def build_image_table_tab(ctx, parent: QWidget) -> None:
     )
 
     def _sync_thresh_for_channel(_chan: str) -> None:
-        from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        val = get_thresh_frac_on(ctx, _thresh_chan())
+        from well_viewer.core.channel_state_controller import (
+            get_thresh_count_on, get_thresh_frac_on, quick_edit_cutoff_is_count,
+        )
+        read = (get_thresh_count_on if quick_edit_cutoff_is_count(ctx)
+                else get_thresh_frac_on)
+        val = read(ctx, _thresh_chan())
         blocked = thresh_stepper.blockSignals(True)
         try:
             thresh_stepper.setValue(float(val))

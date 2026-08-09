@@ -48,7 +48,10 @@ from well_viewer.core.plot_orchestrator import redraw_app
 from well_viewer.core.safe import swallowed
 from well_viewer.core.selection_controller import invalidate_stats_cache
 from well_viewer.data.data_loading import get_rows
-from well_viewer.domain.gating_state import default_thresh_frac_on
+from well_viewer.domain.gating_state import (
+    default_thresh_count_on, default_thresh_frac_on,
+)
+from well_viewer.domain.metric_registry import channel_supports_smfish
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.features.grouping.cell_gating.gating_compute import (
@@ -287,6 +290,21 @@ def cell_gating_load_threshold_frac_on(ctx) -> None:
             edits[channel].setText(str(value))
 
 
+def cell_gating_load_threshold_count_on(ctx) -> None:
+    """Push the typed slice's ThreshCountOn values onto the line-edits.
+
+    Only the smFISH channels carry a count edit, so a stored cutoff for a channel
+    without one simply has no widget to seed — the slice stays the source of
+    truth either way.
+    """
+    edits = ctx.runtime.cell_gating.thresh_count_edits or {}
+    if not edits:
+        return
+    for channel, value in ctx.state.cell_gating.thresh_count_on.items():
+        if channel in edits:
+            edits[channel].setText(str(value))
+
+
 def cell_gating_apply_persisted_state(ctx) -> None:
     """Mirror the typed ``CellGatingState`` slice onto the Cell Gating tab's live
     widgets after a sidecar load.
@@ -305,6 +323,7 @@ def cell_gating_apply_persisted_state(ctx) -> None:
         if edit is not None:
             edit.setText(str(value))
     cell_gating_load_threshold_frac_on(ctx)
+    cell_gating_load_threshold_count_on(ctx)
     for attr, flag in (
         ("use_scatter_gates_cb", ctx.state.cell_gating.use_scatter_gates),
         ("use_scatter_thresh_cb", ctx.state.cell_gating.use_scatter_thresh),
@@ -347,6 +366,11 @@ def _cell_gating_sync_gate_state(ctx) -> None:
             st.thresh_frac_on[channel] = float(edit.text())
         except ValueError:
             swallowed(f"cell gating: keep last ThreshFracOn for {channel!r} (non-numeric)")
+    for channel, edit in (ctx.runtime.cell_gating.thresh_count_edits or {}).items():
+        try:
+            st.thresh_count_on[channel] = float(edit.text())
+        except ValueError:
+            swallowed(f"cell gating: keep last ThreshCountOn for {channel!r} (non-numeric)")
 
 
 def _cell_gating_resolve_key(ctx, channel: str) -> str:
@@ -375,6 +399,7 @@ def _cell_gating_resolve_key(ctx, channel: str) -> str:
     # carrying only the map that leaf needs.
     known = list(getattr(cg, "thresh_frac_on", None) or ())
     known += list(getattr(cg, "fluor_gates", None) or ())
+    known += list(getattr(cg, "thresh_count_on", None) or ())
     if channel in known:
         return channel
     candidate = f"ratio:{channel}"
@@ -405,6 +430,19 @@ def cell_gating_get_thresh_frac_on(ctx, channel: str) -> float:
     val = ctx.state.cell_gating.thresh_frac_on.get(key)
     if val is None:
         return default_thresh_frac_on(channel, seg_channel_token_of(ctx))
+    return float(val)
+
+
+def cell_gating_get_thresh_count_on(ctx, channel: str) -> float:
+    """ThreshCountOn cutoff for *channel* from the typed slice.
+
+    A channel with no stored cutoff falls back to
+    ``well_viewer.domain.gating_state.default_thresh_count_on`` — below the
+    minimum a spot tally can take, so every cell counts as on."""
+    key = _cell_gating_resolve_key(ctx, channel)
+    val = ctx.state.cell_gating.thresh_count_on.get(key)
+    if val is None:
+        return default_thresh_count_on(channel)
     return float(val)
 
 
@@ -692,6 +730,26 @@ def cell_gating_on_threshold_frac_on_change(ctx) -> None:
         refresh_thresh_frac_quick_edit(ctx)
     except ValueError:
         swallowed("cell gating: non-numeric ThreshFracOn edit ignored")
+
+
+def cell_gating_on_threshold_count_on_change(ctx) -> None:
+    """ThreshCountOn edit committed — same fan-out as its intensity sibling.
+
+    Only the count metrics read this cutoff, but which metric a plot is drawing
+    is not knowable from here, so the redraw is unconditional exactly as it is
+    for ThreshFracOn.
+    """
+    try:
+        for edit in ctx.runtime.cell_gating.thresh_count_edits.values():
+            float(edit.text())
+        _cell_gating_sync_gate_state(ctx)
+        _cell_gating_persist_params(ctx)
+        invalidate_stats_cache(ctx)
+        redraw_app(ctx)
+        ctx.bus.plot_options_changed.emit(ctx.state.plot)
+        refresh_thresh_frac_quick_edit(ctx)
+    except ValueError:
+        swallowed("cell gating: non-numeric ThreshCountOn edit ignored")
 
 
 def cell_gating_start_gating_worker(ctx) -> None:
@@ -1141,6 +1199,27 @@ def _cell_gating_build_channel_controls(ctx) -> None:
             )
             ctx.runtime.cell_gating.thresh_frac_edits[channel] = thresh_edit
         rl.addWidget(ctx.runtime.cell_gating.thresh_frac_edits[channel])
+
+        # The count metrics are cut against their own tally, not a brightness, so
+        # they carry a separate cutoff — and only the channels that actually have
+        # a ``_smfish_count`` column get the field.
+        if channel_supports_smfish(channel, ctx.state.channel.smfish_channels):
+            rl.addWidget(QLabel("ThreshCountOn:", ch_row))
+            if channel not in ctx.runtime.cell_gating.thresh_count_edits:
+                seeded_count = gate_state.thresh_count_on.setdefault(
+                    channel, default_thresh_count_on(channel))
+                count_edit = QLineEdit(str(seeded_count), ch_row)
+                count_edit.setFixedWidth(_THRESH_EDIT_W)
+                count_edit.setToolTip(
+                    "A cell is ON when its spot count is above this. -1 counts "
+                    "every cell, including the ones carrying no spots."
+                )
+                count_edit.editingFinished.connect(
+                    lambda _c=ctx: cell_gating_on_threshold_count_on_change(_c)
+                )
+                ctx.runtime.cell_gating.thresh_count_edits[channel] = count_edit
+            rl.addWidget(ctx.runtime.cell_gating.thresh_count_edits[channel])
+
         rl.addStretch(1)
 
         inner_layout.addWidget(ch_row)

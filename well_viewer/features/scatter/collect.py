@@ -404,17 +404,13 @@ def collect_scatter_agg_data(
             return "gfp", "mean", suffix_metric
 
     from well_viewer.core.channel_state_controller import (
-        get_all_fluor_gates, get_thresh_frac_on,
+        get_all_fluor_gates, on_cutoff_for_column,
     )
 
     ch_x, metric_x, intensity_x = parse_statistic(stat_x)
     ch_y, metric_y, intensity_y = parse_statistic(stat_y)
     use_sem = ctx.state.plot.use_sem
     per_fov = bool(ctx.state.plot.use_fov_replicates)
-    # Per-channel cell-gating thresholds don't apply to ratios — use 0 so
-    # every cell with a defined ratio contributes to the well-level mean.
-    threshold_x = 0.0 if metric_x == "ratio" else get_thresh_frac_on(ctx, ch_x)
-    threshold_y = 0.0 if metric_y == "ratio" else get_thresh_frac_on(ctx, ch_y)
     fluor_gates = get_all_fluor_gates(ctx)  # Apply all channel gates
     # ``_label_to_channel_key`` (ratio/shape label→column map) is app-native
     # state not yet migrated — residual bridge.
@@ -456,9 +452,6 @@ def collect_scatter_agg_data(
     # smfish / ratio).
     if metric_x == "smfish":
         val_col_x = f"{ch_x}_smfish_count"
-        # smFISH counts honour the channel's ThreshFracOn (set at line ~342),
-        # like the bar/line/heatmap paths — a cell is "on" when its spot count
-        # exceeds the cutoff (set ThreshFracOn=0 to count any detected spot).
     elif metric_x == "ratio":
         val_col_x = label_to_key.get(ch_x, "")
     elif metric_x == "frac":
@@ -471,13 +464,21 @@ def collect_scatter_agg_data(
 
     if metric_y == "smfish":
         val_col_y = f"{ch_y}_smfish_count"
-        # See the x-axis smFISH comment above — uses the channel's ThreshFracOn.
     elif metric_y == "ratio":
         val_col_y = label_to_key.get(ch_y, "")
     elif metric_y == "frac":
         val_col_y = f"{ch_y}_mean_intensity"
     else:
         val_col_y = f"{ch_y}_{intensity_y}"
+
+    # The ON cutoff has to be picked from the column, so it is resolved here
+    # rather than beside the channels above. Ratios are handled in front of the
+    # resolver: they are a computed value with no per-channel cutoff of their
+    # own, and 0.0 lets every cell with a defined ratio reach the well mean.
+    threshold_x = 0.0 if metric_x == "ratio" else on_cutoff_for_column(
+        ctx, val_col_x, channel=ch_x)
+    threshold_y = 0.0 if metric_y == "ratio" else on_cutoff_for_column(
+        ctx, val_col_y, channel=ch_y)
 
     def _agg_wells(wells, tp, val_col, threshold, metric):
         """Mean ± SD/SEM for the scatter-aggregate plot, via the ONE replicate

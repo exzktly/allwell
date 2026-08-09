@@ -367,6 +367,10 @@ def apply_auto_thresholds_to_pipeline_info(
     existing = read_gating_params(out_dir) or {}
     existing_fluor = dict(existing.get("fluor_gates") or {})
     existing_tfo = dict(existing.get("thresh_frac_on") or {})
+    # This pass rebuilds the block from named keys, so anything it does not read
+    # is dropped on write. The count cutoffs are nothing to do with an intensity
+    # sweep — carry them through untouched.
+    existing_tco = dict(existing.get("thresh_count_on") or {})
     # Preserve any persisted scatter-gate inclusion state — this rebuild only
     # touches ThreshFracOn, so it must not drop the gates the user drew.
     existing_scatter = existing.get("scatter_gates")
@@ -396,6 +400,7 @@ def apply_auto_thresholds_to_pipeline_info(
         scatter_gate_choices_gating=existing_choices_gating,
         scatter_gate_choices_thresh=existing_choices_thresh,
         use_scatter_thresh=existing_use_thresh,
+        thresh_count_on=existing_tco,
     )
     save_gating_to_pipeline_info(out_dir, block)
     return written

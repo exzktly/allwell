@@ -1,10 +1,15 @@
-"""ThreshFracOn plotting-tab quick-edit.
+"""ON-cutoff plotting-tab quick-edit.
 
-The plotting ctxbar carries a Stepper that edits the *active channel's*
-``thresh_frac_on`` (the per-channel ON/OFF intensity threshold) by writing
-through the Cell Gating tab's field — the single source of truth — so persistence
-and every consumer stay consistent. Covers the controller layer with fakes, then
-the real wiring on an offscreen ``WellViewerApp``.
+The plotting ctxbar carries a Stepper that edits the *active channel's* ON
+cutoff by writing through the Cell Gating tab's field — the single source of
+truth — so persistence and every consumer stay consistent.
+
+Which cutoff it edits follows the selected Property: an intensity metric edits
+``thresh_frac_on``, a spot count edits ``thresh_count_on``. The caption, the
+range and the write target move together, because a box that displays one
+number while writing another would quietly destroy the cutoff it is not
+showing. Covers the controller layer with fakes, then the real wiring on an
+offscreen ``WellViewerApp``.
 """
 from __future__ import annotations
 
@@ -14,8 +19,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 from well_viewer.core.channel_state_controller import (
+    get_thresh_count_on,
     get_thresh_frac_on,
     refresh_thresh_frac_quick_edit,
+    set_on_cutoff,
     set_thresh_frac_on,
 )
 
@@ -42,15 +49,41 @@ class _FakeEdit:
 
 
 class _FakeStepper:
+    """Stand-in for ``widgets.stepper.Stepper``, clamping like the real one.
+
+    The clamp is the point: the count cutoff's default is negative, so a stepper
+    left at the intensity range's ``minimum=0`` would display 0 — "cells with at
+    least one spot" — for a value that means "every cell". The retarget has to
+    widen the range before setting the value, and only a clamping double can
+    show that it does.
+    """
+
     def __init__(self, value: float = 0.0) -> None:
         self._value = value
         self.blocked = False
+        self.minimum = 0.0
+        self.maximum = 1e9
+        self.decimals = 1
+        self.single_step = 1.0
+        self.tooltip = ""
 
     def value(self) -> float:
         return self._value
 
     def setValue(self, v: float) -> None:
-        self._value = float(v)
+        self._value = min(max(float(v), self.minimum), self.maximum)
+
+    def setRange(self, lo: float, hi: float) -> None:
+        self.minimum, self.maximum = float(lo), float(hi)
+
+    def setDecimals(self, d: int) -> None:
+        self.decimals = int(d)
+
+    def setSingleStep(self, s: float) -> None:
+        self.single_step = float(s)
+
+    def setToolTip(self, tip: str) -> None:
+        self.tooltip = str(tip)
 
     def blockSignals(self, b: bool) -> bool:
         prev = self.blocked
@@ -58,8 +91,20 @@ class _FakeStepper:
         return prev
 
 
+class _FakeLabel:
+    def __init__(self, text: str = "") -> None:
+        self._text = text
+
+    def text(self) -> str:
+        return self._text
+
+    def setText(self, t: str) -> None:
+        self._text = str(t)
+
+
 class _FakeChannel:
     active_channel = "gfp"
+    active_metric = "mean_intensity"
     threshold = 50.0
 
 
@@ -115,6 +160,9 @@ class _FakeApp:
             "gfp": _FakeEdit("0.0"),
             "mcherry": _FakeEdit("0.0"),
         }
+        # Only the smFISH channels carry a count edit in production; "gfp" plays
+        # that part here.
+        self._cell_gating_thresh_count_edits = {"gfp": _FakeEdit("-1.0")}
         self.redraws = 0
         self._event_bus = _FakeBus()
         # The gate accessors read the slice via ctx (post-R6 pure state); the
@@ -198,6 +246,70 @@ def test_refresh_follows_active_channel():
 def test_refresh_noop_without_stepper():
     app = _FakeApp()                            # no _plotting_thresh_frac_stepper
     refresh_thresh_frac_quick_edit(app._ctx)         # must not raise
+
+
+# ── retargeting onto the count cutoff ────────────────────────────────────────
+
+def test_refresh_shows_the_count_cutoff_for_a_count_metric():
+    """The negative default must survive the stepper's clamp.
+
+    Pinned because the intensity range starts at 0: without widening it first,
+    -1 ("every cell, zero-spot ones included") displays as 0 ("at least one
+    spot") — a different population, silently.
+    """
+    app = _FakeApp()
+    app._app_state.channel.active_metric = "smfish_count"
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 88.0     # must NOT show
+    stepper = app._ctx.widgets.register("_plotting_thresh_frac_stepper", _FakeStepper(0.0))
+    refresh_thresh_frac_quick_edit(app._ctx)
+    assert stepper.value() == -1.0
+    assert stepper.minimum == -1.0
+    assert stepper.decimals == 0
+
+
+def test_refresh_relabels_the_caption_with_the_target():
+    app = _FakeApp()
+    stepper = app._ctx.widgets.register("_review_thresh_frac_stepper", _FakeStepper(0.0))
+    lbl = app._ctx.widgets.register("_review_thresh_frac_lbl", _FakeLabel("ON threshold"))
+
+    refresh_thresh_frac_quick_edit(app._ctx)
+    assert lbl.text() == "ON threshold"
+
+    app._app_state.channel.active_metric = "smfish_count"
+    refresh_thresh_frac_quick_edit(app._ctx)
+    assert lbl.text() == "ON spots"
+    assert stepper.value() == -1.0
+
+
+def test_write_follows_the_displayed_target(monkeypatch):
+    """The bug this guards: display retargeted, write not.
+
+    Typing 3 into a box captioned "ON spots" must set the count cutoff and leave
+    the channel's intensity cutoff exactly where the user put it.
+    """
+    app = _FakeApp()
+    import well_viewer.features.grouping.cell_gating.controller as cg
+    monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
+    # A committed intensity cutoff: the edit is the input surface and the slice
+    # the source of truth, so a real one has both (the change handler syncs the
+    # whole edit bank back into the slice on every commit).
+    app._cell_gating_thresh_frac_edits["gfp"].setText("88.0")
+    app._app_state.cell_gating.thresh_frac_on["gfp"] = 88.0
+    app._app_state.channel.active_metric = "smfish_count"
+
+    set_on_cutoff(app._ctx, 3.0)
+
+    assert get_thresh_count_on(app._ctx, "gfp") == 3.0
+    assert get_thresh_frac_on(app._ctx, "gfp") == 88.0
+
+
+def test_write_still_targets_the_intensity_cutoff_for_an_intensity_metric(monkeypatch):
+    app = _FakeApp()
+    import well_viewer.features.grouping.cell_gating.controller as cg
+    monkeypatch.setattr(cg, "redraw_app", lambda ctx: app._redraw())
+    set_on_cutoff(app._ctx, 120.0)
+    assert get_thresh_frac_on(app._ctx, "gfp") == 120.0
+    assert get_thresh_count_on(app._ctx, "gfp") == -1.0
 
 
 # ── real wiring on an offscreen WellViewerApp ────────────────────────────────

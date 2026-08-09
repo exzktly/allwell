@@ -12,7 +12,7 @@ from well_viewer.domain.viewer_state import parse_rc
 from well_viewer.domain.selections_model import active_replicate_sets
 from well_viewer.core.channel_state_controller import (
     get_all_fluor_gates,
-    get_thresh_frac_on,
+    on_cutoff_for_column,
 )
 from well_viewer.core.safe import swallowed
 from well_viewer.core.lazy import lazy as _lazy
@@ -275,7 +275,8 @@ def export_plot_data(ctx) -> None:
         return
     ch = ctx.state.channel.active_channel
     metric = ctx.state.channel.active_metric
-    threshold = get_thresh_frac_on(ctx, ch)
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col, channel=ch)
     use_sem = bool(ctx.state.plot.use_sem)
     band_lbl = "SEM" if use_sem else "SD"
     fluor_gates = get_all_fluor_gates(ctx)
@@ -387,7 +388,8 @@ def export_bar_plot_data(ctx) -> None:
         fc_by_key_tp = {}
     ch = ctx.state.channel.active_channel
     metric = ctx.state.channel.active_metric
-    threshold = get_thresh_frac_on(ctx, ch)
+    threshold = on_cutoff_for_column(
+        ctx, ctx.state.channel.active_val_col, channel=ch)
     well_labels = _well_labels_map(ctx)
     well_paths = _well_paths_keys(ctx)
     rows_out = []

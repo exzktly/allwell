@@ -737,13 +737,18 @@ def _corrected_frame(ctx, *, ff_mode: str, bg_method: str, ff, bg, store: bool =
 
 def _effective_threshold(ctx) -> float:
     """Frame-local binary threshold: the user's override if set, else the
-    channel's app-wide ThreshFracOn as a read-only default (never written back)."""
+    channel's app-wide ON cutoff as a read-only default (never written back).
+
+    Which cutoff that is follows the active metric — a spot-count readout is cut
+    against its tally, not against a brightness."""
     st = _st(ctx)
     if st.threshold is not None:
         return float(st.threshold)
     try:
-        from well_viewer.core.channel_state_controller import get_thresh_frac_on
-        return float(get_thresh_frac_on(ctx, (st.channel or "").lower()))
+        from well_viewer.core.channel_state_controller import on_cutoff_for_column
+        channel = (st.channel or "").lower()
+        col = f"{channel}_{ctx.state.channel.active_metric}"
+        return float(on_cutoff_for_column(ctx, col, channel=channel))
     except Exception:
         return 0.0
 

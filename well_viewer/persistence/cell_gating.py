@@ -52,6 +52,7 @@ def save_to_pipeline_info(ctx) -> None:
         # default, so the block builder needs to know which channel it is to
         # diff each value against the right one.
         seg_channel_token=seg_channel_token_of(ctx),
+        thresh_count_on=dict(cg.thresh_count_on),
     )
     save_gating_to_pipeline_info(state.dataset.data_dir, block)
 
@@ -138,6 +139,7 @@ def restore_gating_block(ctx, block) -> None:
     cg = ctx.state.cell_gating
     cg.fluor_gates.clear()
     cg.thresh_frac_on.clear()
+    cg.thresh_count_on.clear()
     cg.scatter_gates = []
     cg.use_scatter_gates = False
     cg.use_scatter_thresh = False
@@ -153,8 +155,9 @@ def _write_gating_block_to_slice(cg, block: dict) -> bool:
     ``CellGatingState`` slice *cg*. Pure state mutation — no widgets, no worker.
 
     R6 + Epic-cellgating: the typed slice is the source of truth. Additive for
-    ``fluor_gates`` / ``thresh_frac_on`` (only keys the block carries are written);
-    callers wanting a clean reset clear the dicts first.
+    ``fluor_gates`` / ``thresh_frac_on`` / ``thresh_count_on`` (only keys the
+    block carries are written); callers wanting a clean reset clear the dicts
+    first.
     """
     # ``cell_area_threshold`` is retired from this block — the QC layer now owns
     # cell-area gating and migrates any legacy value (see QCParams.from_pipeline_info).
@@ -177,6 +180,19 @@ def _write_gating_block_to_slice(cg, block: dict) -> bool:
             except (ValueError, TypeError):
                 continue
             cg.thresh_frac_on[str(ch)] = fval
+            applied = True
+
+    # Absent on every sidecar written before count metrics carried their own
+    # cutoff. Nothing to migrate: the accessor's default then applies, which is
+    # the value that makes those plots draw at all.
+    thresh_count_on = block.get("thresh_count_on") or {}
+    if isinstance(thresh_count_on, dict):
+        for ch, val in thresh_count_on.items():
+            try:
+                fval = float(val)
+            except (ValueError, TypeError):
+                continue
+            cg.thresh_count_on[str(ch)] = fval
             applied = True
 
     # Restore the scatter-gate inclusion / thresholding config. The gates already

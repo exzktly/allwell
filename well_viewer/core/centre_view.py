@@ -392,6 +392,9 @@ def build_centre(win, parent: QWidget) -> None:
         # user can tune it without leaving the plot. Hidden on scatter sub-tabs
         # (per-axis channels) by ``_refresh_channel_chip``.
         from widgets.stepper import Stepper as _Stepper
+        from well_viewer.core.channel_state_controller import (
+            set_on_cutoff as _set_on_cutoff,
+        )
         win._plotting_thresh_frac_stepper = win._ctx.widgets.register(
             "_plotting_thresh_frac_stepper",
             _Stepper(value=50.0, minimum=0.0, maximum=1e9, single_step=1.0, decimals=1))
@@ -408,10 +411,13 @@ def build_centre(win, parent: QWidget) -> None:
             "Edits the same value as the Cell Gating tab's ThreshFracOn."
         )
         win._plotting_thresh_frac_stepper.valueChanged.connect(
-            lambda v: win._set_thresh_frac_on(v)
+            lambda v: _set_on_cutoff(win._ctx, v)
         )
+        # "ON cutoff" rather than "Threshold": the box edits whichever cutoff the
+        # selected Property is measured against, and the band owns this caption,
+        # so it has to read true for both.
         win._plotting_thresh_frac_grp = band.add_scope(
-            "Threshold", win._plotting_thresh_frac_stepper, trailing=True)
+            "ON cutoff", win._plotting_thresh_frac_stepper, trailing=True)
 
         # "+ Add panel" button retired — the underlying per-renderer
         # multi-subplot story was never wired (the _add_panel handler

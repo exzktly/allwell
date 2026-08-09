@@ -265,6 +265,28 @@ class DatasetsTab(QWidget):
             return ""
         return nav.currentKey() or ""
 
+    def open_tool(self, kind: str, *, dataset_path: str = "") -> bool:
+        """Show one tool's page, optionally pointed at a dataset already.
+
+        Another pane can send the user here — Review's Home page offers to
+        check a dataset whose run left no completeness record — and landing on
+        whichever tool happened to be showing, with an empty folder field, is a
+        button that does less than it says. Returns False when this build has
+        no such tool, so the caller can tell "done" from "nothing happened".
+        """
+        page_name = self._page_name_for(kind)
+        if page_name is None:
+            return False
+        self._nav.setCurrentKey(page_name)
+        self._pages.setCurrentByName(page_name)
+        # Every tool's page is built with the pane, so there is nothing to
+        # force here — but not every tool takes a dataset path, and one that
+        # does not simply gets shown.
+        setter = getattr(self._pages_by_kind.get(kind), "set_dataset_path", None)
+        if dataset_path and callable(setter):
+            setter(str(dataset_path))
+        return True
+
     def _page_name_for(self, kind: str | None) -> str | None:
         for feat in _FEATURES:
             if feat.kind == kind:

@@ -395,3 +395,67 @@ def test_the_page_opens_no_files(monkeypatch):
                hc.stat_tiles, hc.channel_chips, hc.health_rows,
                hc.run_parameters, hc.your_work, hc.next_step):
         fn(ctx)
+
+
+# ── a dataset produced before the check existed ─────────────────────────────
+
+def _old_sidecar():
+    """A sidecar exactly as a pre-feature run left it: no run_check key."""
+    return {
+        "schema": "exp:channel:well:fov:timepoint", "separator": "_",
+        "fluor_tokens": ["DAPI", "W3Cy5"], "nuclear_token": "DAPI",
+        "smfish_tokens": ["W3Cy5"],
+        "available_timepoints": ["0", "24h", "48h"],
+        "available_fovs": ["F001", "F002"],
+        "shape_features": ["area", "solidity"],
+        "segmentation_method": "stardist_nuclei",
+        "qc_options": {"background": "top_hat", "flatfield": "basic"},
+    }
+
+
+def test_an_old_dataset_still_fills_in_everything_the_sidecar_knows():
+    """Opening a plate produced before this feature must not give a blank page.
+
+    Most of Home comes from keys the sidecar has always carried, so timepoints,
+    fields, shape features, channels and the whole run receipt render normally.
+    Only the two figures that depend on the completeness record go unknown.
+    """
+    ctx = _ctx(None, info=_old_sidecar())
+    tiles = {t.key: t for t in hc.stat_tiles(ctx)}
+
+    assert tiles["timepoints"].value == 3
+    assert tiles["fovs"].value == 2
+    assert tiles["shape_features"].value == 2
+    assert [c["token"] for c in hc.channel_chips(ctx)] == ["DAPI", "W3Cy5"]
+    assert any(c["segmentation"] for c in hc.channel_chips(ctx))
+    receipt = {r["label"]: r["value"] for r in hc.run_parameters(ctx)}
+    assert receipt["Background subtraction"] == "top hat"
+    assert hc.identity(ctx)["schema"] == "exp:channel:well:fov:timepoint"
+
+
+def test_an_old_dataset_marks_only_the_record_backed_figures_unknown():
+    ctx = _ctx(None, info=_old_sidecar())
+    tiles = {t.key: t for t in hc.stat_tiles(ctx)}
+    unavailable = {k for k, t in tiles.items() if not t.available}
+    assert unavailable == {"wells", "coverage"}, (
+        "only the figures that need the completeness record may go unknown")
+
+
+def test_an_old_datasets_plate_is_neutral_rather_than_green_or_red():
+    """Not "fine" and not "broken" — the run left nothing that says either, and
+    painting a guess would be the conflation the record exists to end."""
+    ctx = _ctx(None, info=_old_sidecar())
+    cells = hc.plate_cells(ctx)
+    assert set(cells) == set(WELLS)
+    assert set(cells.values()) == {hc.CELL_UNCHECKED}
+    assert hc.CELL_COMPLETE not in cells.values()
+
+
+def test_an_old_dataset_still_reports_the_users_own_work():
+    """None of this comes from the record, so it is as complete as ever."""
+    ctx = _ctx(None, info=_old_sidecar(), selections=[{"id": 1}],
+               well_labels={"A01": "treated"}, notes="an old note")
+    work = {r["key"]: r["count"] for r in hc.your_work(ctx)}
+    assert work["replicates"] == 1
+    assert work["labels"] == 1
+    assert work["notes"] == 1

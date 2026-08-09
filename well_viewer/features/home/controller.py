@@ -351,9 +351,7 @@ def run_home_action(ctx, action: str) -> None:
             _show_pane(ctx, _PANE_INDEX[action])
             return
         if action == "validate":
-            # Validate lives in the Datasets pane; the tool page itself is that
-            # pane's own concern.
-            _show_pane(ctx, _PANE_INDEX["datasets"])
+            _open_validate(ctx)
             return
         page = _ACTION_PAGE.get(action)
         if page:
@@ -368,6 +366,24 @@ def _reload_dataset(ctx) -> None:
         return
     from well_viewer.core.load_controller import load_directory
     load_directory(ctx, data_dir)
+
+
+def _open_validate(ctx) -> None:
+    """Hand this dataset to Datasets → Validate & Repair.
+
+    The offer Home makes to a dataset with no completeness record — one
+    produced before the check existed, or whose remote check could not run.
+    The folder is carried across: a button labelled "Check this dataset now"
+    that lands on an empty form with the wrong tool showing does less than it
+    says, and the user has to re-find a folder the app already had open.
+    """
+    _show_pane(ctx, _PANE_INDEX["datasets"])
+    pane = getattr(ctx.window, "_datasets_pane", None)
+    open_tool = getattr(pane, "open_tool", None)
+    if not callable(open_tool):
+        return
+    data_dir = getattr(ctx.state.dataset, "data_dir", None)
+    open_tool("validate", dataset_path=str(data_dir) if data_dir else "")
 
 
 def _show_pane(ctx, index: int) -> None:

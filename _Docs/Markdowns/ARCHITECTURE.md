@@ -1462,13 +1462,19 @@ option is selectable is refreshed by `_cell_gating_refresh_gate_filter` — whic
 also shows or hides the "no gates drawn yet" hint — rather than decided once at
 build time.
 
-Both sections read their numbers from **one** per-channel table below them
-(`Channel | Include ≥ | ON ≥`, one row per fluorescence channel and ratio
-metric), built by `controller._cell_gating_build_channel_controls` into
-`_cell_gating_inner`. One table, because the two decisions are different but are
-made per channel and read together. It is not inside a scroll area of its own:
-the tab already scrolls as a whole, and a second, height-capped scroll around
-the primary input surface scrolls inside the scrolling page.
+Each section carries **its own** per-channel table, built by
+`controller._cell_gating_build_channel_controls` into `_cell_gating_inner`
+(the inclusion floors) and `_cell_gating_thresh_inner` (the ON cutoffs), one row
+per fluorescence channel and ratio metric. Two tables rather than one with two
+columns: the numbers share a shape but not a meaning — one decides membership of
+the dataset, the other only how members are counted — so a shared table needs a
+heading that names neither decision, which is the original defect (both columns
+under the ThreshFracOn header) wearing a politer label. The columns also grey out
+independently, since `_cell_gating_apply_scatter_gate_mode` disables whichever
+layer a scatter gate has replaced, so a shared table is half-dead whenever either
+layer is gate-driven. Neither table is inside a scroll area of its own: the tab
+already scrolls as a whole, and a second, height-capped scroll around the primary
+input surface scrolls inside the scrolling page.
 
 Under the table sits the readout: the gate summary, then the **inclusion
 funnel** — `gating_compute.inclusion_funnel`, each layer applied on top of the

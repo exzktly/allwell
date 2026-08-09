@@ -42,11 +42,15 @@ def _build(ctx, qtbot):
     return parent
 
 
-def test_every_channel_gets_both_columns_in_one_table(loaded_app, qtbot):
-    """One row per channel carrying the inclusion floor *and* the ON cutoff.
+def test_each_decision_gets_its_own_per_channel_table(loaded_app, qtbot):
+    """Every channel has both fields, and each lives under the section that owns
+    the decision it feeds.
 
-    They used to be built under two different section headers, with both
-    columns living under the header for only one of them.
+    The inclusion floor and the ON cutoff are per-channel numbers of the same
+    shape answering different questions — one decides whether a cell is in the
+    dataset at all, the other only how the cells in it are counted. A table
+    serving both needs a heading that names neither, which is the original
+    defect (both columns under the ThreshFracOn header) with a politer label.
     """
     ctx = loaded_app._ctx
     _build(ctx, qtbot)
@@ -55,12 +59,23 @@ def test_every_channel_gets_both_columns_in_one_table(loaded_app, qtbot):
     thresh = ctx.runtime.cell_gating.thresh_frac_edits
     channels = set(ctx.state.channel.fluor_channels)
     assert channels, "fixture should load channels"
-    assert channels <= set(fluor), "a channel is missing its Include ≥ field"
-    assert channels <= set(thresh), "a channel is missing its ON ≥ field"
+    assert channels <= set(fluor), "a channel is missing its inclusion floor"
+    assert channels <= set(thresh), "a channel is missing its ON cutoff"
 
-    # Both fields for a channel are in the same table, hence the same parent.
     ch = sorted(channels)[0]
-    assert fluor[ch].parent() is thresh[ch].parent()
+    assert fluor[ch].parent() is not thresh[ch].parent(), (
+        "both decisions are sharing one table again")
+
+    def _hosted_by(widget, host):
+        node = widget.parentWidget()
+        while node is not None:
+            if node is host:
+                return True
+            node = node.parentWidget()
+        return False
+
+    assert _hosted_by(fluor[ch], ctx.widgets.get("_cell_gating_inner"))
+    assert _hosted_by(thresh[ch], ctx.widgets.get("_cell_gating_thresh_inner"))
 
 
 def test_the_table_is_not_inside_its_own_scroll_area(loaded_app, qtbot):

@@ -16,8 +16,10 @@ order the pipeline applies them:
 
 Each question offers its two sources as a radio pair, because the code has
 always treated them as exclusive: ticking the scatter option *replaces* the
-per-channel numbers rather than composing with them. Both questions read their
-per-channel numbers from a single table below them, and the CDFs the numbers are
+per-channel numbers rather than composing with them, and each question's
+per-channel table sits inside its own section rather than in a shared block
+below both — the numbers have the same shape but answer different questions, and
+a table serving both needs a heading that names neither. The CDFs the numbers are
 placed against follow immediately, so an edit and its consequence are on one
 screen.
 
@@ -146,7 +148,6 @@ def build_cell_gating_tab(ctx, parent: QWidget) -> None:
 
     _build_inclusion_section(ctx, control_frame, cf_layout)
     _build_fraction_on_section(ctx, control_frame, cf_layout)
-    _build_channel_table_section(ctx, control_frame, cf_layout)
     _build_readout_section(ctx, control_frame, cf_layout)
     root.addWidget(control_frame)
 
@@ -273,6 +274,7 @@ def _build_inclusion_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
         handle="_cell_gating_use_scatter_gates_cb",
         on_change=cell_gating_on_use_scatter_gates_change,
     )
+    _mount_threshold_table(ctx, frame, layout, "_cell_gating_inner")
 
 
 def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
@@ -305,6 +307,7 @@ def _build_fraction_on_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None
         handle="_cell_gating_use_scatter_thresh_cb",
         on_change=cell_gating_on_use_scatter_thresh_change,
     )
+    _mount_threshold_table(ctx, frame, layout, "_cell_gating_thresh_inner")
 
     auto_row = QWidget(frame)
     auto_row_layout = QHBoxLayout(auto_row)
@@ -358,18 +361,24 @@ def _wire_source_radios(ctx, frame: QWidget, per_channel: QRadioButton,
         list(ctx.runtime.cell_gating.button_groups or []) + [group])
 
 
-def _build_channel_table_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:
-    """The one per-channel table both sections above read from."""
-    layout.addWidget(build_hline_separator(frame))
-    layout.addWidget(build_section_header(
-        frame, "Per-channel thresholds",
-        hint="One row per channel and ratio metric, feeding both the inclusion "
-             "floor and the fraction-on cutoff above.",
-    ))
-    inner = ctx.widgets.register("_cell_gating_inner", QWidget(frame))
-    inner_layout = QVBoxLayout(inner)
-    inner_layout.setContentsMargins(0, 0, 0, 0)
-    layout.addWidget(inner)
+def _mount_threshold_table(ctx, frame: QWidget, layout: QVBoxLayout,
+                          handle: str) -> None:
+    """Host for one decision's per-channel table, indented under its radio pair.
+
+    Each table sits inside the section that owns the decision it feeds rather
+    than in a shared "Per-channel thresholds" block below both. A shared block
+    needs a heading that names neither decision, which is the shape of the
+    original defect (both columns under the ThreshFracOn header) with a more
+    neutral label on it — and since the two columns grey out independently, that
+    block is half-dead whenever either layer is driven by a scatter gate.
+
+    The rows themselves come from ``controller._cell_gating_build_channel_controls``
+    on data load; this only frames the container.
+    """
+    host = ctx.widgets.register(handle, QWidget(frame))
+    host_layout = QVBoxLayout(host)
+    host_layout.setContentsMargins(_RADIO_INDENT, 4, 0, 4)
+    layout.addWidget(host)
 
 
 def _build_readout_section(ctx, frame: QWidget, layout: QVBoxLayout) -> None:

@@ -2030,9 +2030,13 @@ buttons — you pick one or the other, because choosing the scatter option
   questions have **independent** gate pickers, so you can include cells by one
   set of gates and compute fraction-on from a different set.
 
-Both read from **one table** underneath, with a row per fluorescence channel and
-ratio metric and a column for each decision. Both columns are measured against
-per-cell mean fluorescence intensity, whichever Property is selected elsewhere. A
+Each question has **its own table** directly under it, with a row per
+fluorescence channel and ratio metric. They are kept apart on purpose: the two
+numbers have the same shape but answer different questions — the inclusion floor
+decides whether a cell is in the dataset at all, the ON cutoff only decides how
+the cells already in it are counted — and a single table serving both would need
+a heading that names neither. Both are measured against per-cell mean
+fluorescence intensity, whichever Property is selected elsewhere. A
 readout channel's ON cutoff starts at 50; the nuclear (segmentation) channel
 starts at 0, because an ON/OFF brightness cut has no meaning for the channel
 nuclei are *found* with — every segmented cell is by construction a detection in

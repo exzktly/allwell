@@ -603,6 +603,7 @@ and registers every centre page. The current page-list:
 
 | Section | Tab | Sub-pages |
 |---------|-----|-----------|
+| Home | **Home** | — (the dataset's front page; §5.3) |
 | Analysis | **Plotting** | Bar Plots / Line Graphs / Scatter Plot / Distribution / Heat Map |
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
@@ -627,6 +628,22 @@ the `on_tab_change` leaf dispatch working unchanged after the consolidation.
 smFISH stays its own rail entry (it is not an image-*review* surface), following
 the standard one-package-per-tab layout
 (`features/smfish/{controller,worker,tab_view}.py`).
+
+**Home is the landing page, and registry order is the whole mechanism.**
+`build_centre` adds pages in the order `_features()` declares them and then calls
+`setCurrentIndex(0)`; Home is the first descriptor, so it is page 0. There is no
+special case anywhere, which is the point — a page that had to be *named* as the
+landing page would be a second place to keep in step.
+
+That has one consequence which is not obvious and is invisible to the fast lane.
+`win._plotting_notebook` is assigned inside Plotting's builder, and Plotting used
+to be built eagerly only because it held the first slot (`group_idx == 0 and
+tab_idx_in_group == 0`). A dozen modules read that attribute, so Plotting is now
+force-built explicitly beside the existing `Batch Export` pre-build hook, after
+the group loop and before `setCurrentIndex(0)`. Startup cost is unchanged —
+Plotting was eagerly built before — and the hook also covers a build profile
+whose first group is empty, where nothing would otherwise be built eagerly at
+all.
 
 The left **rail navigation** (`RailNav` from `widgets/rail_nav.py`) is the
 single visible selector for the top-level pages. It mirrors the notebook —
@@ -1235,6 +1252,64 @@ body. It is a static scan on purpose — a test that builds a tab needs the
 `scripts/test.sh` runs `-m "not slow"`, so such a test would never run in CI.
 The geometry itself is checked in the slow lane by `test_page_alignment.py`
 above, which builds the window once.
+
+#### The Home page
+
+`features/home/` is the page Review opens on. It answers what a returning user
+asks before anything else — what this plate is, whether the run that produced it
+finished, what it was run with, what they have already done to it — and it does
+so by **reporting a record rather than measuring**. Establishing per-well
+coverage costs a zip central-directory read and a full CSV parse per well, which
+a landing page cannot pay on every open, and a cached answer that silently ages
+is worse than none. The pipeline records the answer at the end of every run
+(§6.2, `pipeline_info.json::run_check`) and this page reads it.
+`tests/test_home_collect.py` pins that literally: it makes `open`, `Path.open`,
+`Path.iterdir`, `Path.glob` and `zipfile.ZipFile` raise, then calls every
+function on the page.
+
+Everything computable lives in `collect.py`, Qt-free and ctx-first, so the whole
+page is exercised in the fast lane against a plain namespace; `controller.py`
+paints widgets from what it returns and `tab_view.py` holds the arrangement.
+
+Three rules the page is built around:
+
+- **A figure it could not obtain renders as an em-dash with its reason, never as
+  zero.** `collect.Missing` is a distinct type rather than `None` so a caller
+  cannot format it as a number and a test can tell it from a real zero without
+  reading prose. Real zeros — the user has defined no replicate sets — read
+  "None yet". Conflating *not computed* with *computed as zero* is the bug class
+  the completeness record exists to end, and the page reporting it must not
+  reintroduce it.
+- **The plate never spends `accent` or `accent2`.** Those already mean
+  "anomalous well" (Concatenate, Subset) and "the other of two normal groups"
+  (Merge Plates) on the other plate dashboards. Home paints from the status
+  palette, spends hue on exceptions, and gives *partial* a coverage arc as well
+  as a colour — the one state the page exists to make visible, and the one that
+  has to survive a small cell and a fast skim.
+- **The states it paints are renderings, not a second opinion.**
+  `pipeline.completeness.health` remains the only classifier; `plate_cells`
+  separates a staged-but-never-processed well from a half-finished one on
+  `covered_any == 0`, a number already in the record.
+
+It builds on `WellPlateSelector` + `apply_plate_geometry(role="picker")`
+directly rather than subclassing `PlateProgress`. That class is a *run
+dashboard* — headline, overall bar, ETA, done/failed/cancelled setters — and it
+makes its plate inert (`WA_TransparentForMouseEvents`, the `status` role, which
+is passive selection). Home's wells are clickable, and undoing inertness on a
+base whose whole point is inertness is fighting it; the four-line read-only
+idiom at `plate_progress.py`'s own construction is what is borrowed.
+
+A click **selects** rather than navigates: a click that teleported the reader
+off the summary page would make multi-select impossible and an exploratory click
+expensive. Navigation lives in the one contextual next-step row, and every
+button on the page — masthead and next-step alike — routes through
+`controller.run_home_action`, so "open this in Analyze" cannot come to mean two
+things depending on which control was pressed.
+
+Home must paint from its **builder**, not from its `on_activate` hook:
+`tab_controller.on_tab_change` early-returns until `_line_ax_mean` exists, and
+that widget comes from Line Graphs, which is drained after startup. The hook is
+for repaints.
 
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 

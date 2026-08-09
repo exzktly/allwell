@@ -48,6 +48,19 @@ def _lazy_build(module_path: str, attr: str):
     return build
 
 
+def _lazy_hook(module_path: str, attr: str):
+    """Return a ``hook(ctx)`` that imports *attr* on call.
+
+    The same deferral :func:`_lazy_build` uses, for the lifecycle hooks a
+    descriptor carries. Keeping them lazy is what lets a feature stay deletable:
+    the registry names its module as a string and nothing is imported until the
+    hook actually fires.
+    """
+    def hook(ctx) -> None:
+        getattr(importlib.import_module(module_path), attr)(ctx)
+    return hook
+
+
 def _lazy_state(module_path: str, attr: str):
     """Return a no-arg factory that imports *attr* from *module_path* and
     constructs it — the uniform AppState-slice constructor shape (audit A15)."""
@@ -104,6 +117,7 @@ _build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", 
 # — the app's ``_build_review_csv_tab`` was only a ``self._ctx`` shim), so it joins
 # the uniform declarative lazy descriptors instead of reaching through the app.
 _build_review_csv = _lazy_build("well_viewer.features.review_csv.tab_view", "build_review_csv_tab")
+_build_home = _lazy_build("well_viewer.features.home.tab_view", "build_home_tab")
 
 
 def _build_sample_definitions(ctx, frame) -> None:
@@ -134,6 +148,7 @@ _state_review_image = _lazy_state("well_viewer.features.image_browser.review_ima
 _state_preview = _lazy_state("well_viewer.features.image_browser.review_image.state", "PreviewState")
 _state_image_table = _lazy_state("well_viewer.features.image_browser.image_table.state", "ImageTableState")
 _state_playground = _lazy_state("well_viewer.features.image_browser.playground.state", "PlaygroundState")
+_state_home = _lazy_state("well_viewer.features.home.state", "HomeState")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,6 +156,18 @@ _state_playground = _lazy_state("well_viewer.features.image_browser.playground.s
 # the per-tab sidebar-visibility + refresh its branch did; the generic
 # scaffolding (hide-all, post-dispatch drains) stays in ``on_tab_change``.
 # ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Home. Its hooks go through lazy proxies for the same reason every other
+# feature's do: `features/registry.py` is the only module allowed to name a
+# feature package, and a descriptor hook is how core reaches one without an
+# import of its own.
+# ─────────────────────────────────────────────────────────────────────────────
+_HOME = "well_viewer.features.home.controller"
+_activate_home = _lazy_hook(_HOME, "activate_home")
+_loaded_home = _lazy_hook(_HOME, "on_home_dataset_loaded")
+_sel_home = _lazy_hook(_HOME, "on_home_selection_changed")
+
 
 def _activate_segmentation(ctx) -> None:
     from well_viewer.features.preview.controller import (
@@ -673,6 +700,16 @@ def _features() -> list[FeatureDescriptor]:
         # ── Analysis ──────────────────────────────────────────────────────
         # "Plotting" is a bespoke composite container (built by
         # centre_view._build_plotting); build=None → the page-stack resolves
+        # Home is first, and that is the whole of what makes it the landing
+        # page: `centre_view.build_centre` adds pages in registry order and
+        # calls `setCurrentIndex(0)`. No special case anywhere.
+        FeatureDescriptor(
+            name="Home", group="Home", build=_build_home,
+            states=(StateSpec("home", _state_home),),
+            on_activate=_activate_home,
+            on_dataset_loaded=_loaded_home,
+            on_selection_changed=_sel_home,
+        ),
         # its builder from its local fallback map. Its plot sub-tabs are the
         # sub-leaf descriptors below.
         FeatureDescriptor(name="Plotting", group="Analysis"),

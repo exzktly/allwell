@@ -1271,17 +1271,33 @@ def commit_focused_notes(ctx) -> None:
     autosave, window close, a dataset swap) would otherwise persist whatever the
     slice last held and silently drop what is on screen. That is why the save
     path used to read the widget directly; with two editors that read has no
-    tiebreak, so the focused one is folded in here instead and the save path
-    reads one thing.
+    tiebreak, so the in-progress one is folded in here and the save path reads
+    one thing.
+
+    Which editor is "in progress" is answered twice, because focus alone is not
+    enough. On a window that is closing — or one that never had keyboard focus
+    to begin with — every editor reports ``hasFocus() == False`` while one of
+    them still holds text nobody has committed, which is exactly the save this
+    function exists to protect. So: the focused editor wins if there is one;
+    otherwise the single editor whose text differs from the slice does. Two
+    editors differing at once cannot happen while the mirror is doing its job,
+    and if it ever did, guessing between them would be worse than leaving the
+    slice alone.
     """
+    divergent = []
     for _key, widget in notes_widgets(ctx):
         try:
+            text = widget.toPlainText()
             if widget.hasFocus():
-                ctx.state.selection.notes_text = widget.toPlainText()
+                ctx.state.selection.notes_text = text
                 return
+            if text != (ctx.state.selection.notes_text or ""):
+                divergent.append(text)
         except RuntimeError:
             # The C++ side is gone (page torn down mid-save); nothing to commit.
             continue
+    if len(divergent) == 1:
+        ctx.state.selection.notes_text = divergent[0]
 
 
 def mirror_notes(ctx, *, source_key: str) -> None:

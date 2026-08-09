@@ -649,7 +649,7 @@ def build_centre(win, parent: QWidget) -> None:
     groups: List[Tuple[str, List[Tuple[str, Callable[[], None]]]]] = [
         (group, [(d.name, _top_level_builder(d.name))
                  for d in win._features.in_group(group)])
-        for group in ("Analysis", "Images", "Data")
+        for group in ("Home", "Analysis", "Images", "Data")
     ]
 
     def _new_tab(title: str) -> QWidget:
@@ -687,6 +687,13 @@ def build_centre(win, parent: QWidget) -> None:
     # the tab being absent under a build profile is a no-op, not a KeyError.
     if "Batch Export" in tab_frames:
         win._batch_export_tab_frame = tab_frames["Batch Export"]
+    # Plotting used to hold the eager first-tab slot and set win._plotting_notebook
+    # as a side effect of being built; Home holds that slot now. Twelve modules
+    # read that attribute, so it is built here explicitly rather than left to
+    # whichever page happens to be first. Costs nothing new — Plotting was built
+    # eagerly before — and it also covers a profile whose first group is empty.
+    if "Plotting" in pending:
+        _build_pending("Plotting")
 
     win._notebook.setCurrentIndex(0)
 

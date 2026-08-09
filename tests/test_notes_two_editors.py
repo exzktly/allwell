@@ -246,3 +246,41 @@ def test_a_deleted_widget_does_not_take_the_save_down(fn):
     ctx = _ctx(**{SD: _FakeEdit("alive"), HOME: _DeadEdit()})
     ctx.state.selection.notes_text = "alive"
     fn(ctx)
+
+
+def test_an_unfocused_edit_is_still_captured_when_only_one_box_differs():
+    """Focus alone is not enough to find the in-progress edit.
+
+    On a window that is closing — or one that never had keyboard focus, which
+    is every window under an offscreen Qt platform — each editor reports no
+    focus while one still holds uncommitted text. That is precisely the save
+    this has to protect, so the single editor differing from the slice wins.
+    """
+    home = _FakeEdit("typed, never focused")
+    ctx = _ctx(**{SD: _FakeEdit("committed earlier"), HOME: home})
+    ctx.state.selection.notes_text = "committed earlier"
+
+    commit_focused_notes(ctx)
+
+    assert ctx.state.selection.notes_text == "typed, never focused"
+
+
+def test_two_divergent_boxes_are_left_alone_rather_than_guessed_between():
+    """Cannot happen while the mirror works. If it ever did, picking one would
+    silently discard the other — leaving the slice is the recoverable answer."""
+    ctx = _ctx(**{SD: _FakeEdit("box a"), HOME: _FakeEdit("box b")})
+    ctx.state.selection.notes_text = "committed earlier"
+
+    commit_focused_notes(ctx)
+
+    assert ctx.state.selection.notes_text == "committed earlier"
+
+
+def test_focus_still_wins_over_the_divergence_fallback():
+    focused = _FakeEdit("the one being typed in", focused=True)
+    ctx = _ctx(**{SD: _FakeEdit("also different"), HOME: focused})
+    ctx.state.selection.notes_text = "committed earlier"
+
+    commit_focused_notes(ctx)
+
+    assert ctx.state.selection.notes_text == "the one being typed in"

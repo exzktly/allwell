@@ -914,6 +914,55 @@ an image-using tab is opened. `pipeline_info.json` is re-read on every open, so
 the viewer always tracks the schema + channel tokens the dataset was built with
 — if you re-run the pipeline with different tokens, just re-open the folder.
 
+### Home
+
+The page Review opens on, with or without a dataset. It answers the four things
+you want to know before doing anything else: what this plate is, whether the run
+that produced it actually finished, what it was run with, and what you have
+already done to it.
+
+**It reports; it does not measure.** Working out how much of each well's input
+its output covers means opening an archive and reading a whole CSV for every
+well — far too slow for a page you pass through constantly, and a cached answer
+that quietly ages is worse than none. So the run records the answer when it ends
+(see [What the pipeline writes](#what-the-pipeline-writes)) and this page reads
+it. That has one consequence worth holding on to: **the page describes the
+moment the run finished.** If you have repaired or edited the dataset by hand
+since, the page still shows it as it was, which is why the date the record was
+taken is on the masthead. *Check this dataset now* hands off to
+[Validate & Repair](#validate--repair-dataset), which re-reads it as it stands.
+
+What is on it:
+
+- **The plate.** One dot per well, coloured by what the run actually produced:
+  complete, partial (with an arc showing how much of it landed), failures
+  recorded, staged but never processed, images with no measurements behind them.
+  Clicking a well selects it, the same selection every other page uses — it does
+  not navigate, so you can pick several. Hovering one says what its numbers are.
+- **Notes.** The same project notes as
+  [Sample Definitions](#sample-definitions), editable here. Type and click away;
+  it saves on its own. Whatever the numbers will not tell you in six months
+  belongs here — which plate had the incubator alarm, which columns were
+  re-plated, which channel bled.
+- **The numbers.** Wells, timepoints, fields per well, shape features, and how
+  much of the input the output covers, with the actual counts underneath rather
+  than a bare percentage. A figure the page could not work out shows **—** and
+  says why. It never shows a zero it did not measure: "nothing was recorded" and
+  "the answer is none" are different, and a page that blurred them would be the
+  exact problem this one exists to solve.
+- **Health.** Only what needs attention. A dataset with nothing wrong says so in
+  one line instead of listing zeros.
+- **Run parameters.** What the run was told to do — segmentation method and its
+  thresholds, the background method named in full, flat-field, debris gating,
+  where it ran and for how long. A threshold that came from the model's own
+  defaults says so, rather than being shown as a number somebody chose.
+- **Your work here.** Replicate sets, plot groups, labelled wells, smFISH
+  thresholds, ratios, notes — with what you have not started yet reading "None
+  yet", because that is a real answer rather than a missing one.
+
+Above all of it, one line saying what most needs doing next, and a button that
+does it.
+
 ### The Review window at a glance
 
 ```

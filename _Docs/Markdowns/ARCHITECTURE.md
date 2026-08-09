@@ -109,6 +109,7 @@ they're shell-wide:
 allwell/
 ├── allwell.py                  ← app entry point + title bar shell (+ version pill)
 ├── version.py                   ← single source of truth for the app version (read by the pill + the PyInstaller spec)
+├── help_topics.py               ← Qt-free: which manual heading documents which page (help drawer)
 ├── mpl_bootstrap.py             ← restrict matplotlib to bundled fonts (called first in main; see §4)
 ├── all_well_launcher.py         ← PyInstaller entry point + --run-pipeline dispatch
 ├── analyze_tab.py               ← Analyze pane (form + run controls + live log)
@@ -831,17 +832,49 @@ the only way back to Analyze and Datasets while collapsed, since the bar is the
 app's sole mode switch.
 
 The band's right end carries the dataset action cluster — reload, presentation
-mode, full reset of saved state, reveal the dataset folder, reset the view, and
-the help drawer. They are built in `AllWellApp` alongside their handlers and
-then moved into the band by `_mount_review_actions`, which appends them after
-the page-tabs host; that host holds the band's only stretch, so the cluster is
-pushed hard right whatever the tab strip is showing, and the band's pinned
-height rises to whatever the buttons need rather than clipping them. Every one
-of the six acts on the loaded dataset or on the plots drawn from it, so
-`_sync_review_actions` shows the cluster in Review alone and hides it in Analyze
-and Datasets, where each would be a control with nothing behind it (`Ctrl+/`
-still opens the help drawer from any mode). Both mode-change handlers call it,
-so the cluster follows the seg and the pane stack alike. It sits on the band
+mode, full reset of saved state, reveal the dataset folder, and reset the view —
+and, outboard of it, the help-drawer button. They are built in `AllWellApp`
+alongside their handlers and then moved into the band by
+`_mount_review_actions`, which appends them after the page-tabs host; that host
+holds the band's only stretch, so both are pushed hard right whatever the tab
+strip is showing, and the band's pinned height rises to whatever the taller of
+the two needs rather than clipping them. Every one of the five acts on the
+loaded dataset or on the plots drawn from it, so `_sync_review_actions` shows
+the cluster in Review alone and hides it in Analyze and Datasets, where each
+would be a control with nothing behind it. Both mode-change handlers call it, so
+the cluster follows the seg and the pane stack alike.
+
+The help button is deliberately not one of them, which is why it is mounted
+after the cluster rather than inside it: the manual it opens documents all three
+modes, and it keeps the band's rightmost slot in every mode while the cluster in
+front of it comes and goes. Anything placed inside the cluster inherits the
+Review-only gating, and for this control that would leave Analyze and Datasets
+with `Ctrl+/` as their only route to the drawer — a shortcut nothing on screen
+advertises once the band's right end is empty.
+
+Opening the drawer aims it at the page the user is on.
+`_help_section_for_current_page` branches on the current mode and asks that
+mode's pane which of its own pages is showing: Review resolves its leaf tab
+through `tab_controller.current_centre_tab`, `DatasetsTab.current_help_page`
+returns the rail key of the tool page, and `AnalyzeTab.current_help_section`
+answers by scroll position, since the Analyze pane is one tall form rather than
+a stack of pages. That last one returns the topmost section with any part of
+itself on screen, recorded by `_section` in build order in `_section_widgets`.
+The form is taller than the distance the scrollbar travels to reach its end, so
+at the bottom of the form every remaining section header sits *below* the
+viewport top; a rule phrased as "the last header above the top" names a section
+several screens out of sight there.
+
+`help_topics.py` holds the maps from a page to the exact manual heading that
+documents it — `SECTION_BY_PAGE` for Review leaves, `ANALYZE_SECTION_HELP` for
+form sections, `DATASETS_PAGE_HELP` for rail labels, and `MODE_OVERVIEW` for the
+fallback each mode uses when its pane cannot say. It is Qt-free so
+`tests/test_help_topics.py` can check every entry against the real
+`README_WellViewer.md` in the fast lane: every value must be a heading that
+exists, every Datasets tool and Analyze section must have a key, and no key may
+name a page that no longer exists. `tests/test_guards_bite.py` carries that
+guard's bite cases — the base branch predates `help_topics.py`, so
+`scripts/prove_guard.sh` cannot prove it there. It sits on the band
 rather than in the window header a row above because that put a second strip of
 chrome across the top of the window carrying controls for a mode the user might
 not be in. An earlier pass set `RAIL_W` to whichever mode's content needed the
@@ -5979,6 +6012,16 @@ Add a `QShortcut(QKeySequence("Ctrl+X"), self, activated=self._handler)`
 line in `AllWellApp._install_shortcuts` (`allwell.py`). The help drawer's
 shortcut list is in `_toggle_help_drawer` in the same file — keep it
 in sync.
+
+### 11.6 Give a new page its help
+
+Adding a Review tab, a Datasets tool, or an Analyze form section means adding
+two things: a section in `_Docs/Markdowns/README_WellViewer.md`, and an entry in
+the matching map in `help_topics.py` whose value is that heading's exact text.
+Without both, the drawer opens on the mode overview for that page and nothing
+says so. `tests/test_help_topics.py` fails until they are there — it reads the
+Datasets roster and the Analyze section titles out of their own source, so a new
+page cannot be added without the guard noticing.
 
 ---
 

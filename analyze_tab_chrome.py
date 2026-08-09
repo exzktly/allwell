@@ -87,8 +87,50 @@ class AnalyzeFormChromeMixin:
                 self._collapsible_sections = {}
             self._collapsible_sections[title] = (body, caret)
 
+        # Every section, collapsible or not, is recorded in build order so
+        # current_help_section can say which one the user has scrolled to.
+        if not hasattr(self, "_section_widgets"):
+            self._section_widgets = {}
+        self._section_widgets[title] = container
+
         parent.layout().addWidget(container)
         return body
+
+    def current_help_section(self) -> str:
+        """Title of the form section the user is looking at, or ``""``.
+
+        The Analyze pane is one tall scrolling form rather than a stack of
+        pages, so "which page am I on" is a question about scroll position. The
+        answer is the topmost section with any part of itself on screen: the one
+        whose header sits at the top of the viewport, or — once its header has
+        scrolled off — the one whose body still fills it. The help drawer uses
+        it to open on that section's own part of the manual instead of the
+        Analyze overview every time.
+
+        Not "the last header above the viewport top": the form is taller than
+        the scroll range spent reaching its end, so at the bottom of the form
+        every remaining header sits *below* the viewport top and that rule names
+        a section scrolled out of sight several screens up.
+
+        Returns ``""`` — meaning "fall back to the mode overview" — before the
+        form is built or when the pane has no scroll area yet.
+        """
+        sections = getattr(self, "_section_widgets", None)
+        scroll = getattr(self, "_left_sidebar", None)
+        if not sections or scroll is None:
+            return ""
+        viewport = scroll.viewport() if hasattr(scroll, "viewport") else None
+        if viewport is None:
+            return ""
+        for title, container in sections.items():
+            if container is None or not container.isVisible():
+                continue
+            # mapTo across the widget tree rather than reading y() directly:
+            # each section sits inside the form widget, not the viewport.
+            top = container.mapTo(viewport, container.rect().topLeft()).y()
+            if top + container.height() > 0:
+                return title
+        return ""
 
     def reveal_section(self, title: str) -> None:
         """Unfold the collapsible section named *title*, if it is folded.

@@ -437,3 +437,34 @@ def test_a_job_its_page_can_show_reports_no_loss(qapp, tmp_path):
         assert notices == []
     finally:
         tab.shutdown()
+
+
+def test_current_help_page_names_the_selected_tool(qapp, tmp_path):
+    """What the help drawer asks the pane so it can open on that tool's section
+    of the manual. The rail key is the label is the help-topic key — there is no
+    second name map, which is the point."""
+    import help_topics
+
+    tab, _ = _make_tab(tmp_path)
+    try:
+        # Whatever the rail opens on, it must be a page the map knows.
+        opening = tab.current_help_page()
+        assert opening in help_topics.DATASETS_PAGE_HELP, opening
+
+        for name in ("Merge Plates", "Job Queue", "Validate & Repair"):
+            tab._nav.setCurrentKey(name)
+            tab._pages.setCurrentByName(name)
+            assert tab.current_help_page() == name
+            assert name in help_topics.DATASETS_PAGE_HELP
+    finally:
+        tab.shutdown()
+
+
+def test_current_help_page_is_safe_before_the_rail_exists(qapp, tmp_path):
+    """Partial construction must not take the drawer down with it."""
+    import types
+
+    from datasets_tab import DatasetsTab as _DT
+
+    stub = types.SimpleNamespace()
+    assert _DT.current_help_page(stub) == ""

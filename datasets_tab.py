@@ -252,6 +252,19 @@ class DatasetsTab(QWidget):
         if job_queue is not None:
             job_queue.save_session()
 
+    def current_help_page(self) -> str:
+        """Rail label of the tool page showing now, or ``""`` before build.
+
+        The help drawer asks for this so it can open on that tool's section of
+        the manual. The label doubles as the ``RailNav`` key and as the
+        ``help_topics.DATASETS_PAGE_HELP`` key, so no second name map exists to
+        drift out of step.
+        """
+        nav = getattr(self, "_nav", None)
+        if nav is None:
+            return ""
+        return nav.currentKey() or ""
+
     def _page_name_for(self, kind: str | None) -> str | None:
         for feat in _FEATURES:
             if feat.kind == kind:

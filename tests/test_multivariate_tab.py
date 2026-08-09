@@ -102,14 +102,29 @@ def test_multivariate_clustering_exposes_feature_profile(loaded_app_shape):
 
 @pytest.mark.slow
 def test_multivariate_tab_flips_off_empty_state_with_dataset(loaded_app_shape):
+    """The lazily-built tab must recognise the already-open dataset.
+
+    This used to assert every registered stack sat on page 1. That stopped being
+    the right question once the placeholder learned to say *which* nothing it is
+    showing: ``_load_path`` clears the well selection, so a selection-gated stack
+    correctly sits on page 0 here saying "No wells selected." What the tab must
+    never do — the thing this test has always been about — is ask for a dataset
+    that is already loaded, so that is what it checks now.
+    """
+    from PySide6.QtWidgets import QLabel
+
     app = loaded_app_shape
     assert app._app_state.dataset.well_paths          # dataset is loaded
     assert app._notebook.setCurrentByName("Multivariate")
-    # The lazily-built tab must recognise the already-open dataset — its
-    # empty-state stack shows the plot (page 1), not the "load a directory"
-    # placeholder (page 0).
-    idxs = [s.currentIndex() for s in getattr(app, "_plot_empty_stacks", [])]
-    assert idxs and all(i == 1 for i in idxs)
+
+    stacks = getattr(app, "_plot_empty_stacks", []) or []
+    assert stacks
+    shown = [
+        lbl.text()
+        for stack in stacks if stack.currentIndex() == 0
+        for lbl in stack.widget(0).findChildren(QLabel) if lbl.text()
+    ]
+    assert "Load a directory." not in shown, shown
 
 
 @pytest.mark.slow

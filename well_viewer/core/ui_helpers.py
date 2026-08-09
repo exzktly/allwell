@@ -145,26 +145,69 @@ def set_combo_values_sectioned(combo: object, sections: list[tuple[str, list[str
             block(False)
 
 
+#: The one wording for "no dataset is loaded", shared by every wrapped tab.
+NO_DATASET_TITLE = "Load a directory."
+NO_DATASET_HINT = "Open… is at the top of the left rail (⌘O)."
+
+
+class EmptyReason:
+    """Why a wrapped tab has nothing to show: the words and the glyph to say it.
+
+    A tab can be empty for more than one reason, and the reasons are not
+    interchangeable — "no dataset is loaded" and "you have not picked any wells"
+    ask the user for completely different next actions. Naming each one lets a
+    single placeholder widget state which one it is, instead of every page
+    inventing its own answer on its own canvas.
+
+    ``icon=None`` keeps whatever glyph the wrap site chose. That is the usual
+    case: when a page's body is empty its glyph is the only signal left of which
+    page you are on, so a reason overrides it only when it has a better one.
+    """
+
+    __slots__ = ("title", "hint", "icon")
+
+    def __init__(self, title: str, hint: str = "", icon: str | None = None) -> None:
+        self.title = title
+        self.hint = hint
+        self.icon = icon
+
+
+#: The default reason. Every wrapped tab needs a dataset, so this is what a wrap
+#: site gets when it names no reason of its own.
+NO_DATASET = EmptyReason(NO_DATASET_TITLE, NO_DATASET_HINT)
+
+
 def wrap_with_empty_state(
     win: Any,
     host: QWidget,
     *,
-    text: str = "Load a directory.",
-    hint: str = "Open… is at the top of the left rail (⌘O).",
+    text: str = NO_DATASET_TITLE,
+    hint: str = NO_DATASET_HINT,
     icon: str = "line-chart",
+    reason: Callable[[Any], EmptyReason | None] | None = None,
 ) -> QStackedWidget:
     """Wrap *host* (a plot canvas / scroll area / card) in a ``QStackedWidget``
-    so an :class:`EmptyState` placeholder can render in its place until a
-    dataset is loaded.
+    so an :class:`EmptyState` placeholder can render in its place whenever the
+    tab has nothing to show.
 
     Page 0 is the EmptyState; page 1 is *host*. The stack starts on page 0
     so the user sees the placeholder immediately on win launch (matplotlib's
     default empty axes are otherwise visible as glaring white blocks).
 
-    The stack registers itself on ``win._plot_empty_stacks`` and
-    ``win._refresh_plot_empty_states()`` flips every registered stack based
-    on whether ``win._app_state.dataset.well_paths`` is non-empty. Tab redraws should call
-    that helper before they paint.
+    *reason* is an optional ``reason(ctx) -> EmptyReason | None`` called on every
+    refresh once a dataset is loaded; ``None`` means "this tab has something to
+    draw, show the host". A site that passes no reason is gated on the dataset
+    alone, which is the behaviour every tab had before reasons existed.
+
+    **"No dataset" always wins.** With no dataset loaded the site reason is not
+    consulted at all and every stack shows the shared wording above — a page
+    cannot sensibly ask for wells to be selected on a plate that is not there.
+
+    The stack registers itself on ``win._plot_empty_stacks``, which stays a plain
+    list of stacks (the reason and its placeholder ride on the stack), and
+    ``refresh_plot_empty_states`` / ``refresh_empty_state_pages`` resolve every
+    registered one together — which is what keeps the wording and the moment of
+    the swap identical across tabs.
     """
     from widgets.empty_state import EmptyState  # local — widget module is heavy
     stack = QStackedWidget()
@@ -173,10 +216,48 @@ def wrap_with_empty_state(
     stack.addWidget(placeholder)  # index 0
     stack.addWidget(host)         # index 1
     stack.setCurrentIndex(0)
+    # Carried on the stack rather than in a parallel structure: the registry is
+    # indexed directly by existing tests, and a tuple there turns a readable
+    # assertion failure into an AttributeError.
+    stack._empty_placeholder = placeholder
+    stack._empty_reason = reason
+    stack._empty_default_icon = icon
     if not hasattr(win, "_plot_empty_stacks") or win._plot_empty_stacks is None:
         win._plot_empty_stacks = []
     win._plot_empty_stacks.append(stack)
     return stack
+
+
+def no_selection_reason(
+    title: str = "No wells selected.",
+    hint: str = "Click wells on the plate at the left, or open Plot Groups below it.",
+) -> Callable[[Any], EmptyReason | None]:
+    """A ``reason`` for tabs that plot exactly the plate selection.
+
+    The title states the state and the hint carries the action, naming controls
+    by the labels they actually wear on screen — the plate has no visible label
+    of its own, and "Plot Groups" is the rail's own section heading.
+    """
+    empty = EmptyReason(title, hint)
+
+    def _reason(ctx) -> EmptyReason | None:
+        from well_viewer.core.selection_controller import has_plottable_selection
+        return None if has_plottable_selection(ctx) else empty
+
+    return _reason
+
+
+def _apply_reason(stack: QStackedWidget, reason: EmptyReason) -> None:
+    """Write *reason* onto *stack*'s placeholder and show it."""
+    placeholder = getattr(stack, "_empty_placeholder", None)
+    if placeholder is not None:
+        placeholder.setText(reason.title)
+        placeholder.setHint(reason.hint)
+        icon = reason.icon or getattr(stack, "_empty_default_icon", None)
+        if icon:
+            placeholder.setIconName(icon)
+    if stack.currentIndex() != 0:
+        stack.setCurrentIndex(0)
 
 
 #: Object names of per-tab control-bar containers that act on the loaded
@@ -191,18 +272,36 @@ _DATA_GATED_OBJECT_NAMES = ("TabCtrl", "ControlBand")
 def refresh_empty_state_pages(win: Any) -> None:
     """Flip every registered stack to the page its current state calls for.
 
+    With no dataset loaded every stack shows the shared "no dataset" wording.
+    Otherwise each stack's own ``reason`` decides: an :class:`EmptyReason` is
+    written onto its placeholder and shown, ``None`` shows the tab body.
+
     Split out of :func:`refresh_plot_empty_states` because this half is cheap —
-    one ``currentIndex()`` comparison per registered stack — while the
-    control-bar gating below it walks the whole widget tree twice. Callers that
-    fire on every selection change want this one; callers reacting to a dataset
-    load want the full refresh.
+    a reason call and a ``currentIndex()`` comparison per registered stack —
+    while the control-bar gating below it walks the whole widget tree twice.
+    Callers that fire on every selection change want this one; callers reacting
+    to a dataset load want the full refresh.
     """
     stacks = getattr(win, "_plot_empty_stacks", None) or []
-    target = 1 if bool(win._app_state.dataset.well_paths) else 0
+    if not stacks:
+        return
+    has_data = bool(win._app_state.dataset.well_paths)
+    ctx = getattr(win, "_ctx", None)
     for stack in stacks:
         try:
-            if stack.currentIndex() != target:
-                stack.setCurrentIndex(target)
+            if not has_data:
+                # The site reason is deliberately not consulted: asking the user
+                # to pick wells on a plate that is not loaded is a worse message
+                # than the one it would replace.
+                _apply_reason(stack, NO_DATASET)
+                continue
+            reason_fn = getattr(stack, "_empty_reason", None)
+            reason = reason_fn(ctx) if (reason_fn is not None and ctx is not None) else None
+            if reason is None:
+                if stack.currentIndex() != 1:
+                    stack.setCurrentIndex(1)
+            else:
+                _apply_reason(stack, reason)
         except Exception:
             swallowed()  # was: pass (silent except)
 

@@ -118,7 +118,6 @@ _logger = logging.getLogger("well_viewer")
 
 from well_viewer.domain.selections_model import color_for_well
 
-NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
 
 # `_set_combo_values` was hoisted into well_viewer.ui_helpers so the new

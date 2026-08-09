@@ -245,9 +245,23 @@ def build_stats_results_panel(ctx, parent: QWidget) -> None:
         "Run test to see results here."
     )
     rl.addWidget(result_text)
-    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    # Not selection-gated: this tab compares groups, and a group is built from
+    # wells rather than being the plate selection. But its empty state was a
+    # sentence in a QTextEdit placeholder, top-left of a large empty box, while
+    # its neighbours centred theirs — and a user reads that difference as
+    # inconsistency, not as a different gating rule. Same widget, own reason.
+    from well_viewer.core.ui_helpers import EmptyReason, wrap_with_empty_state
+
+    def _no_groups(c):
+        if c.state.stats.groups:
+            return None
+        return EmptyReason(
+            "No comparison groups yet.",
+            "Click + Add in the left panel, then drag wells onto a group card.",
+        )
+
     layout.addWidget(wrap_with_empty_state(
-        ctx.window, res_frame, icon="sigma",
+        ctx.window, res_frame, icon="sigma", reason=_no_groups,
     ), 1)
 
     stats_update_tp_menu(ctx)

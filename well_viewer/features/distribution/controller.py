@@ -22,9 +22,14 @@ from well_viewer.core.channel_state_controller import (
 )
 
 
+# Reached when the selection *is* non-empty and still produced no values — a
+# timepoint nothing matched, gating that excluded every cell, wells whose CSVs
+# hold no rows for this metric. The "no wells selected" half of what this used to
+# say is the tab's shared empty-state placeholder now, so naming it here too
+# would be one message covering two causes the user can act on differently.
 NO_DATA_MSG = (
     "No values to plot.\n"
-    "Pick a channel, metric, and timepoint, and select wells or groups."
+    "Try another channel, metric, or timepoint — or check the cell gating."
 )
 
 
@@ -129,10 +134,15 @@ def _empty_msg(ax) -> None:
     fig = ax.figure
     if fig is not None:
         fig.set_facecolor(fc)
+    # Themed muted token, not a hard-coded "gray": this message has to stay
+    # legible in Screen and Publication mode alike, and every other on-axes
+    # message in Review already reads its colour from the theme.
+    from well_viewer.core.plot_style import tokens_for
+    _bg, _title_fg, _muted_fg, _grid, _spine = tokens_for(ax)
     ax.text(
         0.5, 0.5, NO_DATA_MSG,
         ha="center", va="center", transform=ax.transAxes,
-        fontsize=10, color="gray",
+        fontsize=10, color=_muted_fg,
     )
     ax.set_axis_off()
 

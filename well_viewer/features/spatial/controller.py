@@ -211,6 +211,34 @@ def _rep_active_wells(ctx) -> list:
     return sorted(wells)
 
 
+def spatial_empty_reason(ctx):
+    """The Spatial tab's ``wrap_with_empty_state`` reason — level-dependent.
+
+    Spatial has two fallbacks for an empty selection and they are not the same
+    kind of thing. At Summary level ``_summary_wells`` falls back to *every*
+    loaded well, which is a defensible default for a matrix that is about the
+    plate as a whole; it keeps rendering, and its caption names the fallback so
+    the reader knows the selection did not scope it.
+
+    At the three per-frame levels ``_frame_wells`` falls back to the first key of
+    ``well_paths`` — one arbitrary well, in dictionary order, with nothing on
+    screen saying it was picked for the user. That is a silent substitution, so
+    those levels show the placeholder instead.
+    """
+    from well_viewer.core.selection_controller import has_plottable_selection
+    from well_viewer.core.ui_helpers import EmptyReason
+
+    st = _state(ctx)
+    if st is None or st.level == sp_state.LEVEL_SUMMARY:
+        return None
+    if has_plottable_selection(ctx):
+        return None
+    return EmptyReason(
+        "No wells selected.",
+        "Click wells on the plate at the left.",
+    )
+
+
 def _frame_wells(ctx, st) -> list:
     """Wells to facet at a per-frame level. In replicate (group) mode this is the
     active set (non-hidden groups + solo wells), matching the plate highlight and

@@ -181,6 +181,13 @@ def build_batch_export_tab(ctx, parent: QWidget) -> None:
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
     scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
     scroll.setWidget(host)
+    # Dataset-gated only, deliberately. The obvious next step would be to gate
+    # this on "no export groups" the way Statistics is gated on "no comparison
+    # groups", but the widget wrapped here is the *whole* panel — plate map,
+    # group list, OUTPUT SETTINGS and the Run Batch Export button. Swapping all
+    # of that for a placeholder would hide the output configuration precisely
+    # while the user is setting it up. Its "No export groups." line already sits
+    # inside the group list, which is where the groups themselves would appear.
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, scroll, icon="download",

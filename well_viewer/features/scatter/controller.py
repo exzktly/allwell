@@ -36,7 +36,6 @@ from well_viewer.features.scatter.gating import (
 
 from well_viewer.features.scatter._layout import _render_scatter_faceted, _setup_scatter_axes, _style_scatter_ax, log1p_axis_suffix
 
-NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
 
 #: Agg-scatter Property labels that map to a synthetic aggregation key rather
 #: than a metric-intensity column (mirrors ``WellViewerApp._SCATTER_AGG_METRIC_EXTRA``).
@@ -93,17 +92,9 @@ def redraw_scatter(
     _bg, _title_fg, _muted_fg, _grid, _spine = _style_scatter_ax(ctx, ax_scatter)
 
     if not selected_wells and not active_rsets:
+        # The words are the tab's shared placeholder; the axes are cleared above,
+        # so the figure behind it holds nothing an export could misrepresent.
         ctx.runtime.scatter.interaction_cache = {"points": []}
-        ax_scatter.text(
-            0.5,
-            0.5,
-            NO_SELECTION_MSG,
-            ha='center',
-            va='center',
-            transform=ax_scatter.transAxes,
-            fontsize=10,
-            color=_muted_fg,
-        )
         ax_scatter.set_axis_off()
         scatter_canvas.draw()
         return
@@ -325,16 +316,8 @@ def redraw_scatter_agg(
         ctx, ax_agg, fig=agg_fig)
 
     if not selected_wells and not active_rsets:
-        ax_agg.text(
-            0.5,
-            0.5,
-            NO_SELECTION_MSG,
-            ha='center',
-            va='center',
-            transform=ax_agg.transAxes,
-            fontsize=10,
-            color=_muted_fg,
-        )
+        # Words on the shared placeholder; axes cleared above (see the per-cell
+        # branch) so nothing stale can be exported from behind it.
         ax_agg.set_axis_off()
         agg_canvas.draw()
         return

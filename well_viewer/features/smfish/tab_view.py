@@ -189,10 +189,12 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     cdf_btn.clicked.connect(lambda _=False: _smfish_open_cdf_popup(ctx))
     ctrl.add_action(cdf_btn)
 
-    # Status row
-    status_label = reg.register("_smfish_status_label", QLabel(
-        "Select a single well from the global picker.", parent
-    ))
+    # Status row. Starts blank: an empty selection is the shared placeholder's
+    # message now, and this label sits *outside* the empty-state stack, so any
+    # selection sentence here would print alongside the placeholder rather than
+    # instead of it. The label still carries this tab's own states (the smFISH
+    # channel missing, an image that failed to load, Apply-to-All progress).
+    status_label = reg.register("_smfish_status_label", QLabel("", parent))
     status_label.setObjectName("Muted")
     root.addWidget(status_label)
 
@@ -201,8 +203,11 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     reg.register("_smfish_ax_img", fig_img.add_subplot(111))
     canvas_img = reg.register("_smfish_canvas_img", FigureCanvas(fig_img))
     # Theme the canvas immediately so it's never a bare white figure before the
-    # first refresh paints data or an empty-state message.
-    _smfish_paint_empty(ctx, "Select a well to view smFISH images.")
+    # first refresh paints data. No message with it: the canvas sits behind the
+    # empty-state stack,
+    # which is what tells the user there is no dataset or no well selected. A
+    # sentence painted here would only ever be read through that placeholder.
+    _smfish_paint_empty(ctx, "")
 
     from widgets.mpl_toolbar import MplToolbar
     toolbar = reg.register("_smfish_toolbar", MplToolbar(canvas_img, parent))
@@ -227,8 +232,21 @@ def build_smfish_tab(ctx, parent: QWidget) -> None:
     # below stay as they are: they describe states *within* a loaded dataset
     # (no well selected, no smFISH channel, an image that failed to load),
     # which is exactly where the other tabs paint on the axes too.
-    from well_viewer.core.ui_helpers import wrap_with_empty_state
-    root.addWidget(wrap_with_empty_state(ctx.window, plot_host, icon="image"), 1)
+    from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
+    # smFISH is ``single_well_selection``, so on_plate_sel_change collapses any
+    # multi-well selection to one while this tab is current: zero wells is the
+    # only empty selection it can be in. Gating on it gives the tab's own
+    # "No smFISH/mask pair found…" message its real meaning back — an empty
+    # selection used to trigger that line, reporting a missing image pair for a
+    # well the user had never chosen.
+    root.addWidget(wrap_with_empty_state(
+        ctx.window, plot_host, icon="image",
+        reason=no_selection_reason(
+            title="No well selected.",
+            hint="Click a well on the plate at the left. "
+                 "smFISH shows one well at a time.",
+        ),
+    ), 1)
 
     canvas_img.mpl_connect(
         "motion_notify_event", lambda ev: _smfish_on_img_hover(ctx, ev)

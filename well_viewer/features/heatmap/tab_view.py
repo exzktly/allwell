@@ -49,7 +49,9 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # builds. heatmap_controller pulls in matplotlib.patches and numpy at
     # module load, so importing it lazily keeps utility entry points like
     # ``refresh_heatmap_timepoints`` cheap.
-    from well_viewer.features.heatmap.controller import METRIC_OPTIONS
+    from well_viewer.features.heatmap.controller import (
+        METRIC_OPTIONS, heatmap_empty_reason,
+    )
     # A8 burn-down: widget handles go through the WidgetRegistry (``ctx.widgets``),
     # which also stamps ``app._<name>`` so legacy ``app._heatmap_*`` readers in the
     # heatmap controller keep resolving. Non-widget state (scale mode / flags /
@@ -219,9 +221,15 @@ def build_heatmap_tab(ctx, parent: QWidget) -> None:
     # redraw would wipe the widget-side theme styling that setPlotTheme already
     # applied. Let PlotCard.setPlotTheme's apply_axes_style walk stand.
     card.setStatsChipVisible(False)
+    # Deliberately *not* gated on the plate selection. This page draws whatever
+    # its layout holds and reads the selection only to outline cells, so gating
+    # it that way would hide a fully populated saved heat map the moment the
+    # user cleared the plate. What it can genuinely have nothing to show for is
+    # an empty layout — see ``heatmap_empty_reason``.
     from well_viewer.core.ui_helpers import wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="layout-grid",
+        reason=heatmap_empty_reason,
     ), 1)
 
     # ── Mouse hooks ─────────────────────────────────────────────────────────

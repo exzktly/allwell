@@ -869,6 +869,31 @@ def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
         on_plate_sel_change(ctx)
 
 
+def has_plottable_selection(ctx) -> bool:
+    """Is there anything for a selection-driven tab to draw?
+
+    True when the user has picked wells on the plate **or** has at least one
+    visible replicate set — a group is a selection expressed a different way, and
+    a tab plotting groups is not empty just because no individual well is lit.
+
+    This is the condition four renderers each spell out for themselves
+    (``barplot/renderer``, ``lineplot/controller``, ``scatter/controller`` twice)
+    as ``if not selected and not active_rsets``. One copy, next to the state it
+    reads, so the placeholder and the plot cannot come to different conclusions
+    about whether the page has anything on it.
+
+    Deliberately *not* routed through ``data_loading.iter_plot_groups``: that one
+    also yields solo wells and defaults to falling back to every loaded well, so
+    it answers "what should I draw?" rather than "is there anything to draw?".
+    """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    sel = ctx.state.selection
+    if sel.selected_wells:
+        return True
+    well_paths = ctx.state.dataset.well_paths or {}
+    return bool(list(active_replicate_sets(sel.selections, well_paths)))
+
 
 def enforce_well_exclusivity(ctx) -> None:
     """Invariant: a well belongs to **at most one group**. Keep each well in

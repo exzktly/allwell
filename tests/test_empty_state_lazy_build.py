@@ -15,15 +15,40 @@ in the one place every lazy build funnels through, so no feature has to remember
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import QStackedWidget
+from PySide6.QtWidgets import QLabel, QStackedWidget
+
+#: Spelled out rather than imported from ``core.ui_helpers``. This test has to be
+#: runnable against the code *before* the fix to prove it catches anything, and
+#: importing a constant the fix introduces turns that run into an ImportError —
+#: which looks like a red run while measuring nothing at all.
+NO_DATASET_TITLE = "Load a directory."
 
 
 def _stack_pages(app) -> list[int]:
     return [s.currentIndex() for s in (getattr(app, "_plot_empty_stacks", None) or [])]
 
 
-def test_a_lazily_built_tab_shows_its_body_not_the_no_dataset_placeholder(loaded_app):
-    """Open every lazy-only tab on an already-loaded app; none may sit on page 0."""
+def _visible_placeholder_titles(app) -> list[str]:
+    """The title text of every placeholder currently on screen."""
+    out = []
+    for stack in (getattr(app, "_plot_empty_stacks", None) or []):
+        if stack.currentIndex() != 0:
+            continue
+        placeholder = stack.widget(0)
+        labels = [lbl.text() for lbl in placeholder.findChildren(QLabel) if lbl.text()]
+        out.extend(labels)
+    return out
+
+
+def test_a_lazily_built_tab_does_not_ask_for_a_dataset_that_is_loaded(loaded_app):
+    """Open every lazy-only tab on an already-loaded app.
+
+    The assertion is on the placeholder's *words*, not on its page index. A
+    selection-gated tab legitimately sits on page 0 here — ``_load_path`` clears
+    the well selection, so "no wells selected" is the honest thing to say. What
+    must never appear is the no-dataset copy, which is what Spatial and smFISH
+    showed while the rail header named the loaded dataset.
+    """
     app = loaded_app
     assert app._app_state.dataset.well_paths, "fixture should have loaded a dataset"
 
@@ -34,11 +59,11 @@ def test_a_lazily_built_tab_shows_its_body_not_the_no_dataset_placeholder(loaded
         app._notebook.setCurrentByName(title)
         app._drain_pending_centre_builders()
 
-    pages = _stack_pages(app)
-    assert pages, "opening the lazy tabs should have registered empty-state stacks"
-    assert all(page == 1 for page in pages), (
-        "a stack is still on the 'Load a directory.' placeholder with a dataset "
-        f"loaded — pages={pages}, lazy tabs opened={lazy_titles}"
+    assert _stack_pages(app), "opening the lazy tabs should have registered stacks"
+    shown = _visible_placeholder_titles(app)
+    assert NO_DATASET_TITLE not in shown, (
+        f"a placeholder still asks for a dataset that is loaded — showing {shown}, "
+        f"lazy tabs opened={lazy_titles}"
     )
 
 

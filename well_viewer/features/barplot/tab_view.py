@@ -272,9 +272,17 @@ def build_bar_plots_tab(ctx, parent: QWidget) -> None:
     scroll_canvas.setFrameShape(QFrame.NoFrame)
     scroll_canvas.setWidget(card)
     install_canvas_wheel_scroll(canvas, scroll_canvas)
-    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    # Gated on the plate selection as well as the dataset: without a reason this
+    # page painted the same two-line message onto each of its three panels. The
+    # hint names them, because those panel titles are the only thing on screen
+    # that says what the page will produce.
+    from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     right_l.addWidget(wrap_with_empty_state(
         ctx.window, scroll_canvas, icon="bar-chart-horizontal",
+        reason=no_selection_reason(
+            hint="Three panels: mean intensity, fraction above threshold, and N. "
+                 "Click wells on the plate at the left.",
+        ),
     ), 1)
 
     # Drag-to-reorder bars

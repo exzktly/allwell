@@ -110,8 +110,12 @@ class EmptyState(QWidget):
         # off scaledContents so the pixmap renders 1:1.
         self._glyph.setFixedSize(px, px)
         self._glyph.setScaledContents(False)
+        # ``text_muted`` rather than ``text_faint``: against the panel surface
+        # the faint token measures about 2:1, which on a dark theme reads as an
+        # absent glyph rather than a quiet one. This is the only picture on an
+        # otherwise empty page.
         self._glyph.setPixmap(
-            icons.make_pixmap(self._icon_name, "text_faint", px, dpr or 1.0)
+            icons.make_pixmap(self._icon_name, "text_muted", px, dpr or 1.0)
         )
 
     def showEvent(self, event):
@@ -119,16 +123,23 @@ class EmptyState(QWidget):
         super().showEvent(event)
 
     def _build_qss(self) -> str:
+        # The hint carries the action — what to click to leave this state — so it
+        # cannot be the least legible thing on the page. On ``text_muted`` it
+        # measured about 3.2:1 against the panel surface, under the 4.5:1 that
+        # 12px text needs. It moves to ``text_secondary``, which puts it on the
+        # title's colour, so the hierarchy is carried by size and weight instead:
+        # colour alone was doing a job the contrast budget could not afford.
         c, t = theme.Colors, theme.Typography
         return f"""
         #EmptyState {{ background: transparent; }}
         QLabel#EmptyStateText {{
             color: {c.text_secondary};
             font-size: {t.h3_size}px;
+            font-weight: {t.semibold};
             background: transparent;
         }}
         QLabel#EmptyStateHint {{
-            color: {c.text_muted};
+            color: {c.text_secondary};
             font-size: {t.small_size}px;
             background: transparent;
         }}

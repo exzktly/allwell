@@ -43,4 +43,10 @@ def test_refresh_reader_resolves_after_registry_build(viewer_app, qtbot):
         refresh_review_csv,
     )
     refresh_review_csv(app._ctx)  # no dataset loaded → the "select wells" branch; must not raise
-    assert app._review_csv_msg_lbl.text()  # message label was updated by the reader
+    # The reader reached its registry handles and wrote through them. It used to
+    # be checked on the message label, but that branch's sentence moved to the
+    # tab's shared empty-state placeholder — printing it here too would say the
+    # same thing twice — so the label is deliberately blank and the scope label
+    # is what proves the reader got this far.
+    assert app._review_well_lbl.text() == "(select well(s))"
+    assert app._review_csv_msg_lbl.text() == ""

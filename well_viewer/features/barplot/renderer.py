@@ -93,10 +93,6 @@ from well_viewer.domain.stats_compute import aggregate_well
 from well_viewer.core.safe import swallowed
 
 
-NO_SELECTION_MSG = (
-    "No wells or well groups selected.\n"
-    "Select wells on the left panel or define groups to plot."
-)
 
 
 def _pooled_rows(ctx, lbl: str, pool_groups: dict[str, list[str]] | None):
@@ -779,7 +775,11 @@ def redraw_bars(ctx) -> None:
         )
         return
     if not bar_selected and not active_rsets:
-        draw_bar_empty_state(ctx, ax_mean, ax_frac, NO_SELECTION_MSG, ax_n=ax_n)
+        # No message: the tab's shared placeholder covers this canvas and says it
+        # once, where this painted it three times — once per panel. The axes are
+        # already cleared above, which is what keeps a stale figure from being
+        # exported while the placeholder is up.
+        draw_bar_empty_state(ctx, ax_mean, ax_frac, "", ax_n=ax_n)
         return
 
     tp_list = resolve_bar_timepoints(ctx)
@@ -834,12 +834,16 @@ def draw_bar_empty_state(ctx, ax_mean, ax_frac, message: str, *, ax_n=None) -> N
         axes.append(ax_n)
     for ax in axes:
         ax.set_facecolor(_bg)
-        ax.text(
-            0.5, 0.5, message,
-            transform=ax.transAxes,
-            ha="center", va="center",
-            color=_muted_fg, fontsize=10,
-        )
+        # An empty message means a caller whose words live on the tab's shared
+        # placeholder instead; it still wants the themed, axis-less blank canvas
+        # behind it.
+        if message:
+            ax.text(
+                0.5, 0.5, message,
+                transform=ax.transAxes,
+                ha="center", va="center",
+                color=_muted_fg, fontsize=10,
+            )
         ax.set_axis_off()
     ctx.runtime.barplot.canvas.draw_idle()
 

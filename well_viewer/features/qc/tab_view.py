@@ -18,14 +18,18 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
-    QCheckBox, QLabel, QLineEdit, QWidget,
+    QCheckBox, QGridLayout, QHBoxLayout, QLabel, QLineEdit, QVBoxLayout, QWidget,
 )
 
 from .controller import get_qc_params, qc_excluded_count, set_qc_params
 from .params import QCParams
 from well_viewer.core.safe import swallowed
-from widgets.flow_layout import FlowLayout, flow_group
 import theme
+
+# Pixel geometry for this module's controls (ARCHITECTURE §8: named once, never
+# written inline at a call site).
+_GRID_INDENT = 18
+_QUANTITY_LBL_W = 92
 
 
 def _num(text: str) -> float:
@@ -40,9 +44,11 @@ def _fmt(v: float | None) -> str:
 
 
 def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
-    """A compact QC debris-gate row for the Cell Gating tab.
+    """The QC debris-gate controls for the Cell Gating tab.
 
-    Returns the row widget (already laid out). Edits apply live to the whole
+    Returns the widget (already laid out): an enable checkbox with the flagged
+    count beside it, over a grid with one row per measured quantity and its
+    min / max bounds in aligned columns. Edits apply live to the whole
     dataset and refresh the Segmentation overlay so excluded cells show there
     immediately.
 
@@ -51,55 +57,102 @@ def build_qc_gate_controls(ctx, parent: QWidget) -> QWidget:
     Segmentation refresh through their ctx-native entry points.
     """
     row = QWidget(parent)
-    hl = FlowLayout(row)
-    hl.setContentsMargins(8, 2, 8, 2)
+    outer = QVBoxLayout(row)
+    outer.setContentsMargins(8, 2, 8, 2)
+    outer.setSpacing(4)
 
     params = get_qc_params(ctx)
 
-    enable_cb = QCheckBox("QC debris gate", row)
+    head = QWidget(row)
+    head_layout = QHBoxLayout(head)
+    head_layout.setContentsMargins(0, 0, 0, 0)
+    enable_cb = QCheckBox("QC debris gate", head)
     enable_cb.setChecked(bool(params.enabled))
     enable_cb.setToolTip(
         "Flag cells outside the size / solidity / circularity bounds as debris "
         "(non-destructive). Applies to the whole dataset; excluded cells show "
         "here and drop out of every plot/stat. Composes with manual deletes.")
-    hl.addWidget(enable_cb)
+    head_layout.addWidget(enable_cb)
+    head_layout.addSpacing(12)
+    status = QLabel("", head)
+    status.setObjectName("Muted")
+    head_layout.addWidget(status)
+    head_layout.addStretch(1)
+    outer.addWidget(head)
 
-    # Each label+edit is grouped into one FlowLayout item so a wrap at narrow
-    # width never splits a field from its label (and no control clips off-edge).
-    min_area_edit = QLineEdit(_fmt(params.min_area), row)
-    hl.addWidget(flow_group(row, "min area", min_area_edit))
-    max_area_edit = QLineEdit(_fmt(params.max_area), row)
-    hl.addWidget(flow_group(row, "max area", max_area_edit))
-    min_sol_edit = QLineEdit(_fmt(params.min_solidity), row)
-    hl.addWidget(flow_group(row, "min solidity", min_sol_edit))
-    max_region_edit = QLineEdit(_fmt(params.max_region_area), row)
-    max_region_edit.setToolTip(
-        "Reject cells sitting in an over-large bright region (px²) — catches "
-        "debris StarDist shattered into many small cells that per-cell size "
-        "can't, since each fragment is individually small.")
-    hl.addWidget(flow_group(row, "max region", max_region_edit))
-    min_circ_edit = QLineEdit(_fmt(params.min_circularity), row)
+    # One row per measured quantity, min and max in aligned columns. Laid out as
+    # a grid rather than a single wrapping row of "min area / max area / min
+    # solidity / …" fields: those are three different quantities with six labels
+    # that read as one undifferentiated strip, and a bound is only meaningful
+    # beside the thing it bounds. Quantities that admit only one bound show an
+    # em-dash in the other column, so "no such bound" is visibly different from
+    # "a bound I have not filled in".
     _circ_tip = (
         "Circularity = 4π·area/perimeter² (1.0 = perfect circle). Min rejects "
         "jagged / non-round debris. Needs circularity in the data — collected "
         "automatically by the current pipeline; datasets processed before that "
         "must be reprocessed (or have shape perimeter present so it can be "
         "derived on load).")
-    min_circ_edit.setToolTip(_circ_tip)
-    hl.addWidget(flow_group(row, "min circ", min_circ_edit))
-    max_circ_edit = QLineEdit(_fmt(params.max_circularity), row)
-    max_circ_edit.setToolTip(_circ_tip)
-    hl.addWidget(flow_group(row, "max circ", max_circ_edit))
+    _area_tip = "Cell area in pixels; the primary size gate."
+    _sol_tip = (
+        "Solidity = area / convex-hull area. Low values are ragged or "
+        "fragmented objects. There is no upper bound: a perfectly convex cell "
+        "is not a defect.")
+    _region_tip = (
+        "Reject cells sitting in an over-large bright region (px²) — catches "
+        "debris StarDist shattered into many small cells that per-cell size "
+        "can't, since each fragment is individually small. There is no lower "
+        "bound: a small bright region is just a cell.")
+
+    grid = QWidget(row)
+    gl = QGridLayout(grid)
+    gl.setContentsMargins(_GRID_INDENT, 0, 0, 0)
+    gl.setHorizontalSpacing(10)
+    gl.setVerticalSpacing(3)
+    gl.setColumnMinimumWidth(0, _QUANTITY_LBL_W)
+    gl.setColumnStretch(3, 1)
+    for col, cap in ((1, "min"), (2, "max")):
+        head_lbl = QLabel(cap, grid)
+        head_lbl.setObjectName("Muted")
+        gl.addWidget(head_lbl, 0, col)
+
+    def _field(value, tip: str) -> QLineEdit:
+        edit = QLineEdit(_fmt(value), grid)
+        edit.setFixedWidth(theme.Metrics.num_field_w)
+        edit.setPlaceholderText("none")
+        edit.setToolTip(tip)
+        return edit
+
+    def _absent() -> QLabel:
+        """The column a quantity has no bound for. An em-dash, not a gap: a
+        bound that does not exist should not look like one left blank."""
+        lbl = QLabel("—", grid)
+        lbl.setObjectName("Muted")
+        return lbl
+
+    min_area_edit = _field(params.min_area, _area_tip)
+    max_area_edit = _field(params.max_area, _area_tip)
+    min_sol_edit = _field(params.min_solidity, _sol_tip)
+    max_region_edit = _field(params.max_region_area, _region_tip)
+    min_circ_edit = _field(params.min_circularity, _circ_tip)
+    max_circ_edit = _field(params.max_circularity, _circ_tip)
+
+    rows = (
+        ("Area", _area_tip, min_area_edit, max_area_edit),
+        ("Solidity", _sol_tip, min_sol_edit, None),
+        ("Region area", _region_tip, None, max_region_edit),
+        ("Circularity", _circ_tip, min_circ_edit, max_circ_edit),
+    )
+    for r, (name, tip, lo, hi) in enumerate(rows, start=1):
+        name_lbl = QLabel(name, grid)
+        name_lbl.setToolTip(tip)
+        gl.addWidget(name_lbl, r, 0)
+        gl.addWidget(lo if lo is not None else _absent(), r, 1)
+        gl.addWidget(hi if hi is not None else _absent(), r, 2)
+    outer.addWidget(grid)
+
     _edits = (min_area_edit, max_area_edit, min_sol_edit, max_region_edit,
               min_circ_edit, max_circ_edit)
-    for w in _edits:
-        w.setFixedWidth(theme.Metrics.num_field_w)
-        w.setPlaceholderText("none")
-
-    status = QLabel("", row)
-    status.setObjectName("Muted")
-    hl.addWidget(status)
-    hl.addStretch(1)
 
     # stash refs so persistence / external recomputes can refresh the row.
     # ``ctx.widgets.register`` also stamps ``app._qc_gate_widgets`` so the legacy

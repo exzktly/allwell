@@ -1973,9 +1973,13 @@ applied, and each question offers the same two sources as a pair of radio
 buttons — you pick one or the other, because choosing the scatter option
 *replaces* the per-channel numbers rather than adding to them.
 
-- **Cell inclusion — which cells count.** The **QC debris gate** (min/max area,
-  solidity, circularity) leads and is marked *always applied*: it composes with
-  everything else on the tab. Then choose the source of the inclusion decision —
+- **Cell inclusion — which cells count.** The **QC debris gate** leads and is
+  marked *always applied*: it composes with everything else on the tab. It reads
+  as one row per measured quantity — Area, Solidity, Region area, Circularity —
+  with its lower and upper bound in the `min` and `max` columns. Solidity has no
+  upper bound and Region area no lower one, so those cells show an em-dash
+  rather than an empty box you might think you were meant to fill in. Then
+  choose the source of the inclusion decision —
   the per-channel **intensity minimum** (the `Include ≥` column below), or the
   rectangular gates drawn on the [Scatter Plot](#scatter-plot). Until you have
   drawn a gate there, the scatter option is greyed out and says so.

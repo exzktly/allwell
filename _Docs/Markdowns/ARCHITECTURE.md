@@ -1438,6 +1438,13 @@ laid out as the two questions it answers, in the order the app applies them:
    *always applied*: it composes with everything below and is not one of the
    alternatives. Then a radio pair for the source of the inclusion decision —
    per-channel intensity floors, or the Scatter Plot's rectangular gates.
+
+   `qc/tab_view.build_qc_gate_controls` lays the gate out as a grid with one row
+   per *measured quantity* — Area, Solidity, Region area, Circularity — and its
+   min / max bounds in aligned columns, rather than the single wrapping strip of
+   six independently-labelled fields it was. A quantity that admits only one
+   bound (solidity has no upper, region area no lower) renders an em-dash in the
+   other column: a bound that does not exist must not look like one left blank.
 2. **Fraction-on — which included cells count as ON.** The same radio pair
    shape: per-channel cutoffs, or a scatter gate. Then Auto-threshold and the
    button that opens the optimizer.

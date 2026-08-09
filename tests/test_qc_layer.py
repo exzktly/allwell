@@ -180,7 +180,7 @@ def test_circularity_round_trips_through_dict():
 
 
 def test_qc_gate_row_exposes_circularity_inputs(qtbot):
-    """The Segmentation-tab QC gate row has min/max circularity inputs that
+    """The Cell Gating tab's QC gate row has min/max circularity inputs that
     seed from params and refresh on external change."""
     from PySide6.QtWidgets import QWidget
 
@@ -216,3 +216,53 @@ def test_qc_gate_row_exposes_circularity_inputs(qtbot):
     qc_gate_refresh_widgets(app)
     assert w["min_circularity"].text() == "0.7"
     assert w["max_circularity"].text() == ""   # unset → blank
+
+
+def test_qc_gate_row_gives_each_quantity_its_own_row(qtbot):
+    """One grid row per measured quantity, min and max in aligned columns.
+
+    The six bounds used to sit in a single wrapping strip — "min area / max area
+    / min solidity / max region / min circ / max circ" — which reads as one
+    undifferentiated row of fields rather than as three quantities, two of which
+    are bounded on both sides. A quantity with only one bound shows an em-dash in
+    the other column so "no such bound" cannot be mistaken for "not filled in".
+    """
+    from PySide6.QtWidgets import QGridLayout, QLabel, QWidget
+
+    from well_viewer.core.qc_state import QcState
+    from well_viewer.core.widget_registry import WidgetRegistry
+    from well_viewer.features.qc.tab_view import build_qc_gate_controls
+
+    app = SimpleNamespace()
+    app._app_state = SimpleNamespace(
+        dataset=SimpleNamespace(data_dir=None, cache={}, pipeline_info={}),
+        qc=QcState(params=QCParams(enabled=True)))
+    app._ctx = SimpleNamespace(
+        state=app._app_state, app=app, widgets=WidgetRegistry(app),
+        runtime=SimpleNamespace(qc=SimpleNamespace(refresh_widgets_cb=None)))
+
+    parent = QWidget()
+    qtbot.addWidget(parent)
+    row = build_qc_gate_controls(app._ctx, parent)
+    qtbot.addWidget(row)
+
+    grid = next(child.layout() for child in row.findChildren(QWidget)
+                if isinstance(child.layout(), QGridLayout))
+    at = {}
+    for i in range(grid.count()):
+        pos = grid.getItemPosition(i)
+        at[(pos[0], pos[1])] = grid.itemAt(i).widget()
+
+    names = {r: at[(r, 0)].text() for r in range(1, 5)}
+    assert list(names.values()) == ["Area", "Solidity", "Region area", "Circularity"]
+
+    w = app._qc_gate_widgets
+    # Each bound sits in its quantity's row, min in column 1 and max in column 2.
+    assert at[(1, 1)] is w["min_area"] and at[(1, 2)] is w["max_area"]
+    assert at[(2, 1)] is w["min_solidity"]
+    assert at[(3, 2)] is w["max_region_area"]
+    assert at[(4, 1)] is w["min_circularity"] and at[(4, 2)] is w["max_circularity"]
+
+    # The two one-sided quantities say so rather than leaving an empty cell.
+    assert isinstance(at[(2, 2)], QLabel) and at[(2, 2)].text() == "—"
+    assert isinstance(at[(3, 1)], QLabel) and at[(3, 1)].text() == "—"

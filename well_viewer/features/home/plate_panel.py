@@ -73,8 +73,10 @@ def build_home_plate(parent: QWidget) -> WellPlateSelector:
     All / Invert / Clear row comes with that role and is wanted — it is the same
     gesture the rail's own picker offers.
     """
+    # No objectName: the plate paints every well itself through QPainter, so a
+    # style hook here would resolve to nothing. The page reaches it through the
+    # widget registry (``_home_plate``), not through a selector.
     plate = WellPlateSelector(parent)
-    plate.setObjectName("HomePlate")
     plate.setColoredWellsLit(True)
     apply_plate_geometry(plate, role="picker")
     return plate

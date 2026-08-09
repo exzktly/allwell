@@ -537,6 +537,97 @@ QLabel#PlotCardTitle {{
     font-weight: {t.semibold};
     color: {c.text_primary};
 }}
+/* ── The Home page (features/home/) ──────────────────────────────────────
+   Home is a page of cards read at a glance rather than a form operated
+   control by control, so its surfaces are panels on the app canvas and its
+   type carries the hierarchy: the dataset name largest, block titles at
+   heading size, tile values large enough to read across a desk, and
+   everything explanatory muted. */
+QScrollArea#HomeScroll, QScrollArea#HomeScroll > QWidget > QWidget {{
+    background: {c.surface};
+}}
+QFrame#HomeCard, QWidget#HomeTile {{
+    background: {c.panel};
+    border: 1px solid {c.border_subtle};
+    border-radius: {r.md}px;
+}}
+QLabel#HomeTitle {{
+    font-size: {t.h2_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_primary};
+}}
+QLabel#HomeCardTitle {{
+    font-size: {t.h3_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_primary};
+}}
+/* The one-line "what needs doing next" row. A left rule rather than a filled
+   background: the severity has to be legible without the row competing with
+   the plate beneath it, and a tinted panel at this width reads as an alert
+   banner even when it is saying that nothing is wrong. */
+QFrame#HomeNextStep {{
+    background: {c.panel};
+    border: 1px solid {c.border_subtle};
+    border-left: 3px solid {c.border_strong};
+    border-radius: {r.md}px;
+}}
+QLabel#HomeTileLabel {{
+    font-size: {t.caption_size}px;
+    font-weight: {t.medium};
+    color: {c.text_secondary};
+}}
+QLabel#HomeTileValue {{
+    font-size: {t.h2_size}px;
+    font-weight: {t.semibold};
+    color: {c.text_primary};
+}}
+/* Channel chips and the "default" marker beside a threshold nobody chose. */
+QLabel#HomeChip, QLabel#HomeChipSeg {{
+    background: {c.panel_elevated};
+    border: 1px solid {c.border};
+    border-radius: {r.xs}px;
+    padding: 1px 6px;
+    font-family: {t.family_mono};
+    font-size: {t.small_size}px;
+    color: {c.text_primary};
+}}
+QLabel#HomeChipSeg {{
+    border-color: {c.accent};
+}}
+QLabel#HomeWellChips {{
+    font-family: {t.family_mono};
+    font-size: {t.small_size}px;
+    color: {c.text_primary};
+}}
+QPushButton#HomeAction {{
+    background: {c.panel_elevated};
+    border: 1px solid {c.border};
+    border-radius: {r.sm}px;
+    color: {c.text_primary};
+}}
+QPushButton#HomeAction:hover {{
+    background: {c.hover};
+    border-color: {c.border_strong};
+}}
+/* The notes box is styled as prose, not as a form field: no fill and no
+   border at rest, so the page reads as something you look at, and a lift on
+   hover that says this one region accepts typing. Adding a mode ("click to
+   edit") to a page whose whole premise is that it only reports would cost
+   more than the ambiguity it removes. */
+QPlainTextEdit#HomeNotes {{
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: {r.xs}px;
+    color: {c.text_primary};
+}}
+QPlainTextEdit#HomeNotes:hover {{
+    background: {c.panel_elevated};
+    border-color: {c.border_subtle};
+}}
+QPlainTextEdit#HomeNotes:focus {{
+    background: {c.panel_elevated};
+    border-color: {c.border};
+}}
 QLabel#RailHead {{
     font-size: {t.caption_size}px;
     font-weight: {t.semibold};

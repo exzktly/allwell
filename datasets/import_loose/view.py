@@ -1,7 +1,9 @@
 """Qt builder for the Import Loose Folder page.
 
-A source-folder picker, editable filename-schema/separator fields, a live
-preview readout (wells × FOVs × timepoints × channels, plus unparsed/
+A source-folder picker, the shared filename-schema builder
+(:class:`~widgets.schema_picker.SchemaPicker`, the same control the Analyze form
+uses, since this page parses the very filenames Analyze will go on to read), a
+live preview readout (wells × FOVs × timepoints × channels, plus unparsed/
 unreadable counts) that updates on every keystroke, a destination-folder
 picker (hidden when "group in place" is checked), and the usual
 Analyze-style status section — a per-well plate map
@@ -24,7 +26,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -36,12 +37,10 @@ from datasets._common.log_panel import LogPanelMixin, hrule as _hrule
 from util.schema import DEFAULT_SCHEMA, DEFAULT_SEP
 from widgets._support import set_variant
 from widgets.path_field import PathField, folder_picker
+from widgets.schema_picker import SchemaPicker
 from datasets._common.dataset_paths import DatasetPaths, destination_has_content
 from datasets.import_loose.dashboard import ImportLooseDashboard
 from datasets.import_loose.import_loose_compute import scan_folder
-
-# One-character separator field.
-_SEPARATOR_EDIT_W = 40
 
 
 def _is_destination(root: Path) -> str:
@@ -53,8 +52,6 @@ def _is_destination(root: Path) -> str:
     if destination_has_content(dest):
         return "Already has files under 'in' or 'out' — choose an empty folder."
     return ""
-
-
 
 
 class ImportLoosePage(LogPanelMixin, QWidget):
@@ -110,20 +107,21 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._src_field.changed.connect(self._on_source_changed)
         outer.addWidget(self._src_field)
 
-        schema_row = QWidget(self)
-        sl = QHBoxLayout(schema_row)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(theme.Spacing.sm)
-        sl.addWidget(QLabel("Schema:", schema_row))
-        self._schema_edit = QLineEdit(DEFAULT_SCHEMA, schema_row)
-        self._schema_edit.textChanged.connect(self._on_readout_input_changed)
-        sl.addWidget(self._schema_edit, 1)
-        sl.addWidget(QLabel("Separator:", schema_row))
-        self._sep_edit = QLineEdit(DEFAULT_SEP, schema_row)
-        self._sep_edit.setFixedWidth(_SEPARATOR_EDIT_W)
-        self._sep_edit.textChanged.connect(self._on_readout_input_changed)
-        sl.addWidget(self._sep_edit)
-        outer.addWidget(schema_row)
+        # The same control the Analyze form's Filename Schema section uses. This
+        # page parses the very filenames Analyze will go on to read, so asking
+        # for the schema a different way here — two bare text fields against
+        # Analyze's dropdowns — meant the user typed by hand what they pick from
+        # a list one pane over, with no field vocabulary in front of them and
+        # nothing to say which spellings the pipeline understands.
+        self._schema_picker = SchemaPicker(self)
+        self._schema_picker.changed.connect(self._on_readout_input_changed)
+        outer.addWidget(self._schema_picker)
+
+        self._schema_err = QLabel("", self)
+        self._schema_err.setObjectName("Error")
+        self._schema_err.setWordWrap(True)
+        self._schema_err.setVisible(False)
+        outer.addWidget(self._schema_err)
 
         self._readout = QLabel("", self)
         self._readout.setObjectName("Muted")
@@ -205,10 +203,10 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         return self._dest_field.path()
 
     def filename_schema(self) -> str:
-        return self._schema_edit.text().strip() or DEFAULT_SCHEMA
+        return self._schema_picker.schema() or DEFAULT_SCHEMA
 
     def filename_sep(self) -> str:
-        return self._sep_edit.text() or DEFAULT_SEP
+        return self._schema_picker.separator()
 
     def in_place(self) -> bool:
         return self._in_place_cb.isChecked()
@@ -223,10 +221,10 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         self._in_place_cb.setChecked(bool(in_place))
 
     def set_filename_schema(self, schema: str) -> None:
-        self._schema_edit.setText(schema or DEFAULT_SCHEMA)
+        self._schema_picker.setSchema(schema or DEFAULT_SCHEMA)
 
     def set_filename_sep(self, sep: str) -> None:
-        self._sep_edit.setText(sep or DEFAULT_SEP)
+        self._schema_picker.setSeparator(sep or DEFAULT_SEP)
 
     def set_running(self, running: bool) -> None:
         self._run_btn.setEnabled(not running and self._can_run())
@@ -242,8 +240,7 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         # setLocked(), not setEnabled(False) — see PathField.setLocked.
         self._src_field.setLocked(running)
         self._dest_field.setLocked(running)
-        self._schema_edit.setEnabled(not running)
-        self._sep_edit.setEnabled(not running)
+        self._schema_picker.setEnabled(not running)
         self._in_place_cb.setEnabled(not running)
 
     def show_open_in_analyze(self, dest_root: str) -> None:
@@ -353,10 +350,22 @@ class ImportLoosePage(LogPanelMixin, QWidget):
         src = self.source_path()
         if not src or not Path(src).is_dir():
             return False
+        # The same check the run itself makes, moved to where the schema is
+        # typed. A schema with no "well" cannot say which archive a file belongs
+        # to and one with two cannot choose, so the scan examines every file and
+        # groups none — a tidy zero with no reason attached. In-place runs fail
+        # harder still: they shell out to WellPlateZipper.py, which exits 2 on
+        # exactly these errors. And a schema with no "channel" produces archives
+        # Analyze cannot then read, which is the only reason to build them.
+        if self._schema_picker.errors():
+            return False
         if self.in_place():
             return True
         return bool(self.destination_path()) and self._dest_field.is_valid()
 
     def _refresh_run_enabled(self) -> None:
+        errors = self._schema_picker.errors()
+        self._schema_err.setText("  ".join(errors))
+        self._schema_err.setVisible(bool(errors))
         self._run_btn.setEnabled(self._can_run())
         self._queue_btn.setEnabled(self._can_run())

@@ -284,8 +284,8 @@ def test_queue_spec_round_trips_filename_schema_and_separator(qapp, tmp_path):
     page._src_field.set_path(str(src))
     page._on_source_changed()
     page._dest_field.set_path(str(tmp_path / "dest"))
-    page._schema_edit.setText("plate:marker:well:site:tp")
-    page._sep_edit.setText("-")
+    page.set_filename_schema("plate:marker:well:site:tp")
+    page.set_filename_sep("-")
 
     spec = ctrl.collect_spec()
     assert spec["filename_schema"] == "plate:marker:well:site:tp"

@@ -107,7 +107,7 @@ def test_apply_pipeline_info_v1_fallback_no_exec_options(qtbot, tmp_path):
     tab._apply_pipeline_info(info)
 
     assert tab._nuclear_token_edit.text() == "NIR"
-    assert tab._filename_sep_edit.text() == "-"
+    assert tab._schema_picker.separator() == "-"
     assert tab._background_cb.currentText() == "sliding_disk"
     assert tab._seg_method_cb.currentData() == "stardist_nuclei"
     assert tab._fluor_tokens_list() == ["GFP"]

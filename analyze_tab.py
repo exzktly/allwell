@@ -25,7 +25,7 @@ from collections.abc import Callable
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
+    QCheckBox, QFileDialog, QHBoxLayout, QLineEdit, QMessageBox, QPushButton, QScrollArea,
     QSizePolicy, QSplitter, QVBoxLayout, QWidget,
 )
 
@@ -46,10 +46,8 @@ from analyze_progress import AnalyzeProgressMixin
 from analyze_run_spec import AnalyzeRunMixin
 from analyze_suspend import AnalyzeSuspendMixin
 from analyze_tab_log import AnalyzeLogPaneMixin
-from analyze_tab_form import (  # form builders + schema vocab (split out)
+from analyze_tab_form import (  # form builders (split out)
     AnalyzeTabFormMixin,
-    DEFAULT_SEP, SCHEMA_FIELDS,
-    _FIELD_TO_LABEL, _LABEL_TO_FIELD, _SCHEMA_LABELS,
     # Entry-boundary numeric validation lives with the fields it reads; re-exported
     # so ``from analyze_tab import _numeric_option_errors`` still resolves.
     _numeric_option_errors,  # noqa: F401 (re-export)
@@ -60,23 +58,6 @@ from analyze_tab_form import (  # form builders + schema vocab (split out)
 # be swallowed deep in the pipeline (a non-integer radius silently dropped its
 # flag; mesh_ratio=0 caused a downstream division-by-zero). Validate them at the
 # entry boundary instead (audit X4/X6). Pure + module-level so it's unit-tested.
-# ---------------------------------------------------------------------------
-# Schema vocabulary — kept in sync with process_microscopy.py
-# ---------------------------------------------------------------------------
-
-
-def _validate_schema_mappings() -> None:
-    if len(_SCHEMA_LABELS) != len(SCHEMA_FIELDS):
-        raise RuntimeError("Schema label/field length mismatch.")
-    for label in _SCHEMA_LABELS:
-        field = _LABEL_TO_FIELD.get(label)
-        if field is None:
-            raise RuntimeError(f"Missing mapping for schema label: {label!r}")
-        if _FIELD_TO_LABEL.get(field) != label:
-            raise RuntimeError(f"Schema mapping not invertible for label: {label!r}")
-
-
-_validate_schema_mappings()
 
 _PREVIEW_TOKENS = {
     "experiment": "Exp01",
@@ -149,7 +130,6 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
         self._zipper_done = 0
         self._on_pipeline_complete = on_pipeline_complete
         self._fluor_rows: list[tuple[QLineEdit, QCheckBox, QCheckBox, QPushButton]] = []
-        self._schema_cbs: list[QComboBox] = []
 
         self._build_ui()
         self._poll_log()
@@ -400,60 +380,29 @@ class AnalyzeTab(AnalyzeInputMixin, AnalyzeLogPaneMixin, AnalyzeProgressMixin,
     # ------------------------------------------------------------------
     # Schema helpers
     # ------------------------------------------------------------------
+    # The separator / dropdowns / schema-string control is
+    # ``widgets.schema_picker.SchemaPicker``, shared with the Datasets pane's
+    # Zip Loose Folder page. These read through to it; the preview below is the
+    # part that is genuinely Analyze's, since it is drawn from the channel
+    # tokens entered further down this same form.
     def _schema_field_list(self) -> list[str]:
-        return [_LABEL_TO_FIELD.get(cb.currentText(), "ignore") for cb in self._schema_cbs]
-
-    def _on_combobox_selected(self, changed_cb: QComboBox) -> None:
-        if hasattr(self, "_schema_str_edit"):
-            new_schema = ":".join(
-                _LABEL_TO_FIELD.get(c.currentText(), "ignore") for c in self._schema_cbs
-            )
-            self._schema_str_edit.blockSignals(True)
-            self._schema_str_edit.setText(new_schema)
-            self._schema_str_edit.blockSignals(False)
-        self._refresh_schema_preview()
-
-    def _sync_dropdowns_from_string(self) -> None:
-        if not self._schema_cbs or not hasattr(self, "_schema_str_edit"):
-            return
-        raw = self._schema_str_edit.text().strip()
-        if not raw:
-            return
-        parts = [p.strip().lower() for p in raw.split(":")]
-        parts = (parts + ["ignore"] * 5)[:5]
-        if parts == self._schema_field_list():
-            return
-        for cb, field in zip(self._schema_cbs, parts):
-            label = _FIELD_TO_LABEL.get(field, "— ignore —")
-            if cb.currentText() != label:
-                cb.blockSignals(True)
-                cb.setCurrentText(label)
-                cb.blockSignals(False)
-        self._refresh_schema_preview()
+        return self._schema_picker.fields()
 
     def _schema_errors(self) -> list[str]:
-        schema_str = self._build_schema_arg()
-        fields = [f.strip().lower() for f in schema_str.split(":") if f.strip()]
-        errors: list[str] = []
-        if fields.count("channel") != 1:
-            errors.append(f'"Channel" must appear exactly once (found {fields.count("channel")}).')
-        if fields.count("well") != 1:
-            errors.append(f'"Well" must appear exactly once (found {fields.count("well")}).')
-        return errors
+        return self._schema_picker.errors()
 
     def _build_schema_arg(self) -> str:
-        if hasattr(self, "_schema_str_edit"):
-            raw = self._schema_str_edit.text().strip()
-            if raw:
-                return raw
-        return ":".join(self._schema_field_list())
+        return self._schema_picker.schema()
+
+    def _filename_sep(self) -> str:
+        return self._schema_picker.separator()
 
     def _refresh_schema_preview(self) -> None:
-        if not self._schema_cbs or not hasattr(self, "_schema_err_lbl"):
+        if not hasattr(self, "_schema_picker") or not hasattr(self, "_schema_err_lbl"):
             return
         errors = self._schema_errors()
         fields = self._schema_field_list()
-        sep = (self._filename_sep_edit.text() if hasattr(self, "_filename_sep_edit") else DEFAULT_SEP) or DEFAULT_SEP
+        sep = self._filename_sep()
         schema_valid = not errors
 
         if hasattr(self, "_input_edit"):

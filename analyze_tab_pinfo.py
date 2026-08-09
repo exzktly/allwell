@@ -130,14 +130,14 @@ class AnalyzePipelineInfoMixin:
             if w is not None and val:
                 w.setCurrentText(str(val))
 
-        # Schema first (separator, then the string → sync the per-field combos).
-        s("_filename_sep_edit", d.get("filename_sep"))
-        if d.get("filename_schema"):
-            self._schema_str_edit.setText(str(d["filename_schema"]))
-            try:
-                self._sync_dropdowns_from_string()
-            except Exception:
-                swallowed()
+        # Schema first (separator, then the string → the picker syncs its own
+        # per-field combos from it).
+        picker = getattr(self, "_schema_picker", None)
+        if picker is not None:
+            if d.get("filename_sep"):
+                picker.setSeparator(str(d["filename_sep"]))
+            if d.get("filename_schema"):
+                picker.setSchema(str(d["filename_schema"]))
 
         # Segmentation method — the combo carries the canonical value as itemData.
         method = d.get("segmentation_method")

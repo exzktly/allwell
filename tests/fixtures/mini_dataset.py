@@ -21,11 +21,23 @@ CELLS_PER_TP = 6
 FLUOR_CHANNELS = ["gfp", "mcherry"]
 NUCLEAR_TOKEN = "dapi"
 
+#: The channel that carries smFISH spot counts when ``with_smfish=True``.
+#: Deliberately a channel that ALSO has a ``_mean_intensity`` column, because
+#: that is the real situation and it is the whole point: one channel, two
+#: metrics on two scales, and therefore two independent ON cutoffs. A dataset
+#: whose count channel had no intensity column could not tell a fix that
+#: separates the cutoffs from one that merely stopped consulting either.
+SMFISH_CHANNEL = "mcherry"
+
 _COLUMNS = [
     "well", "fov", "timepoint", "timepoint_hours", "channel",
     "nucleus_id", "area_px",
     "gfp_mean_intensity", "mcherry_mean_intensity", "dapi_mean_intensity",
 ]
+
+#: Appended when ``with_smfish=True`` — the column the smFISH tab's worker
+#: writes back into these same per-well CSVs after an Apply Global Threshold.
+_SMFISH_COLUMNS = [f"{SMFISH_CHANNEL}_smfish_count"]
 
 # Optional per-cell shape-feature columns (emitted when ``with_shape=True``),
 # mirroring the catalog in ``shape_features_core``. Includes the always-on
@@ -57,7 +69,23 @@ def cell_area_px(cell: int) -> float:
     return 200.0 + cell * 10.0
 
 
-def _rows_for_well(well: str, *, with_shape: bool = False, n_fovs: int = 1) -> list[dict]:
+def cell_spots(well: str, tp_hours: float, cell: int) -> int:
+    """Closed-form spot tally for one cell — deterministic, assertable.
+
+    Independent of timepoint on purpose: the cutoff behaviour under test does
+    not vary with time, and a tp-invariant tally keeps every expected mean a
+    round number a reader can check by hand.
+
+    Per well, cells 1..6 carry ``well_index + 0 … well_index + 5``. So A01 spans
+    **0–5**: the zero-spot cell is real data here, which is the case an ON
+    cutoff of 0 silently drops and an intensity cutoff of 50 drops along with
+    every other cell.
+    """
+    return (cell - 1) + _well_index(well)
+
+
+def _rows_for_well(well: str, *, with_shape: bool = False, n_fovs: int = 1,
+                   with_smfish: bool = False) -> list[dict]:
     rows: list[dict] = []
     for tp_label, tp_hours in TIMEPOINTS:
         for fov in range(1, n_fovs + 1):
@@ -77,6 +105,9 @@ def _rows_for_well(well: str, *, with_shape: bool = False, n_fovs: int = 1) -> l
                     "mcherry_mean_intensity": round(cell_mcherry(well, tp_hours, cell) + fov_bump, 4),
                     "dapi_mean_intensity": round(cell_dapi(well, tp_hours, cell), 4),
                 }
+                if with_smfish:
+                    row[f"{SMFISH_CHANNEL}_smfish_count"] = cell_spots(
+                        well, tp_hours, cell)
                 if with_shape:
                     row.update({
                         "shape_area": round(150.0 + cell * 5.0, 4),
@@ -89,24 +120,34 @@ def _rows_for_well(well: str, *, with_shape: bool = False, n_fovs: int = 1) -> l
     return rows
 
 
-def build_mini_dataset(dest: Path, *, with_shape: bool = False, n_fovs: int = 1) -> Path:
+def build_mini_dataset(dest: Path, *, with_shape: bool = False, n_fovs: int = 1,
+                       with_smfish: bool = False) -> Path:
     """Materialise the mini dataset into *dest* and return it.
 
     Writes one ``mini_<WELL>.csv`` per well (the trailing well token is what
     ``load_controller._extract_well_token`` keys on) plus ``pipeline_info.json``.
     When *with_shape* is true the per-cell shape-feature columns
     (:data:`_SHAPE_COLUMNS`) are appended, matching a shape-features pipeline run.
+
+    When *with_smfish* is true a ``<channel>_smfish_count`` column is appended
+    for :data:`SMFISH_CHANNEL` and the sidecar names it in ``smfish_tokens`` —
+    the state a dataset is in after the smFISH tab's Apply Global Threshold has
+    written its counts back into the per-well CSVs.
     """
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
 
-    columns = _COLUMNS + (_SHAPE_COLUMNS if with_shape else [])
+    columns = (_COLUMNS
+               + (_SHAPE_COLUMNS if with_shape else [])
+               + (_SMFISH_COLUMNS if with_smfish else []))
     for well in WELLS:
         path = dest / f"mini_{well}.csv"
         with path.open("w", newline="") as fh:
             writer = csv.DictWriter(fh, fieldnames=columns)
             writer.writeheader()
-            writer.writerows(_rows_for_well(well, with_shape=with_shape, n_fovs=n_fovs))
+            writer.writerows(_rows_for_well(
+                well, with_shape=with_shape, n_fovs=n_fovs,
+                with_smfish=with_smfish))
 
     pipeline_info = {
         "schema": "mini",
@@ -117,6 +158,8 @@ def build_mini_dataset(dest: Path, *, with_shape: bool = False, n_fovs: int = 1)
         "fov_index": -1,
         "tp_index": 2,
     }
+    if with_smfish:
+        pipeline_info["smfish_tokens"] = [SMFISH_CHANNEL]
     (dest / "pipeline_info.json").write_text(json.dumps(pipeline_info, indent=2))
     return dest
 

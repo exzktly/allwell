@@ -431,6 +431,26 @@ def loaded_app_shape(viewer_app, mini_dataset_shape):
 
 
 @pytest.fixture
+def mini_dataset_smfish(tmp_path):
+    """Mini dataset carrying a ``<channel>_smfish_count`` column.
+
+    The state a dataset is in after the smFISH tab has applied a global
+    threshold and written its per-cell tallies back into the per-well CSVs.
+    The count channel also has an intensity column, so the two ON cutoffs it
+    now carries can be shown to be independent of each other.
+    """
+    from tests.fixtures.mini_dataset import build_mini_dataset
+    return build_mini_dataset(tmp_path / "mini_dataset_smfish", with_smfish=True)
+
+
+@pytest.fixture
+def loaded_app_smfish(viewer_app, mini_dataset_smfish):
+    """``WellViewerApp`` loaded with the smFISH-count mini dataset."""
+    viewer_app._load_path(mini_dataset_smfish)
+    return viewer_app
+
+
+@pytest.fixture
 def mini_dataset_multifov(tmp_path):
     """Mini dataset with 3 FOVs per well/timepoint (per-FOV means differ) so the
     FOV-as-replicate stats path can be exercised."""

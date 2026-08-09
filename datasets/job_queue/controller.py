@@ -394,6 +394,10 @@ class JobQueueController(QObject):
     def __init__(self, *, state_dir=None, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self.bridge = QueueBridge(state_dir=state_dir, parent=self)
+        # "Show that tool's page, touching nothing", installed by DatasetsTab.
+        # Answers False until then, so a click on a running row reports that it
+        # could not get there instead of appearing to have worked.
+        self._reveal: Callable[[str], bool] = lambda _kind: False
         # Dispatched through self at call time, not bound here: _notify is the
         # one seam a test patches to assert a refusal was reported, and
         # capturing the bound method would leave the session calling the
@@ -445,6 +449,15 @@ class JobQueueController(QObject):
         it" and "take the banner off again"."""
         self.sessions.set_hooks(on_session, on_session_end)
 
+    def set_reveal_hook(self, reveal: Callable[[str], bool]) -> None:
+        """``DatasetsTab`` supplies "show that tool's page, touching nothing".
+
+        Separate from the session hooks because it must be usable when a
+        session may *not* start — a click on a running row is exactly that
+        case, and it needs the page shown without anything being written to it.
+        """
+        self._reveal = reveal
+
     def add_job(self, kind: str, spec: dict) -> None:
         """Called by each Datasets controller's ``on_add_to_queue`` callback."""
         job = JobSpec(id=uuid.uuid4().hex[:10], kind=kind,
@@ -469,13 +482,30 @@ class JobQueueController(QObject):
 
     # ── queue actions ────────────────────────────────────────────────────
     def _on_show_requested(self, job_id: str) -> None:
-        """Clicking a row to preview it on its own page.
+        """Clicking a row to go and look at that job on its own page.
 
-        Refused while a session has that same page open for editing: preview
-        writes the clicked job's fields straight into the page, so the next
-        Save would collect *that* job's settings into the one under edit and
-        silently turn it into a duplicate. Nothing about the queue changes, so
-        `_abandon_session_if_stale` would never have caught it.
+        Two shapes, because a running job and a waiting one want opposite
+        things from the same click.
+
+        A **running** job is shown by navigating and writing nothing. Its page
+        is already displaying that run's own live progress — the dashboard, the
+        plate map filling in — which is exactly what the click is asking to
+        see, and ``show_job`` would overwrite it: it writes fields the
+        controller is actively driving as its progress display, and
+        ``set_running``'s field locks stop user clicks, not this programmatic
+        path. That is why the click used to be dropped here entirely, leaving a
+        running job with no route to its page at all (its ``Edit…`` is disabled
+        too). Navigation was never the unsafe half; populating was.
+
+        Any **other** job is populated first and then shown, so the preview the
+        click asked for is actually in front of the user. Writing the fields
+        into a page nobody is looking at is the same silence in a quieter form.
+
+        Refused outright while a session has that same page open for editing:
+        preview writes the clicked job's fields straight into the page, so the
+        next Save would collect *that* job's settings into the one under edit
+        and silently turn it into a duplicate. Nothing about the queue changes,
+        so `_abandon_session_if_stale` would never have caught it.
         """
         job = self.bridge.queue.get(job_id)
         if job is None:
@@ -488,7 +518,21 @@ class JobQueueController(QObject):
                 "Finish or cancel the job you're editing before opening "
                 "another one on that page.", "warn")
             return
-        self.bridge.show_job(job_id)
+        if job.state == JobState.RUNNING:
+            if not self._reveal(job.kind):
+                self._notify(
+                    "Can't open that job's page from here — switch to it "
+                    "yourself to watch the run.", "warn")
+            return
+        if not self.bridge.show_job(job_id):
+            # The kind's controller is mid-run on a *different* job, so its
+            # page cannot be repopulated. Showing it anyway would be a lie
+            # about which job the fields describe.
+            self._notify(
+                "That tool is busy with another run — its page will show this "
+                "job once the run finishes.", "warn")
+            return
+        self._reveal(job.kind)
 
     def _on_remove(self, job_id: str) -> None:
         job = self.bridge.queue.get(job_id)

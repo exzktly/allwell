@@ -4953,6 +4953,32 @@ Qt event loop. Four layers:
   assumption that a spec is JSON-shaped) rather than the queue's live
   persisted dict.
 
+  **Populating a page and navigating to it are separate, because a running job
+  wants one without the other.** `JobQueueController._on_show_requested`
+  branches on the clicked job's state. A `running` job is *revealed only* — the
+  page is already showing that run's own live progress, which is what the click
+  is asking to see, and `show_job` is exactly what must not touch it. Anything
+  else is populated and then revealed, since writing fields into a page nobody
+  was taken to is the same silence in a quieter form. A job whose kind is busy
+  with a *different* run is refused with a notice rather than shown, because the
+  fields on that page would describe neither job. Before this split the click
+  reached `show_job` alone, whose `False` was dropped: with the row's `Edit…`
+  also disabled while running (`row.py`), a running job had no route to its page
+  at all and nothing said so. Measured on a real `DatasetsTab`, clicking a
+  running row moved the pane not at all and raised no notice.
+
+  Navigation is a hook, `JobQueueController.set_reveal_hook`, supplied by
+  `DatasetsTab._reveal_page` — deliberately **not** `_begin_session` with the
+  banner suppressed. That one stands a page in for a job being *edited* and runs
+  only after the queue has agreed a session may start; this is the plain "take
+  me to that tool" half, and keeping them apart is what lets the running case
+  navigate without populating. It returns whether it arrived: Analyze is the one
+  queueable kind with no rail entry in this pane, so reaching it means changing
+  pane, which only the shell can do — `allwell.py` passes
+  `on_reveal_analyze=self._reveal_analyze_pane`, and a `DatasetsTab` built
+  without a shell (tests, Datasets-only profiles) reports failure so the click
+  says why rather than appearing to work.
+
   `QueueBridge.hydrate_job` is the edit-path counterpart. For the six
   Datasets tools `show_job` is already a complete inverse of `collect_spec` —
   the two read and write the same handful of keys — so hydration falls back

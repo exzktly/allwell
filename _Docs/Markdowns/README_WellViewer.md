@@ -2730,6 +2730,19 @@ instead of babysitting each one.
 - **+ Queue** beside Analyze's **Run Pipeline** button, which captures the
   whole Analyze form — every option, not just the input folder.
 
+**Looking at a job** — click its row and All-Well takes you to that tool's
+page. What you find there depends on the job:
+
+- A **running** job's page is left exactly as it is and simply shown, so you
+  land on that run's own live progress — its dashboard and its plate filling
+  in. Nothing is written to the page, because those fields *are* the progress
+  display.
+- Any **waiting or finished** job has its settings loaded into the page first,
+  so you arrive looking at what that job will run.
+- If the tool is busy with a *different* run, the click is refused and says so
+  — its page is describing the run in flight, and loading another job's
+  settings over it would misdescribe both.
+
 **Changing a queued job** — open the row's **⋯** menu and choose **Edit…**.
 The job's tool page opens with all of its settings restored and the same
 strip across the top; change what you came to change and press **Save

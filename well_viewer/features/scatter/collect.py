@@ -24,6 +24,7 @@ import pandas as pd
 
 from well_viewer.core import debug_flags as debug_flags
 from well_viewer.core.lazy import lazy as _lazy
+from well_viewer.core.safe import swallow
 from well_viewer.data.data_loading import df_included_mask, resolve_value_series, get_rows
 from well_viewer.domain.stats_compute import group_replicate_stats, _reduce_reps
 from well_viewer.domain.metric_registry import column_gating_exempt
@@ -34,6 +35,41 @@ from well_viewer.domain.selections_model import (
 from well_viewer.domain.viewer_state import parse_rc
 
 _logger = logging.getLogger(__name__)
+
+
+def agg_empty_message(ctx, cut_sink: dict | None) -> str:
+    """What to draw when the aggregate collector returned nothing.
+
+    An empty plot used to read "No data available. Please select wells/groups
+    and timepoints." whatever the cause, which was a lie in the case that
+    actually brought a user here: wells selected, timepoints ticked, counts
+    present in the CSVs, and every single point silently dropped because the
+    channel's ON cutoff sat above the whole range a spot tally can occupy. The
+    message sent them back to a selection that was never wrong.
+
+    So when the collector can say the cells were *cut*, say that instead — name
+    the axis, the channel, the cutoff, and how many cells it kept, and point at
+    the control that changes it.
+    """
+    axis = next((a for a in ("X", "Y") if a in (cut_sink or {})), None)
+    if axis is None:
+        return ("No data at the selected timepoints.\n"
+                "Pick different timepoints, or select more wells/groups.")
+    info = cut_sink[axis]
+    channel = str(info.get("channel") or "").upper()
+    is_count = str(info.get("col", "")).endswith("_smfish_count")
+    quantity = "spot count" if is_count else "intensity"
+    knob = "ThreshCountOn" if is_count else "ThreshFracOn"
+    n_total = int(info.get("n_total", 0))
+    detail = (f"Every cell on the {axis} axis was cut by the ON cutoff: "
+              f"{channel} {quantity} > {float(info.get('cutoff', 0.0)):g} "
+              f"kept 0 of {n_total:,} cells.")
+    # Mirror the reason to the status line too — an empty figure is easy to
+    # scroll past, and this is the sentence that says what to change.
+    with swallow("scatter: status line unavailable for the cut-cells notice"):
+        ctx.notify.set_status(detail)
+    return (f"No points to plot.\n{detail}\n"
+            f"Lower {knob} for {channel} in Sample Definitions → Cell Gating.")
 
 
 def timepoint_color_map(timepoints) -> dict[float, Any]:
@@ -337,6 +373,7 @@ def collect_scatter_agg_data(
     timepoints_h: list[float],
     *,
     well_colors: list[str],
+    cut_sink: dict | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Collect aggregate scatter plot data by computing statistics for each replicate/well.
 
@@ -346,6 +383,11 @@ def collect_scatter_agg_data(
         stat_y: Y-axis statistic (e.g., "Mean Fluorescence mCherry" or "Fraction On mCherry")
         timepoints_h: List of target timepoints in hours
         well_colors: List of color strings for coloring replicates/wells
+        cut_sink: optional dict the caller passes in; an axis whose cells were
+            *all* cut by its ON cutoff records ``{"X"|"Y": {channel, col,
+            cutoff, n_total, n_above}}`` here. An empty result with an empty
+            sink means there were no cells to begin with — a different problem
+            with a different remedy, and the caller says so.
 
     Returns:
         Dict mapping "label_tp{timepoint}" → {
@@ -480,7 +522,26 @@ def collect_scatter_agg_data(
     threshold_y = 0.0 if metric_y == "ratio" else on_cutoff_for_column(
         ctx, val_col_y, channel=ch_y)
 
-    def _agg_wells(wells, tp, val_col, threshold, metric):
+    def _record_cut(axis, val_col, channel, threshold, reps):
+        """Note why an axis produced no value, when the reason is knowable.
+
+        ``ReplicateStat`` already carries ``n_above`` and ``n_total``, so the
+        two cases separate for free: no cells at this timepoint at all, versus
+        cells that were every one of them cut by the ON cutoff. Conflating them
+        is what let the tab tell the user to select wells and timepoints they
+        had already selected.
+        """
+        if cut_sink is None or not reps:
+            return
+        n_total = sum(int(r.n_total) for r in reps)
+        n_above = sum(int(r.n_above) for r in reps)
+        if n_total > 0 and n_above == 0:
+            cut_sink.setdefault(axis, {
+                "channel": channel, "col": val_col, "cutoff": threshold,
+                "n_total": n_total, "n_above": n_above,
+            })
+
+    def _agg_wells(wells, tp, val_col, threshold, metric, axis="", channel=""):
         """Mean ± SD/SEM for the scatter-aggregate plot, via the ONE replicate
         model the bar / line plots and the Stats tab use.
 
@@ -504,14 +565,19 @@ def collect_scatter_agg_data(
             fluor_gates=fluor_gates,
         )
         field = "frac" if metric == "frac" else "mean"
-        return _reduce_reps(reps, field, use_sem)
+        value, err = _reduce_reps(reps, field, use_sem)
+        if math.isnan(value):
+            _record_cut(axis, val_col, channel, threshold, reps)
+        return value, err
 
     for label_idx, (identity, disp_label, wells) in enumerate(labels_to_process):
         marker = markers[label_idx % len(markers)]
 
         for tp in sorted(timepoints_h):
-            mean_x, err_x = _agg_wells(wells, tp, val_col_x, threshold_x, metric_x)
-            mean_y, err_y = _agg_wells(wells, tp, val_col_y, threshold_y, metric_y)
+            mean_x, err_x = _agg_wells(wells, tp, val_col_x, threshold_x,
+                                       metric_x, axis="X", channel=ch_x)
+            mean_y, err_y = _agg_wells(wells, tp, val_col_y, threshold_y,
+                                       metric_y, axis="Y", channel=ch_y)
 
             if math.isnan(mean_x) or math.isnan(mean_y):
                 continue

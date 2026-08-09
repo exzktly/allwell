@@ -21,6 +21,7 @@ from pipeline.shape_features import is_shape_column
 from well_viewer.core.safe import swallowed
 from well_viewer.core.plot_style import apply_export_style_to_current, style_legend
 from well_viewer.features.scatter.collect import (  # re-export
+    agg_empty_message,
     collect_scatter_agg_data,
     collect_scatter_data,
     gate_filter_title_suffix,
@@ -339,19 +340,23 @@ def redraw_scatter_agg(
         agg_canvas.draw()
         return
 
-    # Collect aggregate scatter data
+    # Collect aggregate scatter data. ``cut_sink`` comes back naming an axis
+    # whose cells were all cut by its ON cutoff, so an empty plot can say which
+    # of the two very different reasons it is empty for.
+    cut_sink: dict = {}
     scatter_data = collect_scatter_agg_data(
         ctx,
         stat_x,
         stat_y,
         timepoints_h,
         well_colors=well_colors,
+        cut_sink=cut_sink,
     )
 
     if not scatter_data:
         ax_agg.text(
             0.5, 0.5,
-            "No data available.\nPlease select wells/groups and timepoints.",
+            agg_empty_message(ctx, cut_sink),
             ha='center', va='center',
             transform=ax_agg.transAxes,
             fontsize=10,

@@ -298,3 +298,45 @@ def test_layout_readout_guard_clears_a_quoted_value(tmp_path, monkeypatch, shape
     assert _run_scan(monkeypatch, "tests.test_layout_readout_single_source",
                      "test_the_layout_readout_is_not_written_in_the_gui",
                      [tmp_path / "analyze_tab.py"]) is None
+
+
+# ── ON-cutoff sweep ──────────────────────────────────────────────────────────
+#
+# Every plot path must reach its ON cutoff through `on_cutoff_for_column`, or a
+# spot tally gets measured against a fluorescence threshold that sits above the
+# whole range a tally can occupy — the plot then draws nothing at all.
+#
+# All four shapes below are real. The bare call is what most of the converted
+# sites looked like; the aliased import is how both batch-export panels spell
+# it; `app._get_thresh_frac_on` is the god-object shim in `runtime_app`. The
+# fourth — binding the accessor to a local and calling it on the next line — is
+# the one that matters most here: the first version of this guard matched
+# `ast.Call` and reported a clean sweep straight past two sites written that
+# way, which is also the shape a deliberate evasion would take.
+
+@pytest.mark.parametrize("shape", [
+    "    threshold = get_thresh_frac_on(ctx, ctx.state.channel.active_channel)",
+    "    threshold = _get_thresh_frac_on(self._ctx, key)",
+    "    threshold = app._get_thresh_frac_on(channel)",
+    "    read = get_thresh_frac_on\n    threshold = read(ctx)",
+    "    threshold = get_thresh_count_on(ctx, channel)",
+])
+def test_on_cutoff_guard_catches_a_raw_accessor(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"def redraw_foo(ctx):\n{shape}\n")
+    exc = _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                    "test_no_path_picks_its_own_on_cutoff",
+                    [tmp_path / "controller.py"])
+    assert exc is not None, f"the guard walked past {shape!r}"
+    assert "redraw_foo" in str(exc)
+
+
+@pytest.mark.parametrize("shape", [
+    "    threshold = on_cutoff_for_column(ctx, val_col)",
+    "    threshold = on_cutoff_for_column(ctx, val_col, channel=ch_x)",
+    "    threshold = _on_cutoff_for_column(self._ctx, col, channel=key)",
+])
+def test_on_cutoff_guard_clears_the_resolver(tmp_path, monkeypatch, shape):
+    _write(tmp_path, "controller.py", f"def redraw_foo(ctx):\n{shape}\n")
+    assert _run_scan(monkeypatch, "tests.test_on_cutoff_sweep",
+                     "test_no_path_picks_its_own_on_cutoff",
+                     [tmp_path / "controller.py"]) is None

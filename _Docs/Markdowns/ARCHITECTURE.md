@@ -1262,7 +1262,12 @@ so by **reporting a record rather than measuring**. Establishing per-well
 coverage costs a zip central-directory read and a full CSV parse per well, which
 a landing page cannot pay on every open, and a cached answer that silently ages
 is worse than none. The pipeline records the answer at the end of every run
-(§6.2, `pipeline_info.json::run_check`) and this page reads it.
+(§6.2, `pipeline_info.json::run_check`), the Datasets **Validate & Repair** tool
+records one for a dataset that has none (§6b), and this page reads whichever is
+there. Activating the page re-reads that one key from the sidecar, so a scan run
+while the dataset is open shows up on returning to Home rather than needing a
+full reload; nothing else is re-read, because the rest of the sidecar holds
+user-side blocks whose in-memory copy may carry edits not yet saved.
 `tests/test_home_collect.py` pins that literally: it makes `open`, `Path.open`,
 `Path.iterdir`, `Path.glob` and `zipfile.ZipFile` raise, then calls every
 function on the page.
@@ -3924,6 +3929,35 @@ open only a well's output container, taking input member names and parsed CSV
 rows from whichever caller already has them — which is precisely what lets this
 scan delegate without changing how many times it touches the disk.
 
+**A finished scan is recorded.** `datasets/validate/record.py` writes the scan's
+own result into `pipeline_info.json`'s `run_check` block, through the same
+`pipeline.completeness.build_block` / `well_record` pair the pipeline's end-of-run
+check goes through, so there is one record format rather than a pipeline one and
+a Validate one. That closes the loop Review's Home page opens: Home reports a
+record rather than scanning, a dataset produced before the end-of-run check
+existed has none, and the only action Home offers such a dataset is to open this
+tool. Until the scan recorded its answer, following that offer measured the whole
+plate and then discarded it, leaving Home saying exactly what it had said before.
+
+The block carries `source`, and the distinction is not cosmetic: a `"run"` record
+describes the run that had just finished, a `"validate"` record describes the
+folder as it stood when someone looked at it, possibly months later and after
+hand-edits. Home's masthead reads *checked <date>* for one and *run finished
+<date>* for the other. Two smaller consequences of the same difference — a scan
+has no run boundary to filter by, so its `errors` count is every traceback
+present in `out/errors/` rather than only those the last run produced, and
+`WellReport` carries `intent`/`covered_csv`/`covered_any` alongside `missing`,
+because how much is absent does not say how much was asked for and the plate map
+draws a fraction from both.
+
+Only a whole scan is recorded. A cancelled one covers an arbitrary prefix of the
+plate, and a record built from it would paint every unscanned well as measured
+and found absent. A failure to write is reported in the scan log and does not
+fail the scan: the findings are the deliverable and are already in hand, and
+saying so out loud is what keeps "recorded" and "silently not recorded"
+distinguishable — the latter looks, from Home, exactly like a scan that never
+ran.
+
 `validate_compute.py::build_report(root)` is a read-only Qt-free scan.
 *Intent* — what a well's raw input actually contains — is read through
 `pipeline.incremental_keys.fov_keys_from_member_names`, the name-parsing half of
@@ -5957,7 +5991,9 @@ shortfall is reported as a stop rather than shouted at as a fault.
 because the GUI checkbox is the positive. Turning it off still writes a stub
 recording that it was turned off: "the check was off" and "this dataset predates
 the check" need different things from a reader, so there are three
-distinguishable states on disk, not two.
+distinguishable states on disk, not two. A fourth is a record whose `source` is
+`validate` — the dataset was never checked by its run but has been scanned
+since (§6b).
 
 ---
 

@@ -460,8 +460,6 @@ def scan_run(
 
     wells = sorted(set(in_map) | wells_with_output(out_dir, csv_prefix))
     records: dict[str, dict] = {}
-    totals = dict.fromkeys(HEALTH_STATES, 0)
-    totals_intent = totals_csv = totals_any = 0
     partial_scan = False
 
     for well in wells:
@@ -486,33 +484,79 @@ def scan_run(
             # One unreadable well must not cost the record for the other 95.
             partial_scan = True
             continue
-        state = health(
-            missing=cov.missing, csv_state=cov.csv_state,
-            has_in_container=cov.has_in_container, has_out_zip=cov.has_out_zip,
-            has_out_folder=cov.has_out_folder)
-        totals[state] += 1
-        totals_intent += cov.intent
-        totals_csv += cov.covered_csv
-        totals_any += cov.covered_any
-        records[well] = {
-            "intent": cov.intent,
-            "covered_csv": cov.covered_csv,
-            "covered_any": cov.covered_any,
-            "missing_count": len(cov.missing),
-            "missing": [list(pair) for pair in cov.missing[:max_missing_per_well]],
-            "csv_state": cov.csv_state,
-            "has_in": cov.has_in_container,
-            "has_out_zip": cov.has_out_zip,
-            "has_out_folder": cov.has_out_folder,
-            "failed": list(cov.failed),
-            "health": state,
-        }
+        records[well] = well_record(cov, max_missing=max_missing_per_well)
 
     error_count, error_types = errors_since(out_dir, started_at)
     findings = _scan_findings(out_dir, csv_prefix, records)
 
+    return build_block(
+        records,
+        finished_at=finished_at, started_at_iso=started_at_iso,
+        duration_s=duration_s, host=host, mode=mode, schema=schema, sep=sep,
+        csv_prefix=csv_prefix, suspended=suspended, partial_scan=partial_scan,
+        errors={"files": error_count, "by_type": error_types},
+        findings=findings,
+    )
+
+
+#: What produced a record. ``"run"`` is the pipeline's own end-of-run check;
+#: ``"validate"`` is the Datasets Validate tool, which measures the same thing
+#: about a dataset nobody is currently running. Home reports which, because the
+#: two answer subtly different questions: one describes the run that just
+#: finished, the other describes the folder as it stands today.
+RECORD_SOURCES = ("run", "validate")
+
+
+def well_record(cov: WellCoverage, *, max_missing: int = MAX_MISSING_PER_WELL) -> dict:
+    """One well's entry in the ``run_check`` block.
+
+    ``health`` is stored rather than derived so that every surface reporting the
+    record — Home's plate, its health card, the Analyze summary line — reads the
+    same classification instead of each re-running the predicate against a
+    partially-serialised copy of the evidence.
+    """
+    state = health(
+        missing=cov.missing, csv_state=cov.csv_state,
+        has_in_container=cov.has_in_container, has_out_zip=cov.has_out_zip,
+        has_out_folder=cov.has_out_folder)
+    return {
+        "intent": cov.intent,
+        "covered_csv": cov.covered_csv,
+        "covered_any": cov.covered_any,
+        "missing_count": len(cov.missing),
+        "missing": [list(pair) for pair in cov.missing[:max_missing]],
+        "csv_state": cov.csv_state,
+        "has_in": cov.has_in_container,
+        "has_out_zip": cov.has_out_zip,
+        "has_out_folder": cov.has_out_folder,
+        "failed": list(cov.failed),
+        "health": state,
+    }
+
+
+def build_block(
+    records: dict, *, finished_at: str = "", started_at_iso: str = "",
+    duration_s: float | None = None, host: str = "", mode: str = "",
+    schema=(), sep: str = "", csv_prefix: str = "", suspended: bool = False,
+    partial_scan: bool = False, errors: dict | None = None,
+    findings=None, source: str = "run",
+) -> dict:
+    """Assemble a ``run_check`` block from per-well records.
+
+    Split out of :func:`scan_run` because the Datasets Validate tool produces
+    the same record from its own, more thorough scan. Both go through here, so
+    the block cannot acquire two shapes — a reader that learns to render one
+    renders the other, and the totals are summed in one place rather than
+    twice from two loops that could drift.
+    """
+    totals = dict.fromkeys(HEALTH_STATES, 0)
+    for rec in records.values():
+        state = rec.get("health")
+        if state in totals:
+            totals[state] += 1
     return {
         "version": 1,
+        "source": source,
         "finished_at": finished_at,
         "started_at": started_at_iso,
         "duration_s": duration_s,
@@ -524,7 +568,7 @@ def scan_run(
         "skipped": False,
         "skipped_reason": "",
         "suspended": bool(suspended),
-        "partial_scan": partial_scan,
+        "partial_scan": bool(partial_scan),
         "wells": records,
         "totals": {
             "wells": len(records),
@@ -532,12 +576,12 @@ def scan_run(
             "partial": totals["partial"],
             "missing_csv": totals["missing"],
             "no_output": totals["no_output"],
-            "intent": totals_intent,
-            "covered_csv": totals_csv,
-            "covered_any": totals_any,
+            "intent": sum(int(r.get("intent") or 0) for r in records.values()),
+            "covered_csv": sum(int(r.get("covered_csv") or 0) for r in records.values()),
+            "covered_any": sum(int(r.get("covered_any") or 0) for r in records.values()),
         },
-        "errors": {"files": error_count, "by_type": error_types},
-        "findings": findings,
+        "errors": dict(errors or {"files": 0, "by_type": {}}),
+        "findings": list(findings or []),
     }
 
 
@@ -581,11 +625,15 @@ def _scan_findings(out_dir: Path, csv_prefix: str, records: dict) -> list[dict]:
 
 # ── the run-facing entry point ──────────────────────────────────────────────
 
-def _utc_iso(epoch: float | None) -> str:
+def utc_iso(epoch: float | None) -> str:
     """An epoch timestamp as a UTC ISO-8601 string, or ``""`` for ``None``.
 
     The record is read months later, often on a different machine in a
     different timezone, so it carries UTC rather than local time.
+
+    Public because the Datasets Validate tool stamps its own record with it
+    (:mod:`datasets.validate.record`), and a second formatter would let two
+    records of the same shape carry two timestamp spellings.
     """
     if epoch is None:
         return ""
@@ -684,7 +732,7 @@ def record_run_check(
     """
     from pipeline.run_report import merge_into_pipeline_info
 
-    finished_at = _utc_iso(_now())
+    finished_at = utc_iso(_now())
     if skip:
         # A stub, not silence. "The check was turned off" and "this dataset
         # predates the check" need different things from whoever reads the
@@ -714,7 +762,7 @@ def record_run_check(
             fov_field_present="fov" in list(schema),
             started_at=started_at,
             finished_at=finished_at,
-            started_at_iso=_utc_iso(started_at),
+            started_at_iso=utc_iso(started_at),
             duration_s=(None if started_at is None
                         else round(_now() - started_at, 1)),
             host=socket.gethostname(),

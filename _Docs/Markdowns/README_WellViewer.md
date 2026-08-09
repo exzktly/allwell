@@ -860,6 +860,11 @@ means something on its own — the rest of `pipeline_info.json` is written befor
 the first image is read, so a run that died in its first seconds still leaves
 that file behind looking perfectly normal.
 
+The same block is written by [Validate & Repair](#validate--repair-dataset) when
+its check finishes, which is how a dataset produced before this record existed
+gets one. It carries which of the two wrote it, so a scan from last week never
+reads as a run from last week.
+
 Three things worth knowing about it. It describes the **whole dataset**, not
 just the wells this run touched, so re-running to add a timepoint still leaves a
 record covering every well. It is a **snapshot of the moment the run ended** — if
@@ -930,7 +935,11 @@ it. That has one consequence worth holding on to: **the page describes the
 moment the run finished.** If you have repaired or edited the dataset by hand
 since, the page still shows it as it was, which is why the date the record was
 taken is on the masthead. *Check this dataset now* hands off to
-[Validate & Repair](#validate--repair-dataset), which re-reads it as it stands.
+[Validate & Repair](#validate--repair-dataset), which re-reads it as it stands
+and records what it finds — so a dataset that has never been checked fills this
+page in once you have run that tool on it, and the masthead then reads *checked
+<date>* rather than *run finished <date>*, because the two describe different
+moments.
 
 What is on it:
 
@@ -2612,6 +2621,18 @@ but aren't, stale cell-inclusion overrides — and it can repair what it finds.
 Reach for it when a dataset has been moved, edited, merged or hand-repaired
 since the run, or when the run's own record is missing. Both use the same
 definition of a complete well, so they will never disagree about one.
+
+**A completed check writes its own record.** When the scan finishes it stores
+what it found into `pipeline_info.json`, in the same block a run writes at its
+end — so a dataset produced before that check existed, or by a run with the
+check turned off, gets a completeness record from here and Review's **Home**
+page fills in. The record says which of the two produced it, and Home words
+itself accordingly: *checked <date>* for this tool, *run finished <date>* for a
+run. That matters because they describe different moments — a run's record is
+about the run, this one is about the folder as it stood when you scanned it.
+If the dataset is already open in Review, going back to Home shows the new
+record without reloading. If the record cannot be written — a read-only volume,
+say — the raw log says so and the findings are unaffected.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel
    appears showing a "Ready — N well(s)" preview of the plate, before you've

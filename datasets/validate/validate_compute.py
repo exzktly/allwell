@@ -104,6 +104,14 @@ class WellReport:
     #: its empty output is a measurement, not a gap, so it must not be swept
     #: into a forced reprocess that would produce the same empty result.
     zero_cell_recorded: bool = False
+    #: Coverage sizes, carried so a finished scan can be written back as the
+    #: dataset's completeness record without a second pass over the files.
+    #: ``missing`` alone cannot reconstruct them: it says how much is absent,
+    #: not how much was asked for, and a plate map needs both to draw a
+    #: fraction. See :mod:`datasets.validate.record`.
+    intent: int = 0
+    covered_csv: int = 0
+    covered_any: int = 0
 
     @property
     def complete(self) -> bool:
@@ -472,7 +480,12 @@ def _well_done(
     ``(rows, fieldnames, state)``. The scan parses each CSV exactly once and
     shares the result with :func:`_row_content_findings`, which used to re-parse
     every one of them — on a real plate that duplicate pass was the single
-    largest cost in the whole scan."""
+    largest cost in the whole scan.
+
+    The CSV's own keys come back alongside the union because the two differ in a
+    way that matters: a well whose output archive is full and whose CSV is empty
+    has nothing missing, and only the CSV-only count says that the measurements
+    the plots read are not there."""
     csv_keys: set[tuple[str, str]] = set()
     for rows, fieldnames, state in parsed_csvs.values():
         if state == "ok":
@@ -481,7 +494,7 @@ def _well_done(
     done = done_keys(
         csv_keys=csv_keys, out_zip=out_zip, out_folder=out_folder,
         schema=schema_fields, sep=sep)
-    return done, csv_state
+    return done, csv_state, csv_keys
 
 
 def _row_content_findings(
@@ -628,7 +641,7 @@ def _scan_one_well(
 
     out_zip = zip_map.get(well)
     out_folder = folder_map.get(well)
-    done, csv_state = _well_done(
+    done, csv_state, csv_keys = _well_done(
         parsed_csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
 
     # No container means no intent, so the diff below is empty either way; the
@@ -645,6 +658,7 @@ def _scan_one_well(
         has_in_container=container is not None, has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
         zero_cell_recorded=evidence.segmented_zero_cells,
+        intent=len(intent), covered_csv=len(csv_keys), covered_any=len(done),
     )
 
     # A well with real recorded output (done) should have every one of its

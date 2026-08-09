@@ -120,8 +120,15 @@ def identity(ctx) -> dict:
     """The masthead: what this dataset is, and when it was last run.
 
     ``finished_at`` is shown rather than implied because the record is a
-    snapshot of the moment the run ended — a dataset repaired by hand since
+    snapshot of the moment the check ran — a dataset repaired by hand since
     still reads as it did then, and the page must not pretend to be live.
+
+    ``source`` says which check produced it. The pipeline's own end-of-run check
+    describes the run that had just finished; the Datasets Validate tool
+    describes the folder as it stood when someone looked at it, possibly long
+    afterwards. Both are true statements about completeness and they are not
+    the same statement, so the masthead names which one it is showing rather
+    than letting a scan from last week read as a run from last week.
     """
     ds = getattr(ctx.state, "dataset", None)
     data_dir = getattr(ds, "data_dir", None) if ds is not None else None
@@ -137,6 +144,9 @@ def identity(ctx) -> dict:
         "duration_s": block.get("duration_s"),
         "host": str(block.get("host") or ""),
         "suspended": bool(block.get("suspended")),
+        # Absent on records written before the field existed, which were all
+        # written by the pipeline — so its default is the honest one.
+        "source": str(block.get("source") or ("run" if block else "")),
     }
 
 

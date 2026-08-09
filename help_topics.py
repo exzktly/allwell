@@ -52,6 +52,7 @@ MODE_OVERVIEW: dict[str, str] = {
 #: overview, and a renamed or prefixed leaf ("Bar Plots (split)") is caught by
 #: the loose substring match in ``AllWellApp._help_section_for_current_page``.
 SECTION_BY_PAGE: dict[str, str] = {
+    "Home": "Home",
     "Bar Plots": "Bar Plots",
     "Line Graphs": "Line Graphs",
     "Scatter Plot": "Scatter Plot",

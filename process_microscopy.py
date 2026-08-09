@@ -191,6 +191,7 @@ from pipeline.run_report import (
     finalize_run_report,
     record_well_completeness,
 )
+from pipeline.completeness import record_run_check
 from pipeline.sidecar import USER_SIDE_BLOCKS
 
 
@@ -4124,6 +4125,22 @@ def build_parser() -> argparse.ArgumentParser:
                        "downloaded output dir."
                    ))
 
+    p.add_argument("--no_run_check", action="store_true",
+                   help=(
+                       "Skip the end-of-run completeness check. The check reads "
+                       "back what the run wrote — how many (fov, timepoint) "
+                       "groups each well's input held against how many its CSV "
+                       "and output archive cover — and records the answer as the "
+                       "'run_check' block in pipeline_info.json, which is what "
+                       "the Review Home page reports. Skipping it costs seconds "
+                       "and leaves the dataset with no record of whether it is "
+                       "complete; a run skipped this way says so in the sidecar "
+                       "rather than looking like a dataset that predates the "
+                       "check. Remote runs suppress it internally and run it "
+                       "client-side after the fetch instead, since the remote "
+                       "output dir holds only the slice that was uploaded."
+                   ))
+
     p.add_argument("--pos_control_well", default="",
                    help=(
                        "Well label of the positive control (e.g. B02). With "
@@ -4484,6 +4501,12 @@ def main() -> None:
     # merged into this run's report; start clean.
     clear_run_report(output_dir)
 
+    # The boundary the end-of-run completeness check counts tracebacks from.
+    # ``errors/`` is never cleared and its filenames carry a pid but no run id,
+    # so without a start time a clean re-run into this same output dir would
+    # inherit the previous run's failures and report a healthy plate as broken.
+    run_started_at = time.time()
+
     # Per-well failures are surfaced here so main() can signal them via the
     # process exit code (audit E5) rather than always exiting 0.
     failed_wells: list[str] = []
@@ -4563,6 +4586,27 @@ def main() -> None:
     # the three modes. Stays inside the pipeline's own dependency set, so a run
     # produces thresholds even where ``well_viewer`` is not installed.
     run_auto_threshold_pass(args, output_dir, fluor_tokens_for_quant, log)
+
+    # Completeness: read back what the run wrote and record whether it covers
+    # its input, as the ``run_check`` block in the sidecar. Runs after
+    # auto-threshold so the record describes the finished directory including
+    # whatever that pass wrote, and before the exit-code decision because it
+    # does not participate in it — a plate that came up short is recorded and
+    # warned about, but whether the *run* failed is ``failed_wells``' question.
+    record_run_check(
+        info_path=output_dir / PIPELINE_INFO_FILENAME,
+        output_dir=output_dir,
+        in_containers=dict(well_zips or well_folders or []),
+        schema=schema,
+        sep=sep,
+        csv_prefix=args.csv_prefix,
+        started_at=run_started_at,
+        mode="zip" if well_zips else "folder",
+        atomic_writer=_safe_atomic_text_write,
+        log=log,
+        skip=bool(getattr(args, "no_run_check", False)),
+        suspended=_suspend.is_suspended(),
+    )
 
     # audit E5: a run with per-well failures must not exit 0 — otherwise the
     # remote layer reads success and deletes the inputs for wells that never

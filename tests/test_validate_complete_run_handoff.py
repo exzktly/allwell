@@ -371,3 +371,36 @@ def test_force_wells_only_overrides_the_named_wells(tmp_path):
     assert args.force_wells == ["c8"]
     assert pm.build_parser().parse_args(
         ["--input_dir", "in", "--output_dir", "out"]).force_wells is None
+
+
+def test_open_tool_shows_the_tool_and_carries_the_dataset_path(qtbot, tmp_path):
+    """Review's Home page offers to check a dataset whose run left no
+    completeness record, and this is the seam that offer lands on.
+
+    Switching pane alone is not enough: a button labelled "Check this dataset
+    now" that leaves the user on whichever tool happened to be showing, with an
+    empty folder field, does less than it says and makes them re-find a folder
+    the app already has open.
+    """
+    from datasets_tab import DatasetsTab
+
+    tab = DatasetsTab(queue_state_dir=tmp_path)
+    qtbot.addWidget(tab)
+
+    assert tab.open_tool("validate", dataset_path=str(tmp_path)) is True
+    assert tab.current_help_page() == "Validate & Repair"
+
+    page = tab._pages_by_kind["validate"]
+    assert str(tmp_path) in page.dataset_path(), (
+        f"the folder must arrive with the user, got {page.dataset_path()!r}")
+
+
+def test_open_tool_reports_a_tool_this_build_does_not_have(qtbot, tmp_path):
+    """A profiled build can drop a tool. The caller has to be able to tell
+    "shown" from "nothing happened" rather than assuming it worked."""
+    from datasets_tab import DatasetsTab
+
+    tab = DatasetsTab(queue_state_dir=tmp_path)
+    qtbot.addWidget(tab)
+
+    assert tab.open_tool("no-such-tool") is False

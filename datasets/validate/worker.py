@@ -14,6 +14,7 @@ from PySide6.QtCore import QThread, Signal
 
 from util.aw_safe import swallowed
 from datasets.validate.apply import RepairResult, apply_repairs
+from datasets.validate.record import write_record
 from datasets.validate.validate_compute import (
     ScanProgress,
     ValidateError,
@@ -101,4 +102,38 @@ class ValidateWorker(QThread):
                 self.failed.emit(str(exc))
                 return
 
+        self._record(report)
         self.succeeded.emit(report, result)
+
+    def _record(self, report) -> None:
+        """Write the finished scan back as the dataset's completeness record.
+
+        This is what lets a dataset produced before the end-of-run check
+        existed — or by a run launched with the check turned off — populate
+        Review's Home page: Home reports a record rather than scanning, and
+        without this the tool Home sends the user to would measure the answer
+        and then discard it.
+
+        A failure to write is reported in the log and does not fail the scan.
+        The scan's own findings are the deliverable and they are already in
+        hand; losing the record costs a Home page that still says the dataset
+        has not been checked, which is true. Saying so is what makes the two
+        outcomes distinguishable — a silent failure here would leave the user
+        re-running a scan that appears to do nothing.
+        """
+        try:
+            block = write_record(report)
+        except Exception as exc:
+            swallowed("validate record")
+            self.logLine.emit(
+                f"Could not record this scan into pipeline_info.json ({exc}). "
+                "The findings below are unaffected, but Review's Home page will "
+                "still report this dataset as unchecked."
+            )
+            return
+        totals = block.get("totals") or {}
+        self.logLine.emit(
+            f"Recorded into pipeline_info.json — {totals.get('complete', 0)} of "
+            f"{totals.get('wells', 0)} well(s) complete. Review's Home page "
+            "reports this."
+        )

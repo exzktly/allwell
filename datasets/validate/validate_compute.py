@@ -50,11 +50,14 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from datasets._common.concurrency import pick_workers
-from pipeline.incremental_keys import (
-    fov_keys_from_member_names,
-    read_done_fov_keys_from_folder,
-    read_done_fov_keys_from_zip,
+from pipeline.completeness import (
+    csv_keys_from_rows,
+    done_keys,
+    health as _health,
+    missing_keys,
+    reduce_csv_state,
 )
+from pipeline.incremental_keys import fov_keys_from_member_names
 from util.timepoint import parse_hours, sort_key as tp_sort_key
 from util.aw_safe import swallow
 from util.well_token import canonical_well_label
@@ -101,6 +104,14 @@ class WellReport:
     #: its empty output is a measurement, not a gap, so it must not be swept
     #: into a forced reprocess that would produce the same empty result.
     zero_cell_recorded: bool = False
+    #: Coverage sizes, carried so a finished scan can be written back as the
+    #: dataset's completeness record without a second pass over the files.
+    #: ``missing`` alone cannot reconstruct them: it says how much is absent,
+    #: not how much was asked for, and a plate map needs both to draw a
+    #: fraction. See :mod:`datasets.validate.record`.
+    intent: int = 0
+    covered_csv: int = 0
+    covered_any: int = 0
 
     @property
     def complete(self) -> bool:
@@ -111,29 +122,20 @@ def well_health(report: WellReport) -> str:
     """Classify a :class:`WellReport` into one of the four dataset-health
     states the plate map paints.
 
-    Lives here rather than in the controller because both the live per-well
-    progress callback and the final report render the same four states, and a
-    well that flipped colour between the two would be the exact kind of silent
-    disagreement this feature exists to surface:
-
-    ``complete``
-        every ``(fov, timepoint)`` pair in the input is accounted for and a
-        readable measurements CSV exists.
-    ``partial``
-        some of the input's pairs are missing from the output.
-    ``missing``
-        nothing is missing from the input diff, but images exist with no
-        usable measurements CSV behind them.
-    ``no_output``
-        the well has no output evidence at all.
+    The rule itself is ``pipeline.completeness.health``, shared with the
+    pipeline's own end-of-run check so a well cannot read complete on one
+    surface and partial on another. This wrapper exists because the two callers
+    hold different records: everything in this module already has a
+    ``WellReport`` in hand, and both the live per-well progress callback and the
+    final report go through here.
     """
-    if report.missing:
-        return "partial"
-    if report.csv_state == "ok":
-        return "complete"
-    if report.has_in_container or report.has_out_zip or report.has_out_folder:
-        return "missing"
-    return "no_output"
+    return _health(
+        missing=report.missing,
+        csv_state=report.csv_state,
+        has_in_container=report.has_in_container,
+        has_out_zip=report.has_out_zip,
+        has_out_folder=report.has_out_folder,
+    )
 
 
 def wells_needing_force(report: "DatasetReport") -> tuple[str, ...]:
@@ -478,24 +480,21 @@ def _well_done(
     ``(rows, fieldnames, state)``. The scan parses each CSV exactly once and
     shares the result with :func:`_row_content_findings`, which used to re-parse
     every one of them — on a real plate that duplicate pass was the single
-    largest cost in the whole scan."""
-    done: set[tuple[str, str]] = set()
-    csv_state = "missing"
-    if parsed_csvs:
-        states = []
-        for rows, fieldnames, state in parsed_csvs.values():
-            states.append(state)
-            if state != "ok":
-                continue
-            if "fov" in fieldnames and "timepoint" in fieldnames:
-                for row in rows:
-                    done.add((str(row.get("fov", "")), str(row.get("timepoint", ""))))
-        csv_state = "ok" if "ok" in states else ("empty" if "empty" in states else "unreadable")
-    if out_zip is not None:
-        done |= read_done_fov_keys_from_zip(out_zip, schema=schema_fields, sep=sep)
-    if out_folder is not None:
-        done |= read_done_fov_keys_from_folder(out_folder, schema=schema_fields, sep=sep)
-    return done, csv_state
+    largest cost in the whole scan.
+
+    The CSV's own keys come back alongside the union because the two differ in a
+    way that matters: a well whose output archive is full and whose CSV is empty
+    has nothing missing, and only the CSV-only count says that the measurements
+    the plots read are not there."""
+    csv_keys: set[tuple[str, str]] = set()
+    for rows, fieldnames, state in parsed_csvs.values():
+        if state == "ok":
+            csv_keys |= csv_keys_from_rows(rows, fieldnames)
+    csv_state = reduce_csv_state(state for _rows, _fn, state in parsed_csvs.values())
+    done = done_keys(
+        csv_keys=csv_keys, out_zip=out_zip, out_folder=out_folder,
+        schema=schema_fields, sep=sep)
+    return done, csv_state, csv_keys
 
 
 def _row_content_findings(
@@ -642,35 +641,24 @@ def _scan_one_well(
 
     out_zip = zip_map.get(well)
     out_folder = folder_map.get(well)
-    done, csv_state = _well_done(
+    done, csv_state, csv_keys = _well_done(
         parsed_csvs, out_zip, out_folder, schema_fields=schema_fields, sep=sep)
 
+    # No container means no intent, so the diff below is empty either way; the
+    # explicit branch keeps that readable rather than leaving it to follow from
+    # _well_intent's return. The rule itself — including the single-FOV
+    # timepoint-only fallback — is pipeline.completeness.missing_keys, shared
+    # with the pipeline's end-of-run check.
     if container is None:
         missing: set[tuple[str, str]] = set()
-    elif fov_field_present:
-        missing = intent - done
     else:
-        # No 'fov' field in the schema (single-FOV pipelines): fov_tp_from_name
-        # can only return "" for every intent-side key, while a written CSV
-        # row's own 'fov' column is separately normalised to "1"
-        # (normalize_fov's single-FOV convention). Diffing the raw
-        # (fov, timepoint) pairs as-is would report every well missing
-        # everything the moment 'done' came from a CSV row. The previous fix
-        # for that avoided the false positive by skipping the diff outright —
-        # which meant a well missing every timepoint but one read as
-        # identically "complete" to a well with all of them, since 'missing'
-        # was unconditionally empty regardless of what was actually on disk.
-        # 'fov' carries no real information for a schema that doesn't have
-        # it, so diff on timepoint alone instead: correct, and it restores
-        # the per-timepoint completeness check a single-FOV dataset needs.
-        intent_tps = {tp for _fov, tp in intent}
-        done_tps = {tp for _fov, tp in done}
-        missing = {("", tp) for tp in (intent_tps - done_tps)}
+        missing = missing_keys(intent, done, fov_field_present=fov_field_present)
     report = WellReport(
         well=well, missing=tuple(sorted(missing)), csv_state=csv_state,
         has_in_container=container is not None, has_out_zip=out_zip is not None,
         has_out_folder=out_folder is not None,
         zero_cell_recorded=evidence.segmented_zero_cells,
+        intent=len(intent), covered_csv=len(csv_keys), covered_any=len(done),
     )
 
     # A well with real recorded output (done) should have every one of its

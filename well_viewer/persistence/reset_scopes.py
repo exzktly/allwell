@@ -36,6 +36,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from well_viewer.core.safe import swallowed
+from well_viewer.core.ui_helpers import clear_notes_editors as _clear_notes_editors
 
 _logger = logging.getLogger("well_viewer")
 
@@ -125,13 +126,7 @@ def _clear_sample_definitions(ctx) -> None:
     sel.current_selection_id = None
     sel.plot_groups = []
 
-    notes_edit = ctx.widgets.get_or_none("_notes_edit")
-    if notes_edit is not None:
-        blocked = notes_edit.blockSignals(True)
-        try:
-            notes_edit.clear()
-        finally:
-            notes_edit.blockSignals(blocked)
+    _clear_notes_editors(ctx)
 
     _save(ctx, "plot_groups")
     _save(ctx, "sample_definitions")

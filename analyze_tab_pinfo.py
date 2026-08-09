@@ -177,6 +177,12 @@ class AnalyzePipelineInfoMixin:
         nat = d.get("no_auto_threshold")
         if nat is not None and hasattr(self, "_auto_threshold_cb"):
             self._auto_threshold_cb.setChecked(not bool(nat))
+        # Same inversion for the completeness check. Absent means the run
+        # predates the flag, and the checkbox keeps its own default rather than
+        # inheriting a decision nobody made.
+        nrc = d.get("no_run_check")
+        if nrc is not None and hasattr(self, "_run_check_cb"):
+            self._run_check_cb.setChecked(not bool(nrc))
         s("_pos_control_well_edit", d.get("pos_control_well"))
         s("_neg_control_well_edit", d.get("neg_control_well"))
         # The sidecar records wells, not a method — naming both IS the method on

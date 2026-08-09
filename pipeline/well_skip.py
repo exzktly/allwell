@@ -24,6 +24,34 @@ from util.well_token import (
 )
 
 
+def out_zip_path(output_dir: Path, well_label: str) -> Path:
+    """Where a well's compressed QC images live: ``<out>/<well>_out.zip``."""
+    return Path(output_dir) / f"{well_label}_out.zip"
+
+
+def out_folder_path(output_dir: Path, well_label: str) -> Path:
+    """Where a well's uncompressed QC images live: ``<out>/<well>/``.
+
+    Written instead of the archive when a run is told not to compress its
+    output. A dataset is one or the other, never both — but a reader asking
+    "is there image evidence for this well" has to check both, since it may be
+    looking at a dataset some other run produced.
+    """
+    return Path(output_dir) / well_label
+
+
+def csv_path_for_well(output_dir: Path, well_label: str, csv_prefix: str) -> Path:
+    """Where a well's measurements live: ``<out>/<prefix>_<well>.csv``.
+
+    The well token is passed through ``safe_well`` because this one becomes part
+    of a filename the pipeline itself composes, and the three predicates below
+    plus the end-of-run completeness check all have to compose it identically —
+    a reader looking for ``measurements_C8.csv`` beside a writer that wrote
+    ``measurements_C08.csv`` finds nothing and calls the well empty.
+    """
+    return Path(output_dir) / f"{csv_prefix}_{_safe_well(well_label)}.csv"
+
+
 def _canonical_force_wells(force_wells) -> frozenset[str]:
     """Normalise a per-well force list to canonical well labels.
 
@@ -69,9 +97,8 @@ def output_exists_for_well(output_dir: Path, well_label: str, csv_prefix: str) -
     re-run with --incremental (they are absent from the CSV done-set and so are
     re-processed) or --force (redo the whole well).
     """
-    safe_well = _safe_well(well_label)
-    out_zip  = output_dir / f"{well_label}_out.zip"
-    csv_path = output_dir / f"{csv_prefix}_{safe_well}.csv"
+    out_zip  = out_zip_path(output_dir, well_label)
+    csv_path = csv_path_for_well(output_dir, well_label, csv_prefix)
     zip_ok = out_zip.exists()  and out_zip.stat().st_size  > 0
     csv_ok = csv_path.exists() and csv_path.stat().st_size > 0
     return zip_ok and csv_ok
@@ -91,10 +118,9 @@ def output_exists_for_well_folder(
         <output_dir>/<well>_out.zip            – output image archive when *compressed_output* is True
       • <output_dir>/<csv_prefix>_<well>.csv   – per-well measurements
     """
-    safe_well  = _safe_well(well_label)
-    out_folder = output_dir / well_label
-    out_zip    = output_dir / f"{well_label}_out.zip"
-    csv_path   = output_dir / f"{csv_prefix}_{safe_well}.csv"
+    out_folder = out_folder_path(output_dir, well_label)
+    out_zip    = out_zip_path(output_dir, well_label)
+    csv_path   = csv_path_for_well(output_dir, well_label, csv_prefix)
     folder_ok  = out_folder.is_dir() and any(out_folder.iterdir())
     zip_ok     = out_zip.exists() and out_zip.stat().st_size > 0
     csv_ok     = csv_path.exists() and csv_path.stat().st_size > 0

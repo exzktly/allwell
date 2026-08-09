@@ -12,9 +12,8 @@ from __future__ import annotations
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 import theme
+from pipeline.completeness import HEALTH_STATES as _WELL_STATES
 from widgets.plate_progress import PlateProgress, canon_well, status_dot
-
-_WELL_STATES = ("complete", "partial", "missing", "no_output")
 
 
 class ValidateDashboard(PlateProgress):

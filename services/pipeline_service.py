@@ -239,6 +239,11 @@ def build_pipeline_args(
     # thresholds"); the pipeline flag is the negative, so only the off case emits
     # anything. Absent from a legacy opts dict ⇒ on, matching prior behaviour.
     _emit_auto_threshold_flags(args, opts)
+    # Completeness check. Same shape as auto-threshold: the form's checkbox is
+    # the positive statement, the pipeline flag is the negative, and an opts
+    # dict from before the checkbox existed means on.
+    if not opts.get("run_check", True):
+        args.append("--no_run_check")
     if opts.get("qc_remove_debris"):
         args.append("--qc_remove_debris")
         for flag, key in (("--qc_min_area", "qc_min_area"),

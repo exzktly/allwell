@@ -148,7 +148,11 @@ allwell/
 │   ├── ome_explode.py          ← de-interleave a packed OME-TIFF into per-well .zip
 │   │                              archives (Z max-projected; positions → wells via §OME)
 │   ├── incremental_keys.py     ← what an incremental run considers already done
-│   ├── well_skip.py            ← per-well skip decisions for a resumed run
+│   ├── completeness.py         ← the one definition of "is this well complete"
+│   │                              (shared with Datasets → Validate) + the
+│   │                              end-of-run check that records run_check
+│   ├── well_skip.py            ← per-well skip decisions for a resumed run,
+│   │                              and where a well's output files live
 │   ├── suspend.py              ← suspend / resume a run in flight
 │   ├── run_report.py           ← the end-of-run summary the log and Review both read
 │   ├── capacity.py             ← disk-space accounting: what a run needs on the
@@ -599,6 +603,7 @@ and registers every centre page. The current page-list:
 
 | Section | Tab | Sub-pages |
 |---------|-----|-----------|
+| Home | **Home** | — (the dataset's front page; §5.3) |
 | Analysis | **Plotting** | Bar Plots / Line Graphs / Scatter Plot / Distribution / Heat Map |
 | Analysis | **Statistics** | — |
 | Analysis | **Multivariate** | — (higher-dimensional analysis: correlation / PCA·UMAP·t-SNE / clustering / faceting) |
@@ -623,6 +628,22 @@ the `on_tab_change` leaf dispatch working unchanged after the consolidation.
 smFISH stays its own rail entry (it is not an image-*review* surface), following
 the standard one-package-per-tab layout
 (`features/smfish/{controller,worker,tab_view}.py`).
+
+**Home is the landing page, and registry order is the whole mechanism.**
+`build_centre` adds pages in the order `_features()` declares them and then calls
+`setCurrentIndex(0)`; Home is the first descriptor, so it is page 0. There is no
+special case anywhere, which is the point — a page that had to be *named* as the
+landing page would be a second place to keep in step.
+
+That has one consequence which is not obvious and is invisible to the fast lane.
+`win._plotting_notebook` is assigned inside Plotting's builder, and Plotting used
+to be built eagerly only because it held the first slot (`group_idx == 0 and
+tab_idx_in_group == 0`). A dozen modules read that attribute, so Plotting is now
+force-built explicitly beside the existing `Batch Export` pre-build hook, after
+the group loop and before `setCurrentIndex(0)`. Startup cost is unchanged —
+Plotting was eagerly built before — and the hook also covers a build profile
+whose first group is empty, where nothing would otherwise be built eagerly at
+all.
 
 The left **rail navigation** (`RailNav` from `widgets/rail_nav.py`) is the
 single visible selector for the top-level pages. It mirrors the notebook —
@@ -1231,6 +1252,69 @@ body. It is a static scan on purpose — a test that builds a tab needs the
 `scripts/test.sh` runs `-m "not slow"`, so such a test would never run in CI.
 The geometry itself is checked in the slow lane by `test_page_alignment.py`
 above, which builds the window once.
+
+#### The Home page
+
+`features/home/` is the page Review opens on. It answers what a returning user
+asks before anything else — what this plate is, whether the run that produced it
+finished, what it was run with, what they have already done to it — and it does
+so by **reporting a record rather than measuring**. Establishing per-well
+coverage costs a zip central-directory read and a full CSV parse per well, which
+a landing page cannot pay on every open, and a cached answer that silently ages
+is worse than none. The pipeline records the answer at the end of every run
+(§6.2, `pipeline_info.json::run_check`), the Datasets **Validate & Repair** tool
+records one for a dataset that has none (§6b), and this page reads whichever is
+there. Activating the page re-reads that one key from the sidecar, so a scan run
+while the dataset is open shows up on returning to Home rather than needing a
+full reload; nothing else is re-read, because the rest of the sidecar holds
+user-side blocks whose in-memory copy may carry edits not yet saved.
+`tests/test_home_collect.py` pins that literally: it makes `open`, `Path.open`,
+`Path.iterdir`, `Path.glob` and `zipfile.ZipFile` raise, then calls every
+function on the page.
+
+Everything computable lives in `collect.py`, Qt-free and ctx-first, so the whole
+page is exercised in the fast lane against a plain namespace; `controller.py`
+paints widgets from what it returns and `tab_view.py` holds the arrangement.
+
+Three rules the page is built around:
+
+- **A figure it could not obtain renders as an em-dash with its reason, never as
+  zero.** `collect.Missing` is a distinct type rather than `None` so a caller
+  cannot format it as a number and a test can tell it from a real zero without
+  reading prose. Real zeros — the user has defined no replicate sets — read
+  "None yet". Conflating *not computed* with *computed as zero* is the bug class
+  the completeness record exists to end, and the page reporting it must not
+  reintroduce it.
+- **The plate never spends `accent` or `accent2`.** Those already mean
+  "anomalous well" (Concatenate, Subset) and "the other of two normal groups"
+  (Merge Plates) on the other plate dashboards. Home paints from the status
+  palette, spends hue on exceptions, and gives *partial* a coverage arc as well
+  as a colour — the one state the page exists to make visible, and the one that
+  has to survive a small cell and a fast skim.
+- **The states it paints are renderings, not a second opinion.**
+  `pipeline.completeness.health` remains the only classifier; `plate_cells`
+  separates a staged-but-never-processed well from a half-finished one on
+  `covered_any == 0`, a number already in the record.
+
+It builds on `WellPlateSelector` + `apply_plate_geometry(role="picker")`
+directly rather than subclassing `PlateProgress`. That class is a *run
+dashboard* — headline, overall bar, ETA, done/failed/cancelled setters — and it
+makes its plate inert (`WA_TransparentForMouseEvents`, the `status` role, which
+is passive selection). Home's wells are clickable, and undoing inertness on a
+base whose whole point is inertness is fighting it; the four-line read-only
+idiom at `plate_progress.py`'s own construction is what is borrowed.
+
+A click **selects** rather than navigates: a click that teleported the reader
+off the summary page would make multi-select impossible and an exploratory click
+expensive. Navigation lives in the one contextual next-step row, and every
+button on the page — masthead and next-step alike — routes through
+`controller.run_home_action`, so "open this in Analyze" cannot come to mean two
+things depending on which control was pressed.
+
+Home must paint from its **builder**, not from its `on_activate` hook:
+`tab_controller.on_tab_change` early-returns until `_line_ax_mean` exists, and
+that widget comes from Line Graphs, which is drained after startup. The hook is
+for repaints.
 
 ### 5.3 Centre tab builders: `features/<feature>/tab_view.py`
 
@@ -3015,7 +3099,13 @@ parent process supervises the per-well worker pool:
   shortfall; `core/load_controller._report_incomplete_wells` names the affected
   wells in the status line, a toast and the log at dataset load. One file per
   well, written atomically and never appended to, so the worker pool cannot
-  interleave two wells into a corrupt record. Without this, per-field statistics
+  interleave two wells into a corrupt record. **`run_report` describes one
+  invocation, not the dataset** — it is cleared at the start of every run,
+  merged back wholesale, and written only by wells the run actually processed,
+  so an incremental run that adds a timepoint leaves a block naming the handful
+  of wells that had new data. That is the reason the completeness *record*
+  below is a separate thing rather than a reading of this one. Without this,
+  per-field statistics
   silently described whatever fields survived and the first visible symptom was
   an absent error bar several layers from the cause. The per-FOV tracebacks in
   `<output_dir>/errors/` remain the detailed evidence.
@@ -3152,7 +3242,7 @@ Small dependency-light service modules used by `analyze_tab.py`:
 | `pipeline_service.py` | `find_pipeline_script` / `build_pipeline_args` / `spawn_pipeline`. `build_pipeline_args` emits each flag only when present and non-zero (including `--stardist_tile_px` (>0 only) and `--phase_token`); it is decomposed into small table-driven emitters to satisfy the complexity ratchet, behaviour unchanged (`tests/test_pipeline_arg_validation.py`). The StarDist detection thresholds get their own emitter (`_emit_stardist_threshold_flags`) rather than the integer one: they are probabilities, and blank / `auto` / out-of-range emits nothing so the run falls back to the pretrained model's own value. |
 | `frame_preview.py` | The GUI-side StarDist inference behind the Playground's **Segment** button. Holds the session's single loaded model (`_GUI_STARDIST_MODEL`) and the `find_spec` dependency probe, and calls the pipeline's own `pipeline.stardist.segment_nuclei` — so what the Playground shows cannot disagree with what a run produces. **TF and StarDist are imported inside `segment_frame`, never at module scope**: the Playground's controller imports its worker (and through it this module) at GUI start-up, so a module-scope TF import would add tens of seconds and gigabytes to launching the app for everyone who never presses Segment. Qt-free and `well_viewer`-free, which is why it sits here rather than beside the feature that uses it. `segment_frame` takes an optional `on_stage(name)` — a plain callable, so the module stays Qt-free — and reports `STAGE_LOADING` then `STAGE_SEGMENTING`, because only the first call of a session pays the model load and a UI that reports both phases identically leaves that one looking like a hang. |
 | `pipeline_runner.py` | Asynchronous subprocess + stdout-streaming wrapper used by Analyze. Hosts `ProgressTracker`, a stateless log-line parser that turns the pipeline's stdout into structured run events — coarse `("stage", name)`, per-well `("well_stage", (well, stage))` (`upload`/`active`/`process`/`threshold`/`download`), per-well FOV sub-progress `("well_fov", (well, done, total))`, per-well transfer progress `("well_xfer", (well, "up"|"down", fraction))`, and `("zipper_well", well)` — which drive the live `RunDashboard`. `download` fires only once **both** the output zip and the well's CSV(s) have landed (a server-side threshold or a zip-only fetch must not read as "downloaded"). Well completion is counted by **identity, not by marker**: the three terminal markers (`Well X — done.`, `Well X — up to date`, `SKIP well X — output already exists`) all feed one set of finished wells, so a well announced terminal twice is counted once and reported as `("well_repeat", well)`. That matters in batched remote mode, where the pipeline is launched once per batch against a shared remote input directory: a well whose input zip outlives its batch is announced a second time by the next batch, and counting markers drove the headline to "N / N wells (100%)" with wells still outstanding. The announced total is a floor, never a ceiling — more distinct wells finishing than the banner promised raises it (a fresh `("well_total", n)`) rather than printing a fraction over 100%. |
-| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `scripts/_bootstrap_lib.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). **A queue wait is announced, timed, and named**, because it is otherwise indistinguishable from a hang: the upload finishes and the log stops. `_scheduler_handoff_lines` writes the hand-off and is called from **every** launch path — the batched one composed the same launcher but announced nothing, so a batched run fell silent at the exact moment it began waiting. `ProgressTracker` turns those lines, plus the scheduler's own `srun: job N queued and waiting for resources` / `has been allocated resources`, into a `sched` event, and `AnalyzeProgressMixin._on_scheduler` runs a 1-Hz clock reading *Waiting for the scheduler — 4m12s (job 4812345)* with a log breadcrumb every two minutes repeating the elapsed time, the job id and the **request** (an unsatisfiable one — a partition that does not exist, a `--gres` the cluster cannot honour — is the usual cause of an indefinite queue). The job id comes from the scheduler's stderr rather than the `.slurm` sidecar because the sidecar is written from *inside* the allocation and so does not exist while the job is pending; a site whose scheduler words those lines differently still gets the wait announced and timed off the app's own lines, and loses only the id. The wait is what finally retracts the plate-wide `Transferring… N%` label: `set_transfer(None)` otherwise fires only on a *compute* event, which by definition has not happened while the job is queued, which is why the status sat on `Transferring… 100%` for the whole wait. The `remotes.toml` schema is the live contract in `services/remote_config.py`. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. Each batch is its own pipeline launch and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. |
+| `remote_runner.py` | The remote-execution path: uploads the input zip-set to a worker host, runs the pipeline there, and the `Fetcher` pulls each well's `<well>_out.zip` + CSVs back. All rsync calls funnel through `_rsync_with_retry` (transient exit codes 10/11/12/30/35 retried on the `_RSYNC_RETRY_DELAYS = (2,4,8)`s schedule, slept in ≤0.25s chunks so the Stop button stays responsive; 11 is *error in file I/O*, what a fault on the local end of a transfer looks like). Every write the client itself makes on a user volume — staging copies off the input dir, `Fetcher._materialize`, the `pipeline_info.json` rewrite — goes through `util.retry_io.retry_io` for the same reason (§6.5). `_zip_is_complete` (`zipfile.is_zipfile`) guards the final fetch so a timed-out-but-materialised rsync isn't mistaken for a still-pending one — the bug where the last download "just sat there." **Which conda env the pipeline runs in** is `_conda_env_selector`'s answer, resolved once per runner from the host's `remote_python` and used by both the argv builder and the shell composer so they cannot disagree: left at its default the field is a *placeholder* and the env is resolved by name (`conda run -n allwell`), which is what makes a host with a pre-existing system conda work at all; set by the user to an `<env>/bin/python` it selects that prefix (`conda run -p <env>`). `_conda_env_guard` then verifies the env exists on the remote — inside the scheduler allocation when there is one, since the compute node is where it has to exist — and aborts with a `[remote]`-prefixed message naming the host, conda's base, the envs it can see, and the fix. Without it the run reached `conda run` and died on conda's bare `EnvironmentLocationNotFound`, which in a scrolling log is indistinguishable from an error the pipeline raised. A cache hit execs `true` and skips the check. **"Does the env exist" is conda's own question** — a prefix is an environment iff it holds `conda-meta/history` — and the shell that answers it, `CONDA_ENV_SHELL_HELPERS`, is shared with `scripts/_bootstrap_lib.py` so the runner's check and the bootstrap's create-or-skip decision cannot disagree. See §6.6 for why that mattered. **Scheduled compute (HPC lobby/login nodes):** when the host's `compute_launcher` is set (e.g. an `srun …` line), `_compose_remote_cmd` wraps *only* the pipeline command into a scheduler allocation (`srun … bash -lc '<conda>; exec python …'`) so the work lands on a compute node the cluster schedules while staging/cache/fetch/cleanup stay on the login node against the shared filesystem; the run records `$SLURM_JOB_ID` and `close_remote_job` (`scancel`) guarantees the allocation is torn down on completion / failure / cancel. Empty `compute_launcher` = direct-on-host execution (the default). **A queue wait is announced, timed, and named**, because it is otherwise indistinguishable from a hang: the upload finishes and the log stops. `_scheduler_handoff_lines` writes the hand-off and is called from **every** launch path — the batched one composed the same launcher but announced nothing, so a batched run fell silent at the exact moment it began waiting. `ProgressTracker` turns those lines, plus the scheduler's own `srun: job N queued and waiting for resources` / `has been allocated resources`, into a `sched` event, and `AnalyzeProgressMixin._on_scheduler` runs a 1-Hz clock reading *Waiting for the scheduler — 4m12s (job 4812345)* with a log breadcrumb every two minutes repeating the elapsed time, the job id and the **request** (an unsatisfiable one — a partition that does not exist, a `--gres` the cluster cannot honour — is the usual cause of an indefinite queue). The job id comes from the scheduler's stderr rather than the `.slurm` sidecar because the sidecar is written from *inside* the allocation and so does not exist while the job is pending; a site whose scheduler words those lines differently still gets the wait announced and timed off the app's own lines, and loses only the id. The wait is what finally retracts the plate-wide `Transferring… N%` label: `set_transfer(None)` otherwise fires only on a *compute* event, which by definition has not happened while the job is queued, which is why the status sat on `Transferring… 100%` for the whole wait. The `remotes.toml` schema is the live contract in `services/remote_config.py`. **The end-of-run completeness check runs client-side, once, after the fetch.** `_build_remote_argv` appends `--no_run_check` to every remote launch and `verify_and_cleanup` calls `run_client_side_completeness_check` instead, immediately after `refresh_pipeline_info_available_from_outputs` (which rewrites the very `available_*` fields a check would otherwise read stale) and before the `ok` gate, since a run that came back short is exactly the one whose record is worth having. Three reasons it cannot run remotely, and they compound: an incremental run's remote output dir holds only the uploaded split, so a record written there inventories the wrong tree; the fetched sidecar overwrites the local one, so the record would be destroyed on arrival; and a batched run is N separate pipeline launches, each of which would describe its own slice as if it were the plate. Running on the client also answers a strictly better question — *did it get here*, rather than *did the remote produce it*. Whatever `run_check` the fetch brought back is **dropped before the local check runs**: the remote's suppression writes the same "turned off" stub a user's own `--no_run_check` would, and that stub surviving would tell a user they had turned the check off when they had not. The two outcomes are therefore an honest record or none at all, and none reads as "not checked", which is what happened. **Batched mode** (`remote_batch_size > 0` → `_BatchedRemoteProcess`) uploads and runs the plate in slices so peak remote disk is one batch of input plus about one well of output. Each batch is its own pipeline launch and so emits its own "N well(s) to process" banner for its own slice; `_run_batches` therefore injects one synthetic `Zip mode: <N> wells — batched` line ahead of batch 1, and `ProgressTracker` locks the run's denominator onto the first banner it sees. That `<N>` is the whole **staged** plate, including the wells the batched path skips because their per-well CSV is already complete locally — each skipped well gets its own `SKIP well …` marker on the same stream, so it is counted and painted on the plate map instead of leaving the run reporting 100% against a denominator smaller than the plate the user staged. |
 | `remote_config.py` | Per-host remote definitions loaded from `~/.config/allwell/remotes.toml` (or `$ALLWELL_REMOTES`). Each `[remote.<name>]` entry is an SSH alias + `remote_python` / staging dirs / cache budget, plus the optional **`compute_launcher`** (the `srun …` scheduler line consumed by `remote_runner`) and **`jupyterhub_config_path`** (where to find `jupyterhub_config.py` on the remote). Hosts are picked + edited in `analyze_remote_dialog.py`, which can **Fetch** the cluster's discrete compute options by reading the remote's `jupyterhub_config.py` spawner `profile_list` over SSH (no JupyterHub webpage needed) — picking a profile fills in the whole scheduler command. |
 | `input_resolution_service.py` | `plan_input_layout` is the one answer to "what will this folder do?" — pure, returning an `InputPlan` that Analyze's readout displays and `resolve_input_output` executes (§6.1). Around it, the module validates the input folder shape (zip set vs flat) and drives the loose-TIF **grouping (zipper) phase** — `run_zipper` shells out to `WellPlateZipper.py`, which discovers every TIF with one `os.walk` and copies (or, with `--move-source-tifs`, moves) each into its per-well subfolder. `group_by_well` filters discovered entries through `os.path.isfile` (which follows symlinks) so a **broken symlink** — a link whose target is on an unmounted/moved volume, still listed by `os.walk` among `files` because it is a non-directory entry — is skipped at discovery with a per-file warning rather than being handed to `folder_well`'s symlink-following `shutil.copy2`, where opening the missing target raised a bare `FileNotFoundError` that crashed the subprocess and failed the whole plate. This matches the rest of the pipeline's discovery, which already treats a broken link as absent (`process_microscopy.organize_loose_tifs_into_well_folders` and `find_image_groups` both gate on `Path.is_file()` / an existence check). `WellPlateZipper.main` first calls `util.frozen_io.ensure_std_streams` — in a frozen windowed (`console=False`) build the bootloader leaves this subprocess's `sys.stdout` / `sys.stderr` set to `None` even though the parent piped fd 1 / fd 2, so without the rebind every per-well progress line and every skip warning is a silent no-op and the grouping phase looks frozen; the same shim backs `process_microscopy._ensure_pipeline_io_ready`, so both subprocess entry points share one implementation. |
 | `env.py` | `validate_env` — a pure startup check of the `ALLWELL_*` overrides (`ALLWELL_SCRATCH_DIR` / `ALLWELL_REMOTES` / `ALLWELL_SEG_DEBUG`), returning warnings for any that are set but unusable so a mistyped path is not a silent fallback. |
@@ -3827,6 +3917,46 @@ Analyze run actually finished, versus what `pipeline_info.json` — written
 the sidecar advertising the full plate while `out/` holds a fraction, and a
 plain re-run then treats a partially-done well as complete
 (`output_exists_for_well`), so the FOV-level gap is otherwise invisible.
+
+**The rule it applies is not its own.** `pipeline/completeness.py` holds the
+single definition of a complete well — the CSV ∪ archive union, the
+`intent - done` diff with its single-FOV fallback, and the four health states —
+and both this tool and the pipeline's own end-of-run check (§6.2) go through it,
+so the two cannot disagree about a well. Validate keeps everything built *on
+top* of that answer: run-record evidence, the twelve finding codes, the
+per-artefact read budget its tests pin exactly, and repair. The shared functions
+open only a well's output container, taking input member names and parsed CSV
+rows from whichever caller already has them — which is precisely what lets this
+scan delegate without changing how many times it touches the disk.
+
+**A finished scan is recorded.** `datasets/validate/record.py` writes the scan's
+own result into `pipeline_info.json`'s `run_check` block, through the same
+`pipeline.completeness.build_block` / `well_record` pair the pipeline's end-of-run
+check goes through, so there is one record format rather than a pipeline one and
+a Validate one. That closes the loop Review's Home page opens: Home reports a
+record rather than scanning, a dataset produced before the end-of-run check
+existed has none, and the only action Home offers such a dataset is to open this
+tool. Until the scan recorded its answer, following that offer measured the whole
+plate and then discarded it, leaving Home saying exactly what it had said before.
+
+The block carries `source`, and the distinction is not cosmetic: a `"run"` record
+describes the run that had just finished, a `"validate"` record describes the
+folder as it stood when someone looked at it, possibly months later and after
+hand-edits. Home's masthead reads *checked <date>* for one and *run finished
+<date>* for the other. Two smaller consequences of the same difference — a scan
+has no run boundary to filter by, so its `errors` count is every traceback
+present in `out/errors/` rather than only those the last run produced, and
+`WellReport` carries `intent`/`covered_csv`/`covered_any` alongside `missing`,
+because how much is absent does not say how much was asked for and the plate map
+draws a fraction from both.
+
+Only a whole scan is recorded. A cancelled one covers an arbitrary prefix of the
+plate, and a record built from it would paint every unscanned well as measured
+and found absent. A failure to write is reported in the scan log and does not
+fail the scan: the findings are the deliverable and are already in hand, and
+saying so out loud is what keeps "recorded" and "silently not recorded"
+distinguishable — the latter looks, from Home, exactly like a scan that never
+ran.
 
 `validate_compute.py::build_report(root)` is a read-only Qt-free scan.
 *Intent* — what a well's raw input actually contains — is read through
@@ -5857,13 +5987,68 @@ process_microscopy.main()
         │     ├── write per-well CSV + image outputs
         │     └── compress to <well>_out.zip
         ├── write pipeline_info.json
-        └── estimate_thresholds_from_outputs(output_dir, …)
-              └── _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
-                    ↳ pipeline_info.json["cell_gating"]["thresh_frac_on"]
+        ├── estimate_thresholds_from_outputs(output_dir, …)
+        │     └── _apply_thresholds_to_pipeline_info(output_dir, thresholds, log)
+        │           ↳ pipeline_info.json["cell_gating"]["thresh_frac_on"]
+        └── pipeline.completeness.record_run_check(…)
+              ↳ pipeline_info.json["run_check"]
         │
         ▼
 Process exits. Analyze tab offers the dataset to Review.
 ```
+
+**The end-of-run completeness check.** `pipeline/completeness.py` holds one
+definition of "is this well complete", shared by this check and the Datasets
+**Validate & Repair** tool (§6b) — `datasets/validate/validate_compute.py`
+delegates its union, its `intent - done` diff and its four health states here,
+so a well cannot read complete on one surface and partial on another. What is
+*not* shared is the scan: Validate parallelises across wells and layers
+findings, evidence and repair on top, while `scan_run` walks a directory the run
+has just written. The shared predicate takes data the caller already holds and
+opens exactly one thing between its functions — the well's output container —
+which is what lets Validate delegate without changing its per-well read count,
+a number `tests/test_validate_compute.py` pins exactly.
+
+The check runs after the auto-threshold pass and before the exit-code decision,
+and records a `run_check` block per well: how many `(fov, timepoint)` groups the
+input held, how many the measurements CSV covers, how many the CSV and the
+output archive cover between them, which are missing, and the resulting health
+state. **It takes no part in the exit code** — a plate that came up short is
+recorded and warned about, but whether the *run* failed stays `failed_wells`'
+question, which the remote layer depends on.
+
+Three properties are load-bearing:
+
+- **It reads artefacts, never `run_report`.** Its well list is the input map the
+  run resolved (passed in, not re-derived — the run has already walked the input
+  directory and logged what it skipped) unioned with whatever the output holds.
+  A record built on `run_report` would describe an incremental run's 96-well
+  plate as the three wells that happened to have new timepoints.
+- **Two covered counts.** `covered_any` (CSV ∪ archive) is what an incremental
+  re-run treats as done, so it is the honest denominator for "what would
+  re-running recover"; `covered_csv` is what every plot actually reads. A well
+  whose archive is whole and whose CSV is empty has full coverage by the first
+  and none by the second, and one figure alone hides that.
+- **`run_check` is deliberately not a `USER_SIDE_BLOCKS` key.** It describes one
+  run's output, so carrying it across a sidecar rewrite would leave a run that
+  died early holding the previous run's description. Losing a record is visible;
+  inheriting a stale one is not.
+
+Its presence is also the only honest end-of-run signal in the sidecar —
+`pipeline_info.json` itself is written before any image work, so the file
+existing says nothing about whether the run got anywhere. `analyze_tab_log`'s
+last-run card reads the block for exactly that reason. Note that a **suspended**
+run still reaches the check and writes a record: suspend exits through the
+normal end-of-well path, so the block carries a `suspended` flag and the
+shortfall is reported as a stop rather than shouted at as a fault.
+
+`--no_run_check` turns it off, spelled negative-sense like `--no_auto_threshold`
+because the GUI checkbox is the positive. Turning it off still writes a stub
+recording that it was turned off: "the check was off" and "this dataset predates
+the check" need different things from a reader, so there are three
+distinguishable states on disk, not two. A fourth is a record whose `source` is
+`validate` — the dataset was never checked by its run but has been scanned
+since (§6b).
 
 ---
 
@@ -5879,6 +6064,14 @@ nothing already done is re-segmented. Per-FOV quantification is independent
 **What counts as "new":** a FOV-group is one `(fov, timepoint)` — i.e. the
 nuclear file plus its fluor channels for that field+time. "New" = a
 `(fov, timepoint)` not already present in the well's existing CSV.
+
+**The completeness record still covers the whole plate.** A well with nothing
+new returns before writing a run-report entry, so `run_report` after an
+incremental run names only the wells that had new data. The end-of-run check
+(§6.2) does not read that block: it enumerates from the input map the run
+resolved, unioned with what the output holds, and re-reads the artefacts. So a
+run that touched three wells of ninety-six still leaves a `run_check` describing
+ninety-six.
 
 **Local, step by step:**
 
@@ -6558,6 +6751,7 @@ The map (each rule links to the test that holds it):
 | Controllers reach the app via the `app` arg, not by importing `WellViewerApp` (§9) | `test_architecture_contracts.py::test_nothing_imports_wellviewerapp_at_runtime` |
 | EventBus is a capped catalogue of exactly 5 signals (§9) | `test_architecture_contracts.py::test_event_bus_signal_catalogue_is_capped` |
 | Feature-module naming scheme (§3) | `test_architecture_contracts.py::test_feature_module_naming` |
+| One definition of "is this well complete" — no module outside `pipeline/completeness.py` spells out the dataset-health states as its own roster, so the states a plate legend paints cannot diverge from the states the classifier returns (§6.2, §6b) | `tests/test_no_second_completeness_predicate.py`, with its bite cases in `tests/test_guards_bite.py` |
 | `domain/` & `data/` never import `features/` (the layering) | `tests/test_layering.py` |
 | No silent broad-except anywhere (§15) | `tests/test_no_silent_except.py` |
 | `runtime_app` line/attr ratchets + state-package import boundary | `tests/test_guardrails.py` |

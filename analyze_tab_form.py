@@ -486,6 +486,23 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
         self._csv_prefix_edit = self._entry(r, "measurements", width=160)
         r.layout().addStretch(1)
 
+        # On by default. The check reads back what the run wrote and records
+        # whether each well's output covers its input, which is what the Review
+        # Home page reports — without it a dataset carries no record of its own
+        # completeness and a partly-failed well is indistinguishable from a
+        # whole one on disk.
+        self._run_check_cb = WrapCheckBox(
+            "Check completeness when the run finishes", sec)
+        self._run_check_cb.setChecked(True)
+        self._run_check_cb.setToolTip(
+            "After the last well, compare what each well's input held against "
+            "what its CSV and output archive actually cover, and record the "
+            "result in pipeline_info.json. Costs seconds — the files were just "
+            "written, so they are still in the page cache. Turning it off "
+            "leaves the dataset with no completeness record; Review then says "
+            "the check was turned off rather than guessing.")
+        sec.layout().addWidget(self._run_check_cb)
+
     def _build_compute_options_section(self, parent: QWidget) -> None:
         sec = self._section(parent, "Compute Options", collapsible=True, collapsed=True)
 
@@ -956,6 +973,7 @@ class AnalyzeTabFormMixin(AnalyzeFormChromeMixin,
             background=self._background_cb.currentText(),
             background_well=self._background_well_edit.text().strip(),
             auto_threshold=self._auto_threshold_cb.isChecked(),
+            run_check=self._run_check_cb.isChecked(),
             auto_threshold_method=self._auto_threshold_method(),
             pos_control_well=self._pos_control_well_edit.text().strip(),
             neg_control_well=self._neg_control_well_edit.text().strip(),

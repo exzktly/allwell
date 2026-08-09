@@ -423,6 +423,7 @@ class WellViewerApp(QWidget):
 
     # ── Phase 10 (A1) section-nav <-> notebook bridge ─────────────────────
     _SECTION_ICONS = {
+        "Home": "home",
         "Plotting":           "line-chart",
         "Statistics":         "sigma",
         "Multivariate":       "scatter-chart",

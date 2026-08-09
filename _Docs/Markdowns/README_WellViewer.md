@@ -621,6 +621,17 @@ Collapsed by default.
   `measurements` by default, giving `measurements_<WELL>.csv`. Change it to keep
   two differently-configured runs distinguishable inside one output folder.
 
+- **Check completeness when the run finishes.** On by default. After the last
+  well, the run compares what each well's input archive held against what its
+  measurements CSV and output archive actually cover, and records the answer in
+  `pipeline_info.json`. It costs seconds — the files were written moments
+  earlier and are still in the operating system's cache — and it is what lets
+  Review tell you afterwards whether the plate is whole. This matters because a
+  well that lost some of its fields still writes a CSV and an archive that look
+  exactly like a complete well's on disk; without the record there is nothing to
+  compare them against. Turning it off leaves the dataset with no completeness
+  record, and Review then says the check was turned off rather than guessing.
+
 Packaging is not configurable: inputs are always read from per-well `.zip`
 archives and outputs are always written as per-well `.zip` archives. See
 [What the pipeline writes](#what-the-pipeline-writes) for the full layout.
@@ -833,9 +844,34 @@ and by `remote_fetch_report.txt` in the output folder.
 ├── <well>_out.zip          ← masks + tophat-corrected fluorescence + overlays
 ├── <prefix>_<well>.csv     ← per-well measurement CSV (one row per nucleus)
 ├── pipeline_info.json      ← schema + channel tokens + FOVs + timepoints +
-│                              gating thresholds + saved selections, etc.
+│                              gating thresholds + saved selections +
+│                              the completeness record, etc.
+├── errors/                 ← one traceback per failed field, when any fail
 └── (transient tmp_<well>/  ← deleted on success)
 ```
+
+**The completeness record.** `pipeline_info.json` gains a `run_check` block at
+the end of every run, holding one entry per well: how many
+`(field, timepoint)` groups its input held, how many its measurements CSV
+covers, how many the CSV and the output archive cover between them, which are
+missing, and whether that adds up to complete, partial, or images-with-no-
+measurements. It is written *after* the last well, which is why its presence
+means something on its own — the rest of `pipeline_info.json` is written before
+the first image is read, so a run that died in its first seconds still leaves
+that file behind looking perfectly normal.
+
+The same block is written by [Validate & Repair](#validate--repair-dataset) when
+its check finishes, which is how a dataset produced before this record existed
+gets one. It carries which of the two wrote it, so a scan from last week never
+reads as a run from last week.
+
+Three things worth knowing about it. It describes the **whole dataset**, not
+just the wells this run touched, so re-running to add a timepoint still leaves a
+record covering every well. It is a **snapshot of the moment the run ended** — if
+you repair a dataset by hand afterwards, the record still describes it as it was,
+which is why the date it was taken is shown alongside it. And a run that was
+**stopped** part-way records that it was stopped, rather than reporting the wells
+it never got to as though they had failed.
 
 Every archive the app writes — the `<well>_out.zip` results and the
 `in/<WELL>.zip` inputs the Analyze tab packs for you — is built alongside its
@@ -882,6 +918,59 @@ Per-well image ZIPs (`<well>_out.zip`) are discovered on demand the first time
 an image-using tab is opened. `pipeline_info.json` is re-read on every open, so
 the viewer always tracks the schema + channel tokens the dataset was built with
 — if you re-run the pipeline with different tokens, just re-open the folder.
+
+### Home
+
+The page Review opens on, with or without a dataset. It answers the four things
+you want to know before doing anything else: what this plate is, whether the run
+that produced it actually finished, what it was run with, and what you have
+already done to it.
+
+**It reports; it does not measure.** Working out how much of each well's input
+its output covers means opening an archive and reading a whole CSV for every
+well — far too slow for a page you pass through constantly, and a cached answer
+that quietly ages is worse than none. So the run records the answer when it ends
+(see [What the pipeline writes](#what-the-pipeline-writes)) and this page reads
+it. That has one consequence worth holding on to: **the page describes the
+moment the run finished.** If you have repaired or edited the dataset by hand
+since, the page still shows it as it was, which is why the date the record was
+taken is on the masthead. *Check this dataset now* hands off to
+[Validate & Repair](#validate--repair-dataset), which re-reads it as it stands
+and records what it finds — so a dataset that has never been checked fills this
+page in once you have run that tool on it, and the masthead then reads *checked
+<date>* rather than *run finished <date>*, because the two describe different
+moments.
+
+What is on it:
+
+- **The plate.** One dot per well, coloured by what the run actually produced:
+  complete, partial (with an arc showing how much of it landed), failures
+  recorded, staged but never processed, images with no measurements behind them.
+  Clicking a well selects it, the same selection every other page uses — it does
+  not navigate, so you can pick several. Hovering one says what its numbers are.
+- **Notes.** The same project notes as
+  [Sample Definitions](#sample-definitions), editable here. Type and click away;
+  it saves on its own. Whatever the numbers will not tell you in six months
+  belongs here — which plate had the incubator alarm, which columns were
+  re-plated, which channel bled.
+- **The numbers.** Wells, timepoints, fields per well, shape features, and how
+  much of the input the output covers, with the actual counts underneath rather
+  than a bare percentage. A figure the page could not work out shows **—** and
+  says why. It never shows a zero it did not measure: "nothing was recorded" and
+  "the answer is none" are different, and a page that blurred them would be the
+  exact problem this one exists to solve.
+- **Health.** Only what needs attention. A dataset with nothing wrong says so in
+  one line instead of listing zeros.
+- **Run parameters.** What the run was told to do — segmentation method and its
+  thresholds, the background method named in full, flat-field, debris gating,
+  where it ran and for how long. A threshold that came from the model's own
+  defaults says so, rather than being shown as a number somebody chose.
+- **Your work here.** Replicate sets, plot groups, labelled wells, smFISH
+  thresholds, ratios, notes — with what you have not started yet reading "None
+  yet", because that is a real answer rather than a missing one.
+
+Above all of it, one line saying what most needs doing next, and a button that
+does it.
 
 ### The Review window at a glance
 
@@ -2530,6 +2619,29 @@ Use this to check whether an Analyze run actually finished — a crash or a
 partial run can leave `pipeline_info.json` advertising more timepoints than
 `out/` actually holds, so Review would show gaps with no obvious cause and a
 plain re-run would skip the very wells that need finishing.
+
+Every run already records its own completeness when it ends (see
+[What the pipeline writes](#what-the-pipeline-writes)), and the two answer
+different questions. That record is a snapshot of the moment the run finished,
+free, and always there. This tool is the on-demand sweep: it re-reads the
+dataset as it stands *now*, checks things the end-of-run record does not —
+sidecar metadata that has drifted out of sync, CSVs that look like a well's data
+but aren't, stale cell-inclusion overrides — and it can repair what it finds.
+Reach for it when a dataset has been moved, edited, merged or hand-repaired
+since the run, or when the run's own record is missing. Both use the same
+definition of a complete well, so they will never disagree about one.
+
+**A completed check writes its own record.** When the scan finishes it stores
+what it found into `pipeline_info.json`, in the same block a run writes at its
+end — so a dataset produced before that check existed, or by a run with the
+check turned off, gets a completeness record from here and Review's **Home**
+page fills in. The record says which of the two produced it, and Home words
+itself accordingly: *checked <date>* for this tool, *run finished <date>* for a
+run. That matters because they describe different moments — a run's record is
+about the run, this one is about the folder as it stood when you scanned it.
+If the dataset is already open in Review, going back to Home shows the new
+record without reloading. If the record cannot be written — a read-only volume,
+say — the raw log says so and the findings are unaffected.
 
 1. Pick the dataset folder. As soon as it's recognized, a status panel
    appears showing a "Ready — N well(s)" preview of the plate, before you've

@@ -210,8 +210,7 @@ class DatasetsTab(QWidget):
             if self._on_reveal_analyze is None:
                 return False
             return bool(self._on_reveal_analyze())
-        self._nav.setCurrentKey(page_name)
-        self._pages.setCurrentByName(page_name)
+        self._show_page(page_name)
         return True
 
     # ── queue edit sessions ──────────────────────────────────────────────────
@@ -232,8 +231,7 @@ class DatasetsTab(QWidget):
             # that Analyze's own "+ Queue" button put the job on).
             self._show_session_banner(self._analyze_form_layout(), message)
             return
-        self._nav.setCurrentKey(page_name)
-        self._pages.setCurrentByName(page_name)
+        self._show_page(page_name)
         page = self._pages_by_kind.get(kind)
         self._show_session_banner(page.layout() if page is not None else None, message)
 
@@ -260,8 +258,7 @@ class DatasetsTab(QWidget):
         self._drop_session_banner()
         queue_page = self._page_name_for(None)
         if queue_page is not None:
-            self._nav.setCurrentKey(queue_page)
-            self._pages.setCurrentByName(queue_page)
+            self._show_page(queue_page)
 
     def _show_session_banner(self, layout, message: str) -> None:
         """Insert the strip at the top of *layout*.
@@ -299,6 +296,40 @@ class DatasetsTab(QWidget):
         if nav is None:
             return ""
         return nav.currentKey() or ""
+
+    def open_tool(self, kind: str, *, dataset_path: str = "") -> bool:
+        """Show one tool's page, optionally pointed at a dataset already.
+
+        Another pane can send the user here — Review's Home page offers to
+        check a dataset whose run left no completeness record — and landing on
+        whichever tool happened to be showing, with an empty folder field, is a
+        button that does less than it says. Returns False when this build has
+        no such tool, so the caller can tell "done" from "nothing happened".
+        """
+        page_name = self._page_name_for(kind)
+        if page_name is None:
+            return False
+        self._show_page(page_name)
+        # Every tool's page is built with the pane, so there is nothing to
+        # force here — but not every tool takes a dataset path, and one that
+        # does not simply gets shown.
+        setter = getattr(self._pages_by_kind.get(kind), "set_dataset_path", None)
+        if dataset_path and callable(setter):
+            setter(str(dataset_path))
+        return True
+
+    def _show_page(self, page_name: str) -> None:
+        """Move the rail and the page stack together.
+
+        Both halves, always: the rail is the only thing that says which tool is
+        showing, so a caller that set one and forgot the other would leave the
+        pane displaying one page and claiming another. Four entry points reach
+        this — a queue row's click, an edit session, another pane's handoff,
+        and the return to the queue — and they cannot drift apart while it is
+        spelled once.
+        """
+        self._nav.setCurrentKey(page_name)
+        self._pages.setCurrentByName(page_name)
 
     def _page_name_for(self, kind: str | None) -> str | None:
         for feat in _FEATURES:
@@ -350,8 +381,7 @@ class DatasetsTab(QWidget):
 
         self._nav.currentChanged.connect(self._pages.setCurrentByName)
         if _FEATURES:
-            self._nav.setCurrentKey(_FEATURES[0].name)
-            self._pages.setCurrentByName(_FEATURES[0].name)
+            self._show_page(_FEATURES[0].name)
 
     def _build_sidebar(self) -> QWidget:
         # Matches Review's own rail (well_viewer/core/app_shell_view.py): the

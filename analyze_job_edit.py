@@ -71,6 +71,8 @@ def _opts_as_pinfo_keys(opts: dict) -> dict:
         d["input_dir"] = str(raw)
     if "auto_threshold" in d:
         d["no_auto_threshold"] = not bool(d["auto_threshold"])
+    if "run_check" in d:
+        d["no_run_check"] = not bool(d["run_check"])
     return d
 
 

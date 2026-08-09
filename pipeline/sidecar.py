@@ -27,6 +27,13 @@ from pathlib import Path
 
 #: Sidecar keys written by the Review side and owned by the user. Anything that
 #: rewrites ``pipeline_info.json`` from run state must preserve these.
+#:
+#: ``run_report`` and ``run_check`` are deliberately **not** here, and the
+#: instinct to add them should be resisted. Both describe one run's output, so
+#: carrying them across a rewrite means a run that died before it could describe
+#: itself keeps the *previous* run's description — a Home page reporting a plate
+#: as 96/96 complete when the run that just finished wrote four wells. Losing a
+#: record is recoverable and visible; inheriting a stale one is neither.
 USER_SIDE_BLOCKS: tuple[str, ...] = (
     "cell_gating",
     "sample_definitions",

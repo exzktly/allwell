@@ -543,3 +543,57 @@ def test_help_topic_guard_clears_the_real_tree(monkeypatch):
     guard.test_every_topic_names_a_real_heading()
     guard.test_headings_are_unique()
     guard.test_no_topic_keys_for_pages_that_no_longer_exist()
+
+
+# ── the dataset-health roster ───────────────────────────────────────────────
+
+HEALTH_ROSTER_VIOLATIONS = {
+    # What actually shipped: datasets/validate/dashboard.py carried its own
+    # copy of the four states before the predicate was extracted. Running the
+    # guard against that file (restored from the base branch) named it at
+    # line 17, which is the measurement this case makes durable.
+    "tuple": '_WELL_STATES = ("complete", "partial", "missing", "no_output")\n',
+    "list": 'STATES = ["complete", "partial", "missing", "no_output"]\n',
+    "set": 'STATES = {"complete", "partial", "missing", "no_output"}\n',
+    # Three of four. A roster that has already dropped a state is more
+    # suspect than a complete one, not less — §7.5 records one that went
+    # six-of-eight stale without anyone noticing.
+    "stale": '_STATES = ("complete", "partial", "no_output")\n',
+    # Mixed in with unrelated strings, the shape the plot-card roster guard
+    # was defeated by on its first version.
+    "diluted": 'ORDER = ("header", "complete", "partial", "missing", "footer")\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(HEALTH_ROSTER_VIOLATIONS))
+def test_health_roster_guard_catches_a_second_copy(tmp_path, monkeypatch, shape):
+    bad = _write(tmp_path, "bad_health.py", HEALTH_ROSTER_VIOLATIONS[shape])
+    exc = _run_scan(monkeypatch, "tests.test_no_second_completeness_predicate",
+                    "test_no_module_restates_the_dataset_health_roster", [bad])
+    assert exc is not None, f"the {shape} roster went uncaught"
+    assert "bad_health.py" in str(exc)
+
+
+HEALTH_ROSTER_CLEAN = {
+    # The import the sweep put in dashboard.py's place.
+    "import": "from pipeline.completeness import HEALTH_STATES as _WELL_STATES\n",
+    # A legend pairs each state with its label. One state per inner tuple, so
+    # this is presentation rather than a second roster, and it must stay legal
+    # — dashboard.py builds two of these and a colour map besides.
+    "legend": ('ROWS = (("complete", "Complete"), ("partial", "Partial"),\n'
+               '        ("missing", "No measurements"), ("no_output", "No output"))\n'),
+    "colour_map": ('COLORS = {"complete": theme.Colors.success,\n'
+                   '          "partial": theme.Colors.warn,\n'
+                   '          "missing": theme.Colors.danger,\n'
+                   '          "no_output": theme.Colors.text_muted}\n'),
+    # A single state named in passing.
+    "one_state": 'if state == "no_output":\n    pass\n',
+}
+
+
+@pytest.mark.parametrize("shape", sorted(HEALTH_ROSTER_CLEAN))
+def test_health_roster_guard_clears_presentation_and_imports(tmp_path, monkeypatch, shape):
+    good = _write(tmp_path, "good_health.py", HEALTH_ROSTER_CLEAN[shape])
+    assert _run_scan(monkeypatch, "tests.test_no_second_completeness_predicate",
+                     "test_no_module_restates_the_dataset_health_roster",
+                     [good]) is None, f"the {shape} shape was wrongly flagged"

@@ -577,3 +577,162 @@ def _scan_findings(out_dir: Path, csv_prefix: str, records: dict) -> list[dict]:
             ),
         })
     return findings
+
+
+# ── the run-facing entry point ──────────────────────────────────────────────
+
+def _utc_iso(epoch: float | None) -> str:
+    """An epoch timestamp as a UTC ISO-8601 string, or ``""`` for ``None``.
+
+    The record is read months later, often on a different machine in a
+    different timezone, so it carries UTC rather than local time.
+    """
+    if epoch is None:
+        return ""
+    from datetime import datetime, timezone
+
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def failed_groups_by_well(info_path) -> dict:
+    """Which FOV-groups the run recorded as failed, per well.
+
+    Read from the ``run_report`` block the run has just merged. That block is
+    the wrong thing to build an *inventory* from — it names only the wells this
+    invocation processed — but naming failures is exactly what it is for, and a
+    well it does not mention simply had none to report.
+    """
+    import json
+
+    try:
+        report = json.loads(Path(info_path).read_text()).get("run_report") or {}
+        wells = report.get("wells") or {}
+        return {well: list(rec.get("failed") or [])
+                for well, rec in wells.items() if rec.get("failed")}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def log_summary(block: dict, *, log) -> None:
+    """One line saying whether the plate covers its input.
+
+    A suspended run is not a broken plate. It stops taking on new FOV-groups
+    and exits through the normal end-of-well path, so most of its wells are
+    genuinely partial — shouting INCOMPLETE at someone who just pressed stop
+    describes their own action back at them as a fault, and buries the case
+    where the wording means something.
+    """
+    totals = block.get("totals") or {}
+    n_wells = int(totals.get("wells") or 0)
+    partial = int(totals.get("partial") or 0)
+    missing_groups = int(totals.get("intent") or 0) - int(totals.get("covered_any") or 0)
+    if block.get("suspended"):
+        log.info(
+            "Completeness: run was suspended — %d of %d well(s) cover every "
+            "FOV-group in their input. Re-run with --incremental to finish.",
+            n_wells - partial, n_wells)
+        return
+    if partial:
+        names = sorted(w for w, rec in (block.get("wells") or {}).items()
+                       if rec.get("health") == "partial")
+        shown = ", ".join(names[:8]) + (" …" if len(names) > 8 else "")
+        log.warning(
+            "INCOMPLETE: %d well(s) cover fewer FOV-groups than their input "
+            "holds — %d group(s) missing (%s). Their CSV / out.zip exist and "
+            "look complete; per-field statistics for them will be wrong or "
+            "undefined. Re-run with --incremental to recover the missing groups.",
+            partial, missing_groups, shown)
+        return
+    log.info("Completeness: all %d well(s) cover every FOV-group in their input.",
+             n_wells)
+
+
+def record_run_check(
+    *, info_path, output_dir, in_containers, schema, sep: str, csv_prefix: str,
+    started_at: float | None, mode: str, atomic_writer, log,
+    skip: bool = False, suspended: bool = False, failed_by_well=None,
+) -> dict:
+    """Read back what a run wrote, and record whether it covers its input.
+
+    A run that loses FOV-groups still writes a per-well CSV and an output
+    archive, and on disk that output is shaped exactly like a whole well's —
+    which is the reason ``pipeline/run_report.py`` exists. This is the other
+    half of the same idea, and it differs in the two ways that matter for a
+    reader coming to the dataset later.
+
+    It covers **every** well, not the ones this invocation processed. An
+    incremental run that adds a timepoint touches a handful of wells and skips
+    the rest, so the run report it leaves behind names only those; a page
+    reporting completeness from it would describe a finished plate as three
+    wells.
+
+    And it is written **at the end**, which makes its presence meaningful in
+    its own right. ``pipeline_info.json`` is written before any image work, so
+    that file existing says nothing about whether the run got anywhere; a
+    ``run_check`` block in it says the run reached its end.
+
+    Never raises, and never changes the run's exit code. A shortfall is
+    recorded and warned about; whether the *run* failed is a separate question,
+    already answered by the per-well failure list. Cost is one input-container
+    listing, one output-container listing and one CSV read per well, all
+    page-cache-warm because the run has just written them.
+
+    *atomic_writer* is injected — ``pipeline.io._safe_atomic_text_write``, the
+    same shape ``run_report.merge_into_pipeline_info`` takes — so this module
+    stays free of the imaging stack and keeps importing cheaply on a remote
+    host.
+    """
+    from pipeline.run_report import merge_into_pipeline_info
+
+    finished_at = _utc_iso(_now())
+    if skip:
+        # A stub, not silence. "The check was turned off" and "this dataset
+        # predates the check" need different things from whoever reads the
+        # record, and a reader that cannot tell them apart offers the wrong one.
+        log.info("Completeness check skipped (--no_run_check).")
+        block = {
+            "version": 1, "skipped": True, "skipped_reason": "--no_run_check",
+            "finished_at": finished_at, "wells": {}, "totals": {}, "findings": [],
+        }
+        try:
+            merge_into_pipeline_info(
+                info_path, {"run_check": block}, atomic_writer=atomic_writer)
+        except Exception as exc:
+            log.warning("Could not record the skipped completeness check: %s", exc)
+        return block
+
+    try:
+        import socket
+
+        log.info("Completeness: checking %d well(s)…", len(in_containers or {}))
+        block = scan_run(
+            in_containers=in_containers,
+            output_dir=output_dir,
+            schema=schema,
+            sep=sep,
+            csv_prefix=csv_prefix,
+            fov_field_present="fov" in list(schema),
+            started_at=started_at,
+            finished_at=finished_at,
+            started_at_iso=_utc_iso(started_at),
+            duration_s=(None if started_at is None
+                        else round(_now() - started_at, 1)),
+            host=socket.gethostname(),
+            mode=mode,
+            failed_by_well=(failed_groups_by_well(info_path)
+                            if failed_by_well is None else failed_by_well),
+            suspended=suspended,
+        )
+        merge_into_pipeline_info(
+            info_path, {"run_check": block}, atomic_writer=atomic_writer)
+        log_summary(block, log=log)
+        return block
+    except Exception as exc:
+        log.warning("Completeness check failed: %s", exc)
+        return {}
+
+
+def _now() -> float:
+    import time
+
+    return time.time()

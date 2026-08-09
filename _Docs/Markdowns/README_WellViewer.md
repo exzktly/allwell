@@ -1348,9 +1348,32 @@ replicate sets — **t-test**, **Mann-Whitney**, and **KS** — with a KS CDF pl
 - **Optimal use** — define replicate sets first so the tests run on
   biologically meaningful groups rather than single wells.
 
-Statistics, Spatial, Review CSV and Batch Export show a placeholder until a
-dataset is loaded, the same one the plot tabs show, instead of an empty table
-or a blank panel that looks like something failed.
+Every page that needs a dataset — the plot tabs, Statistics, Multivariate,
+Spatial, Review CSV, Batch Export and smFISH — shows the same centred placeholder
+when it has nothing to draw, instead of an empty table or a blank panel that
+looks like something failed. The placeholder says *which* nothing it is: before a
+dataset is open it asks you to load a directory, and once one is open it names
+what the page is still waiting for. On the plot tabs, Multivariate, Review CSV
+and smFISH that is a well selection, so they read "No wells selected." — "No well
+selected." on smFISH, which shows one well at a time — with a
+line telling you to click wells on the plate at the left (or open Plot Groups
+below it) until you pick some. Statistics asks for two comparison groups instead — it names the gap when you
+have one as well as when you have none —
+because it compares groups rather than plotting the plate directly, and the Heat
+Map asks you to put wells on its grid — press **Auto-populate from selection**,
+or drag them in from the plate.
+
+Inside the Image Browser, **Image Table** and **Cell Browser** are not driven by
+the plate: Image Table has its own well picker, and Cell Browser follows whatever
+the plots are showing and its own cell filters. Both still show the load-a-directory
+placeholder before a dataset is open — Image Table used to ask you to choose wells
+and press Generate when there were no wells to choose, and Cell Browser showed a
+blank panel with no explanation at all.
+
+Messages about anything else stay on the plot itself: no timepoints chosen, a
+channel the run never produced, gating that excluded every cell. So a centred
+placeholder always means "this page is waiting for you to choose something", and
+a line on the axes always means "the page ran and this is what it found".
 
 ### Multivariate analysis
 

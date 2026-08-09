@@ -211,7 +211,7 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     # so SEM/SD has no meaning (it belongs only on the aggregate scatter).
     card.plotThemeChanged.connect(lambda _m: redraw_scatter_orchestrate(ctx))
     card.setStatsChipVisible(False)
-    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     # Wrap the card in a vertical scroll area: in "Separate axes" mode the card
     # is given a per-panel minimum height (see _setup_scatter_axes) so stacked
     # panels keep a readable size and scroll instead of squishing. Overlay mode
@@ -222,8 +222,18 @@ def build_scatter_cells_tab(ctx, parent: QWidget) -> None:
     _scroll.setWidgetResizable(True)
     _scroll.setFrameShape(_QFrame.NoFrame)
     _scroll.setHorizontalScrollBarPolicy(_Qt.ScrollBarAlwaysOff)
-    _scroll.setWidget(wrap_with_empty_state(ctx.window, card, icon="scatter-chart"))
-    layout.addWidget(_scroll, 1)
+    _scroll.setWidget(card)
+    # The stack wraps the scroll area, not the other way round — matching Line
+    # Graphs and Bar Plots. A QStackedLayout's minimum is the largest of its
+    # pages whichever one is showing, and setWidgetResizable grows the inner
+    # widget to at least that, so with the stack *inside* the scroll area the
+    # card's per-panel minimum in "Separate axes" mode inflated the placeholder
+    # page too: EmptyState anchors its content at the top, so the message ended
+    # up pinned above a scrolled region taller than the viewport.
+    layout.addWidget(wrap_with_empty_state(
+        ctx.window, _scroll, icon="scatter-chart",
+        reason=no_selection_reason(),
+    ), 1)
 
     canvas.mpl_connect("button_press_event", partial(on_scatter_click, ctx))
     canvas.mpl_connect("motion_notify_event", partial(on_scatter_motion, ctx))

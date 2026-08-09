@@ -665,7 +665,12 @@ def _refresh_review_csv_impl(ctx) -> None:
         fov_cb.setCurrentText("")
         tp_cb.setCurrentText("")
         refresh_review_csv_rows(ctx, [])
-        msg_lbl.setText("Select one or more wells in the picker.")
+        # The empty-selection message is the tab's shared placeholder now, which
+        # renders where the table would be rather than in an 11px line below it.
+        # The label stays — it still carries the "wells selected but no rows"
+        # case below — but printing the selection sentence here too would show
+        # the user the same thing twice, once under the other.
+        msg_lbl.setText("")
         return
 
     well_lbl.setText(

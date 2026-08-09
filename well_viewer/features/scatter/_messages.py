@@ -36,8 +36,14 @@ def agg_empty_message(ctx, cut_sink: dict | None) -> str:
 
     axis = next((a for a in ("X", "Y") if a in (cut_sink or {})), None)
     if axis is None:
+        # A statement, not a prompt. ``tests/test_no_axes_selection_message.py``
+        # keeps imperative selection prompts off the axes — they belong to the
+        # tab's shared placeholder, in one wording, in one place. That guard
+        # cannot see this string (it resolves constants and f-strings, not a
+        # helper's return value), which is a reason to honour the rule here
+        # rather than an excuse to ignore it.
         return ("No data at the selected timepoints.\n"
-                "Pick different timepoints, or select more wells/groups.")
+                "No cells matched for the wells on the plot.")
     info = cut_sink[axis]
     channel = str(info.get("channel") or "").upper()
     cutoff = float(info.get("cutoff", 0.0))

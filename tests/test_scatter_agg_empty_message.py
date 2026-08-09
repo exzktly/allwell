@@ -10,6 +10,8 @@ behaviour tests for the message, not a proof that the bug existed.
 
 from __future__ import annotations
 
+import pytest
+
 from tests.test_scatter_agg_count_cutoff import _ctx, _well_df
 from well_viewer.features.scatter.collect import collect_scatter_agg_data
 from well_viewer.features.scatter._messages import agg_empty_message
@@ -47,6 +49,30 @@ def test_no_cells_at_all_reads_as_a_timepoint_problem():
     msg = agg_empty_message(_ctx({}), {})
     assert "No data at the selected timepoints" in msg
     assert "cut by" not in msg
+
+
+@pytest.mark.parametrize("sink", [{}, {"X": {
+    "channel": "w3cy5", "col": "w3cy5_smfish_count", "cutoff": 50.0,
+    "n_total": 6, "n_above": 0,
+}}])
+def test_neither_message_asks_the_user_to_pick_wells(sink):
+    """Neither branch may paint a selection *prompt* onto the axes.
+
+    ``tests/test_no_axes_selection_message.py`` owns that rule for the whole
+    app: an imperative asking for a plate selection belongs to the tab's shared
+    placeholder, once, in one wording. Its scan resolves constants, names and
+    f-strings but not a helper's return value, so it cannot see these two
+    strings — which is why the rule is restated here, against the same test it
+    applies elsewhere. A rule you only follow where the checker looks is not a
+    rule you follow.
+    """
+    import re
+    msg = agg_empty_message(_ctx({}), sink).lower()
+    asks = re.search(r"\b(select|choose|pick)\b", msg)
+    names_wells = re.search(r"\bwells?\b", msg)
+    assert not (asks and names_wells), (
+        f"reads as a selection prompt, not a report: {msg!r}"
+    )
 
 
 def test_nothing_is_recorded_when_the_plot_succeeds():

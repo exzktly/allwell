@@ -68,9 +68,13 @@ def build_review_csv_tab(ctx, parent: QWidget) -> None:
     table.itemDoubleClicked.connect(
         lambda item: on_review_csv_row_double_click(ctx, item)
     )
-    from well_viewer.core.ui_helpers import wrap_with_empty_state
+    from well_viewer.core.ui_helpers import no_selection_reason, wrap_with_empty_state
     layout.addWidget(wrap_with_empty_state(
         ctx.window, table, icon="file-spreadsheet",
+        reason=no_selection_reason(
+            hint="Click wells on the plate at the left. "
+                 "The table lists every cell in the wells you pick.",
+        ),
     ), 1)
 
     msg_lbl = reg.register("_review_csv_msg_lbl", QLabel(

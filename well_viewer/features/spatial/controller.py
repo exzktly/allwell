@@ -35,6 +35,23 @@ def _state(ctx):
     return ctx.state.feature_slice("spatial")
 
 
+def _sync_empty_state(ctx) -> None:
+    """Re-evaluate this tab's empty-state reason after its own state changed.
+
+    ``spatial_empty_reason`` depends on ``st.level``, which nothing outside this
+    module touches — so none of the app-wide refresh triggers (dataset load, lazy
+    build, selection change) fire when the user switches level. Without this the
+    placeholder was decided once and then stood over a page that had something to
+    draw: at Summary level the reason correctly returns ``None`` while the stack
+    stayed on page 0.
+    """
+    from well_viewer.core.ui_helpers import refresh_empty_state_pages
+    try:
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
+
+
 def _autocompute(ctx) -> None:
     """Recompute *unless* we're at Summary level, where the walk is expensive
     (one DBSCAN per (well, timepoint)) and the user drives the compute via the
@@ -60,6 +77,7 @@ def _rerender_only(ctx) -> None:
         st.last_result["summary_metric_key"] = st.summary_metric_key
         st.last_result["summary_display"] = st.summary_display
     render_spatial(ctx)
+    _sync_empty_state(ctx)
 
 
 def _run_registered(ctx, name: str) -> None:
@@ -211,6 +229,34 @@ def _rep_active_wells(ctx) -> list:
     return sorted(wells)
 
 
+def spatial_empty_reason(ctx):
+    """The Spatial tab's ``wrap_with_empty_state`` reason — level-dependent.
+
+    Spatial has two fallbacks for an empty selection and they are not the same
+    kind of thing. At Summary level ``_summary_wells`` falls back to *every*
+    loaded well, which is a defensible default for a matrix that is about the
+    plate as a whole; it keeps rendering, and its caption names the fallback so
+    the reader knows the selection did not scope it.
+
+    At the three per-frame levels ``_frame_wells`` falls back to the first key of
+    ``well_paths`` — one arbitrary well, in dictionary order, with nothing on
+    screen saying it was picked for the user. That is a silent substitution, so
+    those levels show the placeholder instead.
+    """
+    from well_viewer.core.selection_controller import has_plottable_selection
+    from well_viewer.core.ui_helpers import EmptyReason
+
+    st = _state(ctx)
+    if st is None or st.level == sp_state.LEVEL_SUMMARY:
+        return None
+    if has_plottable_selection(ctx):
+        return None
+    return EmptyReason(
+        "No wells selected.",
+        "Click wells on the plate at the left.",
+    )
+
+
 def _frame_wells(ctx, st) -> list:
     """Wells to facet at a per-frame level. In replicate (group) mode this is the
     active set (non-hidden groups + solo wells), matching the plate highlight and
@@ -242,8 +288,13 @@ def sp_recompute(ctx) -> None:
         return
     wells = _frame_wells(ctx, st)
     if not wells:
-        st.last_error = "Load a dataset and pick a well to analyse."
+        # Not "load a dataset": the per-frame levels are placeholder-gated on the
+        # selection now, so this branch is reached with wells chosen whose frames
+        # would not resolve — and saying load-a-dataset over a loaded one is the
+        # contradiction this whole branch set out to remove.
+        st.last_error = "No spatial data for the chosen wells and timepoint."
         render_spatial(ctx)
+        _sync_empty_state(ctx)
         return
 
     shown = wells[:_MAX_FRAME_PANELS]
@@ -258,6 +309,7 @@ def sp_recompute(ctx) -> None:
     st.frames = frames
     st.n_cells = total_cells
     render_spatial(ctx)
+    _sync_empty_state(ctx)
 
 
 def _compute_frame_payload(ctx, st, well: str) -> dict:
@@ -350,12 +402,14 @@ def _recompute_summary(ctx, st) -> None:
     wells = _summary_wells(ctx)
     tps = available_timepoints(ctx)
     if not wells:
-        st.last_error = "Select one or more wells to summarise."
+        st.last_error = "Press Recompute to build the summary."
         render_spatial(ctx)
+        _sync_empty_state(ctx)
         return
     if not tps:
-        st.last_error = "No timepoints available — load a dataset first."
+        st.last_error = "No timepoints available for this dataset."
         render_spatial(ctx)
+        _sync_empty_state(ctx)
         return
     try:
         matrix = collect_summary_matrix(
@@ -369,6 +423,7 @@ def _recompute_summary(ctx, st) -> None:
         _logger.exception("Summary compute failed")
         st.last_error = f"Summary compute failed: {exc}"
         render_spatial(ctx)
+        _sync_empty_state(ctx)
         return
     st.last_result = {
         "kind": "summary_matrix",
@@ -380,6 +435,7 @@ def _recompute_summary(ctx, st) -> None:
         int(s.n_cells) for s in matrix["summaries"].flatten() if s is not None
     )
     render_spatial(ctx)
+    _sync_empty_state(ctx)
 
 
 def sp_export_summary_csv(ctx) -> None:

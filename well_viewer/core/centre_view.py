@@ -174,6 +174,21 @@ def build_centre(win, parent: QWidget) -> None:
                 )
             except Exception:
                 swallowed()
+            return
+        # A body built *after* a dataset was loaded registers its empty-state
+        # stack on page 0 — the "Load a directory." placeholder — and nothing
+        # would ever flip it, because the load-time refresh has already run.
+        # Spatial and smFISH are both ``lazy_only``, so both showed that
+        # placeholder over a loaded dataset for the life of the session;
+        # Multivariate escaped only because its own controller happens to call
+        # the refresh. Every lazy path funnels through here (the tab-change
+        # handler, the plotting sub-tab handler, and the startup drain, which
+        # calls this same function), so one call covers all of them.
+        try:
+            from well_viewer.core.ui_helpers import refresh_plot_empty_states
+            refresh_plot_empty_states(win)
+        except Exception:
+            swallowed()
 
     win._ctx.runtime.centre.build_pending = _build_pending
 

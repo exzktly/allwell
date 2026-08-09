@@ -586,6 +586,16 @@ def stats_refresh_map(ctx) -> None:
 
 
 def stats_refresh_group_list(ctx) -> None:
+    # Every group mutation (add / delete / rename / clear / sync) funnels through
+    # here, and this tab's empty state is gated on the group count rather than on
+    # the plate selection — so this is the one place that has to tell the
+    # empty-state stacks a group changed. Nothing else would: Statistics is not
+    # on the selection_changed path.
+    try:
+        from well_viewer.core.ui_helpers import refresh_empty_state_pages
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
     container = ctx.widgets.get("_stats_grp_inner")
     layout = container.layout()
     if layout is None:

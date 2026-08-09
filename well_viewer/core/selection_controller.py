@@ -136,8 +136,32 @@ def _refresh_tab_view(ctx, tab: str, *, redrew: bool) -> bool:
     return True
 
 
+def _announce_selection(ctx) -> None:
+    """Put the current well selection on the status bar. One writer, one place.
+
+    Counts what the user chose, not what a tab decided to plot: a page that falls
+    back to every well when nothing is picked must not make the status line claim
+    those wells were selected.
+    """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    sel = ctx.state.selection
+    well_paths = ctx.state.dataset.well_paths or {}
+    n = len([w for w in sel.selected_wells if w in well_paths])
+    if n:
+        ctx.notify.set_status(f"{n} well{'s' if n != 1 else ''} selected")
+        return
+    # A visible replicate set is a selection expressed a different way, and the
+    # plots draw it. Saying "No wells selected" while they do is the same
+    # contradiction, one level up, that this branch set out to remove.
+    n_sets = len(list(active_replicate_sets(sel.selections, well_paths)))
+    if n_sets:
+        ctx.notify.set_status(f"{n_sets} group{'s' if n_sets != 1 else ''} shown")
+    else:
+        ctx.notify.set_status("No wells selected")
+
+
 def apply_selection_refresh(ctx) -> None:
-    app = ctx.window  # transitional bridge (A3)
     """Refresh the sidebar and every visible tab's view after a selection change.
 
     The subscriber body for the ``selection_changed`` bus signal: every
@@ -149,7 +173,26 @@ def apply_selection_refresh(ctx) -> None:
     With Split View a single change can touch two panes, so the per-tab
     refresh runs for each visible leaf; off split this is exactly one tab and
     the behaviour is unchanged.
+
+    The empty-state pass runs first and covers **every** registered stack, not
+    just the visible tabs. It has to: the loop below only touches
+    ``_visible_tabs``, and a feature carrying an ``on_selection_changed`` hook
+    (Review CSV, smFISH, Multivariate, Spatial, Bar Plots, Scatter) returns
+    without ever reaching ``plot_orchestrator.redraw_app``, which is where the
+    other empty-state refresh lives. Anything less leaves a background page
+    showing whatever state it held when the user last looked at it.
+
+    The status line is written from here for the same reason. It used to be
+    echoed by whichever tab happened to redraw, so it reported the selection on
+    the pages that bothered and kept a stale sentence everywhere else — the
+    Segmentation page read "No wells selected." over a lit A01 while its own rail
+    said "Selected: A01", because a tab the user had left wrote it. One writer on
+    the one signal that means the selection changed.
     """
+    app = ctx.window  # transitional bridge (A3)
+    from well_viewer.core.ui_helpers import refresh_empty_state_pages
+    refresh_empty_state_pages(app)
+    _announce_selection(ctx)
     app._refresh_sidebar_map()
     redrew = False
     for tab in _visible_tabs(ctx):
@@ -858,6 +901,38 @@ def set_selected_wells(ctx, new_set, *, commit: bool = True) -> None:
     if commit:
         on_plate_sel_change(ctx)
 
+
+def has_plottable_selection(ctx) -> bool:
+    """Is there anything for a selection-driven tab to draw?
+
+    True when the user has picked wells on the plate **or** has at least one
+    visible replicate set — a group is a selection expressed a different way, and
+    a tab plotting groups is not empty just because no individual well is lit.
+
+    This is the condition four renderers each spell out for themselves
+    (``barplot/renderer``, ``lineplot/controller``, ``scatter/controller`` twice)
+    as ``if not selected and not active_rsets``. One copy, next to the state it
+    reads, so the placeholder and the plot cannot come to different conclusions
+    about whether the page has anything on it.
+
+    Deliberately *not* routed through ``data_loading.iter_plot_groups``: that one
+    also yields solo wells and defaults to falling back to every loaded well, so
+    it answers "what should I draw?" rather than "is there anything to draw?".
+    """
+    from well_viewer.domain.selections_model import active_replicate_sets
+
+    sel = ctx.state.selection
+    well_paths = ctx.state.dataset.well_paths or {}
+    # Filtered by ``well_paths``, exactly as three of the four renderers this
+    # replaced were. A label the dataset does not have plots nothing, so counting
+    # it as "plottable" hides the placeholder over a figure with no data in it.
+    # That state is reachable and outlives a frame: a saved heat-map layout can
+    # push a stale label through ``on_heatmap_click`` -> ``set_selected_wells``,
+    # and the plate widget only prunes it on the *debounced* sidebar refresh,
+    # which lands after this has already decided what to show.
+    if any(w in well_paths for w in sel.selected_wells):
+        return True
+    return bool(list(active_replicate_sets(sel.selections, well_paths)))
 
 
 def enforce_well_exclusivity(ctx) -> None:

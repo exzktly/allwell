@@ -86,6 +86,34 @@ def active_layout(ctx) -> HeatmapLayout:
     return make_plate_layout((ctx.state.dataset.well_paths or {}).keys())
 
 
+def heatmap_empty_reason(ctx):
+    """The Heat Map tab's ``wrap_with_empty_state`` reason: an empty layout.
+
+    This page is not selection-driven. ``redraw_heatmap`` fills its array from
+    ``layout.cells`` alone; the plate selection only draws outlines around cells
+    and turns clicks into selections. So the state it can have nothing to show
+    for is a layout with no wells placed in it — and until now it drew that state
+    as a full 8x12 grid of blank cells under a colourbar spanning a range no
+    measurement produced, which reads as data rather than as absence.
+
+    The empty layout is reached more often than "the user has not filled one in"
+    suggests: ``_ensure_sidebar_layout`` creates an empty ``Sidebar`` layout while
+    the sidebar is being built and leaves ``active_layout_name`` unset, so the
+    branch above returns it and the populated ``make_plate_layout`` default is
+    never reached. Whether that seeding should change is a separate question
+    about this tab's default; either way the placeholder states the truth.
+    """
+    from well_viewer.core.ui_helpers import EmptyReason
+
+    if active_layout(ctx).cells:
+        return None
+    return EmptyReason(
+        "No wells on this heat map.",
+        "Drag wells from the plate into the grid, "
+        "or click Auto-populate from selection.",
+    )
+
+
 def _selected_metric(ctx) -> str:
     cb = ctx.widgets.get_or_none("_heatmap_metric_cb")
     if cb is None:
@@ -425,10 +453,14 @@ def redraw_heatmap(ctx) -> None:
     if tp is None:
         # Try to derive from the data; if still none, leave the canvas blank.
         ax.clear()
+        # Themed muted token, not a hard-coded "gray" — see the same sweep in
+        # distribution/controller._empty_msg.
+        from well_viewer.core.plot_style import tokens_for as _tf
+        _bg, _title_fg, _muted_fg, _grid, _spine = _tf(ax)
         ax.text(
             0.5, 0.5, "No timepoints loaded.",
             ha="center", va="center", transform=ax.transAxes,
-            fontsize=10, color="gray",
+            fontsize=10, color=_muted_fg,
         )
         ax.set_axis_off()
         canvas.draw_idle()
@@ -659,6 +691,16 @@ def redraw_heatmap(ctx) -> None:
         swallowed()  # was: pass (silent except)
 
     canvas.draw_idle()
+    # Re-evaluate this tab's empty-state reason, which reads ``layout.cells``.
+    # Nothing outside this feature touches the layout, so none of the app-wide
+    # refresh triggers fire when the user fills it — and the placeholder's own
+    # instruction is "click Auto-populate from selection". Without this, doing
+    # exactly what it says left the placeholder standing over a populated grid.
+    try:
+        from well_viewer.core.ui_helpers import refresh_empty_state_pages
+        refresh_empty_state_pages(ctx.window)
+    except Exception:
+        swallowed()
 
 
 def _format_cell_value(v: float, metric: str, fmt: str = "") -> str:

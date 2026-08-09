@@ -30,7 +30,10 @@ def render_multivariate(ctx) -> None:
         if st.last_error:
             _draw_message(fig, st.last_error)
         elif not st.last_result:
-            _draw_message(fig, "Select wells and feature columns to begin.")
+            # Only the feature half: an empty *well* selection is the tab's
+            # shared placeholder, which covers this canvas, so naming wells here
+            # would either say it twice or say it where it cannot be read.
+            _draw_message(fig, "Pick feature columns under Features to begin.")
         else:
             kind = st.last_result.get("kind")
             if kind == "correlation":

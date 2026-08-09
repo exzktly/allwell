@@ -26,7 +26,9 @@ from well_viewer.core.plot_style import apply_time_rescale
 from well_viewer.domain.time_rescale import axis_label as time_axis_label
 
 
-NO_SELECTION_MSG = "No wells or well groups selected.\nSelect wells on the left panel or define groups to plot."
+#: Written onto an otherwise-empty figure so an *exported* copy states its
+#: own shortfall; the on-screen placeholder covers this canvas.
+EMPTY_SELECTION_EXPORT_NOTE = "No wells selected — nothing to plot."
 NO_DATA_MSG = "Load a directory.\nOpen… is at the top of the left rail (⌘O)."
 
 
@@ -698,17 +700,26 @@ def redraw_line_plots(
         ctx.notify.set_status("No data loaded.")
         return
     if not selected and not active_rsets:
+        # The words are the tab's shared empty-state placeholder, which covers
+        # this canvas. What is left to do here is make sure the figure *behind*
+        # it is genuinely empty: Export ▾ / Save figure / per-panel Copy read the
+        # Figure object, not the screen, so axes still holding the previous
+        # selection's plot would export as though it were current.
         try:
             fig.set_facecolor(_bg)
         except Exception:
             swallowed()  # was: pass (silent except)
         for ax in (ax_mean, ax_frac, ax_n, ax_cdf):
-            ax.set_title("")
+            ax.cla()
             ax.set_facecolor(_bg)
-            ax.text(0.5, 0.5, NO_SELECTION_MSG, transform=ax.transAxes, ha="center", va="center", color=_muted_fg, fontsize=10)
             ax.set_axis_off()
+        # One line, on the first panel only. Invisible on screen (the tab's
+        # shared placeholder is in front of this canvas) but present in anything
+        # exported from the figure, which carries no placeholder with it.
+        ax_mean.text(0.5, 0.5, EMPTY_SELECTION_EXPORT_NOTE,
+                     transform=ax_mean.transAxes, ha="center", va="center",
+                     color=_muted_fg, fontsize=10)
         canvas.draw_idle()
-        ctx.notify.set_status("No wells selected.")
         return
 
     # Single source of truth: ask ``collect_line_series`` for the

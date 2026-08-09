@@ -66,7 +66,8 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from widgets.plot_card import PlotCard
     from widgets.segmented_control import SegmentedControl
     from well_viewer.core.ui_helpers import (
-        make_plot_with_right_dock, make_popover_button, wrap_with_empty_state,
+        make_plot_with_right_dock, make_popover_button, no_selection_reason,
+        wrap_with_empty_state,
     )
 
     st = ctx.state.feature_slice("multivariate")
@@ -280,9 +281,21 @@ def build_multivariate_tab(ctx, parent: QWidget) -> None:
     from well_viewer.core.ui_helpers import apply_plot_card_decorators
     apply_plot_card_decorators(ctx, card, "Multivariate")
     card.plotThemeChanged.connect(lambda _m: mv_ctrl.mv_recompute(ctx))
+    # No ``text=`` override: this was the one site wording the no-dataset state
+    # differently from the other eleven, and the point of the shared placeholder
+    # is that the same state reads the same everywhere.
+    #
+    # The selection gate is what separates two causes that were previously
+    # indistinguishable here — with four wells selected and no feature columns
+    # this tab showed the *identical* "Select one or more feature columns" line
+    # it showed with no wells at all. Now: no wells gets the placeholder, and
+    # that message means what it says.
     layout.addWidget(wrap_with_empty_state(
         ctx.window, card, icon="scatter-chart",
-        text="Load a directory to explore the feature space.",
+        reason=no_selection_reason(
+            hint="Click wells on the plate at the left, "
+                 "then pick columns under Features.",
+        ),
     ), 1)
 
     # ── closures the controller calls back into ──────────────────────────────

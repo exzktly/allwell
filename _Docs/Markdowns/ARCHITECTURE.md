@@ -3073,7 +3073,12 @@ dirty** (`OmeImportPage.raw_fields`), and `PlateOrderEditor` makes the first cli
 *replace* the preview rather than extend it: a preview is the host's guess, and
 carrying its wells into the order the user is defining makes them positions 1..n,
 pushing every clicked well one stage position later — each well then receives the
-previous position's images, with no count on screen that looks wrong. While a
+previous position's images, with no count on screen that looks wrong. A path the *file* supplied is not a hand-drawn one, and the page tracks which it
+has (`_order_from_file`): editing Origin re-places the file's order at the new
+well (`_reposition_file_order`) rather than being ignored, because the starting
+well is the one answer an inference can get wrong in a way only the user can
+see. A click on the plate makes the order the user's, and only then do the grid
+controls go dead. While a genuinely
 hand-drawn path is in force the grid, origin and serpentine controls are disabled
 with a note saying why, since they describe the other way of producing the same
 order and a control that accepts input and discards it is the page's most

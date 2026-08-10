@@ -2646,6 +2646,13 @@ A suggestion never overwrites an answer you have given. It applies itself while
 the form still holds its defaults; edit anything and it stops, leaving
 **Apply again** to re-apply on demand.
 
+**And you can always correct the starting well.** When the file supplies the
+order itself, the plate fills in but **Origin** stays live — type another well
+and the whole order moves there, keeping its shape. That matters because the
+starting well is the one thing the coordinates can get wrong in a way only you
+can see. Clicking the plate still takes the order over completely, and *then*
+the grid controls grey out, because a hand-drawn path replaces them.
+
 **The stage path is drawn under the plate**, at the same scale, whenever the
 file carries coordinates: one dot per image — not per well — joined in the order
 they were taken, with a larger green dot where the scan starts. The tight

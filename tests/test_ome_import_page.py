@@ -527,7 +527,7 @@ def test_clicking_a_path_does_not_inherit_the_grids_seed_well(qapp, tmp_path):
 
     assert page.params().well_order == ("C03", "C04", "D04", "D03")
     assert "C03→D03" in page._verdict.text()
-    assert "clicked path" in page._verdict.text()
+    assert "explicit path" in page._verdict.text()
 
 
 def test_a_hand_drawn_path_greys_out_the_grid_controls(qapp, tmp_path):
@@ -695,13 +695,13 @@ def test_a_run_locks_every_input_that_would_redraw_the_plate(qapp, tmp_path):
 # ── the layout the file already knows ────────────────────────────────────────
 
 
-def _plate_scan(path, rows, cols, fovs):
+def _plate_scan(path, rows, cols, fovs, *, serpentine=True):
     """An OME-TIFF carrying real plate stage coordinates in its Plane elements."""
     pitch, fov = 9000.0, 600.0
     coords = []
     for r in range(rows):
         line = list(range(cols))
-        if r % 2:
+        if serpentine and r % 2:
             line.reverse()
         for c in line:
             for f in range(fovs):
@@ -944,3 +944,35 @@ def test_a_plate_referenced_file_needs_nothing_typed(qapp, tmp_path):
     assert page._plate.order() == ["C04", "C05", "C06", "D04", "D05", "D06"]
     assert "6 well(s) C04→D06" in page._verdict.text()
     assert "starting at C04" in page._suggest_label.text()
+
+
+def test_a_wrong_starting_well_can_still_be_corrected_by_hand(qapp, tmp_path):
+    """The place is the one thing the coordinates can get wrong in a way only
+    the user can see — a scope-framed file that happens to look plate-framed —
+    so Origin has to stay live over the file's own order and re-place it, not
+    be greyed out as a hand-drawn path would grey it."""
+    from datasets.ome_import.controller import OmeImportController
+
+    # A raster: the grid fields cannot express it, so the file hands over an
+    # explicit order — the state in which the grid controls used to go dead.
+    p = _plate_scan(tmp_path / "scan.ome.tif", 2, 3, 4, serpentine=False)
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    assert page._plate.is_dirty()                 # the file supplied an order
+    assert page._origin_edit.isEnabled()
+    assert page._file_order_note.isVisibleTo(page)
+
+    page._origin_edit.setText("F07")
+    page.refresh_readout()
+
+    assert page._plate.order()[0] == "F07"
+    assert "F07" in page._verdict.text()
+    assert page._run_btn.isEnabled()
+
+    # A click still takes the order over, and *then* the grid controls go dead.
+    _click(page, "H12")
+    page.refresh_readout()
+    assert not page._order_from_file
+    assert not page._origin_edit.isEnabled()
+    assert page._grid_note.isVisibleTo(page)

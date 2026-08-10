@@ -105,7 +105,10 @@ class ConversionPlan:
         if self.well_labels:
             first, last = self.well_labels[0], self.well_labels[-1]
             span = f" {first}" if first == last else f" {first}→{last}"
-        source = " (clicked path)" if self.hand_drawn else " (from the grid)"
+        # "explicit path", not "clicked": the same order can come from the
+        # user's clicks or from the file's own coordinates, and calling the
+        # second one clicked describes something that did not happen.
+        source = " (explicit path)" if self.hand_drawn else " (from the grid)"
         return (
             f"{self.n_wells} well(s){span}{source} × {self.fovs_per_well} FOV(s) × "
             f"{self.n_timepoints} timepoint(s) · channels: {chans}"

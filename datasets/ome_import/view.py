@@ -112,6 +112,13 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._inferred = None
         self._inferred_key = None
         self._auto_apply_key = None
+        # True while the plate's path is the file's answer rather than the
+        # user's clicks. The two look identical to the plate and must not be
+        # treated alike: a hand-drawn path *replaces* the grid controls, while
+        # a suggested one is still steerable by them — otherwise a wrong guess
+        # at the starting well cannot be corrected without first knowing to
+        # press Clear path.
+        self._order_from_file = False
         self._build_ui()
         self.refresh_readout()
 
@@ -310,6 +317,14 @@ class OmeImportPage(LogPanelMixin, QWidget):
         self._grid_note.setVisible(False)
         outer.addWidget(self._grid_note)
 
+        self._file_order_note = QLabel(
+            "This order came from the file. Change Origin to move it to another "
+            "well, or click the plate to draw your own.", self)
+        self._file_order_note.setObjectName("Muted")
+        self._file_order_note.setWordWrap(True)
+        self._file_order_note.setVisible(False)
+        outer.addWidget(self._file_order_note)
+
         self._sub_heading("How was each well sampled?", outer)
 
         row2 = QWidget(self)
@@ -352,7 +367,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         outer.addWidget(caption)
 
         self._plate = PlateOrderEditor(self)
-        self._plate.orderChanged.connect(lambda _=None: self.refresh_readout())
+        self._plate.orderChanged.connect(self._on_plate_order_changed)
         # The one sizing and placement rule every plate map in the app goes
         # through. The "editor" role hides the built-in action row (this page
         # carries its own Generate/Clear buttons below the plate), keeps the
@@ -409,6 +424,11 @@ class OmeImportPage(LogPanelMixin, QWidget):
         bl.addWidget(self._clear_path_btn)
         bl.addStretch(1)
         outer.addWidget(btn_row)
+
+    def _on_plate_order_changed(self, _order=None) -> None:
+        """A click on the plate makes the order the user's, not the file's."""
+        self._order_from_file = False
+        self.refresh_readout()
 
     def _generate_path(self) -> None:
         labels = self._serpentine_seed()
@@ -697,6 +717,7 @@ class OmeImportPage(LogPanelMixin, QWidget):
         # grid fields currently describe, dials and all.
         if self._running:
             return
+        self._reposition_file_order()
         fields = self.raw_fields()
         self._apply_order_source(fields.hand_drawn)
         if not self._plate.is_dirty():
@@ -769,6 +790,30 @@ class OmeImportPage(LogPanelMixin, QWidget):
             self._inferred_key = id(layout)
             self._inferred = infer_layout(layout)
         return self._inferred
+
+    def _reposition_file_order(self) -> None:
+        """Move the file's own order to the Origin the user has typed.
+
+        The coordinates fix the scan's *shape* and, when they are stated in the
+        plate's frame, its place too — but the place is the one thing they can
+        get wrong (a scope-framed file that happens to look plate-framed), and
+        only the user can see it. Editing Origin re-places the same order rather
+        than being ignored, which is what a disabled box would amount to.
+        """
+        if not (self._order_from_file and self._plate.is_dirty()):
+            return
+        origin = self._origin_edit.text().strip() or "A01"
+        current = self._plate.order()
+        if current and current[0] == origin:
+            return
+        layout = self._read_layout(self._src_field.path())
+        if layout is None:
+            return
+        moved = suggest_layout(layout, origin, inferred=self._inferred_for(layout))
+        if moved is None or not moved.well_order:
+            return
+        self._plate.set_order(list(moved.well_order))
+        self._order_from_file = True
 
     def _dest_rule(self, root) -> str:
         """The destination field's own hint, aware of the run being set up.
@@ -848,11 +893,14 @@ class OmeImportPage(LogPanelMixin, QWidget):
             if index >= 0:
                 self._frame_order_cb.setCurrentIndex(index)
         if suggestion.well_order:
-            # A path the grid cannot express: hand it over as an owned order,
-            # which also puts the page into its hand-drawn mode.
+            # A path the grid cannot express, handed over as an owned order —
+            # but marked as the file's rather than the user's, so the grid and
+            # Origin controls stay live over it.
             self._plate.set_order(list(suggestion.well_order))
+            self._order_from_file = True
         else:
             self._plate.clear()
+            self._order_from_file = False
             self._rows_edit.setText(str(suggestion.rows))
             self._cols_edit.setText(str(suggestion.cols))
             index = self._direction_cb.findData(suggestion.direction)
@@ -900,10 +948,15 @@ class OmeImportPage(LogPanelMixin, QWidget):
         confusing: the user fills in a grid, clicks a path, and the fields keep
         showing values that no longer reach the conversion.
         """
-        for w in (self._rows_edit, self._cols_edit, self._origin_edit,
-                  self._direction_cb):
-            w.setEnabled(not hand_drawn)
-        self._grid_note.setVisible(hand_drawn)
+        clicked = hand_drawn and not self._order_from_file
+        for w in (self._rows_edit, self._cols_edit, self._direction_cb):
+            w.setEnabled(not clicked)
+        # Origin stays live even for the file's own order: it is the one answer
+        # an inference can get wrong in a way only the user can see, so it must
+        # always be correctable in place.
+        self._origin_edit.setEnabled(not clicked)
+        self._grid_note.setVisible(clicked)
+        self._file_order_note.setVisible(hand_drawn and self._order_from_file)
 
     # ── internals ────────────────────────────────────────────────────────────
     def _can_convert(self) -> bool:

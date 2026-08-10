@@ -425,7 +425,7 @@ def test_summary_names_the_wells_and_which_input_produced_them(tmp_path):
 
     clicked = plan_conversion(layout, ConversionParams(
         grid_rows=1, grid_cols=3, well_order=("H12", "H11", "G11")))
-    assert "3 well(s) H12→G11 (clicked path)" in clicked.summary()
+    assert "3 well(s) H12→G11 (explicit path)" in clicked.summary()
 
 
 def test_destination_problem_flags_a_folder_that_already_holds_a_conversion(tmp_path):

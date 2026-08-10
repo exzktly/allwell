@@ -384,12 +384,17 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
 
     ctx = loaded_app._ctx
     wells = sorted(ctx.state.dataset.well_paths)
+    assert len(wells) >= 3, "premise: the fixture has wells to drag across"
     ctx.state.selection.selections.append(
         {"id": "g1", "name": "G1", "wells": [wells[0]]})
-    ctx.state.selection.current_selection_id = "g1"
     plate = ctx.widgets.get("_rep_map_plate")
 
     _goto(loaded_app, qtbot, "Groups")
+    # Entering the tab deselects whatever was active, so a plate click has no
+    # consequence until the user picks a group — the order a real edit follows.
+    assert ctx.state.selection.current_selection_id is None
+    ctx.state.selection.current_selection_id = "g1"
+
     assert not _plate_passive_in_group_mode(ctx), (
         "the plate went passive on Groups, so a drag would be dropped")
     plate.setSelectedWellIds(wells[:2])
@@ -398,7 +403,8 @@ def test_a_plate_drag_edits_the_group_only_from_the_groups_tab(loaded_app, qtbot
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2]
 
     _goto(loaded_app, qtbot, "Well Labels")
-    plate.setSelectedWellIds(wells[3:5])
+    ctx.state.selection.current_selection_id = "g1"
+    plate.setSelectedWellIds(wells[1:3])
     plate.selectionDragFinished.emit()
     qtbot.wait(10)
     assert sel_by_id(ctx, "g1").get("wells") == wells[:2], (

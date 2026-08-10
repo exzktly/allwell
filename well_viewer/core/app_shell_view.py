@@ -479,6 +479,15 @@ def build_ui(win) -> None:
     QVBoxLayout(win._sidebar_cell_browser_frame).setContentsMargins(0, 0, 0, 0)
     sidebar_layout.addWidget(win._sidebar_cell_browser_frame, 0)
     win._sidebar_cell_browser_frame.hide()
+    # Somewhere for the surplus height to go when no per-page frame is showing.
+    # The scroll area above is ``setWidgetResizable(True)``, so this column is
+    # always stretched to the viewport; every frame in it is hidden on each page
+    # change and the active page's hook re-shows one, but Home deliberately shows
+    # none. Stretch **0**, not 1: a factor of 1 would compete with
+    # ``_sidebar_main_frame``'s own stretch and halve the rail plate on every
+    # other page. Measured — the main frame stays 527px on Plotting with and
+    # without this line, and the nav stops spreading on Home.
+    sidebar_layout.addStretch(0)
 
     win._h_pane.addWidget(sidebar)
     win._sidebar_root = sidebar  # so mode toggles can hide/show the whole rail

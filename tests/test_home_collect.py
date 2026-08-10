@@ -125,7 +125,7 @@ def test_with_a_record_the_tiles_carry_real_numbers():
     ctx = _ctx(_block({w: _well() for w in WELLS}))
     tiles = {t.key: t for t in hc.stat_tiles(ctx)}
     assert tiles["wells"].value == 5
-    assert tiles["coverage"].value == 100
+    assert tiles["coverage"].value == "100%"
     assert all(t.available for t in tiles.values()
                if t.key in ("wells", "coverage"))
 
@@ -136,7 +136,9 @@ def test_coverage_always_shows_its_denominator():
     wells = {"A01": _well(intent=10, covered_any=9, covered_csv=9)}
     ctx = _ctx(_block(wells))
     coverage = next(t for t in hc.stat_tiles(ctx) if t.key == "coverage")
-    assert coverage.value == 90
+    assert coverage.value == "90%", (
+        "the one proportion on a strip of counts has to carry its unit where "
+        "it is read, not only in the line beneath it")
     assert "9 of 10" in coverage.sub
 
 
@@ -305,15 +307,27 @@ def test_work_is_counted_from_state():
 # ── next step ───────────────────────────────────────────────────────────────
 
 def test_no_dataset_offers_to_open_one():
-    assert hc.next_step(_ctx(None, data_dir=None))["action"] == "open"
+    assert hc.next_step(_ctx(None, wells=(), data_dir=None))["action"] == "open"
+
+
+def test_a_folder_that_opened_but_holds_no_wells_still_offers_to_open_one():
+    """``data_dir`` is set when a load *begins*, and for a folder that turns out
+    to hold nothing readable it stays set. The page is gated on the wells — the
+    same thing the shared empty state covering it is gated on — so the two
+    cannot describe the same moment differently."""
+    step = hc.next_step(_ctx(None, wells=(), data_dir="/data/plate7"))
+    assert step["action"] == "open"
+    assert not hc.has_dataset(_ctx(None, wells=(), data_dir="/data/plate7"))
 
 
 def test_the_ladder_puts_failures_above_everything_else():
     wells = {"A01": _well("complete", failed=["x"]),
              "A02": _well("partial", covered_any=4)}
     step = hc.next_step(_ctx(_block(wells)))
-    assert step["action"] == "errors"
     assert step["severity"] == "danger"
+    assert step["action"] == "complete", (
+        "showing the gap again is not a next step — every shortfall this page "
+        "reports is fixed by running the pipeline over what is missing")
 
 
 def test_a_missing_record_is_itself_the_next_step():

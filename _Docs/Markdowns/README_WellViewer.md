@@ -922,10 +922,16 @@ the viewer always tracks the schema + channel tokens the dataset was built with
 
 ### Home
 
-The page Review opens on, with or without a dataset. It answers the four things
-you want to know before doing anything else: what this plate is, whether the run
-that produced it actually finished, what it was run with, and what you have
-already done to it.
+The page Review opens on. It answers the four things you want to know before
+doing anything else: what this plate is, whether the run that produced it
+actually finished, what it was run with, and what you have already done to it.
+
+**Before you open anything** it shows the same "Load a directory." prompt every
+other page in Review shows when there is no dataset — with an **Open a
+dataset…** button on it, since this is the page the app starts on. The button
+opens the same folder picker as *Open…* at the top of the left rail (⌘O); there
+is one dialog, not two. Nothing else on the page is drawn until a dataset is
+open, because there would be nothing in it to read.
 
 **It reports; it does not measure.** Working out how much of each well's input
 its output covers means opening an archive and reading a whole CSV for every
@@ -949,6 +955,8 @@ What is on it:
   recorded, staged but never processed, images with no measurements behind them.
   Clicking a well selects it, the same selection every other page uses — it does
   not navigate, so you can pick several. Hovering one says what its numbers are.
+  There is no All / Invert / Clear row here, unlike the plate in the rail: those
+  act on what gets plotted, and nothing on this page plots.
 - **Notes.** The project notes, and the only place they are edited. Type and
   click away; it saves on its own. Whatever the numbers will not tell you in six months
   belongs here — which plate had the incubator alarm, which columns were
@@ -971,6 +979,20 @@ What is on it:
 
 Above all of it, one line saying what most needs doing next, and a button that
 does it.
+
+**When something is missing, that button finishes the run.** Failed wells,
+partial wells, wells with images but no measurements, wells that were staged and
+never processed — all of them open **Analyze** already set up to complete this
+dataset: pointed at the project folder, configured from the run's own recorded
+settings, with *Incremental* on so only the missing fields are processed, and
+with the wells an incremental run would otherwise skip forever listed for a full
+reprocess. You do not have to remember what the original run was told to do; the
+handoff carries it, and Analyze says on its dashboard what it just set up.
+
+**Opening a dataset always brings you here first**, whichever page you were on
+when you last quit. Everything else about that session is restored as before —
+it is only arriving with a new dataset that starts on Home, since that is the
+moment there is most to tell you.
 
 #### Telling the app what your wells mean
 

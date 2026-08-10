@@ -1078,12 +1078,21 @@ loaded (the `.../out` path in the split case), not the climbed display name.
 #### Empty states and build failures
 
 `ui_helpers.wrap_with_empty_state` wraps every centre tab whose body needs a
-dataset — the plots, Statistics, Spatial, Review CSV, Batch Export and smFISH —
-so a tab with nothing to show renders the same placeholder rather than an empty
-table, a blank panel, or a bare matplotlib canvas that reads as a failure. The
-wrap registers a `QStackedWidget` on `win._plot_empty_stacks` (page 0 the
-`EmptyState`, page 1 the body) and the refresh helpers flip all of them together,
-which is what keeps the wording and the moment of the swap identical across tabs.
+dataset — Home, the plots, Statistics, Spatial, Review CSV, Batch Export and
+smFISH — so a tab with nothing to show renders the same placeholder rather than
+an empty table, a blank panel, or a bare matplotlib canvas that reads as a
+failure. The wrap registers a `QStackedWidget` on `win._plot_empty_stacks`
+(page 0 the `EmptyState`, page 1 the body) and the refresh helpers flip all of
+them together, which is what keeps the wording and the moment of the swap
+identical across tabs.
+
+**A placeholder may carry one action.** `EmptyState.setAction(label, on_click)`
+adds a button under the hint; without it there is no button at all, which is
+what every site but Home wants — their hint names a control somewhere else and
+a button would be a second way to say it. Home is the page the application opens
+on, so its placeholder is the first screen and gets an explicit *Open a
+dataset…*. The refresher rewrites only a placeholder's text, hint and icon, so
+an action set once at build time survives every pass.
 
 **The placeholder says which "nothing" it is; the axes carry per-plot causes.**
 Each wrap site may pass a `reason(ctx) -> EmptyReason | None`, called on every
@@ -1320,6 +1329,73 @@ function on the page.
 Everything computable lives in `collect.py`, Qt-free and ctx-first, so the whole
 page is exercised in the fast lane against a plain namespace; `controller.py`
 paints widgets from what it returns and `tab_view.py` holds the arrangement.
+
+**Before a dataset is open, the page is not shown at all.** Home's body is
+wrapped in the shared `wrap_with_empty_state` stack like every other Review
+page, so the same "Load a directory." placeholder covers it and the same
+refresher flips it — a landing page reporting on nothing would otherwise open
+the application on a masthead reading "No dataset open" above an empty plate and
+a column of em-dashes. The one thing Home adds is an action on the placeholder
+itself (`EmptyState.setAction`, optional and unused by the other twelve sites):
+the hint names a control in the rail, and on the page the app launches on it is
+worth also being able to press the thing. The button runs `run_home_action(ctx,
+"open")`, the same route the next-step row takes, which reaches the window's own
+`_browse` rather than opening a second file dialog of its own.
+
+Home's own "is there a dataset" predicate is `collect.has_dataset`, which tests
+the **wells** rather than `data_dir`. The two disagree for the whole duration of
+a load — `data_dir` is set when one begins — and permanently for a folder that
+opened and yielded nothing readable. Since the placeholder covering the page is
+gated on the wells, a page gated on anything else could describe a dataset the
+placeholder says is not there.
+
+**Opening a dataset always lands on Home**, whatever page the last session
+ended on. `persistence/view_state.apply_view_state` restores `active_centre_tab`
+for everything else, but the arrival of a *dataset* is the moment a reader most
+needs to be told what they just opened, and dropping them onto a plot of a plate
+they have not been oriented to is not that. A profile with no Home page falls
+back to the saved tab.
+
+**Every shortfall Home reports offers the same next step: finish the run.**
+Failures, partial wells, images without measurements, staged-but-never-processed
+— all four route to `run_home_action(ctx, "complete")`, which hands the dataset
+to Analyze through the shell's `_open_dataset_in_analyze`, the same entry point
+Validate & Repair's *Complete this run in Analyze* uses. That carries three
+things a bare folder path does not: the dataset's own recorded sidecar (so the
+schema, separator and `csv_prefix` match the run being finished — a mismatched
+prefix reads its done-set from files that do not exist and silently reprocesses
+the plate), FOV-level incremental mode, and the per-well force list. The last is
+`collect.wells_needing_force`, the same rule Validate applies: a well with
+images and no CSV has nothing missing by the incremental diff, so it is skipped
+forever unless named, while a merely partial well the diff does fix. Sending the
+reader to a page that shows them the gap a second time is not a next step.
+
+**A Datasets tool is handed the project folder, not the loaded one.** Review's
+`data_dir` is where the CSVs are, which for the pipeline's layout is `out/`;
+every Datasets tool wants the folder above it holding both `in/` and `out/`.
+`controller.dataset_root` reads `dataset.in_dir`, which the loader sets exactly
+when it detected that layout, and falls back to `data_dir` for a flat folder of
+CSVs that has no parent to prefer.
+
+**Home's plate takes `role="editor"`, not `"picker"`.** The wells are clickable
+— that is what separates it from a dashboard's read-only map — but the built-in
+All / Invert / Clear row is not shown. Those act on the plot selection, and
+nothing on this page plots, so their effect is invisible from where they sit.
+
+**The masthead carries one action.** Reveal-folder and open-dataset are in the
+shell's own action cluster directly above the page, and Analyze and Datasets are
+two of the three title-bar mode segments, permanently on screen. Only Reload is
+here, because nothing else offers it and this page reports a record another
+process can replace underneath it.
+
+**Home is the one page with no rail body.** Every other feature's activation
+hook re-shows one of the sidebar's per-page frames, which `on_tab_change` has
+just hidden; Home shows none, because its plate is on the page and the rail's
+picker would be a second one on screen. That is a supported state rather than an
+accident: `RailNav` caps itself at its size hint and the rail column ends in a
+stretch-0 spacer, so the surplus height has somewhere to go. Before both, the
+nav was the only growable item left in a column stretched to the viewport and
+its rows spread from 33px to 81px on every visit to Home.
 
 Three rules the page is built around:
 

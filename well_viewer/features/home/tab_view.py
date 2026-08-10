@@ -165,7 +165,24 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.NoFrame)
     scroll.setObjectName("HomeScroll")
-    outer.addWidget(scroll)
+    # Before a dataset is open there is nothing here to report, and a page of
+    # em-dashes under a masthead reading "No dataset open" describes its own
+    # emptiness at length rather than saying what to do about it. Home takes the
+    # same placeholder every other Review page shows, through the same registry,
+    # so the wording and the moment of the swap are shared rather than
+    # re-decided here. No ``reason``: Home is gated on the dataset alone.
+    from well_viewer.core.ui_helpers import wrap_with_empty_state
+
+    stack = wrap_with_empty_state(ctx.window, scroll, icon="home")
+    reg.register("_home_empty_stack", stack)
+    outer.addWidget(stack)
+    # ...but Home is the page the app opens on, so pointing at a control in the
+    # rail and stopping there is weaker here than anywhere else. The button runs
+    # the same action the masthead and the next-step row use, so "open a
+    # dataset" cannot come to mean two things.
+    placeholder = getattr(stack, "_empty_placeholder", None)
+    if placeholder is not None:
+        placeholder.setAction("Open a dataset…", _action_handler(ctx, "open"))
 
     page = QWidget(scroll)
     scroll.setWidget(page)
@@ -182,7 +199,12 @@ def build_home_overview(ctx, parent: QWidget) -> None:
     body.addWidget(_build_your_work(ctx, page, reg))
     body.addStretch(1)
 
-    from .controller import refresh_home
+    from .controller import hide_rail_body, refresh_home
+    # Home is the landing page, and the landing page's activation hook never
+    # fires — ``build_centre`` selects it before connecting the change handler.
+    # So the rail has to be put into Home's state here, or the page looks one
+    # way on launch and another way every time after.
+    hide_rail_body(ctx)
     refresh_home(ctx)
 
 
@@ -303,6 +325,8 @@ def _build_notes(ctx, page: QWidget, reg) -> QWidget:
                 notes_schedule_save(ctx, widget_key=_NOTES_KEY)
             except Exception:
                 swallowed("home notes commit")
+            else:
+                _set_notes_status(ctx, "saved")
 
     edit = reg.register(_NOTES_KEY, _HomeNotes(frame))
     edit.setObjectName("HomeNotes")
@@ -310,8 +334,29 @@ def _build_notes(ctx, page: QWidget, reg) -> QWidget:
         "What happened on this plate? Anything the numbers won't tell you later.")
     edit.setPlainText(ctx.state.selection.notes_text or "")
     layout.addWidget(edit, 1)
-    layout.addWidget(_muted(frame, "Saves when you click away."))
+    # The commit is on focus-out and therefore invisible: a user types, clicks
+    # away, and nothing on screen distinguishes "written" from "lost". The line
+    # below says which, and is the only part of this page that changes without
+    # the record changing.
+    status = reg.register("_home_notes_status", _muted(frame, NOTES_IDLE))
+    layout.addWidget(status)
+    edit.textChanged.connect(lambda: _set_notes_status(ctx, "dirty"))
     return frame
+
+
+#: What the line under the notes box says in each state. Written out rather than
+#: assembled so the three readings can be compared side by side — the failure
+#: wording is the one that matters and it must not look like the others.
+NOTES_IDLE = "Saves when you click away."
+NOTES_DIRTY = "Unsaved — saves when you click away."
+NOTES_SAVED = "Saved."
+_NOTES_STATUS = {"idle": NOTES_IDLE, "dirty": NOTES_DIRTY, "saved": NOTES_SAVED}
+
+
+def _set_notes_status(ctx, state: str) -> None:
+    label = ctx.widgets.get_or_none("_home_notes_status")
+    if label is not None:
+        label.setText(_NOTES_STATUS.get(state, NOTES_IDLE))
 
 
 # ── tiles ───────────────────────────────────────────────────────────────────

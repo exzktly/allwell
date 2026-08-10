@@ -552,9 +552,31 @@ def restore(ctx, state: dict) -> None:
     # Active tab is restored last so its on-change hook triggers any
     # lazy build with cross-cutting state already in place. Drives the
     # nested plotting stack when a plot sub-tab is requested.
+    #
+    # **Home wins over the saved tab.** Opening a dataset is the moment a user
+    # most needs to be told what they just opened — whether its run finished,
+    # what is missing from it, what it was run with — and landing instead on
+    # whatever page they happened to quit from puts a plot of a plate they have
+    # not been oriented to in front of them. The saved tab is still restored for
+    # every other page, so a session that ends on Line Graphs comes back to Line
+    # Graphs; it is only the arrival of a *dataset* that goes to Home.
     target = state.get("active_centre_tab")
+    if _has_home(ctx):
+        _activate_tab(ctx, "Home")
+        return
     if isinstance(target, str) and target:
         _activate_tab(ctx, target)
+
+
+def _has_home(ctx) -> bool:
+    """Whether this build has a Home page to land on.
+
+    A feature-subset profile can leave it out entirely, and there the saved tab
+    is the best answer available rather than a page that does not exist.
+    """
+    notebook = getattr(ctx.window, "_notebook", None)
+    names = getattr(notebook, "pageNames", None)
+    return bool(callable(names) and "Home" in (names() or ()))
 
 
 def _activate_tab(ctx, name: str) -> None:

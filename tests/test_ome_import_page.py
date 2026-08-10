@@ -69,7 +69,9 @@ def test_converter_page_readout_and_run_gate(qapp, tmp_path):
     params = page.params()
     assert params.frame_order == "pos_in_time"
     assert params.fovs_per_well == 2
-    assert "timepoint(s)" in page._readout.text()
+    # The pass/fail line lives in its own label, so a refusal can be red while
+    # the neutral "what the file holds" context above it stays muted.
+    assert "timepoint(s)" in page._verdict.text()
 
 
 def test_readout_shows_metadata_well_target(qapp, tmp_path):
@@ -153,8 +155,11 @@ def test_plate_seeds_and_click_defines_well_order(qapp, tmp_path):
     page.refresh_readout()
     assert page._plate.order() == ["A01", "A02", "A03"]
     assert not page._plate.is_dirty()
-    # A preview does not populate params.well_order until the user owns it…
-    assert page.params().well_order == ("A01", "A02", "A03")
+    # A preview is a picture of the grid fields, not a second input: it must not
+    # reach params, or the grid's own wells become positions 1..n of an order
+    # the user is still defining, and every well they then click takes the
+    # previous stage position's images.
+    assert page.params().well_order == ()
 
     # "Generate path from grid" seeds an editable (dirty) order.
     page._generate_path()
@@ -475,3 +480,187 @@ def test_a_new_run_drops_the_previous_run_s_verdict(qapp, tmp_path):
     assert ctrl.page._outcome_label.text() == ""
     assert ctrl.page._outcome_label.styleSheet() == ""
     assert ctrl.page._outcome_label.toolTip() == ""
+
+
+# ── which input is in force, and what happens to the other one ───────────────
+
+
+def _click(page, well_id):
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+
+    from widgets.well_plate_selector import _parse_well_id
+
+    row, col = _parse_well_id(well_id)
+    grid = page._plate._grid
+    center = grid._cell_rect(row, col).center()
+    grid.mousePressEvent(QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress, QPointF(center), Qt.LeftButton,
+        Qt.LeftButton, Qt.NoModifier))
+
+
+def test_clicking_a_path_does_not_inherit_the_grids_seed_well(qapp, tmp_path):
+    """The reported case: a 1×1 grid at B02, then four clicked wells.
+
+    The grid's preview used to be submitted as the acquisition order and clicks
+    appended to it, so this produced five wells starting at B02 — every clicked
+    well one stage position later than the user meant.
+    """
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4,
+                      channel_names=("DAPI",))
+    ctrl = OmeImportController()
+    page = ctrl.page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("1")
+    page._origin_edit.setText("B02")
+    page.refresh_readout()
+    assert page._plate.order() == ["B02"]          # the grid's live preview
+    assert page.params().well_order == ()          # …which is not an input
+
+    for well in ("C03", "C04", "D04", "D03"):
+        _click(page, well)
+    page.refresh_readout()
+
+    assert page.params().well_order == ("C03", "C04", "D04", "D03")
+    assert "C03→D03" in page._verdict.text()
+    assert "clicked path" in page._verdict.text()
+
+
+def test_a_hand_drawn_path_greys_out_the_grid_controls(qapp, tmp_path):
+    """The user's complaint: fields that still accept input and are ignored."""
+    from datasets.ome_import.controller import OmeImportController
+
+    page = OmeImportController().page
+    page._rows_edit.setText("2")
+    page._cols_edit.setText("2")
+    page.refresh_readout()
+    assert page._rows_edit.isEnabled()
+    assert not page._grid_note.isVisibleTo(page)
+
+    _click(page, "C03")
+    page.refresh_readout()
+
+    for w in (page._rows_edit, page._cols_edit, page._origin_edit,
+              page._direction_cb):
+        assert not w.isEnabled()
+    assert page._grid_note.isVisibleTo(page)
+    # FOVs and frame order describe the file, not the ordering — still live.
+    assert page._fovs_edit.isEnabled()
+
+
+def test_clearing_the_path_hands_the_grid_back(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    page = OmeImportController().page
+    page._rows_edit.setText("2")
+    page._cols_edit.setText("2")
+    page.refresh_readout()
+    _click(page, "C03")
+    page.refresh_readout()
+    assert not page._rows_edit.isEnabled()
+
+    page._plate.clear()
+    page.refresh_readout()
+
+    assert page._rows_edit.isEnabled()
+    assert not page._grid_note.isVisibleTo(page)
+    assert page.params().well_order == ()
+    assert page._plate.order() == ["A01", "A02", "B02", "B01"]   # grid again
+
+
+def test_a_malformed_count_blocks_the_run_and_names_the_field(qapp, tmp_path):
+    """`_as_int`-or-zero made "two", "1.5" and "0" mean the same silent auto."""
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("4")
+    page.refresh_readout()
+    assert page._run_btn.isEnabled()
+
+    for text, field, expected in (
+        ("abc", "_workers_edit", "Workers must be a whole number"),
+        ("0", "_fovs_edit", "FOVs per well must be 1 or more"),
+        ("two", "_rows_edit", "Rows must be a whole number"),
+    ):
+        getattr(page, field).setText(text)
+        page.refresh_readout()
+        assert not page._run_btn.isEnabled(), (field, text)
+        assert not page._queue_btn.isEnabled(), (field, text)
+        assert expected in page._verdict.text(), (field, text)
+        assert page._verdict.objectName() == "Warn"
+        getattr(page, field).setText("")
+
+
+def test_a_refused_plan_is_red_and_a_good_one_is_not(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4,
+                      channel_names=("DAPI",))
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("4")
+    page.refresh_readout()
+    assert page._verdict.objectName() == "Muted"
+    assert page._verdict.text().startswith("✓")
+
+    page._cols_edit.setText("3")        # 4 frames don't divide into 3 wells
+    page.refresh_readout()
+    assert page._verdict.objectName() == "Danger"
+    assert page._verdict.text().startswith("⚠")
+
+
+def test_a_destination_that_already_holds_wells_blocks_the_run(qapp, tmp_path):
+    from datasets.ome_import.controller import OmeImportController
+
+    p = _write_packed(tmp_path / "plate.ome.tif", n_frames=4,
+                      channel_names=("DAPI",))
+    dest = tmp_path / "out_dataset"
+    (dest / "in").mkdir(parents=True)
+    (dest / "in" / "A01.zip").write_bytes(b"PK\x05\x06" + b"\0" * 18)
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+    page._rows_edit.setText("1")
+    page._cols_edit.setText("4")
+    page.set_destination_path(str(dest))
+    page.refresh_readout()
+
+    # A conversion overwrites the wells it writes and keeps the rest, which
+    # would leave one folder holding two different plates.
+    assert not page._run_btn.isEnabled()
+
+
+def test_a_run_locks_every_input_that_would_redraw_the_plate(qapp, tmp_path):
+    """A grid edit mid-run used to re-seed the preview, so the plate showed
+    wells that were not being written and lost the dials for the ones that
+    were, while the conversion carried on against the order it started with."""
+    from datasets.ome_import.controller import OmeImportController
+
+    page = OmeImportController().page
+    page._rows_edit.setText("2")
+    page._cols_edit.setText("2")
+    page.refresh_readout()
+    page.set_running(True)
+    page.set_well_fraction("A01", 1, 2)
+    assert page._plate._grid._fractions
+
+    for w in (page._grid_row, page._fovs_edit, page._seed_btn,
+              page._clear_path_btn, page._workers_edit, page._plate):
+        assert not w.isEnabled(), w
+
+    page._cols_edit.setText("3")        # the keystroke that used to do it
+    page.refresh_readout()
+    assert page._plate.order() == ["A01", "A02", "B02", "B01"]
+    assert page._plate._grid._fractions

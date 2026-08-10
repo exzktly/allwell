@@ -2980,6 +2980,22 @@ discards its staging file). A read-vs-write timing line is logged so the dominan
 cost is visible; the parallelism grain is per-well, so a degenerate single-well
 grid stays serial.
 
+**The grid and the clicked path are alternatives, and only one of them is an
+input.** The converter page draws the grid's serpentine onto the plate as a live
+*preview*, and the plate the preview lands on is the same one the user clicks
+into. So the page reads `well_order` from the plate **only once the widget is
+dirty** (`OmeImportPage.raw_fields`), and `PlateOrderEditor` makes the first click
+*replace* the preview rather than extend it: a preview is the host's guess, and
+carrying its wells into the order the user is defining makes them positions 1..n,
+pushing every clicked well one stage position later — each well then receives the
+previous position's images, with no count on screen that looks wrong. While a
+hand-drawn path is in force the grid, origin and serpentine controls are disabled
+with a note saying why, since they describe the other way of producing the same
+order and a control that accepts input and discards it is the page's most
+confusing state. `ConversionPlan.summary()` names the wells at both ends of the
+order and which input produced it for the same reason: the counts are identical
+either way.
+
 **The well ordering need not be rectangular.** Each stage position `i` maps to
 `well_labels[i // fovs_per_well]`, so the acquisition path is just an ordered list
 of wells (one well × FOV per position; FOVs-per-well is entered explicitly and
@@ -3908,7 +3924,25 @@ position/frame budget from the same `OmeLayout` and (when FOVs is pinned) the we
 count it implies, so the readout guides how many wells to place before any grid is
 entered, not only errors at the end. `apply.convert` calls `explode_ome_tiff` (which writes per-well zips into
 `<destination>/in/`, threaded, with progress + cancel), and `OmeImportWorker`
-runs it off the UI thread. **A finished conversion says how it went on the page.**
+runs it off the UI thread. **The form is read once, through
+`ome_import_compute.RawFields`** — the boxes exactly as typed, with `parse_count`
+telling a blank ("auto", a real answer) from a value that is not a whole number.
+`RawFields.problems()` returns the user-facing reasons a box can't be read and
+`to_params()` the settings it describes; the page shows the former and refuses to
+run while there are any, so a typo in FOVs per well or Workers is answered instead
+of collapsing into the same silent default as an empty box. The grid boxes are
+exempt while the order is hand-drawn, since nothing then reads them. The
+destination field carries a validator of its own (`destination_problem`) like
+every other tool's: a conversion overwrites the wells it writes and keeps the
+rest, so a folder that already holds a plate would end up holding two.
+The readout is two labels — neutral context above, and a pass/fail line below it
+whose object name switches between `Muted`, `Warn` and `Danger`, because a
+refusal and a green ✓ in the same grey differ only by a glyph. **A run locks
+every input that would redraw the plate**, not only the plate: the plate is the
+progress display, and a grid edit re-seeds its preview, which would swap the
+wells being reported on — dials and all — for the ones the grid currently
+describes while the conversion carries on against the order it started with.
+**A finished conversion says how it went on the page.**
 This is the one tool with no dashboard — it reports on the acquisition plate it
 already draws (below) — so the verdict has a label of its own under the progress
 bar (`set_outcome` / `clear_outcome`), painted by the shared

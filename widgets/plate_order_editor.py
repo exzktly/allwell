@@ -8,7 +8,9 @@ and this class adds only the two things the shared widget has no opinion about:
 
 * **Dirty ownership.** Every click marks the widget *user-owned*, which the
   embedding page uses to stop overwriting a hand-drawn order with the
-  rectangular grid preview it would otherwise keep pushing.
+  rectangular grid preview it would otherwise keep pushing. The first such click
+  also *replaces* the preview rather than extending it — see
+  :meth:`PlateOrderEditor._on_path_changed`.
 * **The ``orderChanged`` name** its host already listens for.
 
 Everything visible — the numbered wells, the alpha-blended arrow tracing the
@@ -52,6 +54,9 @@ class PlateOrderEditor(WellPlateSelector):
         self.setActionsVisible(False)
         self.setRowColumnSelectable(False)
         self._dirty = False
+        # The wells currently on screen only because a preview put them there.
+        # Kept so the first click can tell them from wells the user chose.
+        self._preview: list[str] = []
         self.pathChanged.connect(self._on_path_changed)
 
     # ── model API (the contract datasets/ome_import/view.py uses) ────────────
@@ -62,6 +67,7 @@ class PlateOrderEditor(WellPlateSelector):
     def set_order(self, labels) -> None:
         """Set the path from *labels* as a user-owned (dirty) order, no signal."""
         self._set_path(labels)
+        self._preview = []
         self._dirty = True
 
     def set_preview(self, labels) -> None:
@@ -73,6 +79,7 @@ class PlateOrderEditor(WellPlateSelector):
         """
         if self._dirty:
             return
+        self._preview = [str(w) for w in labels]
         self._set_path(labels)
 
     def is_dirty(self) -> bool:
@@ -83,6 +90,7 @@ class PlateOrderEditor(WellPlateSelector):
         if not self.pathWellIds() and not self._dirty:
             return
         self._set_path([])
+        self._preview = []
         self._dirty = False
         self.orderChanged.emit([])
 
@@ -104,7 +112,24 @@ class PlateOrderEditor(WellPlateSelector):
         return changed
 
     def _on_path_changed(self, ids: list) -> None:
-        """A click on the plate is the user taking ownership of the order."""
+        """A click on the plate is the user taking ownership of the order.
+
+        The first such click **replaces** the preview instead of extending it.
+        A preview is the host's guess, drawn in the same path the user clicks
+        into, so the plate's own append-on-click would silently make the guess's
+        wells positions 1..n and push every clicked well one place later — a
+        conversion where each well receives the previous stage position's
+        images, and no count on screen that looks wrong. Wells the user did
+        click survive, in the order they were clicked; if the click was on a
+        previewed well (the plate's remove gesture) the path is simply emptied,
+        which is the same "start from nothing" that taking over means.
+        """
+        ids = list(ids)
+        if not self._dirty and self._preview:
+            preview = set(self._preview)
+            ids = [w for w in ids if w not in preview]
+            self._set_path(ids)
+        self._preview = []
         self._dirty = True
         # A click goes straight to the grid, so the dial-clearing that
         # ``_set_path`` does for programmatic changes has to happen here too.

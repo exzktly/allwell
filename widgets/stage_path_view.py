@@ -58,8 +58,21 @@ class StagePathView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setObjectName("WellPlateSelector")   # same card as the plate above
+        self.setObjectName("StagePathView")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        # The plate's card, painted here rather than inherited. A
+        # ``WellPlateSelector`` builds that rule into a stylesheet it sets on
+        # *itself*, and this view is its sibling, not its child — taking the
+        # same object name got the name and none of the appearance, which is
+        # exactly the silent miss ``tests/test_theme_selectors.py`` exists to
+        # catch. Same tokens, so the two still read as one drawing.
+        self.setStyleSheet(f"""
+        #StagePathView {{
+            background-color: {theme.Colors.panel};
+            border: 1px solid {theme.Colors.border_subtle};
+            border-radius: {theme.Radii.md}px;
+        }}
+        """)
         self._plate: QWidget | None = None
         self._points: list[tuple[float, float]] = []
 

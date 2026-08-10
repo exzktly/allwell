@@ -153,7 +153,7 @@ def test_image_browser_subtabs_match_the_registry():
     and the one built eagerly, which declaration order does not express. That is
     a fair split only while the two agree on which tabs exist — a sub-leaf added
     to the registry and not to the tuple would be silently absent from the app,
-    which is issue #14 wearing a different hat.
+    which is the silent sub-tab drop wearing a different hat.
     """
     from well_viewer.features.image_browser.tab_view import SUBTABS
 
@@ -233,11 +233,11 @@ def test_home_subtab_behaviour_is_declared_not_listed():
     Two behaviours used to be module constants in the Home package: which tabs
     inset their frame (``_SUBTAB_MARGINS``) and which read the well selection so
     the rail plate stays live (``_TABS_USING_THE_PLATE``). Both are the same
-    shape as issue #14 in miniature -- a tab added to the registry and not to the
-    constant would silently inherit whichever answer the constant happened to
-    give it, with no error and nothing on screen saying so. A greyed plate on a
-    tab that needs it is a control that ignores clicks; a live one on a tab that
-    does not is a control whose clicks do nothing.
+    shape as the silent sub-tab drop in miniature -- a tab added to the
+    registry and not to the constant would silently inherit whichever answer the
+    constant happened to give it, with no error and nothing on screen saying so.
+    A greyed plate on a tab that needs it is a control that ignores clicks; a
+    live one on a tab that does not is a control whose clicks do nothing.
 
     The values themselves are asserted here because they are the *user-visible*
     rule, and they are what a careless edit to the registry would change.

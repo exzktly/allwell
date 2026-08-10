@@ -33,7 +33,8 @@ def _active_subtabs(ctx) -> tuple:
     ``[subtabs]`` allowlist: that ignores the flag, so a manifest narrowing this
     parent used to keep the ``Segmentation`` *descriptor* while the notebook
     never created its *tab*. Home was moved off the same predicate for the same
-    reason (issue #14).
+    reason: asking a bare string check about names nothing declares let a
+    manifest drop tabs it had never heard of.
 
     The order stays here rather than following declaration order, because it is a
     presentation decision this file owns: Image Table leads as the primary

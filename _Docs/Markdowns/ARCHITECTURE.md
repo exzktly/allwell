@@ -1323,10 +1323,11 @@ package: `reads_well_selection` decides whether the rail plate is live while tha
 tab shows (Groups edits a group's membership with it, Cell Gating draws its CDFs
 from the selected wells, Well Labels' prefix/suffix apply to them; Ratios and
 Pipeline Info ask nothing of it), and `subtab_inset` decides whether the tab's
-frame takes a gutter. Both were constants keyed by tab name, which is issue #14's
-shape in miniature — a tab added to the registry and not to the constant inherits
-whichever answer the constant happens to give it, silently. `reads_well_selection`
-is finer than `per_well_selection`: that one is resolved per *page*, and Home is
+frame takes a gutter. Both were constants keyed by tab name, which is the
+silent-sub-tab-drop shape in miniature — a tab added to the registry and not to
+the constant inherits whichever answer the constant happens to give it, with
+nothing on screen saying so. `reads_well_selection` is finer than
+`per_well_selection`: that one is resolved per *page*, and Home is
 per-well as a page while only three of its five editors ask the plate anything.
 
 `Cell Gating`, `Groups` and `Well Labels` carry `removable=False`. That is not a

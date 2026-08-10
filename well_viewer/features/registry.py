@@ -793,8 +793,10 @@ def _features() -> list[FeatureDescriptor]:
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────
+        # Not removable: it has no catalog entry, so its source is never
+        # stripped, and `thin` keeps it today only by naming it in [subtabs].
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
-                          on_activate=_activate_segmentation),
+                          on_activate=_activate_segmentation, removable=False),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
                           on_activate=_activate_image_table,
                           on_dataset_loaded=_loaded_image_table,
@@ -816,7 +818,7 @@ def _features() -> list[FeatureDescriptor]:
         # than descending into them (``tab_controller._resolve_leaf``). Home's
         # own sub-tab handler does the per-tab work instead.
         FeatureDescriptor(name="Cell Gating", parent="Home",
-                          on_activate=_activate_cell_gating),
+                          on_activate=_activate_cell_gating, removable=False),
     ]
 
 

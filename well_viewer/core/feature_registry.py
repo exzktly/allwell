@@ -113,6 +113,18 @@ class FeatureDescriptor:
     # Selection-behaviour flags (replace the hard-coded tab-name string sets).
     per_well_selection: bool = False     # was membership in _PER_WELL_TABS
     single_well_selection: bool = False  # was the smFISH single-well check
+    # Whether a build profile may drop this descriptor. ``False`` marks a
+    # sub-leaf the app cannot run without — its code is never stripped and its
+    # tab is never narrowed away by a ``[subtabs]`` allowlist.
+    #
+    # It exists because a container that enumerates its sub-tabs from the
+    # registry hands the profile a lever over *every* leaf, including ones other
+    # code reaches unconditionally. Home's Groups tab is the case in point:
+    # ``centre_view.build_centre`` builds the rail plate that edits it at
+    # startup with no descriptor check, so a profile dropping the tab would
+    # leave a plate editing something that is not there. Declaring the tab and
+    # then relying on nobody excluding it is not a contract; this is.
+    removable: bool = True
 
 
 class FeatureRegistry:

@@ -100,3 +100,54 @@ def test_app_boots_and_loads_under_subset_profile(qtbot, monkeypatch, mini_datas
     app._invalidate_stats_cache()
     from well_viewer.core.channel_state_controller import update_channel_selector
     update_channel_selector(app._ctx)
+
+
+# ── non-removable sub-leaves ────────────────────────────────────────────────
+
+def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
+    """``[subtabs]`` narrows a parent's *optional* leaves, not all of them.
+
+    A container that enumerates its sub-tabs from the registry hands the profile
+    a lever over every leaf — including ones other code reaches without asking
+    whether they are present. Home's Groups tab is the case: ``build_centre``
+    builds the rail plate that edits it at startup with no descriptor check, so
+    a manifest able to drop the tab would produce a build that starts and then
+    shows a plate editing something that is not there.
+    """
+    p = Profile(name="p", features=frozenset({"Home", "Image Browser"}),
+                subtabs={"Home": frozenset({"Ratios"}),
+                         "Image Browser": frozenset({"Image Table"})})
+    reg = build_feature_registry(p)
+    assert reg.get("Cell Gating") is not None, "a removable=False leaf was dropped"
+    assert reg.get("Segmentation") is not None
+    # …while the optional ones still obey the allowlist.
+    assert reg.get("Cell Browser") is None
+    assert reg.get("Playground") is None
+
+
+def test_the_flag_does_not_rescue_a_leaf_whose_parent_is_gone():
+    """It survives *its parent*, not the absence of one."""
+    p = Profile(name="p", features=frozenset({"Plotting"}), subtabs={})
+    reg = build_feature_registry(p)
+    assert reg.get("Cell Gating") is None
+    assert reg.get("Segmentation") is None
+
+
+def test_every_non_removable_subleaf_is_absent_from_the_strip_catalog():
+    """The flag and ``profiles/full.toml`` must agree.
+
+    A descriptor marked non-removable but carrying a catalog entry would have
+    its source deleted by ``derive_profile`` while the registry insisted the
+    feature was present — the two halves of the profile system disagreeing.
+    """
+    import tomllib
+    from pathlib import Path
+
+    catalog = tomllib.loads(
+        (Path(__file__).resolve().parent.parent / "profiles" / "full.toml")
+        .read_text(encoding="utf-8"))
+    strippable = {str(f.get("name")) for f in catalog.get("feature", [])}
+    kept = {d.name for d in build_feature_registry(FULL).all()
+            if d.parent and not d.removable}
+    assert not (kept & strippable), (
+        f"marked non-removable but listed in full.toml: {sorted(kept & strippable)}")

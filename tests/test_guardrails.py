@@ -69,7 +69,10 @@ _HARD_FAIL = True
 # The architecture-review sweep deleted three more delegators whose last call
 # site had already been rewired (_render_review_image_display,
 # _set_review_image_include_mode, _update_tp_selection_display): 876 → 862.
-RUNTIME_APP_LINE_BUDGET = 862
+# The A8 teardown finished for the replicate-set helpers: the nine-symbol lazy
+# bind into features/grouping went, four of its names being dead, and the three
+# ctx-shaped adapters were replaced by direct domain calls. 862 -> 856.
+RUNTIME_APP_LINE_BUDGET = 856
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,

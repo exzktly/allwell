@@ -17,6 +17,13 @@ from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS
 from well_viewer.domain.viewer_state import extract_well_token as _extract_well_token
 
 
+# Pixel geometry for the New Replicate Set dialog. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_DLG_MIN_W = 420
+_DLG_MIN_H = 480
+
+
 def make_replicate_pairs(toks, size=2):
     """Chunk adjacent tokens into ReplicateSets of ``size`` wells each.
 

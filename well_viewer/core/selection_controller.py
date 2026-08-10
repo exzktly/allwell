@@ -878,7 +878,7 @@ def groups_centre_refresh(ctx) -> None:
         from well_viewer.features.home.groups.selections_view import rep_panel_refresh
         rep_panel_refresh(ctx)
         label_grid_refresh(ctx)
-    from well_viewer.features.grouping.controller import rep_refresh_map
+    from well_viewer.features.home.groups.controller import rep_refresh_map
     rep_refresh_map(ctx)
     update_active_group_label(ctx)
 

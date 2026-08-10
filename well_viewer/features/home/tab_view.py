@@ -11,9 +11,10 @@ column this module builds, whose block order follows the questions a returning
 user asks: what is this plate, what should I do about it, did the run finish,
 what did I say about it, what is in it, what went wrong, what was it run with,
 what have I already done. The tabs after it are where the user *declares* what
-the wells mean, and their bodies live in ``features/grouping`` and
-``features/scatter``; :mod:`.controller` builds them through lazy proxies so
-this feature never imports another one at module scope.
+the wells mean. Each has its own sub-package beside this module —
+``cell_gating/``, ``groups/``, ``labels/``, ``ratios/``, ``pipeline_info/`` —
+and :mod:`.controller` builds them through lazy proxies, so a sub-package a
+profile strips is never imported.
 """
 
 from __future__ import annotations

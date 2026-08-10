@@ -48,6 +48,13 @@ _COORD_DECIMALS = 3
 # repeatability.
 _JITTER_FRACTION = 0.02
 
+# How far a well's mean coordinate may sit from a whole number of pitches before
+# the coordinates are read as the microscope's own frame rather than the plate's.
+# A third of a pitch is 3 mm on a 96-well plate: far wider than any real
+# centring error, and far short of the half-pitch at which two wells would be
+# equally good answers.
+_PLATE_FRAME_TOL = 0.33
+
 
 @dataclass(frozen=True)
 class StageLayout:
@@ -71,6 +78,14 @@ class StageLayout:
     # what the page's serpentine preview draws. A raster scan — every row left
     # to right — is not serpentine, and its order has to be given explicitly.
     serpentine: bool = True
+    # ``(row, col)`` of the block's top-left well on the plate, when the
+    # coordinates are stated in the plate's own frame — A01 at the origin, so
+    # that every position lands on a whole number of pitches inside an 8x12
+    # grid. Then the wells are arithmetic rather than a shape to be placed.
+    # ``None`` when the frame is the microscope's instead (an offset zero,
+    # negative coordinates, a block that would run off the plate), which is the
+    # only case where the starting well has to come from somewhere else.
+    absolute_origin: tuple[int, int] | None = None
     # The well-to-well step in the file's own coordinate units. Carried because
     # it is the conversion factor between stage coordinates and plate cells, and
     # re-deriving it somewhere else would be a second definition of the same
@@ -301,6 +316,7 @@ def infer_stage_layout(positions) -> StageLayout | None:
     fovs = per_well.pop()
     direction, serpentine = _direction_and_serpentine(cells)
     order = _first_visits(cells)
+    origin = _absolute_origin(points, cells, step)
     return StageLayout(
         n_positions=len(points),
         rows=rows,
@@ -310,6 +326,7 @@ def infer_stage_layout(positions) -> StageLayout | None:
         direction=direction,
         serpentine=serpentine,
         pitch=float(step or 0.0),
+        absolute_origin=origin,
     )
 
 
@@ -326,6 +343,47 @@ def place(layout: StageLayout, origin_row: int, origin_col: int) -> list[str]:
             return []
         labels.append(f"{chr(ord('A') + row)}{col + 1:02d}")
     return labels
+
+
+def _absolute_origin(points, cells, step: float,
+                     rows: int = 8, cols: int = 12) -> tuple[int, int] | None:
+    """Where this block sits on the plate, if the coordinates say so.
+
+    A scanner that reports positions in the *plate's* frame puts A01 at the
+    origin, so every well's centre is a whole number of pitches out and the
+    well is arithmetic: ``round(y / pitch)``, ``round(x / pitch)``. A scope
+    reporting in its own frame has an arbitrary zero, and then the same
+    arithmetic is meaningless — so it is only believed when **every** well in
+    the block lands on its grid position within a fraction of a pitch and
+    inside the plate. Measured on each well's mean coordinate rather than on
+    single images, so the fields of view inside a well cannot pull it off.
+    """
+    if step <= 0 or not isfinite(step):
+        return None
+    sums: dict[tuple[int, int], list[float]] = {}
+    for (r, c), (x, y) in zip(cells, points):
+        acc = sums.setdefault((r, c), [0.0, 0.0, 0.0])
+        acc[0] += x
+        acc[1] += y
+        acc[2] += 1
+    base: tuple[int, int] | None = None
+    for (r, c), (sx, sy, n) in sums.items():
+        mx, my = sx / n, sy / n
+        ci, ri = round(mx / step), round(my / step)
+        if abs(mx - ci * step) > step * _PLATE_FRAME_TOL:
+            return None
+        if abs(my - ri * step) > step * _PLATE_FRAME_TOL:
+            return None
+        if not (0 <= ri < rows and 0 <= ci < cols):
+            return None
+        corner = (ri - r, ci - c)
+        if base is None:
+            base = corner
+        elif corner != base:
+            return None      # the block is not rigid on the plate's own grid
+    if base is None or base[0] < 0 or base[1] < 0:
+        return None
+    return base
 
 
 def path_in_cells(positions, pitch: float,

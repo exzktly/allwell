@@ -2629,9 +2629,14 @@ and roles**, and the **timepoint labels**. A scan that isn't a plain serpentine
 is handed over as a clicked path instead, since the grid fields cannot express
 one.
 
-The **starting well** is the one thing coordinates cannot give: they say where
-the *stage* was, and no file states that in plate terms. But acquisition
-software usually writes the well into each position's name — `B02`,
+The **starting well** usually comes from the file too. Many plate scanners
+report positions in the *plate's* own frame — A01 at the origin — so every well
+centre is a whole number of well-pitches out and the well is arithmetic: a block
+at 27 mm, 18 mm is C04. All-Well believes that only when every well in the scan
+lands on its grid position within a third of a pitch and inside the plate;
+otherwise the coordinates are in the microscope's own frame, with an arbitrary
+zero, and say nothing about the plate. Failing that, acquisition software usually
+writes the well into each position's name — `B02`,
 `Well B2, Site 1`, `scan_B02_f0` — and when every position parses, All-Well uses
 those names directly: the origin is filled in and the whole visit order comes
 from the file rather than from a grid. Only when the names say nothing does the

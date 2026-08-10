@@ -373,10 +373,20 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
     inferred = inferred if inferred is not None else infer_layout(layout)
     if inferred is None:
         return None
+    # The block is *placed* at the origin the caller passes, always: an origin
+    # the user has typed is an answer, and an inference never overrules one.
+    # What the coordinates give is the origin to *offer* (``start`` below), which
+    # the page applies into that same box on a form nobody has answered — so a
+    # plate-referenced file still ends up placing itself, by filling the field
+    # rather than by ignoring it.
     try:
         origin_row, origin_col = well_row_col(origin or "A01")
     except ValueError:
         origin_row, origin_col = 0, 0
+    if inferred.absolute_origin is not None:
+        origin_row, origin_col = (
+            inferred.absolute_origin if not (origin or "").strip()
+            else (origin_row, origin_col))
     # An explicit order whenever the grid fields could not reproduce this one.
     # "Is it a serpentine?" is not that question: a stage that reports Y (or X)
     # descending sweeps a perfectly good serpentine whose *first* well is the
@@ -387,10 +397,15 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
     placed = place(inferred, origin_row, origin_col)
     if not placed:
         return None
+    # Compared at the origin the placement actually used — which the file may
+    # have supplied — not at the one that was passed in. Comparing against a
+    # serpentine drawn from a different corner makes every plate-referenced scan
+    # look like a path the grid cannot express.
+    start_label = f"{chr(ord('A') + origin_row)}{origin_col + 1:02d}"
     try:
         from_grid = serpentine_well_labels(
             inferred.rows, inferred.cols,
-            origin=origin or "A01", direction=inferred.direction)
+            origin=start_label, direction=inferred.direction)
     except ValueError:
         from_grid = []
     order = () if placed == from_grid else tuple(placed)
@@ -400,6 +415,9 @@ def suggest_layout(layout: OmeLayout, origin: str = "A01",
     # places it, while a StageLabel names the well outright.
     named = wells_from_names(layout.position_names)
     start = ""
+    if inferred.absolute_origin is not None:
+        r, c = inferred.absolute_origin
+        start = f"{chr(ord('A') + r)}{c + 1:02d}"
     if named:
         visited = list(dict.fromkeys(named))
         start = visited[0]

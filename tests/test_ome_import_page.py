@@ -773,9 +773,14 @@ def test_applying_the_suggestion_fills_the_ordering_controls(qapp, tmp_path):
     assert (page._rows_edit.text(), page._cols_edit.text()) == ("2", "3")
     assert page._fovs_edit.text() == "4"
     assert page._direction_cb.currentData() == "row"
-    # The origin stays the user's, and the plate draws the placed block.
-    assert page._plate.order() == ["B02", "B03", "B04", "C04", "C03", "C02"]
-    assert "6 well(s) B02→C02" in page._verdict.text()
+    # Pressing the button is asking for the file's answer, and these
+    # coordinates are stated in the plate's own frame — so the origin it names
+    # replaces the typed one, and the block is placed where the file says.
+    # (Nothing is overwritten *without* being asked: see
+    # test_an_answered_form_is_never_overwritten_by_the_file.)
+    assert page._origin_edit.text() == "A01"
+    assert page._plate.order() == ["A01", "A02", "A03", "B03", "B02", "B01"]
+    assert "6 well(s) A01→B01" in page._verdict.text()
 
 
 def test_no_suggestion_is_offered_when_the_file_has_no_stage_coordinates(qapp, tmp_path):
@@ -904,3 +909,38 @@ def test_the_readout_says_a_run_will_be_resumed(qapp, tmp_path):
     page._rows_edit.setText("2")
     page.refresh_readout()
     assert not page._run_btn.isEnabled()
+
+
+def test_a_plate_referenced_file_needs_nothing_typed(qapp, tmp_path):
+    """The whole point: pick the file, and the page already knows which wells
+    were imaged — because the coordinates are stated in the plate's frame."""
+    from datasets.ome_import.controller import OmeImportController
+
+    pitch, fov = 9000.0, 600.0
+    coords = [(c * pitch + (f % 2) * fov, r * pitch + (f // 2) * fov)
+              for r in (2, 3) for c in (3, 4, 5) for f in range(4)]
+    planes = "".join(
+        f'<Plane TheT="{i}" TheC="0" TheZ="0" PositionX="{x}" PositionY="{y}"/>'
+        for i, (x, y) in enumerate(coords))
+    mapping = "".join(
+        f'<TiffData FirstT="{i}" FirstC="0" FirstZ="0" IFD="{i}" PlaneCount="1"/>'
+        for i in range(len(coords)))
+    xml = ('<OME xmlns="http://www.openmicroscopy.org/Schemas/OME/2016-06">'
+           '<Image ID="Image:0"><Pixels ID="Pixels:0" DimensionOrder="XYZCT" '
+           'Type="uint16" SizeX="6" SizeY="6" SizeC="1" SizeZ="1" '
+           f'SizeT="{len(coords)}">'
+           '<Channel ID="Channel:0:0" Name="DAPI" SamplesPerPixel="1"/>'
+           f'{planes}{mapping}</Pixels></Image></OME>')
+    p = tmp_path / "plate.ome.tif"
+    tifffile.imwrite(str(p), np.zeros((len(coords), 6, 6), np.uint16),
+                     description=xml, metadata=None, photometric="minisblack")
+
+    page = OmeImportController().page
+    page._src_field.set_path(str(p))
+    page._on_source_changed()
+
+    assert page._origin_edit.text() == "C04"
+    assert page._fovs_edit.text() == "4"
+    assert page._plate.order() == ["C04", "C05", "C06", "D04", "D05", "D06"]
+    assert "6 well(s) C04→D06" in page._verdict.text()
+    assert "starting at C04" in page._suggest_label.text()

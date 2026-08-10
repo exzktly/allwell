@@ -228,3 +228,27 @@ def test_coordinates_that_describe_nothing_are_refused():
     # A layout that does survive never carries a scale nothing can be drawn at.
     good = infer_stage_layout(_scan(2, 3, 4)[0])
     assert good.pitch > 0
+
+
+def test_plate_referenced_coordinates_name_the_wells_outright():
+    """A scanner reporting in the *plate's* frame puts A01 at the origin, so
+    every well centre is a whole number of pitches out and the well is
+    arithmetic — no origin to place, no shape to position."""
+    for (r0, c0) in ((0, 0), (2, 3), (6, 10)):
+        points = [
+            (c * PITCH + (f % 2) * FOV, r * PITCH + (f // 2) * FOV)
+            for r in range(r0, r0 + 2) for c in range(c0, c0 + 2)
+            for f in range(4)
+        ]
+        layout = infer_stage_layout(points)
+        assert layout.absolute_origin == (r0, c0), (r0, c0)
+
+
+def test_a_microscope_framed_file_says_nothing_about_the_plate():
+    """An arbitrary zero, or coordinates that would run off the plate, means the
+    frame is the scope's own — and then the wells genuinely are not in there."""
+    base, _ = _scan(2, 3, 4)
+    assert infer_stage_layout(base).absolute_origin == (0, 0)
+    for offset in ((123456.0, 98765.0), (-50000.0, -50000.0), (PITCH / 2, 0.0)):
+        shifted = [(x + offset[0], y + offset[1]) for x, y in base]
+        assert infer_stage_layout(shifted).absolute_origin is None, offset

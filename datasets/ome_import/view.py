@@ -532,6 +532,16 @@ class OmeImportPage(LogPanelMixin, QWidget):
         if self._src_field.path() and not self._dest_user_set:
             self._dest_field.set_path(str(default_dest(self._src_field.path())))
         self.refresh_readout()
+        # Then, once, whatever the file itself answers — here rather than inside
+        # ``refresh_readout``, which is re-entrant: applying a suggestion edits
+        # fields that call it again, and the outer pass would finish by writing
+        # a readout computed from the form as it stood *before* the apply.
+        # A form the user has answered is never overwritten.
+        layout = self._read_layout(self._src_field.path())
+        if (self._suggestion is not None and layout is not None
+                and self._auto_apply_key != id(layout) and self._untouched()):
+            self._auto_apply_key = id(layout)
+            self._apply_suggestion()
 
     def _on_dest_changed(self) -> None:
         self._dest_user_set = True
@@ -791,13 +801,6 @@ class OmeImportPage(LogPanelMixin, QWidget):
             f"↳ Read from the file: {self._suggestion.describe()}."
         )
         self._suggest_row.setVisible(True)
-        # Applied without being asked only on a form the user has not answered.
-        # A file that describes itself should not need the same answers typed
-        # back into it, and the button stays for a second look or an undo by
-        # editing.
-        if self._auto_apply_key != id(layout) and self._untouched():
-            self._auto_apply_key = id(layout)
-            self._apply_suggestion()
 
     def _refresh_path(self, layout) -> None:
         """Redraw the stage path, anchored where the run will actually start.
@@ -831,6 +834,15 @@ class OmeImportPage(LogPanelMixin, QWidget):
             return
         if suggestion.origin:
             self._origin_edit.setText(suggestion.origin)
+            # Re-read at that origin before applying the rest: the order was
+            # placed against whatever the box said a moment ago, and the box
+            # has just been answered by the file.
+            layout = self._read_layout(self._src_field.path())
+            if layout is not None:
+                suggestion = suggest_layout(
+                    layout, suggestion.origin,
+                    inferred=self._inferred_for(layout)) or suggestion
+                self._suggestion = suggestion
         if suggestion.frame_order:
             index = self._frame_order_cb.findData(suggestion.frame_order)
             if index >= 0:

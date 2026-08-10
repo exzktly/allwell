@@ -3003,8 +3003,7 @@ them apart needs the absolute scale, which means trusting the file's
 outright rather than answered: every plane at one coordinate, fewer than two
 distinct positions, or a scale that is not finite and positive all return
 `None`, since a confident layout out of those is offered to the user as the
-file's own answer. What is **not** inferred is which physical well the block starts
-at: stage coordinates are relative to the microscope's origin, which no file
+file's own answer. What is **not** always inferred is which physical well the block starts at: stage coordinates are relative to the microscope's origin, which no file
 states in plate terms, so `StageLayout.relative_order` is `(row, col)` offsets and
 `place()` puts them at the origin the user chose. `stage_layout.path_in_cells` converts the same coordinates into **plate
 cells** — one unit per well, fractional inside one — anchored so the first
@@ -3049,7 +3048,13 @@ dimension — from which coordinates repeat and how: every position visited once
 is `single`, a sequence running through all of them before repeating is
 `pos_in_time`, one repeating each position consecutively is `time_in_pos`, and
 anything else is `None` rather than a guess. That also yields the timepoint
-count. And `ome_import_compute.wells_from_names` reads the **starting well**
+count. `StageLayout.absolute_origin` reads the **starting well** straight out of the
+coordinates when they are stated in the plate's own frame — A01 at the origin,
+every well centre a whole number of pitches out — believed only when every well
+in the block lands on its grid position within `_PLATE_FRAME_TOL` of a pitch and
+inside the plate, since a microscope-framed file has an arbitrary zero and the
+same arithmetic would be meaningless. Failing that,
+`ome_import_compute.wells_from_names` reads it
 out of `OmeLayout.position_names` (each `<Image>`'s `<StageLabel>` name, else
 its own) — the only thing in an OME-TIFF that locates a position on the *plate*
 rather than on the stage. Every name must yield exactly one well token or the

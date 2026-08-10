@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QApplication, QWidget
 
 from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_tab
 from tests.widget_registry_helpers import assert_handles_registered
@@ -42,3 +42,19 @@ def test_build_registers_handles_and_stamps_app(viewer_app, qtbot):
     build_cell_gating_tab(app._ctx, parent)  # exercises the reads-via-stamp too
 
     assert_handles_registered(app, _HANDLES)
+
+    # Let the canvas paint before the test ends. The builder draws the themed
+    # empty state, which schedules an idle draw, and nothing here runs the event
+    # loop -- so it was still pending when the test returned. pytest-qt then
+    # calls `processEvents()` in its post-call hook, by which point the test's
+    # locals are released; `qtbot.addWidget` holds `parent` only weakly, so the
+    # widget tree is already collected and matplotlib drives `_draw_idle` on a
+    # deleted C++ object (`RuntimeError: Internal C++ object
+    # (FigureCanvasQTAgg) already deleted`). Draining it here resolves the draw
+    # while the canvas is still alive.
+    #
+    # `qtbot.wait(0)` is not a substitute: measured, it leaves the draw pending
+    # and the file still fails. Not a product bug and not this test's subject,
+    # but it failed on every run in the slow lane, where the `slow` mark keeps
+    # CI from ever seeing it.
+    QApplication.processEvents()

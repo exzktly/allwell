@@ -11,9 +11,11 @@ column this module builds, whose block order follows the questions a returning
 user asks: what is this plate, what should I do about it, did the run finish,
 what did I say about it, what is in it, what went wrong, what was it run with,
 what have I already done. The tabs after it are where the user *declares* what
-the wells mean, and their bodies live in ``features/grouping`` and
-``features/scatter``; :mod:`.controller` builds them through lazy proxies so
-this feature never imports another one at module scope.
+the wells mean. Each has its own sub-package beside this module —
+``cell_gating/``, ``groups/``, ``labels/``, ``ratios/``, ``pipeline_info/`` —
+and each is built by calling its own descriptor's ``build``, whose adapter in
+``features/registry.py`` holds the only import of the package, so a sub-package a
+profile strips is never imported.
 """
 
 from __future__ import annotations
@@ -26,7 +28,6 @@ from PySide6.QtWidgets import (
 
 import theme
 from well_viewer.core.app_shell_view import mirror_tab_widget
-from well_viewer.core.profile import active_profile
 from well_viewer.core.selection_controller import import_selections_from_json
 from well_viewer.core.ui_helpers import notes_schedule_save
 from widgets.icon_button import IconButton
@@ -43,33 +44,52 @@ _NOTES_KEY = "_home_notes_edit"
 #: The Import action, registered so the sub-tab handler can hide it on Overview.
 IMPORT_KEY = "_home_import_btn"
 
-#: The page's tabs, in order. Overview leads because it is the landing page and
-#: reports rather than asks. Cell Gating follows it as the definition users reach
-#: for most, keeping the order the definitions had among themselves.
-SUBTABS = (
-    "Overview", "Cell Gating", "Groups", "Well Labels", "Ratios",
-    "Pipeline Info",
-)
+#: The report this module builds. Every other tab is a definition editor whose
+#: body lives in a sub-package beside this one and is declared in the feature
+#: registry, so no tab is *selected* by name here — the list comes from
+#: ``active_subtabs``. Two per-tab presentation facts are still named, below and
+#: in ``controller._TABS_USING_THE_PLATE``: which tabs inset their frame, and
+#: which read the well selection. Both would sit better on the descriptors, the
+#: way ``per_well_selection`` already does for top-level tabs.
+OVERVIEW = "Overview"
 
-#: Tabs whose content is a definition editor rather than the report. The Import
-#: action and the sidebar's group-editing plate belong to these and to no other.
-DEFINITION_SUBTABS = tuple(t for t in SUBTABS if t != "Overview")
+def _subtab_inset(ctx, name: str) -> int:
+    """This tab's own gutter, in pixels.
 
-#: Each body's own inset. The report and the two read-only panes paint to their
-#: own edges; the two editable grids want a gutter. The frames themselves are
-#: flush with the notebook either way, which is what ``test_page_alignment``
-#: measures.
-_SUBTAB_MARGINS = {
-    "Groups": theme.Spacing.md,
-    "Well Labels": theme.Spacing.md,
-}
+    Which tabs want one is the descriptor's ``subtab_inset``, not a list here:
+    the report and the read-only panes paint to their own edges, the editable
+    grids want a gutter, and a tab added tomorrow should not silently get the
+    wrong one because nobody updated a constant. The descriptor carries the
+    decision and this supplies the spacing token, so the registry never imports
+    ``theme``. The frames themselves are flush with the notebook either way,
+    which is what ``test_page_alignment`` measures.
+    """
+    desc = ctx.features.get(name)
+    return theme.Spacing.md if (desc is not None and desc.subtab_inset) else 0
 
 
-def active_subtabs() -> tuple[str, ...]:
-    """The tabs this build ships. Overview is not removable — it is the page."""
-    prof = active_profile()
-    return tuple(t for t in SUBTABS
-                 if t == "Overview" or prof.includes_subtab("Home", t))
+def active_subtabs(ctx) -> tuple[str, ...]:
+    """The tabs this build ships: the report, then the registry's Home sub-leaves.
+
+    Enumerated from the registry rather than from a constant filtered by
+    ``Profile.includes_subtab``. That helper is a bare string check against the
+    ``[subtabs]`` allowlist and never consults descriptors, so asking it about a
+    name nothing declares let a manifest drop tabs it had never heard of. Here
+    the profile has already been applied — ``build_feature_registry`` runs
+    ``Profile.includes`` over the descriptors — so every name a ``[subtabs]``
+    line can reference is a declared sub-leaf, and one marked ``removable=False``
+    survives regardless. Same mechanism Plotting uses (``centre_view``).
+    """
+    return (OVERVIEW, *ctx.features.sub_leaves("Home"))
+
+
+def definition_subtabs(ctx) -> tuple[str, ...]:
+    """The tabs that are editors rather than the report.
+
+    Derived from the live list, not a constant: a build that ships fewer tabs
+    must not keep claiming the missing ones are on screen.
+    """
+    return tuple(t for t in active_subtabs(ctx) if t != OVERVIEW)
 
 
 def _card(parent: QWidget, title: str = "") -> tuple[QFrame, QVBoxLayout]:
@@ -130,17 +150,28 @@ def build_home_tab(ctx, parent: QWidget) -> None:
     ctx.runtime.home.subtabs = sub_tabs
     ctx.runtime.home.built = {}
 
-    for name in active_subtabs():
+    # Fresh frames mean nothing is built into them yet, so the per-tab
+    # "already built" flags reset with them. Cell Gating carries its own —
+    # ``build_cell_gating_subtab`` early-returns on it, because persistence can
+    # reach that builder with no sub-tab index to hand over — and the frame loop
+    # cleared it here before the builders moved onto descriptors. Without the
+    # clear, a rebuilt page would early-return into an empty tab whose widget
+    # handles point at destroyed C++ objects, with no exception and no log line,
+    # since ``build_home_subtab`` would still record the tab as built. No path
+    # builds Home twice per runtime today; this costs one line and settles it.
+    ctx.runtime.cell_gating.subtab_built = False
+
+    # Every frame exists as soon as this loop ends; only the bodies are drained.
+    # The map is what lets a builder be reached by name from outside the
+    # notebook — persistence materializes the Cell Gating editor that way,
+    # having no sub-tab index to hand over.
+    frames = ctx.runtime.home.frames = {}
+    for name in active_subtabs(ctx):
         frame = QWidget(sub_tabs)
-        inset = _SUBTAB_MARGINS.get(name, 0)
+        inset = _subtab_inset(ctx, name)
         QVBoxLayout(frame).setContentsMargins(inset, inset, inset, inset)
         sub_tabs.addTab(frame, name)
-        if name == "Cell Gating":
-            # The Cell Gating builder finds its own frame through the runtime
-            # rather than being handed one, because ``ensure_cell_gating_tab_built``
-            # materializes it from persistence with no sub-tab index to hand over.
-            ctx.runtime.cell_gating.subtab_frame = frame
-            ctx.runtime.cell_gating.subtab_built = False
+        frames[name] = frame
 
     from .controller import (
         drain_home_subtabs, on_home_subtab_changed, sync_home_sidebar,

@@ -25,35 +25,19 @@ from well_viewer.core.selection_controller import (
 from . import collect as hc
 from .plate_panel import paint_plate, well_tooltip
 from .tab_view import (
-    DEFINITION_SUBTABS, IMPORT_KEY, format_value, legend_label,
+    IMPORT_KEY, definition_subtabs, format_value, legend_label,
     legend_swatch_style,
 )
 
-# The definition tabs' bodies belong to other features. They are reached through
-# lazy proxies rather than imports: a module-scope import would couple Home to a
-# removable feature (``test_architecture_contracts``), and a function-local one
-# is a deferred feature import, which is a cycle-workaround this codebase
-# ratchets down (``test_deferred_imports``). A ``lazy(...)`` call is neither —
-# it imports on first call and caches.
-_build_cell_gating_subtab = lazy(
-    "well_viewer.features.grouping.cell_gating.tab_view",
-    "build_cell_gating_subtab")
+# Cell Gating's controller is reached for two refreshes the sub-tab handler and
+# the selection hook drive. Its tab body, and the other four, are built through
+# the feature registry instead — see ``build_home_subtab``.
 _cell_gating_sync_scatter_gates = lazy(
-    "well_viewer.features.grouping.cell_gating.controller",
+    "well_viewer.features.home.cell_gating.controller",
     "cell_gating_sync_scatter_gates")
 _cell_gating_load_cell_areas = lazy(
-    "well_viewer.features.grouping.cell_gating.controller",
+    "well_viewer.features.home.cell_gating.controller",
     "cell_gating_load_cell_areas")
-_build_replicate_groups_centre = lazy(
-    "well_viewer.features.grouping.replicate_panel_view",
-    "build_replicate_groups_centre")
-_build_label_grid = lazy(
-    "well_viewer.features.grouping.label_grid_view", "build_label_grid")
-_build_ratios_inline_panel = lazy(
-    "well_viewer.features.scatter.ratio_panel_view", "build_ratios_inline_panel")
-_build_pipeline_info_subtab = lazy(
-    "well_viewer.features.grouping.pipeline_info_view",
-    "build_pipeline_info_subtab")
 
 _logger = logging.getLogger("well_viewer")
 
@@ -138,22 +122,11 @@ def build_home_subtab(ctx, idx: int) -> None:
         built = ctx.runtime.home.built = {}
     if name == "Overview" or built.get(name):
         return
-    frame = sub.widget(idx)
+    desc = ctx.features.get(name)
+    if desc is None or desc.build is None:
+        return
     try:
-        if name == "Cell Gating":
-            _build_cell_gating_subtab(ctx)
-        elif name == "Groups":
-            _build_replicate_groups_centre(ctx, frame)
-        elif name == "Well Labels":
-            _build_label_grid(ctx, frame)
-        elif name == "Ratios":
-            layout = frame.layout()
-            layout.addWidget(_build_ratios_inline_panel(ctx, frame))
-            layout.addStretch(1)
-        elif name == "Pipeline Info":
-            _build_pipeline_info_subtab(ctx, frame)
-        else:
-            return
+        desc.build(ctx, sub.widget(idx))
         built[name] = True
     except Exception:
         _logger.exception("Home: build sub-tab %r failed", name)
@@ -189,18 +162,36 @@ def drain_home_subtabs(ctx) -> None:
 
 
 def sync_home_sidebar(ctx) -> None:
-    """Show the group-editing plate on the definition tabs, and only there.
+    """Put the rail plate in the state the current tab warrants.
 
-    Overview has its own plate in the page body; the rail's is for composing
-    groups, so on Overview it would be a second plate answering a different
-    question.
+    Three states, because there are three cases. Overview has its own plate in
+    the page body, so the rail's would be a second one answering a different
+    question — hidden. The editors that read the well selection get it live. The
+    two that do not get it greyed rather than removed: it is the page's fixture
+    and the rail visibly emptying as you move between sibling tabs reads as
+    something breaking, but a live-looking plate that silently ignores clicks is
+    worse. The plate paints its own disabled state; nothing in it consulted
+    ``isEnabled()`` before this, so greying it used to be invisible.
+
+    Which editors read the selection is the descriptor's ``reads_well_selection``
+    rather than a name list here: Groups edits a group's membership with the
+    plate, Cell Gating draws its CDFs from the selected wells, Well Labels' Add
+    Prefix / Add Suffix apply to them, and Ratios and Pipeline Info ask nothing
+    of it. A tab added tomorrow declares its own answer instead of inheriting
+    whichever one a constant here happened to give it.
     """
+    name = current_subtab(ctx)
+    on_a_definition_tab = name in definition_subtabs(ctx)
     frame = ctx.widgets.get_or_none("_sidebar_sample_frame")
     if frame is not None:
-        frame.setVisible(current_subtab(ctx) in DEFINITION_SUBTABS)
+        frame.setVisible(on_a_definition_tab)
+    plate = ctx.widgets.get_or_none("_rep_map_plate")
+    if plate is not None:
+        desc = ctx.features.get(name)
+        plate.setEnabled(bool(desc is not None and desc.reads_well_selection))
     btn = ctx.widgets.get_or_none(IMPORT_KEY)
     if btn is not None:
-        btn.setVisible(current_subtab(ctx) in DEFINITION_SUBTABS)
+        btn.setVisible(on_a_definition_tab)
 
 
 def on_home_subtab_changed(ctx, idx: int) -> None:
@@ -211,7 +202,7 @@ def on_home_subtab_changed(ctx, idx: int) -> None:
         # Pick up any gates drawn on the Scatter tab since the last visit.
         _cell_gating_sync_scatter_gates(ctx)
     elif name == "Pipeline Info":
-        cb = ctx.runtime.grouping.pipeline_info_refresh
+        cb = ctx.runtime.pipeline_info.refresh
         if callable(cb):
             cb()            # re-read in case the dataset changed
     elif name == "Groups":
@@ -245,7 +236,7 @@ def activate_home(ctx) -> None:
     resync_record(ctx)
     refresh_home(ctx)
     sync_home_sidebar(ctx)
-    if current_subtab(ctx) in DEFINITION_SUBTABS:
+    if current_subtab(ctx) in definition_subtabs(ctx):
         groups_centre_refresh(ctx)
         _cell_gating_sync_scatter_gates(ctx)
 

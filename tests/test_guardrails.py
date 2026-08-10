@@ -19,20 +19,28 @@ import ast
 import warnings
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUNTIME_APP = REPO_ROOT / "well_viewer" / "runtime_app.py"
-STATE_FILES = [
-    REPO_ROOT / "well_viewer" / "core" / name for name in
-    ("app_state.py", "event_bus.py", "dataset_state.py",
-     "selection_state.py", "plot_state.py", "channel_state.py")
-] + [
-    REPO_ROOT / "well_viewer" / "features" / "stats" / "state.py",
-    REPO_ROOT / "well_viewer" / "features" / "review_image" / "state.py",
-    REPO_ROOT / "well_viewer" / "features" / "image_table" / "state.py",
-    REPO_ROOT / "well_viewer" / "features" / "playground" / "state.py",
-]
+#: The core state modules, named because they are the boundary itself.
+_CORE_STATE = ("app_state.py", "event_bus.py", "dataset_state.py",
+               "selection_state.py", "plot_state.py", "channel_state.py")
+
+
+def _state_files() -> list:
+    """Every state module, *derived* rather than listed.
+
+    The hand-written half of this roster named three feature paths that moved
+    under `features/image_browser/` long ago. The existence check below then
+    skipped the whole test — silently, for as long as the paths were stale — so
+    the one thing enforcing this boundary enforced nothing. A `rglob` cannot go
+    stale on a move, and covers a feature added tomorrow.
+    """
+    core = [REPO_ROOT / "well_viewer" / "core" / n for n in _CORE_STATE]
+    feature = sorted((REPO_ROOT / "well_viewer" / "features").rglob("state.py"))
+    return core + feature
+
+
+STATE_FILES = _state_files()
 FEATURES_DIR = REPO_ROOT / "well_viewer" / "features"
 
 # Budgets hard-fail (Phase 9 onward).
@@ -69,7 +77,10 @@ _HARD_FAIL = True
 # The architecture-review sweep deleted three more delegators whose last call
 # site had already been rewired (_render_review_image_display,
 # _set_review_image_include_mode, _update_tp_selection_display): 876 → 862.
-RUNTIME_APP_LINE_BUDGET = 862
+# The A8 teardown finished for the replicate-set helpers: the nine-symbol lazy
+# bind into features/grouping went, four of its names being dead, and the three
+# ctx-shaped adapters were replaced by direct domain calls. 862 -> 856.
+RUNTIME_APP_LINE_BUDGET = 856
 # Phase 8 moved widget attrs out with their builders: _build_groups_centre (3),
 # _build_cell_gating_subtab (1), _build_ui (14).
 # Code-review X13: removed 3 dead never-read attrs (_montage_chan_cb,
@@ -170,8 +181,10 @@ def test_state_package_import_contract():
     directly — the key unlock of the teardown. Unlike the budgets this is a
     hard invariant: a breach is a real import cycle, so it always fails.
     """
-    if not all(p.exists() for p in STATE_FILES):
-        pytest.skip("state modules not yet relocated")
+    missing = [str(p.relative_to(REPO_ROOT)) for p in STATE_FILES if not p.exists()]
+    assert not missing, (
+        "STATE_FILES names a module that does not exist, so this guard would "
+        f"have measured nothing: {missing}")
 
     forbidden = (
         "well_viewer.runtime_app",

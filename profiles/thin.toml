@@ -8,5 +8,9 @@ features = ["Plotting", "Home", "Image Browser"]
 
 # Narrows the Image Browser to just these sub-tabs (a parent omitted here keeps
 # all of its sub-tabs). Read by the runtime filter AND the offline generator.
+#
+# `Segmentation` is redundant here: its descriptor carries `removable=False`, so
+# it ships whatever this line says. Kept for readability — the list then names
+# every sub-tab this build has, rather than only the ones the narrowing decides.
 [subtabs]
 "Image Browser" = ["Segmentation", "Image Table"]

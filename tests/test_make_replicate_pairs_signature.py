@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import inspect
 
-from well_viewer.features.grouping import controller
-from well_viewer.features.grouping.controller import make_replicate_pairs
+from well_viewer.features.home.groups import controller
+from well_viewer.features.home.groups.controller import make_replicate_pairs
 
 
 def test_signature_takes_toks_and_size():

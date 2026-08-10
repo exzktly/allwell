@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from well_viewer.features.grouping.cell_gating.gating_compute import (
+from well_viewer.features.home.cell_gating.gating_compute import (
     _optimize_thresh_frac_on_between_wells,
     scan_fc_fractions,
 )
@@ -104,7 +104,7 @@ def test_scan_fc_subtract_control_metric_not_inverted():
 
 
 def test_opt_curve_ylim_expands_for_out_of_range_curves():
-    from well_viewer.features.grouping.cell_gating.gating_compute import _opt_curve_ylim
+    from well_viewer.features.home.cell_gating.gating_compute import _opt_curve_ylim
 
     # Raw fraction-on case keeps the familiar [0, 1] frame.
     lo, hi = _opt_curve_ylim(np.array([0.0, 0.5, 1.0]), np.array([0.0, 0.2]),

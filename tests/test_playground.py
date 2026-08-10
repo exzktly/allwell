@@ -92,12 +92,15 @@ def test_build_playground_rgb_binary_whitens_cells():
 
 def test_build_reference_fields_estimates(monkeypatch):
     from well_viewer.features.image_browser.playground import worker
-    import well_viewer.features.image_browser.image_table.controller as itc
+    import well_viewer.data.frame_load as fl
     import well_viewer.data.image_discovery as disc
     frames = [_frame(i) for i in range(4)]
     # The worker imports these lazily from their source modules; patch there.
+    # `data.frame_load`, deliberately not the Image Table's wrapper around it:
+    # patching the wrapper would pass while the worker reached sideways into a
+    # separately-removable sub-tab, which is how that coupling survived a move.
     monkeypatch.setattr(
-        itc, "_load_well_channel",
+        fl, "load_well_channel",
         lambda *a, **k: {(str(i), "0"): f for i, f in enumerate(frames)})
     monkeypatch.setattr(disc, "open_imgref_as_array", lambda ref, **k: ref)
 
@@ -113,8 +116,8 @@ def test_build_reference_fields_estimates(monkeypatch):
 
 def test_build_reference_fields_empty_returns_none(monkeypatch):
     from well_viewer.features.image_browser.playground import worker
-    import well_viewer.features.image_browser.image_table.controller as itc
-    monkeypatch.setattr(itc, "_load_well_channel", lambda *a, **k: {})
+    import well_viewer.data.frame_load as fl
+    monkeypatch.setattr(fl, "load_well_channel", lambda *a, **k: {})
     ff, bg = worker.build_reference_fields(
         None, "H12", "gfp", flatfield_mode="basic", background_method="empty_well")
     assert ff is None and bg is None
@@ -464,7 +467,7 @@ def test_ctxbar_threshold_box_reflects_set_value(loaded_app):
     ThreshFracOn (e.g. after an auto-threshold or Cell Gating edit), not stay at
     its 50.0 default, and follow the active channel."""
     app = loaded_app
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_on_threshold_frac_on_change
+    from well_viewer.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
     from well_viewer.core.channel_state_controller import set_active_channel
     set_active_channel(app._ctx, "gfp")
     app._cell_gating_thresh_frac_edits["gfp"].setText("123")

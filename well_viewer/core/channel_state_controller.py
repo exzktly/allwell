@@ -161,7 +161,7 @@ def recalculate_threshold(ctx) -> None:
     from well_viewer.persistence.cell_gating import load_from_pipeline_info
     load_from_pipeline_info(ctx)
     if ctx.runtime.cell_gating.fluor_gate_edits is not None:
-        from well_viewer.features.grouping.cell_gating.controller import (
+        from well_viewer.features.home.cell_gating.controller import (
             cell_gating_load_cell_areas,
             cell_gating_load_threshold_count_on,
             cell_gating_load_threshold_frac_on,
@@ -843,7 +843,7 @@ def set_ratio_metrics(ctx, ratios: Iterable[RatioMetric]) -> None:
     # the ratio rows into the table whenever the ratio set changes.
     if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
         try:
-            from well_viewer.features.grouping.cell_gating.controller import cell_gating_load_cell_areas
+            from well_viewer.features.home.cell_gating.controller import cell_gating_load_cell_areas
             cell_gating_load_cell_areas(ctx)
         except Exception:
             swallowed()  # was: pass (silent except)
@@ -944,7 +944,7 @@ def _gating_row_key(ctx, channel: str) -> str:
     (``tests/test_guardrails.py::test_core_feature_import_budget``), so the
     accessors route through this rather than importing it apiece.
     """
-    from well_viewer.features.grouping.cell_gating.controller import _cell_gating_resolve_key
+    from well_viewer.features.home.cell_gating.controller import _cell_gating_resolve_key
     return _cell_gating_resolve_key(ctx, channel)
 
 
@@ -1050,7 +1050,15 @@ def ensure_cell_gating_tab_built(ctx) -> bool:
         build = ctx.runtime.centre.build_pending
         if callable(build):
             build("Home")
-        from well_viewer.features.grouping.cell_gating.tab_view import build_cell_gating_subtab
+        # The builder finds its frame through the runtime, and the drain may not
+        # have reached this tab yet, so seed it from Home's frame map. Absent
+        # entirely means a build without the tab: nothing to materialize.
+        if ctx.runtime.cell_gating.subtab_frame is None:
+            frames = ctx.runtime.home.frames or {}
+            ctx.runtime.cell_gating.subtab_frame = frames.get("Cell Gating")
+        if ctx.runtime.cell_gating.subtab_frame is None:
+            return False
+        from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
         build_cell_gating_subtab(ctx)
     return ctx.runtime.cell_gating.fluor_gate_edits is not None
 
@@ -1106,7 +1114,7 @@ def _write_gating_edit(ctx, channel: str, value, *, count: bool) -> None:
     carries a hard-capped budget of feature imports, so the two share one
     statement rather than repeating it.
     """
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         _cell_gating_resolve_key,
         cell_gating_on_threshold_count_on_change,
         cell_gating_on_threshold_frac_on_change,
@@ -1251,7 +1259,7 @@ def get_fluor_gate(ctx, channel: str) -> float:
     ``ctx``. The slice defaults an unset channel to 0.0 (gate off) — the same
     value the old tab-not-built guard returned — independent of whether the
     lazily-built Cell Gating tab exists."""
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_get_fluor_gate
+    from well_viewer.features.home.cell_gating.controller import cell_gating_get_fluor_gate
     return cell_gating_get_fluor_gate(ctx, channel)
 
 

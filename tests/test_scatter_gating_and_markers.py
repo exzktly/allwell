@@ -218,7 +218,7 @@ def _gating_ctx(*, fluor_gates=None, thresh_frac_on=None):
 def test_fluor_gate_resolves_an_upper_case_channel_label():
     """The scatter passes ``"GFP"`` (its axis label); the gate is stored under
     ``"gfp"``. A missed lookup returned 0.0 — the gate silently off."""
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -231,7 +231,7 @@ def test_fluor_gate_resolves_an_upper_case_channel_label():
 def test_fluor_gate_resolves_when_only_the_gate_map_is_populated():
     """The resolver keys off the known rows; a gate edited before any
     threshold row exists must still be found."""
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -241,7 +241,7 @@ def test_fluor_gate_resolves_when_only_the_gate_map_is_populated():
 
 
 def test_thresh_frac_on_resolves_an_upper_case_channel_label():
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_thresh_frac_on,
     )
 
@@ -251,7 +251,7 @@ def test_thresh_frac_on_resolves_an_upper_case_channel_label():
 
 
 def test_ratio_channels_still_resolve_through_the_ratio_prefix():
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 
@@ -266,7 +266,7 @@ def test_resolver_tolerates_a_slice_carrying_only_one_map():
     """The review-image and plotting leaves' unit tests stand the slice up as a
     minimal namespace with just the map they need; the resolver must not demand
     both."""
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_thresh_frac_on,
     )
 
@@ -279,7 +279,7 @@ def test_resolver_tolerates_a_slice_carrying_only_one_map():
 
 
 def test_an_unknown_channel_still_reports_the_gate_as_off():
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
     )
 

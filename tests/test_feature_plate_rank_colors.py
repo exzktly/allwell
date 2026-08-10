@@ -47,7 +47,7 @@ class _FakePlate:
 
 
 def test_groups_plate_uses_group_colors():
-    from well_viewer.features.grouping import controller as gc
+    from well_viewer.features.home.groups import controller as gc
 
     # g1: two wells sharing one group ⇒ both take the group's colour
     # (lowest-well rank = A01). g2 carries an explicit recolour ⇒ both its

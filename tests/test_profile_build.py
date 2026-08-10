@@ -273,3 +273,54 @@ def test_trim_readme_matches_real_thin_profile():
                     "### smFISH", "### Review CSV", "### Saved Plots",
                     "### Batch export", "### Statistics"):
         assert dropped not in out, dropped
+
+
+def test_always_subtabs_matches_the_registrys_non_removable_leaves():
+    """``README_ALWAYS_SUBTABS`` is a restatement, and restatements drift.
+
+    ``scripts/profile_build.py`` is stdlib-only — the PyInstaller spec imports it
+    at build time — so it cannot read the registry to learn which sub-tabs carry
+    ``removable=False``. It names them instead, and this is the check that the
+    two agree. If they drift, the trimmer deletes the manual section for a tab the
+    binary still ships, which reads to the user as the feature being absent.
+    """
+    from scripts.profile_build import README_ALWAYS_SUBTABS, README_SUBTAB_TITLES
+    from well_viewer.features.registry import _features
+
+    actual: dict = {}
+    for d in _features():
+        if d.parent and not d.removable:
+            actual.setdefault(d.parent, set()).add(d.name)
+
+    # Only parents the README trimmer knows about are in scope.
+    actual = {k: v for k, v in actual.items() if k in README_SUBTAB_TITLES}
+    assert README_ALWAYS_SUBTABS == actual
+
+    for parent, names in README_ALWAYS_SUBTABS.items():
+        assert names <= README_SUBTAB_TITLES[parent], (
+            f"{parent}: names not in README_SUBTAB_TITLES: "
+            f"{sorted(names - README_SUBTAB_TITLES[parent])}")
+
+
+def test_a_non_removable_subtab_keeps_its_manual_section():
+    """The defect this closes: `[subtabs] "Home" = ["Ratios"]` trimmed the
+    sections for Cell Gating, Groups and Well Labels out of the manual while all
+    three remained in the build."""
+    from scripts.profile_build import trim_readme_for_profile
+
+    readme = (
+        "## Contents\n\n"
+        "- [Home](#home) (Overview · Cell Gating · Groups · Well Labels · Ratios)\n\n"
+        "### Home\n\nintro\n\n"
+        "#### Cell Gating\n\ngating prose\n\n"
+        "#### Groups\n\ngroups prose\n\n"
+        "#### Well Labels\n\nlabels prose\n\n"
+        "#### Ratios\n\nratios prose\n\n"
+        "#### Pipeline Info\n\npipeline prose\n"
+    )
+    out = trim_readme_for_profile(
+        readme, features={"Home"}, subtabs={"Home": ["Ratios"]})
+
+    for kept in ("#### Cell Gating", "#### Groups", "#### Well Labels", "#### Ratios"):
+        assert kept in out, f"{kept} was trimmed but its tab still ships"
+    assert "#### Pipeline Info" not in out, "Pipeline Info is removable and was kept"

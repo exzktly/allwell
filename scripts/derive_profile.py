@@ -67,7 +67,13 @@ def plan_deletions(catalog: list, profile, repo_root: Path) -> list:
     for entry in catalog:
         name = str(entry.get("name") or "")
         parent = str(entry.get("parent") or "")
-        shim = SimpleNamespace(name=name, parent=parent)
+        # ``removable`` comes along deliberately. ``Profile.includes`` reads it
+        # with a ``getattr(..., True)`` default, so a shim without it votes
+        # "removable" — meaning this generator would happily delete a directory
+        # the runtime filter insists is present. A real ``FeatureDescriptor``
+        # always has the field, so that default exists only for this shim.
+        shim = SimpleNamespace(name=name, parent=parent,
+                               removable=bool(entry.get("removable", True)))
         if profile.includes(shim):
             continue
         # ``keep`` globs are tests that *look* like this feature's but exercise

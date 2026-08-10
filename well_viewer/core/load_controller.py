@@ -456,7 +456,7 @@ def load_directory(ctx, d: Path, label=None) -> None:
         _preview.selected_well = None
     if hasattr(app, "_sidebar_preview_plate"):
         app._refresh_preview_picker()
-    from well_viewer.features.grouping.label_grid_view import label_grid_refresh
+    from well_viewer.features.home.labels.tab_view import label_grid_refresh
     label_grid_refresh(ctx)
     # Refresh Home's definition tabs so any newly loaded labels / groups
     # appear without requiring a tab switch.
@@ -587,7 +587,7 @@ def _kick_off_gating_after_load(ctx) -> None:
     use_scatter = app._app_state.cell_gating.use_scatter_gates
     use_thresh = app._app_state.cell_gating.use_scatter_thresh
     if has_non_default_gate or use_scatter or use_thresh:
-        from well_viewer.features.grouping.cell_gating.controller import cell_gating_start_gating_worker
+        from well_viewer.features.home.cell_gating.controller import cell_gating_start_gating_worker
         cell_gating_start_gating_worker(ctx)
 
 

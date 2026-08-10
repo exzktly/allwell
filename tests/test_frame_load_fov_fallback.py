@@ -10,33 +10,33 @@ from __future__ import annotations
 
 import logging
 
-from well_viewer.features.image_browser.image_table import image_compose as ic
+from well_viewer.data import frame_load as fl
 
 
 def test_exact_match_wins():
     images = {("1", "0"): "A", ("2", "0"): "B"}
-    ref, kind = ic._match_image_ref(images, "1", "0")
+    ref, kind = fl.match_image_ref(images, "1", "0")
     assert ref == "A" and kind == "exact"
 
 
 def test_normalized_token_match():
     # dropdown "1.0" ↔ cache "1"
     images = {("1", "0"): "A"}
-    ref, kind = ic._match_image_ref(images, "1.0", "0.0")
+    ref, kind = fl.match_image_ref(images, "1.0", "0.0")
     assert ref == "A" and kind == "normalized"
 
 
 def test_numeric_close_match_for_t_prefixed_keys():
     # cache keys carry a T-prefix; dropdown is plain numeric.
     images = {("1", "T01"): "A"}
-    ref, kind = ic._match_image_ref(images, "1", "1")
+    ref, kind = fl.match_image_ref(images, "1", "1")
     assert ref == "A" and kind == "numeric"
 
 
 def test_empty_fov_single_fov_resolves():
     # A genuinely single-FOV dataset with an empty dropdown still renders.
     images = {("1", "0"): "A"}
-    ref, kind = ic._match_image_ref(images, "", "0")
+    ref, kind = fl.match_image_ref(images, "", "0")
     assert ref == "A" and kind == "normalized"
 
 
@@ -44,13 +44,13 @@ def test_empty_fov_multi_fov_prefers_no_image():
     # S5: empty dropdown + two FOVs at this tp → prefer "no image" over an
     # arbitrary first FOV.
     images = {("1", "0"): "A", ("2", "0"): "B"}
-    ref, kind = ic._match_image_ref(images, "", "0")
+    ref, kind = fl.match_image_ref(images, "", "0")
     assert ref is None and kind == "ambiguous_fov"
 
 
 def test_no_match_returns_empty_kind():
     images = {("1", "0"): "A"}
-    ref, kind = ic._match_image_ref(images, "9", "9")
+    ref, kind = fl.match_image_ref(images, "9", "9")
     assert ref is None and kind == ""
 
 
@@ -59,11 +59,11 @@ def test_load_array_annotates_non_exact(monkeypatch, caplog):
     monkeypatch.setattr(idisc, "open_imgref_as_array", lambda *a, **k: "IMG")
     # Only a T-prefixed key exists; request the plain-numeric form → numeric tier.
     fluor = {("1", "T01"): object()}
-    monkeypatch.setattr(ic, "_load_well_channel", lambda *a, **k: fluor)
+    monkeypatch.setattr(fl, "load_well_channel", lambda *a, **k: fluor)
 
-    name = "well_viewer.features.image_browser.image_table.image_compose"
+    name = "well_viewer.data.frame_load"
     with caplog.at_level(logging.DEBUG, logger=name):
-        out = ic._load_array(None, {}, "A01", "GFP", "1", "1")
+        out = fl.load_frame_array(None, {}, "A01", "GFP", "1", "1")
     assert out == "IMG"
     assert any("fallback" in r.getMessage() for r in caplog.records), \
         "a non-exact resolution must leave a breadcrumb"

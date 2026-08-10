@@ -57,8 +57,6 @@ from well_viewer.features.image_browser.image_table.image_compose import (  # no
     _load_mask_array,
     _load_ratio_array,
     _load_well_channel,
-    _norm_token,
-    _numeric_token,
     _parse_lut,
     _row_channel,
     _row_display_opts,
@@ -196,7 +194,6 @@ from well_viewer.features.image_browser.image_table.grid_layout import (  # noqa
     _all_dim_options,
     _axis_dim_values,
     _axis_values,
-    _cache_column_tokens,
     _channel_options,
     _current_axis,
     _current_dims,
@@ -950,7 +947,7 @@ def image_table_generate(ctx) -> None:
     if not isinstance(cache, dict):
         cache = {}
         ctx.state.image_table.image_cache = cache
-    # Empty scans are remembered for THIS pass only (image_compose._load_well_channel),
+    # Empty scans are remembered for THIS pass only (data/frame_load.load_well_channel),
     # so one Generate scans a missing well/channel once and the next Generate
     # gives a drive that had stalled another chance.
     reset_scan_misses(ctx)

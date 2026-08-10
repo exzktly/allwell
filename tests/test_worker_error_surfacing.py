@@ -13,7 +13,7 @@ from pathlib import Path
 
 import services.remote_runner as rr
 from services.pipeline_runner import PipelineRunner
-from well_viewer.features.grouping.cell_gating.controller import GatingWorker
+from well_viewer.features.home.cell_gating.controller import GatingWorker
 
 
 # ── E6 ────────────────────────────────────────────────────────────────────
@@ -46,7 +46,7 @@ def test_pipeline_setup_crash_emits_error_and_finished():
 def test_gating_worker_emits_failed_on_crash(qapp, monkeypatch):
     # The worker's first step is get_all_fluor_gates(ctx); force it to raise so
     # _run_inner crashes and must route the error through the ``failed`` signal.
-    import well_viewer.features.grouping.cell_gating.controller as cg
+    import well_viewer.features.home.cell_gating.controller as cg
 
     def _boom(ctx):
         raise RuntimeError("gate boom")

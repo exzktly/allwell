@@ -85,9 +85,9 @@ def color_for_wells(wells: Any) -> str:
     """Canonical group colour: the rank colour of the *lowest* well in *wells*.
 
     So every well in a group (and its line/bar trace) shares one colour. The
-    pure implementation shared by ``core`` and feature code (A8 teardown), lifted
-    verbatim from ``grouping.controller.rank_color_wells`` so there is one home
-    for it and neither layer reaches through the god-object. Indexes the raw
+    pure implementation shared by ``core`` and feature code (A8 teardown), and the
+    only one — the feature-side wrapper it was lifted from is gone, so neither
+    layer reaches through the god-object for a colour. Indexes the raw
     ``WELL_COLORS`` palette directly to preserve the exact historical colours.
     """
     from well_viewer.domain.plate_layout import WELL_COLORS
@@ -118,8 +118,9 @@ def color_for_selection(s: Any) -> str:
 
 def color_for_replicate_set(rset: Any, selections: Iterable[Any]) -> str:
     """Colour for a replicate set / bar group: honours the ``color`` of a
-    selection sharing its ``name``, else the rank colour of its wells. Pure core
-    of ``grouping.controller.rank_color_rset`` (A8 teardown)."""
+    selection sharing its ``name``, else the rank colour of its wells. The A8
+    teardown left this the single implementation; the ctx-shaped adapter that
+    used to wrap it is gone and callers reach it here directly."""
     name = getattr(rset, "name", None)
     if name:
         for s in selections:
@@ -143,7 +144,7 @@ def replicate_display_label(ctx, rset: Any) -> str:
     """Human-friendly x-axis label for a replicate set: the group name, or —
     when that name looks auto-generated (``"1"`` / ``"Replicate 2"`` / ``"R3"``) —
     its member well labels so the axis stays interpretable. A8 teardown: pure
-    ``ctx.state`` + ``well_display_label`` (moved from grouping.controller)."""
+    ``ctx.state`` + ``well_display_label``, with no feature-side wrapper."""
     name = str(getattr(rset, "name", "") or "").strip()
     if not name:
         name = "Replicate"

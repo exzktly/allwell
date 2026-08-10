@@ -21,7 +21,7 @@ def _stub_app(data_dir):
     """ctx-shaped fake: build_pipeline_info_subtab is ctx-native — it reads
     ``ctx.state.dataset``, registers the tree via ``ctx.widgets`` (mirrored onto
     the fake as ``._pipeline_info_tree`` like the real registry stamps the app),
-    and stamps the refresh closure on ``ctx.runtime.grouping``."""
+    and stamps the refresh closure on ``ctx.runtime.pipeline_info``."""
     ds = types.SimpleNamespace(data_dir=data_dir, pipeline_info={})
     ctx = types.SimpleNamespace()
     ctx.state = types.SimpleNamespace(dataset=ds)
@@ -34,7 +34,7 @@ def _stub_app(data_dir):
 
     ctx.widgets = types.SimpleNamespace(
         register=_register, get_or_none=lambda n: _reg.get(n))
-    ctx.runtime = types.SimpleNamespace(grouping=types.SimpleNamespace())
+    ctx.runtime = types.SimpleNamespace(pipeline_info=types.SimpleNamespace())
     return ctx
 
 
@@ -61,7 +61,7 @@ def test_pipeline_info_shows_background_method(qapp, tmp_path):
                        "qc_remove_debris": True},
         "available_timepoints": ["24h"], "available_fovs": ["F001", "F002"],
     }))
-    from well_viewer.features.grouping.pipeline_info_view import build_pipeline_info_subtab
+    from well_viewer.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
     app = _stub_app(tmp_path)
     parent = QWidget()
     build_pipeline_info_subtab(app, parent)
@@ -70,14 +70,14 @@ def test_pipeline_info_shows_background_method(qapp, tmp_path):
     assert ("Fluorescent", "gfp, mcherry") in rows
     assert ("Method", "stardist_nuclei") in rows
     # the same call wired a refresh hook the sub-tab switch uses
-    assert callable(app.runtime.grouping.pipeline_info_refresh)
+    assert callable(app.runtime.pipeline_info.refresh)
 
 
 def test_pipeline_info_reports_top_hat_run(qapp, tmp_path):
     # the whole point: a run that used the square method says so, plainly
     (tmp_path / "pipeline_info.json").write_text(json.dumps({
         "qc_options": {"background": "top_hat"}}))
-    from well_viewer.features.grouping.pipeline_info_view import build_pipeline_info_subtab
+    from well_viewer.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
     app = _stub_app(tmp_path)
     parent = QWidget()
     build_pipeline_info_subtab(app, parent)
@@ -85,7 +85,7 @@ def test_pipeline_info_reports_top_hat_run(qapp, tmp_path):
 
 
 def test_pipeline_info_no_dataset(qapp):
-    from well_viewer.features.grouping.pipeline_info_view import build_pipeline_info_subtab
+    from well_viewer.features.home.pipeline_info.tab_view import build_pipeline_info_subtab
     app = _stub_app(None)
     parent = QWidget()
     build_pipeline_info_subtab(app, parent)          # must not raise

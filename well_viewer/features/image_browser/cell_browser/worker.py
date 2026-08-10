@@ -18,35 +18,12 @@ import numpy as np
 from PySide6.QtCore import QObject, Signal
 
 from well_viewer.features.image_browser.cell_browser.collect import CellDescriptor
-from well_viewer.features.image_browser.image_table.image_compose import _load_array, _load_mask_array
+from widgets.lut_cmaps import resolve_channel_tint
+from well_viewer.data.frame_load import load_frame_array, load_mask_array
 
 _logger = logging.getLogger("well_viewer")
 
-# Additive tints for the multi-channel composite (black background → hue), in
-# channel order. Falls back to white for channels beyond the list.
-_CHANNEL_TINTS = (
-    (0.0, 1.0, 0.0),  # green
-    (1.0, 0.0, 0.0),  # red / magenta-ish
-    (0.0, 0.6, 1.0),  # blue
-    (1.0, 0.0, 1.0),  # magenta
-    (0.0, 1.0, 1.0),  # cyan
-    (1.0, 1.0, 0.0),  # yellow
-)
 _CROP_PAD_PX = 18
-
-
-def resolve_channel_tint(channel: str, index: int,
-                         tint_map: dict[str, tuple] | None = None) -> tuple:
-    """Additive tint for a channel as an ``(r, g, b)`` 0..1 float tuple.
-
-    An explicit per-channel override (the shared ``tint_by_channel``, 0–255)
-    wins; otherwise fall back to the fixed palette by channel index. Pure (no
-    Qt / ctx), so it's unit-testable on its own.
-    """
-    override = (tint_map or {}).get(str(channel).strip().lower())
-    if override is not None:
-        return tuple(max(0.0, min(1.0, float(c) / 255.0)) for c in override)
-    return _CHANNEL_TINTS[index % len(_CHANNEL_TINTS)]
 
 
 def _bbox_for(mask_arr, nucleus_id: int, pad: int) -> tuple | None:
@@ -89,7 +66,8 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
                      show_boundaries: bool, cache: dict,
                      lut_by_channel: dict[str, tuple] | None = None,
                      tint_by_channel: dict[str, tuple] | None = None,
-                     use_tophat: bool = False) -> np.ndarray | None:
+                     use_tophat: bool = False,
+                     scan_misses: set | None = None) -> np.ndarray | None:
     """Multi-channel composite RGB (uint8) of one cell, or None if unrenderable.
 
     *cache* is a per-page dict so each FOV's mask + channel arrays load once.
@@ -98,6 +76,14 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
     others auto-scale per crop. *tint_by_channel* overrides the additive display
     colour per channel (else the fixed per-index palette). *use_tophat* selects
     the corrected (top-hat) image instead of raw.
+
+    *scan_misses* has the same per-page lifetime as *cache* and does the job
+    ``cache`` cannot: an image scan that comes up empty is deliberately not
+    cached (an empty result must not pin "this well has no images" for the
+    session), so without a shared set every cell re-walks the directory for an
+    absent well/channel. Measured over ten cells against one absent channel:
+    ten walks without it, one with, each walk emitting its own log line. The
+    pixels are identical either way -- this is wall-clock and log noise.
     """
     lut_by_channel = lut_by_channel or {}
     tint_by_channel = tint_by_channel or {}
@@ -105,16 +91,16 @@ def compose_cell_rgb(ctx, desc: CellDescriptor, channels: list[str],
         nid = int(float(desc.nucleus_id))
     except (TypeError, ValueError):
         return None
-    # Load the channel arrays FIRST: _load_array (→ _load_well_channel) populates
+    # Load the channel arrays FIRST: load_frame_array (→ load_well_channel) populates
     # the (well, "__mask__", "raw") cache entry as a side effect, and
-    # _load_mask_array depends on it. Calling _load_mask_array before any
-    # _load_array always missed → every cell rendered as "—".
+    # load_mask_array depends on it. Calling load_mask_array before any
+    # load_frame_array always missed → every cell rendered as "—".
     chan_arrays = [
-        _load_array(ctx, cache, desc.well, ch, desc.tp_token, desc.fov,
-                    use_tophat=use_tophat)
+        load_frame_array(ctx, cache, desc.well, ch, desc.tp_token, desc.fov,
+                         use_tophat=use_tophat, scan_misses=scan_misses)
         for ch in channels
     ]
-    mask_full = _load_mask_array(ctx, cache, desc.well, desc.tp_token, desc.fov)
+    mask_full = load_mask_array(ctx, cache, desc.well, desc.tp_token, desc.fov)
     if mask_full is None:
         return None
     mask_full = np.asarray(mask_full)
@@ -198,6 +184,9 @@ class CellImageLoader(QObject):
 
         def _run() -> None:
             cache: dict[str, Any] = {}
+            # Same lifetime as `cache`: one page, one scan per absent
+            # well/channel rather than one per cell.
+            scan_misses: set = set()
             n = 0
             for offset, desc in enumerate(descriptors):
                 # A newer page (or a dataset swap that bumped the gen) has
@@ -209,7 +198,8 @@ class CellImageLoader(QObject):
                 try:
                     rgb = compose_cell_rgb(self._ctx, desc, channels,
                                            show_boundaries, cache, lut_map,
-                                           tint_map, use_tophat)
+                                           tint_map, use_tophat,
+                                           scan_misses=scan_misses)
                 except Exception:
                     _logger.debug("cell_browser: compose failed for %r",
                                   desc, exc_info=True)

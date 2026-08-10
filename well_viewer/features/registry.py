@@ -119,6 +119,40 @@ _build_batch_export = _lazy_build("well_viewer.features.batch_export.tab_view", 
 _build_review_csv = _lazy_build("well_viewer.features.review_csv.tab_view", "build_review_csv_tab")
 _build_home = _lazy_build("well_viewer.features.home.tab_view", "build_home_tab")
 
+_build_groups = _lazy_build("well_viewer.features.home.groups.tab_view",
+                            "build_replicate_groups_centre")
+_build_well_labels = _lazy_build("well_viewer.features.home.labels.tab_view",
+                                 "build_label_grid")
+_build_pipeline_info = _lazy_build("well_viewer.features.home.pipeline_info.tab_view",
+                                   "build_pipeline_info_subtab")
+
+
+def _build_cell_gating(ctx, frame) -> None:
+    """Adapter: the Cell Gating builder takes no frame and finds its own.
+
+    It has to. ``ensure_cell_gating_tab_built`` materializes this editor from
+    the persistence hydrator, which has no sub-tab index to hand over, so the
+    frame is passed through ``ctx.runtime.cell_gating`` instead of an argument.
+    Stamping it here keeps that route working whichever way the build is reached.
+    """
+    from well_viewer.features.home.cell_gating.tab_view import build_cell_gating_subtab
+    ctx.runtime.cell_gating.subtab_frame = frame
+    build_cell_gating_subtab(ctx)
+
+
+def _build_ratios(ctx, frame) -> None:
+    """Adapter: the ratio editor is returned, not mounted.
+
+    ``build_ratios_inline_panel`` parents the panel to *frame* but never adds it
+    to a layout, so on its own it would paint at the origin at its size hint and
+    never resize with the tab.
+    """
+    from well_viewer.features.home.ratios.tab_view import build_ratios_inline_panel
+    layout = frame.layout()
+    layout.addWidget(build_ratios_inline_panel(ctx, frame))
+    layout.addStretch(1)
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # State factories — lazy constructors for each feature-owned ``AppState`` slice.
@@ -266,24 +300,6 @@ def _activate_smfish(ctx) -> None:
         set_selected_wells(ctx, {keep}, commit=False)
     ctx.coordinator.refresh_sidebar_map()
     smfish_sync_from_app(ctx)
-
-
-def _activate_cell_gating(ctx) -> None:
-    from well_viewer.features.grouping.cell_gating.controller import (
-        cell_gating_load_cell_areas,
-        cell_gating_refresh_included_count,
-        cell_gating_sync_scatter_gates,
-    )
-    ctx.widgets.get("_sidebar_main_frame").setVisible(True)
-    ctx.coordinator.refresh_sidebar_map()
-    if ctx.widgets.has("_cell_gating_fluor_gate_edits"):
-        cell_gating_load_cell_areas(ctx)
-        cell_gating_sync_scatter_gates(ctx)
-        # Catch-all for the inclusion readout: the crop region, manual per-cell
-        # deletes, and a cold load whose gates are all at their defaults (which
-        # skips the gating pass entirely) all move the count without running the
-        # worker. Recomputing on tab entry means none of them needs its own hook.
-        cell_gating_refresh_included_count(ctx)
 
 
 def _activate_cell_browser(ctx) -> None:
@@ -793,8 +809,12 @@ def _features() -> list[FeatureDescriptor]:
         ),
 
         # ── Image Browser sub-leaves (dispatch hooks only) ─────────────────
+        # Not removable: it has no catalog entry, so its source is never
+        # stripped, and `removable=False` keeps its tab whatever a `[subtabs]`
+        # line says. `thin` still lists it, which is now a no-op it can keep or
+        # drop freely.
         FeatureDescriptor(name="Segmentation", parent="Image Browser",
-                          on_activate=_activate_segmentation),
+                          on_activate=_activate_segmentation, removable=False),
         FeatureDescriptor(name="Image Table", parent="Image Browser",
                           on_activate=_activate_image_table,
                           on_dataset_loaded=_loaded_image_table,
@@ -809,14 +829,26 @@ def _features() -> list[FeatureDescriptor]:
                           on_dataset_loaded=_loaded_playground,
                           single_well_selection=True),
 
-        # ── Home sub-leaf ─────────────────────────────────────────────────
-        # Declared so a build profile can name Cell Gating in ``[subtabs]``.
-        # Its ``on_activate`` does not fire: dispatch is keyed on
-        # ``current_centre_tab``, which resolves Home's tabs to "Home" rather
-        # than descending into them (``tab_controller._resolve_leaf``). Home's
-        # own sub-tab handler does the per-tab work instead.
+        # ── Home sub-leaves ───────────────────────────────────────────────
+        # Home enumerates its tabs from these, in this order, so a profile
+        # cannot name a tab that is not declared here. No ``on_activate``:
+        # dispatch is keyed on ``current_centre_tab``, which resolves Home's
+        # tabs to "Home" rather than descending into them
+        # (``tab_controller._resolve_leaf``); Home's own sub-tab handler does
+        # the per-tab work. The first three are load-bearing for code that
+        # never asks whether they are present — see ``removable``.
         FeatureDescriptor(name="Cell Gating", parent="Home",
-                          on_activate=_activate_cell_gating),
+                          build=_build_cell_gating, removable=False,
+                          reads_well_selection=True),
+        FeatureDescriptor(name="Groups", parent="Home",
+                          build=_build_groups, removable=False,
+                          reads_well_selection=True, subtab_inset=True),
+        FeatureDescriptor(name="Well Labels", parent="Home",
+                          build=_build_well_labels, removable=False,
+                          reads_well_selection=True, subtab_inset=True),
+        FeatureDescriptor(name="Ratios", parent="Home", build=_build_ratios),
+        FeatureDescriptor(name="Pipeline Info", parent="Home",
+                          build=_build_pipeline_info),
     ]
 
 
@@ -834,6 +866,17 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
     if profile is None:
         profile = active_profile()
 
+    # The sub-leaf names that survive, per parent — decided by the *same*
+    # predicate that keeps the descriptors, so the two halves cannot disagree.
+    # `includes_subtab` is deliberately not used here: it is a bare string check
+    # against the `[subtabs]` allowlist and ignores `removable`, so tagging a
+    # `StateSpec` with a non-removable sub-tab would keep the descriptor and drop
+    # its slice — an app that boots and then raises `AttributeError` on first use.
+    kept_subleaves: dict[str, set] = {}
+    for leaf in _features():
+        if leaf.parent and profile.includes(leaf):
+            kept_subleaves.setdefault(leaf.parent, set()).add(leaf.name)
+
     def _admit_states(d):
         # Drop a surviving composite parent's sub-tab-tagged state slices whose
         # sub-tab the profile excludes. Descriptor-level ``includes`` keeps the
@@ -843,8 +886,8 @@ def build_feature_registry(profile=None) -> FeatureRegistry:
         # and eagerly import their physically-stripped state modules.
         if not any(s.subtab for s in d.states):
             return d
-        kept = tuple(s for s in d.states
-                     if not s.subtab or profile.includes_subtab(d.name, s.subtab))
+        admitted = kept_subleaves.get(d.name, set())
+        kept = tuple(s for s in d.states if not s.subtab or s.subtab in admitted)
         return d if kept == d.states else replace(d, states=kept)
 
     return FeatureRegistry(_admit_states(d) for d in _features()

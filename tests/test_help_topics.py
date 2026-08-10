@@ -151,3 +151,44 @@ def test_no_topic_keys_for_pages_that_no_longer_exist():
         set(help_topics.ANALYZE_SECTION_HELP) - set(_analyze_section_titles()))
     assert not stale_datasets, f"DATASETS_PAGE_HELP keys naming no rail page: {stale_datasets}"
     assert not stale_analyze, f"ANALYZE_SECTION_HELP keys naming no form section: {stale_analyze}"
+
+
+def _home_subtab_names() -> list[str]:
+    """Home's sub-leaf names, read from ``features/registry.py``.
+
+    Read from source rather than by building the registry: importing it pulls in
+    Qt and every feature module, and this file stays in the fast lane. The
+    descriptors are the roster the notebook enumerates, so a sub-tab added there
+    without a help topic has to fail here.
+    """
+    src = (REPO_ROOT / "well_viewer" / "features" / "registry.py").read_text(
+        encoding="utf-8")
+    names: list[str] = []
+    for node in ast.walk(ast.parse(src)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id != "FeatureDescriptor":
+            continue
+        kw = {k.arg: k.value for k in node.keywords}
+        parent, name = kw.get("parent"), kw.get("name")
+        if (isinstance(parent, ast.Constant) and parent.value == "Home"
+                and isinstance(name, ast.Constant)):
+            names.append(name.value)
+    return names
+
+
+def test_every_home_subtab_has_a_topic():
+    """Home is a notebook, and ``current_centre_tab`` stops at the page.
+
+    So every one of Home's tabs resolves to the leaf ``"Home"``, and without a
+    key of its own each lands at the top of the Home chapter -- which reads as
+    the scroll having failed. ``_review_help_section`` asks Home which sub-tab is
+    showing and prefers that key; this is what says the key exists.
+    """
+    names = _home_subtab_names()
+    assert names, "found no Home sub-leaf descriptors — parser drifted"
+    missing = [n for n in names if n not in help_topics.SECTION_BY_PAGE]
+    assert not missing, (
+        "Home sub-tabs with no entry in help_topics.SECTION_BY_PAGE; the drawer "
+        f"opens at the top of the Home chapter for them: {missing}"
+    )

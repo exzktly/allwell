@@ -69,7 +69,15 @@ SECTION_BY_PAGE: dict[str, str] = {
     "Playground": "Playground",
     "smFISH": "smFISH",
     "Review CSV": "Review CSV",
+    # Home's sub-tabs. `current_centre_tab` resolves them all to "Home" -- the
+    # leaf resolver deliberately does not descend into Home -- so these are
+    # reached by `_review_help_section` asking Home which sub-tab is current
+    # before it falls back to the page's own key.
     "Cell Gating": "Cell Gating",
+    "Groups": "Groups",
+    "Well Labels": "Well Labels",
+    "Ratios": "Ratios",
+    "Pipeline Info": "Pipeline Info",
     "Saved Plots": "Saved Plots",
     "Batch Export": "Batch export",
 }

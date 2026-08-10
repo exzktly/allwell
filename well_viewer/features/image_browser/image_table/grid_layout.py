@@ -1,11 +1,13 @@
-"""Image Table layout + dimension resolution.
+"""Image Table layout: axis/cell math and the row<->cell snapshot helpers.
 
-Axis/cell layout math, the per-dimension option lists (well / channel / FOV /
-timepoint), channel enumeration, and the row<->cell snapshot helpers — the
-"decide what goes in each cell" layer. Extracted from ``controller.py`` so the
-controller keeps event handling + orchestration. Token helpers come from the
-``image_compose`` layer (downward dependency). ``controller`` re-exports these
-names, so call sites and external importers (playground) are unchanged.
+The "decide what goes in each cell" layer, extracted from ``controller.py`` so
+the controller keeps event handling + orchestration.
+
+The per-dimension option lists it used to own are ``data/dataset_dims.py`` and
+the channel-token vocabulary is ``data/frame_load.py`` — both shared with the
+Playground, which is a separately removable sub-tab and may not reach into this
+one. They are re-exported here under this module's existing private names so
+its own call sites and ``controller``'s re-export block are unchanged.
 """
 
 from __future__ import annotations
@@ -13,74 +15,19 @@ from __future__ import annotations
 from well_viewer.domain.viewer_state import parse_rc
 
 
-from well_viewer.features.image_browser.image_table.image_compose import (
-    NUC_SEG_TOKEN,
-    OVERLAY_CHAN,
-    _binary_variant,
-    _norm_token,
-    is_variant_token,
+from well_viewer.features.image_browser.image_table.image_compose import OVERLAY_CHAN
+# The dataset's per-dimension option lists and the channel-token vocabulary are
+# the data layer's (`data/dataset_dims.py`, `data/frame_load.py`), shared with the
+# Playground. Re-exported under this module's existing private names so its own
+# call sites and `controller`'s re-export block are unchanged.
+from well_viewer.data.frame_load import is_variant_token  # noqa: F401
+from well_viewer.data.dataset_dims import (  # noqa: F401
+    channel_options as _channel_options,
+    fov_options as _fov_options,
+    timepoint_options as _timepoint_options,
+    tp_sort_key as _tp_sort_key,
+    well_options as _well_options,
 )
-
-
-def _channel_options(ctx) -> list[str]:
-    """All channel tokens available for selection (uppercase for display).
-
-    Sourced from the canonical ``ctx.state.channel.fluor_channels`` /
-    ``ctx.state.channel.smfish_channels`` lists (built by ``_recalculate_threshold`` from
-    pipeline_info.json + CSV detection — same lists every other tab uses).
-    Falls back to the raw ``ctx.state.dataset.pipeline_info`` dict for the rare case
-    where the tab is repopulated before the first ``_recalculate_threshold``
-    pass. Adds the virtual ``NUC+SEG`` token at the end when a nuclear
-    channel is known — that's where the pre-rendered segmentation overlay
-    images live, and they're how the Image Table replaces the old Movie
-    Montage tab.
-    """
-    info = ctx.state.dataset.pipeline_info or {}
-    chans: list[str] = []
-
-    fluor = list(ctx.state.channel.fluor_channels or [])
-    if not fluor:
-        nuclear_pi = (info.get("nuclear_token") or "").strip().lower()
-        if nuclear_pi:
-            fluor.append(nuclear_pi)
-        for tok in info.get("fluor_tokens", []) or []:
-            tok = str(tok).strip().lower()
-            if tok and tok not in fluor:
-                fluor.append(tok)
-    for tok in fluor:
-        tok = str(tok).strip().lower()
-        if tok and tok not in chans:
-            chans.append(tok)
-
-    smfish = ctx.state.channel.smfish_channels or []
-    for tok in smfish:
-        tok = str(tok).strip().lower()
-        if tok and tok not in chans:
-            chans.append(tok)
-
-    options = [c.upper() for c in chans]
-
-    # Binary variants — "<CHAN> (binary)" renders that channel's ThreshFracOn
-    # threshold-binary (positive cells white). Offered right after the real
-    # channels so a nested row axis can mix e.g. NIR, GFP and GFP (binary). The
-    # render/load path decodes the token (see image_compose._binary_base).
-    options += [_binary_variant(c) for c in options]
-
-    seg_tok = (ctx.state.channel.seg_channel_token or "").strip()
-    if not seg_tok:
-        seg_tok = (info.get("nuclear_token") or "").strip()
-    if seg_tok:
-        options.append(NUC_SEG_TOKEN)
-
-    # Append user-defined ratio metrics as virtual channels.  The display
-    # label "GFP/RFP" is what appears in the dropdown; _find_ratio_for_channel
-    # resolves it back to the RatioMetric at render time.
-    for r in (ctx.state.channel.ratio_metrics or []):
-        lbl = r.display_label()
-        if lbl and lbl not in options:
-            options.append(lbl)
-
-    return options
 
 
 def _find_ratio_for_channel(ctx, chan: str):
@@ -89,59 +36,6 @@ def _find_ratio_for_channel(ctx, chan: str):
         if r.display_label().upper() == chan.strip().upper():
             return r
     return None
-
-
-# Timepoint ordering is shared app-wide — see util.timepoint.sort_key.
-from util.timepoint import sort_key as _tp_sort_key
-
-
-def _cache_column_tokens(ctx, column: str) -> list[str]:
-    """Unique normalised tokens from ``column`` across every cached DataFrame.
-
-    ``ctx.state.dataset.cache`` values are DataFrames since the pandas migration; iterating
-    one with ``for row in df`` yields *column names*, not rows. Pull the column
-    out vectorised instead — and skip frames that don't carry it at all.
-    """
-    seen: list[str] = []
-    cache = ctx.state.dataset.cache or {}
-    for df in cache.values():
-        if df is None or column not in getattr(df, "columns", ()):
-            continue
-        for val in df[column].dropna().unique():
-            tok = _norm_token(val)
-            if tok and tok not in seen:
-                seen.append(tok)
-    return seen
-
-
-def _timepoint_options(ctx) -> list[str]:
-    info = ctx.state.dataset.pipeline_info or {}
-    seen: list[str] = []
-    for tp in (info.get("available_timepoints") or []):
-        tok = _norm_token(tp)
-        if tok and tok not in seen:
-            seen.append(tok)
-    if seen:
-        return sorted(seen, key=_tp_sort_key)
-    # Fallback: derive timepoints from loaded CSV rows when pipeline_info
-    # doesn't list them (older runs, custom schemas, etc.).
-    return sorted(_cache_column_tokens(ctx, "timepoint"), key=_tp_sort_key)
-
-
-def _fov_options(ctx) -> list[str]:
-    info = ctx.state.dataset.pipeline_info or {}
-    seen: list[str] = []
-    for fv in (info.get("available_fovs") or []):
-        tok = _norm_token(fv)
-        if tok and tok not in seen:
-            seen.append(tok)
-    if seen:
-        return seen
-    return _cache_column_tokens(ctx, "fov")
-
-
-def _well_options(ctx) -> list[str]:
-    return sorted(ctx.state.dataset.well_paths.keys(), key=parse_rc)
 
 
 # ── Plate (96-well) virtual dimensions ───────────────────────────────────────

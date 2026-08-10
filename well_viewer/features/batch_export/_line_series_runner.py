@@ -47,7 +47,14 @@ from well_viewer.domain.selections_model import (
 )
 from well_viewer.data.data_loading import get_rows as _get_rows
 
-_rank_color_rset = _lazy("well_viewer.features.grouping.controller", "rank_color_rset")
+from well_viewer.domain.selections_model import color_for_replicate_set
+
+
+def _rank_color_rset(ctx, rset) -> str:
+    """Rank colour for a ReplicateSet / BarGroup off ``ctx.state.selection``."""
+    return color_for_replicate_set(rset, ctx.state.selection.selections)
+
+
 
 
 def collect_line_series_for_group(

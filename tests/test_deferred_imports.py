@@ -113,9 +113,10 @@ FEATURE_PREFIX = "well_viewer.features"
 # 108 -> 104: the sample definitions became tabs of Home, and the page builder
 # that assembled them (`grouping.replicate_panel_view.build_sample_definitions_centre`)
 # was deleted with its four function-local imports of the cell-gating, ratio and
-# pipeline-info builders. Home reaches those same builders through `core.lazy`
-# proxies instead — a call rather than an import statement, so the escape hatch
-# is not re-opened somewhere else.
+# pipeline-info builders. Home reaches those same builders through the registry
+# instead: each tab is a descriptor whose `build` adapter in `features/registry.py`
+# holds the only import of its package, so the escape hatch is not re-opened
+# somewhere else.
 MAX_DEFERRED_FEATURE_IMPORTS = 104
 
 

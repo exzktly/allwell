@@ -78,7 +78,15 @@ _PROG_BAR_W = 180
 _TP_LB_MIN_H = 120
 # Sibling-feature ctx forms reached through core.lazy proxies — a call, not an
 # import statement, so no module-load cycle and no deferred-import-budget hit.
-_rep_sets_loaded = _lazy("well_viewer.features.grouping.controller", "rep_sets_loaded")
+from well_viewer.domain.selections_model import replicate_sets_loaded
+
+
+def _rep_sets_loaded(ctx):
+    """All rep-sets with >=1 loaded well (hidden included), from typed state."""
+    return replicate_sets_loaded(ctx.state.selection.selections,
+                                 ctx.state.dataset.well_paths)
+
+
 _col_for_scatter_axis = _lazy("well_viewer.features.scatter.controller", "col_for_scatter_axis")
 _get_all_profile_names = _lazy("well_viewer.features.export.style", "get_all_profile_names_ctx")
 _ensure_custom_export_profiles = _lazy("well_viewer.features.export.style", "ensure_custom_export_profiles_ctx")

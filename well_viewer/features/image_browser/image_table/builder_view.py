@@ -40,9 +40,7 @@ import theme
 from well_viewer.core.safe import swallow
 from well_viewer.core.ui_helpers import parse_float_edit
 from widgets.stepper import Stepper
-from well_viewer.features.image_browser.cell_browser.worker import (
-    resolve_channel_tint,
-)
+from widgets.lut_cmaps import resolve_channel_tint
 from well_viewer.features.image_browser.image_table.state import (
     Axis, ChannelSpec, spec_from_state,
 )

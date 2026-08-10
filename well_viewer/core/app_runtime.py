@@ -98,8 +98,8 @@ class AppRuntime:
                  "image_table", "heatmap", "barplot", "cell_gating", "multivariate",
                  "batch_export", "saved_plots", "split", "fov", "sem", "aggregate",
                  "review_image", "review", "stats", "plot_groups", "export",
-                 "centre", "view_state", "tab", "grouping", "playground", "qc",
-                 "home")
+                 "centre", "view_state", "tab", "groups", "pipeline_info",
+                 "playground", "qc", "home")
 
     def __init__(self, app=None, store: dict | None = None) -> None:
         if store is None:
@@ -222,14 +222,30 @@ class AppRuntime:
         # (``ctx.runtime.tab.selection_model_identity``). Debug-only, never
         # persisted; read exclusively by the tab controller.
         object.__setattr__(self, "tab", _FeatureRuntime(s, "_tab_"))
-        # Sample-Definitions GROUPS-list transient scratch (prefix ``_grp_``): the
-        # pending inline-rename row index (``ctx.runtime.grouping.inline_edit_idx``
-        # <-> ``app._grp_inline_edit_idx``) the rename action sets and the panel
+        # Home's GROUPS-tab transient scratch (prefix ``_groupstab_``): the
+        # pending inline-rename row index (``ctx.runtime.groups.inline_edit_idx``
+        # <-> ``app._groupstab_inline_edit_idx``) the rename action sets and the panel
         # refresh consumes, and the Quick-Replicates dropdown state
-        # (``ctx.runtime.grouping.pair_dir`` / ``.iter_order`` <-> ``app._grp_pair_dir``
-        # / ``app._grp_iter_order``) the row/col-pair shims + the from-dropdowns
-        # reader thread through. Session-only, never persisted.
-        object.__setattr__(self, "grouping", _FeatureRuntime(s, "_grp_"))
+        # (``ctx.runtime.groups.pair_dir`` / ``.iter_order`` / ``.rep_size``) the
+        # row/col-pair shims + the from-dropdowns reader thread through.
+        # Session-only, never persisted.
+        #
+        # The prefix is ``_groupstab_`` rather than the tidier ``_groups_``
+        # because that one is taken: ``WellViewerApp._groups_centre_refresh`` and
+        # ``._groups_from_rep_sets`` already own it, and ``reset_scopes`` reaches
+        # the first by name. Since the store is shared with the widget registry,
+        # a field called ``centre_refresh`` here would stamp straight onto the
+        # method's key. None of the four fields does today, so this is a
+        # collision avoided rather than a bug fixed — but the old ``_grp_``
+        # prefix had no overlap, and the rename introduced one for free.
+        object.__setattr__(self, "groups", _FeatureRuntime(s, "_groupstab_"))
+        # Home's PIPELINE INFO tab (prefix ``_pipeline_info_``): the re-read
+        # closure (``ctx.runtime.pipeline_info.refresh``) the tab stamps on build
+        # and the sub-tab switch invokes, so entering the tab picks up a
+        # ``pipeline_info.json`` written since the last visit. The namespace stays
+        # in core when the tab is profiled out, the way every removable feature's
+        # does; nothing then writes it and the one reader is callable-guarded.
+        object.__setattr__(self, "pipeline_info", _FeatureRuntime(s, "_pipeline_info_"))
         # Playground testbed transient scratch (prefix ``_playground_``): the
         # current frame identity key (``ctx.runtime.playground.frame_key`` <->
         # ``app._playground_frame_key``), the reference-field worker bridge

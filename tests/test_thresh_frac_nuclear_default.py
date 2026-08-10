@@ -158,7 +158,7 @@ def test_cell_gating_rows_seed_the_nuclear_channel_at_zero():
     thresh_inner = QWidget()
     QVBoxLayout(thresh_inner)
 
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         _cell_gating_build_channel_controls,
     )
     ctx = _ctx()

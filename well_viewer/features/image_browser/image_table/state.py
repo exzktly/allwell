@@ -195,8 +195,11 @@ class ImageTableState:
 # data, so the mapping is unit-testable with no Qt.
 
 _ROOT_DIMS = ("well", "timepoint", "fov")
-# Mirror of image_compose's variant suffixes — duplicated so this module stays
-# stdlib-only (its import contract forbids importing the Qt/numpy render layer).
+# Mirror of ``data/frame_load.py``'s variant suffixes, which are the source of
+# truth. Duplicated rather than imported so this module stays stdlib-only: the
+# loader reaches numpy transitively, and the shelf's spec mapping must stay
+# importable without it. ``test_image_table_state_suffixes_match_frame_load``
+# fails if the two ever drift.
 # ``corrected`` deliberately has no suffix: it is the default render, so leaving
 # its token bare keeps every previously saved view's ``channel_opts`` keys valid.
 _BINARY_SUFFIX = " (binary)"

@@ -47,7 +47,7 @@ def _make_ctx(*, fluor_data, ratio_data=None, cell_areas=None):
 def test_five_channels_get_five_distinct_colours():
     """The old 4-entry cycle would give channel 5 the same colour as the
     cell-area CDF (index 0) or channel 1 (index 4 % 4 == 0)."""
-    from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
+    from well_viewer.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
     fluor_data = {f"ch{i}": [1.0, 2.0, 3.0] for i in range(5)}
     ctx = _make_ctx(fluor_data=fluor_data, cell_areas=[10, 20, 30])
@@ -62,7 +62,7 @@ def test_empty_channel_does_not_shift_or_blank_later_channels():
     """A dataset where the *middle* channel has no valid values must not
     steal the next channel's axes slot -- every non-empty channel gets its
     own titled subplot, and only the truly-empty one is left blank."""
-    from well_viewer.features.grouping.cell_gating.renderer import _cell_gating_plot_cdf
+    from well_viewer.features.home.cell_gating.renderer import _cell_gating_plot_cdf
 
     import theme
 

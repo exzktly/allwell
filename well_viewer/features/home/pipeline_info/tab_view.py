@@ -183,8 +183,8 @@ def build_pipeline_info_subtab(ctx, parent: QWidget) -> None:
         tree.resizeColumnToContents(0)
 
     reload_ib.clicked.connect(lambda _=False: _refresh())
-    # Live-callback stamp (AppRuntime's sanctioned case): the sample-def tab-switch
+    # Live-callback stamp (AppRuntime's sanctioned case): Home's sub-tab switch
     # invokes this to re-read pipeline_info.json when the Pipeline Info sub-tab is
-    # entered. Reached via ctx.runtime.grouping.pipeline_info_refresh.
-    ctx.runtime.grouping.pipeline_info_refresh = _refresh
+    # entered. Reached via ctx.runtime.pipeline_info.refresh.
+    ctx.runtime.pipeline_info.refresh = _refresh
     _refresh()

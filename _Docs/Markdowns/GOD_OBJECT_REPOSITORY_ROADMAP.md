@@ -95,8 +95,8 @@ not reinvent what it already gives:
   is the new gold-standard guard idiom — new decoupling work should add/extend a
   subset-profile boot assertion, matching this.
 - **Still coupled (confirmed teardown targets):** `core/load_controller.py` retains
-  many direct `from well_viewer.features…` imports (qc/crop/review_image/grouping/
-  heatmap at `:292,308-310,318,333,378`) *not* yet on the hook seam;
+  many direct `from well_viewer.features…` imports (qc/crop/review_image/home/
+  heatmap) *not* yet on the hook seam;
   `on_selection_changed` hooks + the `stats`/preview builders still name `app`.
 
 ## Context
@@ -193,7 +193,8 @@ Same "one module per PR" cadence as the `ctx.app` ledger. Priority by risk:
 5. **Sample Definitions app-bridge god-seam** — **closed.** The sample definitions
    became tabs of Home, and the page builder that needed the seam
    (`grouping.replicate_panel_view.build_sample_definitions_centre`) went with the
-   page. Home assembles those tab bodies itself through `core.lazy` proxies, so
+   page. Home assembles those tab bodies from the registry — each is a sub-leaf
+   descriptor whose `build` adapter holds the only import of its package — so
    `tab_controller.build_sample_definitions_app_bridge` is deleted rather than
    migrated: there is no feature routing through the god-object here any more.
 - Pattern per fn: `def f(app,...)` → `def f(ctx,...)`; body reads
@@ -260,8 +261,7 @@ callback at startup so the lower layer imports no feature" pattern.
   `get_rows` on `loaded_app`) + qc/crop/aggregate layer tests + app_smoke — 46 green.
 
 ### B1b · Move `load_controller`'s residual direct feature imports onto hooks *(extends B1, medium)*
-`load_controller.py` still imports qc/crop/review_image/grouping/heatmap directly
-(`:292,308-310,318,333,378`) — the post-load work not yet on the `on_dataset_loaded`
+`load_controller.py` still imports qc/crop/review_image/home/heatmap directly — the post-load work not yet on the `on_dataset_loaded`
 seam the baseline introduced. Migrate each to an `on_dataset_loaded(ctx)` hook on its
 feature descriptor (the mechanism already exists and is proven for Image Table +
 smFISH), so `load_controller` names **no** feature and imports none a profile excluded.

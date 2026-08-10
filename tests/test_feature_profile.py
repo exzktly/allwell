@@ -7,6 +7,8 @@ than a fork — so full-app changes to surviving regions flow in for free.
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 pytest.importorskip("PySide6")
@@ -100,3 +102,158 @@ def test_app_boots_and_loads_under_subset_profile(qtbot, monkeypatch, mini_datas
     app._invalidate_stats_cache()
     from well_viewer.core.channel_state_controller import update_channel_selector
     update_channel_selector(app._ctx)
+
+
+# ── non-removable sub-leaves ────────────────────────────────────────────────
+
+def test_a_non_removable_subleaf_survives_a_narrowing_subtabs_list():
+    """``[subtabs]`` narrows a parent's *optional* leaves, not all of them.
+
+    A container that enumerates its sub-tabs from the registry hands the profile
+    a lever over every leaf — including ones other code reaches without asking
+    whether they are present. Home's Groups tab is the case: ``build_centre``
+    builds the rail plate that edits it at startup with no descriptor check, so
+    a manifest able to drop the tab would produce a build that starts and then
+    shows a plate editing something that is not there.
+    """
+    p = Profile(name="p", features=frozenset({"Home", "Image Browser"}),
+                subtabs={"Home": frozenset({"Ratios"}),
+                         "Image Browser": frozenset({"Image Table"})})
+    reg = build_feature_registry(p)
+    assert reg.get("Cell Gating") is not None, "a removable=False leaf was dropped"
+    assert reg.get("Segmentation") is not None, "a removable=False leaf was dropped"
+
+    # And the *tab*, not just the descriptor. Keeping one without the other is
+    # the shape this flag was added to prevent, and it is what Image Browser did:
+    # its notebook filtered a static tuple through ``includes_subtab``, which
+    # never reads ``removable``, so ``Segmentation`` survived in the registry
+    # while its tab was never created.
+    import types
+
+    from well_viewer.features.home.tab_view import active_subtabs
+    from well_viewer.features.image_browser.tab_view import _active_subtabs
+
+    ctx = types.SimpleNamespace(features=reg)
+    home_tabs = active_subtabs(ctx)
+    for name in ("Cell Gating", "Groups", "Well Labels"):
+        assert name in home_tabs, f"Home tab {name!r} narrowed away"
+    assert "Segmentation" in _active_subtabs(ctx), "Image Browser tab narrowed away"
+
+    # …while the optional ones still obey the allowlist, in both halves.
+    assert reg.get("Cell Browser") is None
+    assert reg.get("Playground") is None
+    assert "Cell Browser" not in _active_subtabs(ctx)
+    assert "Pipeline Info" not in home_tabs
+
+
+def test_image_browser_subtabs_match_the_registry():
+    """The notebook owns the *order*; the registry owns the *membership*.
+
+    ``SUBTABS`` leads with Image Table because that tab is the primary surface
+    and the one built eagerly, which declaration order does not express. That is
+    a fair split only while the two agree on which tabs exist — a sub-leaf added
+    to the registry and not to the tuple would be silently absent from the app,
+    which is issue #14 wearing a different hat.
+    """
+    from well_viewer.features.image_browser.tab_view import SUBTABS
+
+    reg = build_feature_registry(FULL)
+    assert set(SUBTABS) == set(reg.sub_leaves("Image Browser"))
+
+
+def test_the_flag_does_not_rescue_a_leaf_whose_parent_is_gone():
+    """It survives *its parent*, not the absence of one."""
+    p = Profile(name="p", features=frozenset({"Plotting"}), subtabs={})
+    reg = build_feature_registry(p)
+    assert reg.get("Cell Gating") is None
+    assert reg.get("Segmentation") is None
+
+
+def test_every_non_removable_subleaf_is_absent_from_the_strip_catalog():
+    """The flag and ``profiles/full.toml`` must agree.
+
+    A descriptor marked non-removable but carrying a catalog entry would have
+    its source deleted by ``derive_profile`` while the registry insisted the
+    feature was present — the two halves of the profile system disagreeing.
+    """
+    import tomllib
+    from pathlib import Path
+
+    catalog = tomllib.loads(
+        (Path(__file__).resolve().parent.parent / "profiles" / "full.toml")
+        .read_text(encoding="utf-8"))
+    strippable = {str(f.get("name")) for f in catalog.get("feature", [])}
+    kept = {d.name for d in build_feature_registry(FULL).all()
+            if d.parent and not d.removable}
+    assert not (kept & strippable), (
+        f"marked non-removable but listed in full.toml: {sorted(kept & strippable)}")
+
+
+def test_home_enumerates_its_tabs_from_the_registry():
+    """The tab list and the descriptor list cannot disagree.
+
+    Home used to filter a module constant through ``includes_subtab``, which is a
+    bare string check against the ``[subtabs]`` allowlist and never consults
+    descriptors. Asking it about names nothing declared meant a manifest could
+    drop tabs it had never heard of: the one line ARCHITECTURE's valid-names
+    table sanctioned — ``[subtabs] "Home" = ["Cell Gating"]``, meaning *keep Cell
+    Gating* — silently took four editors with it.
+    """
+    from well_viewer.features.home.tab_view import active_subtabs
+
+    full = build_feature_registry(FULL)
+    ctx = SimpleNamespace(features=full)
+    assert active_subtabs(ctx) == (
+        "Overview", "Cell Gating", "Groups", "Well Labels", "Ratios",
+        "Pipeline Info",
+    )
+
+    # The sanctioned manifest line keeps the three load-bearing editors and drops
+    # only what is declared removable.
+    narrowed = Profile(name="p", features=frozenset({"Home"}),
+                       subtabs={"Home": frozenset({"Cell Gating"})})
+    ctx = SimpleNamespace(features=build_feature_registry(narrowed))
+    assert active_subtabs(ctx) == (
+        "Overview", "Cell Gating", "Groups", "Well Labels")
+
+
+def test_every_home_tab_has_a_builder():
+    """Home dispatches through the descriptor, so one without a ``build`` would
+    add a tab that silently stays empty."""
+    home_leaves = [d for d in build_feature_registry(FULL).all()
+                   if d.parent == "Home"]
+    assert home_leaves, "premise: Home declares sub-leaves"
+    missing = [d.name for d in home_leaves if d.build is None]
+    assert not missing, f"Home sub-leaves with no builder: {missing}"
+
+
+def test_home_subtab_behaviour_is_declared_not_listed():
+    """Home's per-tab facts live on the descriptors, not in name lists.
+
+    Two behaviours used to be module constants in the Home package: which tabs
+    inset their frame (``_SUBTAB_MARGINS``) and which read the well selection so
+    the rail plate stays live (``_TABS_USING_THE_PLATE``). Both are the same
+    shape as issue #14 in miniature -- a tab added to the registry and not to the
+    constant would silently inherit whichever answer the constant happened to
+    give it, with no error and nothing on screen saying so. A greyed plate on a
+    tab that needs it is a control that ignores clicks; a live one on a tab that
+    does not is a control whose clicks do nothing.
+
+    The values themselves are asserted here because they are the *user-visible*
+    rule, and they are what a careless edit to the registry would change.
+    """
+    reg = build_feature_registry(FULL)
+    subs = {n: reg.get(n) for n in reg.sub_leaves("Home")}
+
+    reads = {n for n, d in subs.items() if d.reads_well_selection}
+    assert reads == {"Groups", "Cell Gating", "Well Labels"}
+
+    inset = {n for n, d in subs.items() if d.subtab_inset}
+    assert inset == {"Groups", "Well Labels"}
+
+    # Nothing outside Home claims either flag: they are sub-tab behaviours, and a
+    # top-level page's plate rule is `per_well_selection`, resolved per page.
+    for d in build_feature_registry(FULL).all():
+        if d.parent != "Home":
+            assert not d.reads_well_selection, d.name
+            assert not d.subtab_inset, d.name

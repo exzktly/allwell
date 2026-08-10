@@ -172,7 +172,28 @@ def test_nothing_imports_wellviewerapp_at_runtime():
     )
 
 
-# ── no module-scope import of a removable feature, anywhere (removability) ────
+# ── removable features must stay importable-on-demand (removability) ─────────
+#
+# Two rules, one machinery. Both ask "who imports a package the profile may
+# delete", and they differ only in *when* the import counts:
+#
+#   * A top-level removable feature (``features/stats``) is dropped by commenting
+#     its descriptor out or deleting its directory. A function-local import is the
+#     sanctioned way to reach one, because the call site is guarded by the feature
+#     being present. Only import-time imports are violations.
+#   * A nested removable sub-package (``features/home/ratios``) is a directory
+#     ``derive_profile`` deletes on its own, and the shape that reaches for one is
+#     usually a plain helper call with no guard in front of it. Deferring that
+#     import defers the crash rather than avoiding it, so **function-local imports
+#     count too** — with one narrow, listed exemption for a container dispatching
+#     to its own sub-tabs by tab name.
+#
+# The extractor below is shared so the two cannot drift apart in what they can
+# see, which is how `playground/worker.py` reached into `image_table` unnoticed:
+# `ast.Import`, relative imports and imports nested in a module-level `try:`/`if:`
+# were invisible to both.
+
+from tests._repo_scan import python_sources  # noqa: E402
 
 # Support libs under features/ that are always present (not removable rail tabs):
 # importing THEM at module scope is fine. Everything else under features/ is a
@@ -183,57 +204,215 @@ _SUPPORT_LIBS = {"export", "preview", "crop", "qc"}
 def _feature_pkg_of(path: Path):
     """The ``features/<pkg>`` package a file belongs to, or None if not under
     features/."""
-    parts = path.relative_to(WELL_VIEWER).parts
+    try:
+        parts = path.relative_to(WELL_VIEWER).parts
+    except ValueError:
+        return None
     if len(parts) >= 2 and parts[0] == "features":
         return parts[1]
     return None
 
 
-def _removable_feature_imports(tree: ast.Module, importer_pkg):
-    """``(lineno, target_pkg)`` for every module-scope ``from
-    well_viewer.features.<F>`` where F is a *removable* feature and the import is
-    not intra-feature (importer already lives in F). Function-local imports and
-    ``if TYPE_CHECKING:`` blocks are allowed (not module-body children)."""
-    out = []
-    for node in tree.body:
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        mod = node.module or ""
-        if not mod.startswith("well_viewer.features."):
-            continue
-        target = mod.split(".")[2]
-        if target == "registry" or target in _SUPPORT_LIBS:
-            continue
-        if target == importer_pkg:  # intra-feature import — allowed
-            continue
-        out.append((node.lineno, target))
+def _module_of(path: Path) -> str:
+    """Dotted module name for a repo file, e.g. ``well_viewer.features.home.controller``."""
+    return ".".join(path.relative_to(REPO_ROOT).with_suffix("").parts)
+
+
+def _deferred_node_ids(tree: ast.Module) -> set:
+    """Ids of every node inside a function body — i.e. not run at import time.
+
+    A class body *is* run at import, and so is anything inside a module-level
+    ``try:`` or ``if:``; only a function defers execution.
+    """
+    out: set = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for child in ast.walk(node):
+                if child is not node:
+                    out.add(id(child))
     return out
+
+
+def _imported_modules(node: ast.AST, here: str):
+    """Every module string an import node names, absolute.
+
+    Handles ``from x import y`` (``ImportFrom``), ``import x.y`` (``Import``,
+    which the first version of both guards never looked at) and relative
+    ``from .y import z``, resolved against *here*'s own package.
+    """
+    if isinstance(node, ast.Import):
+        return [a.name for a in node.names]
+    if not isinstance(node, ast.ImportFrom):
+        return []
+    if not node.level:
+        return [node.module or ""]
+    parts = here.split(".")[:-1]                 # the file's own package
+    base = parts[:len(parts) - (node.level - 1)] if node.level > 1 else parts
+    return [".".join([*base, node.module]) if node.module else ".".join(base)]
+
+
+def _import_nodes(tree: ast.Module):
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            yield node
 
 
 def test_no_module_scope_imports_of_removable_features():
     """Every removable feature (every ``features/<X>`` except the support libs
     ``export`` / ``preview`` / ``crop`` / ``qc`` and the assembly module
-    ``registry.py``) must be importable on demand only: nothing may
-    ``from well_viewer.features.<X> import …`` at module scope, except inside
+    ``registry.py``) must be importable on demand only: nothing may import
+    ``well_viewer.features.<X>`` at import time, except inside
     ``features/registry.py`` (the sanctioned lazy-wrapper assembly point) and
     intra-feature imports. This is what makes a feature removable by commenting
     its descriptor out — AND deletable from disk — without breaking startup."""
     offenders = []
-    for path in _walk_py(WELL_VIEWER):
-        if path.name == "__init__.py" and _feature_pkg_of(path) is None:
-            pass  # well_viewer/__init__.py — still scanned below
-        # features/registry.py is the one allowed module-scope importer.
+    for path in python_sources():
         if path == WELL_VIEWER / "features" / "registry.py":
             continue
+        tree = _parse(path)
+        here = _module_of(path)
         importer_pkg = _feature_pkg_of(path)
-        for lineno, target in _removable_feature_imports(_parse(path), importer_pkg):
-            offenders.append(f"{path.relative_to(REPO_ROOT)}:{lineno} -> well_viewer.features.{target}")
+        deferred = _deferred_node_ids(tree)
+        tc_ranges = _type_checking_line_ranges(tree)
+        for node in _import_nodes(tree):
+            if id(node) in deferred:
+                continue                          # lazy — the sanctioned shape
+            if any(lo <= node.lineno <= hi for lo, hi in tc_ranges):
+                continue                          # type-only
+            for mod in _imported_modules(node, here):
+                if not mod.startswith("well_viewer.features."):
+                    continue
+                target = mod.split(".")[2]
+                if target == "registry" or target in _SUPPORT_LIBS:
+                    continue
+                if target == importer_pkg:        # intra-feature — allowed
+                    continue
+                offenders.append(
+                    f"{path.relative_to(REPO_ROOT)}:{node.lineno} -> {mod}")
     assert not offenders, (
-        "Module-scope import of a removable feature — make it function-local "
+        "Import-time import of a removable feature — make it function-local "
         "(lazy), use the existing runtime_app `_lazy(...)` proxy, or move shared "
         "code to a lower layer (core/data). This import would break the feature's "
-        "removal/deletion:\n  " + "\n  ".join(sorted(offenders))
-    )
+        "removal/deletion:\n  " + "\n  ".join(sorted(offenders)))
+
+
+def _nested_removable_packages() -> dict[str, str]:
+    """``{"well_viewer.features.home.ratios": "Ratios", …}`` — every removable
+    unit in ``profiles/full.toml`` whose package sits *inside* another feature.
+
+    The catalog is the authority on what gets physically deleted, so it is also
+    the authority on which sub-packages a container may not bind.
+    """
+    import tomllib
+
+    catalog = tomllib.loads((REPO_ROOT / "profiles" / "full.toml")
+                            .read_text(encoding="utf-8"))
+    out: dict[str, str] = {}
+    for entry in catalog.get("feature", []):
+        for rel in entry.get("paths") or []:
+            parts = Path(rel).parts
+            # well_viewer / features / <container> / <sub-package>
+            if len(parts) == 4 and parts[:2] == ("well_viewer", "features"):
+                out[".".join(parts)] = str(entry.get("name"))
+    return out
+
+
+#: The one sanctioned shape for reaching a nested removable sub-package from
+#: outside it: a container's own sub-tab dispatch, which selects a builder by the
+#: tab's *name* (``sub.tabText(idx)``). In a stripped build the tab does not
+#: exist, so the branch holding the import is unreachable — which is exactly what
+#: is NOT true of an ordinary helper call, and why this list is per
+#: ``(importer, target package)`` rather than per file.
+#:
+#: `features/registry.py` is exempt wholesale (it is the assembly point) and is
+#: skipped before this is consulted.
+_DISPATCH_EXEMPT = {
+    ("well_viewer/features/image_browser/controller.py",
+     "well_viewer.features.image_browser.image_table"),
+    ("well_viewer/features/image_browser/controller.py",
+     "well_viewer.features.image_browser.cell_browser"),
+    ("well_viewer/features/image_browser/controller.py",
+     "well_viewer.features.image_browser.playground"),
+}
+
+
+def _nested_offenders():
+    """``(rel, pkg, lineno, mod, name, deferred)`` for every reach into a nested
+    removable package from outside it — at import time *or* inside a function."""
+    nested = _nested_removable_packages()
+    found = []
+    for path in python_sources():
+        if path == WELL_VIEWER / "features" / "registry.py":
+            continue
+        rel = str(path.relative_to(REPO_ROOT))
+        here = _module_of(path)
+        tree = _parse(path)
+        deferred = _deferred_node_ids(tree)
+        tc_ranges = _type_checking_line_ranges(tree)
+        for node in _import_nodes(tree):
+            if any(lo <= node.lineno <= hi for lo, hi in tc_ranges):
+                continue
+            for mod in _imported_modules(node, here):
+                for pkg, name in nested.items():
+                    if mod != pkg and not mod.startswith(pkg + "."):
+                        continue
+                    if here == pkg or here.startswith(pkg + "."):
+                        continue      # inside the sub-package itself — allowed
+                    found.append((rel, pkg, node.lineno, mod, name,
+                                  id(node) in deferred))
+    return found
+
+
+def test_a_container_feature_does_not_import_its_own_removable_sub_packages():
+    """§5.3 removability, for the nested case the sibling guard cannot see.
+
+    The rule above compares only the first path segment under ``features/``, so
+    it reads an import from ``features/home/ratios`` by
+    ``features/home/controller.py`` as intra-feature and waves it through. But
+    Ratios is its own removable unit with its own ``[[feature]]`` block:
+    ``derive_profile`` deletes that directory, and an import in the container
+    would then fail at startup — the whole app, not just the tab. The same
+    applies to Image Browser's three sub-tabs.
+
+    **A function-local import is not a fix here**, which is the lesson that cost
+    this branch a defect. `playground/worker.py` reached into the Image Table
+    from inside a function, so the first version of this guard could not see it,
+    and the Playground's reference-field modes died on a daemon thread in a build
+    that had dropped the Image Table. A deferred import of a deleted module
+    raises just as surely, one frame later. The only exemption is a container
+    dispatching to its own sub-tabs by tab name, where the branch cannot be
+    reached once the tab is gone — see ``_DISPATCH_EXEMPT``.
+    """
+    nested = _nested_removable_packages()
+    assert nested, "profiles/full.toml lists no nested removable package"
+    offenders = [
+        f"{rel}:{lineno} -> {mod} (removable unit {name!r}"
+        + (", function-local — still fatal once the directory is gone)"
+           if deferred else ")")
+        for rel, pkg, lineno, mod, name, deferred in _nested_offenders()
+        if (rel, pkg) not in _DISPATCH_EXEMPT
+    ]
+    assert not offenders, (
+        "Import of a removable SUB-package from outside it. `derive_profile` "
+        "deletes this directory, so the import breaks the app, not just the tab "
+        "— and making it function-local only moves the failure to the first call. "
+        "Move the shared code down to `data/` where every sibling can reach it, "
+        "or reach the sub-tab through its descriptor's build adapter in "
+        "features/registry.py:\n  " + "\n  ".join(sorted(offenders)))
+
+
+def test_the_dispatch_exemption_still_describes_real_imports():
+    """An allowlist that outlives what it excuses starts hiding the next one.
+
+    Every entry in ``_DISPATCH_EXEMPT`` must still name an import this guard
+    would otherwise reject. When a container stops reaching for a sub-package,
+    its entry must go — and this is what says so.
+    """
+    live = {(rel, pkg) for rel, pkg, *_ in _nested_offenders()}
+    stale = _DISPATCH_EXEMPT - live
+    assert not stale, (
+        "These entries no longer describe a real import — delete them from "
+        f"_DISPATCH_EXEMPT: {sorted(stale)}")
 
 
 def test_disabling_a_leaf_feature_drops_it_everywhere():

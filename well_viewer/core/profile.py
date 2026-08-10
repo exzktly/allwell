@@ -78,12 +78,26 @@ class Profile:
     subtabs: dict = field(default_factory=dict)
 
     def includes(self, descriptor) -> bool:
-        """Whether *descriptor* (a ``FeatureDescriptor``) survives this profile."""
+        """Whether *descriptor* (a ``FeatureDescriptor``) survives this profile.
+
+        A sub-leaf marked ``removable=False`` survives its parent regardless of
+        the ``[subtabs]`` allowlist. Narrowing a parent means "ship these of its
+        optional leaves", not "ship only these" — some leaves are load-bearing
+        for code that never asks the registry whether they are present, and a
+        manifest that could drop those would produce a build that starts and
+        then misbehaves. The flag is on the descriptor rather than a name list
+        here so the answer lives with the feature.
+
+        Duck-typed on purpose: ``scripts/derive_profile.py`` passes a shim with
+        only ``name`` / ``parent``, so ``removable`` is read with a default.
+        """
         if self.features is None:
             return True
         if descriptor.parent:
             if descriptor.parent not in self.features:
                 return False
+            if not getattr(descriptor, "removable", True):
+                return True
             allowed = self.subtabs.get(descriptor.parent)
             return allowed is None or descriptor.name in allowed
         return descriptor.name in self.features

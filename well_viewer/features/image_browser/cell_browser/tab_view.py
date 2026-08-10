@@ -26,10 +26,8 @@ from well_viewer.features.image_browser.cell_browser.criteria_view import (  # r
 )
 from well_viewer.features.image_browser.cell_browser.collect import cell_browser_channels
 from well_viewer.features.image_browser.cell_browser.state import CellBrowserState
-from well_viewer.features.image_browser.cell_browser.worker import (
-    CellImageLoader,
-    resolve_channel_tint,
-)
+from well_viewer.features.image_browser.cell_browser.worker import CellImageLoader
+from widgets.lut_cmaps import resolve_channel_tint
 
 # Pixel geometry for this module's controls. Named rather than written
 # inline so the number is stated once and a reader can see what it sizes

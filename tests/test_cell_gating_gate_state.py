@@ -65,7 +65,7 @@ def _app(fluor=(), thresh=(), *, state=None, with_edits=True):
 
 
 def test_sync_parses_edits_into_slice(qtbot):
-    from well_viewer.features.grouping.cell_gating.controller import _cell_gating_sync_gate_state
+    from well_viewer.features.home.cell_gating.controller import _cell_gating_sync_gate_state
     app = _app(fluor=[("gfp", "12.5"), ("ratio:g_over_m", "3")],
                thresh=[("gfp", "40"), ("ratio:g_over_m", "60.5")])
     _cell_gating_sync_gate_state(app._ctx)
@@ -78,7 +78,7 @@ def test_sync_keeps_last_committed_on_garbage(qtbot):
     # A stray keystroke must NOT silently disable a gate: the slice keeps the
     # last-committed value (the old widget-reading accessor returned the 0.0
     # default for unparsable text, quietly turning the gate off).
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         _cell_gating_sync_gate_state,
         cell_gating_get_fluor_gate,
     )
@@ -91,7 +91,7 @@ def test_sync_keeps_last_committed_on_garbage(qtbot):
 
 
 def test_accessors_read_slice_with_defaults_and_ratio_resolution(qtbot):
-    from well_viewer.features.grouping.cell_gating.controller import (
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_fluor_gate,
         cell_gating_get_thresh_frac_on,
     )
@@ -111,7 +111,7 @@ def test_accessors_read_slice_with_defaults_and_ratio_resolution(qtbot):
 
 
 def test_load_threshold_frac_on_pushes_slice_to_widgets(qtbot):
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_load_threshold_frac_on
+    from well_viewer.features.home.cell_gating.controller import cell_gating_load_threshold_frac_on
     st = CellGatingState(thresh_frac_on={"gfp": 33.0, "mcherry": 75.5})
     app = _app(thresh=[("gfp", "50.0"), ("mcherry", "50.0")], state=st)
     cell_gating_load_threshold_frac_on(app._ctx)
@@ -122,8 +122,8 @@ def test_load_threshold_frac_on_pushes_slice_to_widgets(qtbot):
 def test_thresh_change_handler_syncs_then_fans_out(qtbot, monkeypatch):
     # The editingFinished flow end-to-end: edit text → handler → slice synced,
     # stats cache invalidated, redraw + plot_options_changed emitted.
-    import well_viewer.features.grouping.cell_gating.controller as cg
-    from well_viewer.features.grouping.cell_gating.controller import (
+    import well_viewer.features.home.cell_gating.controller as cg
+    from well_viewer.features.home.cell_gating.controller import (
         cell_gating_get_thresh_frac_on,
         cell_gating_on_threshold_frac_on_change,
     )
@@ -143,7 +143,7 @@ def test_thresh_change_handler_syncs_then_fans_out(qtbot, monkeypatch):
 
 
 def test_thresh_change_handler_rejects_garbage_without_acting(qtbot):
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_on_threshold_frac_on_change
+    from well_viewer.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
     st = CellGatingState(thresh_frac_on={"gfp": 40.0})
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "garbage")], state=st)
     cell_gating_on_threshold_frac_on_change(app._ctx)
@@ -154,8 +154,8 @@ def test_thresh_change_handler_rejects_garbage_without_acting(qtbot):
 def test_editing_finished_signal_drives_the_sync(qtbot, monkeypatch):
     # The actual Qt wiring: editingFinished on a real QLineEdit connected the
     # way the build loop does it must land the value in the slice.
-    import well_viewer.features.grouping.cell_gating.controller as cg
-    from well_viewer.features.grouping.cell_gating.controller import cell_gating_on_threshold_frac_on_change
+    import well_viewer.features.home.cell_gating.controller as cg
+    from well_viewer.features.home.cell_gating.controller import cell_gating_on_threshold_frac_on_change
     monkeypatch.setattr(cg, "invalidate_stats_cache", lambda ctx: None)
     monkeypatch.setattr(cg, "redraw_app", lambda ctx: None)
     app = _app(fluor=[("gfp", "0.0")], thresh=[("gfp", "50.0")])

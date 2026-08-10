@@ -54,3 +54,21 @@ def test_lut_colormap_to_rgb_reds_is_black_to_red():
     # Top row (low intensity) is black; bottom row (high) is red.
     assert rgb[0].max() < 6
     assert rgb[-1, :, 0].min() > 240 and rgb[-1, :, 1].max() < 6 and rgb[-1, :, 2].max() < 6
+
+
+def test_resolve_channel_tint_override_and_default():
+    from widgets.lut_cmaps import CHANNEL_TINTS as _CHANNEL_TINTS
+    from widgets.lut_cmaps import resolve_channel_tint
+
+    # Explicit per-channel override (0-255) wins and is normalized to 0..1,
+    # case-insensitively keyed.
+    assert resolve_channel_tint("GFP", 0, {"gfp": (255, 0, 0)}) == (1.0, 0.0, 0.0)
+
+    # No override → fixed palette by channel index.
+    assert resolve_channel_tint("gfp", 0, {}) == _CHANNEL_TINTS[0]
+    assert resolve_channel_tint("rfp", 1, {}) == _CHANNEL_TINTS[1]
+    assert resolve_channel_tint("anything", 0, None) == _CHANNEL_TINTS[0]  # None map
+
+    # Index wraps around the palette.
+    n = len(_CHANNEL_TINTS)
+    assert resolve_channel_tint("c", n, {}) == _CHANNEL_TINTS[0]

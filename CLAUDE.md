@@ -543,7 +543,7 @@ worse than no check because it is reported as evidence.
 7. **Search the history before building a remembered feature.** A report that
    Batch Export's Quick Setup "used to take an N for serial rows" turned out to
    be Sample Definitions' *Quick Replicates* (`Group along` / `Replicates per
-   group` / `Order`, backed by `grouping.controller.make_replicate_pairs`).
+   group` / `Order`, backed by `home.groups.controller.make_replicate_pairs`).
    `git log -S` across the plausible strings found no such control in Batch
    Export at any point. One question beat implementing the wrong thing.
 

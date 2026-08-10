@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from well_viewer.core.safe import swallowed
-from well_viewer.features.grouping.controller import rep_add
+from well_viewer.features.home.groups.controller import rep_add
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -77,12 +77,12 @@ def rep_panel_refresh(ctx) -> None:
             swallowed()  # was: pass (silent except)
     # honour a pending inline-rename request (set by the "Rename" action — it
     # stores a position into _selections; see _sel_request_inline_rename)
-    idx = ctx.runtime.grouping.inline_edit_idx
+    idx = ctx.runtime.groups.inline_edit_idx
     idx = idx if isinstance(idx, int) else -1
     if 0 <= idx < len(sels):
-        ctx.runtime.grouping.inline_edit_idx = -1
+        ctx.runtime.groups.inline_edit_idx = -1
         row = getattr(lst, "_rows", {}).get(sels[idx].get("id"))
         if row is not None and hasattr(row, "trigger_rename"):
             QTimer.singleShot(0, row.trigger_rename)
-    from well_viewer.features.grouping.controller import rep_refresh_map
+    from well_viewer.features.home.groups.controller import rep_refresh_map
     rep_refresh_map(ctx)

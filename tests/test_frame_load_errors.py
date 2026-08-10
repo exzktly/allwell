@@ -6,7 +6,7 @@ from __future__ import annotations
 import logging
 
 import well_viewer.data.image_discovery as idisc
-from well_viewer.features.image_browser.image_table import image_compose as ic
+from well_viewer.data import frame_load as fl
 
 
 def test_load_mask_array_logs_on_decode_failure(monkeypatch, caplog):
@@ -17,8 +17,8 @@ def test_load_mask_array_logs_on_decode_failure(monkeypatch, caplog):
     well, tp, fov = "A01", "0", "1"
     cache = {(well, "__mask__", "raw"): {(str(fov), str(tp)): object()}}
 
-    logger_name = "well_viewer.features.image_browser.image_table.image_compose"
+    logger_name = "well_viewer.data.frame_load"
     with caplog.at_level(logging.DEBUG, logger=logger_name):
-        assert ic._load_mask_array(None, cache, well, tp, fov) is None
+        assert fl.load_mask_array(None, cache, well, tp, fov) is None
     assert any("mask" in r.getMessage().lower() for r in caplog.records), \
         "a failed mask decode must leave a breadcrumb"

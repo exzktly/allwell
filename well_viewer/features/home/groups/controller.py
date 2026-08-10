@@ -1,20 +1,27 @@
-"""Quick-replicate helpers — drives the "Quick Replicates" dropdowns on the
-sample-definitions panel. (The rep-map plate is now a ``widgets.WellPlateSelector``
-wired in ``views/replicate_panel_view.py``; its drag edits the current selection
-via ``WellViewerApp._sel_set_composition`` directly — no controller helpers.)"""
+"""Groups tab behaviour: build a replicate set, and push it onto the rail plate.
+
+The pure halves of what used to sit beside these live in
+``domain/selections_model.py`` — this module is the part that opens a dialog,
+reads a dropdown, or writes to a widget, so it stays in the feature.
+"""
 
 from __future__ import annotations
-
 
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QVBoxLayout,
 )
 
-from well_viewer.domain.batch_models import ReplicateSet
-from well_viewer.domain.viewer_state import extract_well_token as _extract_well_token
-from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS
 from well_viewer.core.safe import swallowed
-from well_viewer.domain.selections_model import color_for_wells
+from well_viewer.domain.batch_models import ReplicateSet
+from well_viewer.domain.plate_layout import PLATE_COLS, PLATE_ROWS
+from well_viewer.domain.viewer_state import extract_well_token as _extract_well_token
+
+
+# Pixel geometry for the New Replicate Set dialog. Named rather than written
+# inline so the number is stated once and a reader can see what it sizes
+# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
+_DLG_MIN_W = 420
+_DLG_MIN_H = 480
 
 
 def make_replicate_pairs(toks, size=2):
@@ -36,9 +43,9 @@ def make_replicate_pairs(toks, size=2):
 
 def rep_quick_pairs(ctx) -> None:
     """Generate quick replicate pairs using current dropdown selections."""
-    pair_dir = ctx.runtime.grouping.pair_dir or "row"
-    iter_order = ctx.runtime.grouping.iter_order or "row"
-    size = ctx.runtime.grouping.rep_size or 2
+    pair_dir = ctx.runtime.groups.pair_dir or "row"
+    iter_order = ctx.runtime.groups.iter_order or "row"
+    size = ctx.runtime.groups.rep_size or 2
     well_paths = ctx.state.dataset.well_paths
     sel_state = ctx.state.selection
     new_sets = []
@@ -176,20 +183,10 @@ def rep_add(ctx) -> None:
 
 
 
-# A8 teardown: the display-label leaves now live in the domain layer (shared by
-# core / every plot renderer without a feature import). Re-exported here so the
-# god-method delegates + existing ``grouping.controller`` importers resolve.
-from well_viewer.domain.selections_model import (  # noqa: F401
-    replicate_display_label,
-    well_display_label,
-)
-
-# Pixel geometry for this module's controls. Named rather than written
-# inline so the number is stated once and a reader can see what it sizes
-# (ARCHITECTURE §8: never hardcode a pixel size at a call site).
-_DLG_MIN_W = 420
-_DLG_MIN_H = 480
-
+# A8 teardown: the display-label leaves live in the domain layer (shared by core
+# and every plot renderer without a feature import), and callers reach them
+# there directly — the re-export this comment used to describe went with
+# ``features/grouping``.
 
 
 def rep_refresh_map(ctx) -> None:
@@ -220,23 +217,9 @@ def rep_refresh_map(ctx) -> None:
     plate.setSelectedWellIds(cur_wells)
 
 
-
-def rank_color_rset(ctx, rset) -> str:
-    """Colour for a ReplicateSet / BarGroup (or anything with a ``wells``
-    attribute) — honours the per-selection ``color`` override when an entry
-    in ``_selections`` shares its ``name``, otherwise falls back to the
-    rank colour of its lowest well.
-
-    A8 teardown: takes ``ctx`` — delegates to the pure domain colour resolver
-    over ``ctx.state.selection`` (no god-object)."""
-    from well_viewer.domain.selections_model import color_for_replicate_set
-    return color_for_replicate_set(rset, ctx.state.selection.selections)
-
-
-
 def rep_quick_pairs_from_dropdowns(ctx) -> None:
     """Read dropdown values and update state, then call rep_quick_pairs()."""
-    grp = ctx.runtime.grouping
+    grp = ctx.runtime.groups
     pair_cb = ctx.widgets.get_or_none("_rep_quick_pair_dir_var")
     iter_cb = ctx.widgets.get_or_none("_rep_quick_iter_order_var")
     size_sb = ctx.widgets.get_or_none("_rep_quick_size_var")
@@ -247,40 +230,3 @@ def rep_quick_pairs_from_dropdowns(ctx) -> None:
     grp.iter_order = "row" if "Across" in iter_cb.currentText() else "col"
     grp.rep_size = size_sb.value() if size_sb is not None else 2
     rep_quick_pairs(ctx)
-
-
-
-def rep_sets_loaded(ctx) -> list[ReplicateSet]:
-    """One ReplicateSet per selection that has ≥1 loaded well (ignores hidden),
-    in ``_selections`` order — derived straight from the unified model.
-
-    A8 teardown: reads typed ``ctx.state.selection`` / ``ctx.state.dataset`` so
-    it takes ``ctx`` and names no god-object."""
-    out: list[ReplicateSet] = []
-    for s in ctx.state.selection.selections:
-        wells = s.get("wells") or []
-        if any(w in ctx.state.dataset.well_paths for w in wells):
-            out.append(ReplicateSet(s.get("name") or "", list(wells)))
-    return out
-
-
-
-def rep_color_for(ctx, lbl: str) -> str | None:
-    """Return the colour for the selection that owns *lbl*, or None if the
-    well is not in any selection."""
-    for s in ctx.state.selection.selections:
-        if lbl in (s.get("wells") or []):
-            return ctx.window._sel_color(s)
-    return None
-
-
-
-def rank_color_wells(ctx, wells) -> str:
-    """Colour for a set of wells — the rank colour of its lowest well, so all
-    of its wells (and its line/bar trace) share one colour.
-
-    A8 teardown: the pure implementation now lives in ``domain.selections_model``
-    (``color_for_wells``); this thin ctx-signature wrapper stays for the legacy
-    ``WellViewerApp._rank_color_wells`` god-method delegate (the arg is unused)."""
-    return color_for_wells(wells)
-

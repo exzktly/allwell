@@ -60,12 +60,19 @@ paths = ["well_viewer/features/batch_export", "well_viewer/persistence/export_gr
 tests = ["tests/test_batch_export_*.py", "tests/test_export_groups_*.py"]
 
 [[feature]]
+# The frame loaders and the dataset option lists this tab used to own are in
+# `data/frame_load.py` / `data/dataset_dims.py`, so the Cell Browser and the
+# Playground survive its deletion; what stays here is the grid itself.
 name = "Image Table"
 parent = "Image Browser"
 paths = ["well_viewer/features/image_browser/image_table"]
-tests = ["tests/test_image_table_*.py", "tests/test_image_compose_*.py"]
+tests = ["tests/test_image_table_*.py"]
+# The loader tests went with the loader: they are `tests/test_frame_load_*.py`
+# now and cover `data/`, which survives this feature being stripped.
 
 [[feature]]
+# The channel-tint palette moved to `widgets/lut_cmaps.py`, which is why the
+# Image Table's builder shelf no longer needs this package to exist.
 name = "Cell Browser"
 parent = "Image Browser"
 paths = ["well_viewer/features/image_browser/cell_browser"]
@@ -76,6 +83,31 @@ name = "Playground"
 parent = "Image Browser"
 paths = ["well_viewer/features/image_browser/playground"]
 tests = ["tests/test_playground*.py"]
+
+[[feature]]
+# Home's ratio editor. The ratio *model* is core and stays: the state slice
+# (`state.channel.ratio_metrics`), its persistence block and its reset scope all
+# survive, so a dataset carrying ratios still plots them — only the tab that
+# defines new ones goes. Home reaches this package by descriptor and nothing
+# else module-scope imports it; `channel_state_controller` looks `_ratio_panel`
+# up with `get_or_none` and tolerates its absence.
+name = "Ratios"
+parent = "Home"
+paths = ["well_viewer/features/home/ratios"]
+# Anchored at `test_ratios_`, which sweeps only the editor's own file: the
+# tests for the core model and the read-time computation are named
+# `test_ratio_*` (singular) and stay.
+tests = ["tests/test_ratios_*.py"]
+
+[[feature]]
+# Home's pipeline-parameter viewer: a read-only tree over `pipeline_info.json`.
+# Nothing reads back from it beyond the refresh closure Home invokes on entering
+# the tab, which is `callable()`-guarded and simply never set in a stripped
+# build. The Analyze side parses the same file through its own reader.
+name = "Pipeline Info"
+parent = "Home"
+paths = ["well_viewer/features/home/pipeline_info"]
+tests = ["tests/test_pipeline_info_view.py"]
 
 [[feature]]
 # Pipeline-side removable unit (NOT a Qt tab): the Cellpose segmenter. StarDist
